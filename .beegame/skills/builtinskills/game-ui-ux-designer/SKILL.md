@@ -26,7 +26,7 @@ Establish how game view, information and controls share space before placing chi
 
 Choose orientations and usable sizes from requirements, not input-device assumptions. Use the same variant's padding, gaps, minima and scaling in its budget; verify control minima after projection. Shared layouts supply relationships once, while each screen supplies content and meaningful differences. Specify behavior outside supported conditions.
 
-For BGS UI data, read [layout calculation](references/layout-calculation.md) for the actual schema, current tool entries, active expanded/overlay inputs and font measurement. Reuse the existing solver, same authored UI and actual game-view allocation for camera framing; geometry does not choose composition or interaction. Keep unavailable bindings pending and complete those sources later. Native engine/DOM layouts use their own applicable facilities.
+For a new interface, first describe screens, actions, navigation and space needs in the existing UI record. Work with art direction on actual complete-screen visual designs, inspect the pictures at useful size and link the selected designs. After corresponding resources are prepared, author the UI layout and resource/action/state bindings from those designs and actual asset metrics; do not start with UI JSON or a placeholder layout. For BGS UI data, read [layout calculation](references/layout-calculation.md) for schema, supplied tools and font measurement. Reuse the existing solver and the same authored UI/game-view for camera framing. Geometry does not choose composition or interaction. Existing sources are repaired in place; native engine/DOM layouts use their applicable facilities.
 
 ## State feedback and motion
 

@@ -71,8 +71,10 @@ test('handoff sends reference reading to native Read without a visual certificat
     const help = await design('help') as any
     expect(help.instruction).toContain('Read reference pictures with the native Read tool')
     expect(help.instruction).toContain('report the exact path and read error')
-    expect(help.instruction).toContain('begin their geometry during planning without production assets')
-    expect(help.help).toContain('Baseline checks index integrity, not layout geometry')
+    expect(help.instruction).toContain('create them only after selected actual visual designs and corresponding resources exist')
+    expect(help.instruction).not.toContain('begin their geometry during planning')
+    expect(help.help).toContain('Baseline checks index integrity, not visual design or layout geometry')
+    expect(help.help).toContain('First select actual visual designs and obtain corresponding resources; then author UI/Scene JSON')
     expect(help.help).toContain('--design baseline --details')
     expect(help.help).not.toContain('baseline|visual')
     expect(help.help).not.toContain('generation record')

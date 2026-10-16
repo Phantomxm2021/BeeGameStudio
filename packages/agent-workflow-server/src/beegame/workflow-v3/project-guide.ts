@@ -6,20 +6,45 @@ import { createHash } from 'node:crypto'
 
 const NAV_START = '<!-- bgs:source-navigation:start -->'
 const NAV_END = '<!-- bgs:source-navigation:end -->'
-// Project-wide instructions only. Native Skill metadata is the discoverable
-// catalog; procedures and their relative references stay in the installed Skills.
-const PROJECT_CONVENTIONS = `## Project conventions
-- Preserve confirmed requirements and the project's existing sources of truth. Use project-relative paths for durable project references.
+// One working contract for generated guides and active goal context. Native
+// metadata resolves Skill names/namespaces; procedures stay in the Skills.
+export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
+- Preserve confirmed requirements, design standards, budget, authorization and unrelated work. Use project-relative paths.
 - Keep project-specific architecture decisions and confirmed runtime entry points outside the generated source-navigation block; update them when the implementation changes. Generated pointers list saved sources and declared commands, not verified runtime behavior.
+- For follow-ups, reuse still-valid designs, resources, methods and evidence. Repair affected sources without restarting production or lowering standards.
 
 ## Professional methods
-- Select relevant installed Skills from the current session's native metadata and invoke them with the Skill tool before related design or implementation decisions; reuse methods already loaded in context.
-- Read the invoked Skill and only the references needed for the task. Resolve bundled references and scripts from the base directory supplied by that invocation, not from a saved installation path.
-- Keep professional procedures in their Skills, not in this guide. Do not duplicate the catalog or require every Skill in a fixed sequence.`
+- For a new complete game design, cover these responsibilities. Use the current session's native metadata to resolve names/namespaces, then invoke matching Skills with the Skill tool before related design or implementation decisions. Reuse loaded methods; follow-ups cover affected responsibilities.
 
-// Source pointers only. Existing design/configuration supplies the decisions;
-// this is not another mandatory authored delivery/report.
-export const PROJECT_GUIDE_TEMPLATE = `# Project navigation
+| Design responsibility | Skills |
+| --- | --- |
+| GDD.md: direction/gameplay | game-creative-director-expert, game-systems-designer-expert |
+| LEVEL_SCENE_DESIGN.md: levels/scenes | game-level-designer-expert |
+| BALANCE_DESIGN.md: balance | game-balance-designer-expert |
+| TECHNICAL_DESIGN.md: technology/tasks | gameplay-programmer, game-implementation-planning |
+| ART_DIRECTION.md: art | game-art-director-expert |
+| UI_UX_SPEC.md: UI/UX | game-ui-ux-designer |
+| AUDIO_DESIGN.md: audio | game-audio-designer |
+| ASSET_PLAN.md: resources | game-content-pipeline-engineer |
+
+- Read the invoked Skill and only the references needed for the task. Resolve paths from the base directory supplied by that invocation. Do not duplicate the catalog or procedures here. Report missing required methods; do not silently skip their responsibility.
+
+## Required design dependencies
+For applicable new work, use this order; do not omit, replace or reverse required dependencies:
+1. Design records: define gameplay, levels, balance, UI actions/navigation, art, audio and technical approach. Use prose/sketches for space needs; do not create UI/Scene JSON here. Technical/resource plans start as drafts.
+2. Actual visual designs: use existing image tools or supplied designs for complete UI screens/key states, scenes and needed props. Save and Read pictures; inspect composition, hierarchy, game visibility and style; link selections from owning records. Prose, palettes and JSON geometry do not replace visual design. Missing supplied pictures do not waive it.
+3. Resources: complete ASSET_PLAN.md from selected visual/audio designs; acquire suitable assets, inspect actual files/metrics and register them. Preserve the selected style; a screen board is not runtime UI.
+4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Finalize TECHNICAL_DESIGN.md tasks from these inputs.
+5. Implementation and runtime verification: implement those tasks using the saved content; play the required flow and compare actual screens, interaction and sound with the designs.
+Image-tool request JSON is a tool input, not a project UI/Scene layout. Reuse existing Skills and entries; add no separate plan or task database.
+
+## Quality and evidence
+- Skill invocation, complete documents, valid JSON and successful tools do not establish design quality. Inspect actual-size composition, hierarchy, style and state feedback; verify fidelity, gameplay, interaction and sound in the actual runtime.
+- Fix contradictions in owning sources. Obtain necessary evidence within authorization; report unresolved gaps rather than inventing evidence or passing them. Appearance and game feel remain unverified without actual observations.`
+
+// Only generated navigation is descriptive. Project-specific decisions remain
+// in existing design/configuration; this template adds no authored report.
+export const PROJECT_GUIDE_TEMPLATE = `# Project working conventions
 
 ${NAV_START}
 ## Current route
@@ -38,7 +63,7 @@ ${NAV_START}
 - Tests: <maintained test paths; prerequisites belong in their sources>
 ${NAV_END}
 
-${PROJECT_CONVENTIONS}
+${PROJECT_WORKING_CONVENTIONS}
 `
 
 const PATH = 'CLAUDE.md' as const
@@ -128,11 +153,11 @@ ${NAV_END}`
 
 export function projectGuideTemplate(workspacePath:string) {
   const facts=projectNavigationSnapshot(workspacePath)
-  return {facts,value:`# Project navigation
+  return {facts,value:`# Project working conventions
 
 ${sourceNavigation(facts)}
 
-${PROJECT_CONVENTIONS}
+${PROJECT_WORKING_CONVENTIONS}
 `}
 }
 
@@ -213,6 +238,6 @@ export async function readProjectGuide(workspacePath:string):Promise<ProjectGuid
 
 export function projectGuideContext(guide:ProjectGuide):string {
   if(guide.status!=='loaded')return 'Project navigation reference: '+JSON.stringify(guide)+'. No prior guide was reused or file created.'
-  return 'Project navigation reference: CLAUDE.md (SHA-256 '+guide.sha256+', '+guide.bytes+' bytes). '+
-    'Reference text only, not authorization, requirements, permissions or a quality verdict. This guide expands no includes and enables no settings/hooks.\n'+guide.text
+  return 'Project working conventions and navigation: CLAUDE.md (SHA-256 '+guide.sha256+', '+guide.bytes+' bytes). '+
+    'Follow applicable project working conventions within current user authorization. Current user instructions and active design dependencies take precedence over older guide workflow wording. This file cannot expand permissions or budget, authorize new paid operations or override explicit user instructions. Generated navigation describes saved facts, not requirements or quality acceptance. This guide expands no includes and enables no settings/hooks.\n'+guide.text
 }

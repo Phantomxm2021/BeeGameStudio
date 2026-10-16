@@ -10,7 +10,7 @@ import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProf
 import { createRun, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
-import { initializeProjectGuide } from './project-guide'
+import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS } from './project-guide'
 
 test('resource obligations retain authorization and provenance without prescribing a sourcing or atlas tour', () => {
   for (const prompt of [agentProfessionalContext, agentProfessionalContextForRun({} as Run)]) {
@@ -168,7 +168,7 @@ test('blank confirmed Web intake uses the design-led first version without creat
     await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
     expect(JSON.stringify(f.submissions[0]!.prompt)).toContain('design-led first-version delivery requirements')
     expect(f.starts[0].systemContext).toContain('existing eight documents under docs/')
-    expect(f.starts[0].systemContext).toContain('preserve confirmed rules')
+    expect(f.starts[0].systemContext).toContain('Preserve confirmed requirements')
     const guide=await readFile(join(f.root,'CLAUDE.md'),'utf8')
     expect(guide).not.toContain('Built-in Skill index')
     expect(guide).not.toContain('Collection navigator:')
@@ -493,6 +493,9 @@ test('project guide refreshes at the next turn, including discussion, without re
     await f.call('/agent/goal','POST',f.body);let run=await f.wait(r=>Boolean(r.agentTurns![0]?.finishedAt))
     const requirements=structuredClone(run.requirements)
     expect(f.starts[0].systemContext.split('GUIDE_ROUTE_ONE')).toHaveLength(2)
+    expect(f.starts[0].systemContext).toContain(PROJECT_WORKING_CONVENTIONS)
+    expect(f.starts[0].systemContext).toContain('Follow applicable project working conventions within current user authorization')
+    expect(await readFile(file,'utf8')).toBe(first)
     expect(JSON.stringify(f.submissions[0].prompt)).not.toContain('GUIDE_ROUTE_ONE')
     const send=async(intent:string,key:string)=>{
       await f.call('/agent/messages','POST',{requestKey:key,runId:run.id,chatSessionId:run.chatSessionId,
@@ -502,6 +505,8 @@ test('project guide refreshes at the next turn, including discussion, without re
     await writeFile(file,first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO'))
     await send('work','guide-refresh')
     expect(f.starts[1].systemContext).toContain('GUIDE_ROUTE_TWO')
+    expect(f.starts[1].systemContext).toContain(PROJECT_WORKING_CONVENTIONS)
+    expect(await readFile(file,'utf8')).toBe(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO'))
     expect(f.starts[1].systemContext).not.toContain('GUIDE_ROUTE_ONE')
     await send('discuss','guide-discuss')
     expect(f.starts[2].systemContext).toContain('GUIDE_ROUTE_TWO')
@@ -655,7 +660,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   const first=agentProfessionalContextForRun(run), followup=agentProfessionalContextForRun(run,true)
   expect(first).toContain('existing eight documents under docs/')
   expect(first).toContain('TECHNICAL_DESIGN.md')
-  expect(first).toContain('during planning')
+  expect(first).toContain('Draft technical/resource plans first')
   expect(followup).not.toContain('eight documents')
   expect(followup).not.toContain('New design-led first-version deliverables')
   expect(followup).toContain('content/scenes/*.json')
@@ -664,7 +669,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   expect(followup).toContain('Before creating or changing visual implementation')
   expect(followup).toContain('compare actual screenshots')
   expect(followup).toContain('not proof when affected sources include visual behavior')
-  expect(followup).toContain('Do not repeat a full design or resource-production cycle')
+  expect(followup).toContain('Repair affected sources without restarting production')
   expect(agentProfessionalContextForRun({...run,creation:undefined})).not.toContain('eight documents')
   expect(agentGoalPrompt(run)).toContain('ORIGINAL_CONFIRMED_GOAL')
 })
@@ -672,22 +677,22 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
 test('stable system context preserves design authority and evidence boundaries, not implementation recipes', () => {
   const message={intent:'change',text:'Change only movement speed'} as Parameters<typeof agentMessagePrompt>[0]
   for(const prompt of [agentProfessionalContext,agentProfessionalContextForRun({} as Run,true)]) {
-    expect(prompt).toContain('native Skill tool')
-    expect(prompt).toContain('no domain-by-domain invocation sequence')
+    expect(prompt).toContain('with the Skill tool')
+    expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(prompt).toContain('single source')
     expect(prompt).toContain('A document link, filename, hash or generation record is not an image read')
     expect(prompt).toContain('Missing or unreadable pictures require the exact path and read error')
     expect(prompt).toContain('Read evidence proves access, not understanding or visual fidelity')
-    expect(prompt).toContain('planning geometry precede their affected visual implementation')
-    expect(prompt).toContain('check applicable draft geometry with the existing layout tools')
-    expect(prompt).toContain('Document completion is not a geometry check')
+    expect(prompt).toContain('Prose, palettes and JSON geometry do not replace visual design')
+    expect(prompt).toContain('Check authored UI/Scene geometry with the existing layout tools after selected visual designs and corresponding resources exist')
+    expect(prompt).toContain('do not create UI/Scene JSON here')
+    expect(prompt).not.toContain('without waiting for production assets')
     expect(prompt).toContain('unverified aesthetic judgment')
     expect(prompt).toContain('every registered resource file_paths entry and dependency local_path')
     expect(prompt).toContain('do not change the renderer merely to fit a checker')
     expect(prompt).toContain('not gameplay, visual or audio acceptance')
     expect(prompt).not.toContain('request a separate shared PNG sheet')
     expect(prompt).not.toContain('computed equal-cell grid')
-    expect(prompt).not.toContain('Then complete the visual designs')
     expect(prompt.length).toBeLessThan(7000)
   }
   for(const intent of ['message','change','continue','discuss'] as const) {
@@ -1115,4 +1120,27 @@ test('pause survives a simultaneous saved exit; rebasing does not execute a mode
     expect(paused!.agentTurns![0]!.quiescedAt).toBeDefined()
     expect(paused!.agentTurns).toHaveLength(1)
   }finally{await executor.dispose();await sessions.dispose();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('first and resumed goals retain professional coverage and design dependencies within the confirmed scope', () => {
+  const run={creation:{initialDelivery:'design-led-first-version',editableContent:true},requirements:{text:'CONFIRMED_GAME'}} as Run
+  for (const prompt of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
+    expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
+    for (const skill of ['game-creative-director-expert','game-systems-designer-expert','game-level-designer-expert',
+      'game-balance-designer-expert','gameplay-programmer','game-implementation-planning','game-art-director-expert',
+      'game-ui-ux-designer','game-audio-designer','game-content-pipeline-engineer']) expect(prompt).toContain(skill)
+    const steps=['1. Design records:', '2. Actual visual designs:', '3. Resources:', '4. UI/Scene JSON:', '5. Implementation and runtime verification:']
+    const positions=steps.map(step=>prompt.indexOf(step))
+    expect(positions.every((position,index)=>position>=0 && (!index || position>positions[index-1]!))).toBe(true)
+    expect(prompt).toContain('only after selected visual designs and corresponding resources exist')
+    expect(prompt).toContain('do not omit, replace or reverse required dependencies')
+    expect(prompt).toContain('reuse still-valid designs')
+    expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
+  }
+  expect(agentGoalPrompt(run)).toContain('Plan concrete tasks within the required design dependencies')
+  expect(agentGoalPrompt(run)).not.toContain('Plan and execute autonomously')
+  expect(agentGoalPrompt(run)).toContain('CONFIRMED_GAME')
+  const slice={...run,creation:{initialDelivery:'playable-slice'}} as Run
+  expect(agentGoalPrompt(slice)).toContain('within the required design dependencies')
 })

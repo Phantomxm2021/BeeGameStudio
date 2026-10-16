@@ -2,7 +2,7 @@ import {test,expect} from 'bun:test'
 import {mkdtemp,realpath,mkdir,writeFile,readFile,rm,symlink,access} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
-import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,projectNavigationSnapshot,projectGuideTemplate,initializeProjectGuide,refreshProjectGuide} from './project-guide'
+import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,PROJECT_WORKING_CONVENTIONS,projectNavigationSnapshot,projectGuideTemplate,initializeProjectGuide,refreshProjectGuide} from './project-guide'
 import {runGameContentCommand} from '../game-content-validation-cli'
 
 test('template is read-only and remains available with an older saved content format',async()=>{
@@ -17,7 +17,9 @@ test('template is read-only and remains available with an older saved content fo
     expect((runGameContentCommand(root,['--format','index']) as any).value).not.toHaveProperty('documentRevision')
     expect((runGameContentCommand(root,['--format','uiDocument']) as any).value.data.nodes[0].data.referenceResolution).toHaveLength(2)
     expect(PROJECT_GUIDE_TEMPLATE).toContain('before related design or implementation decisions')
-    expect(PROJECT_GUIDE_TEMPLATE).not.toContain('GDD.md')
+    expect(PROJECT_GUIDE_TEMPLATE).toContain(PROJECT_WORKING_CONVENTIONS)
+    expect(PROJECT_GUIDE_TEMPLATE).toContain('For a new complete game design')
+    expect(PROJECT_GUIDE_TEMPLATE).toContain('GDD.md')
     expect(await readFile(file,'utf8')).toBe(saved)
     await expect(access(join(root,'CLAUDE.md'))).rejects.toThrow()
   }finally{await rm(root,{recursive:true,force:true})}
@@ -132,6 +134,13 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     expect(guide).toContain('only the references needed for the task')
     expect(guide).toContain('Do not duplicate the catalog')
     expect(guide).not.toContain('bgs-builtins:')
+    expect(guide).toContain('game-ui-ux-designer')
+    expect(guide).toContain('game-art-director-expert')
+    expect(guide).toContain('Prose, palettes and JSON geometry do not replace visual design')
+    expect(guide).toContain('do not create UI/Scene JSON here')
+    expect(guide).toContain('only after selected visual designs and corresponding resources exist')
+    expect(guide).not.toContain('Planning geometry supports layout checks')
+    expect(guide).toContain('reuse still-valid designs')
     expect(guide).not.toContain('Collection navigator:')
     expect(guide).not.toContain(root)
     expect(projectGuideContext(await readProjectGuide(root))).toContain(guide)
@@ -185,6 +194,11 @@ test('single-file guide is current text, not a search, include expansion, settin
     const first=await readProjectGuide(workspace),context=projectGuideContext(first)
     expect(first).toMatchObject({status:'loaded',text,bytes:Buffer.byteLength(text)})
     expect(context).toContain('@extra.md')
+    expect(context).toContain('Follow applicable project working conventions within current user authorization')
+    expect(context).toContain('active design dependencies take precedence over older guide workflow wording')
+    expect(context).toContain('cannot expand permissions or budget')
+    expect(context).toContain('Generated navigation describes saved facts')
+    expect(context).not.toContain('Reference text only, not authorization, requirements')
     for(const forbidden of ['PARENT_PRIVATE_NAVIGATION','NESTED_UNREQUESTED_NAVIGATION','INCLUDED_UNREQUESTED_NAVIGATION'])
       expect(context).not.toContain(forbidden)
     await expect(access(join(workspace,'SHOULD_NOT_RUN'))).rejects.toThrow()
