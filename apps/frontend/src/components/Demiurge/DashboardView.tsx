@@ -121,7 +121,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     return () => { cancelled = true; clearTimeout(timer); };
   }, [projectId, deploymentInProgress, authenticationStatus, showWarning]);
 
-  const { sendMessage, stopTask, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState } = useChat({
+  const { sendMessage, stopTask, continueTask, autoRetryTurnId, cancelAutoRetry, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState } = useChat({
     projectId,
     onError: err => console.error(err),
     showToastError: showError,
@@ -223,6 +223,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     if (hasPendingToolPermission || projectRuntimeDisplay?.phase === 'waiting_approval') return 'waiting_approval';
     if (isExecutionBusy) return 'running';
     if (isProjectStarting) return 'starting';
+    if (projectRuntimeDisplay?.phase === 'paused' && projectRuntimeDisplay.blocked) return 'paused';
     if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
     return deriveDashboardStatus({
       isOffline,
@@ -238,6 +239,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     isLoading,
     isExecutionBusy,
     projectRuntimeDisplay?.phase,
+    projectRuntimeDisplay?.blocked,
     canContinue,
     hasPendingToolPermission,
     waitingPermission.isWaitingStatus,
@@ -403,6 +405,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         }}
         isLoading={isLoading}
         onStopTask={stopTask}
+        onContinueTask={canSendMessage ? continueTask : undefined}
+        autoRetryTurnId={autoRetryTurnId}
+        onCancelRetry={cancelAutoRetry}
         isStopping={isStopping}
         isRuntimeBusy={isExecutionBusy}
         onResolveToolPermission={hasPendingToolPermission && canApproveTool && !isProjectInteractionLocked ? resolveToolPermission : undefined}

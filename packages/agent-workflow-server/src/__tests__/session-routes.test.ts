@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   realpath,
+  readFile,
   rm,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -152,6 +153,54 @@ it('does not offer a stopped native permission as actionable after service resta
     expect(receivedPrompt).toBe('Continue my project')
     expect(runnerStarts).toBe(1)
     releaseTurn?.()
+  } finally { for (const cleanup of cleanups.splice(0)) await cleanup() }
+})
+
+it('keeps provider refusal actionable after host settlement and a later successful turn clears it', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-provider-refusal-')))
+  temporaryDirectories.push(root)
+  const ownerId = 'refusal-owner', projectId = 'refusal-project'
+  const projectsRoot = join(root, 'projects'), workspace = join(projectsRoot, 'users', ownerId, projectId)
+  await mkdir(workspace, { recursive: true })
+  const cleanups: Array<() => void | Promise<void>> = []
+  let runnerStarts = 0
+  const options = { currentUser: { id: ownerId, role: 'owner' as const },
+    dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: projectsRoot,
+    modelConfigStore: false as const, skillsConfig: false as const,
+    sessionRunner: { start: async () => { runnerStarts++; throw new Error('Reading state must never start native work') } } }
+  const app = createAgentWorkflowApp({ ...options, registerCleanup: cleanup => cleanups.push(cleanup) })
+  const post = (url: string, body: unknown) => app.request(url, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  try {
+    expect((await post('/api/projects', { id: projectId, name: 'Refusal test', root_path: workspace,
+      created_at: Date.now() })).status).toBe(200)
+    expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake',
+      models: { balanced: 'mimo-v2.6-flash' }, isDefault: true })).status).toBe(200)
+    const { session } = await (await post(`/api/projects/${projectId}/session/ensure`, { language: 'zh' })).json() as { session: { id: string } }
+    const recovered = await recoverLatestProjectSessionFromDisk(workspace)
+    expect(recovered?.transcriptPath).toBeTruthy()
+    for (const cleanup of cleanups.splice(0)) await cleanup()
+    const saved = await readFile(join(workspace, recovered!.transcriptPath), 'utf8')
+    const baseId = Math.max(...saved.trim().split('\n').map(line => JSON.parse(line).id))
+    const append = async (offset: number, type: string, text: string, turnId = 'failed-turn') => appendFile(
+      join(workspace, recovered!.transcriptPath), JSON.stringify({ id: baseId + offset, sessionId: session.id,
+        turnId, type, text, createdAt: new Date().toISOString(), payload: { type, subtype: 'host_evidence' } }) + '\n')
+    await append(1, 'turn.started', 'Start')
+    await append(2, 'turn.failed', 'API Error: 400 Upstream request failed: [model_coming_soon] This model is coming soon.')
+    await append(3, 'system.status', 'Execution settled; quality unverified')
+    const restarted = createAgentWorkflowApp({ ...options, registerCleanup: cleanup => cleanups.push(cleanup) })
+    const state = await (await restarted.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, unknown>
+    expect(state).toMatchObject({ phase: 'paused', blocked: true, active_agents: [], active_subagents: [],
+      blocked_reason_code: 'runtime_failed' })
+    expect(state.next_action).toContain('model_coming_soon')
+    expect(runnerStarts).toBe(0)
+    // New terminal work supersedes the failure; later metadata has no lifecycle authority.
+    await append(4, 'turn.started', 'Next turn', 'next-turn')
+    await append(5, 'turn.completed', 'Done', 'next-turn')
+    await append(6, 'system.status', 'Later host evidence', 'next-turn')
+    const nextState = await (await restarted.request(`/api/projects/${projectId}/runtime-state`)).json()
+    expect(nextState).toMatchObject({ phase: 'idle', blocked: false })
+    expect(runnerStarts).toBe(0)
   } finally { for (const cleanup of cleanups.splice(0)) await cleanup() }
 })
 

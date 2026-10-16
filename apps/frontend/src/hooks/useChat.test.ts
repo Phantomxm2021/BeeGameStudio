@@ -106,6 +106,68 @@ import { useChat } from './useChat';
 import { settleChatActivity } from '../utils/chatActivity';
 
 describe('useChat clarification gate handling', () => {
+  it('arms only one automatic retry for a native model failure and binds it to that failed turn', async () => {
+    vi.mocked(api.continueTask).mockResolvedValue({ resume_task_id: 'retry-turn' } as any);
+    const { result } = renderHook(() => useChat({ projectId: 'retry-project' }));
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'retry-project', task_id: 'session',
+      message_id: 'failure-1', turn_id: 'failed-turn', content: 'API Error: Connection error.' }));
+    expect(result.current.autoRetryTurnId).toBe('failed-turn');
+    expect(api.continueTask).not.toHaveBeenCalled();
+    await act(async () => result.current.continueTask('failed-turn', true));
+    expect(api.continueTask).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      project_id: 'retry-project', failed_turn_id: 'failed-turn', automatic_retry: true,
+    }));
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'retry-project', task_id: 'session',
+      message_id: 'failure-2', turn_id: 'retry-turn', content: 'API Error: Connection error.' }));
+    expect(result.current.autoRetryTurnId).toBeNull();
+    expect(api.continueTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels automatic retry on a stop or project switch, and ignores non-model failures', async () => {
+    vi.mocked(api.stopTask).mockResolvedValue({ state: 'stopped' } as any);
+    const { result, rerender } = renderHook(({ projectId }) => useChat({ projectId }), { initialProps: { projectId: 'A' } });
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'A', task_id: 's', turn_id: 'a',
+      message_id: 'failure-a', content: 'API Error: Connection error.' }));
+    expect(result.current.autoRetryTurnId).toBe('a');
+    await act(async () => result.current.stopTask());
+    expect(result.current.autoRetryTurnId).toBeNull();
+    rerender({ projectId: 'B' });
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'A', task_id: 's', turn_id: 'other',
+      content: 'API Error: Connection error.' }));
+    expect(result.current.autoRetryTurnId).toBeNull();
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'B', task_id: 's', turn_id: 'b',
+      content: 'Permission denied for tool.' }));
+    expect(result.current.autoRetryTurnId).toBeNull();
+    act(() => latestWebSocketOptions.onClose?.());
+    expect(api.continueTask).not.toHaveBeenCalled();
+  });
+
+  it('discards a retry response after switching projects', async () => {
+    let finish!: (value: any) => void;
+    vi.mocked(api.continueTask).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { result, rerender } = renderHook(({ projectId }) => useChat({ projectId }), { initialProps: { projectId: 'A' } });
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.continueTask('failed-turn', true); });
+    rerender({ projectId: 'B' });
+    await act(async () => { finish({ resume_task_id: 'old-retry' }); await pending; });
+    expect(result.current.currentTaskId).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('settles loading and streaming on a provider refusal without dispatching a continuation', () => {
+    const { result } = renderHook(() => useChat({ projectId: 'provider-refusal' }));
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', task_id: 'session', turn_id: 'turn', status: 'running' }));
+    expect(result.current.isLoading).toBe(true);
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'error', task_id: 'session', turn_id: 'turn',
+      content: '上游暂未开放当前模型（model_coming_soon）', timestamp: 200 }));
+    expect(result.current.isLoading).toBe(false);
+    expect(chatStoreState.settleActivity).toHaveBeenCalledWith('session', 'turn', 'failed', 200);
+    expect(chatStoreState.setIsStreaming).toHaveBeenLastCalledWith(false);
+    expect(chatStoreState.setCurrentSender).toHaveBeenLastCalledWith(null);
+    expect(api.continueTask).not.toHaveBeenCalled();
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+
   it('retains the actual live delivery handoff error without replacing the Agent result', () => {
     renderHook(() => useChat({ projectId: 'proj_1' }));
     act(() => latestWebSocketOptions.onMessage?.({

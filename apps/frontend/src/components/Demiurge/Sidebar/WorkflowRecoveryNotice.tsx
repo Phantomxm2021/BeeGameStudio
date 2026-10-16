@@ -4,8 +4,8 @@ import type { TaskRecoveryStatus } from '../../../services/beeGameAdapter';
 
 /** Reads host ownership facts, not Chat's reconstructed idle/running label.
  * Only the explicit recovery button mutates anything; it never continues. */
-export function WorkflowRecoveryNotice({ projectId, lang, refreshKey, onBlockedChange }: {
-    projectId: string; lang: string; refreshKey: string; onBlockedChange: (blocked: boolean) => void;
+export function WorkflowRecoveryNotice({ projectId, lang, refreshKey, failed = false, onBlockedChange }: {
+    projectId: string; lang: string; refreshKey: string; failed?: boolean; onBlockedChange: (blocked: boolean) => void;
 }) {
     const [status, setStatus] = useState<TaskRecoveryStatus | null>(null);
     const [error, setError] = useState('');
@@ -18,9 +18,12 @@ export function WorkflowRecoveryNotice({ projectId, lang, refreshKey, onBlockedC
     useEffect(() => {
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
+        // A failed native turn may still be releasing its host writer. Keep
+        // retry disabled until this read confirms that ownership is settled.
+        if (failed) onBlockedChange(true);
         const read = async () => {
             try {
-                const next = await api.getTaskRecovery(projectId);
+                const next = await api.getTaskRecovery(projectId, failed);
                 if (cancelled) return;
                 setStatus(next); setError(''); setSuccess(false); onBlockedChange(Boolean(next));
                 if (next?.state === 'stopping') timer = setTimeout(() => void read(), 1000);
@@ -30,7 +33,7 @@ export function WorkflowRecoveryNotice({ projectId, lang, refreshKey, onBlockedC
         };
         void read();
         return () => { cancelled = true; clearTimeout(timer); };
-    }, [projectId, refreshKey, revision, onBlockedChange]);
+    }, [projectId, refreshKey, failed, revision, onBlockedChange]);
     const recover = async () => {
         setRecovering(true); setError('');
         try {

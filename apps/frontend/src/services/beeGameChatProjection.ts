@@ -253,6 +253,8 @@ function eventToProjectEventMessagesBase(
       ]
     }
     case 'assistant.message': {
+      // Native API error answers are shown by their terminal failure row.
+      if (event.payload?.error || event.payload?.isApiErrorMessage === true) return []
       const usage = getUsageFromEventPayload(event.payload)
       return [
         baseMessage('agent_message', event, projectId, 'beegame', now),
@@ -528,6 +530,8 @@ function eventToProjectEventMessagesBase(
       return [
         {
           type: 'error',
+          message_id: `beegame-failure-${event.sessionId}-${event.turnId || event.id}`,
+          task_kind: 'runtime_error',
           task_id: taskId,
           project_id: projectId,
           turnId: event.turnId,
@@ -937,6 +941,8 @@ export function projectHistoryMessages(
     type:
       message.type === 'agent_message' || message.type === 'token'
         ? 'text'
+        : message.type === 'error'
+          ? 'error'
         : message.type === 'context_compaction'
           ? 'system_status'
         : message.type === 'thought'

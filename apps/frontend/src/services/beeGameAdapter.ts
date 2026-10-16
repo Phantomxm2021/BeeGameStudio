@@ -68,6 +68,7 @@ type V3Run = {
   recoveryDiagnostic?: string
   agentTurns?: Array<{
     attemptId: string
+    turnId?: string
     status: 'running' | 'ended' | 'failed' | 'interrupted'
     notStarted?: boolean
   }>
@@ -114,6 +115,7 @@ async function sendV3Message(projectId: string, sessionId: string, input: {
   intent?: 'continue'
   requestKey: string
   continuationOf?: string
+  allowResume?: boolean
   attachments?: ChatAttachmentPayload[]
 }): Promise<{ turn: { attemptId: string }; runId: string }> {
   let run = await currentV3Run(projectId)
@@ -121,6 +123,7 @@ async function sendV3Message(projectId: string, sessionId: string, input: {
     throw new Error('项目会话与 V3 任务不一致，请重新打开项目。')
   assertWriterReleased(run)
   if (run.paused) {
+    if (input.allowResume === false) throw new Error('任务已被暂停，已取消自动重试。')
     const resumed = await postJson<{ run: V3Run }>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow-v3/resume`,
       { planRevision: run.planRevision },
@@ -655,12 +658,19 @@ export const beeGameAdapter = {
 
   async continueTask(data: {
     project_id: string
+    failed_turn_id?: string
+    automatic_retry?: boolean
     task_id?: string
   }): Promise<ContinueTaskResponse> {
+    if (data.automatic_retry && !data.failed_turn_id) throw new Error('自动重试必须绑定失败回合。')
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
     let run = await currentV3Run(data.project_id)
     assertWriterReleased(run)
+    if (data.failed_turn_id && run.agentTurns?.at(-1)?.turnId !== data.failed_turn_id)
+      throw new Error('任务回合已改变，已取消旧错误的重试。')
+    if (data.automatic_retry && run.paused)
+      throw new Error('任务已被暂停，已取消自动重试；请明确继续任务。')
     if (run.paused) {
       await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/workflow-v3/resume`, {
         planRevision: run.planRevision,
@@ -668,6 +678,8 @@ export const beeGameAdapter = {
       run = await currentV3Run(data.project_id)
     }
     const last = run.agentTurns?.at(-1)
+    if (data.failed_turn_id && last?.turnId !== data.failed_turn_id)
+      throw new Error('任务回合已改变，已取消旧错误的重试。')
     if (!last || !['failed', 'interrupted'].includes(last.status) || last.notStarted)
       throw new Error('没有可续作的已中断 V3 回合；请明确发送新的执行请求。')
     const result = await sendV3Message(data.project_id, session.id, {
@@ -675,6 +687,7 @@ export const beeGameAdapter = {
       intent: 'continue',
       requestKey: crypto.randomUUID(),
       continuationOf: last.attemptId,
+      allowResume: !data.automatic_retry,
     })
     return {
       command_id: session.id,
@@ -714,9 +727,10 @@ export const beeGameAdapter = {
   },
 
   /** Explicit recovery only: never calls resume or sends a model message. */
-  async getTaskRecovery(projectId: string): Promise<TaskRecoveryStatus | null> {
+  async getTaskRecovery(projectId: string, includeActive = false): Promise<TaskRecoveryStatus | null> {
     const run = await readV3Run(projectId)
-    if (!run?.writer || run.writerLiveness === 'local-active' && !run.paused) return null
+    if (!run?.writer) return null
+    if (run.writerLiveness === 'local-active' && !run.paused && !includeActive) return null
     let message = ''
     try { assertWriterReleased(run) } catch (error) { message = (error as Error).message }
     return { state: run.writerLiveness === 'local-active' ? 'stopping' :

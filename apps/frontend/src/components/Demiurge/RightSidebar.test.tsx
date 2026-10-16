@@ -65,6 +65,63 @@ function deferred<T>() {
 }
 
 describe('RightSidebar tabs', () => {
+    it('places the retry capsule beside the model error and keeps historical errors manual', async () => {
+        vi.useFakeTimers();
+        const onContinueTask = vi.fn().mockResolvedValue(undefined);
+        const props = { projectId: 'inline-retry', lang: 'en' as const, progress: 0, isLoading: false,
+            messages: [{ id: 'model-failure', sender: 'system', type: 'error' as const, taskKind: 'runtime_error',
+                turnId: 'failed-turn', content: 'Selected model is at capacity.', timestamp: Date.now() }],
+            onSendMessage: vi.fn(), onContinueTask, waitingPermission: getWaitingPermissionState([]),
+            projectStatus: { project_id: 'inline-retry', phase: 'paused', blocked: true } };
+        const view = render(<RightSidebar {...props} />);
+        await act(async () => vi.advanceTimersByTime(20_000));
+        expect(onContinueTask).not.toHaveBeenCalled();
+        const error = screen.getByRole('alert');
+        expect(within(error).getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry');
+        view.rerender(<RightSidebar {...props} autoRetryTurnId="failed-turn" />);
+        expect(within(error).getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry in 10s');
+        await act(async () => vi.advanceTimersByTime(10_000));
+        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn', true);
+    });
+
+    it('does not start the countdown while failed execution ownership is unknown', async () => {
+        vi.useFakeTimers();
+        const pending = deferred<null>();
+        vi.mocked(api.getTaskRecovery).mockReturnValueOnce(pending.promise);
+        const onContinueTask = vi.fn();
+        render(<RightSidebar projectId="waiting-for-cleanup" lang="en" progress={0} isLoading={false}
+            messages={[{ id: 'failed', sender: 'system', type: 'error', turnId: 'failed-turn',
+                content: 'API Error: Connection error.', timestamp: Date.now() }]}
+            projectStatus={{ project_id: 'waiting-for-cleanup', phase: 'paused', blocked: true }}
+            autoRetryTurnId="failed-turn" onContinueTask={onContinueTask} onSendMessage={vi.fn()}
+            waitingPermission={getWaitingPermissionState([])} />);
+        await act(async () => vi.advanceTimersByTime(20_000));
+        expect(onContinueTask).not.toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: 'Retry now' })).toBeDisabled();
+        await act(async () => { pending.resolve(null); await pending.promise; });
+        expect(screen.getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry in 10s');
+    });
+
+    it('offers explicit continuation for a failed task after reopening, without sending on render', async () => {
+        const onContinueTask = vi.fn().mockResolvedValue(undefined);
+        const onSendMessage = vi.fn();
+        const props = { projectId: 'provider-refusal', lang: 'zh' as const, progress: 0, isLoading: false,
+            messages: [], onSendMessage, onContinueTask, waitingPermission: getWaitingPermissionState([]),
+            projectStatus: { project_id: 'provider-refusal', phase: 'paused', blocked: true } };
+        const view = render(<RightSidebar {...props} />);
+        const button = await screen.findByRole('button', { name: '继续原任务' });
+        await waitFor(() => expect(button).toBeEnabled());
+        expect(onContinueTask).not.toHaveBeenCalled();
+        expect(onSendMessage).not.toHaveBeenCalled();
+        fireEvent.click(button);
+        expect(onContinueTask).toHaveBeenCalledTimes(1);
+        view.rerender(<RightSidebar {...props} canSendMessage={false} />);
+        expect(screen.getByRole('button', { name: '继续原任务' })).toBeDisabled();
+        view.rerender(<RightSidebar {...props} isLoading />);
+        expect(screen.queryByRole('button', { name: '继续原任务' })).not.toBeInTheDocument();
+        expect(onContinueTask).toHaveBeenCalledTimes(1);
+    });
+
     it('preserves sent V3 messages and accepts a new correction instead of rewriting history', async () => {
         const onSendMessage = vi.fn().mockResolvedValue(true);
         render(<RightSidebar projectId="inline-edit" lang="en" progress={0} isLoading={false}

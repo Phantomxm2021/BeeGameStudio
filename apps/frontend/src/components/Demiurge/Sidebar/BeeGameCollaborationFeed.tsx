@@ -1,3 +1,4 @@
+import { RuntimeErrorNotice, type ModelRequestRetryControl } from './RuntimeErrorNotice';
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowLeft, Bot, Check, ChevronDown, CircleCheck, Copy, FileText, Hourglass, ImageIcon, LoaderCircle, Minus, Monitor, Pencil, Send, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -30,6 +31,7 @@ import { Button } from '../../beui/project-button';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
+    retry?: ModelRequestRetryControl;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
     lang?: Language;
     currentUserDisplayName?: string;
@@ -526,6 +528,11 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     };
 
     for (const message of messages) {
+        if (message.type === 'error') {
+            entries.push({ kind: 'context', message });
+            activeTurn = null;
+            continue;
+        }
         if (message.sender === 'user') {
             entries.push({ kind: 'user', message });
             activeTurn = null;
@@ -615,6 +622,7 @@ const splitResponseParts = (parts: ResponsePart[], completed: boolean) => {
 
 export const BeeGameCollaborationFeed = memo(({
     messages,
+    retry,
     lang = 'en',
     onEditMessage,
     editingMessageId = null,
@@ -686,7 +694,10 @@ export const BeeGameCollaborationFeed = memo(({
                         /></Message>
 
                     ) : entry.kind === 'context' ? (
-                        entry.message.taskKind === 'context_compaction'
+                        entry.message.type === 'error'
+                            ? <RuntimeErrorNotice key={entry.message.id} content={displayText(entry.message.content)} zh={lang.startsWith('zh')}
+                                retry={retry?.messageId === entry.message.id ? retry : undefined} />
+                            : entry.message.taskKind === 'context_compaction'
                             ? <CompactionMarker key={entry.message.id} message={entry.message} text={text} isLoading={isLoading} />
                             : <ContextUpdateSeparator key={entry.message.id} message={entry.message} text={text} lang={lang} />
                     ) : (

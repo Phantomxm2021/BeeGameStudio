@@ -28,6 +28,17 @@ const message = (type: ProjectEventMessage['type'], overrides: Partial<ProjectEv
 })
 
 describe('standalone chat projection', () => {
+  it('keeps failure identity and error presentation identical in live output and history', () => {
+    const [failure] = projectEventMessages('project-a', event({ type: 'turn.failed', text: 'API Error: Connection error.' }));
+    expect(failure).toMatchObject({ type: 'error', message_id: 'beegame-failure-main-turn-a',
+      task_kind: 'runtime_error', turnId: 'turn-a' });
+    expect(projectHistoryMessages([failure], new Map())).toEqual([expect.objectContaining({
+      id: failure.message_id, type: 'error', taskKind: 'runtime_error', turnId: 'turn-a',
+    })]);
+    expect(projectEventMessages('project-a', event({ type: 'assistant.message', text: 'API Error: Connection error.',
+      payload: { type: 'assistant', error: 'api_error' } }))).toEqual([]);
+  });
+
   it('uses explicit display text without reading storage and preserves user acknowledgement and ownership', () => {
     const input = frozen(event({ type: 'user.message', text: 'transport payload', payload: {
       type: 'user.message', clientMessageId: 'client-1', supersedesMessageId: 'client-old',

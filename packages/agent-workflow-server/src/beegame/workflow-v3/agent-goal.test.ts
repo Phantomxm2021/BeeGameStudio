@@ -814,6 +814,20 @@ test('native failure preserves partial output and never repeats model work or ma
     expect(run.agentTurns![0]!.error).toBe('Synthetic native failure')
     expect(run.deliveryEligible).toBe(false);expect(await readFile(join(f.root,'candidate.txt'),'utf8')).toContain('partial')
     await f.call('/agent/goal','POST',f.body);expect(f.submissions).toHaveLength(1)
+    const requirements=structuredClone(run.requirements), previous=structuredClone(run.agentTurns![0]!)
+    f.setMode('normal')
+    const continuation={requestKey:'explicit-failure-continuation',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',
+      continuationOf:previous.attemptId,text:'Continue the original task using saved partial work'}
+    expect((await f.call('/agent/messages','POST',continuation)).status).toBe(202)
+    const resumed=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions).toHaveLength(2)
+    expect(resumed.chatSessionId).toBe(run.chatSessionId)
+    expect(resumed.requirements).toEqual(requirements)
+    expect(resumed.agentTurns![0]).toEqual(previous)
+    expect(await readFile(join(f.root,'candidate.txt'),'utf8')).toContain('partial')
+    expect((await f.call('/agent/messages','POST',continuation)).status).toBe(202)
+    expect(f.submissions).toHaveLength(2)
   }finally{await f.close()}
 })
 test('pause cancels real turn; resume only clears user pause, never restarts work',async()=>{

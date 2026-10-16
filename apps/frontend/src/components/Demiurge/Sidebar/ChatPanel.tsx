@@ -1,3 +1,4 @@
+import type { ModelRequestRetryControl } from './RuntimeErrorNotice';
 import { memo, useRef, useState } from 'react';
 import { CornerDownRight, Ellipsis, FileText, ListEnd, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
@@ -19,6 +20,7 @@ import { UserQuestionPanel } from './UserQuestionPanel';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
+    retry?: ModelRequestRetryControl;
     isLoading: boolean;
     queuedMessages?: Array<{ id: string; text: string; state: 'pending' | 'dispatching'; attachmentCount?: number }>;
     queueActionId?: string | null;
@@ -191,6 +193,7 @@ const BeUiPermissionPanel = ({
 
 export const ChatPanel = memo(({
     messages,
+    retry,
     isLoading,
     queuedMessages = [],
     queueActionId,
@@ -309,6 +312,7 @@ export const ChatPanel = memo(({
                 ) : null}
                 <BeeGameCollaborationFeed
                     messages={messages}
+                    retry={retry}
                     onPreviewArtifact={onPreviewArtifact}
                     lang={lang}
                     currentUserDisplayName={currentUserDisplayName}

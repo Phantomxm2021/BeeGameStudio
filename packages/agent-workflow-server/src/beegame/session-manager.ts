@@ -2806,13 +2806,24 @@ function getEmptyTurnMessage(language?: BeeGameSessionLanguage): string {
 /**
  * Converts a structured provider error envelope into readable chat text while
  * leaving the original SDK message untouched in agent.raw.jsonl and payloads.
- * Detection is based on the JSON shape, not provider names or message phrases.
+ * Known provider refusal codes also carry a concrete continuation explanation.
  */
 export function formatRuntimeErrorForDisplay(
   value: string,
   language?: BeeGameSessionLanguage,
 ): string {
   const text = value.trim()
+  if (/^(?:API Error:\s*)?400\b/i.test(text) &&
+      /\[model_coming_soon\]|"code"\s*:\s*"model_coming_soon"/.test(text)) {
+    const messages: Partial<Record<BeeGameSessionLanguage, string>> = {
+      zh: '上游暂未开放当前模型（model_coming_soon），本轮已停止。已有会话和产物保留，可重试原任务；当前模型不变。',
+      'zh-TW': '上游暫未開放目前模型（model_coming_soon），本輪已停止。既有對話與產物保留，可重試原任務；目前模型不變。',
+      en: 'The provider has not enabled the selected model (model_coming_soon). This turn stopped; saved conversation and files are retained. Retry the same task when ready; the selected model is unchanged.',
+      ja: '選択したモデルは提供元でまだ利用できません（model_coming_soon）。このターンは停止しました。会話とファイルは保持されます。同じモデルでタスクを再試行できます。',
+      ko: '제공업체가 선택한 모델을 아직 활성화하지 않았습니다(model_coming_soon). 이번 턴은 중단되었으며 대화와 파일은 보존됩니다. 선택한 모델을 유지하며 같은 작업을 재시도할 수 있습니다.',
+    }
+    return messages[language ?? 'en'] ?? messages.en!
+  }
   const objectStart = text.indexOf('{')
   const arrayStart = text.indexOf('[')
   const jsonStart =

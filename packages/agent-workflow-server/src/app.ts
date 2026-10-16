@@ -5465,10 +5465,15 @@ function deriveBeeGameRuntimeStatus(
           agentStatus: 'working',
         }
   }
-  if (latest?.type === 'turn.failed' || latest?.type === 'session.failed') {
+  // Accounting and host evidence can arrive after a terminal event. They do
+  // not turn a failed native turn into an idle, successful-looking project.
+  const outcome = events.findLast(event =>
+    ['turn.started', 'turn.completed', 'turn.empty', 'turn.failed',
+      'session.started', 'session.stopped', 'session.failed'].includes(event.type))
+  if (outcome?.type === 'turn.failed' || outcome?.type === 'session.failed') {
     return {
       phase: 'paused',
-      nextAction: latest.text || 'BeeGame turn failed',
+      nextAction: outcome.text || 'BeeGame turn failed',
       updatedAt,
       activeAgents: [],
       activeSubagents,

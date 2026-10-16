@@ -469,7 +469,7 @@ export const api = {
    * @param data - 包含项目 ID 和可选的任务 ID
    * @returns 返回任务 ID 和状态
    */
-  continueTask: (data: { project_id: string; task_id?: string }) =>
+  continueTask: (data: { project_id: string; task_id?: string; failed_turn_id?: string; automatic_retry?: boolean }) =>
     beeGameAdapter.continueTask(data),
 
   requestProjectAction: (data: {
@@ -486,7 +486,7 @@ export const api = {
     beeGameAdapter.stopTask(data),
 
   recoverTask: (data: { project_id: string }) => beeGameAdapter.recoverTask(data),
-  getTaskRecovery: (projectId: string) => beeGameAdapter.getTaskRecovery(projectId),
+  getTaskRecovery: (projectId: string, includeActive = false) => beeGameAdapter.getTaskRecovery(projectId, includeActive),
 
   /**
    * 获取项目的聊天历史记录
