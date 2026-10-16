@@ -7,7 +7,7 @@ import { Button } from '../../beui/project-button';
 import { buildArtifactViewModel, type ArtifactEditorKind, type ArtifactListItem } from './artifactViewModel';
 import { ArtifactEmptyCard } from './ArtifactEmptyCard';
 
-export type ArtifactEditorFile = { path: string; id: string; kind: ArtifactEditorKind };
+export type ArtifactEditorFile = { path: string; id: string; kind: ArtifactEditorKind; error?: string };
 
 interface ArtifactsPanelProps {
     artifacts: ArtifactListItem[];
@@ -75,12 +75,14 @@ export const ArtifactsPanel = memo(({
                 <Button variant="ghost" size="icon" aria-label={`${zh ? '查看' : 'View'} ${item.name}`} title={zh ? '查看' : 'View'} onClick={() => onPreview(item.id, item.name)}><Eye size={15} /></Button>
             </div>) : !isLoading && !error ? <ArtifactEmptyCard icon={FileText} message={zh ? '暂无项目文档' : 'No project documents yet'} /> : null}
         </section> : <section aria-label={`${labels[page]} files`}>
-            {editorFilesError ? <p role="alert" className="mb-3 type-caption-1 text-[var(--destructive)]">{editorFilesError}</p> : null}
+            {editorFilesError ? <p role="alert" className="mb-3 whitespace-pre-wrap break-words type-caption-1 text-[var(--destructive)]">{editorFilesError}</p> : null}
             {isEditorFilesLoading ? <div aria-label={zh ? '正在加载文件' : 'Loading files'} className="space-y-2"><Skeleton className="h-14 w-full" /><Skeleton className="h-14 w-full" /></div> : files.length ? <div className={listClass}>
-                {files.map(file => <button key={file.path} type="button" className={rowClass} onClick={() => onOpenEditor?.(file.kind, file.path)}>
+                {files.map(file => <button key={file.path} type="button" className={`${rowClass} disabled:cursor-default disabled:hover:bg-transparent`} disabled={Boolean(file.error)} onClick={() => onOpenEditor?.(file.kind, file.path)}>
                     <FileJson size={16} className="shrink-0 text-[var(--text-secondary)]" aria-hidden="true" />
-                    <span className="min-w-0 flex-1"><span className="block truncate type-footnote text-[var(--text-primary)]">{file.path.split('/').at(-1)}</span><span className="block truncate type-caption-2 text-[var(--text-muted)]" title={file.id}>{file.path}</span></span>
-                    <ExternalLink size={14} className="shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+                    <span className="min-w-0 flex-1"><span className="block truncate type-footnote text-[var(--text-primary)]">{file.path.split('/').at(-1)}</span><span className="block truncate type-caption-2 text-[var(--text-muted)]" title={file.id}>{file.path}</span>
+                        {file.error ? <span role="alert" className="mt-1 block whitespace-pre-wrap break-words type-caption-2 text-[var(--destructive)]">{zh ? '文件校验错误：' : 'File validation error: '}{file.error}</span> : null}
+                    </span>
+                    {!file.error ? <ExternalLink size={14} className="shrink-0 text-[var(--text-muted)]" aria-hidden="true" /> : null}
                 </button>)}
             </div> : !editorFilesError ? <ArtifactEmptyCard icon={page === 'scene' ? Box : LayoutPanelTop} message={zh ? '暂无可编辑的 JSON 文件' : 'No editable JSON files yet'} /> : null}
         </section>}

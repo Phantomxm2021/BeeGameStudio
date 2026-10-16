@@ -148,14 +148,22 @@ export const contentIndexSchema = strictObject({
     schema: literal(BEEGAME_CONTENT_PACKAGE_SCHEMA),
     id: identifier,
     dimension: enumeration(['2d', '3d']),
-    documentRevision: digestSchema,
-    assetManifestRevision: digestSchema,
+    // Legacy snapshots may retain these tags. Current authoring and measurement
+    // identify the actual saved bytes; authors need not manufacture/copy hashes.
+    documentRevision: digestSchema.optional(),
+    assetManifestRevision: digestSchema.optional(),
     entryScene: identifier,
     files: uniqueIdentifiers.min(1),
     /** Optional on existing v2 packages; new packages use this to avoid loading every document at startup. */
     documents: array(contentDocumentRegistryEntrySchema).optional(),
-    sceneModel: literal(BEEGAME_SCENE_MODEL),
+    sceneModel: literal(BEEGAME_SCENE_MODEL).default(BEEGAME_SCENE_MODEL),
   })
+
+/** The existing entry ID can name a world or a standalone visual UI. A flow
+ * graph/VFX document is not itself a renderable entry. */
+export function isContentEntryKind(kind: string, dimension: '2d' | '3d') {
+  return kind === `scene-${dimension}` || kind === 'ui-screen' || kind === 'ui-hud'
+}
 
 const transformSchema = strictObject({
     position: tuple([finiteNumber, finiteNumber, finiteNumber]),
@@ -281,7 +289,14 @@ const uiResponsiveOverrideSchema = strictObject({
 const uiLayoutFieldNames = Object.keys(uiLayoutFieldsSchema.shape).filter(key => key !== 'anchor')
 const uiPivotOverrideSchema = strictObject({ x: finiteNumber.optional(), y: finiteNumber.optional() })
 const uiLayoutOcclusionSchema = enumeration(['protected', 'occluder'])
-const uiNodeDataSchema = record(string(), unknown()).superRefine((data, context) => {
+const positivePair = tuple([finiteNumber.positive(), finiteNumber.positive()])
+const uiNodeDataSchema = strictObject({
+  referenceResolution: positivePair.optional(),
+  targetViewports: array(positivePair).min(1).optional(),
+  minimumControlSize: positivePair.optional(),
+  orientation: enumeration(['Landscape', 'Portrait']).optional(),
+  compactMaxWidth: finiteNumber.positive().optional(),
+}).catchall(unknown()).superRefine((data, context) => {
   for (const key of uiLayoutFieldNames) {
     if (Object.hasOwn(data, key)) context.addIssue({ code: 'custom', path: [key],
       message: `UI layout field belongs in layout.${key}, not data.${key}; it would not be consumed there` })

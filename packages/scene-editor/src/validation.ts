@@ -48,7 +48,21 @@ function assertComponent(input: unknown, path: string, ids: Set<string>): assert
   else if (type === 'animator') json(component.controller, `${path}.controller`)
 }
 
-function assertSource(input: unknown, path: string) { const value = record(input, path); const source = record(value.source, `${path}.source`); if (source.kind === 'fixture') { text(source.fixtureId, `${path}.source.fixtureId`); if (typeof source.fixtureDigest !== 'string' || !DIGEST.test(source.fixtureDigest)) invalid(`${path}.source.fixtureDigest`, 'expected SHA-256') } else if (source.kind === 'published-ir' || source.kind === 'content-package') { text(source.publicationId, `${path}.source.publicationId`); for (const key of ['candidateDigest', 'sourceInputDigest']) if (typeof source[key] !== 'string' || !DIGEST.test(source[key] as string)) invalid(`${path}.source.${key}`, 'expected SHA-256') } else invalid(`${path}.source.kind`, 'unsupported'); if (typeof value.contentDigest !== 'string' || !DIGEST.test(value.contentDigest)) invalid(`${path}.contentDigest`, 'expected SHA-256'); for (const key of ['contentRevision', 'contentSchemaVersion', 'adapterId', 'adapterVersion']) text(value[key], `${path}.${key}`) }
+function assertSource(input: unknown, path: string) {
+  const value = record(input, path), source = record(value.source, `${path}.source`)
+  if (source.kind === 'fixture') {
+    text(source.fixtureId, `${path}.source.fixtureId`)
+    if (typeof source.fixtureDigest !== 'string' || !DIGEST.test(source.fixtureDigest)) invalid(`${path}.source.fixtureDigest`, 'expected SHA-256')
+  } else if (source.kind === 'published-ir' || source.kind === 'content-package') {
+    text(source.publicationId, `${path}.source.publicationId`)
+    for (const key of ['candidateDigest', 'sourceInputDigest']) {
+      if (source.kind === 'content-package' && source[key] === undefined) continue
+      if (typeof source[key] !== 'string' || !DIGEST.test(source[key] as string)) invalid(`${path}.source.${key}`, 'expected SHA-256')
+    }
+  } else invalid(`${path}.source.kind`, 'unsupported')
+  if (typeof value.contentDigest !== 'string' || !DIGEST.test(value.contentDigest)) invalid(`${path}.contentDigest`, 'expected SHA-256')
+  for (const key of ['contentRevision', 'contentSchemaVersion', 'adapterId', 'adapterVersion']) text(value[key], `${path}.${key}`)
+}
 export function assertSceneNode(input: unknown, path = 'gameObject'): asserts input is SceneNode { const value = record(input, path); for (const legacy of ['kind', 'visible', 'material', 'light', 'volume', 'assetId', 'unknown']) if (legacy in value) invalid(`${path}.${legacy}`, 'legacy scene field is forbidden'); text(value.id, `${path}.id`); text(value.name, `${path}.name`); if (value.parentId !== null) text(value.parentId, `${path}.parentId`); if (!Array.isArray(value.children) || new Set(value.children).size !== value.children.length) invalid(`${path}.children`, 'expected unique IDs'); value.children.forEach((id, index) => text(id, `${path}.children[${index}]`)); bool(value.active, `${path}.active`); bool(value.locked, `${path}.locked`); assertTransform(value.transform, `${path}.transform`); if (!Array.isArray(value.tags) || new Set(value.tags).size !== value.tags.length) invalid(`${path}.tags`, 'expected unique tags'); value.tags.forEach((tag, index) => text(tag, `${path}.tags[${index}]`)); if (!Array.isArray(value.components)) invalid(`${path}.components`, 'expected array'); const ids = new Set<string>(); value.components.forEach((component, index) => assertComponent(component, `${path}.components[${index}]`, ids)); if (value.metadata !== undefined) json(value.metadata, `${path}.metadata`) }
 function assertAsset(input: unknown, path: string): asserts input is SceneAsset { const value = record(input, path); for (const key of ['id', 'name', 'mimeType', 'path']) text(value[key], `${path}.${key}`); const assetPath = value.path as string; if (assetPath.startsWith('/') || assetPath.includes('\\') || assetPath.split('/').includes('..')) invalid(`${path}.path`, 'unsafe path') }
 export function assertSceneSettings(input: unknown): asserts input is SceneSettings {

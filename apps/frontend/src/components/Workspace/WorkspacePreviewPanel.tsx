@@ -206,9 +206,9 @@ function PreviewFrame({ title, url, frameRef, labels, viewport, onViewportChange
         : 'relative h-full w-full'} style={framedViewport ? { width: viewport.width * viewportScale, height: viewport.height * viewportScale } : undefined}>
         <iframe ref={frameRef} title={title} data-testid="beegame-live-preview-frame" src={url}
           onLoad={() => { void fetch(url, { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(response => {
-            // Measured V3 Preview serves the exact artifact bytes, without the legacy injected bridge.
+            // Isolated static Preview serves the exact artifact bytes without an injected bridge.
             // iframe load alone is not enough: HTTP error documents also trigger it.
-            if (!response.ok || response.headers.get('X-BeeGame-Preview-Mode') !== 'measured-static') return;
+            if (!response.ok || !['measured-static', 'candidate-static'].includes(response.headers.get('X-BeeGame-Preview-Mode') ?? '')) return;
             if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
             loadTimeoutRef.current = null;
             setState(current => current === 'loading' ? 'loaded' : current);

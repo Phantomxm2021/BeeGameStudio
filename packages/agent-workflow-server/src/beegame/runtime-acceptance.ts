@@ -3,9 +3,9 @@ import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import { contentRuntimeCheckSchema } from './content-runtime-contract'
-import { parseBeeGameContentDocument, parseBeeGameContentIndex } from './game-content-schema'
+import { parseBeeGameContentDocument, parseBeeGameContentIndex, isContentEntryKind } from './game-content-schema'
 import { auditUiInteractiveBounds, readUiLayoutCameras } from './ui-layout-audit'
-import { designHandoffPath, readDesignAcceptanceRequirements } from './design-handoff'
+import { checkDesignHandoff, DESIGN_ACCEPTANCE_PATH, designHandoffPath, designSupportingFiles, isDesignUiFile, isDesignSceneFile, readDesignAcceptanceRequirements } from './design-handoff'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
 import { designReviewResultSchema, type DesignFinding } from './design-handoff'
 
@@ -30,6 +30,7 @@ const verificationSchema = z.object({
   outsideScope: z.array(z.string().trim().min(1)).optional(),
   contentChecks: z.array(contentRuntimeCheckSchema).optional(),
   requirementChecks: z.array(requirementCheckSchema).optional(),
+  designRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 })
 const reportSchema = z.object({
   scope: z.enum(['request', 'delivery']).optional(),
@@ -87,7 +88,8 @@ export async function artifactDigest(workspace: string, path: string, allowDirec
 }
 
 /** Read an Agent-authored result at a fixed project path, without a workflow dispatch. */
-export async function readRuntimeAcceptanceReport(workspace: string, reportPath: string): Promise<RuntimeAcceptance | undefined> {
+export async function readRuntimeAcceptanceReport(workspace: string, reportPath: string,
+  options: { requireDesignRevision?: boolean; requireEditableContent?: boolean } = {}): Promise<RuntimeAcceptance | undefined> {
   let text: string
   try {
     await artifactDigest(workspace, reportPath) // Reject symlink escapes before reading the report.
@@ -106,12 +108,20 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
     const report = reportSchema.parse(raw)
     let limitation = report.scope !== 'request' && report.status === 'passed'
       ? deliveryLimitation(report) : undefined
+    if (report.scope !== 'request' && report.status === 'passed' && !limitation &&
+        (options.requireDesignRevision || report.verification?.designRevision !== undefined)) {
+      const design = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
+      if (!design.valid) limitation = diagnostic('verification-incomplete', 'Design handoff is incomplete: ' + design.issues.join('; '))
+      else if (report.verification?.designRevision !== design.revision)
+        limitation = diagnostic('verification-incomplete', 'Design revision is missing or changed; revalidate affected evidence against the current documents and layouts.')
+    }
     if (report.designIssues?.length && report.status === 'passed')
       limitation = diagnostic('product-failed', 'Design issues remain unresolved; a passed report cannot release them.')
     if (report.scope !== 'request' && report.status === 'passed' && !report.artifactPaths?.length)
       limitation ??= diagnostic('verification-incomplete', 'The tested deployment artifacts are not recorded.')
     if (report.scope !== 'request' && report.status === 'passed' && !limitation)
-      limitation = await contentBindingLimitation(workspace, report.verification, report.evidencePaths)
+      limitation = await contentBindingLimitation(workspace, report.verification, report.evidencePaths, options.requireEditableContent,
+        options.requireDesignRevision || report.verification?.designRevision !== undefined)
     if (report.scope !== 'request' && report.status === 'passed' && !limitation)
       limitation = designRequirementLimitation(workspace, report.verification, report.evidencePaths)
     if (report.status === 'passed' && report.scope !== 'request' && !report.evidencePaths.length)
@@ -135,6 +145,22 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
   } catch (error) { return blocked(error) }
 }
 
+/** Read-only view of the existing delivery report. Valid means declared
+ * coverage/version/evidence integrity, never independent aesthetic approval. */
+export async function inspectDesignAcceptance(workspace: string, requireDesignRevision = false, requireEditableContent = false) {
+  const report = await readRuntimeAcceptanceReport(workspace, DESIGN_ACCEPTANCE_PATH,
+    {requireDesignRevision,requireEditableContent})
+  const checks = report?.verification?.requirementChecks ?? []
+  return {path:DESIGN_ACCEPTANCE_PATH, valid:report?.scope === 'delivery' && report.status === 'passed',
+    status:report?.status ?? 'unverified',scope:report?.scope,
+    summary:report?.summary ?? 'The itemized acceptance report is missing; completion is unverified.',
+    diagnostic:report?.diagnostic,
+    requirementChecks:checks,
+    evidence:report?.evidence ?? [],artifacts:report?.artifacts ?? [],
+    quality:'unverified' as const,
+    note:'Declared requirement coverage, current design revision and retained evidence only. Observation truth, original semantic completeness, visual restoration and experience quality are not certified by this read.'}
+}
+
 function deliveryLimitation(report: { verification?: z.infer<typeof verificationSchema> }): AcceptanceDiagnostic | undefined {
   const checked = verificationSchema.safeParse(report.verification)
   if (!checked.success) return diagnostic('verification-incomplete', 'Delivery verification coverage is not recorded; this is not a full delivery pass.')
@@ -152,7 +178,11 @@ function deliveryLimitation(report: { verification?: z.infer<typeof verification
 function designRequirementLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined, evidencePaths: string[]): AcceptanceDiagnostic | undefined {
   const requirements = readDesignAcceptanceRequirements(workspace)
   const checks = verification?.requirementChecks ?? []
+  const seen = new Set<string>()
   for (const check of checks) {
+    const key = check.document + '#' + check.id
+    if (seen.has(key)) return diagnostic('report-invalid','Duplicate requirement check: ' + key)
+    seen.add(key)
     const source = requirements.find(requirement => requirement.document === check.document && requirement.id === check.id)
     if (!source) return diagnostic('report-invalid', `Requirement check has no declared acceptance source: ${check.document}#${check.id}.`)
     if (source.documentSha256 !== check.documentSha256 || source.handoffSha256 !== check.handoffSha256)
@@ -170,17 +200,26 @@ function designRequirementLimitation(workspace: string, verification: z.infer<ty
 
 /** Verify coverage and evidence identity, not source-code patterns or claimed
  * visual correctness. The Agent remains responsible for the observed result. */
-async function contentBindingLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined, evidencePaths: string[]): Promise<AcceptanceDiagnostic | undefined> {
+async function contentBindingLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined, evidencePaths: string[],
+  requireEditableContent = false, bindDesignSources = verification?.designRevision !== undefined): Promise<AcceptanceDiagnostic | undefined> {
+  // Reuse the owners' actual source links and the runtime registry, not another
+  // checklist. Source-only/native projects remain valid when content is neither
+  // required by the host nor declared by their design documents.
+  const designUi = bindDesignSources ? designSupportingFiles(workspace, ['UI_UX_SPEC.md']).filter(isDesignUiFile) : []
+  const designScenes = bindDesignSources ? designSupportingFiles(workspace, ['LEVEL_SCENE_DESIGN.md']).filter(isDesignSceneFile) : []
   const indexPath = 'content/index.json'
   try { await artifactDigest(workspace, indexPath) }
   catch (error) {
-    if (((error as Error).cause as NodeJS.ErrnoException)?.code === 'ENOENT') return
+    if (((error as Error).cause as NodeJS.ErrnoException)?.code === 'ENOENT')
+      return requireEditableContent || designUi.length || designScenes.length
+        ? diagnostic('verification-incomplete', 'Required or design-linked editable content is missing: ' + indexPath) : undefined
     throw error
   }
   const index = parseBeeGameContentIndex(JSON.parse(await readFile(resolve(workspace, indexPath), 'utf8')))
   const required = new Map<string, Set<string>>()
   const nodeIds = new Map<string, Set<string>>()
   const tilemapNodes = new Map<string, Set<string>>()
+  const runtimeUi = new Set<string>(), runtimeScenes = new Set<string>()
   const add = (kind: string, path: string) => {
     if (!required.has(kind)) required.set(kind, new Set())
     required.get(kind)!.add(path)
@@ -191,6 +230,14 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
     const path = `content/${file}`
     await artifactDigest(workspace, path)
     const document = parseBeeGameContentDocument(JSON.parse(await readFile(resolve(workspace, path), 'utf8')))
+    if (bindDesignSources || requireEditableContent) {
+      const entries = index.documents?.filter(entry => entry.path === file) ?? []
+      if (entries.length !== 1 || entries[0]!.id !== document.id || entries[0]!.kind !== document.kind ||
+          index.documents!.filter(entry => entry.id === document.id).length !== 1)
+        return diagnostic('report-invalid', 'Runtime registry must identify the actual saved document: ' + path)
+    }
+    if (document.kind.startsWith('ui-')) runtimeUi.add(path)
+    if (document.kind.startsWith('scene-')) runtimeScenes.add(path)
     nodeIds.set(path, new Set(document.data.nodes.map(node => node.id)))
     if (document.kind === 'ui-screen' || document.kind === 'ui-hud') {
       const geometryIssues = readUiLayoutCameras(workspace, document).flatMap(options => auditUiInteractiveBounds(document, options))
@@ -204,6 +251,22 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
       if (ids.size) tilemapNodes.set(path, ids)
     }
     if (document.assetRefs.length) add('resource-binding', path)
+  }
+  if (bindDesignSources || requireEditableContent) {
+    if (index.documents?.length !== index.files.length ||
+        !index.documents.some(entry => entry.id === index.entryScene && isContentEntryKind(entry.kind, index.dimension) && entry.loadPhase === 'startup'))
+      return diagnostic('report-invalid', 'Runtime registry files and startup entryScene must agree')
+    if (requireEditableContent && !index.documents.some(entry => entry.kind === 'ui-screen' || entry.kind === 'ui-hud'))
+      return diagnostic('verification-incomplete', 'Required editable UI document must be registered')
+  }
+  if (bindDesignSources) for (const [owner, declared, registered] of [
+    ['UI_UX_SPEC.md', designUi, runtimeUi], ['LEVEL_SCENE_DESIGN.md', designScenes, runtimeScenes],
+  ] as const) {
+    const missing = [...registered].filter(path => !declared.includes(path))
+    const unregistered = declared.filter(path => !registered.has(path))
+    if (missing.length || unregistered.length)
+      return diagnostic('verification-incomplete', owner + ' and content/index.json must reference the same sources. ' +
+        'Missing design links: ' + (missing.join(', ') || 'none') + '; unregistered design sources: ' + (unregistered.join(', ') || 'none'))
   }
   const checks = verification?.contentChecks ?? []
   for (const check of checks) {
@@ -242,6 +305,10 @@ export async function runtimeEvidenceIsCurrent(workspace: string, reports: Runti
       if (deliveryLimitation(report)) return false
       if (await contentBindingLimitation(workspace, report.verification, report.evidence.map(file => file.path))) return false
       if (designRequirementLimitation(workspace, report.verification, report.evidence.map(file => file.path))) return false
+      if (report.verification?.designRevision) {
+        const design = checkDesignHandoff(workspace,PROJECT_DOCUMENTS)
+        if (!design.valid || design.revision !== report.verification.designRevision) return false
+      }
       if (!report.artifacts?.length) return false
       for (const artifact of report.evidence)
         if (await artifactDigest(workspace, artifact.path) !== artifact.sha256) return false

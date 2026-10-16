@@ -25,6 +25,7 @@ import { closeSessionTestBrowsers } from './native-test-browser-cleanup'
 import { projectExecutionAccess } from './project-execution-access'
 import { nativeRuntimeFeatureSettings, type RuntimeSettingsConfig } from '../runtime-settings-store'
 import { prepareNativeSkillPlugins } from './native-skill-plugins'
+import { NATIVE_MCP_CONFIG_ENV, prepareNativeMcpConfig } from './native-mcp-config'
 import { standardCliDebugDiagnostic, withStandardCliDiagnostics } from './standard-cli-debug'
 import {
   createRuntimeObservability,
@@ -87,12 +88,14 @@ export function nativeRuntimeCommand(
 /** Supply project facts through the standard CLI prompt option, not native
  * environment-prompt code. Use the resolved execution directory, including
  * isolated tasks; preserve custom non-CLI fixture commands unchanged. */
-export function appendWorkingFilesInstruction(command: string[], directory: string): string[] {
+export function appendWorkingFilesInstruction(command: string[], directory: string, toolReadPaths: readonly string[] = [], mcpContext = ''): string[] {
   const index = command.indexOf('--append-system-prompt')
   if (index < 0) return command
   if (index + 1 >= command.length) throw new Error('Missing append-system-prompt value')
   const instruction = `Project temporary working directory (TMPDIR): ${JSON.stringify(directory)}. Prefer this project-owned directory for disposable scripts and scratch files; keep maintained tests in the project's normal test structure. Native tool output uses CLAUDE_CODE_TMPDIR separately; read actual tool-returned paths, not a guessed project path. File tools require literal paths, not an unexpanded $TMPDIR; Bash can use "$TMPDIR".`
-  return command.map((argument, position) => position === index + 1 ? [argument, instruction].filter(Boolean).join('\n\n') : argument)
+  const toolContext = toolReadPaths.length ? 'Host-authorized external tool read paths: ' + JSON.stringify(toolReadPaths) +
+    '. These paths are readable, not proof of executable compatibility or a successful export. Probe only the selected tool; keep output and caches in the project. Do not disable the sandbox or infer broader host access.' : ''
+  return command.map((argument, position) => position === index + 1 ? [argument, instruction, toolContext, mcpContext].filter(Boolean).join('\n\n') : argument)
 }
 
 class NativeCliProcessRuntime implements BeeGameSessionRuntime {
@@ -159,7 +162,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     // config. Only isolated tasks need the plugin route for those Skills.
     const skillPlugins = command.includes('--print')
       ? await prepareNativeSkillPlugins(input.env, Boolean(input.isolatedTask)) : undefined
+    let mcp: Awaited<ReturnType<typeof prepareNativeMcpConfig>> | undefined
     try {
+      if (command.includes('--print') && !input.isolatedTask) mcp = await prepareNativeMcpConfig(input.env, input.cwd)
       const executionEnvironment = { ...input.env,
         ...(skillPlugins ? { BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: skillPlugins.builtins } : {}) }
       const taskAccess = input.isolatedTask ? await createNativeTaskAccess({
@@ -185,8 +190,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       // Standard SDK info logs expose response status/timing, not debug request
       // bodies. Do not alter provider, timeout or retry configuration.
       if (command.includes('--debug-to-stderr')) childEnvironment.ANTHROPIC_LOG = input.env.ANTHROPIC_LOG ?? 'info'
-      const child = Bun.spawn([...appendWorkingFilesInstruction(command, scratchPath),
-        ...(skillPlugins?.flags ?? []), ...withRuntimeFeatureSettings(taskAccess?.flags ?? projectAccess!.flags, input.env)], {
+      const child = Bun.spawn([...appendWorkingFilesInstruction(command, scratchPath, projectAccess?.toolReadPaths, mcp?.context),
+        ...(skillPlugins?.flags ?? []), ...(mcp?.flags ?? []), ...withRuntimeFeatureSettings(taskAccess?.flags ?? projectAccess!.flags, input.env)], {
         cwd: taskAccess?.root ?? projectAccess!.root,
         env: childEnvironment,
         stdin: 'pipe',
@@ -207,7 +212,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         scratchPath,
         taskAccess,
         projectAccess,
-        skillPlugins?.close,
+        async () => { try { await skillPlugins?.close() } finally { await mcp?.close() } },
         command.includes('--debug-to-stderr'),
       )
       runtime.stdoutCompletion = runtime.consumeStdout()
@@ -215,7 +220,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       void child.exited.then(code => runtime.onExit(code))
       return runtime
     } catch (error) {
-      await skillPlugins?.close()
+      try { await skillPlugins?.close() } finally { await mcp?.close() }
       throw error
     }
   }
@@ -422,6 +427,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       // A provider/local error can terminate before the first assistant message
       // (and thus before replay). The CLI tags such results with the command UUID.
       const ownResult = message.type === 'result' && message.request_id === turn.requestId
+      if (acknowledged && this.nativeSessionId) this.sessionInput.onNativeSubmission?.(this.nativeSessionId)
       if (!acknowledged && !ownResult) {
         if (message.type === 'result') turn.pendingMessages = []
         else turn.pendingMessages.push(message)
@@ -764,6 +770,7 @@ export function nativeRuntimeEnvironment(
   // The host's per-project authorization map is not native/model configuration.
   delete environment.BEEGAME_PROJECT_TOOL_READ_PATHS
   delete environment.BEEGAME_RUNTIME_SETTINGS_JSON
+  delete environment[NATIVE_MCP_CONFIG_ENV]
   return environment
 }
 

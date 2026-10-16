@@ -7,6 +7,7 @@ import { DashboardRepository } from '../dashboard-repository'
 import { saveRuntimeSettingsConfig, resolveRuntimeFeatureSettings } from '../runtime-settings-store'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
 import { SupabaseRuntimeEnvClient } from '../supabase-runtime-env-client'
+import { upsertMcpServer } from '../mcp-servers-store'
 
 const originalEncryptionKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 
@@ -23,6 +24,20 @@ afterAll(() => {
 })
 
 describe('DashboardRepository Supabase boundaries', () => {
+  test('runtime MCP configuration remains owner-scoped and public listings redact credentials', async()=>{
+    const root = await mkdtemp(join(tmpdir(),'bgs-runtime-mcp-owner-'))
+    const a = join(root,'owner-a'), b = join(root,'owner-b')
+    const repository = new DashboardRepository({dashboardDataRoot:root,getUserDataRoot:()=>a,skillsConfig:false})
+    try {
+      upsertMcpServer({name:'Fixture',enabled:true,transport:'stdio',scope:'beegame',command:'fixture',
+        autoStart:true,env:[{key:'TOKEN',value:'synthetic-private-token'}]}, {dataDir:a})
+      expect(JSON.parse((await repository.getRuntimeEnv(a,'a')).BEEGAME_NATIVE_MCP_SERVERS_JSON)).toMatchObject([
+        {command:'fixture',env:[{key:'TOKEN',value:'synthetic-private-token'}]},
+      ])
+      expect(JSON.parse((await repository.getRuntimeEnv(b,'b')).BEEGAME_NATIVE_MCP_SERVERS_JSON)).toEqual([])
+      expect(JSON.stringify(await repository.listMcpServers(new Request('http://fixture'),{id:'a',role:'owner'}))).not.toContain('synthetic-private-token')
+    } finally { await rm(root,{recursive:true,force:true}) }
+  })
   test('forwards only explicitly configured host artifact credentials', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-artifact-env-'))
     const previousUrl = process.env.BEEGAME_ARTIFACTS_URL

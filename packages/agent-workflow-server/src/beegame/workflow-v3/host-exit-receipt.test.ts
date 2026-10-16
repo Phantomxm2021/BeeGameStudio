@@ -23,15 +23,16 @@ async function fixture(autonomous=true) {
       selected_option:{title:'Synthetic'},settings:{},document_language:'en',game_user_visible_language:'en',
       agent_response_language:'en',resource_library_usage:'optional'}),constraints:{},ids:['req.play']})
   if(autonomous)run.agentTurns=[];await store.commit(run.projectId,run.ownerId,0,run,'created')
-  const receipts=()=>createHostExitReceipts({dataRoot:join(root,'host'),key})!
+  const hostIdentity={machine:'synthetic-host',boot:'boot-a'}
+  const receipts=()=>createHostExitReceipts({dataRoot:join(root,'host'),key,identity:async()=>({...hostIdentity})})!
   let calls=0
   const sessions=new BeeGameSessionManager({async start(){calls++;throw Error('Recovery cannot start native')}},join(root,'sessions'),async()=>({}),{},true)
-  return {root,workspace,key,run,store,receipts,sessions,get calls(){return calls},
+  return {root,workspace,key,run,store,receipts,sessions,hostIdentity,get calls(){return calls},
     current:async()=>(await store.read(run.projectId,run.ownerId))!,
     close:async()=>{await sessions.dispose();await rm(root,{recursive:true,force:true})}}
 }
 const identity=(run:Run)=>({expectedVersion:run.version,attemptId:run.writer!.attemptId,fence:run.writer!.fence})
-async function killAt(f:Awaited<ReturnType<typeof fixture>>,mode:'agent'|'source'|'no-start'|'before-exit',body?:unknown) {
+async function killAt(f:Awaited<ReturnType<typeof fixture>>,mode:'agent'|'source'|'no-start'|'before-exit'|'during-native',body?:unknown) {
   const child=Bun.spawn([process.execPath,join(import.meta.dir,'host-exit-crash-fixture.ts')],{cwd:process.cwd(),stdin:'pipe',stdout:'pipe',stderr:'pipe'})
   child.stdin.write(JSON.stringify({root:f.root,key:f.key.toString('hex'),run:f.run,mode,body}));child.stdin.end()
   let output='',errors='';let reached=false
@@ -42,7 +43,7 @@ async function killAt(f:Awaited<ReturnType<typeof fixture>>,mode:'agent'|'source
     if(!reached)throw Error('Synthetic crash checkpoint absent: '+errors.slice(-1500))
     const checkpoint=output.split('\n').filter(Boolean).map(line=>{try{return JSON.parse(line)}catch{return {}}}).find(e=>e.checkpoint)
     expect(checkpoint.pid).toBe(child.pid)
-    expect(checkpoint.checkpoint).toBe(mode==='before-exit'?'before-exit':'receipt-before-database')
+    expect(checkpoint.checkpoint).toBe(mode==='before-exit'?'before-exit':mode==='during-native'?'during-native':'receipt-before-database')
     child.kill('SIGKILL');await child.exited;await Promise.all([stdout,stderr])
   }finally{if(child.exitCode===null)child.kill('SIGKILL');await child.exited}
   const run=await f.current()
@@ -138,6 +139,83 @@ test('SIGKILL before observed exit cannot create a recovery proof',async()=>{
     expect(await f.current()).toEqual(run);expect(f.calls).toBe(0)
   }finally{await executor.dispose();await f.close()}
 },30000)
+
+test('signed ownership permits explicit recovery after a verified reboot, never same-boot or foreign-host inference',async()=>{
+  const f=await fixture(),executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions,exitReceipts:f.receipts()})
+  try {
+    const run=await killAt(f,'during-native'),identityBefore=identity(run)
+    expect(await f.receipts().read(run)).toBeUndefined()
+    expect(await executor.recoveryDiagnostic(run)).toEqual({evidence:'unavailable',code:'same-boot'})
+    await expect(executor.recover(run,identityBefore)).rejects.toThrow('No durable native exit')
+    f.hostIdentity.machine='another-host';f.hostIdentity.boot='boot-b'
+    expect(await executor.recoveryDiagnostic(run)).toEqual({evidence:'unavailable',code:'foreign-host'})
+    await expect(executor.recover(run,identityBefore)).rejects.toThrow('No durable native exit')
+    f.hostIdentity.machine='synthetic-host'
+    expect(await executor.recoveryEvidence(run)).toBe('host-reboot')
+    expect((await f.current()).writer).toEqual(run.writer) // Discovery cannot mutate or run work.
+    const recovered=await executor.recover(run,identityBefore)
+    expect(recovered.writer).toBeUndefined();expect(recovered.paused).toBeDefined()
+    expect(recovered.agentTurns![0]!.status).toBe('interrupted')
+    expect(recovered.agentTurns![0]!.nativeSessionId).toBe('11111111-2222-4333-8444-555555555555')
+    expect(recovered.agentTurns![0]!.notStarted).toBeUndefined()
+    expect(recovered.agentTurns![0]!.usage).toBeUndefined() // Never invent accounting.
+    expect(recovered.deliveryEligible).toBe(false);expect(f.calls).toBe(0)
+    expect(await executor.recover(recovered,identityBefore)).toEqual(recovered)
+    expect((await f.receipts().read(run))!.quiescedAt).toBe(recovered.agentTurns![0]!.quiescedAt)
+    expect(await readFile(join(f.workspace,'candidate.txt'),'utf8')).toContain('Synthetic candidate')
+  }finally{await executor.dispose();await f.close()}
+},30000)
+
+test('missing, tampered or inaccessible ownership never supplies reboot evidence',async()=>{
+  const f=await fixture()
+  try {
+    const run=await killAt(f,'before-exit'),receipts=f.receipts()
+    f.hostIdentity.boot='boot-b'
+    const unavailable=createHostExitReceipts({dataRoot:join(f.root,'host'),key:f.key,
+      identity:async()=>{throw Error('Synthetic identity probe failure')}})!
+    await expect(unavailable.rebootEvidence!(run)).rejects.toThrow('kernel host/boot')
+    const root=join(f.root,'host/workflow-v3-exits'),file=join(root,(await readdir(root)).find(n=>n.endsWith('.owner'))!)
+    await writeFile(file,'{"payload":"untrusted","signature":"'+ '0'.repeat(64)+'"}')
+    await expect(receipts.rebootEvidence!(run)).rejects.toThrow('untrusted')
+    await rm(file)
+    expect(await receipts.rebootEvidence!(run)).toBe('ownership-missing')
+    expect((await f.current()).writer).toEqual(run.writer)
+  }finally{await f.close()}
+},30000)
+
+test('reboot recovery cannot adopt another attempt or an unacknowledged native session snapshot',async()=>{
+  for(const mismatch of ['attempt','unsubmitted']) {
+    const f=await fixture(),executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions,exitReceipts:f.receipts()})
+    try {
+      const run=await killAt(f,'before-exit'),writer=run.writer!
+      await mkdir(join(f.root,'sessions/snapshots'),{recursive:true})
+      await writeFile(join(f.root,'sessions/snapshots',run.chatSessionId+'.json'),JSON.stringify({
+        sessionId:run.chatSessionId,workspacePath:run.workspacePath,nativeSessionId:'11111111-2222-4333-8444-555555555555',
+        executionIdentity:{...writer,attemptId:mismatch==='attempt'?'another-attempt':writer.attemptId,
+          turnId:'prior-native-turn',...(mismatch==='attempt'?{nativeSubmitted:true}:{})},
+      }))
+      f.hostIdentity.boot='boot-b'
+      const recovered=await executor.recover(run,identity(run))
+      expect(recovered.paused).toBeDefined();expect(recovered.writer).toBeUndefined()
+      expect(recovered.agentTurns![0]!.nativeSessionId).toBeUndefined()
+      expect(recovered.agentTurns![0]!.turnId).toBeUndefined()
+      expect(recovered.agentTurns![0]!.notStarted).toBeUndefined()
+      expect(f.calls).toBe(0)
+    }finally{await executor.dispose();await f.close()}
+  }
+},30000)
+
+test('ownership recording failure rejects before claiming or submitting native work',async()=>{
+  const f=await fixture()
+  const receipts=createHostExitReceipts({dataRoot:join(f.root,'host'),key:f.key,
+    identity:async()=>{throw Error('Synthetic host identity failure')}})!
+  const executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions,exitReceipts:receipts})
+  try {
+    await expect(executor.start(f.run,{})).rejects.toThrow('kernel host/boot')
+    expect(await f.current()).toEqual(f.run)
+    expect(f.calls).toBe(0)
+  }finally{await executor.dispose();await f.close()}
+})
 
 test('corrupt, copied, unsigned, symlinked or differently keyed host records never unlock a writer',async()=>{
   const f=await fixture(),executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions,exitReceipts:f.receipts()})

@@ -2,21 +2,69 @@ import {test,expect} from 'bun:test'
 import {mkdtemp,realpath,mkdir,writeFile,readFile,rm,symlink,access} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
-import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,projectNavigationSnapshot,projectGuideTemplate} from './project-guide'
+import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,projectNavigationSnapshot,projectGuideTemplate,initializeProjectGuide,refreshProjectGuide} from './project-guide'
 import {runGameContentCommand} from '../game-content-validation-cli'
 
 test('template is read-only and remains available with an older saved content format',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-template-')))
   try {
     await mkdir(join(root,'.beegame/delivery'),{recursive:true})
-    const file=join(root,'.beegame/delivery/content-format.json'),saved='{"coordinates":{"saved":true}}'
+    const file=join(root,'.beegame/delivery/content-format.json'),saved='{"coordinates":{"saved":true},"index":{"documentRevision":"must-copy-manually"},"uiDocument":{"obsolete":true}}'
     await writeFile(file,saved)
     expect(runGameContentCommand(root,['--format','projectGuide'])).toMatchObject({ok:true,value:projectGuideTemplate(root).value})
     expect(runGameContentCommand(root,['--format'])).toMatchObject({sections:expect.arrayContaining(['projectGuide'])})
-    expect(PROJECT_GUIDE_TEMPLATE.length).toBeLessThan(1200)
+    expect(runGameContentCommand(root,['--format','coordinates'])).not.toMatchObject({value:{saved:true}})
+    expect((runGameContentCommand(root,['--format','index']) as any).value).not.toHaveProperty('documentRevision')
+    expect((runGameContentCommand(root,['--format','uiDocument']) as any).value.data.nodes[0].data.referenceResolution).toHaveLength(2)
+    expect(PROJECT_GUIDE_TEMPLATE).toContain('before related design or implementation decisions')
     expect(PROJECT_GUIDE_TEMPLATE).not.toContain('GDD.md')
     expect(await readFile(file,'utf8')).toBe(saved)
     await expect(access(join(root,'CLAUDE.md'))).rejects.toThrow()
+  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('generated navigation refreshes from saved sources, retains authored text and does not rewrite unchanged facts',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-refresh-')))
+  try {
+    await initializeProjectGuide(root)
+    const path=join(root,'CLAUDE.md'),initial=await readFile(path,'utf8')
+    const suffix='\n## Project decisions\nConfirmed entry: src/main.ts\nUSER_NOTES_UNCHANGED\n'
+    await writeFile(path,initial+suffix)
+    for(const dir of ['docs','src','tests'])await mkdir(join(root,dir))
+    await writeFile(join(root,'docs/design.md'),'PROJECT_PROSE_NOT_COPIED')
+    await writeFile(join(root,'src/main.ts'),'PROJECT_CODE_NOT_COPIED')
+    await writeFile(join(root,'tests/game.test.ts'),'')
+    await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'actual-dev-command',build:'actual-build-command'}}))
+    expect(await refreshProjectGuide(root)).toBe(true)
+    const updated=await readFile(path,'utf8')
+    for(const value of ['docs/design.md','src/main.ts','tests/game.test.ts','actual-dev-command','actual-build-command'])expect(updated).toContain(value)
+    expect(updated).not.toContain('PROJECT_PROSE_NOT_COPIED')
+    expect(updated).not.toContain('PROJECT_CODE_NOT_COPIED')
+    expect(updated.slice(updated.indexOf('## Professional methods'))).toBe((initial+suffix).slice(initial.indexOf('## Professional methods')))
+    expect(await refreshProjectGuide(root)).toBe(false)
+    await rm(join(root,'src/main.ts'))
+    await writeFile(join(root,'src/new-entry.ts'),'')
+    await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'changed-dev-command'}}))
+    expect(await refreshProjectGuide(root)).toBe(true)
+    const changed=await readFile(path,'utf8'),navigation=changed.slice(0,changed.indexOf('## Professional methods'))
+    expect(navigation).toContain('src/new-entry.ts')
+    expect(navigation).toContain('changed-dev-command')
+    expect(navigation).not.toContain('src/main.ts')
+    expect(navigation).not.toContain('actual-build-command')
+    expect(changed.endsWith(suffix)).toBe(true)
+    await writeFile(path,changed.replace('<!-- bgs:source-navigation:end -->',''))
+    const malformed=await readFile(path,'utf8')
+    await expect(refreshProjectGuide(root)).rejects.toThrow('markers are incomplete')
+    expect(await readFile(path,'utf8')).toBe(malformed)
+    await writeFile(path,'USER_GUIDE_WITHOUT_MANAGED_BLOCK')
+    expect(await refreshProjectGuide(root)).toBe(false)
+    await rm(path)
+    expect(await refreshProjectGuide(root)).toBe(false)
+    await expect(access(path)).rejects.toThrow()
+    await writeFile(join(root,'outside.md'),initial)
+    await symlink(join(root,'outside.md'),path)
+    expect(await refreshProjectGuide(root)).toBe(false)
+    expect(await readFile(join(root,'outside.md'),'utf8')).toBe(initial)
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
@@ -48,33 +96,58 @@ test('one navigation batch supplies saved commands and actual pointers without p
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
-test('method navigation points to the installed collection without reading bodies or rewriting a saved guide',async()=>{
-  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-methods-'))),catalog=join(root,'installed-collection'),workspace=join(root,'project')
+test('guide delegates discovery to native Skills without installation paths or a second catalog',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-methods-'))),workspace=join(root,'project')
   const previous=process.env.BEEGAME_BUILTIN_SKILLS_DIR
   try {
-    await mkdir(workspace);await mkdir(join(catalog,'specialist'),{recursive:true})
-    await writeFile(join(catalog,'specialist/SKILL.md'),'---\nname: specialist\ndescription: Test method\n---\nSKILL_BODY_NOT_NAVIGATION')
-    const navigator=join(catalog,'README.md')
-    await writeFile(navigator,'COLLECTION_BODY_NOT_NAVIGATION')
+    await mkdir(workspace)
     const guide=join(workspace,'CLAUDE.md'),saved='EXISTING_USER_NAVIGATION'
     await writeFile(guide,saved)
-    process.env.BEEGAME_BUILTIN_SKILLS_DIR=catalog
+    process.env.BEEGAME_BUILTIN_SKILLS_DIR=join(root,'old-installation')
     const result=projectGuideTemplate(workspace)
-    expect(result.value).toContain(navigator)
     expect(result.facts).toEqual(projectNavigationSnapshot(workspace))
-    expect(result.value).not.toContain('COLLECTION_BODY_NOT_NAVIGATION')
-    expect(result.value).not.toContain('SKILL_BODY_NOT_NAVIGATION')
+    expect(result.value).toContain("current session's native metadata")
+    expect(result.value).toContain('base directory supplied by that invocation')
+    expect(result.value).not.toContain(root)
+    expect(result.value).not.toContain('Collection navigator:')
+    expect(result.value).not.toContain('Built-in Skill index')
     expect(await readFile(guide,'utf8')).toBe(saved)
-    await rm(navigator)
-    expect(projectGuideTemplate(workspace).value).toContain('<unavailable; use installed native Skill metadata>')
-    process.env.BEEGAME_BUILTIN_SKILLS_DIR=join(root,'missing-catalog')
-    expect(projectGuideTemplate(workspace).facts).toEqual(result.facts)
-    expect(projectGuideTemplate(workspace).value).toContain('<unavailable; use installed native Skill metadata>')
+    process.env.BEEGAME_BUILTIN_SKILLS_DIR=join(root,'relocated-installation')
+    expect(projectGuideTemplate(workspace)).toEqual(result)
     expect(await readFile(guide,'utf8')).toBe(saved)
   } finally {
     if(previous===undefined)delete process.env.BEEGAME_BUILTIN_SKILLS_DIR;else process.env.BEEGAME_BUILTIN_SKILLS_DIR=previous
     await rm(root,{recursive:true,force:true})
   }
+})
+
+test('initial guide stays portable and never overwrites a saved file or link',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-initialize-')))
+  try {
+    const path=join(root,'CLAUDE.md')
+    await initializeProjectGuide(root)
+    const guide=await readFile(path,'utf8')
+    expect(guide.split('\n').length).toBeLessThan(200)
+    expect(guide).toContain('with the Skill tool')
+    expect(guide).toContain('only the references needed for the task')
+    expect(guide).toContain('Do not duplicate the catalog')
+    expect(guide).not.toContain('bgs-builtins:')
+    expect(guide).not.toContain('Collection navigator:')
+    expect(guide).not.toContain(root)
+    expect(projectGuideContext(await readProjectGuide(root))).toContain(guide)
+    for(const saved of ['USER_AUTHORED_GUIDE','']) {
+      await writeFile(path,saved)
+      await initializeProjectGuide(root)
+      expect(await readFile(path,'utf8')).toBe(saved)
+    }
+    await rm(path)
+    const target=join(root,'user-guide.md')
+    await writeFile(target,'USER_LINK_TARGET')
+    await symlink(target,path)
+    await initializeProjectGuide(root)
+    expect(await readFile(target,'utf8')).toBe('USER_LINK_TARGET')
+    expect((await readProjectGuide(root)).status).toBe('unavailable')
+  }finally{await rm(root,{recursive:true,force:true})}
 })
 
 test('navigation diagnoses metadata aliases, malformed/oversized inputs and unsafe registered paths without reading them',async()=>{

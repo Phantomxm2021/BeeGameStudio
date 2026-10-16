@@ -1,8 +1,9 @@
 import { test, expect } from 'bun:test'
+import sharp from 'sharp'
 import { access, copyFile, mkdir, mkdtemp, realpath, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { openAgentTools } from './agent-tools'
+import { openAgentTools, openDesignActions } from './agent-tools'
 import { sharedContentChecker } from '../content-checker-runtime'
 import { CONTENT_DRAFT_EXAMPLES } from '../game-content-validation-cli'
 import { openPreviewTestAccess } from '../preview-test-access'
@@ -12,6 +13,72 @@ import { sharedPlaywright } from '../shared-playwright'
 import { buildEditableProject } from './editable-project'
 import { sceneLayoutFixture, uiLayoutFixture } from '../fixtures/layout-fixture'
 import { createHash } from 'node:crypto'
+import { registeredContentChecks } from './agent-measurement'
+import { runArtifactCheck } from './runtime-checks'
+import { readContentView } from './content-view'
+import { designHandoffPath } from '../design-handoff'
+import { writeDesignDocumentsFixture, designHandoffFixture } from '../fixtures/layout-fixture'
+
+test('finalize supports existing scoped documents and preserves independent work when a sibling is invalid', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-scoped-design-')))
+  try {
+    await writeDesignDocumentsFixture(root, ['GDD.md'])
+    const design = openDesignActions(root)
+    const path = join(root,'docs/GDD.md')
+    await writeFile(path,(await readFile(path,'utf8')).replace('Fixture decision.','Changed decision.'))
+    expect(await design('finalize')).toMatchObject({valid:true,finalized:['GDD.md']})
+    await writeFile(join(root,'docs/AUDIO_DESIGN.md'),'Malformed unrelated draft')
+    const original = await readFile(path,'utf8')
+    expect(await design('finalize',['docs/GDD.md'])).toMatchObject({valid:true,finalized:['GDD.md']})
+    expect(await readFile(path,'utf8')).toBe(original)
+    await writeFile(path,original.replace('Changed decision.','Another decision.'))
+    expect(await design('finalize')).toMatchObject({valid:false,finalized:['GDD.md']})
+    const finalized = await readFile(path,'utf8')
+    expect(finalized).not.toBe(original)
+    await design('finalize')
+    expect(await readFile(path,'utf8')).toBe(finalized)
+    expect(await readFile(join(root,'docs/AUDIO_DESIGN.md'),'utf8')).toBe('Malformed unrelated draft')
+    await expect(design('finalize',['../GDD.md'])).rejects.toThrow('document name')
+  } finally { await rm(root,{recursive:true,force:true}) }
+})
+
+test('design handoff exposes early requirements and final implementation coverage without a second plan', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-design-actions-')))
+  try {
+    await writeDesignDocumentsFixture(root)
+    const design = openDesignActions(root)
+    const techPath = join(root, designHandoffPath('TECHNICAL_DESIGN.md'))
+    const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
+    delete tech.implementationItems
+    await writeFile(techPath, JSON.stringify(tech))
+    expect(await design('finalize')).toMatchObject({valid:true})
+    const baseline = await design('baseline') as any
+    expect(baseline.valid).toBe(true)
+    expect(baseline.requirements).toHaveLength(8)
+    await expect(design('implementation')).rejects.toThrow('implementationItems')
+    await writeFile(techPath, JSON.stringify(designHandoffFixture('TECHNICAL_DESIGN.md')))
+    expect(await design('finalize')).toMatchObject({valid:true})
+    expect(await design('implementation')).toMatchObject({valid:true,globalSources:baseline.requirements.map((r:any)=>'docs/'+r.document)})
+    await rm(join(root, 'docs/AUDIO_DESIGN.md'))
+    expect(await design('baseline')).toMatchObject({valid:false,requirements:[]})
+  } finally { await rm(root, {recursive:true,force:true}) }
+})
+
+test('handoff sends reference reading to native Read without a visual certification command', async () => {
+  const root = await mkdtemp(join(tmpdir(),'bgs-reference-help-'))
+  try {
+    const design = openDesignActions(root)
+    const help = await design('help') as any
+    expect(help.instruction).toContain('Read reference pictures with the native Read tool')
+    expect(help.instruction).toContain('report the exact path and read error')
+    expect(help.instruction).toContain('begin their geometry during planning without production assets')
+    expect(help.help).toContain('Baseline checks index integrity, not layout geometry')
+    expect(help.help).toContain('--design baseline --details')
+    expect(help.help).not.toContain('baseline|visual')
+    expect(help.help).not.toContain('generation record')
+    await expect(design('visual')).rejects.toThrow('Unknown design action')
+  } finally { await rm(root,{recursive:true,force:true}) }
+})
 
 async function command(root: string, directory: string, name: string, ...args: string[]) {
   const child = Bun.spawn([process.execPath, join(root, directory, name), ...args], {
@@ -21,6 +88,48 @@ async function command(root: string, directory: string, name: string, ...args: s
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   return { stdout, stderr, code }
 }
+test('actual author entry supplies executable pure UI examples with no manual hashes or dummy Scene', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-pure-ui-author-')))
+  const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined })
+  try {
+    const format = await command(root, tools.directory, 'check-content.mjs', '--format', 'examples')
+    expect(format.code, format.stdout+format.stderr).toBe(0)
+    const examples = JSON.parse(format.stdout).value
+    expect(examples.index).not.toHaveProperty('documentRevision')
+    expect(examples.index).not.toHaveProperty('assetManifestRevision')
+    expect(examples.index).not.toHaveProperty('sceneModel')
+    await mkdir(join(root, 'content/ui'), { recursive: true })
+    const sources = { 'content/index.json': JSON.stringify(examples.index), 'content/ui/menu.json': JSON.stringify(examples.ui) }
+    for (const [path, bytes] of Object.entries(sources)) await writeFile(join(root, path), bytes)
+    const current = await command(root, tools.directory, 'check-content.mjs', '--current')
+    expect(current.code, current.stdout+current.stderr).toBe(0)
+    expect(JSON.parse(current.stdout)).toMatchObject({ valid: true, contentCount: 1, runtimeVerified: false })
+    const checked = await registeredContentChecks(root, {}, true)
+    expect(checked.map(c => [c.id, c.status, c.status === 'passed' ? '' : c.observation])).toEqual([
+      ['content-structure', 'passed', ''], ['content-layout', 'passed', ''], ['content-resources', 'passed', ''],
+    ])
+    const view = await readContentView(root)
+    expect(view).toMatchObject({ state: 'draft', indexIssues: [], index: { entryScene: 'menu' } })
+    if (view.state === 'draft') expect(view.documents).toHaveLength(1)
+    await mkdir(join(root, 'dist/content/ui'), { recursive: true })
+    await writeFile(join(root, 'dist/index.html'), '<!doctype html><title>Synthetic package</title>')
+    for (const [path, bytes] of Object.entries(sources)) await writeFile(join(root, 'dist', path), bytes)
+    const delivery = await runArtifactCheck(root, 'delivery-package', { runtimeArtifact: 'dist', expectedOutputs: [] }, [], {})
+    expect(delivery.status, delivery.observation).toBe('passed')
+    for (const [path, bytes] of Object.entries(sources)) expect(await readFile(join(root, path), 'utf8')).toBe(bytes)
+    await expect(access(join(root, 'content/scenes'))).rejects.toThrow()
+    for (const invalid of [
+      { ...examples.index, documentRevision: 'pending' },
+      { ...examples.index, sceneModel: 'unsupported' },
+      { ...examples.index, documents: [{ ...examples.index.documents[0], kind: 'ui-flow' }] },
+      { ...examples.index, documents: [{ ...examples.index.documents[0], loadPhase: 'on-demand' }] },
+    ]) {
+      await writeFile(join(root, 'content/index.json'), JSON.stringify(invalid))
+      expect((await command(root, tools.directory, 'check-content.mjs', '--current')).code).toBe(1)
+      expect((await registeredContentChecks(root, {}, true))[0]?.status).toBe('failed')
+    }
+  } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
+}, 30000)
 test('materialized layout command retains confirmed device scope without model-supplied flags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-layout-target-tools-'))
   const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined,
@@ -290,6 +399,9 @@ test('a chosen consumer copy remains buildable without the temporary host tools'
     expect(installed.code,installed.stderr).toBe(0)
     expect(JSON.parse(installed.stdout)).toMatchObject({alreadyPresent:false,runtimeVerified:false})
     expect(JSON.parse((await command(root,tools.directory,'consumer.mjs','--install','src/bgs-content-consumer.mjs')).stdout).alreadyPresent).toBe(true)
+    const publication=await command(root,tools.directory,'consumer.mjs','--install-runtime-files','src/bgs-runtime-files.mjs')
+    expect(publication.code,publication.stderr).toBe(0)
+    expect(await readFile(join(root,'src/bgs-runtime-files.mjs'),'utf8')).toContain('copyRegisteredRuntimeFiles')
     await writeFile(join(root,'src/main.js'),"import{readUiData}from'./bgs-content-consumer.mjs';window.readUiData=readUiData;")
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{build:'bun build.mjs'}}))
     await writeFile(join(root,'build.mjs'),"import{writeFile}from'node:fs/promises';const r=await Bun.build({entrypoints:['src/main.js'],outdir:'dist',target:'browser'});if(!r.success)throw Error('Synthetic build failed');await writeFile('dist/index.html','<!doctype html><script src=main.js></script>');")

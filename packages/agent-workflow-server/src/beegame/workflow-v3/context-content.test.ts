@@ -47,7 +47,9 @@ test('scoped content checks need no eight documents, catch overflow, distinguish
     await save(uiLayoutFixture())
     await writeFile(join(root, 'content/ui/unrelated.json'), 'not a document')
     const checked = await runChecks(root, task, [], undefined, { orientation: 'Landscape' })
-    expect(checked.checks.map(check => check.status)).toEqual(['passed', 'passed', 'unverified'])
+    expect(checked.checks.map(check => check.status)).toEqual(['passed', 'passed', 'passed'])
+    expect(checked.checks[2]!.observation).toContain('empty declared resource closure')
+    expect(checked.checks[2]!.observation).toContain('final resource coverage and runtime use remain unverified')
     expect(checked.checks[1]!.coverage?.files).toEqual(['content/ui/menu.json'])
     expect(checked.checks[1]!.inputs.some(file => file.path.includes('unrelated'))).toBe(false)
     await save(uiLayoutFixture(2000))
@@ -70,7 +72,7 @@ test('actual linked Scene and underlay versions invalidate results; missing link
     ui.data.nodes[0].data.layoutCamera = { nodeId: 'game-view', path: 'content/scenes/level.json' }
     await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
     const missing = await runChecks(root, { ...task, checks: ['content-layout'] }, [])
-    expect(missing.checks[0]!.status).toBe('unverified')
+    expect(missing.checks[0]!.status).not.toBe('passed')
     await writeFile(join(root, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
     const checked = await runChecks(root, { ...task, checks: ['content-layout'] }, [])
     expect(checked.checks[0]!.status).toBe('passed')
@@ -79,16 +81,16 @@ test('actual linked Scene and underlay versions invalidate results; missing link
     expect(await versionsMatch(root, checked.checks[0]!.inputs)).toBe(false)
     ui.data.nodes[0].data.layoutUnderlay = { path: 'content/ui/below.json', clearance: 'allow-cover' }
     await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
-    expect((await runChecks(root, { ...task, checks: ['content-layout'] }, [])).checks[0]!.status).toBe('unverified')
+    expect((await runChecks(root, { ...task, checks: ['content-layout'] }, [])).checks[0]!.status).not.toBe('passed')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('resource checks bind actual manifest modules and members, reject stale resources and do not require unrelated assets', async () => {
+test('resource checks bind actual modules/members and retain required Manifest coverage beyond scoped bindings', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-v3-resource-check-'))
   try {
     await mkdir(join(root, 'content/ui'), { recursive: true }); await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
     const manifest = assetManifestAuthoringExamples().canonical
-    // A different required resource is not delivered by this local task.
+    // A required registered resource cannot disappear behind narrower bindings.
     manifest.requirements.push({ ...structuredClone(manifest.requirements[0]!), id: 'req-unrelated' })
     await writeBeeGameAssetManifest(root, manifest)
     await writeFile(join(root, 'assets/runtime/example/resource.json'), '{}')
@@ -97,16 +99,21 @@ test('resource checks bind actual manifest modules and members, reject stale res
     ui.data.nodes[1].data = { image: { assetRef: manifest.resources[0]!.id } }
     await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
     const scoped = { ...task, checks: ['content-resources'] as const }
+    const incomplete = await runChecks(root, { ...scoped, checks: [...scoped.checks] }, [])
+    expect(incomplete.checks[0]!.status).toBe('failed')
+    expect(incomplete.checks[0]!.observation).toContain('req-unrelated')
+    manifest.requirements.pop()
+    await writeBeeGameAssetManifest(root, manifest)
     const checked = await runChecks(root, { ...scoped, checks: [...scoped.checks] }, [])
-    expect(checked.checks[0]!.status).toBe('passed')
+    expect(checked.checks[0]!.status, checked.checks[0]!.observation).toBe('passed')
     expect(checked.checks[0]!.inputs.map(file => file.path)).toContain('assets/runtime/example/resource.json')
     expect(checked.checks[0]!.inputs.some(file => file.path.startsWith('assets/manifest/'))).toBe(true)
-    expect(auditAssetContract(root).valid).toBe(false)
+    expect(auditAssetContract(root).valid).toBe(true)
     await writeFile(join(root, 'assets/runtime/example/resource.json'), 'broken json')
     expect(await versionsMatch(root, checked.checks[0]!.inputs)).toBe(false)
     expect((await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!.status).toBe('failed')
     await rm(join(root, 'assets/runtime/example/resource.json'))
-    expect((await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!.status).toBe('unverified')
+    expect((await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!.status).toBe('failed')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { auditBeeGameContentPackage, BEEGAME_SCENE_MODEL, loadBeeGameContentFileListForEditing } from './game-content-package'
+import { contentDocumentSchema } from './game-content-schema'
+import { CONTENT_DRAFT_EXAMPLES } from './scene-ui-content-authoring'
 
 const HASH = 'a'.repeat(64)
 const workspaces: string[] = []
@@ -48,6 +50,19 @@ const logicalCameraData = {
 }
 
 describe('Unity-style Game Content scene contract', () => {
+  it('locates malformed root metadata at the authored node field, not a later generic layout error', () => {
+    for (const [field, value] of Object.entries({ referenceResolution: { width: 960, height: 540 },
+      targetViewports: [{ width: 960, height: 540 }], minimumControlSize: { width: 44, height: 44 }, orientation: 'wide' })) {
+      const ui = structuredClone(CONTENT_DRAFT_EXAMPLES.ui) as any
+      ui.data.nodes[0].data[field] = value
+      const parsed = contentDocumentSchema.safeParse(ui)
+      expect(parsed.success, field).toBe(false)
+      if (!parsed.success) expect(parsed.error.issues.some(issue => issue.path.slice(0, 5).join('.') === 'data.nodes.0.data.'+field)).toBe(true)
+    }
+    const misplaced = structuredClone(CONTENT_DRAFT_EXAMPLES.ui) as any
+    misplaced.data.referenceResolution = [960, 540]
+    expect(contentDocumentSchema.safeParse(misplaced).success).toBe(false)
+  })
   it('revision errors identify the stale index fields without pointing to removed commands', () => {
     const result = audit({schema:'beegame-content.v1',id:'scene',kind:'scene-2d',assetRefs:[],data:{nodes:[{id:'root'}]}},
       '2d',manifest,{documentRevision:'b'.repeat(64),assetManifestRevision:'c'.repeat(64)})

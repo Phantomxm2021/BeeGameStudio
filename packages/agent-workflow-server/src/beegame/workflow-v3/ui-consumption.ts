@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { inspectUiLayout, isUiControl } from '../../../../scene-editor/src/ui-layout-inspection'
 import { initializeUiLayout } from '../../../../scene-editor/src/ui-container-layout'
+import { resolveUiNodesForViewport, uiCompactMaxWidth } from '../../../../scene-editor/src/ui-responsive'
 import { contentIndexSchema, contentDocumentSchema, type BeeGameContentDocument } from '../game-content-schema'
 import { readVersion } from './checks'
 import { digest, type CheckResult, type TaskSpec } from './state'
@@ -10,6 +11,8 @@ export type PreparedUiProbe = { document: string; nodeId: string; selector: stri
   coordinateRoot?: string; layoutViewport?: [number, number];
   checkTextFit: boolean;
   minimumControlSize?: [number, number];
+  composition: { nodes: { id: string; selector?: string; bounds: PreparedUiProbe['before']; fontSize?: number; minimumControlSize?: [number, number] }[];
+    unverified: { id: string; reason: string }[] };
   hasTouch?: boolean;
   unobservedProperties: { property: 'position' | 'size' | 'sizeDelta'; reason: string }[];
   originalSha256: string; before: { left: number; top: number; right: number; bottom: number };
@@ -107,6 +110,16 @@ export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProb
       const before = measure(data)
       if (!before?.active || before.bounds.right <= before.bounds.left || before.bounds.bottom <= before.bounds.top)
         throw new Error('Saved UI node is inactive or collapsed at this viewport. Click steps change the runtime DOM, not saved-layout eligibility; choose a saved-active node for this geometry probe and verify dynamic-only states with an interaction test. Consumption is unverified')
+      // The shared inspector above validates the hierarchy before this walk.
+      // State bindings override authored defaults; this static probe cannot
+      // mutate a lower-priority default and infer the game's dynamic state.
+      let ancestor: typeof node | undefined = node
+      while (ancestor) {
+        if (ancestor.bindings?.enabled)
+          throw new Error('State-bound enabled visibility needs an interaction observation; changing the authored default cannot verify it')
+        const parentId: string | undefined = ancestor.parentId
+        ancestor = parentId ? data.nodes.find(value => value.id === parentId) : undefined
+      }
       const variants: PreparedUiProbe['variants'] = []
       const unobservedProperties: PreparedUiProbe['unobservedProperties'] = []
       // Stretch anchors own dimensions through sizeDelta, not layout.size. Flow
@@ -133,10 +146,53 @@ export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProb
         variants.push({ property:candidate, replacement: JSON.stringify(changed), expected: b })
       }
       const disabled = structuredClone(doc), disabledData = disabled.data as typeof data
-      disabledData.nodes.find(node => node.id === probe.nodeId)!.enabled = false
+      const disabledNode = disabledData.nodes.find(node => node.id === probe.nodeId)!
+      const rootNode = data.nodes.find(node => node.id === data.rootId)
+      const effectiveOverride = viewport.height > viewport.width && disabledNode.responsive?.portrait?.enabled !== undefined
+        ? disabledNode.responsive.portrait
+        : viewport.width <= uiCompactMaxWidth(rootNode) && disabledNode.responsive?.compact?.enabled !== undefined
+          ? disabledNode.responsive.compact : undefined
+      if (effectiveOverride) effectiveOverride.enabled = false
+      else disabledNode.enabled = false
+      // Derive the composition from this saved document, not another list of
+      // Agent-selected nodes. Dynamic visibility/layout needs actual state;
+      // do not infer that state from a visible DOM box and call it verified.
+      const composition: PreparedUiProbe['composition'] = { nodes: [], unverified: [] }
+      const byId = new Map(data.nodes.map(node => [node.id, node]))
+      const projected = new Map(resolveUiNodesForViewport(data.nodes, data.rootId, viewport).map(node => [node.id, node]))
+      const minimum = byId.get(data.rootId)?.data?.minimumControlSize
+      const dynamicRoots = new Set<string>()
+      for (const node of data.nodes) if (node.bindings && Object.keys(node.bindings).some(key => key !== 'text' && key !== 'styleColor')) {
+        dynamicRoots.add(node.id)
+        // Visibility/width of a flex child also changes its siblings' allocation.
+        let parent = node.parentId ? byId.get(node.parentId) : undefined
+        while (parent) {
+          if (projected.get(parent.id)?.layout?.container) dynamicRoots.add(parent.id)
+          parent = parent.parentId ? byId.get(parent.parentId) : undefined
+        }
+      }
+      for (const rect of inspectUiLayout(data.nodes, data.rootId, viewport)) {
+        if (rect.id === data.rootId) continue
+        const candidate = byId.get(rect.id)!
+        let current: typeof candidate | undefined = candidate, dynamic = false
+        while (current) {
+          if (dynamicRoots.has(current.id)) dynamic = true
+          current = current.parentId ? byId.get(current.parentId) : undefined
+        }
+        if (dynamic) { composition.unverified.push({ id: rect.id, reason: 'State-dependent visibility or geometry needs an interaction observation' }); continue }
+        if (!rect.active) continue
+        if (rect.bounds.right <= rect.bounds.left || rect.bounds.bottom <= rect.bounds.top) {
+          composition.unverified.push({ id: rect.id, reason: 'No positive saved geometry for this state' }); continue
+        }
+        const mapped = task.uiProbes!.find(other => other.document === probe.document && other.nodeId === rect.id &&
+          other.viewport[0] === probe.viewport[0] && other.viewport[1] === probe.viewport[1] && JSON.stringify(other.steps) === JSON.stringify(probe.steps))
+        composition.nodes.push({ id: rect.id, ...(mapped ? { selector: mapped.selector } : {}), bounds: rect.bounds,
+          ...(typeof projected.get(rect.id)?.style?.fontSize === 'number' ? { fontSize: projected.get(rect.id)!.style!.fontSize as number } : {}),
+          ...(isUiControl(candidate) && Array.isArray(minimum) && minimum.length === 2 ? { minimumControlSize: minimum as [number, number] } : {}) })
+      }
       probes.push({ ...probe, ...(layoutViewport?{layoutViewport}:{}), minimumControlSize, disabledSource: JSON.stringify(disabled),
         hasTouch: Boolean(requiredViewport && probe.viewport[0] === requiredViewport[0] && probe.viewport[1] === requiredViewport[1]),
-        checkTextFit: node.role==='text' || node.role==='button', unobservedProperties, originalSha256: digest(body), before: before.bounds, variants })
+        checkTextFit: node.role==='text' || node.role==='button', composition, unobservedProperties, originalSha256: digest(body), before: before.bounds, variants })
     } catch (error) {
       throw new Error('UI probe '+probe.document+'#'+probe.nodeId+' @ '+probe.viewport.join('x')+' ['+property+']: '+
         (error instanceof Error ? error.message : 'Preparation failed'))
@@ -146,6 +202,7 @@ export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProb
     'Selected registered DOM node geometry, enabled visibility and visible text fit at supplied viewports/click paths only; not all fields, nodes, states, sibling occlusion, aesthetics or Canvas/Scene/resource/audio consumption. Custom gameplay parameters remain unverified.',
     'Text clipping/pseudo-content cannot establish complete text fit; source geometry and runtime observations do not prove gameplay or design semantics.',
     'Declared control minima are checked against transformed CSS bounds, never inverse-scaled logical dimensions. Unselected controls remain unverified.',
+    'Baseline/restoration also compare all saved-active state-independent nodes carrying unique data-node-id markers in this composition. Missing markers and dynamic branches remain explicitly unverified; this is not visual-style or all-state acceptance.',
     ...(requiredViewport ? ['Host-required Web Touch phone viewport: '+requiredViewport.join('x')+'; representative coverage, not every mobile device.'] : []),
     ...(probes.some(probe=>probe.coordinateRoot)?['coordinateRoot maps fixed saved logical dimensions through an independently observed stable axis-aligned DOM root. Root scale/translation is observed, not acceptance of the intended whole-frame adaptation; rotation, perspective, border/padding and changing roots remain unverified.']:[]),
     ...probes.map(probe=>'Selected '+probe.document+'#'+probe.nodeId+' @ '+probe.viewport.join('x')+

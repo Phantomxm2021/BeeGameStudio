@@ -17,11 +17,11 @@ import { readTileSetResource } from './tilemap-contract'
 import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-editor/src/scene-camera'
 
 export * from './game-content-schema'
-import { BEEGAME_CONTENT_ROOT, BEEGAME_CONTENT_INDEX, BEEGAME_UI_ASSET_BACKED_ROLES, BEEGAME_SCENE_COMPONENT_TYPES, BEEGAME_SCENE_ASSET_COMPONENT_TYPES, CONTENT_RESOURCE_LOCATOR_KEYS, contentIndexSchema, contentDocumentSchema, type BeeGameContentIndex, type BeeGameContentDocument } from './game-content-schema'
+import { BEEGAME_CONTENT_ROOT, BEEGAME_CONTENT_INDEX, BEEGAME_UI_ASSET_BACKED_ROLES, BEEGAME_SCENE_COMPONENT_TYPES, BEEGAME_SCENE_ASSET_COMPONENT_TYPES, CONTENT_RESOURCE_LOCATOR_KEYS, contentIndexSchema, contentDocumentSchema, isContentEntryKind, type BeeGameContentIndex, type BeeGameContentDocument } from './game-content-schema'
 
 export type BeeGameContentAuthority = Readonly<{
-  documentRevision: string
-  assetManifestRevision: string
+  documentRevision?: string
+  assetManifestRevision?: string
   manifest: BeeGameAssetManifest
 }>
 
@@ -641,9 +641,9 @@ export function auditBeeGameContentPackage(
       ],
     }
   }
-  if (index.documentRevision !== authority.documentRevision)
+  if (authority.documentRevision !== undefined && index.documentRevision !== authority.documentRevision)
     issues.push(`${BEEGAME_CONTENT_INDEX}: documentRevision does not match the supplied source revision. Refresh the index metadata from current saved inputs before building/measuring; if sources change again, the previous build/evidence is not current.`)
-  if (index.assetManifestRevision !== authority.assetManifestRevision)
+  if (authority.assetManifestRevision !== undefined && index.assetManifestRevision !== authority.assetManifestRevision)
     issues.push(
       `${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match the supplied Manifest revision. Refresh the index metadata from the actual saved Manifest before building/measuring.`,
     )
@@ -739,8 +739,8 @@ export function auditBeeGameContentPackage(
   }
   const entry = documents.find(document => document.id === index.entryScene)
   if (!entry) issues.push(`Entry scene does not resolve: ${index.entryScene}.`)
-  else if (entry.kind !== `scene-${index.dimension}`)
-    issues.push(`Entry content must be scene-${index.dimension}: ${index.entryScene}.`)
+  else if (!isContentEntryKind(entry.kind, index.dimension))
+    issues.push(`Entry content must be scene-${index.dimension}, ui-screen or ui-hud: ${index.entryScene}.`)
 
   if (issues.length) return { valid: false, issues }
   const value = { index, documents }

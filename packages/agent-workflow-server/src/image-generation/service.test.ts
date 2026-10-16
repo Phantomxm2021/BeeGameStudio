@@ -11,7 +11,7 @@ import { imageChargeCreditsMicro, fixedImageChargeCreditsMicro, CLOUDFLARE_INITI
 import { ImageProviderError } from './provider'
 import { openImageGenerationAccess } from './access'
 import { ImageConfigurationError } from './runtime-config'
-import { compileUiReferenceBoard } from './ui-reference-board.mjs'
+import { compileUiReferenceBoard, compileUiAssetSheet } from './ui-reference-board.mjs'
 import { writeBeeGameAssetManifest, type BeeGameAssetManifest } from '../beegame/asset-contracts'
 
 test.each(['platform', 'byok'] as const)('resource intent rejects new incompatible requests before billing/provider and does not alter recovery: %s', async source => {
@@ -112,6 +112,36 @@ test('host compiles UI board before billing, records the actual prompt and rejec
     expect(received[0]).not.toHaveProperty('uiReference')
     const record = readFileSync(join(root, 'assets/ai-generation-prompts.md'), 'utf8')
     expect(record).toContain(JSON.stringify(expected.prompt))
+    expect(billing.actions).toEqual(['reserve', 'settle'])
+  } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('UI skin generation passes the selected design bytes to the provider; missing designs never reach billing', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-ui-skins-')), billing = fakeBilling(), received: any[] = []
+  const design = await png()
+  mkdirSync(join(root, 'assets/visual'), { recursive: true }); writeFileSync(join(root, 'assets/visual/design.png'), design)
+  await writeBeeGameAssetManifest(root, { version: 9, resources: [], requirements: [
+    { id: 'ui-skins', acquisition_profile: { dimensions: ['2D'], asset_kinds: ['sprite-atlas'], styles: [] } },
+  ] })
+  const service = new ImageGenerationService(new ImageAttemptStore(root, { generate: async (_config, request) => {
+    received.push(request); return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
+  } }), billing.client)
+  const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
+    requiredQuality: 'low', loadConfig: async () => cloudflareConfig, service })
+  const input = { requestId: 'skins', purpose: 'production', requirementIds: ['ui-skins'], referenceImagePath: 'assets/visual/design.png',
+    uiAssets: { elements: [{ id: 'control', description: 'Primary control skin from the selected design, no label', width: 240, height: 64 }] } }
+  const send = (value: unknown) => fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) })
+  try {
+    expect((await send({ ...input, referenceImagePath: undefined })).status).toBe(400)
+    expect((await send({ ...input, referenceImagePath: 'assets/visual/missing.png' })).status).toBe(400)
+    expect(received).toEqual([]); expect(billing.actions).toEqual([])
+    const response = await send(input)
+    expect(response.status).toBe(200); await response.arrayBuffer()
+    expect(received).toHaveLength(1)
+    expect(received[0].referenceImage.bytes).toEqual(design)
+    expect(received[0].prompt).toBe(compileUiAssetSheet(input).request.prompt)
+    expect(received[0].background).toBe('transparent')
+    expect(received[0]).not.toHaveProperty('uiAssets')
     expect(billing.actions).toEqual(['reserve', 'settle'])
   } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
 })

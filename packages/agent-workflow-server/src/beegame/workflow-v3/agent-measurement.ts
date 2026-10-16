@@ -5,19 +5,21 @@ import { z } from 'zod/v4'
 import { buildEditableProject, projectFiles, projectDependencies, sameFiles, AGENT_EVIDENCE_DIRECTORY } from './editable-project'
 import { runArtifactCheck } from './runtime-checks'
 import { runContentCheck } from './content-checks'
-import { contentIndexSchema } from '../game-content-schema'
+import { contentIndexSchema, isContentEntryKind } from '../game-content-schema'
 import { readVersion, versionsMatch } from './checks'
 import { projectPathSchema, taskSchema, isInitialSliceTurn, WorkflowError, type AgentTurn, type Run, type AgentMeasurement, type SkillUse, type CheckResult } from './state'
 import { CHECK_VERSIONS } from './check-versions'
 import { sameJson, type WorkflowStore } from './store'
 import { inspectAgentMeasurementInputs } from './measured-build'
 import { reviewSourceSnapshot } from '../design-source-reading'
-import { projectNavigationSnapshot } from './project-guide'
+import { projectNavigationSnapshot, refreshProjectGuide } from './project-guide'
 import { priorMainSkillLoads } from './context'
+import { inspectDesignAcceptance } from '../runtime-acceptance'
+import { DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
 
 export const AGENT_CONSUMPTION_CHECKS = ['ui-data-consumption','scene-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'] as const
 export const AGENT_CONSUMPTION_SUPPORT = {
-  ui:'Selected registered DOM geometry/text-fit in window CSS pixels or an explicit source-sized coordinateRoot; not intended frame adaptation, all states or sibling occlusion',
+  ui:'Selected registered DOM geometry/text-fit plus baseline/restored state-independent data-node-id composition bounds/fonts/control minima; dynamic/unmarked nodes and visual style remain unverified',
   scene:'Selected registered 2D Scene node changes a stable Canvas screenshot when disabled in the served JSON; not proof of correct geometry, all nodes/states or visual quality',
   pixel:'Bound static 2D images/Tilemaps in a visible Canvas; not DOM/CSS images, procedural Canvas, dynamic graphics or 3D',
   font:'Bound custom-font plain DOM text, not system fonts, rich text or Canvas',
@@ -39,7 +41,7 @@ export const measurementRequest = z.object({
   requestKey: z.string().trim().min(1),
   runtimeArtifact: projectPathSchema.refine(path => !path.split('/').some(p => p.startsWith('.') || ['node_modules','transcripts'].includes(p)) &&
     path!==AGENT_EVIDENCE_DIRECTORY && !path.startsWith(AGENT_EVIDENCE_DIRECTORY+'/'), 'Use a public build directory outside reserved reports/ evidence and host/private metadata'),
-  reportPaths: z.array(z.union([projectPathSchema,
+  reportPaths: z.array(z.union([projectPathSchema, z.literal(DESIGN_ACCEPTANCE_PATH),
     z.string().regex(/^\.beegame\/tmp\/preview-test-[a-zA-Z0-9_-]+\/execution\.json$/)])).default([]),
   consumption:consumptionRequest.optional(),
 }).strict()
@@ -71,7 +73,7 @@ export async function registeredContentChecks(root: string, constraints: Record<
       new Set(entries.map(entry => entry.id)).size === entries.length &&
       new Set(index.files).size === index.files.length &&
       index.files.length === paths.length && index.files.every(path => paths.includes(path)) &&
-      entries.some(entry => entry.id === index.entryScene && entry.kind === 'scene-'+index.dimension && entry.loadPhase === 'startup') &&
+      entries.some(entry => entry.id === index.entryScene && isContentEntryKind(entry.kind, index.dimension) && entry.loadPhase === 'startup') &&
       entries.every(entry => entry.kind === 'vfx' ||
         /^(scenes|ui)\//.test(entry.path) && entry.path.endsWith('.json') && projectPathSchema.safeParse('content/'+entry.path).success &&
         (entry.path.startsWith('scenes/') ? entry.kind.startsWith('scene-') : entry.kind.startsWith('ui-')))
@@ -169,12 +171,21 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     await save(record,true)
     const root=run.workspacePath
     try {
+      // Refresh before hashing/building: guide maintenance must not stale the
+      // just-created receipt when the turn settles without further source edits.
+      await refreshProjectGuide(root)
       // Only explicitly selected execution receipts may enter from host
       // metadata; never open arbitrary capabilities/settings or follow aliases.
       for (const path of request.reportPaths.filter(path=>path.startsWith('.beegame/')))
         if (await realpath(resolve(root,path)) !== resolve(await realpath(root),path))
           throw new WorkflowError('report-alias','Execution receipt must not resolve through an alias')
       record.reports=await Promise.all(request.reportPaths.map(path=>readVersion(root,path)))
+      if (request.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
+        const acceptance = await inspectDesignAcceptance(root,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent)
+        for (const evidence of acceptance.evidence)
+          if (!record.reports.some(file=>file.path === evidence.path))
+            record.reports.push(await readVersion(root,evidence.path))
+      }
       const requirements={path:'requirement:'+run.requirements.revision,sha256:run.requirements.sha256}
       const build=await buildEditableProject(root,{editableProject:true,runtimeArtifact:request.runtimeArtifact,
         writablePaths:[request.runtimeArtifact+'/**']},[requirements,...record.reports],[AGENT_EVIDENCE_DIRECTORY],controller.signal)
@@ -204,6 +215,12 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     return record
   }
   return {
+    async assertActive(write = false) {
+      if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
+      const run = await current()
+      if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
+      if (write && run.paused) throw new WorkflowError('run-paused', 'Turn writes are paused')
+    },
     async executionInputs() {
       if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability closed')
       const run = await current()
@@ -254,9 +271,10 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       // place of the newest pending or failed record.
       const measurement=latest ? {freshness:await inspectAgentMeasurementInputs(run,latest.record),
         attemptId:latest.attemptId,...measurementSummary(latest.record,details)} : null
+      const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent)
       return {
         ...(input.executionContext?.()?{executionContext:input.executionContext!()}:{}),
-        scope:'agent-task-evidence-handoff',runId:run.id,version:run.version,measurement,status:run.status,
+        scope:'agent-task-evidence-handoff',runId:run.id,version:run.version,measurement,acceptance,status:run.status,
         checkScope:measurementCheckScope(latest?.record),
         // run.blockedReason describes the previous settled turn while this
         // writer is active. Do not present it as the current measurement cause.
@@ -322,6 +340,9 @@ function uiObservationFeedback(id:string, observation:string) {
       conditions:p.conditions,
       ...(p.controlSize?{controlSize:p.controlSize}:{}),
       ...(p.enabled?{enabled:p.enabled}:{}),
+      ...(p.composition ? { composition: Object.fromEntries(Object.entries(p.composition).map(([phase, value]: [string, any]) =>
+        [phase, value ? { status: value.status, checkedCount: value.checked?.length,
+          issues: value.issues?.map((issue: any) => ({ id: issue.id, kind: issue.kind })), unverified: value.unverified } : undefined])) } : {}),
       ...(p.status==='passed'?{}:{
       coordinateDomain:p.coordinateDomain,unobservedProperties:p.unobservedProperties,
       ...(p.textFit?{textFit:{before:fit(p.textFit.before),changed:p.textFit.changed?.map((v:any)=>({property:v.property,actual:fit(v.actual)})),

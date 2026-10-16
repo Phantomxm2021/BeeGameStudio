@@ -1,5 +1,13 @@
 import { parseSpriteSheet, spriteSheetSelection } from '../sprite-sheet';
 
+export function uiNodeImageSource(node: { assetRef?: string; data?: Record<string, unknown> }): { assetRef?: string; data?: Record<string, unknown> } {
+  const image = typeof node.data?.image === 'object' && node.data.image !== null
+    ? node.data.image as Record<string, unknown> : undefined;
+  return typeof image?.assetRef === 'string'
+    ? { assetRef: image.assetRef, data: { ...node.data, ...image } }
+    : { assetRef: node.assetRef, data: node.data };
+}
+
 const frameName = (name: string) => name.replace(/\.(png|webp|jpe?g)$/i, '');
 
 /** Materialize cropped sprites once, so image, tiled and nine-slice previews

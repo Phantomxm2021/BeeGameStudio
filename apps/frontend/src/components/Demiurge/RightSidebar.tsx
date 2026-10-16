@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } fr
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload } from '../../services/api';
+import { WorkflowRecoveryNotice } from './Sidebar/WorkflowRecoveryNotice';
 import type { ChatAttachmentPayload } from '../../services/api';
 import { beeGameAdapter, isBeeGameProjectPackageArtifactId, type BeeGameQueuedMessage } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
@@ -538,11 +539,15 @@ export function RightSidebar({
             const files: ArtifactEditorFile[] = [];
             for (const item of snapshot.documents ?? []) {
                 const kind = item.kind;
-                if (kind === 'scene-2d' || kind === 'scene-3d' || kind === 'ui-screen' || kind === 'ui-hud') {
-                    files.push({ path: item.path, id: item.id, kind: kind.startsWith('scene-') ? 'scene' : 'ui' });
+                if (kind === 'scene' || kind === 'ui' || kind === 'scene-2d' || kind === 'scene-3d' || kind === 'ui-screen' || kind === 'ui-hud') {
+                    files.push({ path: item.path, id: item.id, kind: kind === 'scene' || kind.startsWith('scene-') ? 'scene' : 'ui', error: item.error });
                 }
             }
             setEditorFiles(files);
+            if (snapshot.indexIssues?.length) setEditorFilesError([
+                lang === 'zh' ? '内容索引有误：以下为安全发现的源文件，不代表内容包合格；修正索引后才能打开编辑。' : 'Invalid content index: safely discovered source files below are not an accepted package. Fix the index before opening the editor.',
+                ...snapshot.indexIssues,
+            ].join('\n'));
         } catch (error) {
             if (!controller.signal.aborted && activeProjectRef.current === projectId) {
                 console.error('Failed to load Scene/UI files:', error);
@@ -679,6 +684,7 @@ export function RightSidebar({
         return 'Artifacts';
     };
     const sidebarTabs = ['chat', 'todo', 'artifacts'] as const;
+    const [writerBlocked, setWriterBlocked] = useState(false);
 
     return (
         <>
@@ -706,6 +712,8 @@ export function RightSidebar({
                         </TabsList>
                     </div>
 
+                    <WorkflowRecoveryNotice key={`workflow-recovery:${projectId}`} projectId={projectId} lang={lang}
+                        refreshKey={`${isLoading}:${isStopping}:${isRuntimeBusy}`} onBlockedChange={setWriterBlocked} />
                     {/* Content Area */}
                     <TabsContent key={projectId} value="chat" keepMounted className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto data-[hidden]:hidden">
                             <ChatPanel 
@@ -714,7 +722,7 @@ export function RightSidebar({
                                 streamingMessageId={streamingMessageId}
                                 onStop={onStopTask}
                                 isStopping={isStopping}
-                                isComposerLocked={isComposerLocked}
+                                isComposerLocked={isComposerLocked || writerBlocked}
                                 queuedMessages={queuedMessages}
                                 queueActionId={queueActionId}
                                 queueError={queueError}
@@ -746,7 +754,7 @@ export function RightSidebar({
                 actionPermission={beeGamePermissionReview}
                             pendingPermissions={pendingPermissions}
                                 waitingPermission={waitingPermission}
-                                canSendMessage={canSendMessage}
+                                canSendMessage={canSendMessage && !writerBlocked}
                                 lang={lang}
                                 currentUserDisplayName={currentUserDisplayName}
                                 currentUserEmail={currentUserEmail}

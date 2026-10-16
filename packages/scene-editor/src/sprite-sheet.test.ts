@@ -1,10 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { parseSpriteSheet, spriteSheetSelection } from './sprite-sheet'
-import { withAsset } from './inspector'
+import { withAsset, withSpriteFrame } from './inspector'
+import { resolveSurfaceImage } from './production-surface'
 import type { SpriteRendererComponent, SceneAsset } from './model'
 import { canonicalJson } from './persistence'
 
 describe('project sprite sheets', () => {
+  it.each([{ frame:'left' }, { initialFacing:'left' }, { frame:'left', initialFacing:'left' }])('editor direction changes survive saved data and production selection: %j', properties => {
+    const sheet = { frameWidth:8, frameHeight:8, framesPerFacing:1, facings:['right','left'] }
+    const sprite: SpriteRendererComponent = { id:'sprite', type:'sprite-renderer', enabled:true, assetId:'atlas', properties,
+      material:{ mode:'unlit', color:'#ffffff', metalness:0, roughness:1, opacity:1, alphaMode:'opaque' } }
+    const next = withSpriteFrame(sprite, sheet, 'right')
+    expect(next).toMatchObject({ frame:{x:0}, animation:{initialFacing:'right'}, material:{textureRegion:{x:0}} })
+    const saved = JSON.parse(canonicalJson(next))
+    expect(spriteSheetSelection(sheet, saved.properties).frame?.x).toBe(0)
+    const assets = new Map([['atlas', { source:{} as CanvasImageSource, url:'fixture', sheet }]])
+    expect(resolveSurfaceImage(assets, 'atlas', saved.properties).frame).toEqual([0,0,8,8])
+    expect(withSpriteFrame(next, sheet, 'left')).toMatchObject({ frame:{x:8}, animation:{initialFacing:'left'} })
+    expect(sprite.properties).toEqual(properties)
+  })
   it('uses a component frameSize without requiring a sidecar atlas', () => {
     expect(spriteSheetSelection(undefined, {frameSize:[48,48]}).frame).toEqual({x:0,y:0,width:48,height:48})
     expect(spriteSheetSelection(undefined, {frameSize:[0,48]})).toEqual({})

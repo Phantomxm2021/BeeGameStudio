@@ -46,11 +46,11 @@ for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-
       if(mode==='stale-font')await writeFile(join(root,'dist',selected),'bad')
       // Actual target renderer, no BGS preview or injected PASS. The host changes
       // only requests; this game reads its own UI/font binding and applies them.
-      const script = `const d=await fetch('/${source}').then(r=>r.json()), n=d.data.nodes.find(n=>n.id==='play'), b=document.querySelector('#play');
+      const script = `const d=await fetch('./${source}').then(r=>r.json()), n=d.data.nodes.find(n=>n.id==='play'), b=document.querySelector('#play');
         const selected=n.data.font.member||'${defaultFont}';
-        ${mode === 'wrong-member' ? "await fetch('/'+selected).then(r=>r.arrayBuffer());" : ''}
-        try{const face=await new FontFace('Measured', 'url(/'+${mode === 'wrong-member' ? JSON.stringify(defaultFont) : 'selected'}+')'${mode === 'mixed-fonts' ? ",{unicodeRange:'U+0053'}" : ''}).load();document.fonts.add(face)}catch(e){${mode === 'suppression-error' ? "throw Error('Uncaught font load failure');" : ''}}
-        ${mode === 'mixed-fonts' ? "document.fonts.add(await new FontFace('Alternate','url(/"+memberFont+")').load());" : ''}
+        ${mode === 'wrong-member' ? "await fetch('./'+selected).then(r=>r.arrayBuffer());" : ''}
+        try{const face=await new FontFace('Measured', 'url(./'+${mode === 'wrong-member' ? JSON.stringify(defaultFont) : 'selected'}+')'${mode === 'mixed-fonts' ? ",{unicodeRange:'U+0053'}" : ''}).load();document.fonts.add(face)}catch(e){${mode === 'suppression-error' ? "throw Error('Uncaught font load failure');" : ''}}
+        ${mode === 'mixed-fonts' ? "document.fonts.add(await new FontFace('Alternate','url(./"+memberFont+")').load());" : ''}
         b.style.fontFamily=${['fetch-only','legacy-gap'].includes(mode) ? "'monospace'" : mode === 'same-rendering' ? JSON.stringify('Measured,'+(process.platform==='darwin'?'Arial':'DejaVu Sans')) : mode === 'mixed-fonts' ? "'Measured,Alternate,monospace'" : "'Measured,monospace'"};
         b.textContent=${mode === 'wrong-text' ? "'Wrong saved text'" : mode === 'ignore-text' ? "'Signal 19AB'" : 'n.text'};
         ${mode === 'rich-text' ? "b.innerHTML='<span>'+n.text+'</span>';" : ''}

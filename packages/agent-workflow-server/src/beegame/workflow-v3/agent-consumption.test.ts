@@ -49,7 +49,7 @@ async function fixture(kind:'ui'|'pixel'|'font'|'audio',ignore=false) {
   let html='',consumption:Consumption
   if(kind==='ui') {
     html='<style>body{margin:0}button{position:absolute;box-sizing:border-box}</style><button id="play">Play</button><script>'+
-      'fetch("/content/ui/menu.json").then(r=>r.json()).then(d=>{const n=d.data.nodes.find(n=>n.id==="play"),b=document.querySelector("#play"),'+
+      'fetch("./content/ui/menu.json").then(r=>r.json()).then(d=>{const n=d.data.nodes.find(n=>n.id==="play"),b=document.querySelector("#play"),'+
       's='+(ignore?'[200,52]':'n.layout.size')+',p='+(ignore?'[0,0]':'n.layout.position||[0,0]')+';'+
       'b.style.width=s[0]+"px";b.style.height=s[1]+"px";b.style.left=(640-s[0]/2+p[0])+"px";b.style.top=(360-s[1]/2+p[1])+"px";if(n.enabled===false)b.style.display="none";})</script>'
     consumption={checks:['ui-data-consumption'],uiProbes:[uiProbe]}
@@ -65,8 +65,8 @@ async function fixture(kind:'ui'|'pixel'|'font'|'audio',ignore=false) {
       scene.data.nodes[1].transform={position:[-100,-50,0]}
       scene.data.nodes[1].components=[{id:'sprite',type:'sprite-renderer',assetRef:asset.id,data:{size:[80,40]}}]
       html='<style>body{margin:0}</style><canvas width="960" height="540"></canvas><script type="module">'+
-        'const d=await fetch("/content/scenes/level.json").then(r=>r.json()),n=d.data.nodes.find(n=>n.id==="board"),'+
-        'c=d.data.nodes.find(n=>n.id===d.data.cameraNodeId),im=new Image();im.src="/'+path+'";await im.decode();'+
+        'const d=await fetch("./content/scenes/level.json").then(r=>r.json()),n=d.data.nodes.find(n=>n.id==="board"),'+
+        'c=d.data.nodes.find(n=>n.id===d.data.cameraNodeId),im=new Image();im.src="./'+path+'";await im.decode();'+
         'const raw=n.components[0].data.size,scale=n.transform.scale||[1,1],s=[raw[0]*scale[0],raw[1]*scale[1]],p=n.transform.position,ctx=document.querySelector("canvas").getContext("2d");'+
         'ctx.drawImage(im,480+p[0]-'+(ignore?'0':'c.transform.position[0]')+'-s[0]/2,270+p[1]-'+(ignore?'0':'c.transform.position[1]')+'-s[1]/2,s[0],s[1]);</script>'
       consumption={checks:['pixel-data-consumption'],pixelProbes:[{document:'content/scenes/level.json',nodeId:'board',componentId:'sprite',selector:'canvas',viewport:[960,540]}]}
@@ -75,9 +75,9 @@ async function fixture(kind:'ui'|'pixel'|'font'|'audio',ignore=false) {
       asset.root_path=path;asset.file_paths=[path];asset.asset_kind='font';manifest.project_target!.asset_format_capabilities=['ttf']
       await cp(process.platform==='darwin'?'/System/Library/Fonts/Supplemental/Arial.ttf':'/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',join(root,path))
       ui.assetRefs=[asset.id];Object.assign(ui.data.nodes[1],{text:'Signal 19AB',style:{fontSize:28},data:{font:{assetRef:asset.id}}})
-      html='<button id="play"></button><script type="module">const d=await fetch("/content/ui/menu.json").then(r=>r.json()),'+
+      html='<button id="play"></button><script type="module">const d=await fetch("./content/ui/menu.json").then(r=>r.json()),'+
         'n=d.data.nodes.find(n=>n.id==="play"),b=document.querySelector("#play");'+
-        'try{document.fonts.add(await new FontFace("Measured","url(/'+path+')").load())}catch{}'+
+        'try{document.fonts.add(await new FontFace("Measured","url(./'+path+')").load())}catch{}'+
         'b.style.fontFamily="Measured, monospace";b.style.fontSize=n.style.fontSize+"px";b.textContent=n.text;</script>'
       consumption={checks:['font-data-consumption'],uiProbes:[uiProbe]}
     } else {
@@ -86,8 +86,8 @@ async function fixture(kind:'ui'|'pixel'|'font'|'audio',ignore=false) {
       await writeFile(join(root,path),audioProbeWav(false));scene.assetRefs=[asset.id]
       scene.data.nodes[1].components=[{id:'sound',type:'audio-source',assetRef:asset.id,data:{volume:.6,loop:false}}]
       html='<button id="start">Play</button><button id="stop">Stop</button><audio id="clip" preload="auto"></audio><script type="module">'+
-        'const d=await fetch("/content/scenes/level.json").then(r=>r.json()),c=d.data.nodes[1].components[0],a=document.querySelector("#clip");'+
-        'a.src="/'+path+'";a.volume=c.data.volume;a.loop=c.data.loop;document.querySelector("#start").onclick=()=>a.play().catch(()=>{});'+
+        'const d=await fetch("./content/scenes/level.json").then(r=>r.json()),c=d.data.nodes[1].components[0],a=document.querySelector("#clip");'+
+        'a.src="./'+path+'";a.volume=c.data.volume;a.loop=c.data.loop;document.querySelector("#start").onclick=()=>a.play().catch(()=>{});'+
         'document.querySelector("#stop").onclick=()=>a.pause();</script>'
       consumption={checks:['audio-data-consumption'],audioProbes:[{document:'content/scenes/level.json',nodeId:'board',componentId:'sound',selector:'#clip',viewport:[960,540],playSteps:[{click:'#start'}],stopSteps:[{click:'#stop'}]}]}
     }

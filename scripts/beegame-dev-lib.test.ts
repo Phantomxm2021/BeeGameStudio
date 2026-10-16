@@ -4,9 +4,27 @@ import { getBuildFeatures } from './defines'
 import {
   buildBeeGameDevPlan,
   waitForBeeGameDevServices,
+  stopBeeGameDevServices,
 } from './beegame-dev-lib'
 
 describe('BeeGame local dev launcher helpers', () => {
+  test('shutdown signals every owned service and waits for its drain', async () => {
+    const signalled: string[] = []
+    let finish!: () => void
+    const drained = new Promise<number>(resolve => { finish = () => resolve(0) })
+    let ended = false
+    const stopping = stopBeeGameDevServices([
+      { child: { kill: () => { signalled.push('runtime') }, exited: drained } },
+      { child: { kill: () => { signalled.push('frontend') }, exited: Promise.resolve(0) } },
+    ]).then(() => { ended = true })
+    await Promise.resolve()
+    expect(signalled).toEqual(['runtime', 'frontend'])
+    expect(ended).toBe(false)
+    finish()
+    await stopping
+    expect(ended).toBe(true)
+  })
+
   test('a failed frontend is reported without terminating a surviving service', async () => {
     // Harmless, test-owned processes only. Never run pkill against live services.
     const frontend = Bun.spawn([process.execPath, '-e', 'process.exit(7)'], { stdout: 'ignore', stderr: 'ignore' })

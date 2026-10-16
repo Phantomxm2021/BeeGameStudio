@@ -34,7 +34,7 @@ async function fixture() {
   return { root, index, manifest, member }
 }
 
-test('first index metadata is read-only, explicit and consumable without a legacy design release', async () => {
+test('legacy index metadata remains read-only and compatible, but is not required for authoring', async () => {
   const { root, index, manifest } = await fixture()
   await rm(join(root, 'content/index.json'))
   const operands = ['content/scenes/level.json', 'content/ui/menu.json']
@@ -49,8 +49,8 @@ test('first index metadata is read-only, explicit and consumable without a legac
   await expect(access(join(root, 'content/index.json'))).rejects.toThrow()
   await expect(access(join(root, 'docs'))).rejects.toThrow()
   await expect(access(join(root, '.beegame/design-handoffs'))).rejects.toThrow()
-  expect((runGameContentCommand(root, ['--current']) as any).issues.join(' ')).toContain('--package-metadata')
-  expect(JSON.stringify(runGameContentCommand(root, ['--format', 'index']))).toContain('--package-metadata')
+  expect((runGameContentCommand(root, ['--current']) as any).issues.join(' ')).toContain('--format examples')
+  expect((runGameContentCommand(root, ['--format', 'index']) as any).value).not.toHaveProperty('documentRevision')
   // The author, not the metadata helper, chooses this actual registry.
   await writeFile(join(root, 'content/index.json'), JSON.stringify({ ...index, ...metadata.indexMetadata,
     documents: [{ id: 'level', kind: 'scene-2d', path: 'scenes/level.json', loadPhase: 'startup' },
@@ -137,11 +137,13 @@ test('current preflight retains actual registry, member integrity and geometry f
   manifest.resources[0]!.selection_reason = ['Changed real resource choice']
   await writeBeeGameAssetManifest(root, manifest)
   const changed = runGameContentCommand(root, ['--current']) as any
-  expect(changed.valid).toBe(false)
-  expect(changed.issues.join(' ')).toContain('assetManifestRevision differs')
+  expect(changed.valid).toBe(true)
+  expect(changed.issues.join(' ')).not.toContain('assetManifestRevision differs')
   expect(changed.issues.join(' ')).not.toContain('--authority')
   expect(changed.registry.assetManifestRevision).not.toBe(JSON.parse(before).assetManifestRevision)
   const index = { ...JSON.parse(before), assetManifestRevision: changed.registry.assetManifestRevision }
+  delete index.documentRevision
+  delete index.assetManifestRevision
   await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
   await writeFile(join(root, member), '{"changed":true}')
   expect((runGameContentCommand(root, ['--current']) as any).issues.join(' ')).toContain('File hash does not match manifest')

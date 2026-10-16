@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { produceResources, mergeRegistrationRequests, listRegisteredResources } from './resource-production'
+import { produceResources, mergeRegistrationRequests, listRegisteredResources, RESOURCE_HELP } from './resource-production'
 import { assetManifestAuthoringExamples, renderAssetManifestAuthoringContract } from './asset-manifest-authoring-contract'
 import { readBeeGameAssetManifest } from './asset-contracts'
 import { materializeContentCheckerEntry } from './scene-ui-content-authoring'
@@ -78,6 +78,31 @@ const recipe = { format: 'beegame-programmatic-audio-v1', cues: [
   { id: 'cue', duration_ms: 100, voices: [{ source: { type: 'oscillator', waveform: 'sine', frequency_hz: 440 },
     start_ms: 0, duration_ms: 100, gain: .5, attack_ms: 5, release_ms: 10 }] },
 ] }
+
+test('library registration preserves source and dependency bindings, rejecting absent dependency files before registry writes', async () => {
+  const root = await mkdtemp(join(tmpdir(),'bgs-library-registration-'))
+  try {
+    const fixture = assetManifestAuthoringExamples().canonical, item = fixture.resources[0]!
+    const dependencyPath = 'assets/runtime/example/metadata.json'
+    await mkdir(join(root,'assets/runtime/example'),{recursive:true})
+    await writeFile(join(root,item.root_path),'{}')
+    const source = {type:'resource-library',pack_id:'pack',pack_version:'1.2',element_id:'main',element_path:'main.json'}
+    const dependencies = [{key:'meta',parent_key:'main',element_id:'meta',element_path:'metadata.json',
+      reference_path:'metadata.json',local_path:dependencyPath,kind:'metadata'}]
+    const resource = {id:item.id,fulfills:item.fulfills,root_path:item.root_path,file_paths:[...item.file_paths,dependencyPath],
+      provisional:false,reason:'Synthetic library import',selection_reason:['Matches selected design'],source,dependencies}
+    const request = {operation:'register',resources:[resource],projectTarget:fixture.project_target,requirements:fixture.requirements}
+    await expect(produceResources(root,request)).rejects.toThrow('does not exist')
+    expect((await readBeeGameAssetManifest(root)).resources).toEqual([])
+    await writeFile(join(root,dependencyPath),'{"dependency":true}')
+    await produceResources(root,request)
+    const saved = await readBeeGameAssetManifest(root)
+    expect(saved.resources[0]).toMatchObject({source,dependencies,file_paths:resource.file_paths})
+    expect(saved.resources[0]!.local_file_hashes![dependencyPath]).toBe(createHash('sha256').update('{"dependency":true}').digest('hex'))
+    await expect(produceResources(root,{...request,resources:[{...resource,file_paths:item.file_paths}]})).rejects.toThrow('must be listed')
+    expect(await readBeeGameAssetManifest(root)).toEqual(saved)
+  } finally { await rm(root,{recursive:true,force:true}) }
+})
 const fontJob = { url: 'https://fonts.gstatic.com/example.woff2', output: 'assets/runtime/font.woff2',
   licenseUrl: 'https://raw.githubusercontent.com/google/fonts/main/ofl/example/OFL.txt', license: 'OFL-1.1',
   pageUrl: 'https://fonts.google.com/specimen/Example' }
@@ -259,4 +284,60 @@ test('missing project target points to the supplied contract, not an absent save
       provisional:false, reason:'Synthetic', selection_reason:['Synthetic fixture'],
     }] })).rejects.toThrow('--contract')
   } finally { await rm(root, { recursive:true, force:true }) }
+})
+
+test('registration input distinguishes generated provenance and reports exact web source fields through the CLI', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-resource-source-contract-'))
+  try {
+    const contract = renderAssetManifestAuthoringContract()
+    for (const guidance of [contract, RESOURCE_HELP]) {
+      expect(guidance).toContain('omit source')
+      expect(guidance).toContain('resource.reason')
+      expect(guidance).toContain('upload/import path')
+    }
+    const requestExample = contract.split('Minimal local-authoring request')[1]!.split('```json\n')[1]!.split('\n```')[0]!
+    const example = JSON.parse(requestExample)
+    expect(example.resources[0]).not.toHaveProperty('source')
+    expect(mergeRegistrationRequests([example]).resources[0]).toEqual(example.resources[0])
+
+    await materializeContentCheckerEntry(root)
+    const fixture = assetManifestAuthoringExamples().canonical, item = fixture.resources[0]!
+    await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
+    await writeFile(join(root, item.root_path), '{}')
+    const input = { id: item.id, fulfills: item.fulfills, root_path: item.root_path, file_paths: item.file_paths,
+      provisional: false, reason: 'Locally authored synthetic fixture', selection_reason: ['Synthetic test'] }
+    const request = { operation: 'register', resources: [input], projectTarget: fixture.project_target, requirements: fixture.requirements }
+    const env = { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl }
+    const run = async (value: unknown) => {
+      await writeFile(join(root, 'request.json'), JSON.stringify(value))
+      const child = Bun.spawn([process.execPath, '.beegame/delivery/resources.mjs', 'request.json'], {
+        cwd: root, env, stdout: 'pipe', stderr: 'pipe',
+      })
+      const result = JSON.parse(await new Response(child.stdout).text())
+      return { result, exit: await child.exited }
+    }
+    for (const type of ['agent-authored', 'user-provided', 'unknown']) {
+      const { result, exit } = await run({ ...request, resources: [{ ...input, source: { type } }] })
+      expect(exit).toBe(1)
+      expect(result.valid).toBe(false)
+      expect(result.issues.join(' ')).toContain('resources.0.source.type')
+      expect(result.issues.join(' ')).toContain('omit source and supply resource.reason')
+      expect(result.issues.join(' ')).toContain('upload/import path')
+      expect((await readBeeGameAssetManifest(root)).resources).toEqual([])
+    }
+    const { result: invalidWeb, exit: webExit } = await run({ ...request, resources: [{ ...input, source: {
+      type: 'web', source_url: 'https://example.com/data.json', page_url: 'https://example.com/', retrieved_at: '2026-01-01T00:00:00.000Z',
+    } }] })
+    expect(webExit).toBe(1)
+    expect(invalidWeb.issues.join(' ')).toContain('resources.0.source.license')
+    expect(invalidWeb.issues.join(' ')).not.toContain('resources.0.source: Invalid input')
+    expect(invalidWeb.issues.join(' ')).toContain('expected string')
+    expect((await readBeeGameAssetManifest(root)).resources).toEqual([])
+    const { result, exit } = await run(request)
+    expect(exit).toBe(0)
+    expect(result.valid).toBe(true)
+    const saved = await readBeeGameAssetManifest(root)
+    expect(saved.resources[0]!.source).toMatchObject({ type: 'agent-authored', reason: input.reason })
+    expect(saved.resources[0]!.source).toHaveProperty('created_at')
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

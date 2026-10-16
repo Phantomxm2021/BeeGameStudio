@@ -70,13 +70,13 @@ export type McpSettingsCopy = {
 
 function getMcpHealthLabel(copy: McpSettingsCopy, health: McpServerTestResult | undefined, isTesting: boolean): string {
   if (isTesting) return copy.form.testingConnection;
-  if (!health) return copy.form.untested;
+  if (!health || health.status === 'untested') return copy.form.untested;
   return health.ok ? copy.form.available : copy.form.unavailable;
 }
 
 function getMcpHealthClass(health: McpServerTestResult | undefined, isTesting: boolean): string {
   if (isTesting) return 'text-orange-300';
-  if (!health) return 'text-muted-foreground';
+  if (!health || health.status === 'untested') return 'text-muted-foreground';
   return health.ok ? 'text-foreground' : 'text-foreground';
 }
 
@@ -124,35 +124,21 @@ export function McpSettingsPanel({
   const [activeServerMenuId, setActiveServerMenuId] = useState('');
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 py-2">
-      {servers.length ? <p className="type-callout max-w-2xl text-muted-foreground">{copy.intro}</p> : null}
-
       {servers.length ? (
-        <div className="divide-y divide-border border-y border-border">
+        <ul aria-label={copy.configured} className="divide-y divide-border/70 rounded-2xl border border-border/70 bg-muted/30">
           {servers.map(server => (
-            <div key={server.id} className="flex items-center justify-between gap-3 py-3">
-              <button
-                type="button"
-                onClick={event => onEdit(server, toPopoverAnchorRect(event.currentTarget.getBoundingClientRect()))}
-                className="min-w-0 flex-1 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent"
+            <li key={server.id} className="flex min-h-20 items-center gap-3 px-4 sm:gap-5 sm:px-5">
+              <div
+                className="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 gap-y-1 self-stretch py-5 text-left"
               >
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 shrink-0 rounded-full ${server.enabled ? 'bg-muted' : 'bg-muted-foreground'}`}
-                  />
-                  <span className="type-footnote truncate text-foreground">{server.name}</span>
-                </div>
-                <div className="type-footnote mt-1 truncate pl-4 text-muted-foreground">
-                  {server.transport} · {server.scope}
-                </div>
-                <div className="type-footnote mt-1 flex items-center gap-2 pl-4">
-                  <span className={getMcpHealthClass(healthById[server.id], testingServerId === server.id)}>
-                    {getMcpHealthLabel(copy, healthById[server.id], testingServerId === server.id)}
-                  </span>
-                  {healthById[server.id]?.message ? (
-                    <span className="truncate text-muted-foreground">{healthById[server.id].message}</span>
-                  ) : null}
-                </div>
-              </button>
+                <span className="max-w-full truncate text-[15px] font-medium text-foreground" title={server.name}>{server.name}</span>
+                <span className="min-w-0 truncate text-sm text-muted-foreground">
+                  {server.transport} · {copy.form[server.scope]}
+                </span>
+              </div>
+              <span className={`shrink-0 whitespace-nowrap text-sm ${getMcpHealthClass(healthById[server.id], testingServerId === server.id)}`}>
+                {getMcpHealthLabel(copy, healthById[server.id], testingServerId === server.id)}
+              </span>
               <div className="relative flex shrink-0 items-center gap-2">
                 <button
                   type="button"
@@ -232,9 +218,9 @@ export function McpSettingsPanel({
                   />
                 ) : null}
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       ) : (
         <div className={`flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-muted-foreground ${activeDiscovered.length || discovered.length ? '' : 'flex-1'}`} data-testid="mcp-empty-state">
           <Network className="size-6" aria-hidden="true" />
@@ -299,7 +285,6 @@ export function McpSettingsPanel({
         </div>
       ) : null}
 
-      {status ? <div className="type-footnote text-foreground">{status}</div> : null}
     </div>
   );
 }
@@ -367,7 +352,7 @@ export function McpServerFormPopover({
 
               <div className="grid gap-2 py-3">
                 <span className="type-caption-1 text-muted-foreground">{copy.form.transport}</span>
-                <ProjectSelect ariaLabel={copy.form.transport} value={form.transport} onValueChange={value => update({ transport: value as McpServerTransport })} options={[{ value: 'stdio', label: copy.form.stdio }, { value: 'sse', label: copy.form.sse }, { value: 'http', label: copy.form.http }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" />
+                <ProjectSelect portal ariaLabel={copy.form.transport} value={form.transport} onValueChange={value => update({ transport: value as McpServerTransport })} options={[{ value: 'stdio', label: copy.form.stdio }, { value: 'sse', label: copy.form.sse }, { value: 'http', label: copy.form.http }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" contentClassName="z-[370]" />
               </div>
 
               {form.transport !== 'stdio' ? (
@@ -424,7 +409,7 @@ export function McpServerFormPopover({
                     ) : null}
                     <div className="grid gap-2 py-3">
                       <span className="type-caption-1 text-muted-foreground">{copy.form.scope}</span>
-                      <ProjectSelect ariaLabel={copy.form.scope} value={form.scope} onValueChange={value => update({ scope: value as McpServerScope })} options={[{ value: 'beegame', label: copy.form.beegame }, { value: 'project', label: copy.form.project }, { value: 'global', label: copy.form.global }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" />
+                      <ProjectSelect portal ariaLabel={copy.form.scope} value={form.scope} onValueChange={value => update({ scope: value as McpServerScope })} options={[{ value: 'beegame', label: copy.form.beegame }, { value: 'project', label: copy.form.project }, { value: 'global', label: copy.form.global }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" contentClassName="z-[370]" />
                     </div>
 
                     <label className="grid gap-2 py-3">

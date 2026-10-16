@@ -60,6 +60,7 @@ export type SceneNodeBindingCoverage = {
 export type CheckResult = { id: string; version: string; status: 'passed' | 'failed' | 'unverified' | 'execution-error';
   inputs: FileVersion[]; observation: string; createdAt: string; artifacts?: FileVersion[];
   coverage?: { files: string[]; limitations: string[]; uiNodeBindings?: UiNodeBindingCoverage[];
+    uiSurfaceCompatibility?: ({ document: string } & Pick<ReturnType<typeof import('../../../../scene-editor/src/production-surface').inspectProductionUiSupport>, 'supported' | 'issues' | 'projectSemantics'>)[];
     sceneNodeBindings?: SceneNodeBindingCoverage[];
     assetContract?: import('../asset-contract-audit').AssetContractAudit }; projectBuild?: {
     version: 'v3-editable-build.1'; files: FileVersion[]; excludedReports: string[];
@@ -73,7 +74,7 @@ export type Run = {
   visualHandoffVersion?: 1;
   // Host-observed blank-project intake, not a phase or model-authored plan.
   // Absent on existing/imported runs; never infer it from missing content later.
-  creation?: { initialDelivery: 'playable-slice'; editableContent: boolean; webStarter?: 'react-canvas-2d-v1' };
+  creation?: { initialDelivery: 'playable-slice' | 'design-led-first-version'; editableContent: boolean; webStarter?: 'react-canvas-2d-v1' };
   version: number; requestKey: string; status: 'planning' | 'running' | 'blocked' | 'completed';
   requirements: { revision: string; text: string; constraints: Record<string, unknown>; ids: string[]; sha256: string };
   // Retained as an optimistic revision for authorized requirement changes and

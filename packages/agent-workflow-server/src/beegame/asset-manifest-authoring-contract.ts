@@ -141,13 +141,37 @@ For locally authored or downloaded files, use the resources.mjs entry supplied
 in the current project tool context with --help
 and its batch register operation. Supply source facts and file paths; the tool
 computes hashes and writes the canonical modules/index. Do not hand-fill hashes.
-Existing resource-library selection/import remains with its supplied tool.
+Select and download library files with assets.mjs; preserve its registrationSource
+as source in the same resources.mjs registration, including downloaded dependency bindings.
 Visual/font and audio workers supply only their resource registration requests.
 The shared owner defines the project-wide target and actual requirement IDs in
 a separate register request with resources:[]; combine that configuration and
 worker requests with the supplied resources.mjs entry and --register-from. Include every required
 supported runtime format, not just the formats produced by one worker.
 The data-only example below is not a PNG/audio/font target configuration.
+
+## Registration input versus saved manifest
+
+The canonical examples below describe **saved output**, not resources.mjs
+request objects. In a register or atlas resource input, explicit \`source\`
+accepts only \`web\` or \`resource-library\` with the provenance fields below.
+For locally agent-authored files, **omit source** and supply \`resource.reason\`;
+the registrar writes \`source.type=agent-authored\`, \`created_at\`, hashes,
+status and selection time. Do not copy those generated fields or the canonical
+agent-authored/user-provided source examples into a registration request.
+User-provided provenance is written by the upload/import path; do not relabel
+those files as agent-authored.
+
+Minimal local-authoring request (replace the example paths and requirement ID;
+the owner must also provide the actual projectTarget and requirements):
+
+\`\`\`json
+${json({ operation: 'register', resources: [{
+  id: 'EXAMPLE-RUNTIME-DATA-01', fulfills: ['EXAMPLE-RUNTIME-DATA'],
+  root_path: 'assets/runtime/example/resource.json', file_paths: ['assets/runtime/example/resource.json'],
+  provisional: false, reason: 'Locally authored example data.', selection_reason: ['Matches the actual requirement.'],
+}] })}
+\`\`\`
 
 ## Deliverables
 

@@ -485,6 +485,9 @@ export const api = {
   stopTask: (data: { task_id: string; project_id?: string }) =>
     beeGameAdapter.stopTask(data),
 
+  recoverTask: (data: { project_id: string }) => beeGameAdapter.recoverTask(data),
+  getTaskRecovery: (projectId: string) => beeGameAdapter.getTaskRecovery(projectId),
+
   /**
    * 获取项目的聊天历史记录
    * @param projectId - 项目 ID

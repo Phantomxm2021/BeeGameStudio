@@ -23,77 +23,16 @@ test('batch text samples are selected per source without losing unknown/non-text
     expect(() => partitionUiTextSamples(samples, sources)).toThrow('Text samples')
 })
 
-test('static sample inspection rejects invalid sources and viewports before opening a browser', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-static-sample-path-'))
-  try {
-    await mkdir(join(root, 'docs/visual/ART_DIRECTION'), { recursive: true })
-    await writeFile(join(root, 'source.html'), '<main>Not an owned sample</main>')
-    await symlink(join(root, 'source.html'), join(root, 'docs/visual/ART_DIRECTION/alias.html'))
-    const { inspectVisualSample } = await import(toolPath)
-    const browser = { newContext() { throw Error('Browser should not open') } }
-    for (const sample of ['source.html', '../source.html', 'docs/visual/ART_DIRECTION/../../source.html', 'docs/visual/ART_DIRECTION/run.js'])
-      await expect(inspectVisualSample(root, { sample, width: 960, height: 540 }, browser)).rejects.toThrow('retained')
-    await expect(inspectVisualSample(root, { sample: 'docs/visual/ART_DIRECTION/alias.html', width: 960, height: 540 }, browser)).rejects.toThrow('symlink')
-    await expect(inspectVisualSample(root, { sample: 'docs/visual/ART_DIRECTION/sample.html', width: NaN, height: 540 }, browser)).rejects.toThrow('Viewport')
-  } finally { await rm(root, { recursive: true, force: true }) }
-})
-
-test('a changed static sample does not publish a stale capture and closes its context', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-static-sample-change-'))
-  let closed = 0
-  try {
-    await mkdir(join(root, 'docs/visual/UI_UX_SPEC'), { recursive: true })
-    const sample = 'docs/visual/UI_UX_SPEC/sample.html'
-    await writeFile(join(root, sample), '<main>First</main>')
-    const page = { on() {}, async goto() {}, async evaluate() {}, async screenshot() {
-      await writeFile(join(root, sample), '<main>Changed</main>'); return Buffer.from('not-published')
-    } }
-    const browser = { async newContext(options: any) {
-      expect(options.javaScriptEnabled).toBe(false)
-      expect(options.serviceWorkers).toBe('block')
-      return { async route() {}, async newPage() { return page }, async close() { closed++ } }
-    } }
-    const { inspectVisualSample } = await import(toolPath)
-    await expect(inspectVisualSample(root, { sample, width: 960, height: 540 }, browser)).rejects.toThrow('changed')
-    expect(closed).toBe(1)
-  } finally { await rm(root, { recursive: true, force: true }) }
-})
-
-/** Real local pixels, no model request, game product or billable generation. */
-test.skipIf(process.env.BGS_DESIGN_BROWSER !== '1')('static sample CLI renders without formal Content, disables scripts and re-renders changed sources', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-static-sample-browser-'))
-  const api = openPreviewTestAccess({ start: async () => ({ status: 'idle' }), status: () => ({ status: 'idle' }), stop() {} })
-  try {
-    await materializeSceneUiFormat(root)
-    await mkdir(join(root, 'docs/visual/ART_DIRECTION'), { recursive: true })
-    const sample = 'docs/visual/ART_DIRECTION/sample.html'
-    const run = async () => {
-      const child = Bun.spawn(['node', DESIGN_INSPECTOR_PATH, '--visual-sample', sample, '320', '180', '--preview-api', api.baseUrl],
-        { cwd: root, env: { ...process.env, BEEGAME_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
-      const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
-      return { code, stdout, stderr }
-    }
-    await writeFile(join(root, sample), '<!doctype html><html><body style="margin:0;background:#123456"><script>document.body.style.background="#ff0000"</script><main>Static reference</main></body></html>')
-    const first = await run()
-    expect(first.stderr).toBe('')
-    expect(first.code).toBe(0)
-    const before = JSON.parse(first.stdout)
-    expect(before.visualAcceptance).toBe('not-certified')
-    expect(before.source.path).toBe(sample)
-    expect(before.capture).toStartWith('.beegame/tmp/visual-samples/')
-    const sharp = (await import('sharp')).default
-    const pixel = await sharp(await readFile(join(root, before.capture))).extract({ left: 0, top: 0, width: 1, height: 1 }).removeAlpha().raw().toBuffer()
-    expect([...pixel]).toEqual([0x12, 0x34, 0x56]) // Project script was not executed.
-    await writeFile(join(root, sample), '<!doctype html><body style="background:#654321">Revised static reference</body>')
-    const second = await run()
-    expect(second.code).toBe(0)
-    const after = JSON.parse(second.stdout)
-    expect(after.source.sha256).not.toBe(before.source.sha256)
-    expect(after.capture).not.toBe(before.capture)
-    expect((await readFile(join(root, after.capture))).subarray(1, 4).toString()).toBe('PNG')
-    await writeFile(join(root, sample), '<!doctype html><img src="https://example.test/external.png">')
-    expect((await run()).code).not.toBe(0)
-  } finally { await api.close(); await rm(root, { recursive: true, force: true }) }
+test('retired HTML/SVG sample command rejects before requesting a browser capability', async () => {
+  const child = Bun.spawn(['node', toolPath, '--visual-sample', 'docs/visual/UI_UX_SPEC/sample.html', '960', '540'],
+    { stdout: 'pipe', stderr: 'pipe' })
+  const [code, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+  ])
+  expect(code).not.toBe(0)
+  expect(stdout).toBe('')
+  expect(stderr).toContain('Read the saved reference with the native Read tool')
+  expect(stderr).not.toContain('PREVIEW_CAPABILITY_MISSING')
 })
 
 test('design inspector rejects escaping files and invalid viewports before opening a browser', async () => {

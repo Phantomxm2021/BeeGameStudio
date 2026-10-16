@@ -42,13 +42,13 @@ for (const mode of ['consume', 'music', 'legacy-audio', 'loop-true', 'member', '
       await mkdir(join(root, 'dist')); await cp(join(root,'content'),join(root,'dist/content'),{recursive:true}); await cp(join(root,'assets'),join(root,'dist/assets'),{recursive:true})
       if (mode === 'stale-audio') await writeFile(join(root, 'dist', selected), 'stale')
       // Independent game HTML, no BGS renderer or application test-PASS hook.
-      const script = `const scene=await fetch('/${source}').then(r=>r.json()),c=scene.data.nodes[1].components[0],a=document.querySelector('#clip');
-        ${mode === 'lazy-play' ? '' : `a.src='/'+${mode === 'wrong-member' ? JSON.stringify(file) : `(c.data.member||'${file}')`};`}
+      const script = `const scene=await fetch('./${source}').then(r=>r.json()),c=scene.data.nodes[1].components[0],a=document.querySelector('#clip');
+        ${mode === 'lazy-play' ? '' : `a.src='./'+${mode === 'wrong-member' ? JSON.stringify(file) : `(c.data.member||'${file}')`};`}
         a.volume=${mode === 'ignore-volume' ? '.6' : 'c.data.volume'};a.loop=${mode === 'ignore-loop' ? 'false' : 'c.data.loop'};
         ${mode === 'muted' ? 'a.muted=true;' : ''}
-        ${mode === 'fetch-only' || mode === 'wrong-member' ? `await fetch('/${selected}').then(r=>r.arrayBuffer());` : ''}
-        ${mode === 'decode-error' ? "a.src='/broken.wav';" : ''}
-        document.querySelector('#start').onclick=()=>{${mode === 'lazy-play' ? `setTimeout(()=>{a.src='/${file}';a.play().catch(()=>{});},100);` : mode === 'fetch-only' || mode === 'legacy-gap' ? '' : 'a.play().catch(()=>{});'}};
+        ${mode === 'fetch-only' || mode === 'wrong-member' ? `await fetch('./${selected}').then(r=>r.arrayBuffer());` : ''}
+        ${mode === 'decode-error' ? "a.src='./broken.wav';" : ''}
+        document.querySelector('#start').onclick=()=>{${mode === 'lazy-play' ? `setTimeout(()=>{a.src='./${file}';a.play().catch(()=>{});},100);` : mode === 'fetch-only' || mode === 'legacy-gap' ? '' : 'a.play().catch(()=>{});'}};
         document.querySelector('#stop').onclick=()=>{${mode === 'ignore-stop' ? '' : 'a.pause();'}};
         ${mode === 'unrelated-error' ? "console.error('Independent game failure');" : ''}`
       if (mode === 'decode-error') await writeFile(join(root, 'dist/broken.wav'), 'not encoded audio')

@@ -22,6 +22,7 @@ import {
 } from './audit-events-store'
 import {
   deleteMcpServer,
+  exportMcpServersSnapshot,
   listMcpServers,
   upsertMcpServer,
   type McpServerConfig,
@@ -873,6 +874,7 @@ export class DashboardRepository {
         throw error
       })
       syncWebToolsToRuntimeConfig(webTools, { dataDir })
+      const mcpServers = await this.supabaseForAuthToken(authToken).runtimeMcpServers(userId)
       await this.materializeRemoteUserSkillsSafely(userId, dataDir)
       // Supabase owns logical runtime configuration (provider credentials and
       // platform feature flags). The runtime host owns physical isolation. Do
@@ -884,6 +886,7 @@ export class DashboardRepository {
         ...mapWebToolsConfigToRuntimeEnv(webTools),
         ...hostToolEnv,
         ...hostIsolationEnv,
+        BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(mcpServers),
         ...(runtimeSettings.skillSearchEnabled !== undefined
           ? { SKILL_SEARCH_ENABLED: runtimeSettings.skillSearchEnabled ? '1' : '0' } : {}),
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
@@ -910,6 +913,7 @@ export class DashboardRepository {
       ...hostToolEnv,
       ...platformEnv,
       ...selectedModelEnv,
+      BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(exportMcpServersSnapshot({ dataDir })),
       BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
     }
   }

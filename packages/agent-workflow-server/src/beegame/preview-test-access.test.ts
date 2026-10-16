@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test'
 import { openPreviewTestAccess } from './preview-test-access'
 import { PREVIEW_IFRAME_SANDBOX } from '@bee-game-studio/agent-workflow/preview-environment'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { BeeGamePreviewManager } from './preview-manager'
 
 test('preview capability exposes only its owned preview and revokes browser access on close', async () => {
   let started = 0, stopped = 0, browserClosed = 0
@@ -38,6 +42,11 @@ test('preview capability exposes only its owned preview and revokes browser acce
     expect(helper).toContain('gameFrame')
     expect(helper).toContain('node <test-script.mjs> (not bun)')
     expect(helper).toContain('beforeNavigate')
+    const audioScope = access.instruction.split('\n').find(line => line.startsWith('Audio/custom probe scope:'))!
+    for (const term of ['OUTER preview wrapper', 'context.addInitScript', 'separate window',
+      'gameFrame.evaluate(() => window.__audioEvents ?? null)', 'never page.evaluate',
+      'missing probe is unverified', 'do not prove audible output'])
+      expect(audioScope).toContain(term)
     const html = await (await fetch(result.hostUrl)).text()
     expect(html).toContain(`sandbox="${PREVIEW_IFRAME_SANDBOX}"`)
     expect(html).not.toContain('allow-same-origin')
@@ -79,4 +88,86 @@ test('browser start explicitly reports reuse; restart is a separate owned operat
     expect(await post('/browser/restart')).toMatchObject({ reused: false, endpoint: 'ws://127.0.0.1:1234/second' })
     expect(restarts).toBe(1)
   } finally { await access.close() }
+})
+
+test('preview restart replaces the owned server and loads changed source without building', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'preview-restart-'))
+  const manager = new BeeGamePreviewManager()
+  const options = { sessionId: 'restart-fixture', workspacePath: workspace, mode: 'production' as const }
+  const access = openPreviewTestAccess({
+    start: mode => manager.start({ ...options, mode }),
+    restart: mode => manager.restart({ ...options, mode }),
+    status: () => manager.status(options.sessionId, workspace),
+    stop: () => { manager.stop(options.sessionId, workspace) },
+  })
+  const serverSource = (version: string) =>
+    `Bun.serve({hostname:"127.0.0.1",port:Number(process.env.PORT),fetch(){return Response.json({version:${JSON.stringify(version)},pid:process.pid})}})`
+  try {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({
+      scripts: { preview: `${JSON.stringify(process.execPath)} server.ts`, build: 'exit 99' },
+    }))
+    await writeFile(join(workspace, 'server.ts'), serverSource('before'))
+    const post = (path: string) => fetch(access.baseUrl + path, { method: 'POST', body: JSON.stringify({ mode: 'production' }) })
+    expect((await post('/preview')).status).toBe(200)
+    const readServer = async () => await (await fetch(manager.internalUrl(options.sessionId)!)).json() as { version: string; pid: number }
+    const before = await readServer()
+    expect(before.version).toBe('before')
+    await writeFile(join(workspace, 'server.ts'), serverSource('after'))
+    expect((await post('/preview')).status).toBe(200)
+    expect(await readServer()).toEqual(before)
+    const restarted = await post('/preview/restart')
+    expect(restarted.status).toBe(200)
+    expect((await restarted.json() as any).preview.mode).toBe('production')
+    const after = await readServer()
+    expect(after.version).toBe('after')
+    expect(after.pid).not.toBe(before.pid)
+    expect(() => process.kill(before.pid, 0)).toThrow()
+    expect(access.instruction).toContain('POST /preview/restart')
+  } finally {
+    await access.close()
+    manager.dispose()
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('preview restart validates scope, shares the startup lock and reports failure', async () => {
+  let restarts = 0
+  let resolveRestart!: (value: { status: string }) => void
+  let entered!: () => void
+  const entering = new Promise<void>(resolve => { entered = resolve })
+  const access = openPreviewTestAccess({
+    start: async () => ({ status: 'running' }),
+    restart: () => {
+      restarts++
+      const pending = new Promise<{ status: string }>(resolve => { resolveRestart = resolve })
+      entered()
+      return pending
+    },
+    status: () => ({ status: 'idle' }), stop() {},
+  })
+  const post = (path: string, body: unknown, headers?: HeadersInit) =>
+    fetch(access.baseUrl + path, { method: 'POST', body: JSON.stringify(body), headers })
+  try {
+    expect((await post('/preview/restart', { mode: 'production' }, { origin: 'https://evil.test' })).status).toBe(404)
+    expect((await post('/preview/restart', { mode: 'production', workspacePath: '/other' })).status).toBe(400)
+    expect((await post('/preview/restart', { mode: 'invalid' })).status).toBe(400)
+    expect(restarts).toBe(0)
+    const pending = post('/preview/restart', { mode: 'production' })
+    await entering
+    expect(restarts).toBe(1)
+    expect((await post('/preview', { mode: 'production' })).status).toBe(409)
+    expect((await post('/preview/restart', { mode: 'production' })).status).toBe(409)
+    resolveRestart({ status: 'failed' })
+    expect((await pending).status).toBe(503)
+    expect((await post('/preview', { mode: 'production' })).status).toBe(200)
+  } finally {
+    resolveRestart?.({ status: 'failed' })
+    await access.close()
+  }
+  const unsupported = openPreviewTestAccess({ start: async () => ({ status: 'running' }), status: () => ({ status: 'idle' }), stop() {} })
+  try {
+    expect((await fetch(unsupported.baseUrl + '/preview/restart', {
+      method: 'POST', body: JSON.stringify({ mode: 'production' }),
+    })).status).toBe(501)
+  } finally { await unsupported.close() }
 })

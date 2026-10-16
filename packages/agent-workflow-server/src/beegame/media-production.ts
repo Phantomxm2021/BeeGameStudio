@@ -26,6 +26,8 @@ export const atlasRequestSchema = object({ operation: literal('atlas'), group: s
     filtering: enumeration(['nearest', 'linear']),
   }).strict()
 const requestSchema = discriminatedUnion('operation', [
+  object({ operation: literal('inspect'), inputs: array(source).min(1),
+    alphaThreshold: number().int().min(0).max(254).default(0) }).strict(),
   object({ operation: literal('images'), jobs: array(imageJob).min(1) }).strict(),
   atlasRequestSchema,
 ])
@@ -116,6 +118,36 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
     return { width: info.width, height: info.height, channels: info.channels, format: 'png' as const, alpha: info.channels === 4 || info.channels === 2 }
   }
   try {
+    if (request.operation === 'inspect') {
+      const measurements = []
+      for (const item of request.inputs) {
+        const pipe = await load(item)
+        const { hasAlpha } = await pipe.metadata()
+        const { data, info } = await pipe.ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+        const { width, height, channels } = info
+        let left = width, top = height, right = -1, bottom = -1, visiblePixels = 0
+        const edgeVisiblePixels = { top: 0, right: 0, bottom: 0, left: 0 }
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+          if (data[(y * width + x) * channels + channels - 1]! <= request.alphaThreshold) continue
+          visiblePixels++
+          left = Math.min(left, x); top = Math.min(top, y)
+          right = Math.max(right, x); bottom = Math.max(bottom, y)
+          if (y === 0) edgeVisiblePixels.top++
+          if (x === width - 1) edgeVisiblePixels.right++
+          if (y === height - 1) edgeVisiblePixels.bottom++
+          if (x === 0) edgeVisiblePixels.left++
+        }
+        measurements.push({ input: item.input,
+          region: { left: item.crop?.left ?? 0, top: item.crop?.top ?? 0, width, height },
+          hasAlpha: hasAlpha === true, alphaThreshold: request.alphaThreshold, visiblePixels,
+          alphaBounds: visiblePixels ? { left: (item.crop?.left ?? 0) + left,
+            top: (item.crop?.top ?? 0) + top, width: right - left + 1, height: bottom - top + 1 } : null,
+          edgeVisiblePixels })
+      }
+      return { valid: true, operation: request.operation, scope: 'decoded-alpha-measurement',
+        coordinates: 'decoded-source-pixels', measurements,
+        unverified: ['Object identity/count, complete object coverage, state alignment, filtering safety, appearance and runtime use. Alpha bounds are not automatically safe crop/frame rectangles; omitted objects and pixels outside a selected region are not checked.'] }
+    }
     if (request.operation === 'images') {
       const outputs = []
       for (const job of request.jobs) {
@@ -194,6 +226,10 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
 
 export const MEDIA_HELP = `Usage: bun .beegame/delivery/media.mjs request.json
 Run from the project root. Inputs are project-relative. Outputs are new assets/*.png (and atlas *.json); existing files are never overwritten. Use a new version path for replacements, then update registration explicitly. Batch failures list retained successful files; rerun only unfinished jobs.
+Read-only measurement example:
+{"operation":"inspect","inputs":[{"input":"assets/sheet.png"},{"input":"assets/sheet.png","crop":{"left":10,"top":20,"width":100,"height":80}}],"alphaThreshold":0}
+Decodes existing images/regions without creating or changing files. Reports alpha bounds in original decoded source pixels and visible pixels on each region edge. Threshold 0 counts every nonzero alpha, including soft shadows; another threshold changes the measurement, not quality. A bound can include multiple objects; a selected region can omit artwork. This does not select objects, certify complete coverage, align states or prove filtering safety. Inspect the whole sheet and every intended frame; keep uncertain identity/bounds unresolved instead of guessing.
+An intact sheet can use the existing assets.mjs atlas <sheet.png> <frames.json> <assets/runtime/name.png> command with measured {frames:{name:{x,y,w,h}}}: it copies PNG bytes unchanged and writes named metadata, then resources.mjs registers the pair. No per-part files or repacking are required. Confirm actual artwork, common state alignment and suitable sampling gutters; exact alpha bounds alone are not filtering padding. Use images/atlas processing below only for a demonstrated crop, canvas alignment, resize or padding need. These operations do not fix incorrect artwork or authorize paid regeneration.
 Images example:
 {"operation":"images","jobs":[{"input":"assets/source.png","crop":{"left":0,"top":0,"width":32,"height":32},"resize":{"width":64,"height":64,"fit":"contain","kernel":"nearest"},"padding":{"top":2,"bottom":2,"left":2,"right":2},"output":"assets/icon.png"}]}
 Optional overlays: [{"input":"assets/mark.png","left":4,"top":4}], with optional crop. Coordinates/dimensions are decoded image pixels, not UI logical units. Resize fit is contain/cover/fill (cover crops; fill distorts); kernel is nearest/lanczos3. Transparent padding; single-frame inputs only; output PNG.

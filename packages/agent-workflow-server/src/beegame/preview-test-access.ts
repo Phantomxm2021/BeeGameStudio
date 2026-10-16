@@ -8,10 +8,18 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[character]!)
 
+/** The managed Preview shell also embeds isolated measurement copies. */
+export function previewTestHostDocument(source: URL) {
+  return { body: `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bee Game Studio Preview Test</title><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}</style></head><body><iframe id="beegame-preview" title="Game preview" sandbox="${PREVIEW_IFRAME_SANDBOX}" src="${escapeHtml(source.href)}"></iframe></body></html>`,
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
+      'referrer-policy': 'no-referrer', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; frame-src ${source.origin}; frame-ancestors 'none'` } }
+}
+
 /** A temporary capability for one already-authorized implementation workspace.
  * No arbitrary workspace, command, browser flags or proxy URL are accepted. */
 export function openPreviewTestAccess(input: {
   start: (mode: 'development' | 'production') => Promise<Snapshot>
+  restart?: (mode: 'development' | 'production') => Promise<Snapshot>
   status: () => Snapshot
   stop: () => void
   browser?: Pick<ReturnType<typeof createPreviewTestBrowser>, 'start' | 'status' | 'close'> &
@@ -47,12 +55,14 @@ export function openPreviewTestAccess(input: {
       const host = { hostUrl: `${url.origin}${prefix}/host`, frameSelector: '#beegame-preview', environment: PREVIEW_ENVIRONMENT }
       try {
         if (request.method === 'GET' && path === '/status') return json({ preview: input.status(), browser: browser.status(), ...host })
-        if (request.method === 'POST' && path === '/preview') {
+        if (request.method === 'POST' && (path === '/preview' || path === '/preview/restart')) {
           const body = await request.json() as { mode?: unknown }
           if (!body || Object.keys(body).some(key => key !== 'mode') || !['development', 'production'].includes(String(body.mode)))
             return json({ error: 'Expected {"mode":"development|production"}' }, 400)
-          if (pending) return json({ error: 'Preview start already in progress; query /status.' }, 409)
-          pending = input.start(body.mode as 'development' | 'production')
+          if (pending) return json({ error: 'Preview start or restart already in progress; query /status.' }, 409)
+          const start = path === '/preview/restart' ? input.restart : input.start
+          if (!start) return json({ error: 'Preview restart is unavailable.' }, 501)
+          pending = start(body.mode as 'development' | 'production')
           try {
             const preview = await pending
             return json({ preview, ...host }, preview.status === 'running' ? 200 : 503)
@@ -123,10 +133,8 @@ export function openPreviewTestAccess(input: {
           if (snapshot.status !== 'running' || !snapshot.url) return json({ error: 'Start a preview first', preview: snapshot }, 503)
           const source = new URL(snapshot.url)
           if (!['http:', 'https:'].includes(source.protocol)) throw new Error('Invalid managed preview URL')
-          return new Response(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bee Game Studio Preview Test</title><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}</style></head><body><iframe id="beegame-preview" title="Game preview" sandbox="${PREVIEW_IFRAME_SANDBOX}" src="${escapeHtml(source.href)}"></iframe></body></html>`, {
-            headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
-              'referrer-policy': 'no-referrer', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; frame-src ${source.origin}; frame-ancestors 'none'` },
-          })
+          const host = previewTestHostDocument(source)
+          return new Response(host.body, { headers: host.headers })
         }
         return new Response('Not found', { status: 404 })
       } catch (error) {
@@ -139,10 +147,11 @@ export function openPreviewTestAccess(input: {
     baseUrl: base,
     instruction: [
       `Optional project-scoped Preview test API (native Bash/fetch, no account credentials): ${base}`,
-      'POST /preview with {"mode":"development"} or {"mode":"production"}; GET /status. Read returned URLs from JSON. Production serves the existing build without rewriting it. Navigate to hostUrl and inspect its iframe; the sandbox matches Dashboard.',
+      'POST /preview starts or reuses the preview server; POST /preview/restart restarts that server after server/config changes (not the browser). Both accept {"mode":"development"} or {"mode":"production"}; GET /status. Read returned URLs from JSON. Production serves the existing build without rewriting it. Navigate to hostUrl and inspect its iframe; the sandbox matches Dashboard.',
       'The game may be mounted under a URL subpath. Resolve game JSON, images, fonts and audio relative to the game/build base, not the host origin root. Vite development receives the preview base from BGS; production uses your existing build base. Resolve registered content documents relative to content/index.json. Do not hardcode a session URL into source or build output.',
       'POST /browser starts or reuses an isolated, muted Chromium (reused is returned); it does not restart it. POST /browser/restart explicitly closes the old browser/pages and finishes active recordings, then returns a new CDP endpoint. It avoids shell sandbox escape approvals and is closed with this capability. Native browser tools remain available; verification methods are yours.',
       'Optional Node helper: run node <test-script.mjs> (not bun). const { withPreviewPage } = await import(process.env.BEEGAME_PREVIEW_TEST_MODULE); await withPreviewPage({mode:"production",contextOptions:{viewport:{width:960,height:540}},beforeNavigate:async({page,context})=>{ /* Install routes/recording here BEFORE the first game request. */ }}, async ({page,gameFrame,runtimeErrors,runtimeErrorDetails,observedEnvironment,observeEnvironment}) => { /* Use gameFrame for the actual game. runtimeErrors counts all pageErrors, consoleErrors, failedRequests and httpErrors from before first navigation. runtimeErrorDetails holds the first 5 per category: redacted, truncated messages/locations or request paths/status/failure reasons, without headers, bodies or console objects. Both are attached to thrown Errors and retained by snapshot/play capture. Check these observations explicitly; zero errors is not gameplay acceptance. Choose exact expected values from current authored sources. */ }); Omit apiUrl to resolve current workspace access. Explicit apiUrl is supported. observedEnvironment records the actual game-frame viewport/DPR/touch/pointer at first load; await observeEnvironment() rereads it after resize. contextOptions accepts deviceScaleFactor. frame is a FrameLocator, gameFrame a Frame; page.keyboard targets the focused iframe. The helper closes context/CDP on success or failure and assigns no verdict.',
+      'Audio/custom probe scope: page is the OUTER preview wrapper; gameFrame is the game iframe. Install startup hooks with beforeNavigate:async({context})=>{ await context.addInitScript(() => { /* Install your actual probe hooks here. */ }); }. Each frame has a separate window, even though addInitScript runs in all frames. Read game observations with gameFrame.evaluate, never page.evaluate. For example, await gameFrame.evaluate(() => window.__audioEvents ?? null) reads a caller-installed probe, not a built-in helper field. A missing probe is unverified, not zero audio events; confirm installation, real user activation and observation scope before blaming or rewriting game audio. Network fetch/decode/source-start observations alone do not prove audible output or listening quality. Do not add game debug globals solely to satisfy a mis-scoped test.',
       'A pinned shared playwright-core client is available to project Node scripts: const { chromium } = await import(process.env.BEEGAME_PLAYWRIGHT_MODULE); const browser = await chromium.connectOverCDP(endpoint). Use the endpoint returned by POST /browser; no npm install or browser download is needed for this path. Close your test pages/contexts and disconnect when finished; the capability owns browser startup and cleanup. This shared client is test tooling, not a game dependency or deployment asset.',
       'For clean-runtime assertions use withPreviewPage({runtimeErrorPolicy:"fail",...},inspect): retained first-load errors reject even if inspect returns PASS or installs listeners only after a reload. Default "observe" remains diagnostic. checkNumericSamples(allRetainedValues,{minimum?,maximum?}) from the same helper deterministically reports passed/failed/unverified for explicit finite bounds; any violating sample remains failed, empty samples unverified. It does not verify the chosen bound, unseen behavior, concurrency or listening quality. Preserve separate per-run evidence; do not overwrite an already measured report while rechecking it.',
       'checkTextSeparation(gameFrame,[selectorA,selectorB,...]) observes rendered text-node rectangles, including nested spans, for explicit text groups intended to be separate. Overlap fails, missing/hidden text is unverified. This is a current-state DOM geometry check, not Canvas, clipping, occlusion, all-screen coverage or visual taste. Available from the same Node helper.',

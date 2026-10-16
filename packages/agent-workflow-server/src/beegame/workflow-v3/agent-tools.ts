@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { ZodError } from 'zod/v4'
 import { CURRENT_CONTENT_CHECKER_ENTRY, CONTENT_BINDING_ENTRY, MEDIA_PRODUCTION_ENTRY, RESOURCE_PRODUCTION_ENTRY } from '../content-checker-runtime'
@@ -8,19 +9,63 @@ import type { openPreviewTestAccess } from '../preview-test-access'
 import { publishProjectPreviewCapability } from '../project-preview-capability'
 import type { createAgentMeasurement } from './agent-measurement'
 import type { openImageGenerationAccess } from '../../image-generation/access'
-import { bundleContentConsumer, contentConsumerCommand } from '../game-content-consumer-cli'
+import { bundleContentConsumer, contentConsumerCommand, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
 import { sharedPlaywright } from '../shared-playwright'
 import type { LayoutConstraints } from '../ui-layout-audit'
 import type { ResourceCatalogPack, ResourceCatalogPage } from '@bee-game-studio/beegame-resource-core'
+import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
+import { checkDesignHandoff, checkDesignHandoffDraft, DESIGN_HANDOFF_INSTRUCTION,
+  finalizeDesignDocuments, readDesignAcceptanceRequirements, readDesignImplementationChecklist, snapshotDesignDocuments } from '../design-handoff'
+import { DESIGN_RUNTIME_REPORT_INSTRUCTION, inspectDesignAcceptance } from '../runtime-acceptance'
 
 export type AgentPreviewAccess = ReturnType<typeof openPreviewTestAccess>
 export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
+
+/** Same design indexes and writer lifetime; no new workflow state or copied plan. */
+export function openDesignActions(root: string, requireEditableContent = false) {
+  let before = snapshotDesignDocuments(root, PROJECT_DOCUMENTS)
+  return async (action: string, documents: string[] = []) => {
+    const selected = documents.map(name => name.startsWith('docs/') ? name.slice(5) : name)
+    if (selected.some(name => !PROJECT_DOCUMENTS.includes(name as typeof PROJECT_DOCUMENTS[number])))
+      throw Error('Expected an existing design document name')
+    if (documents.length && action !== 'finalize') throw Error('Document selection is supported only by finalize')
+    if (action === 'help') return { valid: true, instruction: DESIGN_HANDOFF_INSTRUCTION,
+      acceptanceInstruction: DESIGN_RUNTIME_REPORT_INSTRUCTION + ' Save .beegame/delivery/acceptance.json with scope:"delivery", status:"passed"|"failed"|"blocked", summary, environment, evidencePaths, artifactPaths and verification:{target:"deployment",observation:"target-runtime",knownIssues:[],unverified:[],designRevision,requirementChecks,contentChecks?}. Copy current designRevision and requirement source hashes from --design implementation; do not calculate or invent them. Record real differences from selected designs and missing observations honestly. --design acceptance reads this same validator; it never executes or retries tests. After reports are final, attach the report to the existing measurement with --report .beegame/delivery/acceptance.json when measuring a static Web build.',
+      help: 'handoff.mjs --design baseline|implementation|acceptance reads saved design inputs and acceptance evidence. baseline requires all eight documents and their output/acceptance entries, but not final implementationItems. Its CLI prints status/issues and counts by default; --design baseline --details returns full requirements and source hashes. Baseline checks index integrity, not layout geometry; use the existing check-content.mjs --design-layouts --draft for planning geometry. implementation requires the final task coverage. --design finalize [DOCUMENT.md ...] updates only selected documents (default: saved documents, independently); missing unrelated documents are not prerequisites. It explicitly updates existing document/index version metadata after an authorized write; call before checking the baseline and after affected design edits, before writing verification reports. These commands do not build, execute tests or certify semantic completeness, taste or quality.' }
+    if (action === 'finalize') {
+      const names = PROJECT_DOCUMENTS.filter(name => selected.length ? selected.includes(name) :
+        existsSync(resolve(root,'docs',name)))
+      const issues: string[] = [], finalized: string[] = []
+      for (const name of names) {
+        const draft = checkDesignHandoffDraft(root, name).issues
+        if (draft.length) { issues.push(...draft); continue }
+        const result = finalizeDesignDocuments(root, [name], before)
+        issues.push(...result.issues)
+        if (!result.issues.length) {
+          before.documents[name] = snapshotDesignDocuments(root, [name]).documents[name]
+          finalized.push(name)
+        }
+      }
+      if (!names.length) issues.push('No saved design documents to finalize')
+      return { valid: !issues.length, issues, finalized }
+    }
+    if (action === 'baseline') {
+      const check = checkDesignHandoff(root, PROJECT_DOCUMENTS, { technicalBaseline: true })
+      return { ...check, requirements: check.valid ? readDesignAcceptanceRequirements(root, { technicalBaseline: true }) : [] }
+    }
+    if (action === 'implementation') return { valid: true, ...readDesignImplementationChecklist(root),
+      requirements:readDesignAcceptanceRequirements(root) }
+    if (action === 'acceptance') return inspectDesignAcceptance(root,true,requireEditableContent)
+    throw Error('Unknown design action; use --design help')
+  }
+}
 
 /** Entry points only: no stage, Task, invented authority or tool/result rewriting.
  * Native execution already supplies the shared checker/Sharp environment. */
 export async function openAgentTools(input: {
   workspacePath: string
   constraints?: LayoutConstraints
+  requireEditableContent?: boolean
   libraryBaseUrl?: string
   readInitialCatalog?: boolean
   getAuthToken: () => string | undefined | Promise<string | undefined>
@@ -30,6 +75,7 @@ export async function openAgentTools(input: {
   openImage?: () => AgentImageAccess | Promise<AgentImageAccess>
 }) {
   const root = await realpath(input.workspacePath)
+  const design = openDesignActions(root, input.requireEditableContent)
   // Check each parent before creating a child; a project symlink must not
   // redirect host-written adapters outside the authorized workspace.
   let parent = root
@@ -72,6 +118,13 @@ export async function openAgentTools(input: {
           return new Response('Not found',{status:404})
         try {
           const body=await request.json()
+          if (body && typeof body === 'object' && 'designAction' in body) {
+            if (Object.keys(body).some(key => !['designAction','documents'].includes(key)) || typeof body.designAction !== 'string' ||
+                body.documents !== undefined && (!Array.isArray(body.documents) || body.documents.some((name: unknown) => typeof name !== 'string')))
+              throw Error('Design accepts designAction and optional document names')
+            await input.measurement!.assertActive(body.designAction === 'finalize')
+            return Response.json(await design(body.designAction, body.documents), { headers: { 'Cache-Control':'no-store' } })
+          }
           if (body && typeof body === 'object' && 'executionInputs' in body) {
             if (Object.keys(body).length !== 1 || body.executionInputs !== true)
               throw Error('Execution input inspection accepts executionInputs:true only')
@@ -122,16 +175,16 @@ export async function openAgentTools(input: {
       // start measurement or manufacture an author-written review assignment.
       await writeFile(resolve(directory,'handoff.mjs'),[
         'import {realpath,readFile} from "node:fs/promises";',
-        'const help="Read-only task/evidence handoff: node <this-entry> [FILE ...] [--details]. With no files: task, source navigation and latest measurement/freshness; no source coverage. Files must be explicit public project-relative design/source/test/report paths. --details includes current requirement text, selected source text and saved observations/history. No build, tests, model, writes or quality verdict.";',
+        'const help="Task/evidence handoff: node <this-entry> [FILE ...] [--details]. With no files: task, source navigation and latest measurement/freshness; no source coverage. Files must be explicit public project-relative design/source/test/report paths. --details includes current requirement text, selected source text and saved observations/history. --design baseline prints status/issues and counts; --design baseline --details returns full requirements and source hashes. --design help describes design inspection; only --design finalize [DOCUMENT.md ...] writes existing version metadata. All other actions are read-only. No build, tests, model or quality verdict.";',
         'const args=process.argv.slice(2);if(args.length===1 && args[0]==="--help"){console.log(help);process.exit(0)}',
-        'const details=args.at(-1)==="--details";const paths=details?args.slice(0,-1):args;if(paths.some(p=>p.startsWith("--")))throw Error(help);',
+        'const details=args.at(-1)==="--details",positional=details?args.slice(0,-1):args;const designAction=positional[0]==="--design"?positional[1]:undefined;if(positional[0]==="--design" && (!designAction || designAction!=="finalize" && positional.length!==2 || details && designAction!=="baseline"))throw Error("Use --design help");const documents=designAction==="finalize"?positional.slice(2):[];const paths=designAction?[]:positional;if(paths.some(p=>p.startsWith("--")))throw Error(help);',
         'if(await realpath(process.cwd())!=='+JSON.stringify(root)+')throw Error("Handoff belongs to another workspace");',
         'if(!process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE)throw Error("No active BGS turn capability");',
         'const capability=JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE,"utf8"));',
         'if(capability.version!==1 || capability.workspace!==await realpath(process.cwd()) || capability.sessionId!=='+JSON.stringify(input.sessionId)+' || !capability.executionId)throw Error("Expired or mismatched turn capability");',
         'const api=new URL(capability.apiUrl);if(api.protocol!=="http:" || api.hostname!=="127.0.0.1" || api.username || api.password || api.search || api.hash)throw Error("Invalid handoff endpoint");',
-        'const response=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({handoffPaths:paths,details}),redirect:"error"});',
-        'const result=await response.json();console.log(JSON.stringify(result,null,2));if(!response.ok || result.error || !result.sources?.valid)process.exitCode=1;',
+        'const response=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(designAction?{designAction,documents}:{handoffPaths:paths,details}),redirect:"error"});',
+        'const result=await response.json();const output=designAction==="baseline" && !details && typeof result.valid==="boolean" ? {scope:"design-index-integrity",valid:result.valid,issues:result.issues,revision:result.revision,documentVersions:result.documentVersions,requirementCount:result.requirements?.length??0,layoutVerified:false,runtimeVerified:false,note:result.note,details:"Use --design baseline --details for full requirements/source hashes. Geometry is not checked here; use check-content.mjs --design-layouts --draft."} : result;console.log(JSON.stringify(output,null,2));if(!response.ok || result.error || !(designAction?result.valid:result.sources?.valid))process.exitCode=1;',
       ].join('\n'),{flag:'wx',mode:0o600})
     }
     if (input.libraryBaseUrl) {
@@ -182,6 +235,7 @@ export async function openAgentTools(input: {
     // Optional existing geometry/paint implementation, not generated game code.
     // The bundle stays out of model context; the Agent chooses whether to use it.
     await writeFile(resolve(directory, 'content-consumer.mjs'), await bundleContentConsumer(), { flag: 'wx', mode: 0o600 })
+    await writeFile(resolve(directory, 'registered-runtime-files.mjs'), await registeredRuntimeFilesSource(), { flag: 'wx', mode: 0o600 })
     await writeFile(resolve(directory, 'consumer.mjs'),
       contentConsumerCommand(root, entry('content-consumer.mjs')), { flag: 'wx', mode: 0o600 })
     return {
@@ -195,7 +249,7 @@ export async function openAgentTools(input: {
       turnContext: [
         'Optional BGS project tools (project root; --help):',
         ...(input.measurement ? ['Static Web source-copy build and smoke measurement (no separate prebuild): node '+JSON.stringify(entry('measure.mjs'))+' --help; --inspect reads without rerunning.'] : []),
-        ...(input.measurement ? ['Read-only task/evidence: node '+JSON.stringify(entry('handoff.mjs'))+' [FILE ...] [--details]; task facts, optional sources.'] : []),
+        ...(input.measurement ? ['Task/evidence: node '+JSON.stringify(entry('handoff.mjs'))+' [FILE ...] [--details] reads facts/sources. --design help exposes the existing eight-document index, baseline and implementation checks; only --design finalize writes version metadata.'] : []),
         'Assets: bun ' + JSON.stringify(entry('assets.mjs')) + ' --help (catalog/download, local hashes). ' + libraryState,
         ...(input.readInitialCatalog ? [library ? await initialCatalogContext(library.baseUrl) :
           'Initial built-in resource catalog: unavailable. ' + libraryState + ' This is not an empty catalog.'] : []),

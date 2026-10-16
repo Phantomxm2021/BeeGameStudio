@@ -20,3 +20,12 @@ export function compileUiReferenceBoard(request: BoardRequest, screenOrientation
   }
   note: string
 }
+
+type AssetSheetRequest = BoardRequest & { purpose?: string; requirementIds?: string[]; uiAssets?: unknown }
+export function compileUiAssetSheet(request: AssetSheetRequest): {
+  request: Omit<AssetSheetRequest, 'uiAssets' | 'uiReference' | 'prompt'> & { prompt: string }
+  layout: ReturnType<typeof compileUiReferenceBoard>['layout'] & {
+    elements: Array<{ id: string; description: string; width: number; height: number }>
+  }
+  note: string
+}

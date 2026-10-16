@@ -112,3 +112,43 @@ export function compileUiReferenceBoard(request, screenOrientation) {
     note: 'Computed prompt geometry only. Confirm the inventory against the project UI specification and inspect actual image framing, HUD coverage and readability; none is certified by this plan.',
   }
 }
+
+/** Production skins from a selected design, not another screen mockup. Uses
+ * the existing grid calculator; requested cells are NOT measured atlas frames. */
+export function compileUiAssetSheet(request) {
+  const spec = request.uiAssets
+  uiBoardObject(spec, ['elements'], 'uiAssets')
+  if (request.purpose !== 'production' || !Array.isArray(request.requirementIds) || !request.requirementIds.length)
+    throw Error('UI assets need purpose: production and existing Manifest requirementIds')
+  uiBoardText(request.referenceImagePath, 'UI assets referenceImagePath (selected design)', 512)
+  if (request.prompt !== undefined || request.uiReference !== undefined)
+    throw Error('Use uiAssets with the selected design, not prompt or uiReference')
+  if (request.background !== undefined && request.background !== 'transparent')
+    throw Error('UI asset sheets require background: transparent')
+  if (!Array.isArray(spec.elements) || !spec.elements.length || spec.elements.length > 64)
+    throw Error('uiAssets.elements must list 1–64 static visual elements from the selected design')
+  for (const element of spec.elements) {
+    uiBoardObject(element, ['id', 'description', 'width', 'height'], 'UI asset element')
+    uiBoardText(element.id, 'element.id', 80)
+    uiBoardText(element.description, 'element.description (design appearance/state)', 4000)
+    if (![element.width, element.height].every(value => Number.isSafeInteger(value) && value > 0))
+      throw Error('UI element width/height must be positive integer design dimensions')
+  }
+  const grid = compileUiReferenceBoard({ size: request.size, uiReference: {
+    viewport: { width: Math.max(...spec.elements.map(item => item.width)), height: Math.max(...spec.elements.map(item => item.height)) },
+    style: 'Grid calculation only', screens: spec.elements.map(item => ({ id: item.id, description: item.description })),
+  } }).layout
+  const prompt = [
+    'Produce a shared runtime UI asset sheet using the attached selected UI design as the visual source, not a new design.',
+    'Reproduce the specified element skins, materials, silhouettes, decoration and states. Do not replace distinctive artwork with generic geometric controls.',
+    `Canvas ${grid.canvas.width} x ${grid.canvas.height}; ${grid.columns} columns x ${grid.rows} rows, transparent gutters of ${grid.gap}px.`,
+    'Isolate each unrotated element in its cell, with transparent empty space between elements. Preserve the intended opacity inside panels/buttons. No screen backgrounds, dynamic labels, scores, progress fills or hit areas; those remain runtime UI. Skins are text-free unless an element explicitly calls for fixed decorative lettering or a wordmark. IDs below are identifiers, never text to paint.',
+    ...spec.elements.map((item, index) => `Element ${JSON.stringify(item.id.trim())}, design dimensions ${item.width} x ${item.height}, ` +
+      `cell ${JSON.stringify(grid.panels[index])}: ${item.description.trim()}`),
+  ].join('\n\n')
+  if (prompt.length > 32000) throw Error('UI asset prompt exceeds 32000 characters; shorten element descriptions')
+  const { uiAssets: ignored, ...options } = request
+  return { request: { ...options, prompt, size: `${grid.canvas.width}x${grid.canvas.height}`, background: 'transparent', quality: request.quality ?? 'low' },
+    layout: { ...grid, elements: spec.elements },
+    note: 'Design-linked production request only, not an aesthetic verdict or measured atlas. Inspect actual alpha/bounds, then crop/pack or register measured named frames with the existing media/resources tools. No image or frame coordinates are certified.' }
+}

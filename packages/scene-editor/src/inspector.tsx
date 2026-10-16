@@ -182,6 +182,16 @@ function TilemapProperties({ component, document, replace }: { component: Extrac
     </span></Property>
   </>
 }
+export function withSpriteFrame(component: Extract<SceneComponent, { type: 'sprite-renderer' | 'image' }>, sheet: SceneAsset['spriteSheet'], value: string) {
+  // Preserve the saved selector convention. Writing initialFacing alongside a
+  // retained frame would leave the higher-priority frame unchanged.
+  const directional = sheet && !('frames' in sheet) && sheet.facings?.length
+  const property = directional && typeof component.properties.frame !== 'string' ? 'initialFacing' : 'frame'
+  const properties = { ...component.properties, [property]: value }
+  const selection = spriteSheetSelection(sheet, properties)
+  return { ...component, ...(component.type === 'sprite-renderer' ? selection : {}), properties,
+    material: { ...component.material, ...(selection.frame ? { textureRegion: selection.frame } : {}) } }
+}
 function SpriteFrameProperty({ component, document, replace }: { component: Extract<SceneComponent, { type: 'sprite-renderer' | 'image' }>; document: SceneDocument; replace: (next: SceneComponent, label: string) => void }) {
   const sheet = component.assetId ? document.assets[component.assetId]?.spriteSheet : undefined
   const atlas = sheet && 'frames' in sheet ? sheet : undefined
@@ -189,16 +199,10 @@ function SpriteFrameProperty({ component, document, replace }: { component: Extr
   const directional = Boolean(strip?.facings?.length)
   const names = atlas ? Object.keys(atlas.frames) : directional ? strip?.facings : strip?.states
   if (!names?.length) return null
-  const property = directional ? 'initialFacing' : 'frame'
   const selection = spriteSheetSelection(sheet, component.properties)
   const value = directional ? selection.animation?.initialFacing ?? names[0] : atlas ? (typeof component.properties.frame === 'string' ? atlasFrameName(component.properties.frame) : names[0]) : names[Math.round((selection.frame?.x ?? 0) / strip!.frameWidth)] ?? names[0]
   return <Property label={directional ? 'Facing' : 'Frame'}><Select ariaLabel={directional ? 'Sprite facing' : 'Sprite frame'} value={value} options={names.map(name => ({ value: name, label: name }))}
-    onValueChange={value => {
-      const properties = { ...component.properties, [property]: value }
-      const selection = spriteSheetSelection(sheet, properties)
-      replace({ ...component, ...(component.type === 'sprite-renderer' ? selection : {}), properties,
-        material: { ...component.material, ...(selection.frame ? { textureRegion: selection.frame } : {}) } }, 'Change sprite frame')
-    }} /></Property>
+    onValueChange={value => replace(withSpriteFrame(component, sheet, value), 'Change sprite frame')} /></Property>
 }
 function TextInspector({ component, document, replace }: { component: Extract<SceneComponent, { type: 'text' }>; document: SceneDocument; replace: (next: SceneComponent, label: string) => void }) {
   const [text, setText] = useState(component.text)

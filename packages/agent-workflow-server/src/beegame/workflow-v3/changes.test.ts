@@ -19,7 +19,7 @@ async function fixture() {
   for (const dir of ['content/ui','content/scenes','src']) await mkdir(join(root,dir),{recursive:true})
   await writeFile(join(root,'package.json'),JSON.stringify({scripts:{build:'bun run build.mjs'}}))
   await writeFile(join(root,'build.mjs'),"import {cp,mkdir} from 'node:fs/promises';await mkdir('dist',{recursive:true});await cp('src/index.html','dist/index.html');await cp('content','dist/content',{recursive:true});")
-  await writeFile(join(root,'src/index.html'),'<html><body>Fixture<script>fetch("/content/ui/menu.json").then(r=>r.json()).then(d=>document.body.dataset.height=d.data.nodes[1].layout.size[1]);</script></body></html>')
+  await writeFile(join(root,'src/index.html'),'<html><body>Fixture<script>fetch("./content/ui/menu.json").then(r=>r.json()).then(d=>document.body.dataset.height=d.data.nodes[1].layout.size[1]);</script></body></html>')
   await writeFile(join(root,'content/ui/menu.json'),JSON.stringify(uiLayoutFixture()))
   await writeFile(join(root,'content/scenes/level.json'),JSON.stringify(sceneLayoutFixture()))
   await writeFile(join(root,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',dimension:'2d',documentRevision:'a'.repeat(64),
@@ -96,9 +96,12 @@ test('autonomous editor has a single CAS writer, refuses stale/paused scope, and
     const identity={expectedVersion:f.run.version,attemptId:f.run.writer!.attemptId,fence:f.run.writer!.fence}
     failSettlement=false
     f.run=await executor.recover(f.run,identity)
+    expect(f.run.paused).toBeDefined()
     expect(f.run.sourceEdits![0]!.sourceEdit.status).toBe('failed');expect(f.run.writer).toBeUndefined()
     expect(f.run.blockedReason).toContain('Source edit failed:')
     expect(f.run.blockedReason).not.toContain('Saved candidates are unmeasured')
+    await expect(executor.edit(f.run,f.run.sourceEdits![0]!.requestKey==='a'?a:b)).rejects.toThrow('resume')
+    f.run=await executor.resume(f.run)
     await expect(executor.edit(f.run,f.run.sourceEdits![0]!.requestKey==='a'?a:b)).rejects.toThrow('historical/failed')
     f.run=await executor.stop(f.run)
     await expect(executor.edit(f.run,{...await editValue(f),requestKey:'paused'})).rejects.toThrow('resume')

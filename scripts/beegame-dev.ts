@@ -2,6 +2,7 @@
 import {
   buildBeeGameDevPlan,
   waitForBeeGameDevServices,
+  stopBeeGameDevServices,
   DEFAULT_BEEGAME_BILLING_PORT,
   DEFAULT_BEEGAME_FRONTEND_PORT,
   DEFAULT_BEEGAME_RUNTIME_PORT,
@@ -62,10 +63,15 @@ console.log(`Billing:  http://127.0.0.1:${plan.ports.billing}`)
 console.log(`Skills:   http://127.0.0.1:${plan.ports.skills}`)
 console.log(`Resources: http://127.0.0.1:${plan.ports.resources}`)
 
+let shuttingDown = false
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    shutdown()
-    process.exit(signal === 'SIGINT' ? 130 : 143)
+    if (shuttingDown) return
+    shuttingDown = true
+    void stopBeeGameDevServices(children).then(
+      () => process.exit(signal === 'SIGINT' ? 130 : 143),
+      error => { console.error(error.message); process.exit(1) },
+    )
   })
 }
 
@@ -73,13 +79,3 @@ await waitForBeeGameDevServices(children, event => {
   console.error(JSON.stringify({ type: 'service.exited', timestamp: new Date().toISOString(), ...event }))
   if (event.exitCode !== 0) process.exitCode = 1
 })
-
-function shutdown(): void {
-  for (const { child } of children) {
-    try {
-      child.kill()
-    } catch {
-      // Child may already be closed.
-    }
-  }
-}

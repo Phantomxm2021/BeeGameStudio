@@ -40,7 +40,7 @@ test('UI reference coordinates preserve causality: '+mode,async()=>{
       '</style><div id="stage"><div id="surface"><button id="play">'+
       (mode==='overflow'?'<span style="display:block">First</span><span style="display:block">Second</span>':'Play')+
       '</button></div></div><div id="other"></div><script>'+ (mode==='perspective'?'document.querySelector("#stage").style.perspective="1000px";':'')+
-      'fetch("/content/ui/menu.json").then(r=>r.json()).then(d=>{const n=d.data.nodes[1],frame=document.querySelector("#surface"),b=document.querySelector("#play"),'+
+      'fetch("./content/ui/menu.json").then(r=>r.json()).then(d=>{const n=d.data.nodes[1],frame=document.querySelector("#surface"),b=document.querySelector("#play"),'+
       's='+(mode==='ignore'?'[200,52]':'n.layout.size')+',p='+(mode==='ignore'?'[0,0]':'n.layout.position||[0,0]')+';'+
       'const scale='+(['offset-root','changing-basis'].includes(mode)?'.65':'Math.min(innerWidth/1280,innerHeight/720)')+';frame.style.transform='+
       (mode==='axis-scale'?'"scale(.6,.8)"':'"scale("+scale+")"')+

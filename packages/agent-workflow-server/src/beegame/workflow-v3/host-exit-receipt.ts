@@ -5,6 +5,7 @@ import { join, relative, isAbsolute, sep } from 'node:path'
 import { z } from 'zod/v4'
 import { digest, WorkflowError, type Run, type AgentTurn } from './state'
 import { sameJson } from './store'
+import { readHostBootIdentity, type HostBootIdentity } from './host-boot-identity'
 
 // Exit facts only: never checks, outputs, an acceptance verdict or a request
 // to replay. Signature key stays in the host; project files are not evidence.
@@ -12,6 +13,9 @@ export type HostExitFacts = Pick<AgentTurn, 'quiescedAt' | 'notStarted' | 'turnI
 export type HostExitReceipts = {
   save(run: Run, facts: HostExitFacts): Promise<void>
   read(run: Run): Promise<HostExitFacts | undefined>
+  /** Persist before claiming/submitting work. Not an assertion of exit. */
+  claim?(run: Run): Promise<void>
+  rebootEvidence?(run: Run): Promise<'host-reboot' | 'same-boot' | 'foreign-host' | 'ownership-missing' | 'unsupported-host'>
 }
 const factsSchema = z.object({
   quiescedAt: z.string().datetime(), notStarted: z.literal(true).optional(),
@@ -21,7 +25,8 @@ const factsSchema = z.object({
 const invalid = () => new WorkflowError('exit-receipt-invalid',
   'Host exit receipt is unreadable, untrusted or belongs to another writer; no unlock or automatic retry', 503)
 
-export function createHostExitReceipts(input: { dataRoot: string; key?: Uint8Array }): HostExitReceipts | undefined {
+export function createHostExitReceipts(input: { dataRoot: string; key?: Uint8Array;
+  identity?: () => Promise<HostBootIdentity | undefined> }): HostExitReceipts | undefined {
   // Reuse existing host configuration key; do not silently create a project
   // key or make a plaintext project assertion into trusted evidence.
   if (!input.key) return undefined
@@ -56,10 +61,10 @@ export function createHostExitReceipts(input: { dataRoot: string; key?: Uint8Arr
   }
   const filename = (run: Run) => digest(JSON.stringify(binding(run)))+'.json'
   const signature = (payload: string) => createHmac('sha256', key).update(payload).digest('hex')
-  const readAt = async (run: Run, root: string): Promise<HostExitFacts | undefined> => {
+  const readEnvelope = async (run: Run, root: string, suffix = '') => {
     let file
     try {
-      file = await open(join(root, filename(run)), constants.O_RDONLY | constants.O_NOFOLLOW)
+      file = await open(join(root, filename(run)+suffix), constants.O_RDONLY | constants.O_NOFOLLOW)
       const stat = await file.stat()
       if (!stat.isFile() || stat.size > 2*1024*1024) throw invalid()
       const value = JSON.parse(await file.readFile('utf8')) as { payload?: unknown; signature?: unknown }
@@ -67,36 +72,71 @@ export function createHostExitReceipts(input: { dataRoot: string; key?: Uint8Arr
           !timingSafeEqual(Buffer.from(value.signature, 'hex'), Buffer.from(signature(value.payload), 'hex'))) throw invalid()
       const body = JSON.parse(value.payload)
       if (body.version !== 1 || !sameJson(body.binding, binding(run))) throw invalid()
-      const facts = factsSchema.parse(body.facts) as HostExitFacts
-      return facts
+      return body
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      if (['EACCES','EPERM','EIO','EMFILE','ENFILE'].includes((error as NodeJS.ErrnoException).code ?? ''))
+        throw new WorkflowError('exit-evidence-read-failed', 'Host exit evidence could not be read; no unlock or automatic retry', 503)
       throw invalid()
     } finally { await file?.close() }
   }
+  const readAt = async (run: Run, root: string): Promise<HostExitFacts | undefined> => {
+    const body = await readEnvelope(run, root)
+    if (body === undefined) return undefined
+    try { return factsSchema.parse(body.facts) as HostExitFacts } catch { throw invalid() }
+  }
+  const ownershipSchema = z.object({ host: z.string().regex(/^[a-f0-9]{64}$/), boot: z.string().min(1).max(128) }).strict()
+  const identity = async () => {
+    try {
+      const value = await (input.identity ?? readHostBootIdentity)()
+      if (!value) return undefined
+      if (!value.machine || !value.boot) throw Error('Missing host identity')
+      return { host: createHmac('sha256', key).update('host:'+value.machine.toLowerCase()).digest('hex'), boot: value.boot.toLowerCase() }
+    } catch { throw new WorkflowError('host-identity-unavailable', 'Cannot verify kernel host/boot identity; no unlock or automatic retry', 503) }
+  }
+  const publish = async (run: Run, root: string, body: unknown, suffix = '') => {
+    const payload = JSON.stringify(body), file = join(root, filename(run)+suffix)
+    const temporary = file+'.'+randomUUID()+'.tmp'
+    const handle = await open(temporary, 'wx', 0o600)
+    try {
+      try { await handle.writeFile(JSON.stringify({ payload, signature: signature(payload) })); await handle.sync() }
+      finally { await handle.close() }
+      try { await link(temporary, file) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || !sameJson(await readEnvelope(run, root, suffix), body)) throw invalid()
+      }
+      const directory = await open(root, 'r')
+      try { await directory.sync() } finally { await directory.close() }
+    } finally { await unlink(temporary) }
+  }
   return {
+    async claim(run) {
+      const ownership = await identity()
+      if (!ownership) return // No reboot recovery on unsupported platforms.
+      const root = await rootFor(run, true)
+      await publish(run, root, { version: 1, binding: binding(run), ownership }, '.owner')
+    },
+    async rebootEvidence(run) {
+      let body
+      try { body = await readEnvelope(run, await rootFor(run), '.owner') }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'ownership-missing'; throw error }
+      if (!body) return 'ownership-missing'
+      let ownership
+      try { ownership = ownershipSchema.parse(body.ownership) } catch { throw invalid() }
+      const current = await identity()
+      if (!current) return 'unsupported-host'
+      if (current.host !== ownership.host) return 'foreign-host'
+      return current.boot === ownership.boot ? 'same-boot' : 'host-reboot'
+    },
     async read(run) {
       try { return await readAt(run, await rootFor(run)) }
       catch(error) {if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error}
     },
     async save(run, value) {
-      const facts = factsSchema.parse(value), root = await rootFor(run,true), file = join(root, filename(run))
+      const facts = factsSchema.parse(value), root = await rootFor(run,true)
       const existing = await readAt(run, root)
       if (existing) { if (!sameJson(existing, facts)) throw invalid(); return }
-      const payload = JSON.stringify({ version: 1, binding: binding(run), facts })
-      const temporary = file+'.'+randomUUID()+'.tmp'
-      const handle = await open(temporary, 'wx', 0o600)
-      try {
-        try { await handle.writeFile(JSON.stringify({ payload, signature: signature(payload) })); await handle.sync() }
-        finally { await handle.close() }
-        // Publish a complete fsynced receipt without replacing an earlier fact.
-        try { await link(temporary, file) }
-        catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || !sameJson(await readAt(run, root), facts)) throw error
-        }
-        const directory = await open(root, 'r')
-        try { await directory.sync() } finally { await directory.close() }
-      } finally { await unlink(temporary) }
+      await publish(run, root, { version: 1, binding: binding(run), facts })
     },
   }
 }

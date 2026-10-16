@@ -116,6 +116,7 @@ import { loadPersonalImageConnection, publicPersonalImageConnection, savePersona
 import { createImageBillingClient } from '@bee-game-studio/beegame-billing-core/image-billing'
 import {
   discoverMcpServers,
+  readDiscoveredMcpServerInput,
   type McpServerScope,
   type McpServerTransport,
 } from './mcp-servers-store'
@@ -760,6 +761,10 @@ export function createAgentWorkflowApp(
       }),
       start: async mode => {
         await beeGamePreviews.start({ sessionId, workspacePath, mode })
+        return snapshot()
+      },
+      restart: async mode => {
+        await beeGamePreviews.restart({ sessionId, workspacePath, mode })
         return snapshot()
       },
       status: snapshot,
@@ -1628,11 +1633,13 @@ export function createAgentWorkflowApp(
 
   app.get('/api/mcp-servers/discover', async c => {
     // Host configuration files are not user-scoped, unlike saved MCP entries.
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'workspace.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(
       await discoverMcpServers({
         dataDir: getCurrentUserDataRoot(c.req.raw),
+        existingServers: await dashboardRepository.listMcpServers(c.req.raw, user),
         outboundTargetPolicyOptions,
         outboundTargetResolver: resolveOutboundTarget,
       }),
@@ -1658,6 +1665,12 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
+    // A dashboard stdio test starts a process on the host, unlike owner-scoped
+    // configuration storage and sandboxed project execution.
+    if (body.transport === 'stdio' || body.transport === undefined) {
+      const hostForbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
+      if (hostForbidden) return c.json(hostForbidden, 403)
+    }
     const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
     if (error) return c.json({ error }, 400)
     return c.json(
@@ -1672,13 +1685,26 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
+    let input = body
+    if (body.sourcePath !== undefined) {
+      const hostForbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
+      if (hostForbidden) return c.json(hostForbidden, 403)
+      if (typeof body.sourcePath !== 'string' || typeof body.name !== 'string') {
+        return c.json({ error: 'MCP discovery source and name are required' }, 400)
+      }
+      const discovered = readDiscoveredMcpServerInput(body.sourcePath, body.name, {
+        dataDir: getCurrentUserDataRoot(c.req.raw),
+      })
+      if (!discovered) return c.json({ error: 'Discovered MCP configuration not found; discover again' }, 404)
+      input = discovered
+    }
+    const error = await validateMcpServerBody(input, hasPermittedOutboundUrl)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
     const saved = await dashboardRepository.upsertMcpServer(
       c.req.raw,
       user,
-      { ...toMcpServerInput(body), id: undefined },
+      { ...toMcpServerInput(input), id: undefined },
     )
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,

@@ -6,7 +6,7 @@ import { observeAudio } from './runtime-audio.mjs'
 
 let input = ''
 for await (const part of process.stdin) input += part
-const { endpoint, artifact, files, uiProbes, requiredViewport, entryUrl = 'http://bgs-runtime.invalid/index.html' } = JSON.parse(input)
+const { endpoint, artifact, files, uiProbes, requiredViewport, previewHost, entryUrl = 'http://bgs-runtime.invalid/index.html' } = JSON.parse(input)
 const entry = new URL(entryUrl), servingBase = new URL('.', entry)
 if (!['http:', 'https:'].includes(entry.protocol) || entry.username || entry.password || entry.search || entry.hash)
   throw new Error('Expected a static publication entry URL')
@@ -15,6 +15,32 @@ if (url.protocol !== 'ws:' || url.hostname !== '127.0.0.1') throw new Error('Exp
 const { chromium } = await import(process.env.BGS_PLAYWRIGHT_MODULE)
 const browser = await chromium.connectOverCDP(endpoint, { timeout: 15000 })
 const sharp = uiProbes?.some(probe => probe.mode === 'pixels') ? (await import(process.env.BGS_SHARP_MODULE)).default : undefined
+// Serialized by Playwright into the game frame. A rotated/skewed rectangle's
+// AABB is not its interactive edge length; keep such controls unverified rather
+// than adding another transform solver beside the shared layout implementation.
+function measureDomNodes(nodes) {
+  return nodes.map(node => {
+    let matches
+    try { matches = node.selector ? [...document.querySelectorAll(node.selector)] :
+      [...document.querySelectorAll('[data-node-id]')].filter(element => element.getAttribute('data-node-id') === node.id) }
+    catch { return { id: node.id, unverified: 'Invalid mapped node selector' } }
+    if (matches.length !== 1) return { id: node.id, unverified: matches.length ? 'Ambiguous node selector/data-node-id' : 'Missing node selector/data-node-id' }
+    const element = matches[0], rect = element.getBoundingClientRect(), css = getComputedStyle(element)
+    for (let parent = element; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent)
+      if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0)
+        return { id: node.id, unverified: 'Saved-active node is hidden in this runtime state' }
+      if (node.minimumControlSize) {
+        const matrix = new DOMMatrixReadOnly(style.transform === 'none' ? undefined : style.transform)
+        if (!matrix.is2D || Math.abs(matrix.b) > .000001 || Math.abs(matrix.c) > .000001 || matrix.a <= 0 || matrix.d <= 0 ||
+            style.perspective !== 'none' || style.rotate && !['none', '0deg'].includes(style.rotate) ||
+            style.scale && style.scale !== 'none' && style.scale.split(' ').some(value => !Number.isFinite(Number(value)) || Number(value) <= 0))
+          return { id: node.id, unverified: 'Control edge size under rotation, skew, reflection or perspective is unverified; bounding boxes are insufficient' }
+      }
+    }
+    return { id: node.id, bounds: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, fontSize: parseFloat(css.fontSize) }
+  })
+}
 function regionMask(info, regions) {
   const mask=new Uint8Array(info.width*info.height)
   for(const r of regions){
@@ -62,11 +88,17 @@ try {
   const errors = [], missing = new Set(), unsupported = new Set(), requested = new Set()
   const context = await browser.newContext({ viewport: { width: probe?.viewport[0] ?? smokeViewport?.[0] ?? 1280, height: probe?.viewport[1] ?? smokeViewport?.[1] ?? 720 }, hasTouch: Boolean(smokeViewport || probe?.hasTouch), deviceScaleFactor: probe?.deviceScaleFactor ?? 1, serviceWorkers: 'block', acceptDownloads: false })
   try {
+    const hostUrl = 'http://bgs-preview.invalid/'
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, HEAD, OPTIONS', 'access-control-allow-headers': '*' }
     await context.routeWebSocket('**/*', socket => { unsupported.add('non-static WebSocket'); socket.close() })
     await context.route('**/*', async route => {
       try {
         const url = new URL(route.request().url())
-        if (url.origin !== entry.origin || !['GET', 'HEAD'].includes(route.request().method())) {
+        if (previewHost && url.href === hostUrl && route.request().method() === 'GET' &&
+            route.request().isNavigationRequest() && !route.request().frame().parentFrame()) {
+          await route.fulfill(previewHost); return
+        }
+        if (url.origin !== entry.origin || !['GET', 'HEAD', ...(previewHost ? ['OPTIONS'] : [])].includes(route.request().method())) {
           unsupported.add('external request or non-static method'); await route.abort(); return
         }
         if (!url.pathname.startsWith(servingBase.pathname)) {
@@ -76,6 +108,7 @@ try {
         const path = decodeURIComponent(url.pathname.slice(servingBase.pathname.length)) || 'index.html'
         const expected = allowed.get(path)
         if (!expected) { missing.add(path); await route.fulfill({ status: 404, body: 'Not found' }); return }
+        if (route.request().method() === 'OPTIONS') { await route.fulfill({ status: 204, headers: cors }); return }
         const real = await realpath(resolve(base, path)), rel = relative(base, real)
         if (!rel || rel === '..' || rel.startsWith('../')) throw new Error('Request escaped build directory')
         const body = await readFile(real)
@@ -87,14 +120,14 @@ try {
           if (expected.sha256 !== probe.resource.sha256) throw new Error('Probe font differs from measured bytes')
           if (suppressFont) {
             requested.add(path)
-            await route.fulfill({ status: 404, body: 'Font suppressed by the host observation' }); return
+            await route.fulfill({ status: 404, headers: previewHost ? cors : undefined, body: 'Font suppressed by the host observation' }); return
           }
         }
         const imageReplacement = marker && path === probe.resource.path
         if(imageReplacement && expected.sha256 !== probe.resource.sha256)throw new Error('Probe image differs from measured bytes')
         const audioReplacement = silence && path === probe.resource.path
         if (audioReplacement && expected.sha256 !== probe.resource.sha256) throw new Error('Probe audio differs from measured bytes')
-        await route.fulfill({ status: 200, contentType: imageReplacement ? 'image/png' : audioReplacement ? 'audio/wav' : expected.mime,
+        await route.fulfill({ status: 200, headers: previewHost ? cors : undefined, contentType: imageReplacement ? 'image/png' : audioReplacement ? 'audio/wav' : expected.mime,
           body: imageReplacement ? Buffer.from(marker.body,'base64') : audioReplacement ? Buffer.from(probe.silence,'base64') : replacement ?? body })
         requested.add(path)
       } catch {
@@ -102,27 +135,35 @@ try {
         await route.abort().catch(() => undefined)
       }
     })
-    const page = await context.newPage()
-    page.on('pageerror', error => { if (errors.length < 20) errors.push(error.message.slice(0, 300)) })
-    page.on('console', message => {
+    const outer = await context.newPage()
+    outer.on('pageerror', error => { if (errors.length < 20) errors.push(error.message.slice(0, 300)) })
+    outer.on('console', message => {
       // Only the exact, intentionally suppressed font request's 404 is expected.
       // Original-load errors and all other URLs remain actual driver observations.
       if (suppressFont && message.location().url === new URL(probe.resource.path,servingBase).href &&
           message.text().startsWith('Failed to load resource:')) return
       if (message.type() === 'error' && errors.length < 20) errors.push(message.text().slice(0, 300))
     })
-    await page.goto(entry.href, { waitUntil: 'networkidle', timeout: 15000 })
-    const environment = await page.evaluate(() => ({viewport:[innerWidth,innerHeight],devicePixelRatio,
-      maxTouchPoints:navigator.maxTouchPoints,coarsePointer:matchMedia('(pointer: coarse)').matches,hover:matchMedia('(hover: hover)').matches}))
+    await outer.goto(previewHost ? hostUrl : entry.href, { waitUntil: 'networkidle', timeout: 15000 })
+    let page = outer.mainFrame()
+    if (previewHost) {
+      const element = await outer.locator('#beegame-preview').elementHandle()
+      const frame = await element?.contentFrame()
+      await element?.dispose()
+      if (!frame) throw Error('Preview measurement iframe is unavailable')
+      page = frame
+    }
+    const environment = { embedding: previewHost ? 'sandboxed-iframe' : 'standalone', ...await page.evaluate(() => ({origin:globalThis.origin,viewport:[innerWidth,innerHeight],devicePixelRatio,
+      maxTouchPoints:navigator.maxTouchPoints,coarsePointer:matchMedia('(pointer: coarse)').matches,hover:matchMedia('(hover: hover)').matches})) }
     if (probe?.mode === 'audio') {
       let observed
       try {
         for (const step of probe.steps ?? []) await page.locator(step.click).click({ timeout: 5000 })
-        observed = await observeAudio(page, probe, requested)
+        observed = await observeAudio(page, probe, requested, servingBase)
       } catch { observed = { reason: 'Declared audio activation path unavailable' } }
       return { ...observed, environment, errors, missingFiles: [...missing], unsupported: [...unsupported], requestedFiles: [...requested] }
     }
-    let bounds, reason, pixels, scene, font, textFit, physicalBounds, coordinateSpace
+    let bounds, reason, pixels, scene, font, textFit, physicalBounds, coordinateSpace, composition
     if (probe) {
       try { for (const step of probe.steps ?? []) await page.locator(step.click).click({ timeout: 5000 }) }
       catch { reason = 'Declared UI activation path could not be observed; no arbitrary test JS was executed' }
@@ -219,6 +260,12 @@ try {
             right:(bounds.right-basis.root.left)/sx,bottom:(bounds.bottom-basis.root.top)/sy}
         }
       }
+      // Validate the coordinate basis first: a rejected root must not leave
+      // window-space bounds labelled as saved logical UI pixels in the report.
+      if (!probe.mode && probe.minimumControlSize && bounds && !reason) {
+        const [control] = await page.evaluate(measureDomNodes, [{ id: probe.nodeId, selector: probe.selector, minimumControlSize: probe.minimumControlSize }])
+        if (control.unverified) reason = control.unverified
+      }
       if (probe.checkTextFit && bounds && !reason) textFit = await locator.evaluate(element => {
         const box=element.getBoundingClientRect(), outside=r=>r.left<box.left-1 || r.top<box.top-1 || r.right>box.right+1 || r.bottom>box.bottom+1
         const overflow=[], walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT)
@@ -261,18 +308,32 @@ try {
         if (details.children || !['none','normal'].includes(details.before) || !['none','normal'].includes(details.after))
           reason = 'Font probe requires plain DOM text without child elements or pseudo-element text'
         else {
-          const cdp = await context.newCDPSession(page)
+          let cdp
           try {
+            let sharedSession = false
+            try { cdp = await context.newCDPSession(previewHost ? page : outer) }
+            catch (error) {
+              if (!previewHost || !error.message.includes('does not have a separate CDP session')) throw error
+              cdp = await context.newCDPSession(outer)
+              sharedSession = true
+            }
             await cdp.send('DOM.enable'); await cdp.send('CSS.enable')
-            const {root} = await cdp.send('DOM.getDocument')
-            const {nodeId} = await cdp.send('DOM.querySelector', {nodeId: root.nodeId, selector: probe.selector})
+            const {root} = await cdp.send('DOM.getDocument', sharedSession ? { depth: -1, pierce: true } : {})
+            let documentId = root.nodeId
+            if (sharedSession) {
+              const frame = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#beegame-preview' })
+              const {node} = await cdp.send('DOM.describeNode', { nodeId: frame.nodeId })
+              if (!node.contentDocument?.nodeId) throw Error('Game frame document unavailable')
+              documentId = node.contentDocument.nodeId
+            }
+            const {nodeId} = await cdp.send('DOM.querySelector', {nodeId: documentId, selector: probe.selector})
             if (!nodeId) throw Error('Target node unavailable')
             const {fonts} = await cdp.send('CSS.getPlatformFontsForNode', {nodeId})
             font = { text: details.text, fontSize: details.fontSize,
               fonts: fonts.filter(value => value.glyphCount > 0).sort((a,b) => a.postScriptName.localeCompare(b.postScriptName)),
               sha256: createHash('sha256').update(await locator.screenshot({animations:'disabled',timeout:5000})).digest('hex') }
           } catch { reason = 'Actual glyph fonts could not be observed; native CSS selectors and supported Chromium CDP required' }
-          finally { await cdp.detach() }
+          finally { await cdp?.detach() }
         }
         if (!requested.has(probe.resource.path)) reason = 'Target did not request the selected registered font member'
       }
@@ -292,6 +353,27 @@ try {
         }
       }
     }
+    if (probe?.composition && !probe.mode && !variant && !reason) {
+      const observed = await page.evaluate(measureDomNodes, probe.composition.nodes)
+      const unverified = [...probe.composition.unverified], issues = [], checked = []
+      for (const actual of observed) {
+        if (actual.unverified) { unverified.push({ id: actual.id, reason: actual.unverified }); continue }
+        const expected = probe.composition.nodes.find(node => node.id === actual.id), physical = actual.bounds
+        const box = coordinateSpace ? { left: (physical.left-coordinateSpace.root.left)/coordinateSpace.scale[0],
+          top: (physical.top-coordinateSpace.root.top)/coordinateSpace.scale[1], right: (physical.right-coordinateSpace.root.left)/coordinateSpace.scale[0],
+          bottom: (physical.bottom-coordinateSpace.root.top)/coordinateSpace.scale[1] } : physical
+        checked.push(actual.id)
+        if (Object.keys(expected.bounds).some(key => Math.abs(box[key]-expected.bounds[key]) > 1))
+          issues.push({ id: actual.id, kind: 'geometry', expected: expected.bounds, actual: box })
+        if (expected.fontSize !== undefined && Math.abs(actual.fontSize-expected.fontSize) > .1)
+          issues.push({ id: actual.id, kind: 'font-size', expected: expected.fontSize, actual: actual.fontSize })
+        if (expected.minimumControlSize && [physical.right-physical.left, physical.bottom-physical.top].some((size, i) => size+.01 < expected.minimumControlSize[i]))
+          issues.push({ id: actual.id, kind: 'minimum-control-size', minimum: expected.minimumControlSize,
+            actual: [physical.right-physical.left, physical.bottom-physical.top] })
+      }
+      composition = { status: issues.length ? 'failed' : unverified.length || !checked.length ? 'unverified' : 'passed',
+        checked, issues, unverified, scope: 'Saved state-independent marked DOM geometry/font sizes/control minima only; no visual fidelity or dynamic-state verdict' }
+    }
     const surfacePresent = await page.locator('body').evaluate(body => {
       // Absolute-positioned UI/Canvas does not contribute to body height.
       // Observe a concrete visible surface, not the flow container's bounds.
@@ -309,7 +391,7 @@ try {
         return true
       })
     })
-    return { driver: 'host-owned Chromium; actual static build', environment, viewport: probe?.viewport ?? smokeViewport ?? [1280, 720], surfacePresent, bounds, physicalBounds, coordinateSpace, pixels, scene, font, textFit, reason,
+    return { driver: 'host-owned Chromium; actual static build', environment, viewport: probe?.viewport ?? smokeViewport ?? [1280, 720], surfacePresent, bounds, physicalBounds, coordinateSpace, pixels, scene, font, textFit, composition, reason,
       requestedFiles: [...requested], missingFiles: [...missing], errors, unsupported: [...unsupported],
       limitations: 'Initial load/error smoke only. Container/text presence is NOT pixel/rendering proof. Fetching JSON is NOT proof its layout, hierarchy, resources or gameplay rules are consumed.' }
   } finally { await context.close() }
@@ -444,16 +526,19 @@ try {
       const mismatch = !match(before.bounds,probe.before) ? 'baseline' : changed.find(value=>!match(value.actual.bounds,value.expected))?.property ??
         (!match(restored.bounds,probe.before)?'restored':undefined)
       const geometryFailure = !runtimeReason && probe.variants.length>0 && mismatch
+      const compositionFailure = [before, restored].some(value => value.composition?.status === 'failed')
+      const compositionUnknown = [before, restored].some(value => value.composition?.status === 'unverified')
       const textPhase = before.textFit?.status==='failed'?'baseline':changed.find(value=>value.actual.textFit?.status==='failed')?.property ?? 'restored'
-      const reason = controlFailure ? 'Actual CSS control size is below declared minimumControlSize '+probe.minimumControlSize.join('x') : textFailure ? 'Visible text exceeds node bounds at '+textPhase : runtimeReason ||
+      const reason = compositionFailure ? 'Rendered composition differs from saved UI geometry, font sizes or control minima; inspect composition.issues' : controlFailure ? 'Actual CSS control size is below declared minimumControlSize '+probe.minimumControlSize.join('x') : textFailure ? 'Visible text exceeds node bounds at '+textPhase : runtimeReason ||
         (enabledFailure ? 'Saved enabled=false is ignored: target remains visible' : undefined) ||
         (geometryFailure ? 'Observed geometry differs from saved layout at '+mismatch+
           (probe.coordinateRoot?' in saved logical UI pixels':' in window CSS pixels; a fixed source-sized surface may use an explicit independent coordinateRoot. This mismatch is not proof of the whole-game appearance.') : !probe.variants.length ?
           'No observable saved layout property perturbation; baseline/restoration and text observations do not prove data consumption' :
-          textUnknown ? 'Complete visible text fit could not be established' : undefined)
-      const status = controlFailure || textFailure || geometryFailure || enabledFailure ? 'failed' : runtimeReason || !probe.variants.length || textUnknown || disabled.unsupported.length ? 'unverified' :
+          textUnknown ? 'Complete visible text fit could not be established' : compositionUnknown ? 'Rendered composition coverage is incomplete; inspect composition.unverified' : undefined)
+      const status = compositionFailure || controlFailure || textFailure || geometryFailure || enabledFailure ? 'failed' : runtimeReason || !probe.variants.length || textUnknown || compositionUnknown || disabled.unsupported.length ? 'unverified' :
         observations.some(value => value.errors.length || value.missingFiles.length) ? 'failed' : 'passed'
       results.push({ document: probe.document, nodeId: probe.nodeId, viewport: probe.viewport, status, reason, conditions:conditions(probe,before),
+        composition: { before: before.composition, restored: restored.composition },
         coordinateDomain:probe.coordinateRoot?'saved logical UI pixels':'window CSS pixels',
         ...(probe.coordinateRoot?{coordinateRoot:probe.coordinateRoot,layoutViewport:probe.layoutViewport,
           mappings:geometryObservations.map(value=>({basis:value.coordinateSpace,physicalBounds:value.physicalBounds}))}:{}),

@@ -4,6 +4,7 @@ export { runDraftEditsCli } from './draft-edits'
 export { runComposeDraftCli } from './draft-composition'
 import { readDesignSections, reviewSourceSnapshot } from './design-source-reading'
 import { sceneUiContentFormat } from './scene-ui-content-authoring'
+export { CONTENT_DRAFT_EXAMPLES } from './scene-ui-content-authoring'
 import { createHash } from 'node:crypto'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
@@ -14,7 +15,7 @@ import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-ed
 import { auditBeeGameContentPackage, parseBeeGameContentIndex, contentDraftStructureIssues, type BeeGameContentPackage } from './game-content-package'
 import type { BeeGameContentIndex } from './game-content-schema'
 import { parseBeeGameContentDocument } from './game-content-schema'
-import { PROJECT_GUIDE_TEMPLATE, projectGuideTemplate } from './workflow-v3/project-guide'
+import { projectGuideTemplate } from './workflow-v3/project-guide'
 import { inspectUiLayout, inspectUiLayoutBoundaries, summarizeUiLayoutInspection, type UiLayoutInspectionOptions } from '../../../scene-editor/src/ui-layout-inspection'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import { checkDesignLayouts, checkReviewDesignLayouts } from './design-layout-check'
@@ -81,22 +82,19 @@ export function validateGameContent(workspacePath: string) {
   let authority
   try {
     // Source/report freshness remains the measurement/export layer's responsibility.
-    const index = parseBeeGameContentIndex(readWorkspaceDraft(workspacePath, 'content/index.json'))
+    parseBeeGameContentIndex(readWorkspaceDraft(workspacePath, 'content/index.json'))
     const manifest = readBeeGameAssetManifestSync(workspacePath)
-    authority = { documentRevision: index.documentRevision, manifest,
-      assetManifestRevision: createHash('sha256').update(JSON.stringify(manifest)).digest('hex') }
+    authority = { manifest }
   }
   catch (error) {
     const missingIndex = (error as NodeJS.ErrnoException).code === 'ENOENT' &&
       (error as NodeJS.ErrnoException).path?.endsWith(`${sep}content${sep}index.json`)
     return { ...validationScope, valid: false,
-      issues: [`Saved content/index.json or Asset Manifest are unavailable: ${error instanceof Error ? error.message : String(error)}${missingIndex ? '. For first-index metadata use --package-metadata content/scenes/FILE.json content/ui/FILE.json ... with your saved files, then author the registry; this does not create an index or approve design.' : ''}`],
+      issues: [`Saved content/index.json or Asset Manifest are unavailable: ${error instanceof Error ? error.message : String(error)}${missingIndex ? '. Use --format examples for a complete minimal index and Scene/UI inputs; no revision hashes are required.' : ''}`],
       contentCount: 0, elapsedMs: Math.round(performance.now() - started) }
   }
   const audit = auditBeeGameContentPackage(workspacePath, authority)
-  const issues = audit.issues.map(issue => issue.startsWith('content/index.json: assetManifestRevision does not match the supplied Manifest revision.')
-    ? 'content/index.json: assetManifestRevision differs from the actual Manifest. Use registry.assetManifestRevision from this result after saving the real resources; update only the affected index metadata, then build/measure. This is not a design authority or quality verdict.'
-    : issue)
+  const issues = audit.issues
   // The host audit diagnoses missing/malformed indexes. Do not replace its
   // error with an unrelated "accepted manifest required" precondition.
   const nativeIndex = audit.valid
@@ -110,8 +108,8 @@ export function validateGameContent(workspacePath: string) {
     valid: audit.valid,
     issues,
     designVerified: false,
-    note: 'Current registered content and real resources only. documentRevision is a saved tag, NOT a verified design baseline. No source files are changed. Design agreement, runtime use and quality remain unverified.',
-    registry: { assetManifestRevision: authority.assetManifestRevision },
+    note: 'Current registered content and real resources only. Optional legacy revision tags are NOT a verified design baseline and need no manual refresh. Actual source/resource bytes are checked and bound by measurement. No source files are changed. Design agreement, runtime use and quality remain unverified.',
+    registry: { assetManifestRevision: createHash('sha256').update(JSON.stringify(authority.manifest)).digest('hex') },
     contentCount: audit.package?.documents.length ?? 0,
     ...(loadFootprint ? { loadFootprint } : {}),
     elapsedMs: Math.round(performance.now() - started),
@@ -248,37 +246,11 @@ export function inspectContentDraft(workspacePath: string, path: string, selecto
     note: 'Selected values are saved source, not a completeness, geometry, resource or gameplay verdict.' }
 }
 
-// Executable examples are shared by help and scoped author inputs, and tested
-// against the production draft rules. They do not select a game's design.
-export const CONTENT_DRAFT_EXAMPLES = {
-  ui: { schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
-    rootId: 'root', nodes: [
-      { id: 'root', role: 'screen-root', data: { orientation: 'Landscape', referenceResolution: [960, 540],
-        targetViewports: [[960, 540]], minimumControlSize: [44, 44] },
-        layout: { container: { direction: 'column', align: 'center', justify: 'center', gap: 16 } } },
-      { id: 'play', role: 'button', parentId: 'root', text: 'Play', layout: { size: [160, 48] } },
-    ],
-  } },
-  camera: { orthographic: true, orthographicSize: 2.7, pixelsPerUnit: 100,
-    viewport: { width: 960, height: 540 }, framing: 'expand' },
-  scene: { schema: 'beegame-content.v1', id: 'world', kind: 'scene-2d', assetRefs: [], data: {
-    settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels', width: 960, height: 540, pixelsPerUnit: 100 },
-      requiredVisibleNodeIds: ['shape'] }, cameraNodeId: 'camera', nodes: [
-      { id: 'camera', transform: { position: [480, 270, 0] }, components: [{ id: 'camera-component', type: 'camera',
-        data: { orthographic: true, orthographicSize: 2.7, coordinateSpace: 'logical-pixels',
-          viewport: { width: 960, height: 540 }, framing: 'expand' } }] },
-      { id: 'shape', transform: { position: [480, 270, 0] }, components: [
-        { id: 'shape-sprite', type: 'sprite-renderer', data: { size: [100, 100] } },
-        { id: 'shape-collider', type: 'box-collider-2d', data: { size: [100, 100], offset: [0, 0], isTrigger: false } },
-      ] },
-    ],
-  } },
-}
-
 export const CURRENT_CONTENT_CHECK_HELP = `Usage: bun <supplied-check-content-entry> [workspace] [command] [--details]
   (no command), --current   Check saved index/content and real resource references; not design agreement, runtime or quality acceptance
-  --package-metadata FILE ... Read first-index compatibility fields from saved Scene/UI/VFX and actual Manifest; no writes
+  --package-metadata FILE ... Legacy compatibility hashes only; not needed for new indexes; no writes
   --format [SECTION ...]    List format sections or read selected sections together; projectGuide is optional navigation, not a new design contract
+  --format examples         Executable minimal UI/index and an unbound Scene draft; no manual revision hashes
   --check-drafts FILE ...   Check saved draft structure together; resource bindings remain pending
   --inspect-draft FILE [--node ID | --pointer /json/pointer] ... Read exact draft fields together
   --layout-draft FILE W H [--game-view ID --camera FILE] Inspect UI/Scene geometry without an index
@@ -563,8 +535,9 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: La
       format = sceneUiContentFormat()
     }
     if (!format || typeof format !== 'object' || Array.isArray(format)) throw new Error('Invalid content format')
-    // Navigation is independent of old saved Scene/UI format references.
-    const reference={...format,projectGuide:PROJECT_GUIDE_TEMPLATE}
+    // The running parser owns canonical shapes; an older saved reference may
+    // retain extra command sections, but cannot advertise an obsolete schema.
+    const reference: Record<string,unknown>={...format,...sceneUiContentFormat()}
     if (args.length === 1) return { ok: true, scope: 'content-format-sections', sections: Object.keys(reference) }
     const sections = [...new Set(args.slice(1))]
     for (const section of sections)

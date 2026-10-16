@@ -21,7 +21,7 @@ for (const mode of ['consume','ignore-node','no-fetch','unstable','stale-copy','
       await cp(join(root,'content'),join(root,'dist/content'),{recursive:true})
       if (mode === 'stale-copy') await writeFile(join(root,'dist/content/scenes/level.json'),JSON.stringify({...doc,id:'other'}))
       if (mode === 'stale-registry') await writeFile(join(root,'dist/content/index.json'),'{}')
-      const fetchScene = mode === 'no-fetch' ? '' : 'const scene=await fetch("/content/scenes/level.json").then(r=>r.json());'
+      const fetchScene = mode === 'no-fetch' ? '' : 'const scene=await fetch("./content/scenes/level.json").then(r=>r.json());'
       const condition = mode === 'consume' || mode === 'stale-copy' ? 'scene.data.nodes.find(n=>n.id==="board").enabled!==false' : 'true'
       const draw = mode === 'unstable' ? 'ctx.fillStyle=`rgb(${Math.floor(Math.random()*256)},0,0)`;ctx.fillRect(10,10,50,40);' :
         `if(${condition}){ctx.fillStyle="#ee9933";ctx.fillRect(10,10,50,40);}`

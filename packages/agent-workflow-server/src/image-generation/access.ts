@@ -9,7 +9,7 @@ import { createImagePromptRecord } from './prompt-record'
 import { ImageConfigurationError } from './runtime-config'
 import { ImageReferenceError, readProjectReferenceImage } from './reference-image'
 import { CREDIT_FACE_VALUE_PER_USD, fixedImageChargeCreditsMicro } from './pricing'
-import { compileUiReferenceBoard } from './ui-reference-board.mjs'
+import { compileUiReferenceBoard, compileUiAssetSheet } from './ui-reference-board.mjs'
 
 const generation = z.object({
   requestId: z.string().trim().min(1).max(200),
@@ -17,12 +17,13 @@ const generation = z.object({
   requirementIds: z.array(z.string().trim().min(1)).min(1).max(128).optional(),
   prompt: z.string().trim().min(1).max(32000).optional(),
   uiReference: z.unknown().optional(),
+  uiAssets: z.unknown().optional(),
   background: z.enum(['auto', 'opaque', 'transparent']).optional(),
   quality: z.enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
   size: z.enum(['1024x1024', '1024x1536', '1536x1024']).optional(),
   referenceImagePath: z.string().trim().min(1).max(512).optional(),
-}).strict().refine(value => (value.prompt !== undefined) !== (value.uiReference !== undefined),
-  { message: 'Use exactly one of prompt or uiReference' })
+}).strict().refine(value => [value.prompt, value.uiReference, value.uiAssets].filter(item => item !== undefined).length === 1,
+  { message: 'Use exactly one of prompt, uiReference or uiAssets' })
 
 // PNG can be one part of a 3D/XR need, but cannot supply its model, rig or motion.
 const pngKinds = new Set(['image', 'texture', 'sprite', 'sprite-sheet', 'sprite-atlas'])
@@ -100,12 +101,13 @@ export function openImageGenerationAccess(input: {
       }
       if (request.method !== 'POST') return new Response('POST required', { status: 405 })
       const parsed = generation.safeParse(await request.json().catch(() => null))
-      if (!parsed.success) return Response.json({ error: 'Expected requestId, exactly one of prompt or uiReference, and optional background/quality/size/referenceImagePath' }, { status: 400 })
+      if (!parsed.success) return Response.json({ error: 'Expected requestId, exactly one of prompt, uiReference or uiAssets, and optional background/quality/size/referenceImagePath' }, { status: 400 })
       if (input.requiredQuality && parsed.data.quality && parsed.data.quality !== input.requiredQuality)
         return Response.json({ error: `This delivery milestone requires quality ${input.requiredQuality}` }, { status: 422 })
       let normalizedRequest
       try {
-        normalizedRequest = { ...(parsed.data.uiReference === undefined ? { ...parsed.data, prompt: parsed.data.prompt! } :
+        normalizedRequest = { ...(parsed.data.uiAssets !== undefined ? compileUiAssetSheet(parsed.data).request :
+          parsed.data.uiReference === undefined ? { ...parsed.data, prompt: parsed.data.prompt! } :
           compileUiReferenceBoard(parsed.data, input.screenOrientation).request),
           purpose: parsed.data.purpose, requirementIds: parsed.data.requirementIds,
           ...(input.requiredQuality ? { quality: input.requiredQuality } : {}) }
@@ -119,6 +121,8 @@ export function openImageGenerationAccess(input: {
       try {
         const { requestId, referenceImagePath, purpose, requirementIds, ...imageRequest } = normalizedRequest
         config = await input.loadConfig()
+        if (parsed.data.uiAssets !== undefined && config.provider !== 'cloudflare')
+          throw new ImageRequestValidationError('This provider cannot accept the selected UI design image; no generation submitted. Use a reference-capable provider, not an unrelated replacement style.')
         stage = 'reference-image'
         const referenceImage = referenceImagePath
           ? await readProjectReferenceImage(input.workspacePath, referenceImagePath) : undefined
@@ -188,7 +192,7 @@ export function openImageGenerationAccess(input: {
       'For image editing, you may pass an existing project-relative PNG under assets/ as referenceImagePath; no visual board is required. The provider must support reference images; the cost command reports availability. Do not submit host paths or regenerate an unknown paid attempt.',
       'The host records requests and billing source in assets/ai-generation-prompts.md; no manual maintenance is needed. Register only the actual selected file and hash in the Manifest.',
       'New image requests declare purpose: reference, experiment or production. Production requests include existing Manifest requirementIds for compatible bitmap parts, including textures used in 3D/XR. References/experiments carry no requirementIds and do not complete runtime resources. A PNG cannot supply a model, rig, animation behavior or device interaction. Old paid requests remain recoverable without new metadata; these fields never change billing identity.',
-      'UI reference boards use the structured uiReference input documented by assets.mjs --help. The host compiles their fixed equal-cell grid from project reference dimensions and the explicit screen/state list. Use ui-board-plan to inspect the prompt and chosen canvas without generation, then quote that size and submit the same structured input. Do not hand-author an asymmetric board prompt. Generated pixels still require visual inspection.',
+      'UI reference boards use uiReference; design-linked runtime skins use uiAssets with referenceImagePath. Both structured inputs are documented by assets.mjs --help and compiled by the host. ui-board-plan and ui-assets-plan inspect requests without generation or billing; submit the same structured input after quoting its chosen canvas. Production skins still need inspected alpha/bounds and measured named atlas frames; requested grid cells are not generated frame coordinates.',
     ].join('\n'),
     close() {
       closed = true

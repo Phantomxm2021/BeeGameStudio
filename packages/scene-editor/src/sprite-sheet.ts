@@ -45,6 +45,8 @@ export function validateSpriteSheetBounds(sheet: SpriteSheet, width: number, hei
 }
 
 export function spriteSheetSelection(table: SpriteSheet | undefined, properties: Record<string, unknown> = {}): Pick<SpriteRendererComponent, 'frame' | 'animation'> {
+  const selected = typeof properties.frame === 'string' ? properties.frame :
+    typeof properties.initialFacing === 'string' ? properties.initialFacing : undefined
   if (!table) {
     const size = properties.frameSize
     if (Array.isArray(size) && size.length >= 2 && size.slice(0,2).every(n => typeof n === 'number' && Number.isInteger(n) && n > 0))
@@ -52,20 +54,23 @@ export function spriteSheetSelection(table: SpriteSheet | undefined, properties:
     return {}
   }
   if ('frames' in table) {
-    const name = typeof properties.frame === 'string' ? atlasFrameName(properties.frame) : Object.keys(table.frames)[0]
+    const name = selected !== undefined ? atlasFrameName(selected) : Object.keys(table.frames)[0]
     if (!table.frames[name]) throw new Error(`Sprite atlas has no frame "${name}"`)
     return { frame: table.frames[name] }
   }
   const frame = { x: 0, y: 0, width: table.frameWidth, height: table.frameHeight }
   if (table.facings?.length && table.framesPerFacing) {
-    const initialFacing = typeof properties.initialFacing === 'string' && table.facings.includes(properties.initialFacing) ? properties.initialFacing : table.facings[0]
+    const initialFacing = selected !== undefined ? atlasFrameName(selected) : table.facings[0]
+    if (!table.facings.includes(initialFacing)) throw new Error(`Sprite strip has no frame "${initialFacing}"`)
     frame.x = table.facings.indexOf(initialFacing) * table.framesPerFacing * table.frameWidth
     return { frame, animation: { frameWidth: table.frameWidth, frameHeight: table.frameHeight, framesPerFacing: table.framesPerFacing,
       facings: table.facings, initialFacing, loop: true, ...(table.frameDurationMs ? { frameDurationMs: table.frameDurationMs } : {}) } }
   }
-  if (table.states?.length && typeof properties.frame === 'string') {
+  if (selected !== undefined) {
     const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '')
-    frame.x = Math.max(0, table.states.findIndex(state => normalize(state) === normalize(properties.frame as string))) * table.frameWidth
+    const index = table.states?.findIndex(state => normalize(state) === normalize(atlasFrameName(selected))) ?? (selected === 'default' ? 0 : -1)
+    if (index < 0) throw new Error(`Sprite strip has no frame "${selected}"`)
+    frame.x = index * table.frameWidth
   }
   return { frame }
 }

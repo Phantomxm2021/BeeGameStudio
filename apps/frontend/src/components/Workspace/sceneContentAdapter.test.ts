@@ -5,6 +5,7 @@ import { editorDocumentToSceneContent, sceneContentToEditorDocument } from './sc
 import { editorRect, rectTransform } from '../../../../../packages/scene-editor/src/rect-transform';
 import { sceneWorldTransforms2d } from '../../../../../packages/scene-editor/src/scene-layout-inspection';
 import { nodeWorldMatrix } from '../../../../../packages/scene-editor/src/selection-transform';
+import { assertSceneDocument } from '../../../../../packages/scene-editor/src/validation';
 
 const HASH = 'a'.repeat(64);
 const assets: Record<string, SceneAsset> = {
@@ -28,6 +29,18 @@ function scene(): BeeGameSceneContentDocument {
 }
 
 describe('Unity-style scene adapter', () => {
+  it('opens current source without fabricating legacy authority hashes; published IR remains strict', () => {
+    const input = scene(); input.assetRefs = []; input.data.nodes = [{ id: 'root', components: [] }];
+    const document = sceneContentToEditorDocument({ document: input, documentRevision: HASH });
+    expect(document.source.source).toEqual({ kind: 'content-package', publicationId: 'scene' });
+    expect(() => assertSceneDocument(document)).not.toThrow();
+    const published = structuredClone(document) as any;
+    published.source.source.kind = 'published-ir';
+    expect(() => assertSceneDocument(published)).toThrow('candidateDigest');
+    const invalid = structuredClone(document) as any;
+    invalid.source.source.sourceInputDigest = 'pending';
+    expect(() => assertSceneDocument(invalid)).toThrow('sourceInputDigest');
+  });
   it.each([1, 100])('resolves screen Canvas reference bounds at %s pixels per unit without changing authored rects', pixelsPerUnit => {
     for (const renderMode of ['screen-space-overlay', 'screen-space-camera', 'world-space']) {
       const rect = { anchorMin: [0, 0], anchorMax: [1, 1], pivot: [.5, .5], anchoredPosition: [0, 0], sizeDelta: [0, 0] };

@@ -60,6 +60,45 @@ test('UI board CLI plans offline, quotes the computed canvas and submits structu
   } finally { server.stop(true); await rm(root, { recursive: true, force: true }) }
 })
 
+test('UI skin planning requires a real selected reference and submits the design-linked production request unchanged', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-ui-skins-'))
+  const received: unknown[] = []
+  let supportsReference = true
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET') { received.push('quote'); return Response.json({ available: true, provider: 'cloudflare',
+      billingSource: 'external', referenceImageSupported: supportsReference }) }
+    received.push(await request.json())
+    return new Response(new Uint8Array(await sharp({ create: { width: 8, height: 8, channels: 4, background: '#fff0' } }).png().toBuffer()),
+      { headers: { 'content-type': 'image/png' } })
+  } })
+  try {
+    await mkdir(join(root, 'assets/visual'), { recursive: true })
+    const design = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#123' } }).png().toBuffer()
+    await writeFile(join(root, 'assets/visual/selected.png'), design)
+    const script = join(root, 'assets.mjs'), file = join(root, 'request.json')
+    const input = { requestId: 'ui-skins', purpose: 'production', requirementIds: ['ui-skins'], referenceImagePath: 'assets/visual/selected.png',
+      uiAssets: { elements: [{ id: 'panel', description: 'The selected panel skin without text', width: 400, height: 240 }] } }
+    await writeFile(file, JSON.stringify(input))
+    await writeProjectAssetCommand(script, { imageEndpoint: `http://127.0.0.1:${server.port}/generate` })
+    const planned = await run(root, script, 'ui-assets-plan', file)
+    expect(planned.code, planned.stderr).toBe(0)
+    expect(JSON.parse(planned.stdout).design).toMatchObject({ path: input.referenceImagePath,
+      sha256: createHash('sha256').update(design).digest('hex') })
+    expect(received).toEqual([])
+    await writeFile(file, JSON.stringify({ ...input, referenceImagePath: 'assets/visual/missing.png' }))
+    expect((await run(root, script, 'ui-assets-plan', file)).code).not.toBe(0)
+    expect(received).toEqual([])
+    await writeFile(file, JSON.stringify(input))
+    supportsReference = false
+    const unsupported = await run(root, script, 'generate', file, 'assets/runtime/unsupported.png')
+    expect(unsupported.code).not.toBe(0); expect(unsupported.stderr).toContain('no generation was submitted')
+    expect(received).toEqual(['quote']); received.length = 0; supportsReference = true
+    expect((await run(root, script, 'generate', file, 'assets/runtime/skins.png')).code).toBe(0)
+    expect(received).toEqual(['quote', input])
+    expect(JSON.parse((await run(root, script, 'ui-assets-plan', file)).stdout).note).toContain('not an aesthetic verdict')
+  } finally { server.stop(true); await rm(root, { recursive: true, force: true }) }
+})
+
 test('project asset command browses facts and returns image cost without forcing a source', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-assets-command-'))
   const requests: string[] = []
@@ -155,15 +194,15 @@ test('library fetch requires a stored hash, checks bytes and removes mismatches 
           }
           if (url.origin !== 'https://library.test') throw Error('Unexpected external request');
           if (url.pathname.endsWith('/resource-url')) return Response.json({url:'https://asset.test/file'});
-          if (url.pathname.includes('/elements/')) return Response.json({element:{specs:${JSON.stringify({ contentHash: storedHash })}}});
-          return Response.json({pack:{license:'CC0'}});
+          if (url.pathname.includes('/elements/')) return Response.json({element:{path:'original/sample.bin',specs:${JSON.stringify({ contentHash: storedHash })}}});
+          return Response.json({pack:{license:'CC0',version:'1.2'}});
         };
       `)
       const child = Bun.spawn([process.execPath, '--preload', preload, script, 'fetch', 'pack', 'element', 'assets/sample.bin'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
       const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
       if (name === 'valid') {
         expect(code).toBe(0)
-        expect(JSON.parse(stdout)).toMatchObject({ source: 'resource-library', sha256: hash })
+        expect(JSON.parse(stdout)).toMatchObject({ source: 'resource-library', sha256: hash, registrationSource: {type:'resource-library',pack_id:'pack',pack_version:'1.2',element_id:'element',element_path:'original/sample.bin'} })
         expect(await readFile(join(root, 'assets/sample.bin'), 'utf8')).toBe(bytes)
         const again = Bun.spawn([process.execPath, '--preload', preload, script, 'fetch', 'pack', 'element', 'assets/sample.bin'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
         expect(await again.exited).not.toBe(0)
@@ -282,8 +321,15 @@ test('project asset command keeps the generated sheet intact and writes frame me
     await mkdir(join(root, 'assets/generated'), { recursive: true })
     const script = join(root, 'assets.mjs')
     await writeProjectAssetCommand(script, {})
+    const help = await run(root, script, '--help')
+    expect(help.code).toBe(0)
+    expect(help.stdout).toContain('separate part files and repacking are not required')
+    expect(help.stdout).toContain('operation:inspect')
+    expect(help.stdout).toContain('Alpha bounds do not identify objects')
+    const mark = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#30b464' } }).png().toBuffer()
     const sheet = await sharp({ create: { width: 32, height: 16, channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer()
+      background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: mark, left: 2, top: 2 }, { input: mark, left: 18, top: 2 }]).png().toBuffer()
     await writeFile(join(root, 'assets/generated/elements.png'), sheet)
     const spec = join(root, 'assets/generated/frames.json')
     await writeFile(spec, JSON.stringify({ frames: {
@@ -295,6 +341,7 @@ test('project asset command keeps the generated sheet intact and writes frame me
     expect(result.code).toBe(0)
     expect(JSON.parse(result.stdout).frames).toEqual(['button', 'icon'])
     expect((await readFile(join(root, 'assets/runtime/ui.png'))).toString('hex')).toBe(sheet.toString('hex'))
+    expect((await readFile(join(root, 'assets/generated/elements.png'))).toString('hex')).toBe(sheet.toString('hex'))
     const atlas = JSON.parse(await readFile(join(root, 'assets/runtime/ui.json'), 'utf8'))
     expect(atlas).toEqual({ frames: {
       button: { frame: { x: 0, y: 0, w: 12, h: 12 } },

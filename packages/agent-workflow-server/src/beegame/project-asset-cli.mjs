@@ -25,14 +25,16 @@ const usage = `Usage: bun <this-file> <command> [arguments]
   inspect <assets/path> [assets/path ...] Hash local assets in one call; no provenance/quality inference
   cost [quality] [size]                 Show availability and the Cloudflare Credit quote
   ui-board-plan <request.json>          Read-only: compute equal-cell grid and full prompt, no network or billing
+  ui-assets-plan <request.json>         Read-only: design-linked runtime UI sheet, no network or billing
   generate <request.json> <assets/path>  Generate from {requestId,purpose,prompt,requirementIds?,background?,quality?,size?,referenceImagePath?}
                                          background: auto|opaque|transparent; quality: auto|low|medium|high|xhigh|max; size: 1024x1024|1024x1536|1536x1024
 New requests use purpose: reference|experiment|production. Production includes existing Manifest requirementIds for PNG-compatible parts; register needs with resources: [] before files exist. References/experiments do not fulfill requirements. PNG may supply a 3D/XR texture, not a model, rig or runtime behavior. Missing metadata is accepted only for recovery of an existing paid attempt.
 For UI reference boards replace prompt with uiReference: {viewport:{width,height},style,screens:[{id,description},...]}. Read the project UI specification for reference dimensions and the complete screen/state inventory. Each description covers one complete screen with its HUD; style/content must not include board placement. Do not supply rows, columns, a separate count or free-form board layout. The system computes equal-size cells from the viewport and list length. Omit size to select the supported canvas giving the largest proportional panels. Inspect ui-board-plan, quote its returned size at low, then generate using the SAME STRUCTURED request file, not the compiled prompt. The host recompiles that request before generation. A plan does not certify the image's layout or the inventory's completeness.
+For production UI skins replace prompt with uiAssets:{elements:[{id,description,width,height},...]}, purpose:production, existing requirementIds and referenceImagePath pointing to the selected UI design. Descriptions identify appearance/state in that design, not an invented visual direction. ui-assets-plan reads/hashes the actual reference and computes a shared transparent grid; generate accepts the same request. It does not generate automatically or assign frame coordinates. Keep live text/values/progress/hit areas in runtime UI; use existing media/resources for inspected named frames. Procedural UI remains supported, but this production path does not turn a reference board into a runtime atlas or certify visual fidelity.
   atlas <assets/sheet.png> <assets/frames.json> <assets/runtime/name.png>
                                          Publish named rectangles as a PNG + same-basename atlas JSON
-For compatible small AI-generated elements, prefer one shared sheet request; use atlas to register inspected rectangles. generate returns an image, not frame metadata. atlas does not pack separate images. Split generation for a concrete visual/use need, preserving planned atlas delivery.
-For decoded image crop/resize/composition and packing separate sprites, use ${TOOL_CONFIG.mediaCommand ?? 'bun .beegame/delivery/media.mjs'} --help. Its JSON request supports named crop regions, explicit filtering/padding and compatible atlas output; no package installation or custom PNG encoder is needed.
+For compatible small AI-generated elements, prefer one shared sheet request; use atlas to publish inspected rectangles, then resources.mjs to register the pair. atlas copies the PNG bytes unchanged; separate part files and repacking are not required for a usable intact sheet. generate returns an image, not measured frame metadata. Inspect complete artwork, state alignment and sampling gutters; nonoverlap alone does not prove suitability. atlas does not pack separate images or approve appearance. A full-screen reference board is not automatically a production sheet. Split generation for a concrete visual/use need, preserving planned atlas delivery.
+For read-only decoded alpha/bounds measurements (operation:inspect), or a demonstrated need for crop/resize/composition and packing separate sprites, use ${TOOL_CONFIG.mediaCommand ?? 'bun .beegame/delivery/media.mjs'} --help. Alpha bounds do not identify objects or automatically define safe crops. Its JSON request supports named crop regions, explicit filtering/padding and compatible atlas output; no package installation or custom PNG encoder is needed.
 Honor explicit user source choices. For common sounds, icons and environment assets, first consider suitable supplied or built-in licensed resources. Prefer existing complete animations when suitable; a generated sheet does not guarantee temporal continuity. Consider AI generation for distinctive artwork when existing candidates do not fit, not as the default for all core art. Use focused web sourcing for a concrete gap, verifying rights and download/format feasibility; stop when a suitable candidate is found. These are source choices, not a mandatory source-by-source tour. Procedurally replacing required core artwork remains a fallback requiring a concrete blocker and user authorization; simple controls, geometric effects and an explicitly chosen procedural aesthetic are different. The same atlas format supports retrieved and generated assets. Dynamic text and live geometry need not become images.
 ${catalogUsage}
 Commands are optional. You choose the source and asset design. No command updates the Manifest.`
@@ -68,11 +70,11 @@ function catalogRequest(value) {
 function imageRequest(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Image request must be a JSON object')
-  const allowed = ['requestId', 'purpose', 'requirementIds', 'prompt', 'uiReference', 'background', 'quality', 'size', 'referenceImagePath']
+  const allowed = ['requestId', 'purpose', 'requirementIds', 'prompt', 'uiReference', 'uiAssets', 'background', 'quality', 'size', 'referenceImagePath']
   const unknown = Object.keys(value).filter(key => !allowed.includes(key))
   if (unknown.length) throw new Error('Unknown image request fields: ' + unknown.join(', '))
   for (const [key, max] of [['requestId', 200], ['prompt', 32000]]) {
-    if (key === 'prompt' && value.uiReference !== undefined) continue
+    if (key === 'prompt' && (value.uiReference !== undefined || value.uiAssets !== undefined)) continue
     if (typeof value[key] !== 'string' || !value[key].trim() || value[key].trim().length > max)
       throw new Error('Image request ' + key + ' must be a nonempty string of at most ' + max + ' characters')
   }
@@ -91,6 +93,7 @@ function imageRequest(value) {
       value.referenceImagePath.split(/[\\/]/).includes('..')))
     throw new Error('Image request referenceImagePath must be a project-relative path under assets/')
   if (value.uiReference !== undefined) compileUiReferenceBoard(value)
+  if (value.uiAssets !== undefined) compileUiAssetSheet(value)
   return value
 }
 
@@ -247,6 +250,12 @@ async function main() {
     const expectedHash = (element.element ?? element).specs?.contentHash
     if (typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/.test(expectedHash))
       throw new Error('Library element requires a valid stored content hash before download')
+    const selectedPack = pack.pack ?? pack, selectedElement = element.element ?? element
+    if (typeof selectedPack.version !== 'string' || !selectedPack.version.trim() ||
+        typeof selectedElement.path !== 'string' || !selectedElement.path.trim())
+      throw new Error('Library selection requires its pack version and element path before download')
+    const registrationSource = { type:'resource-library', pack_id:packId, pack_version:selectedPack.version,
+      element_id:elementId, element_path:selectedElement.path }
     const url = new URL(location.url)
     if (url.protocol !== 'https:' || url.username || url.password)
       throw new Error('Library returned an invalid download URL')
@@ -270,9 +279,10 @@ async function main() {
         JSON.stringify({
           ...file,
           source: 'resource-library',
+          registrationSource,
           pack: pack.pack ?? pack,
           element: element.element ?? element,
-          note: 'Inspect dependencies before registering this file in the Manifest.',
+          note: 'Use registrationSource unchanged with resources.mjs register. Fetch required dependency files as well; include their local paths in file_paths and existing dependencies records. Download is not registration or runtime use.',
         }),
       )
     } finally {
@@ -332,10 +342,19 @@ async function main() {
       await imageFile.close()
       if (!published) await unlink(output.target).catch(() => undefined)
     }
-  } else if (command === 'ui-board-plan') {
+  } else if (command === 'ui-board-plan' || command === 'ui-assets-plan') {
     const request = imageRequest(JSON.parse(await readFile(args[0], 'utf8')))
-    if (request.uiReference === undefined) throw Error('ui-board-plan requires uiReference')
-    console.log(JSON.stringify(compileUiReferenceBoard(request), null, 2))
+    if (command === 'ui-assets-plan') {
+      if (request.uiAssets === undefined) throw Error('ui-assets-plan requires uiAssets')
+      const source = await assetDestination(request.referenceImagePath, false)
+      if (await realpath(source.target) !== source.target) throw Error('UI design reference must not resolve through a link')
+      const bytes = await readFile(source.target)
+      console.log(JSON.stringify({ ...compileUiAssetSheet(request), design: { path: source.path,
+        sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length } }, null, 2))
+    } else {
+      if (request.uiReference === undefined) throw Error('ui-board-plan requires uiReference')
+      console.log(JSON.stringify(compileUiReferenceBoard(request), null, 2))
+    }
   } else if (command === 'cost') {
     if (!TOOL_CONFIG.imageEndpoint)
       throw new Error('AI image generation is unavailable for this turn')
@@ -347,13 +366,16 @@ async function main() {
     if (!TOOL_CONFIG.imageEndpoint)
       throw new Error('AI image generation is unavailable for this turn')
     const submittedRequest = imageRequest(JSON.parse(await readFile(args[0], 'utf8')))
-    const board = submittedRequest.uiReference === undefined ? undefined : compileUiReferenceBoard(submittedRequest)
+    const board = submittedRequest.uiAssets !== undefined ? compileUiAssetSheet(submittedRequest) :
+      submittedRequest.uiReference === undefined ? undefined : compileUiReferenceBoard(submittedRequest)
     const request = board?.request ?? submittedRequest
     const quoteUrl = new URL(TOOL_CONFIG.imageEndpoint)
     if (request.quality) quoteUrl.searchParams.set('quality', request.quality)
     if (request.size) quoteUrl.searchParams.set('size', request.size)
     const quote = await jsonRequest(quoteUrl)
     if (!quote.available) throw new Error('AI image generation unavailable: ' + (quote.unavailableReason ?? 'check model, credentials and billing'))
+    if (submittedRequest.uiAssets !== undefined && quote.referenceImageSupported !== true)
+      throw Error('UI skins require a provider that accepts the selected design image; no generation was submitted')
     if (quote.provider === 'cloudflare' && quote.billingSource !== 'external') {
       if (!Number.isSafeInteger(quote.quotedCreditsMicro) || quote.quotedCreditsMicro <= 0)
         throw new Error('Cloudflare image has no fixed Credit price for this quality and size')

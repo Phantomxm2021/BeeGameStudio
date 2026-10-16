@@ -52,10 +52,10 @@ for (const mode of ['consume', 'individual-images', 'parent-camera', 'wrong-cell
       await mkdir(join(root, 'dist')); await cp(join(root, 'content'), join(root, 'dist/content'), { recursive: true }); await cp(join(root, 'assets'), join(root, 'dist/assets'), { recursive: true })
       if (mode === 'stale-tileset') await writeFile(join(root, 'dist', tiles), '{}')
       // Independent game renderer: own formulas, no BGS preview/layout imports or PASS.
-      const script = `const scene=await fetch("/${source}").then(r=>r.json()), mapNode=scene.data.nodes.find(n=>n.id==="board"), map=mapNode.components.find(c=>c.type==="tilemap").data;
+      const script = `const scene=await fetch("./${source}").then(r=>r.json()), mapNode=scene.data.nodes.find(n=>n.id==="board"), map=mapNode.components.find(c=>c.type==="tilemap").data;
         const gridNode=scene.data.nodes.find(n=>n.id===map.gridNodeId), grid=gridNode.components.find(c=>c.type==="grid").data;
-        const tiles=await fetch("/${tiles}").then(r=>r.json()), atlas=await fetch("/${atlas}").then(r=>r.json()), images=new Map();
-        for(const tile of Object.values(tiles.tiles)){if(images.has(tile.sprite.member))continue;const im=new Image();im.src="/"+tile.sprite.member;await im.decode();images.set(tile.sprite.member,im)}
+        const tiles=await fetch("./${tiles}").then(r=>r.json()), atlas=await fetch("./${atlas}").then(r=>r.json()), images=new Map();
+        for(const tile of Object.values(tiles.tiles)){if(images.has(tile.sprite.member))continue;const im=new Image();im.src="./"+tile.sprite.member;await im.decode();images.set(tile.sprite.member,im)}
         const ctx=document.querySelector("canvas").getContext("2d");
         const camera=scene.data.nodes.find(n=>n.id===scene.data.cameraNodeId).transform?.position||[0,0], p=${mode === 'ignore-position' ? '[0,0]' : 'mapNode.transform.position'}, parent=gridNode.transform.position, s=gridNode.transform.scale||[1,1];
         let cells=${mode === 'ignore-cells' ? '[{x:-1,y:0,tileId:"grass"},{x:1,y:0,tileId:"grass"},{x:0,y:1,tileId:"wall"}]' : 'map.cells'};${mode === 'omit-cell' ? 'cells=cells.slice(1);' : ''}${mode === 'omit-interior' ? 'cells=cells.filter(c=>c.x!==3||c.y!==0);' : ''}${mode === 'extra-cell' ? 'cells=[...cells,{x:2,y:1,tileId:"grass"}];' : ''}

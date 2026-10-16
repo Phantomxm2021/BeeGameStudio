@@ -737,10 +737,15 @@ export class SupabaseDashboardStore {
   }
 
   async listMcpServers(ownerId: string): Promise<McpServerConfig[]> {
+    return (await this.runtimeMcpServers(ownerId)).map(toPublicMcpServerConfig)
+  }
+
+  /** Host runtime only; public routes must use listMcpServers (redacted). */
+  async runtimeMcpServers(ownerId: string): Promise<McpServerConfig[]> {
     const rows = await this.rest<SupabaseMcpServerRow[]>(
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
     )
-    return rows.map(row => toPublicMcpServerConfig(rowToMcpServer(row)))
+    return rows.map(rowToMcpServer)
   }
 
   async upsertMcpServer(

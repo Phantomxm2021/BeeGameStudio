@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
-import { bundleContentConsumer, CONTENT_CONSUMER_API } from '../game-content-consumer-cli'
+import { bundleContentConsumer, CONTENT_CONSUMER_API, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
 import { digest, WorkflowError, type Run } from './state'
 
 // Only exact host records are ignored. A README, imported source, unknown dot
@@ -27,7 +27,7 @@ export async function observeProjectCreation(root: string, brief: {
       (await sourcePaths(await realpath(root))).length) return undefined
   const settings = brief.settings
   const editableContent = settings.platform === 'Web' && settings.bgsVisualEditing !== false
-  return {initialDelivery:'playable-slice',editableContent,
+  return {initialDelivery:'design-led-first-version',editableContent,
     ...(editableContent && settings.engine === 'React' && settings.dimension === '2D' &&
       ['Landscape','Portrait'].includes(String(settings.orientation)) ? {webStarter:'react-canvas-2d-v1' as const} : {})}
 }
@@ -60,7 +60,6 @@ export async function webStarterFiles(orientation: 'Landscape' | 'Portrait', lan
   }}
   const json = (value: unknown) => JSON.stringify(value,null,2)+'\n'
   const index = {schema:'beegame-content-package.v2',id:'game',dimension:'2d',sceneModel:'game-object-v2',
-    documentRevision:digest(json(scene)+json(ui)),assetManifestRevision:digest('no-assets'),
     entryScene:'main',files:['scenes/main.json','ui/hud.json'],documents:[
       {id:'main',path:'scenes/main.json',kind:'scene-2d',loadPhase:'startup'},
       {id:'hud',path:'ui/hud.json',kind:'ui-hud',loadPhase:'startup'},
@@ -69,10 +68,11 @@ export async function webStarterFiles(orientation: 'Landscape' | 'Portrait', lan
     'package.json':json({name:'bgs-web-game',private:true,type:'module',scripts:{dev:'vite --host 127.0.0.1',build:'vite build'},
       dependencies:{react:'19.3.0','react-dom':'19.3.0'},devDependencies:{vite:'8.3.0'}}),
     'index.html':'<!doctype html><html lang="'+language+'"><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>BGS</title><div id="root"></div><script type="module" src="./src/main.jsx"></script></html>\n',
-    'vite.config.js':`import { cp } from 'node:fs/promises';
+    'scripts/bgs-runtime-files.mjs':await registeredRuntimeFilesSource(),
+    'vite.config.js':`import { copyRegisteredRuntimeFiles } from './scripts/bgs-runtime-files.mjs';
 export default { base: './', publicDir: false, plugins: [{
   name: 'editable-content', apply: 'build',
-  async closeBundle() { await cp('content', 'dist/content', { recursive: true }); }
+  async closeBundle() { await copyRegisteredRuntimeFiles(process.cwd(), 'dist'); }
 }] };
 `,
     'content/index.json':json(index),'content/scenes/main.json':json(scene),'content/ui/hud.json':json(ui),
@@ -97,7 +97,7 @@ export function createGame({ canvas, scene }) {
     'src/main.jsx':`import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseBeeGameContentIndex, fetchStartupContentDocuments, readSceneData, readUiData,
-  createProductionUiSurface, renderProductionScene2d } from './bgs-content-consumer.mjs';
+  createProductionUiSurface, renderProductionScene2d, loadProductionResources } from './bgs-content-consumer.mjs';
 import { createGame } from './game.js';
 import './style.css';
 
@@ -106,10 +106,10 @@ function App() {
   const [error, setError] = useState('');
   useEffect(() => {
     const abort = new AbortController();
-    let frame = 0, surface, game, stopped = false, previous = 0, lastHud = '';
+    let frame = 0, surface, game, resources, stopped = false, previous = 0, lastHud = '';
     const cleanup = () => {
       stopped = true; abort.abort(); cancelAnimationFrame(frame);
-      game?.dispose(); surface?.dispose();
+      game?.dispose(); surface?.dispose(); resources?.dispose();
     };
     const fail = error => { if (!stopped) { cleanup(); setError(String(error)); } };
     (async () => {
@@ -119,23 +119,25 @@ function App() {
       if (!response.ok) throw Error('content/index.json: HTTP ' + response.status);
       const index = parseBeeGameContentIndex(await response.json());
       const docs = await fetchStartupContentDocuments(index, indexUrl, fetcher);
-      if (stopped) return;
-      const scene = readSceneData(docs.find(doc => doc.id === index.entryScene));
-      const ui = readUiData(docs.find(doc => doc.kind === 'ui-hud'));
+      if (docs.some(doc => doc.assetRefs.length)) resources = await loadProductionResources(new URL('./assets/asset-manifest.json', document.baseURI), docs, fetcher);
+      if (stopped) { resources?.dispose(); return; }
+      const entry = docs.find(doc => doc.id === index.entryScene);
+      const scene = entry?.kind.startsWith('scene-') ? readSceneData(entry) : undefined;
+      const ui = readUiData(entry?.kind.startsWith('ui-') ? entry : docs.find(doc => doc.kind === 'ui-hud' || doc.kind === 'ui-screen'));
       surface = await createProductionUiSurface(hud.current);
       if (stopped) { surface.dispose(); return; }
-      game = createGame({ canvas: canvas.current, scene });
+      game = createGame({ canvas: canvas.current, scene, assets: resources?.assets, resourceUrl: resources?.resourceUrl });
       const tick = now => {
         try {
           const viewport = { width: canvas.current.clientWidth, height: canvas.current.clientHeight };
           if (viewport.width > 0 && viewport.height > 0) {
             game.update(previous ? Math.min((now - previous) / 1000, 0.05) : 0);
-            renderProductionScene2d(canvas.current, scene, viewport);
+            if (scene) renderProductionScene2d(canvas.current, scene, viewport, resources?.assets);
             game.draw(canvas.current.getContext('2d'), viewport);
             // Avoid replacing interactive DOM every frame when nothing changed.
             const key = JSON.stringify([viewport, game.state]);
             if (key !== lastHud) {
-              surface.render(ui, viewport, { state: game.state, onAction: (action, id) => game.action(action, id) });
+              surface.render(ui, viewport, { state: game.state, assets: resources?.assets, fonts: resources?.fonts, onAction: (action, id) => game.action(action, id) });
               lastHud = key;
             }
           }
@@ -158,7 +160,7 @@ createRoot(document.getElementById('root')).render(<App/>);
 /** Called only under the first native writer reservation. Exclusive writes and
  * exact-byte recovery never replace an existing or subsequently edited source. */
 export async function installWebStarter(run: Run) {
-  if (run.creation?.webStarter !== 'react-canvas-2d-v1') return
+  if (run.creation?.initialDelivery !== 'playable-slice' || run.creation.webStarter !== 'react-canvas-2d-v1') return
   const root = await realpath(run.workspacePath)
   const brief = JSON.parse(run.requirements.text)
   const files = await webStarterFiles(brief.settings.orientation, brief.game_user_visible_language)

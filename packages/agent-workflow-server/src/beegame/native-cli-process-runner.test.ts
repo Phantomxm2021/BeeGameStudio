@@ -339,6 +339,23 @@ describe('native CLI process runner', () => {
       })).rejects.toThrow('provider failed before replay')
     } finally { clearTimeout(timeout); await runtime.dispose?.() }
   })
+  test('submission identity is confirmed only by replay of this command, not a correlated pre-replay failure', async () => {
+    for (const prompt of ['hello', 'error-before-ack']) {
+      const ids: string[] = []
+      const runtime = await createNativeCliProcessRunner({command:[process.execPath,fixturePath]}).start({
+        sessionId:'submission-identity',cwd:process.cwd(),env:{},
+        resumeSessionId:'550e8400-e29b-41d4-a716-446655440000',
+        onNativeSubmission:id=>{ids.push(id)},
+      })
+      try {
+        const submitted=runtime.submit({prompt,signal:new AbortController().signal,
+          onMessage:()=>{},requestPermission:async()=>({behavior:'deny'})})
+        if(prompt==='error-before-ack')await expect(submitted).rejects.toThrow('provider failed before replay')
+        else await submitted
+        expect(ids).toEqual(prompt==='hello'?['550e8400-e29b-41d4-a716-446655440000']:[])
+      } finally { await runtime.dispose?.() }
+    }
+  })
   test('a CLI startup load error preserves its cause and cannot replace the saved native identity', async () => {
     const cwd=await mkdtemp(join(tmpdir(),'native-startup-load-'))
     const ids:string[]=[],messages:unknown[]=[]

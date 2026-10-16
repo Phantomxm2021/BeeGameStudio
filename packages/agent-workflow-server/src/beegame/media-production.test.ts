@@ -27,6 +27,73 @@ const atlas = { operation: 'atlas', group: 'test', frames: [
   { id: 'red.png', input: 'assets/red.png' }, { id: 'blue', input: 'assets/blue.png' },
 ], maxWidth: 10, maxHeight: 20, padding: 1, filtering: 'linear', output: 'assets/sheet.png', metadata: 'assets/sheet.atlas.json' }
 
+test('inspect measures whole images and regions in source pixels without writing or selecting objects', async () => {
+  const root = await fixture(), width = 12, height = 8
+  const raw = Buffer.alloc(width * height * 4)
+  const mark = (x: number, y: number, alpha = 255) => raw.set([30, 180, 100, alpha], (y * width + x) * 4)
+  for (let y = 3; y <= 4; y++) for (let x = 2; x <= 4; x++) mark(x, y)
+  mark(9, 6); mark(10, 6); mark(1, 1, 8)
+  const bytes = await sharp(raw, { raw: { width, height, channels: 4 } }).png().toBuffer()
+  await writeFile(join(root, 'assets/parts.png'), bytes)
+  const before = (await readdir(join(root, 'assets'))).sort()
+  const result = await produceMedia(root, { operation: 'inspect', inputs: [
+    { input: 'assets/parts.png' },
+    { input: 'assets/parts.png', crop: { left: 1, top: 2, width: 5, height: 4 } },
+    { input: 'assets/parts.png', crop: { left: 3, top: 3, width: 3, height: 3 } },
+  ] }, sharp)
+  expect(result).toMatchObject({ valid: true, scope: 'decoded-alpha-measurement', coordinates: 'decoded-source-pixels',
+    measurements: [
+      { hasAlpha: true, alphaThreshold: 0, visiblePixels: 9,
+        alphaBounds: { left: 1, top: 1, width: 10, height: 6 },
+        edgeVisiblePixels: { top: 0, right: 0, bottom: 0, left: 0 } },
+      { region: { left: 1, top: 2, width: 5, height: 4 }, visiblePixels: 6,
+        alphaBounds: { left: 2, top: 3, width: 3, height: 2 } },
+      { visiblePixels: 4, alphaBounds: { left: 3, top: 3, width: 2, height: 2 },
+        edgeVisiblePixels: { top: 2, right: 0, bottom: 0, left: 2 } },
+    ] })
+  // Two independent marks yield one combined bound, not an inferred object or safe frame.
+  expect(result.unverified.join(' ')).toContain('Object identity/count')
+  expect(result.unverified.join(' ')).toContain('pixels outside a selected region are not checked')
+  const thresholded = await produceMedia(root, { operation: 'inspect', inputs: [{ input: 'assets/parts.png' }], alphaThreshold: 120 }, sharp)
+  expect(thresholded).toMatchObject({ measurements: [{ visiblePixels: 8,
+    alphaBounds: { left: 2, top: 3, width: 9, height: 4 } }] })
+  expect((await readdir(join(root, 'assets'))).sort()).toEqual(before)
+  expect((await readFile(join(root, 'assets/parts.png'))).toString('hex')).toBe(bytes.toString('hex'))
+})
+
+test('inspect distinguishes transparent images from images without alpha', async () => {
+  const root = await fixture()
+  await writeFile(join(root, 'assets/empty.png'), await sharp({ create: {
+    width: 6, height: 4, channels: 4, background: '#00000000',
+  } }).png().toBuffer())
+  await writeFile(join(root, 'assets/rgb.png'), await sharp(join(root, 'assets/red.png')).removeAlpha().png().toBuffer())
+  expect(await produceMedia(root, { operation: 'inspect', inputs: [
+    { input: 'assets/empty.png' }, { input: 'assets/rgb.png' },
+  ] }, sharp)).toMatchObject({ measurements: [
+    { hasAlpha: true, visiblePixels: 0, alphaBounds: null, edgeVisiblePixels: { top: 0, right: 0, bottom: 0, left: 0 } },
+    { hasAlpha: false, visiblePixels: 24, alphaBounds: { left: 0, top: 0, width: 6, height: 4 },
+      edgeVisiblePixels: { top: 6, right: 4, bottom: 6, left: 4 } },
+  ] })
+})
+
+test('inspect rejects invalid requests, undecodable inputs and escaped paths without outputs', async () => {
+  const root = await fixture(), outside = await fixture()
+  await symlink(join(outside, 'assets'), join(root, 'assets/external'))
+  await writeFile(join(root, 'assets/broken.png'), 'not a decoded image')
+  const before = (await readdir(join(root, 'assets'))).sort()
+  const request = { operation: 'inspect', inputs: [{ input: 'assets/red.png' }] }
+  for (const invalid of [
+    { ...request, inputs: [] }, { ...request, alphaThreshold: -1 }, { ...request, alphaThreshold: 255 },
+    { ...request, alphaThreshold: 1.5 }, { ...request, output: 'assets/no.png' },
+    { ...request, inputs: [{ input: 'assets/broken.png' }] },
+    { ...request, inputs: [{ input: 'assets/red.png', crop: { left: 5, top: 0, width: 2, height: 2 } }] },
+    { ...request, inputs: [{ input: '../outside.png' }] },
+    { ...request, inputs: [{ input: 'assets/external/red.png' }] },
+  ]) await expect(produceMedia(root, invalid, sharp)).rejects.toThrow()
+  expect((await readdir(join(root, 'assets'))).sort()).toEqual(before)
+  expect((await readdir(join(outside, 'assets'))).sort()).toEqual(['blue.png', 'red.png'])
+})
+
 test('atlas is decoded and selected by the actual runtime frame consumer, including edge padding', async () => {
   const root = await fixture()
   expect(await produceMedia(root, atlas, sharp)).toMatchObject({ valid: true, width: 8, height: 12, frameCount: 2 })
@@ -91,7 +158,7 @@ test('sprite crops and packing preserve transparent frame space and intentional 
       if (packed[(y * frame.width + 4) * 4 + 3]) visibleRows.push(y)
     expect(visibleRows).toEqual([offsets[i]! + 2, offsets[i]! + 3, offsets[i]! + 4])
   }
-  expect(await readFile(join(root, 'assets/motion-source.png'))).toEqual(source)
+  expect((await readFile(join(root, 'assets/motion-source.png'))).toString('hex')).toBe(source.toString('hex'))
 })
 
 test('invalid regions, duplicate normalized names, size and filtering fail before output', async () => {
@@ -148,4 +215,16 @@ test('deployed thin entry uses the installed dependency closure without package 
   const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
   expect({ code, error }).toEqual({ code: 0, error: '' })
   expect(JSON.parse(output)).toMatchObject({ valid: true, frameCount: 2 })
+  const before = (await readdir(join(root, 'assets'))).sort()
+  await writeFile(join(root, 'request.json'), JSON.stringify({ operation: 'inspect', inputs: [{ input: atlas.output }] }))
+  const inspection = Bun.spawn([process.execPath, 'media.mjs', 'request.json'], { cwd: root,
+    env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl, BEEGAME_SHARP_MODULE: media.moduleUrl },
+    stdout: 'pipe', stderr: 'pipe' })
+  const [inspectCode, inspectOutput, inspectError] = await Promise.all([
+    inspection.exited, new Response(inspection.stdout).text(), new Response(inspection.stderr).text(),
+  ])
+  expect({ code: inspectCode, error: inspectError }).toEqual({ code: 0, error: '' })
+  expect(JSON.parse(inspectOutput)).toMatchObject({ operation: 'inspect', scope: 'decoded-alpha-measurement',
+    measurements: [{ region: { left: 0, top: 0, width: 8, height: 12 }, hasAlpha: true }] })
+  expect((await readdir(join(root, 'assets'))).sort()).toEqual(before)
 }, 30_000)

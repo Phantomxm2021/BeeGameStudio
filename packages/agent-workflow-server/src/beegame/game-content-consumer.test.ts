@@ -6,7 +6,33 @@ import { uiAnchor, uiLocalMatrix } from './game-content-consumer'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { productionUiStyle, inspectProductionUiSupport } from '../../../scene-editor/src/production-surface'
+import { productionUiStyle, inspectProductionUiSupport, resolveSurfaceImage, bindProductionUiNode } from '../../../scene-editor/src/production-surface'
+import { uiNodeStyle } from '../../../scene-editor/src/ui-preview/UiContentRenderer'
+
+test('production resource lookup shares editor member/frame semantics and never substitutes missing selections',()=>{
+  const image = {source:{} as CanvasImageSource,url:'fixture',sheet:parseSpriteSheet({frames:{
+    red:{frame:{x:0,y:0,w:8,h:8}},green:{frame:{x:8,y:0,w:8,h:8}},
+  }})}
+  const assets = new Map([['atlas',image],['atlas:assets/runtime/sheet.png',image]])
+  expect(resolveSurfaceImage(assets,'atlas',{frame:'red.png'}).frame).toEqual([0,0,8,8])
+  expect(resolveSurfaceImage(assets,'atlas',{member:'assets/runtime/sheet.png',frame:'green'}).frame).toEqual([8,0,8,8])
+  expect(()=>resolveSurfaceImage(assets,'atlas',{frame:'missing'})).toThrow('no frame')
+  expect(()=>resolveSurfaceImage(assets,'atlas',{member:'missing'})).toThrow('Missing decoded')
+  const strip = {source:{} as CanvasImageSource,url:'fixture',sheet:parseSpriteSheet({frameWidth:8,frameHeight:8,
+    framesPerFacing:1,facings:['right','left']})}
+  const strips = new Map([['strip',strip]])
+  expect(resolveSurfaceImage(strips,'strip',{frame:'left'}).frame).toEqual([8,0,8,8])
+  expect(resolveSurfaceImage(strips,'strip',{initialFacing:'left'}).frame).toEqual([8,0,8,8])
+  expect(()=>resolveSurfaceImage(strips,'strip',{frame:'missing'})).toThrow('no frame')
+  strip.sheet = parseSpriteSheet({frameWidth:8,frameHeight:8,states:['idle','active']})
+  expect(resolveSurfaceImage(strips,'strip',{frame:'active'}).frame).toEqual([8,0,8,8])
+  expect(()=>resolveSurfaceImage(strips,'strip',{frame:'missing'})).toThrow('no frame')
+  const support = inspectProductionUiSupport({rootId:'root',nodes:[{id:'root',role:'screen-root'},
+    {id:'button',parentId:'root',role:'button',data:{image:{assetRef:'atlas',member:'assets/runtime/sheet.png',frame:'red'}}}]})
+  expect(support.supported).toBe(true)
+  expect(support.visualSources).toContainEqual(expect.objectContaining({ nodeId: 'button', representation: 'bitmap', assetRef: 'atlas' }))
+  expect(support.visualDesign).toBe('unverified')
+})
 
 test('shared production styles honor documented aliases without mutating or silently choosing conflicting values',()=>{
   const style={align:'right',verticalAlign:'bottom',fontSize:22,lineHeight:26}
@@ -16,6 +42,29 @@ test('shared production styles honor documented aliases without mutating or sile
   expect(()=>productionUiStyle({verticalAlign:'baseline'},'label')).toThrow('label/verticalAlign')
   expect(inspectProductionUiSupport({rootId:'root',nodes:[{id:'root',role:'screen-root'},
     {id:'label',parentId:'root',role:'text',style:{gradient:['red','blue']}}]}).issues[0]).toMatchObject({nodeId:'label',property:'style'})
+})
+
+test('shared UI keeps text shadows separate and binds progress/state through responsive layout without a new renderer', () => {
+  expect(productionUiStyle({ textShadow: '0 0 12px lime', shadow: '0 0 4px black', cornerRadius: 8,
+    background: { color: 'navy' }, border: { width: 2, color: 'lime', radius: 8 } }, 'panel'))
+    .toEqual({ textShadow: '0 0 12px lime', boxShadow: '0 0 4px black', borderRadius: 8, background: 'navy', border: '2px solid lime' })
+  expect(productionUiStyle({ textShadow: '0 0 12px lime' }, 'title')).not.toHaveProperty('boxShadow')
+  expect(uiNodeStyle({ id: 'title', role: 'text', style: { textShadow: '0 0 12px lime' } }, false, {}, []))
+    .toMatchObject({ textShadow: '0 0 12px lime', boxShadow: undefined })
+  const node = { id: 'fill', role: 'shape', layout: { size: [320, 16] as [number, number] },
+    style: { shape: 'rounded-rect', color: 'green' }, bindings: { widthRatio: 'ratio', styleColor: 'color', enabled: 'visible' },
+    responsive: { compact: { enabled: true, layout: { size: [210, 12] as [number, number] } } } }
+  const source = structuredClone(node)
+  const bound = bindProductionUiNode(node, { ratio: .5, color: 'red', visible: false })
+  expect(node).toEqual(source)
+  expect(bound).toMatchObject({ enabled: false, layout: { size: [160, 16] }, style: { backgroundColor: 'red' },
+    responsive: { compact: { enabled: false, layout: { size: [105, 12] }, style: { backgroundColor: 'red' } } } })
+  expect(inspectProductionUiSupport({ rootId: 'root', nodes: [{ id: 'root', role: 'screen-root' }, node] }).supported).toBe(true)
+  expect(bindProductionUiNode(node, { ratio: 0, color: 'red', visible: true }).layout!.size![0]).toBe(0)
+  for (const ratio of [-1, 1.1, NaN, '0.5'])
+    expect(() => bindProductionUiNode(node, { ratio, color: 'red', visible: true })).toThrow('widthRatio')
+  expect(() => bindProductionUiNode({ ...node, layout: { anchorMin: [0, 0], anchorMax: [1, 0] } },
+    { ratio: .5, color: 'red', visible: true })).toThrow('fixed layout.size')
 })
 
 const scene = { schema: 'beegame-content.v1', id: 'level', kind: 'scene-2d', assetRefs: [],

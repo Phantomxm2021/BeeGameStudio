@@ -70,6 +70,53 @@ it('resumes a stopped V3 run before dispatching an explicit new message', async 
   })
 })
 
+it.each(['message', 'continue'] as const)('blocks %s before resume when a paused writer is unresolved', async kind => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    session: { id: 'chat-1', cwd: '/workspace', status: 'running', turnStatus: 'idle' },
+  })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1', paused: { at: 'now' },
+    writer: { attemptId: 'first', fence: 1 }, requirements: { revision: 'revision-1' },
+    agentTurns: [{ attemptId: 'first', status: 'running' }],
+  }, writerLiveness: 'unknown', recoveryEvidence: 'unavailable', recoveryDiagnostic: 'same-boot' })))
+  await expect(kind === 'message' ? beeGameAdapter.sendMessage({ project_id: 'project', content: '继续任务' }) :
+    beeGameAdapter.continueTask({ project_id: 'project' })).rejects.toThrow('同次开机')
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure', '/api/projects/project/workflow-v3',
+  ])
+})
+
+it('explicit writer recovery does not resume or dispatch a model message', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({run:{
+    id:'run-1',version:7,chatSessionId:'chat-1',requirements:{revision:'r'},
+    writer:{attemptId:'first',fence:1},agentTurns:[{attemptId:'first',status:'running'}],
+  },writerLiveness:'unknown',recoveryEvidence:'host-reboot'})))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({run:{
+    id:'run-1',paused:{at:'now'},agentTurns:[{attemptId:'first',status:'interrupted'}],
+  }})))
+  expect(await beeGameAdapter.recoverTask({project_id:'project'})).toEqual({recovered:true,paused:true})
+  expect(authenticatedFetchMock.mock.calls.map(([url])=>url)).toEqual([
+    '/api/projects/project/workflow-v3','/api/projects/project/workflow-v3/recover-writer',
+  ])
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[1]![1]!.body as string)).toEqual({expectedVersion:7,attemptId:'first',fence:1})
+})
+
+it('explains a resume race without sending a new model message', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({session:{id:'chat-1'}})))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({run:{
+    id:'run-1',version:7,planRevision:2,chatSessionId:'chat-1',paused:{at:'now'},requirements:{revision:'r'},
+    agentTurns:[{attemptId:'first',status:'interrupted'}],
+  }})))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({code:'writer-unresolved',
+    error:'Resume cannot release an unknown writer'}),{status:409}))
+  await expect(beeGameAdapter.sendMessage({project_id:'project',content:'继续任务'})).rejects.toThrow('旧执行尚未确认停止或结算')
+  expect(authenticatedFetchMock.mock.calls).toHaveLength(3)
+  expect(authenticatedFetchMock.mock.calls[2]![0]).toBe('/api/projects/project/workflow-v3/resume')
+})
+
 it('forwards a chat attachment to V3 without adding a user-facing intent', async () => {
   authenticatedFetchMock.mockReset()
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
@@ -849,6 +896,18 @@ describe('transcriptEventsToHistory', () => {
     expect(snapshot.documents).toEqual([
       { path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' },
     ])
+    expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps per-file errors and registry identities in a partial Scene/UI list', async () => {
+    const documents = [
+      { path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' },
+      { path: 'ui/hud.json', revision: 'b'.repeat(64), id: 'hud', kind: 'ui-hud', error: 'data.nodes.5.responsive.compact.layout: Unrecognized key: "gap"' },
+      { path: 'ui/missing.json', id: 'missing', kind: 'ui-screen', error: 'Cannot read registered file (ENOENT)' },
+    ]
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'draft', documents })))
+
+    expect((await beeGameAdapter.getProjectGameContentFileList('project-1')).documents).toEqual(documents)
     expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
   })
 

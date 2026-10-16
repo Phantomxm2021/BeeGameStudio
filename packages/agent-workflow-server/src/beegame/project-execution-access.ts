@@ -128,7 +128,9 @@ export async function projectExecutionAccess(input: {
   const { modelType } = standardCliProvider(input.environment)
   const settings = {
     ...(modelType ? { modelType } : {}),
-    permissions: { ask: [...new Set(['Read', 'Grep', 'Glob', ...input.scopedTools ?? []])] },
+    // Shell sandbox settings do not constrain native file tools. Route every
+    // file mutation through the same host workspace boundary as file reads.
+    permissions: { ask: [...new Set(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', ...input.scopedTools ?? []])] },
     ...(input.scopedTools ? { disableAllHooks: true } : {}),
     sandbox: {
       enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: !input.scopedTools,
@@ -139,7 +141,7 @@ export async function projectExecutionAccess(input: {
     },
   }
   // Keep trusted host/plugin settings; project settings cannot broaden access.
-  return { root, temporary, nativeOutput, settings, environment,
+  return { root, temporary, nativeOutput, settings, environment, toolReadPaths,
     async isReferenceRead(tool: string | undefined, input: Record<string, unknown>) {
       if (!['Read', 'Glob', 'Grep'].includes(tool ?? '')) return false
       const path = tool === 'Read' ? input.file_path : input.path

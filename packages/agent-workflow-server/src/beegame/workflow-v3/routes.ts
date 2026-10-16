@@ -21,6 +21,7 @@ import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
 import { auditEventPage } from './event-page'
 import type { HostExitReceipts } from './host-exit-receipt'
 import { observeProjectCreation } from './web-project-start'
+import { initializeProjectGuide } from './project-guide'
 
 function imageScreenOrientation(run: Run): 'Landscape' | 'Portrait' | undefined {
   const value = run.requirements.constraints.orientation
@@ -85,8 +86,8 @@ export function registerV3Routes(app: Hono, input: {
     }
   }
   const agentSelection = z.object({measurementId:z.string().uuid(),requirementsRevision:z.string().min(1)}).strict()
-  // Adapt existing dashboard endpoints on the server. Never enter legacy
-  // scripts/acceptance restoration for a V3 project, or silently use older PASS.
+  // Ordinary Preview is a candidate runtime, not measured delivery. Keep it
+  // out of both measurement selection and legacy session/model restoration.
   for (const suffix of ['preview', 'preview/restart', 'deployment-readiness', 'deployments']) {
     app.on(suffix === 'preview' ? ['GET','POST','DELETE'] : suffix === 'deployment-readiness' ? ['GET'] : suffix === 'deployments' ? ['GET','POST'] : ['POST'],
       '/api/projects/:id/' + suffix, async (c, next) => {
@@ -162,25 +163,21 @@ export function registerV3Routes(app: Hono, input: {
             return c.json({allowed:false,issues:[detail.error],code:detail.code,destination:deployment.destination,quality:'unverified'})
           }
         }
-        if (!input.preview) throw new WorkflowError('preview-unavailable', 'Measured Preview is not configured', 503)
-        let state = await input.preview.status(project.id, user.id)
-        if (c.req.method === 'DELETE') {
-          if (state.preview) input.preview.close(project.id, user.id, state.preview.id)
-          state = {preview:null}
-        } else if (c.req.method === 'POST') {
+        if (!input.preview) throw new WorkflowError('preview-unavailable', 'Project Preview is not configured', 503)
+        let state = await input.preview.candidateStatus(project.id, user.id)
+        if (c.req.method === 'POST') {
           const body = await input.readBody(c.req.raw)
           z.object({}).strict().parse(body)
-          const latest = ctx.run.agentTurns?.flatMap(turn => turn.measurements ?? []).at(-1)
-          if (!latest) throw new WorkflowError('preview-unverified',
-            'No host-measured build is saved for this Run. A browser test execution.json is not a measurement; run the supplied measure.mjs entry, then inspect its result. No build or test was started by this Preview request.')
-          // openAgent rechecks writer, requirements, sources and artifact identity.
-          // Restart does not rerun a build or model and reuses a valid capability.
-          state = {preview:await input.preview.openAgent(ctx.run, latest.id)}
+          if (ctx.run.writer || input.sessions.hasActiveProjectTurn(user.id, project.id, ctx.workspace))
+            throw new WorkflowError('workspace-busy', 'Wait for the project writer to stop before starting Preview')
+          state = { preview: await input.preview.openCandidate(ctx.run) }
+        } else if (c.req.method === 'DELETE') {
+          if (state.preview) input.preview.closeCandidate(project.id, user.id, state.preview.id)
+          state = { preview: null }
         }
         return c.json({sessionId:ctx.run.chatSessionId,workspacePath:ctx.run.workspacePath,
-          status:state.preview ? 'running' : c.req.method === 'DELETE' ? 'stopped' : 'idle',
-          url:state.preview?.url ?? '',mode:'production',updatedAt:new Date().toISOString(),
-          message:state.preview ? state.preview.limitations.join(' ') : state.reason ?? 'No measured Preview is open'})
+          status:state.preview?'running':c.req.method==='DELETE'?'stopped':'idle',url:state.preview?.url??'',mode:'production',
+          updatedAt:new Date().toISOString(),message:state.preview?state.preview.limitations.join(' '):state.reason??'No candidate Preview is open'})
       } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
     })
   }
@@ -280,8 +277,11 @@ export function registerV3Routes(app: Hono, input: {
         throw new WorkflowError('run-unavailable', 'Persisted V3 project has no available Run; do not use legacy execution.', 503)
       if (run && run.workspacePath !== value.workspace) throw new WorkflowError('workspace-changed', 'Run workspace binding changed')
       if (run && !Array.isArray(run.agentTurns)) throw new WorkflowError('task-mode-retired', 'This older Task Run is retired. Start a new autonomous project; it cannot be silently migrated.', 409)
-      return c.json({ run: run ?? null, writerLiveness: run ? writerExecutor({ ...value, run }).writerLiveness(run) : 'none',
-        recoveryEvidence:run ? await writerExecutor({...value,run}).recoveryEvidence(run):'unavailable',
+      const writer=run?writerExecutor({...value,run}):undefined
+      const recovery=run && writer && 'recoveryDiagnostic' in writer ? await writer.recoveryDiagnostic(run):
+        {evidence:run && writer?await writer.recoveryEvidence(run):'unavailable',code:'receipt-only'}
+      return c.json({ run: run ?? null, writerLiveness: run && writer ? writer.writerLiveness(run) : 'none',
+        recoveryEvidence:recovery.evidence,recoveryDiagnostic:recovery.code,
         hostExitReceiptsConfigured:Boolean(input.exitReceipts) })
     }
     catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
@@ -311,6 +311,10 @@ export function registerV3Routes(app: Hono, input: {
       // Persist mode before any model dispatch; retry can reconcile this same
       // intake if mode persistence failed, never overwrite or create another Run.
       await input.persistMode(request,ctx.user,ctx.project,run)
+      // Only a blank creative intake before its first turn. Resumes, imported
+      // sources and running projects never receive a backfilled guide.
+      if(run.creation?.initialDelivery==='design-led-first-version' && run.agentTurns!.length===0)
+        await initializeProjectGuide(ctx.workspace)
       const turn=await ctx.agentExecutor.start(run,{
         openImage:input.openAgentImage ? ()=>input.openAgentImage!({user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,visualHandoffVersion:run.visualHandoffVersion,screenOrientation:imageScreenOrientation(run)}) : undefined,
         modelConfigId:chat.modelConfigId,language:body.brief.agent_response_language,
@@ -435,8 +439,8 @@ export function registerV3Routes(app: Hono, input: {
     // Run progress can advance while the saved files remain unchanged. That only invalidates edit authority, not a read-only view.
     const workflowChanged = after.version !== ctx.run.version
     const writerActive = Boolean(ctx.run.writer || after.writer || input.sessions.hasActiveProjectTurn(user.id, projectId, ctx.workspace))
-    const editablePaths = snapshot.state === 'draft' && !ctx.run.paused ? snapshot.documents.filter(d =>
-      ['scene-2d','scene-3d','ui-screen','ui-hud','ui-flow'].includes('kind' in d ? d.kind! : d.document!.kind)).map(d => d.path) : []
+    const editablePaths = snapshot.state === 'draft' && snapshot.index && !snapshot.indexIssues.length && !ctx.run.paused ? snapshot.documents.filter(d =>
+      !('error' in d && d.error) && ['scene-2d','scene-3d','ui-screen','ui-hud','ui-flow'].includes('kind' in d ? d.kind! : d.document!.kind)).map(d => d.path) : []
     const canEdit = !writerActive && !workflowChanged && hasBeeGamePermission(user, 'project.create') &&
       hasBeeGamePermission(user, 'agent.send_message') && editablePaths.length > 0
     return { ...snapshot, readOnly: !canEdit, ...(canEdit ? { editing: { version: ctx.run.version, planRevision: ctx.run.planRevision,

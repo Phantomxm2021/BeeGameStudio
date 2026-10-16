@@ -56,8 +56,8 @@ for(const mode of ['consume','hidpi','unscaled-backing','unscaled-backing-defaul
       await mkdir(join(root,'dist'));await cp(join(root,'content'),join(root,'dist/content'),{recursive:true});await cp(join(root,'assets'),join(root,'dist/assets'),{recursive:true})
       if(mode==='stale-copy')await writeFile(join(root,'dist',path),JSON.stringify(sceneLayoutFixture()))
       // Independent target game renderer. Never uses BGS preview or returns PASS.
-      const script=mode==='no-fetch'?'':`const d=await fetch("/${path}").then(r=>r.json()),n=d.data.nodes.find(n=>n.id==="${isUi?'play':'board'}"),im=new Image();
-        im.src="/${resource.root_path}";await im.decode();const c=document.querySelector("canvas"),ctx=c.getContext("2d");
+      const script=mode==='no-fetch'?'':`const d=await fetch("./${path}").then(r=>r.json()),n=d.data.nodes.find(n=>n.id==="${isUi?'play':'board'}"),im=new Image();
+        im.src="./${resource.root_path}";await im.decode();const c=document.querySelector("canvas"),ctx=c.getContext("2d");
         ${['hidpi','unscaled-backing','unscaled-backing-default'].includes(mode)?'c.style.width="960px";c.style.height="540px";c.width=960*devicePixelRatio;c.height=540*devicePixelRatio;':''}
         ${mode==='hidpi'?'ctx.scale(devicePixelRatio,devicePixelRatio);':''}
         const s=${isUi?'n.layout.size':'n.components[0].data.size'},p=${isUi?'n.layout.position||[0,0]':mode==='ignore-position'?'[-100,-50]':'[...n.transform.position]'};

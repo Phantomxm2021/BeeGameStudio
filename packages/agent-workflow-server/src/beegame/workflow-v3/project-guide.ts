@@ -1,16 +1,27 @@
 import { constants } from 'node:fs'
 import { readdirSync, realpathSync, statSync, fstatSync, openSync, readSync, closeSync } from 'node:fs'
-import { open, realpath } from 'node:fs/promises'
+import { open, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
-import { getBuiltinSkillsDirectory } from '@bee-game-studio/beegame-skills-core/store'
 
-const METHOD_SELECTION = 'Select relevant installed Skills through the native Skill tool; reuse loaded methods. The collection is navigation, not stages or authority. Do not copy Skill bodies into this guide.'
+const NAV_START = '<!-- bgs:source-navigation:start -->'
+const NAV_END = '<!-- bgs:source-navigation:end -->'
+// Project-wide instructions only. Native Skill metadata is the discoverable
+// catalog; procedures and their relative references stay in the installed Skills.
+const PROJECT_CONVENTIONS = `## Project conventions
+- Preserve confirmed requirements and the project's existing sources of truth. Use project-relative paths for durable project references.
+- Keep project-specific architecture decisions and confirmed runtime entry points outside the generated source-navigation block; update them when the implementation changes. Generated pointers list saved sources and declared commands, not verified runtime behavior.
+
+## Professional methods
+- Select relevant installed Skills from the current session's native metadata and invoke them with the Skill tool before related design or implementation decisions; reuse methods already loaded in context.
+- Read the invoked Skill and only the references needed for the task. Resolve bundled references and scripts from the base directory supplied by that invocation, not from a saved installation path.
+- Keep professional procedures in their Skills, not in this guide. Do not duplicate the catalog or require every Skill in a fixed sequence.`
 
 // Source pointers only. Existing design/configuration supplies the decisions;
-// a guide is optional, not another mandatory authored delivery/report.
+// this is not another mandatory authored delivery/report.
 export const PROJECT_GUIDE_TEMPLATE = `# Project navigation
 
+${NAV_START}
 ## Current route
 - Route decision source: <actual design/configuration path>
 
@@ -25,10 +36,9 @@ export const PROJECT_GUIDE_TEMPLATE = `# Project navigation
 ## Run and verify
 - Commands: <saved configuration path and declared commands>
 - Tests: <maintained test paths; prerequisites belong in their sources>
+${NAV_END}
 
-## Professional methods
-- Collection navigator: <installed bgs-builtins catalog>/README.md
-- ${METHOD_SELECTION}
+${PROJECT_CONVENTIONS}
 `
 
 const PATH = 'CLAUDE.md' as const
@@ -92,22 +102,13 @@ export function projectNavigationSnapshot(workspacePath:string) {
     verified:'saved names and declared commands only; no command executed, entry/engine chosen or consumption/quality certified'}
 }
 
-/** On-demand ready-to-use source scaffold. Never copies prose/parameters,
+/** On-demand ready-to-use source scaffold. Never copies project prose/parameters,
  * assertions, receipts or temporary capabilities into the durable guide. */
-export function projectGuideTemplate(workspacePath:string) {
-  const facts=projectNavigationSnapshot(workspacePath),paths=(xs:string[])=>xs.length?xs.map(p=>'`'+p.replaceAll('`','\\`')+'`').join(', '):'<not established>'
+function sourceNavigation(facts:ReturnType<typeof projectNavigationSnapshot>) {
+  const paths=(xs:string[])=>xs.length?xs.map(p=>'`'+p.replaceAll('`','\\`')+'`').join(', '):'<not established>'
   const configuration=facts.rootFiles.filter(p=>!p.endsWith('.md'))
-  let collectionNavigation:string
-  try {
-    const navigator=join(getBuiltinSkillsDirectory(),'README.md')
-    if(!statSync(navigator).isFile())throw Error('Collection navigator is not a regular file')
-    collectionNavigation=paths([navigator])
-  } catch {
-    // Optional method navigation must not block the project source scaffold.
-    collectionNavigation='<unavailable; use installed native Skill metadata>'
-  }
-  return {facts,value:`# Project navigation
-
+  return `${NAV_START}
+<!-- Refreshed from saved sources before measurement and at turn end; keep authored decisions outside this block. -->
 ## Current route
 - Root source anchors (route not inferred): ${paths(configuration)}
 
@@ -122,14 +123,75 @@ export function projectGuideTemplate(workspacePath:string) {
 ## Run and verify
 - Declared package.json scripts (not executed): ${Object.entries(facts.commands).map(([k,v])=>JSON.stringify(k)+': '+JSON.stringify(v)).join('; ')||'<not established>'}
 - Maintained test sources: ${paths(facts.testFiles)}
+${NAV_END}`
+}
 
-## Professional methods
-- Collection navigator: ${collectionNavigation}
-- ${METHOD_SELECTION}
+export function projectGuideTemplate(workspacePath:string) {
+  const facts=projectNavigationSnapshot(workspacePath)
+  return {facts,value:`# Project navigation
+
+${sourceNavigation(facts)}
+
+${PROJECT_CONVENTIONS}
 `}
+}
+
+/** New, blank creative projects only; callers must check creation/turn facts.
+ * Never replace an existing guide, including a link or an empty user file. */
+export async function initializeProjectGuide(workspacePath:string):Promise<void> {
+  const root=await realpath(workspacePath)
+  try {
+    await writeFile(join(root,PATH),projectGuideTemplate(root).value,{encoding:'utf8',flag:'wx'})
+  } catch(error) {
+    if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error
+  }
 }
 export type ProjectGuide = {path:typeof PATH;status:'loaded';text:string;sha256:string;bytes:number} |
   {path:typeof PATH;status:'missing'|'empty'|'unavailable';reason:string}
+
+async function readGuideText(file:Awaited<ReturnType<typeof open>>) {
+  const stat=await file.stat()
+  if(!stat.isFile())throw Error('Project guide must be a regular file, not a directory or device')
+  if(stat.size>MAX_BYTES)throw Error('Project guide exceeds the 64 KiB reference-input bound; no truncated guide was loaded')
+  const buffer=Buffer.alloc(MAX_BYTES+1)
+  let bytes=0
+  while(bytes<buffer.length) {
+    const read=await file.read(buffer,bytes,buffer.length-bytes,bytes)
+    if(!read.bytesRead)break
+    bytes+=read.bytesRead
+  }
+  if(bytes>MAX_BYTES)throw Error('Project guide grew beyond the reference-input bound; no truncated guide was loaded')
+  const data=buffer.subarray(0,bytes),text=new TextDecoder('utf-8',{fatal:true}).decode(data)
+  if(text.includes('\u0000'))throw Error('Project guide must be UTF-8 text, not binary data')
+  return {data,text}
+}
+
+/** Existing writer only. Update the explicitly generated block, never create a
+ * missing guide or replace authored text. No change means no write. */
+export async function refreshProjectGuide(workspacePath:string):Promise<boolean> {
+  const candidate=await readProjectGuide(workspacePath)
+  if(candidate.status!=='loaded' || !candidate.text.includes(NAV_START) && !candidate.text.includes(NAV_END))return false
+  let file:Awaited<ReturnType<typeof open>>|undefined
+  try {
+    const root=await realpath(workspacePath)
+    file=await open(join(root,PATH),constants.O_RDWR|constants.O_NOFOLLOW|constants.O_NONBLOCK)
+    if((await file.stat()).nlink!==1)throw Error('Shared project guide files are not refreshed')
+    const {text}=await readGuideText(file)
+    const start=text.indexOf(NAV_START),end=text.indexOf(NAV_END)
+    if(start<0 && end<0)return false
+    if(start<0 || end<start || text.indexOf(NAV_START,start+NAV_START.length)>=0 || text.indexOf(NAV_END,end+NAV_END.length)>=0)
+      throw Error('Project guide navigation markers are incomplete or duplicated; authored text preserved')
+    const next=text.slice(0,start)+sourceNavigation(projectNavigationSnapshot(root))+text.slice(end+NAV_END.length)
+    if(next===text)return false
+    if(Buffer.byteLength(next)>MAX_BYTES)throw Error('Refreshed project guide exceeds 64 KiB; saved guide preserved')
+    await file.writeFile(next,'utf8')
+    await file.truncate(Buffer.byteLength(next))
+    return true
+  } catch(error) {
+    if((error as NodeJS.ErrnoException).code==='ENOENT')return false
+    throw error
+  } finally {await file?.close()}
+}
 
 /** Read one project-root regular file only. No search, @include expansion,
  * settings/hooks parsing, command execution, file creation or stale cache. */
@@ -138,19 +200,7 @@ export async function readProjectGuide(workspacePath:string):Promise<ProjectGuid
   try {
     const root=await realpath(workspacePath)
     file=await open(join(root,PATH),constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK)
-    const stat=await file.stat()
-    if(!stat.isFile())throw Error('Project guide must be a regular file, not a directory or device')
-    if(stat.size>MAX_BYTES)throw Error('Project guide exceeds the 64 KiB reference-input bound; no truncated guide was loaded')
-    const buffer=Buffer.alloc(MAX_BYTES+1)
-    let bytes=0
-    while(bytes<buffer.length) {
-      const read=await file.read(buffer,bytes,buffer.length-bytes,null)
-      if(!read.bytesRead)break
-      bytes+=read.bytesRead
-    }
-    if(bytes>MAX_BYTES)throw Error('Project guide grew beyond the reference-input bound; no truncated guide was loaded')
-    const data=buffer.subarray(0,bytes),text=new TextDecoder('utf-8',{fatal:true}).decode(data)
-    if(text.includes('\u0000'))throw Error('Project guide must be UTF-8 text, not binary data')
+    const {data,text}=await readGuideText(file),bytes=data.length
     if(!text.trim())return {path:PATH,status:'empty',reason:'File contains no navigation text'}
     return {path:PATH,status:'loaded',text,bytes,sha256:createHash('sha256').update(data).digest('hex')}
   } catch(error) {

@@ -13,6 +13,7 @@ import { parseBeeGameContentDocument, sceneDesignSource, BEEGAME_UI_ASSET_BACKED
 export { designReviewResultSchema, type DesignReviewStep, type DesignReviewResult, type DesignFinding } from '@bee-game-studio/agent-workflow/design-review-result'
 
 export type DesignDocument = typeof PROJECT_DOCUMENTS[number]
+export const DESIGN_ACCEPTANCE_PATH = '.beegame/delivery/acceptance.json'
 const text = string().trim().min(1)
 const handoffSchema = object({
   version: literal(2).default(2),
@@ -91,8 +92,9 @@ Write outputs:[{id,section,acceptance?:{section,method:"test"|"target-runtime"|"
 Register every necessary owned release outcome in outputs with acceptance pointing to an actual prose heading explaining conditions/actions, observable expected results and necessary boundaries/recovery. Keep explanatory prose out of the required checklist. Use an independently checkable behavior, page/state interaction, professional treatment or technical integration, not "implement all gameplay/UI" or one item per function, constant or sentence. Existing version 2 indexes remain readable but their coarse or unindexed expectations are not certified as a new complete checklist. Use test for deterministic rules/calculations, target-runtime for actual presentation/input/audio and end-to-end play, inspection for directly examinable resources or retained provenance. Prose review is not runtime evidence; no completed runtime check is required while authoring.`
 
 export const DESIGN_HANDOFF_INSTRUCTION = DESIGN_INDEX_INSTRUCTION + `
-Only the final TECHNICAL_DESIGN author adds implementationItems:[{id,section,dependsOn:[existing task IDs],requirementRefs:[{document:actual design filename,id:owned output ID}]}] to its existing index. New tasks state dependsOn explicitly (empty when independent); existing indexes without it remain readable but do not assert independence. Each section points to one concise task paragraph in TECHNICAL_DESIGN.md: deliverable goal, prerequisite task IDs, authoritative professional references, needed data inputs, observable completion conditions and verification method. Reference owner acceptance instead of copying it; add only task-specific integration expectations. Choose independently implementable and verifiable work units: foundational capabilities and end-to-end integration are both valid. Split independently failing work, not every constant or function; a whole player journey need not be one giant task. Retain shared constraints once and an end-to-end journey check. Cover every registered required output, including technical ones. Do not invent dependencies before specialists finish, another delivery-plan file, a task database, fixed command sequence or runtime verification. Joint Review compares original confirmed requirements, necessary professional decisions and task meaning; the program checks declared coverage, references and dependencies, not semantic completeness.
-Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui and content/scenes JSON are design sources, not immutable evidence: link them from their owning UI_UX_SPEC.md or LEVEL_SCENE_DESIGN.md sections, because Content completes bindings in the same files. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose for the joint review. User decisions must trace to actual user authorization. Version 1 sidecars are rejected instead of silently converted.`
+Read reference pictures with the native Read tool at their actual saved paths, just as you read the linked design documents. A document link, filename, hash or generation record is not an image read. If a picture is missing, unreadable or unsupported, report the exact path and read error; do not claim to have inspected it or silently substitute another image. Existing and user-supplied references do not need AI source certification. Use the available AI image tools when generation is needed within the authorized scope and budget. UI/Scene source and runtime consumption checks remain separate from reading reference pictures.
+Only the final TECHNICAL_DESIGN author adds implementationItems:[{id,section,dependsOn:[existing task IDs],requirementRefs:[{document:actual design filename,id:owned output ID}]}] to its existing index. New tasks state dependsOn explicitly (empty when independent); existing indexes without it remain readable but do not assert independence. Each section points to one concise task paragraph in TECHNICAL_DESIGN.md: deliverable goal, prerequisite task IDs, authoritative professional references, needed data inputs, observable completion conditions and verification method. Reference owner acceptance instead of copying it; add only task-specific integration expectations. Choose independently implementable and verifiable work units: foundational capabilities and end-to-end integration are both valid. Split independently failing work, not every constant or function; a whole player journey need not be one giant task. Retain shared constraints once and an end-to-end journey check. Cover every registered required output, including technical ones. Finalize task references after the selected designs, resources and UI/Scene sources exist. Do not invent another delivery-plan file, a task database or runtime verification. Compare original confirmed requirements, necessary professional decisions and task meaning; the program checks declared coverage, references and dependencies, not semantic completeness.
+Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui and content/scenes JSON are design sources, not immutable evidence: link them from their owning UI_UX_SPEC.md or LEVEL_SCENE_DESIGN.md sections, begin their geometry during planning without production assets, then revise affected decisions and complete resource bindings from the selected visual designs and resources before final implementation handoff. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose; do not silently substitute a fallback. User decisions must trace to actual user authorization. Version 1 sidecars are rejected instead of silently converted.`
 
 function hash(body: string | Buffer) { return createHash('sha256').update(body).digest('hex') }
 function readRetained(workspace: string, path: string) {
@@ -156,14 +158,14 @@ export function isHigherDocumentVersion(current: string, previous: string) {
   }
   return false
 }
-/** Exact supporting files cited by affected documents; Scene/UI owners may
- * create explicitly linked missing layout outputs. No broad directory grant. */
+/** Exact owned calculation/layout outputs for scoped writes and versioning.
+ * Reference pictures are read through the native Read tool, like documents;
+ * they are not classified, authenticated or made into a delivery gate here. */
 export function designSupportingFiles(workspace: string, documents: readonly string[]) {
   const root = realpathSync(workspace), files = new Set<string>()
   for (const name of documents) {
     if (!PROJECT_DOCUMENTS.some(document => document === name)) throw new Error('Unknown design document')
-    const body = readRetained(workspace, `docs/${name}`).toString('utf8')
-    const tree = fromMarkdown(body), definitions = new Map<string, string>()
+    const tree = fromMarkdown(readRetained(workspace, `docs/${name}`).toString('utf8')), definitions = new Map<string, string>()
     const walk = (node: any, visit: (node: any) => void) => {
       visit(node)
       for (const child of node.children ?? []) walk(child, visit)
@@ -177,17 +179,12 @@ export function designSupportingFiles(workspace: string, documents: readonly str
       try { path = decodeURIComponent(url.split(/[?#]/)[0]!) } catch { return }
       const target = resolve(root, 'docs', path), part = relative(root, target).split(sep).join('/')
       const calculation = /^docs\/calc\/[A-Za-z0-9_./-]+\.(?:mjs|js|json|md)$/.test(part)
-      const ownVisual = part.startsWith('docs/visual/' + name.slice(0, -3) + '/') &&
-        /^docs\/visual\/[A-Za-z0-9_./-]+\.(?:html|svg|png|jpg|jpeg|webp)$/.test(part)
       const ownLayout = (name === 'UI_UX_SPEC.md' && isDesignUiFile(part)) ||
         (name === 'LEVEL_SCENE_DESIGN.md' && isDesignSceneFile(part))
-      if (!calculation && !ownVisual && !ownLayout) return
-      // readRetained checks containment; reject even an in-workspace symlink.
+      if (!calculation && !ownLayout) return
       let actual: string
       try { actual = realpathSync(target) } catch (error) {
-        // Missing factual evidence cannot be invented. A planned layout is an
-        // owned output, however: its exact planned link can authorize repair.
-        // Missing data still fails reference/layout checks until saved.
+        // Only explicitly linked owned layouts can authorize a missing output.
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
           if (ownLayout) files.add(part)
           return
@@ -199,6 +196,7 @@ export function designSupportingFiles(workspace: string, documents: readonly str
       files.add(part)
     })
   }
+
   // An appendix already records its model/imported calculation code. It
   // need not also be duplicated as Markdown links to permit a retained rerun.
   for (const file of [...files]) {
@@ -682,7 +680,7 @@ export function finalizeDesignDocuments(workspace: string, documents: readonly D
 }
 
 /** Reuse the only output index actually consumed by runtime acceptance. */
-export function readDesignAcceptanceRequirements(workspace: string) {
+export function readDesignAcceptanceRequirements(workspace: string, options: { technicalBaseline?: boolean } = {}) {
   const requirements: Array<{ document: DesignDocument; id: string; section: string; outputSection: string;
     method: 'test' | 'target-runtime' | 'inspection'; documentSha256: string; handoffSha256: string }> = []
   const documents: DesignDocument[] = []
@@ -703,7 +701,7 @@ export function readDesignAcceptanceRequirements(workspace: string) {
       requirements.push({ document, id: output.id, outputSection: output.section, ...output.acceptance, documentSha256: hash(bytes), handoffSha256: hash(sidecar) })
   }
   if (documents.length && !documents.includes('GDD.md')) throw new Error('Design acceptance requires the current GDD.md')
-  const issues = implementationIssues(indexes, PROJECT_DOCUMENTS.every(name => documents.includes(name)))
+  const issues = implementationIssues(indexes, !options.technicalBaseline && PROJECT_DOCUMENTS.every(name => documents.includes(name)))
   if (issues.length) throw new Error(issues.join('; '))
   return requirements
 }
@@ -717,7 +715,7 @@ export function readDesignImplementationChecklist(workspace: string) {
   const { handoff } = documentHandoff(workspace, 'TECHNICAL_DESIGN.md', readRetained(workspace, 'docs/TECHNICAL_DESIGN.md').toString('utf8'))
   return { source: designHandoffPath('TECHNICAL_DESIGN.md'), designRevision: check.revision,
     globalSources: PROJECT_DOCUMENTS.map(document => `docs/${document}`),
-    resultPath: '.beegame/delivery/acceptance.json',
+    resultPath: DESIGN_ACCEPTANCE_PATH,
     items: handoff.implementationItems!.map(item => ({ id: item.id,
       ...(item.dependsOn !== undefined ? { dependsOn: item.dependsOn } : {}),
       taskSource: { document: 'docs/TECHNICAL_DESIGN.md', section: item.section },

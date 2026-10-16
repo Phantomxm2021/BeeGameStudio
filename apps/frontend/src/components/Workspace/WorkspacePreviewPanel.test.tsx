@@ -54,9 +54,9 @@ describe('WorkspacePreviewPanel', () => {
     expect(screen.getByRole('status')).toBeTruthy();
     head.mockRestore();
   });
-  it('accepts measured static Preview only after its iframe loads and a HEAD probe confirms the measured origin', async () => {
+  it.each(['measured-static', 'candidate-static'])('accepts %s Preview only after its iframe loads and a HEAD probe confirms its isolated origin', async mode => {
     const head = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, {
-      status: 200, headers: { 'X-BeeGame-Preview-Mode': 'measured-static' },
+      status: 200, headers: { 'X-BeeGame-Preview-Mode': mode },
     }));
     try {
       render(<WorkspacePreviewPanel {...live} />);

@@ -399,7 +399,7 @@ export function SelectContent({ className, children, portal = false }: SelectCon
             }
       }
       style={{
-        ...(portal ? { position: 'fixed' as const, left: rect.left, width: rect.width, right: 'auto', top: isTop ? 'auto' : rect.bottom, bottom: isTop ? window.innerHeight - rect.top : 'auto', zIndex: 260 } : {}),
+        ...(portal ? { position: 'fixed' as const, left: rect.left, width: rect.width, right: 'auto', top: isTop ? 'auto' : rect.bottom, bottom: isTop ? window.innerHeight - rect.top : 'auto' } : {}),
         transformOrigin: isTop ? "bottom" : "top",
         overflowX: "hidden",
         overflowY: open ? "auto" : "hidden",
@@ -409,7 +409,8 @@ export function SelectContent({ className, children, portal = false }: SelectCon
       // flush against the trigger, then separates into its own rounded pill;
       // sits above or below depending on available space
       className={cn(
-        "absolute left-0 right-0 z-20 rounded-xl border border-border bg-background shadow-lg",
+        "absolute left-0 right-0 rounded-xl border border-border bg-background shadow-lg",
+        portal ? "z-[260]" : "z-20",
         isTop ? "bottom-full" : "top-full",
         className,
       )}

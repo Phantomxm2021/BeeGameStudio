@@ -1,7 +1,8 @@
 import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { uiAnchor, uiPaintOrder } from '../content-coordinates';
-import { resolveUiImage } from './uiAtlas';
+import { resolveUiImage, uiNodeImageSource } from './uiAtlas';
+export { uiNodeImageSource } from './uiAtlas';
 import { uiFontKey } from '../ui-font-reference';
 import type { BeeGameUiContentNode } from './types';
 
@@ -247,6 +248,9 @@ export function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamil
     fontSize: resolvedFontSize,
     fontFamily,
     fontWeight: typeof style.fontWeight === 'number' ? style.fontWeight : 400,
+    textShadow: typeof style.textShadow === 'string' ? style.textShadow : undefined,
+    boxShadow: typeof style.boxShadow === 'string' ? style.boxShadow : typeof style.shadow === 'string' ? style.shadow : undefined,
+    fontVariantNumeric: typeof style.fontVariantNumeric === 'string' ? style.fontVariantNumeric as React.CSSProperties['fontVariantNumeric'] : undefined,
     letterSpacing: typeof style.letterSpacing === 'number' ? style.letterSpacing : 0,
     textTransform: 'none',
     opacity: dataAlpha,
@@ -267,14 +271,6 @@ export function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamil
   output.top = y;
   output.translate = `${-anchorX * 100}% ${-anchorY * 100}%`;
   return output;
-}
-
-export function uiNodeImageSource(node: BeeGameUiContentNode): { assetRef?: string; data?: Record<string, unknown> } {
-  const image = typeof node.data?.image === 'object' && node.data.image !== null
-    ? node.data.image as Record<string, unknown> : undefined;
-  return typeof image?.assetRef === 'string'
-    ? { assetRef: image.assetRef, data: { ...node.data, ...image } }
-    : { assetRef: node.assetRef, data: node.data };
 }
 
 export function resolveNodeImage(node: BeeGameUiContentNode, assetUrls: Record<string, string>): string | undefined {

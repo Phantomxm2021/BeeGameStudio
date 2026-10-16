@@ -227,3 +227,55 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('portable menu/HUD layouts a
     server.stop(true)
   }
 }, 30000)
+
+test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('shared production UI renders atlas skins, progress and nested labels in actual host pixels', async () => {
+  const { chromium } = await import(sharedPlaywright().moduleUrl)
+  const source = await bundleContentConsumer()
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => new URL(request.url).pathname === '/consumer.mjs'
+    ? new Response(source, { headers: { 'content-type': 'application/javascript' } })
+    : new Response('<!doctype html><style>body{margin:0}</style><body></body>', { headers: { 'content-type': 'text/html' } }) })
+  let browser
+  try {
+    browser = await chromium.launch({ executablePath: process.env.BGS_LAYOUT_BROWSER_EXECUTABLE ?? chromium.executablePath(), headless: true, args: ['--mute-audio'] })
+    const page = await browser.newPage()
+    await page.goto(`http://127.0.0.1:${server.port}`)
+    for (const [width, height, ratio] of [[1280, 720, 1], [844, 390, .5], [844, 390, 0]]) {
+      await page.setViewportSize({ width, height })
+      const actual = await page.evaluate(async ({ width, height, ratio }: { width: number; height: number; ratio: number }) => {
+        const moduleUrl = '/consumer.mjs', lib = await import(moduleUrl)
+        document.body.replaceChildren()
+        const source = { rootId: 'root', nodes: [
+          { id: 'root', role: 'screen-root', data: { compactMaxWidth: 900 }, layout: { size: [1280, 720] } },
+          { id: 'track', parentId: 'root', role: 'shape', layout: { size: [320, 16], position: [20, 20] }, style: { color: 'gray' } },
+          { id: 'fill', parentId: 'track', role: 'shape', layout: { size: [320, 16] }, style: { shape: 'rounded-rect', cornerRadius: 8 },
+            bindings: { widthRatio: 'ratio', styleColor: 'color' }, responsive: { compact: { layout: { size: [210, 12] } } } },
+          { id: 'badge', parentId: 'root', role: 'shape', layout: { anchor: 'middle-center', size: [100, 100], position: [0, -50] }, style: { shape: 'circle', color: 'lime' } },
+          { id: 'grade', parentId: 'badge', role: 'text', text: 'A', layout: { anchor: 'middle-center', size: [80, 80] }, style: { fontSize: 32, textShadow: '0 0 12px lime' } },
+          { id: 'play', parentId: 'root', role: 'button', text: 'Play', assetRef: 'skin', data: { frame: 'blue' },
+            actions: { click: 'start' }, layout: { anchor: 'middle-center', position: [0, 80], size: [200, 64] }, style: { fontSize: 24 } },
+        ] }
+        const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 8
+        const ctx = canvas.getContext('2d')!; ctx.fillStyle = 'red'; ctx.fillRect(0, 0, 8, 8); ctx.fillStyle = 'blue'; ctx.fillRect(8, 0, 8, 8)
+        const assets = new Map([['skin', { source: canvas, url: 'synthetic', sheet: lib.parseSpriteSheet({ frames: { blue: { frame: { x: 8, y: 0, w: 8, h: 8 } } } }) }]])
+        const before = JSON.stringify(source), surface = await lib.createProductionUiSurface(document.body)
+        const geometry = surface.render(source, { width, height }, { assets, state: { ratio, color: 'red' }, onAction() {} })
+        const get = (id: string) => document.querySelector(`[data-node-id="${id}"]`) as HTMLElement
+        const expectedGrade = geometry.find((node: any) => node.id === 'grade').bounds, grade = get('grade'), gradeBox = grade.getBoundingClientRect()
+        return { sourcePreserved: before === JSON.stringify(source),
+          gradePositionError: Math.max(...(['left', 'top', 'right', 'bottom'] as const).map(key => Math.abs(gradeBox[key]-expectedGrade[key]))),
+          titleBoxShadow: getComputedStyle(grade).boxShadow, titleTextShadow: getComputedStyle(grade).textShadow,
+          fillWidth: get('fill')?.getBoundingClientRect().width ?? 0,
+          buttonHeight: get('play').getBoundingClientRect().height,
+          // This fixture has no packer edge padding. Sample the frame interior
+          // to identify the selected skin, not linear-filter boundary quality.
+          skinPixel: [...get('play').querySelector('canvas')!.getContext('2d')!.getImageData(100, 32, 1, 1).data] }
+      }, { width, height, ratio })
+      expect(actual.sourcePreserved).toBe(true)
+      expect(actual.gradePositionError).toBeLessThan(.1)
+      expect(actual.titleBoxShadow).toBe('none'); expect(actual.titleTextShadow).not.toBe('none')
+      expect(actual.fillWidth).toBe((width <= 900 ? 210 : 320) * ratio)
+      expect(actual.buttonHeight).toBe(64)
+      expect(actual.skinPixel).toEqual([0, 0, 255, 255])
+    }
+  } finally { await browser?.close(); server.stop(true) }
+}, 30000)

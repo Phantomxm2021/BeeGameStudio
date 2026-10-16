@@ -107,10 +107,12 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
           throw new WorkflowError('writer-unresolved','No durable host quiescence evidence or original-host observation; missing session and user claims cannot unlock it')
         await recordQuiescence(current,attempt,receipt)
       }
-      const quiet=(await input.store.read(run.projectId,run.ownerId))!
+      const quiet=(await input.store.read(run.projectId,run.ownerId))!,paused=pauseRun(quiet)
+      if(paused!==quiet)await input.store.commit(run.projectId,run.ownerId,quiet.version,paused,'run.paused')
       const error = 'Recovered interrupted settlement from host quiescence evidence. Partial candidates retained, not accepted; external outcomes remain unverified. No automatic retry.'
-      const next = settleSourceEdit(quiet, attempt.attemptId, attempt.fence, error)
-      await input.store.commit(run.projectId, run.ownerId, quiet.version, next, 'writer.recovered')
+      const next = settleSourceEdit(paused, attempt.attemptId, attempt.fence, error)
+      next.blockedReason = 'User pause retained. Source edit failed: '+error
+      await input.store.commit(run.projectId, run.ownerId, paused.version, next, 'writer.recovered')
       observedExits.delete(attempt.attemptId)
       return next
     },

@@ -12,7 +12,7 @@ import { BeeGameSessionManager } from '../session-manager'
 import type { Run } from './state'
 
 const job = JSON.parse(await Bun.stdin.text()) as {
-  root: string; key: string; mode: 'agent' | 'source' | 'no-start' | 'before-exit'; run: Run; body?: unknown
+  root: string; key: string; mode: 'agent' | 'source' | 'no-start' | 'before-exit' | 'during-native'; run: Run; body?: unknown
 }
 const root = await realpath(job.root)
 if (dirname(root) !== await realpath(tmpdir()) || !basename(root).startsWith('bgs-v3-exit-crash-') ||
@@ -38,11 +38,14 @@ const sessions = new BeeGameSessionManager({ async start(input) {
   input.onNativeSessionId?.('11111111-2222-4333-8444-555555555555')
   return { stop(){}, async dispose(){}, async submit(turn) {
     await writeFile(join(job.run.workspacePath,'candidate.txt'),'Synthetic candidate; never game acceptance')
+    input.onNativeSubmission?.('11111111-2222-4333-8444-555555555555')
+    if(job.mode==='during-native')await checkpoint('during-native')
     await turn.onMessage({type:'result',subtype:'success',session_id:'11111111-2222-4333-8444-555555555555',
       usage:{input_tokens:5,output_tokens:2},result:'Synthetic only'} as any)
   } }
 } }, join(root,'sessions'), async()=>({}), {}, true)
-const exitReceipts = createHostExitReceipts({dataRoot:join(root,'host'),key:Buffer.from(job.key,'hex')})!
+const exitReceipts = createHostExitReceipts({dataRoot:join(root,'host'),key:Buffer.from(job.key,'hex'),
+  identity:async()=>({machine:'synthetic-host',boot:'boot-a'})})!
 if(job.mode === 'source') await createV3Executor({store,sessions,exitReceipts}).edit(job.run,job.body)
 else await createAgentGoalExecutor({store,sessions,exitReceipts}).start(job.run,{})
 // Native execution is asynchronous; keep this exact synthetic worker alive.

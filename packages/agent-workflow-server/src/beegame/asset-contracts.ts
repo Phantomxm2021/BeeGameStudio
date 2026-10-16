@@ -219,6 +219,7 @@ export type BeeGameAuthoredResourceInput = {
   content_profile?: Record<string, unknown>
   technical_facts?: Record<string, string | number | boolean>
   replace_existing_provisional?: boolean
+  dependencies?: BeeGameResourceDependency[]
 }
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
 const ASSET_REQUIREMENTS_MODULE_ROOT = 'assets/manifest/requirements'
@@ -499,7 +500,7 @@ export async function registerBeeGameAuthoredResources(
  * Mechanical verification is not aesthetic, licensing or runtime approval. */
 export async function registerBeeGameLocalResources(
   workspacePath: string,
-  inputs: readonly (BeeGameAuthoredResourceInput & { source?: Extract<BeeGameProjectResourceSource, { type: 'web' | 'agent-authored' }> })[],
+  inputs: readonly (BeeGameAuthoredResourceInput & { source?: Extract<BeeGameProjectResourceSource, { type: 'web' | 'agent-authored' | 'resource-library' }> })[],
   options: { additionalFormatCapabilities?: readonly string[];
     projectTarget?: BeeGameAssetManifest['project_target']; requirements?: BeeGameAssetManifest['requirements'] } = {},
 ): Promise<BeeGameAssetManifest> {
@@ -546,6 +547,7 @@ export async function registerBeeGameLocalResources(
     for (const id of input.fulfills ?? existing?.fulfills ?? [])
       if (!requirementIds.has(id)) batchIssues.push(`resource ${input.id}.fulfills: unknown requirement ID ${id}; use an ID from requirements, not a display name/resource ID`)
     const paths = uniqueStrings(input.file_paths.map(normalizedProjectPath))
+    validateDependencies(input.dependencies, 'resource ' + input.id + '.dependencies', paths, batchIssues)
     if ((AUDIO_FILE_EXTENSIONS.has(extname(input.root_path).toLowerCase()) || input.asset_kind?.startsWith('audio')) &&
         !AUDIO_ASSET_KINDS.has(input.asset_kind ?? ''))
       batchIssues.push(`resource ${input.id}.asset_kind: unsupported audio type ${input.asset_kind ?? '(missing)'}; use audio-clip for encoded files, audio-cue/audio-bank for structured definitions (music/ambience/voice are also supported).`)
@@ -663,6 +665,7 @@ export async function registerBeeGameLocalResources(
       ...(input.technical_facts
         ? { technical_facts: { ...input.technical_facts } }
         : {}),
+      ...(input.dependencies ? { dependencies: structuredClone(input.dependencies) } : {}),
     }
     if (changesPaths)
       existing?.file_paths

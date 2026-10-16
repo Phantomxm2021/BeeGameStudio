@@ -109,7 +109,7 @@ describe('screen UI content geometry handoff', () => {
 
   test('reports invalid authored viewport settings rather than silently ignoring them', () => {
     const document = screen([])
-    document.data.nodes[0]!.data = { compactMaxWidth: 'phone' }
+    document.data.nodes[0]!.data = { compactMaxWidth: 'phone' } as any
     expect(auditUiInteractiveBounds(document).join(' ')).toContain('compactMaxWidth')
     document.data.nodes[0]!.data = { targetViewports: [] }
     expect(auditUiInteractiveBounds(document).join(' ')).toContain('targetViewports')

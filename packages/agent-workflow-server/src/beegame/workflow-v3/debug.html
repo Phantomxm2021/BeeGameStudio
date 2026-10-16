@@ -80,7 +80,7 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <h2>执行／已测构建</h2>
 <label>自主 Agent 实际测量（非 Task）<select id="measurement"></select></label>
 <button id="read-measurement">核对测量／报告版本（只读）</button>
-<p>自主 Run 的预览／下载使用选中测量。只有实际调用按需 measure.mjs 后才有记录；无记录不会补造 Task 或自动构建。</p>
+<p>此处的测量预览／下载使用选中测量；普通项目 Preview 不要求 Measure，也不代表交付验证。只有实际调用按需 measure.mjs 后才有测量记录；无记录不会补造 Task 或自动构建。</p>
 <button id="preview">打开当前已测 Preview</button><button id="close-preview">关闭本页 Preview</button>
 <button id="static">下载已测静态包</button><button id="project-export">下载已测工程</button>
 <iframe id="preview-frame" title="已测构建 Preview" sandbox="allow-scripts" hidden></iframe><div id="downloads"></div>

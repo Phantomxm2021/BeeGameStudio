@@ -4,8 +4,9 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { ZodError } from 'zod/v4'
 import { artifactDigest } from '../runtime-acceptance'
-import { contentIndexSchema, contentDocumentSchema } from '../game-content-schema'
+import { contentIndexSchema, contentDocumentSchema, isContentEntryKind } from '../game-content-schema'
 import { createPreviewTestBrowser } from '../preview-test-browser'
+import { previewTestHostDocument } from '../preview-test-access'
 import { sharedPlaywright } from '../shared-playwright'
 import { requiredTouchViewport } from '../ui-layout-audit'
 import { readVersion, versionsMatch } from './checks'
@@ -83,7 +84,7 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
         }
       }
       const entry = registry.find(d => d.id === index.entryScene)
-      if (entry?.kind !== 'scene-'+index.dimension || entry.loadPhase !== 'startup') {
+      if (!entry || !isContentEntryKind(entry.kind, index.dimension) || entry.loadPhase !== 'startup') {
         result.status = 'failed'; result.observation = 'Entry Scene kind/load phase is invalid'; return result
       }
       const scoped = { ...task, expectedOutputs: registry.map(d => 'content/'+d.path) }
@@ -175,14 +176,21 @@ export async function observeStaticPublication(root: string, artifact: string, e
   if(!await versionsMatch(root,result.inputs)) throw new Error('Publication copy changed during observation')
 }
 
-async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedSceneProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[], entryUrl?: string, requiredViewport?: [number, number]) {
+export async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedSceneProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[], entryUrl?: string, requiredViewport?: [number, number], timeoutMs = 120_000) {
   const owned = createPreviewTestBrowser()
   let child: ReturnType<typeof spawn> | undefined
+  // One host-owned budget for the whole browser batch, not a per-probe retry.
+  // The optional budget is a host/test input, never an agent request field.
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(new Error('Browser observation timed out after '+timeoutMs+'ms; no automatic retry')), timeoutMs)
+  const observationSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal
+  const stopped = () => signal?.aborted ? new Error('Check cancelled') : deadline.signal.reason as Error
   const abort = () => { void owned.close().catch(() => undefined) }
-  signal?.addEventListener('abort', abort, { once: true })
+  observationSignal.addEventListener('abort', abort, { once: true })
   try {
+    if (observationSignal.aborted) throw stopped()
     const { endpoint } = await owned.start()
-    if (signal?.aborted) throw new Error('Check cancelled')
+    if (observationSignal.aborted) throw stopped()
     // Like the existing design-browser-inspection.mjs, use Node for the pinned
     // Playwright client. Bun's in-process CDP connection times out on this host.
     const node = Bun.which('node')
@@ -198,19 +206,26 @@ async function observeStaticBuild(root: string, artifact: string, paths: string[
         try { if (process.platform !== 'win32' && child?.pid) process.kill(-child.pid, 'SIGKILL'); else child?.kill('SIGKILL') }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') reject(error) }
       }
-      signal?.addEventListener('abort', stop, { once: true })
+      observationSignal.addEventListener('abort', stop, { once: true })
       child.stdout!.on('data', data => { output += data.toString(); if (output.length > 65536) stop() })
       child.stderr!.on('data', data => { errors = (errors+data.toString()).slice(-2000) })
       child.stdin!.on('error', () => { /* Spawn/close reports the actual driver failure. */ })
-      child.once('error', error => { signal?.removeEventListener('abort', stop); reject(error) })
+      child.once('error', error => { observationSignal.removeEventListener('abort', stop); reject(observationSignal.aborted ? stopped() : error) })
       child.once('close', code => {
-        signal?.removeEventListener('abort', stop)
-        if (signal?.aborted) reject(new Error('Check cancelled'))
+        observationSignal.removeEventListener('abort', stop)
+        if (observationSignal.aborted) reject(stopped())
         else if (code !== 0 || output.length > 65536) reject(new Error('Browser observation driver failed: '+errors))
         else resolvePromise(output)
       })
-      if (signal?.aborted) stop()
-      else child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes, entryUrl, requiredViewport }))
+      if (observationSignal.aborted) stop()
+      // Publication relocation checks keep their standalone target semantics.
+      // Preview measurements use the same shell/sandbox, but serve only this
+      // immutable copy; no running project Preview is started or replaced.
+      else {
+        const measuredEntry = new URL(entryUrl ?? 'http://bgs-runtime.invalid/previews/measurement/index.html')
+        child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes, entryUrl: measuredEntry.href, requiredViewport,
+          previewHost: entryUrl ? undefined : previewTestHostDocument(measuredEntry) }))
+      }
     })
     const actual = JSON.parse(observation) as { surfacePresent: boolean; errors: string[]; missingFiles: string[]; unsupported: string[]; probes?: { status: string }[] }
     result.status = actual.unsupported.length ? 'unverified' : actual.errors.length || actual.missingFiles.length ? 'failed'
@@ -218,8 +233,12 @@ async function observeStaticBuild(root: string, artifact: string, paths: string[
         : actual.probes.some(probe => probe.status === 'failed') ? 'failed' : actual.probes.every(probe => probe.status === 'passed') ? 'passed' : 'unverified'
       : actual.surfacePresent ? 'passed' : 'unverified'
     result.observation = observation.trim()
+  } catch (error) {
+    if (observationSignal.aborted) throw stopped()
+    throw error
   } finally {
-    signal?.removeEventListener('abort', abort)
+    clearTimeout(timer)
+    observationSignal.removeEventListener('abort', abort)
     await owned.close()
   }
 }

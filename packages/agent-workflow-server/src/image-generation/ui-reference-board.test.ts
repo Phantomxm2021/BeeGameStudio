@@ -1,10 +1,26 @@
 import { expect, test } from 'bun:test'
-import { compileUiReferenceBoard } from './ui-reference-board.mjs'
+import { compileUiReferenceBoard, compileUiAssetSheet } from './ui-reference-board.mjs'
 
 const request = (width: number, height: number, count: number) => ({
   requestId: 'board',
   uiReference: { viewport: { width, height }, style: 'Flat, readable UI',
     screens: Array.from({ length: count }, (_, i) => ({ id: `screen-${i}`, description: `Full gameplay state ${i} with HUD` })) },
+})
+
+test('UI production compiles selected-design skins, never a screen board or invented atlas coordinates', () => {
+  const input = { requestId: 'skins', purpose: 'production', requirementIds: ['ui-skins'], referenceImagePath: 'assets/visual/selected.png',
+    uiAssets: { elements: [{ id: 'panel', description: 'The translucent rounded panel in the selected design', width: 600, height: 400 },
+      { id: 'button-normal', description: 'The decorated primary control, normal state, without its label', width: 240, height: 64 }] } }
+  const before = structuredClone(input), plan = compileUiAssetSheet(input)
+  expect(input).toEqual(before)
+  expect(plan.request).toMatchObject({ purpose: 'production', referenceImagePath: input.referenceImagePath, background: 'transparent', quality: 'low' })
+  expect(plan.request).not.toHaveProperty('uiAssets')
+  expect(plan.request.prompt).toContain('not a new design')
+  expect(plan.note).toContain('not an aesthetic verdict or measured atlas')
+  for (const invalid of [{ referenceImagePath: undefined }, { purpose: 'reference' }, { requirementIds: [] },
+    { prompt: 'redesign this' }, { background: 'opaque' },
+    { uiAssets: { elements: [input.uiAssets.elements[0], input.uiAssets.elements[0]] } }])
+    expect(() => compileUiAssetSheet({ ...input, ...invalid } as Parameters<typeof compileUiAssetSheet>[0])).toThrow()
 })
 
 test('grid preserves arbitrary project ratios, every screen and equal nonoverlapping in-bounds cells', () => {

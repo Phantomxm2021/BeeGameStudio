@@ -12,12 +12,7 @@ export const help = `Usage: node .beegame/delivery/inspect-design.mjs ui.json wi
 Without --capture it saves a new screenshot in .beegame/tmp/ui-inspections/.
 The current browser capability is read automatically on each invocation. Legacy
 --preview-api current-url remains accepted; do not copy ephemeral URLs into source.
-Static design reference: node .beegame/delivery/inspect-design.mjs --visual-sample docs/visual/OWNER/sample.html width height
-OWNER is ART_DIRECTION or UI_UX_SPEC; self-contained SVG is also supported.
-This mode needs no formal UI JSON, assets, game build or Content package.
-It disables scripts and external requests, captures into a private tool cache
-and reports the current source hash. Read the capture to inspect appearance.
-It does not certify aesthetics, interaction, font delivery or runtime quality.
+
 Run from the project root. Uses the existing isolated browser and shared Playwright;
 no npm install, game package, Vite server or custom measurement script is required.
 samples.json maps authored text IDs to arrays of legal label/counter strings, e.g.
@@ -350,71 +345,20 @@ export async function inspectDesign(workspace, options, browser, sampleIds, batc
   } finally { if (!batch) await context.close() }
 }
 
-/** Render static references, never execute project scripts during Review. */
-export async function inspectVisualSample(workspace, options, browser) {
-  const root = await realpath(workspace)
-  if (![options.width, options.height].every(n => Number.isInteger(n) && n > 0 && n <= 16384))
-    throw Error('Viewport must have positive finite dimensions no larger than 16384')
-  if (typeof options.sample !== 'string' || options.sample.split('/').includes('..') ||
-      !/^docs\/visual\/(?:ART_DIRECTION|UI_UX_SPEC)\/[A-Za-z0-9_./-]+\.(?:html|svg)$/.test(options.sample))
-    throw Error('Expected a retained Art/UI HTML or SVG sample')
-  const file = await workspaceFile(root, options.sample)
-  if (file !== resolve(root, options.sample)) throw Error('Sample must not resolve through a symlink')
-  const bytes = await readFile(file)
-  if (!bytes.length || bytes.length > 10 * 1024 * 1024) throw Error('Sample must be nonempty and no larger than 10 MiB')
-  const sha256 = createHash('sha256').update(bytes).digest('hex')
-  const context = await browser.newContext({
-    viewport: { width: options.width, height: options.height }, javaScriptEnabled: false, serviceWorkers: 'block',
-  })
-  try {
-    const blocked = []
-    await context.route('**/*', async route => {
-      if (route.request().url() !== 'http://bgs-visual.invalid/sample') {
-        blocked.push('Sample requires an external dependency; embed it in the static sample')
-        await route.abort()
-        return
-      }
-      await route.fulfill({ status: 200, body: bytes,
-        contentType: extname(file) === '.svg' ? 'image/svg+xml' : 'text/html',
-        headers: { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; script-src 'none'; frame-src 'none'; object-src 'none'" } })
-    })
-    const page = await context.newPage()
-    page.on('console', message => { if (message.type() === 'error') blocked.push('Static sample resource or markup error: ' + message.text()) })
-    await page.goto('http://bgs-visual.invalid/sample', { waitUntil: 'networkidle', timeout: 15000 })
-    await page.evaluate(() => document.fonts.ready)
-    if (blocked.length) throw Error(blocked[0])
-    const image = await page.screenshot({ type: 'png' })
-    if (createHash('sha256').update(await readFile(file)).digest('hex') !== sha256)
-      throw Error('Sample changed during inspection; no capture published')
-    // Validate each parent before creating its child; never follow a cache alias.
-    for (const directory of ['.beegame', '.beegame/tmp', '.beegame/tmp/visual-samples']) {
-      const path = resolve(root, directory)
-      await mkdir(path).catch(error => { if (error.code !== 'EEXIST') throw error })
-      if (await realpath(path) !== path) throw Error('Sample capture cache must not be a symlink')
-    }
-    const capture = '.beegame/tmp/visual-samples/' + randomUUID() + '.png'
-    await writeFile(resolve(root, capture), image, { flag: 'wx' })
-    return { source: { path: options.sample, sha256 }, viewport: { width: options.width, height: options.height },
-      capture, visualAcceptance: 'not-certified',
-      limitations: ['Static reference only; inspect its pixels against the owning design.',
-        'No project scripts, runtime interaction or formal Content consumption were checked.'] }
-  } finally { await context.close() }
-}
-
 async function main() {
   const args = process.argv.slice(2)
   if (args.length === 1 && args[0] === '--help') { console.log(help); return }
-  const sampleMode = args[0] === '--visual-sample'
+  if (args[0] === '--visual-sample') throw Error('--visual-sample is not a reference-reading tool. Read the saved reference with the native Read tool.')
   const resourcesMode = args[0] === '--resources', batchMode = args[0] === '--ui-all'
-  const [ui, w, h, ...flags] = sampleMode ? args.slice(1) : resourcesMode || batchMode ? [undefined, '800', '600', ...args.slice(1)] : args
-  const options = { ...(sampleMode ? { sample: ui } : { ui }), ...(resourcesMode ? { resources: true } : {}), width: Number(w), height: Number(h) }
+  const [ui, w, h, ...flags] = resourcesMode || batchMode ? [undefined, '800', '600', ...args.slice(1)] : args
+  const options = { ui, ...(resourcesMode ? { resources: true } : {}), width: Number(w), height: Number(h) }
   const names = { '--preview-api':'previewApi', '--font':'font', '--samples':'samples', '--preview':'preview', '--capture':'capture' }
   for (let i = 0; i < flags.length;) {
-    if (!sampleMode && flags[i] === '--report' && !options.report) { options.report = true; i++; continue }
-    if (!sampleMode && flags[i] === '--details' && !options.details) { options.details = true; i++; continue }
-    if (!sampleMode && flags[i] === '--render' && !options.render) { options.render = true; i++; continue }
+    if (flags[i] === '--report' && !options.report) { options.report = true; i++; continue }
+    if (flags[i] === '--details' && !options.details) { options.details = true; i++; continue }
+    if (flags[i] === '--render' && !options.render) { options.render = true; i++; continue }
     const name = names[flags[i]]
-    if (!name || (sampleMode && name !== 'previewApi') || !flags[i+1] || options[name] !== undefined) throw Error(help)
+    if (!name || !flags[i+1] || options[name] !== undefined) throw Error(help)
     options[name] = flags[i+1]
     i += 2
   }
@@ -490,7 +434,7 @@ async function main() {
         inspectorRevision: results[0]?.inspectorRevision, visualAcceptance: 'not-certified' }, options.report)
       if (issues.length || results.some(result => result.status === 'failed')) process.exitCode = 1
     } else {
-      const result = await (sampleMode ? inspectVisualSample : inspectDesign)(process.cwd(), options, browser)
+      const result = await inspectDesign(process.cwd(), options, browser)
       await outputInspectionReport(process.cwd(), result, options.report)
       if (result.status === 'failed') process.exitCode = 1
     }

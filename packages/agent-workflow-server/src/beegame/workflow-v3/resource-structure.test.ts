@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import sharp from 'sharp'
 import { writeBeeGameAssetManifest, type BeeGameAssetManifest } from '../asset-contracts'
 import { auditAssetContract } from '../asset-contract-audit'
-import { sceneLayoutFixture } from '../fixtures/layout-fixture'
+import { sceneLayoutFixture, uiLayoutFixture } from '../fixtures/layout-fixture'
 import { runContentCheck } from './content-checks'
 import { measurementSummary } from './agent-measurement'
 
@@ -22,6 +22,23 @@ async function fixture() {
   return {root,path,manifest,save:()=>writeBeeGameAssetManifest(root,manifest),
     close:()=>rm(root,{recursive:true,force:true})}
 }
+
+test('shared UI capability gaps are visible in existing coverage without rejecting valid custom consumers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-ui-compatibility-'))
+  try {
+    const ui: any = uiLayoutFixture()
+    ui.data.nodes[1].role = 'slider'
+    ui.data.nodes[1].bindings = { interactable: 'canAdjust' }
+    await mkdir(join(root, 'content/ui'), { recursive: true })
+    await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
+    const result = await runContentCheck(root, 'content-resources', { expectedOutputs: ['content/ui/menu.json'] }, [], {})
+    expect(result.status, result.observation).toBe('passed')
+    expect(result.coverage?.uiSurfaceCompatibility).toMatchObject([{ document: 'content/ui/menu.json', supported: false,
+      issues: expect.arrayContaining([expect.objectContaining({ nodeId: 'play', property: 'role' }),
+        expect.objectContaining({ nodeId: 'play', property: 'bindings.interactable' })]) }])
+    expect(result.coverage?.limitations.join(' ')).toContain('advisory, not a content failure')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 test('static PNG texture can serve 3D without mandatory animation; all registered needs are checked without Scene refs', async () => {
   const f=await fixture()

@@ -67,7 +67,6 @@ export type SceneUiContentAuthoringInput = Readonly<{
 /** Design-time format is not the later project-specific authority snapshot. */
 export async function materializeSceneUiFormat(workspacePath: string) {
   const format = structuredClone(sceneUiContentFormat()) as Record<string, any>
-  format.revisionFields = 'documentRevision and assetManifestRevision are required BGS-supplied metadata, not Agent-defined hashes. Their actual values are supplied in content-contract.json when content authoring begins; none are available at design time.'
   format.layoutDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-file width height`
   format.sceneLayoutBatchInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --scene-layouts --report`
   format.designLayoutInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --design-layouts --report`
@@ -96,7 +95,7 @@ export async function materializeSceneUiAuthoringContract(workspacePath: string,
     validationCommand: `bun ${CONTENT_CHECKER_PATH}`,
     inspectionCommand: 'bun .beegame/delivery/bind-content.mjs --inspect content/ui/FILE.json content/scenes/FILE.json',
     layoutInspectionCommand: `bun ${CONTENT_CHECKER_PATH} --design-layouts --report`,
-    revisionUsage: 'Use the saved source and Manifest metadata supplied by --package-metadata before the first index. The checker is read-only and does not approve design or runtime quality.',
+    revisionUsage: 'New indexes need no revision hashes. Supplied legacy tags remain compatibility metadata, not design or runtime approval.',
   }
   await materializeSceneUiFormat(workspacePath)
   // Project-specific revision inputs are not another copy of the format reference.
@@ -148,6 +147,37 @@ export function buildSceneUiContentAuthoringAuthority(
   return Object.freeze({ contract })
 }
 
+/** Public, executable author inputs. The UI/index pair is a complete resource-
+ * free package; the Scene is an unbound draft, not delivered artwork. */
+export const CONTENT_DRAFT_EXAMPLES = {
+  index: { schema: 'beegame-content-package.v2', id: 'interface', dimension: '2d',
+    entryScene: 'menu', files: ['ui/menu.json'], documents: [
+      { id: 'menu', kind: 'ui-screen', path: 'ui/menu.json', loadPhase: 'startup' },
+    ] },
+  ui: { schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
+    rootId: 'root', nodes: [
+      { id: 'root', role: 'screen-root', data: { orientation: 'Landscape', referenceResolution: [960, 540],
+        targetViewports: [[960, 540]], minimumControlSize: [44, 44] },
+        layout: { container: { direction: 'column', align: 'center', justify: 'center', gap: 16 } } },
+      { id: 'play', role: 'button', parentId: 'root', text: 'Play', actions: { click: 'play' }, layout: { size: [160, 48] } },
+    ],
+  } },
+  camera: { orthographic: true, orthographicSize: 2.7, pixelsPerUnit: 100,
+    viewport: { width: 960, height: 540 }, framing: 'expand' },
+  scene: { schema: 'beegame-content.v1', id: 'world', kind: 'scene-2d', assetRefs: [], data: {
+    settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels', width: 960, height: 540, pixelsPerUnit: 100 },
+      requiredVisibleNodeIds: ['shape'] }, cameraNodeId: 'camera', nodes: [
+      { id: 'camera', transform: { position: [480, 270, 0] }, components: [{ id: 'camera-component', type: 'camera',
+        data: { orthographic: true, orthographicSize: 2.7, coordinateSpace: 'logical-pixels',
+          viewport: { width: 960, height: 540 }, framing: 'expand' } }] },
+      { id: 'shape', transform: { position: [480, 270, 0] }, components: [
+        { id: 'shape-sprite', type: 'sprite-renderer', data: { size: [100, 100] } },
+        { id: 'shape-collider', type: 'box-collider-2d', data: { size: [100, 100], offset: [0, 0], isTrigger: false } },
+      ] },
+    ],
+  } },
+}
+
 /** Pure schema/reference, never a project version or authoring authority. */
 export function sceneUiContentFormat() {
   return {
@@ -156,13 +186,12 @@ export function sceneUiContentFormat() {
         coordinates: CONTENT_COORDINATE_CONTRACT,
         runtimeConsumption: CONTENT_RUNTIME_CONTRACT,
         tilemap: TILEMAP_AUTHORING_CONTRACT,
+        examples: CONTENT_DRAFT_EXAMPLES,
         index: {
           schema: BEEGAME_CONTENT_PACKAGE_SCHEMA,
-          documentRevision: '<first index uses --package-metadata FILE ... indexMetadata.documentRevision; later --current retains the saved tag; do not invent approval>',
-          assetManifestRevision: '<actual Manifest hash: first index uses --package-metadata FILE ... indexMetadata.assetManifestRevision; later --current supplies registry.assetManifestRevision>',
           id: '<stable-package-id>',
           dimension: '<2d|3d>',
-          entryScene: '<scene-document-id>',
+          entryScene: '<startup scene, ui-screen or ui-hud document id>',
           sceneModel: BEEGAME_SCENE_MODEL,
           files: ['scenes/<name>.json', 'ui/<name>.json', 'vfx/<name>.json'],
           documents: [
@@ -171,7 +200,7 @@ export function sceneUiContentFormat() {
             { id: '<other-document-id>', path: 'vfx/<name>.json', kind: 'vfx', loadPhase: 'on-demand' },
           ],
         },
-        revisionFields: 'Index revision fields are required metadata. Before a first index, --package-metadata content/scenes/FILE.json content/ui/FILE.json ... returns indexMetadata derived from actual saved inputs and Manifest; the author still chooses files, entry, dimension and load policy. It writes no files and does not certify design. After saving, --current checks real content/resources while retaining the saved documentRevision tag; prose edits do not churn that tag. Measurement still binds source/reports. Draft checks need no index. Do not invent hashes or approval.',
+        revisionFields: 'New indexes omit documentRevision and assetManifestRevision; no metadata calculation/copy step is needed. Existing SHA-256 tags remain readable for legacy callers, but --current and measurement check actual files/resources rather than requiring tag refresh. sceneModel defaults to game-object-v2 when omitted; another supplied value is invalid. entryScene retains its existing name and may select a startup ui-screen/ui-hud for a pure UI project; no empty Scene is required. --format examples returns executable index/UI inputs and an unbound Scene draft, not a design or quality verdict.',
         sceneDocument: {
           schema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
           id: '<stable-scene-id>',
@@ -272,9 +301,13 @@ export function sceneUiContentFormat() {
           data: {
             rootId: '<root-node-id>',
             nodes: [
+              { id: '<root-node-id>', role: '<screen-root|hud-root|flow-root, matching document kind>',
+                data: { orientation: '<Landscape|Portrait>', referenceResolution: ['<positive-width>', '<positive-height>'],
+                  targetViewports: [['<positive-width>', '<positive-height>']], minimumControlSize: ['<positive-width>', '<positive-height>'],
+                  compactMaxWidth: '<optional-positive-width>' } },
               {
                 id: '<node-id>',
-                parentId: '<optional-parent-id>',
+                parentId: '<root-node-id or another existing parent-id>',
                 role: '<one canonical role from format.uiVocabulary.roles>',
                 enabled: true,
                 name: '<optional-name>',
@@ -286,7 +319,7 @@ export function sceneUiContentFormat() {
                   anchorMax: ['<optional-number-0-to-1>', '<optional-number-0-to-1>'],
                   sizeDelta: ['<optional-number>', '<optional-number>'],
                   position: [0, 0],
-                  size: [0, 0],
+                  size: ['<optional nonnegative width; 0 is zero, not auto>', '<optional nonnegative height; 0 is zero, not auto>'],
                   rotation: 0,
                   scale: [1, 1],
                   minSize: ['<optional-min-width>', '<optional-min-height>'],
@@ -353,7 +386,8 @@ export function sceneUiContentFormat() {
         uiVocabulary: {
           behaviorBindings: {
             schema: 'actions and bindings are string-to-string maps, not objects containing event/payload/conditions. Keep stable node IDs; an action handler receives the action ID and node ID.',
-            example: { actions: { click: 'game.start' }, bindings: { text: 'session.label', enabled: 'session.canStart' } },
+            example: { actions: { click: 'game.start' }, bindings: { text: 'session.label', enabled: 'session.showStart' } },
+            enabled: 'enabled controls node/subtree activation and visibility, not a visible button\'s disabled/interactable state. A false enabled binding removes the node from the shared surface. Keep visible-disabled behavior in the project action/control adapter; do not bind canStart/canCharge to enabled when the control must remain visible.',
             sharedSurface: 'The optional createProductionUiSurface supports actions.click and bindings.text/enabled. Pass onAction(action,nodeId) and a flat state dictionary keyed by the exact binding strings; text values are strings/numbers, enabled values booleans. Dots in a state key are not object traversal. It rejects other properties, absent state and data.visibleWhen; it does not interpret expressions, payload, litWhen or enabledWhen. A custom runtime may implement additional declared semantics, but the shared surface does not.',
             placement: 'When a project binding entry is actually supplied, inspect exact saved node IDs, then use --current mapping.json. The pure format reference does not create that entry. A supplied actions/bindings map replaces the old map; resource data/style merge. Binding does not authorize removing a color, resizing a sprite or redesigning the source.',
           },
@@ -397,7 +431,7 @@ export function sceneUiContentFormat() {
           'Every file path in index.files is relative to content/.',
           'Index documents is the runtime load registry: list every index.files entry exactly once with its canonical id, path, kind and loadPhase. Mark entryScene and only the UI documents needed for the first interactive frame as startup; mark other screens, scenes and VFX on-demand. Fetch startup documents first and fetch on-demand documents only when the game enters or needs them.',
           'Every used assetRef is listed once in the document assetRefs and resolves to a verified Manifest resource.',
-          `The index must declare sceneModel "${BEEGAME_SCENE_MODEL}". Every scene node is a GameObject; node.kind is forbidden.`,
+          `sceneModel defaults to "${BEEGAME_SCENE_MODEL}" when omitted. Every scene node is a GameObject; node.kind is forbidden.`,
           'Use the GameObject/Component structure for both dimensions, with coordinate semantics defined by format.coordinates, not inferred from an engine name. Transform has three components; 2D uses the XY plane and an orthographic Camera. In a 3D scene replace the 2D coordinateSystem example with {origin:"world",units:"meters"}.',
           'Put gameplay identity such as player, enemy, tree, anchor or checkpoint in node.semantic. Put renderer, physics, audio, animation, lighting and camera capabilities in components using exactly format.sceneVocabulary.componentTypes. Every component requires a stable unique id that is independent of array order. An empty GameObject has no renderer. Gameplay behavior metadata belongs in node.data.behaviors as entries with stable id, kind and config; do not add script or MonoBehaviour components.',
           'Every visible object must retain a real renderer: use sprite-renderer for authored 2D graphics, tilemap + tilemap-renderer for grid environments when appropriate (format.tilemap), world-space canvas + canvas-renderer + image/text for solid-color meters and labels, Light2D spot data for a 2D vision cone, and particle-system + particle-system-renderer for particles.',

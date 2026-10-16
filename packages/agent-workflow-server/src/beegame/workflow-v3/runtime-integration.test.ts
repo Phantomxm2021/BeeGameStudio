@@ -31,7 +31,7 @@ for (const kind of ['surface', 'script-error', 'missing-resource', 'external', '
     try {
       await mkdir(join(root, 'dist'))
       const extra = kind === 'script-error' ? '<script>throw Error("fixture runtime error")</script>'
-        : kind === 'missing-resource' ? '<script src="/missing.js"></script>'
+        : kind === 'missing-resource' ? '<script src="./missing.js"></script>'
         : kind === 'external' ? '<script>fetch("http://outside.invalid/private")</script>'
         : kind === 'websocket' ? '<script>new WebSocket("ws://outside.invalid/private")</script>' : ''
       await writeFile(join(root, 'dist/index.html'), '<!doctype html><body>'+(kind === 'empty' ? '' : '<canvas width="100" height="100"></canvas>')+extra+'</body>')
@@ -52,7 +52,7 @@ test('cancelling a busy observed build terminates the owned driver/browser, keep
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     await mkdir(join(root, 'dist'))
-    const body = '<!doctype html><body>busy fixture<script>setInterval(()=>fetch("/index.html?tick="+Date.now()),20)</script></body>'
+    const body = '<!doctype html><body>busy fixture<script>setInterval(()=>fetch("./index.html?tick="+Date.now()),20)</script></body>'
     await writeFile(join(root, 'dist/index.html'), body)
     timer = setTimeout(() => controller.abort(), 1500)
     const result = (await runChecks(root, task, [], controller.signal)).checks[0]!

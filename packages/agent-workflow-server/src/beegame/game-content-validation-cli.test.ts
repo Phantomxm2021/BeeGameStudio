@@ -83,8 +83,8 @@ test('input identity follows saved sources/links, not a generator public copy, a
   expect(changed.runtimeVerified).toBe(false)
   expect(publicBefore).toContain('wrong-copy')
   const format=runGameContentCommand(root,['--format','index']) as any
-  expect(format.value.documentRevision).toContain('--package-metadata')
-  expect(format.value.assetManifestRevision).toContain('--package-metadata')
+  expect(format.value).not.toHaveProperty('documentRevision')
+  expect(format.value).not.toHaveProperty('assetManifestRevision')
   expect(CONTENT_CHECK_HELP).toContain('not design agreement, runtime or quality acceptance')
 })
 
@@ -250,7 +250,7 @@ test('draft geometry checks targets without unfinished prose; final Review still
   const path = join(root, 'content/ui/menu.json'), ui = uiLayoutFixture()
   // The format's responsive shape is consumed at node level by the real schema.
   const format = runGameContentCommand(root, ['--format', 'uiDocument']) as any
-  const responsive = structuredClone(format.value.data.nodes[0].responsive)
+  const responsive = structuredClone(format.value.data.nodes.find((node: any) => node.responsive).responsive)
   Object.assign(ui.data.nodes[1]!, { responsive })
   writeFileSync(path, JSON.stringify(ui))
   const before = readFileSync(path, 'utf8')
@@ -307,7 +307,7 @@ test('format entry reads one actual contract section without full Content or res
   expect(output.trim().split('\n')).toHaveLength(1)
   expect(output.length).toBeLessThan(30_000)
   expect(JSON.parse(output).values.uiVocabulary.behaviorBindings.example).toEqual({
-    actions: { click: 'game.start' }, bindings: { text: 'session.label', enabled: 'session.canStart' },
+    actions: { click: 'game.start' }, bindings: { text: 'session.label', enabled: 'session.showStart' },
   })
   const scene = runGameContentCommand(root, ['--format', 'sceneVocabulary']) as any
   expect(scene.value.requiredData.grid.schema).toBe('grid.v1')
@@ -466,7 +466,7 @@ test('design appendix comes from actual shared geometry, preserves sources and n
   expect(readFileSync(path, 'utf8')).toBe(original)
   source.data.nodes[0]!.data!.targetViewports = [[0,360]]
   writeFileSync(path, JSON.stringify(source))
-  expect(() => generateUiLayoutAppendix(root, args)).toThrow('positive')
+  expect(() => generateUiLayoutAppendix(root, args)).toThrow('targetViewports')
   expect(() => generateUiLayoutAppendix(root, ['--layout-draft', '../draft.json', '960','540'])).toThrow()
 })
 

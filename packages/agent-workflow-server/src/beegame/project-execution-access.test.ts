@@ -140,11 +140,26 @@ test('scoped Review requests host permission before every role tool and cannot b
     expect(access.settings.permissions.ask).toContain('Bash')
     expect(access.settings.permissions.ask).toContain('AskUserQuestion')
     expect(access.settings.permissions.ask).toContain('Write')
+    expect(access.settings.permissions.ask).toEqual(expect.arrayContaining(['Edit', 'MultiEdit', 'NotebookEdit']))
     expect(access.settings.sandbox.autoAllowBashIfSandboxed).toBe(false)
     expect(access.settings.disableAllHooks).toBe(true)
     expect(access.settings.sandbox.failIfUnavailable).toBe(true)
     expect(access.settings.sandbox.allowUnsandboxedCommands).toBe(false)
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('ordinary project file mutations cannot bypass host permission callbacks', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'project-file-tool-')))
+  let output: string | undefined
+  try {
+    const access = await projectExecutionAccess({ workspacePath: root, sessionId: 'files', environment: {} })
+    output = access.nativeOutput
+    expect(access.settings.permissions.ask).toEqual(expect.arrayContaining(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']))
+    expect(access.settings.sandbox.allowUnsandboxedCommands).toBe(false)
+  } finally {
+    if (output) await rm(output, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('native outputs stay outside source scans, resume the same Chat and never expose sibling sessions or symlink targets', async () => {

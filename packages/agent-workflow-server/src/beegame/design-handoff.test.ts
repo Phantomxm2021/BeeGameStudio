@@ -11,6 +11,16 @@ import { checkDesignDocumentReferences } from './design-document-references'
 
 const digest = (body: string) => createHash('sha256').update(body).digest('hex')
 
+test('document handoff does not constrain HTML/SVG game implementation', () => fixture(async workspace => {
+  await mkdir(join(workspace,'src'),{recursive:true})
+  await writeFile(join(workspace,'src/index.html'),'<main onclick="play()">Game</main>')
+  await writeFile(join(workspace,'src/icon.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>')
+  const doc=join(workspace,'docs/TECHNICAL_DESIGN.md')
+  await writeFile(doc,await readFile(doc,'utf8')+'\n[Game](../src/index.html)\n[Icon](../src/icon.svg)\n')
+  expect(designSupportingFiles(workspace,['TECHNICAL_DESIGN.md'])).toEqual([])
+  expect(checkDesignHandoff(workspace,['TECHNICAL_DESIGN.md']).valid).toBe(true)
+}))
+
 test.each(['GDD.md', 'AUDIO_DESIGN.md', 'TECHNICAL_DESIGN.md'] as const)(
   '%s: numbering-only pointers are read-checkable and persisted only by authorized finalization', name => fixture(async workspace => {
     const snapshot = snapshotDesignDocuments(workspace, [name])
@@ -498,29 +508,24 @@ test('only existing explicitly cited calculation files enter scoped writes and r
   expect(checkDesignDocumentReferences(workspace, 'BALANCE_DESIGN.md').valid).toBe(false)
 }))
 
-test('visual references bind the owner version and revision without granting a consumer writes to its art source', () => fixture(async workspace => {
+test('reference links do not authenticate images, grant writes or bind image bytes to document versions', () => fixture(async workspace => {
   await mkdir(join(workspace, 'docs/visual/ART_DIRECTION'), { recursive: true })
-  await mkdir(join(workspace, 'docs/visual/UI_UX_SPEC'), { recursive: true })
-  const art = 'docs/visual/ART_DIRECTION/sample.svg', ui = 'docs/visual/UI_UX_SPEC/sample.html'
-  await writeFile(join(workspace, art), '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>')
-  await writeFile(join(workspace, ui), '<!doctype html><main>Composition</main>')
-  await writeFile(join(workspace, 'docs/ART_DIRECTION.md'), designDocumentFixture('ART_DIRECTION.md') +
-    '\n![Visual][sample]\n\n[sample]: visual/ART_DIRECTION/sample.svg\n')
-  await writeFile(join(workspace, 'docs/UI_UX_SPEC.md'), designDocumentFixture('UI_UX_SPEC.md') +
-    '\n[Art sample](visual/ART_DIRECTION/sample.svg)\n[Composition](visual/UI_UX_SPEC/sample.html)\n')
-  expect(designSupportingFiles(workspace, ['ART_DIRECTION.md'])).toEqual([art])
-  expect(designSupportingFiles(workspace, ['UI_UX_SPEC.md'])).toEqual(['content/ui/menu.json', ui])
-  expect(designCalculationFiles(workspace, ['ART_DIRECTION.md'])).toEqual([])
-  const snapshot = snapshotDesignDocuments(workspace, ['ART_DIRECTION.md', 'UI_UX_SPEC.md'])
-  const original = checkDesignHandoff(workspace, ['ART_DIRECTION.md', 'UI_UX_SPEC.md'])
-  await writeFile(join(workspace, art), '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="green"/></svg>')
-  expect(checkDesignHandoff(workspace, ['ART_DIRECTION.md', 'UI_UX_SPEC.md']).revision).not.toBe(original.revision)
-  expect(finalizeDesignDocuments(workspace, ['ART_DIRECTION.md', 'UI_UX_SPEC.md'], snapshot).issues).toEqual([])
-  expect(designDocumentVersion(await readFile(join(workspace, 'docs/ART_DIRECTION.md'), 'utf8'))).toBe('1.1')
-  expect(designDocumentVersion(await readFile(join(workspace, 'docs/UI_UX_SPEC.md'), 'utf8'))).toBe('1.0')
-  await rm(join(workspace, art))
-  await symlink(join(workspace, ui), join(workspace, art))
-  expect(() => designSupportingFiles(workspace, ['ART_DIRECTION.md'])).toThrow('must not be a symlink')
+  const art = 'docs/visual/ART_DIRECTION/reference.PNG'
+  await writeFile(join(workspace, art), 'Fixture reference bytes; not claiming an image read')
+  const doc = join(workspace,'docs/ART_DIRECTION.md')
+  await writeFile(doc,designDocumentFixture('ART_DIRECTION.md') + '\n[Reference](visual/ART_DIRECTION/reference.PNG)\n')
+  expect(designSupportingFiles(workspace,['ART_DIRECTION.md'])).toEqual([])
+  const snapshot = snapshotDesignDocuments(workspace,['ART_DIRECTION.md'])
+  const before = checkDesignHandoff(workspace,['ART_DIRECTION.md'])
+  expect(before.valid).toBe(true)
+  expect(before.evidenceHashes).not.toHaveProperty(art)
+  await writeFile(join(workspace,art),'Changed reference bytes')
+  expect(checkDesignHandoff(workspace,['ART_DIRECTION.md']).revision).toBe(before.revision)
+  expect(finalizeDesignDocuments(workspace,['ART_DIRECTION.md'],snapshot).issues).toEqual([])
+  expect(designDocumentVersion(await readFile(doc,'utf8'))).toBe('1.0')
+  expect(DESIGN_HANDOFF_INSTRUCTION).toContain('native Read tool')
+  expect(DESIGN_HANDOFF_INSTRUCTION).toContain('report the exact path and read error')
+  expect(DESIGN_HANDOFF_INSTRUCTION).not.toContain('host matches')
 }))
 
 test('single UI source is owned by UI; later bindings do not bump design version but geometry edits do', () => fixture(async workspace => {

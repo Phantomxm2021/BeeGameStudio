@@ -55,6 +55,7 @@ import { ChatJsonlReader } from './chat-jsonl-reader'
 import { auditEventPage, type EventPageSelection } from './workflow-v3/event-page'
 import { answeredQuestionInput } from './user-question'
 import { sanitizePath } from '../../../../src/utils/sessionStoragePortable'
+import { expandPath } from '../../../../src/utils/path'
 import { SessionUsageOutbox } from './session-usage-outbox'
 import { isPersonalModelId } from '../model-connections'
 
@@ -230,6 +231,8 @@ export type BeeGameSession = {
 
 export type BeeGameRuntimeSnapshot = {
   sessionId: string
+  /** Host-only binding; a session UUID alone cannot identify an interrupted attempt. */
+  executionIdentity?: { attemptId: string; workerId: string; fence: number; turnId: string; nativeSubmitted?: true }
   /** UUID owned and emitted by the native runtime; never a BGS routing ID. */
   nativeSessionId?: string
   workspacePath: string
@@ -300,6 +303,8 @@ export type BeeGameSessionRunnerStartInput = {
   nativeSessionId?: string
   /** Records the UUID emitted by the native runtime for durable resume. */
   onNativeSessionId?(sessionId: string): void
+  /** Native replay of this exact submitted command, not merely CLI startup. */
+  onNativeSubmission?(sessionId: string): void
   /** Passive provider accounting, cumulative within this native process. */
   onNativeUsage?(usage: Usage): void
   cwd: string
@@ -329,6 +334,7 @@ export type RuntimeLaunchContract = {
 const RUNTIME_MODEL_ENV_KEYS = new Set([
   'BEEGAME_CONFIG_DIR',
   'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR',
+  'BEEGAME_NATIVE_MCP_SERVERS_JSON',
   'BEEGAME_ARTIFACTS_URL',
   'BEEGAME_ARTIFACTS_TOKEN',
   'CLAUDE_ARTIFACTS_URL',
@@ -436,6 +442,7 @@ export type BeeGamePendingPermission = DashboardPermissionRequest & {
 }
 
 type SessionRecord = {
+  executionIdentity?: BeeGameRuntimeSnapshot['executionIdentity']
   /** Redact runtime credentials from persisted and streamed Chat events only. */
   redactVisible?: ReturnType<typeof createResponseRedactor>
   systemContext?: string
@@ -681,6 +688,8 @@ export class BeeGameSessionManager {
     )
     const record: SessionRecord = {
       session,
+      ...(!input.freshNativeContext && persistedRuntime?.workspacePath===cwd && persistedRuntime.executionIdentity
+        ? {executionIdentity:persistedRuntime.executionIdentity}:{}),
       ...(input.isolatedTask ? { isolatedTask: input.isolatedTask } : {}),
       ...(input.resumeNativeSessionId
         ? { nativeSessionId: input.resumeNativeSessionId }
@@ -1094,6 +1103,7 @@ export class BeeGameSessionManager {
       attachments?: BeeGameAttachment[]
       confirmedBriefContext?: string
       onTurnAccepted?: (turnId: string) => void
+      executionIdentity?: Pick<NonNullable<BeeGameRuntimeSnapshot['executionIdentity']>, 'attemptId'|'workerId'|'fence'>
       prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string; close?: () => Promise<void> }>
       onTurnSettled?: () => Promise<void>
       onTurnReady?: () => void | Promise<void>
@@ -1173,6 +1183,7 @@ export class BeeGameSessionManager {
       record.thinkingBlockStartedAt.clear()
       record.currentTurnStartingUsage = this.deriveRuntimeSnapshot(record).usage
       record.currentTurnId = nextTurnId
+      record.executionIdentity = display?.executionIdentity ? {...display.executionIdentity,turnId:nextTurnId}:undefined
       record.nextTurnIndex += 1
       display?.onTurnAccepted?.(nextTurnId)
       turnAccepted = true
@@ -1472,6 +1483,11 @@ export class BeeGameSessionManager {
             : {}),
           onNativeSessionId: nativeSessionId => {
             record.nativeSessionId = nativeSessionId
+            this.persistRuntimeSnapshot(record)
+          },
+          onNativeSubmission: nativeSessionId => {
+            record.nativeSessionId = nativeSessionId
+            if(record.executionIdentity)record.executionIdentity={...record.executionIdentity,nativeSubmitted:true}
             this.persistRuntimeSnapshot(record)
           },
           onNativeUsage: usage => {
@@ -1988,19 +2004,6 @@ export class BeeGameSessionManager {
         return { behavior: 'allow', source: 'user', scope: 'session' }
       }
     }
-    if (authorizeProjectWorkspaceFileMutation(record, request)) {
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        ...(request.agentId ? { agentId: request.agentId } : {}),
-        decision: 'allow',
-        scope: 'once',
-        autoApproved: true,
-        reason: 'project_workspace_file_mutation',
-      })
-      return Promise.resolve({ behavior: 'allow', source: 'policy', scope: 'once' })
-    }
     const projectFileAccess = projectWorkspaceFileAccessAuthority(
       record,
       request,
@@ -2021,7 +2024,9 @@ export class BeeGameSessionManager {
           autoDenied: projectFileAccess.behavior === 'deny',
           reason: projectFileAccess.reason,
           message: projectFileAccess.message ?? request.message,
-          input: request.input,
+          // Write inputs may contain an entire file. Native tool events already
+          // carry that payload; do not duplicate it in automatic permission logs.
+          ...(!isFileMutationTool(request.toolName) ? { input: request.input } : {}),
         },
       )
       return Promise.resolve({
@@ -2236,6 +2241,7 @@ export class BeeGameSessionManager {
         { nativeSessionId: record.nativeSessionId },
       ),
       activeSubagentToolUseIds: [...record.activeNativeTaskToolUseIds.values()],
+      ...(record.executionIdentity?{executionIdentity:record.executionIdentity}:{}),
     }
   }
 
@@ -3642,6 +3648,13 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
     throw new Error('Invalid runtime snapshot')
   }
   const record = value as Record<string, unknown>
+  const execution=record.executionIdentity as BeeGameRuntimeSnapshot['executionIdentity']
+  const executionIdentity=execution && typeof execution.attemptId==='string' && typeof execution.workerId==='string' &&
+    Number.isSafeInteger(execution.fence) && execution.fence>0 && typeof execution.turnId==='string' &&
+    execution.attemptId && execution.workerId && execution.turnId ? {
+      attemptId:execution.attemptId,workerId:execution.workerId,fence:execution.fence,turnId:execution.turnId,
+      ...(execution.nativeSubmitted===true?{nativeSubmitted:true as const}:{}),
+    }:undefined
   const usage =
     record.usage &&
     typeof record.usage === 'object' &&
@@ -3650,6 +3663,7 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
       : {}
   return {
     sessionId: String(record.sessionId || ''),
+    ...(executionIdentity?{executionIdentity}:{}),
     ...(typeof record.nativeSessionId === 'string' && record.nativeSessionId
       ? { nativeSessionId: record.nativeSessionId }
       : {}),
@@ -3862,19 +3876,6 @@ function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
 }
 
-function authorizeProjectWorkspaceFileMutation(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): boolean {
-  if (!record.projectId || !isFileMutationTool(request.toolName)) return false
-  const artifactPath = getMutationArtifactPath(request.input)
-  if (!artifactPath) return false
-  const workspaceRoot = resolveExistingPath(record.session.cwd)
-  const targetPath = resolveProspectivePath(record.session.cwd, artifactPath)
-  const rel = relative(workspaceRoot, targetPath)
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
-}
-
 type ProjectWorkspaceFileAccessAuthority = {
   behavior: 'allow' | 'deny'
   reason:
@@ -3889,9 +3890,18 @@ function projectWorkspaceFileAccessAuthority(
   request: DashboardPermissionRequest,
 ): ProjectWorkspaceFileAccessAuthority | undefined {
   if (!record.projectId) return undefined
+  const writing = isFileMutationTool(request.toolName)
   const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'
-  if (!['Read', 'Grep', 'Glob'].includes(request.toolName)) return undefined
-  const inputPath = request.input[pathKey]
+  if (!writing && !['Read', 'Grep', 'Glob'].includes(request.toolName)) return undefined
+  // Glob's absolute pattern can override its declared search directory.
+  // Keep patterns relative; the separately checked path selects the directory.
+  if (request.toolName === 'Glob' && (typeof request.input.pattern !== 'string' ||
+      !request.input.pattern.trim() || isAbsolute(request.input.pattern) ||
+      request.input.pattern.split(/[\\/]/).includes('..'))) {
+    return { behavior: 'deny', reason: 'project_workspace_target_invalid',
+      message: 'Glob requires a relative pattern without parent traversal; use path for the project-local search directory.' }
+  }
+  const inputPath = writing ? getMutationArtifactPath(request.input, request.toolName) : request.input[pathKey]
   const defaultToWorkspace =
     (request.toolName === 'Grep' || request.toolName === 'Glob') &&
     inputPath === undefined
@@ -3917,6 +3927,10 @@ function projectWorkspaceFileAccessAuthority(
       message: `${request.toolName} may not access files outside the project workspace.`,
     }
   }
+  // Native serializes safety/other reasons, but not the ordinary ask rule
+  // installed by BGS. Preserve those native prompts without allowing a human
+  // approval to bypass the project boundary above.
+  if (writing && request.decisionReason?.trim()) return undefined
   return {
     behavior: 'allow',
     reason: 'project_workspace_file_access',
@@ -3924,9 +3938,9 @@ function projectWorkspaceFileAccessAuthority(
 }
 
 function resolveProspectivePath(cwd: string, artifactPath: string): string {
-  const targetPath = isAbsolute(artifactPath)
-    ? resolve(artifactPath)
-    : resolve(cwd, artifactPath)
+  // Match native tool expansion (home notation, whitespace, Unicode/platform
+  // normalization) before resolving aliases and checking the project boundary.
+  const targetPath = expandPath(artifactPath, cwd)
   const missingSegments: string[] = []
   let existingAncestor = targetPath
   while (!existsSync(existingAncestor)) {
@@ -3976,10 +3990,10 @@ function findLatestInterruptedTurnId(events: BeeGameEvent[]): string {
   return ''
 }
 
-function getMutationArtifactPath(input: Record<string, unknown>): string {
-  return String(
-    input.file_path || input.path || input.notebook_path || '',
-  ).trim()
+function getMutationArtifactPath(input: Record<string, unknown>, toolName?: string): string {
+  const path = toolName ? input[toolName === 'NotebookEdit' ? 'notebook_path' : 'file_path']
+    : input.file_path || input.path || input.notebook_path
+  return typeof path === 'string' ? path.trim() : ''
 }
 
 function getTopLevelWorkspacePath(cwd: string, artifactPath: string): string {
@@ -4684,6 +4698,10 @@ export function mergeRuntimeEnv(
     ...normalizeRuntimeEnvironment(runtime?.env ?? {}),
     ...(additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? normalizeRuntimeEnvironment(additionalEnv) : {}),
   }
+  // MCP settings are owner-scoped host data, never an arbitrary model-config env override.
+  delete selectedEnvironment.BEEGAME_NATIVE_MCP_SERVERS_JSON
+  if (additionalEnv.BEEGAME_NATIVE_MCP_SERVERS_JSON !== undefined)
+    selectedEnvironment.BEEGAME_NATIVE_MCP_SERVERS_JSON = additionalEnv.BEEGAME_NATIVE_MCP_SERVERS_JSON
   const modelType =
     additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? additionalEnv.BEEGAME_MODEL_TYPE : runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
   return {

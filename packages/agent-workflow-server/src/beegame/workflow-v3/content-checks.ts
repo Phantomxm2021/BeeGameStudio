@@ -9,6 +9,7 @@ import { validateResourceSelections } from '../tilemap-contract'
 import { readVersion } from './checks'
 import { digest, type CheckResult, type FileVersion, type TaskSpec, type UiNodeBindingCoverage, type SceneNodeBindingCoverage } from './state'
 import { CHECK_VERSIONS } from './check-versions'
+import { inspectProductionUiSupport } from '../../../../scene-editor/src/production-surface'
 
 const isContentPath = (path: string) => /^content\/(ui|scenes)\/.+\.json$/.test(path)
 
@@ -129,8 +130,8 @@ export async function runContentCheck(root: string, id: 'content-structure' | 'c
       if (!refs.length) {
         for (const [file, document] of documents)
           issues.push(...undeclaredAssetReferenceIssues(file, document))
-        if (!issues.length && !assetContract?.present) {
-          result.observation = 'No resource bindings declared. Resource-free/draft files do not prove final resource coverage.'
+        if (!issues.length && !assetContract?.present && !documents.size) {
+          result.observation = 'No saved content or resource manifest to check.'
           return result
         }
       }
@@ -155,7 +156,9 @@ export async function runContentCheck(root: string, id: 'content-structure' | 'c
     result.status = issues.length ? 'failed' : 'passed'
     result.observation = issues.length ? [...new Set(issues)].join('\n') : id === 'content-layout'
       ? 'Current scoped UI and linked compositions passed the existing spatial algorithm. Not font, appearance, interaction or runtime acceptance.'
-      : id === 'content-resources' ? 'Scoped bindings, member selection and all registered Manifest resource structures checked. Not runtime or whole-game semantic coverage.'
+      : id === 'content-resources' ? !refs.length && !assetContract?.present
+        ? 'Saved content declares no resource references; empty declared resource closure checked without requiring an empty Manifest. Not proof that designs need no artwork, fonts or audio; final resource coverage and runtime use remain unverified.'
+        : 'Scoped bindings, member selection and all registered Manifest resource structures checked. Not runtime or whole-game semantic coverage.'
         : 'Saved Scene/UI structure and linked source identity checked; unbound drafts are allowed. Not final resource or runtime acceptance.'
     result.coverage ??= { files: [...documents.keys()], limitations: ['Only this task and its explicit links checked; semantic coverage of original requirements is not established.'] }
   } catch (error) {
@@ -165,6 +168,12 @@ export async function runContentCheck(root: string, id: 'content-structure' | 'c
     if (id === 'content-resources') {
       result.coverage ??= { files: [...documents.keys()], limitations: [] }
       result.coverage.uiNodeBindings = uiNodeBindings
+      result.coverage.uiSurfaceCompatibility = [...documents].flatMap(([document, source]) => {
+        if (source.kind !== 'ui-screen' && source.kind !== 'ui-hud') return []
+        const { supported, issues, projectSemantics } = inspectProductionUiSupport(source.data)
+        return [{ document, supported, issues, projectSemantics }]
+      })
+      result.coverage.limitations.push('Shared UI surface compatibility is advisory, not a content failure or renderer selection. Unsupported visual/behavior fields need a scoped adapter retaining shared layout; compatibility does not establish runtime use or design fidelity.')
       result.coverage.sceneNodeBindings = sceneNodeBindings
       result.coverage.assetContract = assetContract
       result.coverage.limitations.push('Scene inventory preserves declared hierarchy, component bindings and behavior metadata, not executed behavior. File inspection proves only supported structural facts, not clip compatibility, timing, assembly quality or native-engine/XR device use.')

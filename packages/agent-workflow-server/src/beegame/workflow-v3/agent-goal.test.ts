@@ -10,6 +10,7 @@ import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProf
 import { createRun, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
+import { initializeProjectGuide } from './project-guide'
 
 test('resource guidance removes AI default and reuses existing requirements and runtime evidence', () => {
   for (const prompt of [agentProfessionalContext, agentProfessionalContextForRun({} as Run)]) {
@@ -153,28 +154,34 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     close:async()=>{await Promise.all(cleanup.map(fn=>fn()));await sessions.dispose();await rm(container,{recursive:true,force:true})}}
 }
 
-test('blank confirmed Web intake starts connected, stops after one slice turn and never reinstalls on follow-up',async()=>{
+test('blank confirmed Web intake uses the design-led first version without creating template content',async()=>{
   const f=await fixture('normal',false,undefined,undefined,undefined,0,{},undefined,true)
   Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,
     settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    expect(run.creation).toEqual({initialDelivery:'playable-slice',editableContent:true,webStarter:'react-canvas-2d-v1'})
+    expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true,webStarter:'react-canvas-2d-v1'})
     const initialMessage = f.sessions.transcript(run.chatSessionId).find(event => event.type === 'user.message')!
     expect(initialMessage, run.blockedReason).toBeDefined()
     expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
     expect(JSON.parse(String(initialMessage.payload?.confirmedBriefContext))).toEqual(f.body.brief)
-    expect(await readFile(join(f.root,'content/index.json'),'utf8')).toContain('scenes/main.json')
-    expect(JSON.stringify(f.submissions[0]!.prompt)).toContain('then end this turn for user feedback')
-    expect(JSON.stringify(f.submissions[0]!.prompt)).toContain('one small, complete player experience')
-    expect(JSON.stringify(f.submissions[0]!.prompt)).toContain('Reduce content quantity, not the controls, readability or audiovisual feedback')
-    expect(JSON.stringify(f.submissions[0]!.prompt)).toContain('a proposed rule change is not authorization to implement it')
-    expect(run.blockedReason).toContain('not full-game completion')
+    await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
+    expect(JSON.stringify(f.submissions[0]!.prompt)).toContain('design-led first-version loop')
+    expect(f.starts[0].systemContext).toContain('draft the eight documents')
+    expect(f.starts[0].systemContext).toContain('a proposed rule change is not authorization to implement it')
+    const guide=await readFile(join(f.root,'CLAUDE.md'),'utf8')
+    expect(guide).not.toContain('Built-in Skill index')
+    expect(guide).not.toContain('Collection navigator:')
+    expect(guide).toContain('before related design or implementation decisions')
+    expect(f.starts[0].systemContext).toContain(guide.slice(guide.indexOf('## Professional methods')))
+    expect(run.blockedReason).not.toContain('not full-game completion')
     expect(f.submissions).toHaveLength(1)
     // Identical intake is read-only even after the model has authored new files.
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     expect(f.submissions).toHaveLength(1)
+    expect(await readFile(join(f.root,'CLAUDE.md'),'utf8')).toBe(guide)
+    await mkdir(join(f.root,'src'),{recursive:true})
     await writeFile(join(f.root,'src/game.js'),'// retained user work')
     expect((await f.call('/agent/messages','POST',{requestKey:'feedback',runId:run.id,
       chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
@@ -182,9 +189,47 @@ test('blank confirmed Web intake starts connected, stops after one slice turn an
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(f.submissions).toHaveLength(2)
     expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// retained user work')
-    expect(run.creation?.initialDelivery).toBe('playable-slice')
+    expect(run.creation?.initialDelivery).toBe('design-led-first-version')
+    const refreshed=await readFile(join(f.root,'CLAUDE.md'),'utf8')
+    expect(refreshed).toContain('src/game.js')
+    expect(refreshed.slice(refreshed.indexOf('## Professional methods'))).toBe(guide.slice(guide.indexOf('## Professional methods')))
   }finally{await f.close()}
 },30000)
+
+test('existing sources and an already-running goal never receive a backfilled guide',async()=>{
+  const existing=await fixture()
+  const running=await fixture('wait',false,undefined,undefined,undefined,0,{},undefined,true)
+  Object.assign(running.body.brief,{creation_mode:'creative',build_source:null})
+  try {
+    await writeFile(join(existing.root,'README.md'),'Existing project source')
+    Object.assign(existing.body.brief,{creation_mode:'creative',build_source:null})
+    expect((await existing.call('/agent/goal','POST',existing.body)).status).toBe(202)
+    await existing.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    await expect(readFile(join(existing.root,'CLAUDE.md'),'utf8')).rejects.toThrow()
+
+    expect((await running.call('/agent/goal','POST',running.body)).status).toBe(202)
+    await running.wait(r=>Boolean(r.writer) && running.submissions.length===1)
+    await rm(join(running.root,'CLAUDE.md'))
+    expect((await running.call('/agent/goal','POST',running.body)).status).toBe(202)
+    expect(running.submissions).toHaveLength(1)
+    await expect(readFile(join(running.root,'CLAUDE.md'),'utf8')).rejects.toThrow()
+  }finally{await existing.close();await running.close()}
+},30000)
+
+test('damaged generated navigation is reported without overwriting it or retaining an exited writer',async()=>{
+  const f=await fixture()
+  try {
+    await initializeProjectGuide(f.root)
+    const path=join(f.root,'CLAUDE.md'),damaged=(await readFile(path,'utf8')).replace('<!-- bgs:source-navigation:end -->','')
+    await writeFile(path,damaged)
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.agentTurns![0].status).toBe('ended')
+    expect(run.writer).toBeUndefined()
+    expect(run.blockedReason).toContain('Project navigation refresh failed')
+    expect(await readFile(path,'utf8')).toBe(damaged)
+  }finally{await f.close()}
+})
 
 test('running autonomous events use the actual host-accepted turn, not a previous Chat turn or an unbound cold host',async()=>{
   const f=await fixture('normal',false,undefined,undefined,undefined,240)
@@ -257,9 +302,9 @@ test('initial goal continues through visual direction without host Tasks or a se
     const submit=f.submissions[0]!
     expect(submit.language).toBe('zh')
     expect(submit.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
-    expect(JSON.stringify(submit.prompt)).toContain('current experience focus and necessary decisions in the existing design records')
-    expect(JSON.stringify(submit.prompt)).toContain('Develop interaction and its necessary presentation together')
-    expect(JSON.stringify(submit.prompt)).toContain('continue through implementation and actual runtime checks')
+    expect(JSON.stringify(submit.prompt)).toContain('design-led first-version loop')
+    expect(JSON.stringify(submit.prompt)).toContain('guide resources, UI/Scene and actual runtime checks')
+    expect(JSON.stringify(submit.prompt)).toContain('no second production authorization or automatic paid retry')
     expect(JSON.stringify(submit.prompt)).not.toContain('first assignment ends at visual-direction handoff')
     expect(JSON.stringify(submit.prompt)).not.toContain('Professional coverage:')
     expect(f.starts[0].systemContext).toContain(agentProfessionalContext)
@@ -603,15 +648,21 @@ test('focused facts retain literal user decisions and answered Questions, never 
 })
 
 // Prompt regression only: these assertions cannot prove scope discipline or taste.
-test.each([1, undefined] as const)('experience guidance replaces document and production-order prerequisites: %s', visualHandoffVersion => {
+test.each([1, undefined] as const)('design-led guidance reuses eight documents and keeps follow-ups scoped: %s', visualHandoffVersion => {
   const run={visualHandoffVersion,requirements:{text:'ORIGINAL_CONFIRMED_GOAL'}} as Run
   const context=agentProfessionalContextForRun(run), goal=agentGoalPrompt(run)
-  expect(context).toContain('no fixed document set or domain mapping is required')
-  expect(context).toContain('the player experience being tried, the confirmed rules it retains')
-  expect(context).toContain('necessary controls/feedback and what content is deferred')
+  expect(context).toContain('new first versions use the existing eight documents')
+  expect(context).toContain('Preserve confirmed rules')
+  expect(context).toContain('Read reference pictures with the native Read tool')
+  expect(context).toContain('report the exact path and read error')
+  expect(context).toContain('initial requirement/acceptance entries')
   expect(context).toContain('mark unresolved assumptions')
-  expect(context).toContain('Implement the needed interaction and presentation together within the authorized scope and cost')
-  expect(context).toContain('Use actual play observations before multiplying similar content')
+  expect(context).toContain('Check planning geometry with the supplied draft layout tools without waiting for production assets')
+  expect(context).toContain('missing geometry is unverified, not established by document baseline validity')
+  expect(context).toContain('complete bindings in those same UI/Scene sources')
+  expect(context).not.toContain('construct editable Scene/UI JSON after')
+  expect(context).not.toContain('production resources and UI/Scene construction')
+  expect(context).toContain('implement each item and verify the same requirements')
   expect(goal).toContain('ORIGINAL_CONFIRMED_GOAL')
   for(const prompt of [context,goal]) {
     expect(prompt).not.toContain('lowest-cost')
@@ -624,10 +675,10 @@ test.each([1, undefined] as const)('experience guidance replaces document and pr
   }
   if(visualHandoffVersion===1) {
     expect(context).toContain('do not produce a complete asset set merely to fill an inventory')
-    expect(context).toContain('Necessary visuals and audio may be developed alongside interaction')
+    expect(context).toContain('Visual designs precede production resources')
     expect(context).toContain('Temporary representations are for validation, not substitutes for required final artwork')
-    expect(goal).toContain('Develop interaction and its necessary presentation together')
-    expect(goal).toContain('within authorized scope and cost')
+    expect(goal).toContain('design-led first-version loop')
+    expect(goal).toContain('within the confirmed scope')
   }
 })
 
@@ -649,7 +700,7 @@ test('professional responsibilities stay complete in stable system context, not 
     expect(prompt).toContain('Preserve existing paths/references')
     expect(prompt).toContain('concrete decisions, reasons')
     expect(prompt).not.toContain('complete the applicable eight-domain design records before visual production')
-    expect(prompt).toContain('not as a blanket prerequisite for the playable slice')
+    expect(prompt).toContain('Downstream work consumes these decisions instead of guessing them from pixels')
     expect(prompt).toContain('assets/visual/ui-board.png')
     expect(prompt).toContain('assets/visual/scene-board.png')
     expect(prompt).toContain('assets/visual/design-board.png')
@@ -661,11 +712,11 @@ test('professional responsibilities stay complete in stable system context, not 
     expect(prompt).toContain('read-only quote for the actual low-quality variant')
     expect(prompt).toContain('plan a shared transparent sheet request')
     expect(prompt).toContain('An atlas assembled after many separate generations does not save generation cost')
-    expect(prompt).toContain('screens and distinct layout states in the current slice')
+    expect(prompt).toContain('screens and distinct layout states in the confirmed first version')
     expect(prompt).toContain('confirmed Landscape or Portrait setting')
     expect(prompt).toContain('project reference viewport width and height')
     expect(prompt).toContain('computed equal-cell grid')
-    expect(prompt).toContain('use the inspected UI design board only as appearance guidance via referenceImagePath')
+    expect(prompt).toContain('use the selected UI design via referenceImagePath')
     expect(prompt).toContain('request a separate shared PNG sheet with background: transparent')
     expect(prompt).toContain('background: transparent')
     expect(prompt).toContain('fixed-order shelf packer with no rotation or trim')
@@ -674,9 +725,15 @@ test('professional responsibilities stay complete in stable system context, not 
     expect(prompt).toContain('obtain a read-only quote')
     expect(prompt).toContain('respecting user exclusions and the configured project image budget')
     expect(prompt).toContain('do not ask for redundant per-image or visual-direction approval')
-    expect(prompt).toContain('an unavailable AI bridge alone does not rule out suitable existing references')
+    expect(prompt).toContain('Read reference pictures with the native Read tool')
+    expect(prompt).toContain('A document link, filename, hash or generation record is not an image read')
+    expect(prompt).toContain('report the exact path and read error')
+    expect(prompt).toContain('Reuse suitable existing or user-supplied reference images after reading them')
+    expect(prompt).not.toContain('host matches them to received generation records')
+    expect(prompt).not.toContain('AI is optional')
+    expect(prompt).not.toContain('both valid design methods')
     expect(prompt).toContain('revise only affected records')
-    expect(prompt).toContain('not gameplay authority, exact UI coordinates or production atlas')
+    expect(prompt).toContain('not machine-readable coordinates, gameplay authority or a production atlas')
     expect(prompt).toContain('a temporary stop from a prior turn is not a permanent asset prohibition')
     expect(prompt).toContain('choose a suitable source per item, not a mandatory source-by-source tour')
     expect(prompt).toContain('For common sounds, icons and environment assets, first consider suitable supplied or built-in licensed resources')
@@ -696,7 +753,7 @@ test('professional responsibilities stay complete in stable system context, not 
     expect(prompt).toContain('fallback requiring a concrete blocker and user authorization')
     expect(prompt).toContain('record source files and rights, or the renderer path for procedural work, without fake assetRefs')
     expect(prompt).toContain('observe each required resource in its reachable game state; unobserved use stays unverified')
-    expect(prompt).toContain('develop editable Scene/UI JSON together with its required presentation')
+    expect(prompt).toContain('begin applicable editable Scene/UI geometry during planning and check it without production assets')
     expect(prompt).toContain('including relevant visual nodes and asset bindings, not just settings')
     expect(prompt).toContain('Keep production resources and their UI/Scene bindings in sync')
     expect(prompt).toContain('compare actual screenshots')
@@ -705,7 +762,7 @@ test('professional responsibilities stay complete in stable system context, not 
     expect(prompt).toContain('actual runtime must consume the saved data')
     expect(prompt).toContain('Unity/Godot use native scene/UI data')
     expect(prompt).toContain('obtain migration authorization')
-    expect(prompt).toContain('disclose that specific blocker')
+    expect(prompt).toContain('report the specific error or limitation')
     expect(prompt).toContain('actual runtime')
     expect(prompt).toContain('unverified')
     expect(prompt).toContain('single source')
@@ -716,9 +773,9 @@ test('professional responsibilities stay complete in stable system context, not 
   }
   for(const prompt of prompts)expect(prompt).not.toContain('Professional coverage:')
   expect(prompts[0]).toContain('ORIGINAL_CONFIRMED_GOAL')
-  expect(prompts[0]).toContain('complete-screen UI layout references and distinct scene/prop references')
-  expect(prompts[0]).toContain('selected screen/state list determine the equal-cell grid')
-  expect(prompts[0]).toContain('continue through implementation and actual runtime checks')
+  expect(prompts[0]).toContain('Complete-screen UI designs and scene/prop designs')
+  expect(prompts[0]).toContain('guide resources, UI/Scene and actual runtime checks')
+  expect(prompts[0]).toContain('no second production authorization or automatic paid retry')
   expect(prompts[0]).not.toContain('first assignment ends')
   expect(agentGoalPrompt({...run,visualHandoffVersion:undefined})).toContain('Develop the game from this complete confirmed goal')
   expect(agentProfessionalContextForRun(run)).toContain('assets/visual/ui-board.png')

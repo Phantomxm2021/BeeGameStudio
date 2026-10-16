@@ -1,12 +1,153 @@
 import { expect, test } from 'bun:test'
+import sharp from 'sharp'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readRuntimeAcceptanceReport, runtimeEvidenceIsCurrent } from './runtime-acceptance'
+import { readRuntimeAcceptanceReport, runtimeEvidenceIsCurrent, inspectDesignAcceptance } from './runtime-acceptance'
 import { bundleAcceptanceChecker } from './acceptance-check-bundle'
 import { designDocumentFixture, designHandoffFixture, designRequirementChecksFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
-import { designHandoffPath, finalizeDesignDocuments, snapshotDesignDocuments } from './design-handoff'
+import { checkDesignHandoff, DESIGN_ACCEPTANCE_PATH, designHandoffPath, finalizeDesignDocuments, snapshotDesignDocuments } from './design-handoff'
+import { PROJECT_DOCUMENTS } from './project-content-authority'
+
+async function registerDesignFixture(root: string) {
+  const index={schema:'beegame-content-package.v2',id:'fixture',dimension:'2d',sceneModel:'game-object-v2',
+    documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'level',
+    files:['ui/menu.json','scenes/level.json'],documents:[
+      {id:'menu',kind:'ui-screen',path:'ui/menu.json',loadPhase:'startup'},
+      {id:'level',kind:'scene-2d',path:'scenes/level.json',loadPhase:'startup'}]}
+  await writeFile(join(root,'content/index.json'),JSON.stringify(index))
+  return index
+}
+const designContentChecks = () => [
+  {kind:'ui-layout',document:'content/ui/menu.json',nodeId:'play',property:'layout'},
+  {kind:'scene-layout',document:'content/scenes/level.json',nodeId:'board',property:'transform'},
+].map(check=>({...check,change:'Synthetic fixture change',expected:'Synthetic expected',observed:'Synthetic expected',
+  status:'passed',evidencePaths:['observed.txt']}))
+
+test('design-led acceptance still checks document coverage and revision without an image gate',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-design-led-acceptance-'))
+  try {
+    await writeDesignDocumentsFixture(root)
+    await registerDesignFixture(root)
+    await mkdir(join(root,'.beegame/delivery'),{recursive:true})
+    await writeFile(join(root,'observed.txt'),'Synthetic observation, not actual gameplay evidence')
+    await writeFile(join(root,'game.js'),'Synthetic build')
+    const report={scope:'delivery',status:'passed',summary:'Synthetic report',environment:'Synthetic runtime',
+      evidencePaths:['observed.txt'],artifactPaths:['game.js'],verification:{target:'deployment',observation:'target-runtime',
+        knownIssues:[],unverified:[],designRevision:checkDesignHandoff(root,PROJECT_DOCUMENTS).revision,
+        contentChecks:designContentChecks(),requirementChecks:designRequirementChecksFixture(root,['observed.txt'])}}
+    const save=async(value:unknown)=>writeFile(join(root,DESIGN_ACCEPTANCE_PATH),JSON.stringify(value))
+    expect(await inspectDesignAcceptance(root,true)).toMatchObject({valid:false,status:'unverified'})
+    await save(report)
+    const accepted=await readRuntimeAcceptanceReport(root,DESIGN_ACCEPTANCE_PATH,{requireDesignRevision:true})
+    expect(accepted?.status).toBe('passed')
+    expect(await inspectDesignAcceptance(root,true)).toMatchObject({valid:true,quality:'unverified'})
+    await save({...report,verification:{...report.verification,designRevision:undefined}})
+    expect((await inspectDesignAcceptance(root,true)).summary).toContain('revision is missing')
+    await save({...report,verification:{...report.verification,requirementChecks:report.verification.requirementChecks.slice(1)}})
+    expect((await inspectDesignAcceptance(root,true)).summary).toContain('unverified')
+    await save({...report,verification:{...report.verification,requirementChecks:[...report.verification.requirementChecks,report.verification.requirementChecks[0]]}})
+    expect((await inspectDesignAcceptance(root,true)).summary).toContain('Duplicate')
+    await save(report)
+    const doc=join(root,'docs/UI_UX_SPEC.md')
+    await writeFile(doc,await readFile(doc,'utf8')+'\nChanged decision.\n')
+    expect((await inspectDesignAcceptance(root,true)).summary).toContain('revision is missing or changed')
+    expect(await runtimeEvidenceIsCurrent(root,[accepted!])).toBe(false)
+    await rm(join(root,'docs/AUDIO_DESIGN.md'))
+    expect((await inspectDesignAcceptance(root,true)).summary).toContain('incomplete')
+  } finally { await rm(root,{recursive:true,force:true}) }
+})
+
+test('design acceptance binds the actual runtime registry to owner sources and respects the host editable-content requirement',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-design-runtime-sources-'))
+  try {
+    await writeDesignDocumentsFixture(root)
+    await mkdir(join(root,'assets/visual'),{recursive:true});await mkdir(join(root,'.beegame/delivery'),{recursive:true})
+    const visual=await sharp({create:{width:8,height:8,channels:4,background:'red'}}).png().toBuffer()
+    await writeFile(join(root,'assets/visual/design.png'),visual)
+
+    for(const name of ['UI_UX_SPEC.md','LEVEL_SCENE_DESIGN.md'])
+      await writeFile(join(root,'docs',name),await readFile(join(root,'docs',name),'utf8')+'\n[Selected](../assets/visual/design.png)\n')
+    await writeFile(join(root,'observed.txt'),'Synthetic fixture observation')
+    await writeFile(join(root,'game.js'),'Synthetic artifact')
+    const save=async(contentChecks=designContentChecks())=>writeFile(join(root,DESIGN_ACCEPTANCE_PATH),JSON.stringify({
+      scope:'delivery',status:'passed',summary:'Synthetic',environment:'Synthetic',evidencePaths:['observed.txt'],artifactPaths:['game.js'],
+      verification:{target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],contentChecks,
+        designRevision:checkDesignHandoff(root,PROJECT_DOCUMENTS).revision,requirementChecks:designRequirementChecksFixture(root,['observed.txt'])}}))
+    await save()
+    expect((await inspectDesignAcceptance(root,true,true)).summary).toContain('content/index.json')
+    const index=await registerDesignFixture(root)
+    await save([])
+    expect((await inspectDesignAcceptance(root,true,true)).summary).toContain('consumption is unverified')
+    await save()
+    const accepted=await readRuntimeAcceptanceReport(root,DESIGN_ACCEPTANCE_PATH,{requireDesignRevision:true,requireEditableContent:true})
+    expect(accepted?.status).toBe('passed')
+    await rm(join(root,'content/index.json'))
+    expect(await runtimeEvidenceIsCurrent(root,[accepted!])).toBe(false)
+    await registerDesignFixture(root)
+    // Both files are valid, but only one is the actual runtime source.
+    await writeFile(join(root,'content/ui/actual.json'),await readFile(join(root,'content/ui/menu.json')))
+    index.files[0]='ui/actual.json';index.documents[0]!.path='ui/actual.json'
+    await writeFile(join(root,'content/index.json'),JSON.stringify(index))
+    const actualChecks=designContentChecks().map(check=>({...check,
+      document:check.document.replace('ui/menu.json','ui/actual.json')}))
+    await save(actualChecks)
+    const mismatch=await inspectDesignAcceptance(root,true,true)
+    expect(mismatch.valid).toBe(false)
+    expect(mismatch.summary).toContain('same sources')
+    expect(mismatch.summary).toContain('ui/actual.json')
+    expect(mismatch.summary).toContain('ui/menu.json')
+    const uiPath=join(root,'docs/UI_UX_SPEC.md')
+    await writeFile(uiPath,(await readFile(uiPath,'utf8')).replace('ui/menu.json','ui/actual.json'))
+    await save(actualChecks)
+    expect((await inspectDesignAcceptance(root,true,true)).valid).toBe(true)
+    index.documents[0]!.id='wrong-id'
+    await writeFile(join(root,'content/index.json'),JSON.stringify(index))
+    expect((await inspectDesignAcceptance(root,true,true)).summary).toContain('actual saved document')
+    // Native/source-only work is not forced to create or use shared UI/Scene.
+    await rm(join(root,'content/index.json'))
+    for(const name of ['UI_UX_SPEC.md','LEVEL_SCENE_DESIGN.md']) {
+      const path=join(root,'docs',name)
+      await writeFile(path,(await readFile(path,'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm,''))
+    }
+    await save([])
+    expect((await inspectDesignAcceptance(root,true,false)).valid).toBe(true)
+    expect((await inspectDesignAcceptance(root,true,true)).valid).toBe(false)
+  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('editable UI-only delivery uses the same entry kinds and still requires declared Scene sources', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-ui-only-acceptance-'))
+  try {
+    await writeDesignDocumentsFixture(root)
+    const index = await registerDesignFixture(root)
+    index.entryScene = 'menu'
+    index.files = ['ui/menu.json']
+    index.documents = index.documents.filter(entry => entry.id === 'menu')
+    await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
+    const sceneDesign = join(root, 'docs/LEVEL_SCENE_DESIGN.md')
+    await writeFile(sceneDesign, (await readFile(sceneDesign, 'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm, ''))
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, 'observed.txt'), 'Synthetic UI observation, not real game evidence')
+    await writeFile(join(root, 'game.js'), 'Synthetic artifact')
+    const save = () => writeFile(join(root, DESIGN_ACCEPTANCE_PATH), JSON.stringify({ scope: 'delivery', status: 'passed',
+      summary: 'Synthetic UI-only report', environment: 'Fixture', evidencePaths: ['observed.txt'], artifactPaths: ['game.js'],
+      verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [],
+        designRevision: checkDesignHandoff(root, PROJECT_DOCUMENTS).revision,
+        requirementChecks: designRequirementChecksFixture(root, ['observed.txt']), contentChecks: designContentChecks().slice(0, 1) } }))
+    await save()
+    expect((await inspectDesignAcceptance(root, true, true)).valid).toBe(true)
+    index.documents[0]!.loadPhase = 'on-demand'
+    await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
+    expect((await inspectDesignAcceptance(root, true, true)).summary).toContain('startup entryScene')
+    index.documents[0]!.loadPhase = 'startup'
+    await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
+    await writeFile(sceneDesign, (await readFile(sceneDesign, 'utf8')) + '\n[Required Scene](../content/scenes/level.json)\n')
+    await save()
+    expect((await inspectDesignAcceptance(root, true, true)).valid).toBe(false)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 test.each(['missing', 'failed', 'false-contract'] as const)('runtime acceptance cannot turn %s retained evidence into PASS through source hashes', async kind => {
   const workspace = await mkdtemp(join(tmpdir(), 'synthetic-runtime-evidence-'))

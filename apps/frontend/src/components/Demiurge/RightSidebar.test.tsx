@@ -22,6 +22,7 @@ vi.mock('../../contexts/ToastContext', () => ({
 
 vi.mock('../../services/api', () => ({
     api: {
+        getTaskRecovery: vi.fn().mockResolvedValue(null),
         getArtifacts: vi.fn().mockResolvedValue([]),
         getChatHistoryPaginationState: vi.fn(() => ({ initialized: false, hasMore: false })),
         getOlderChatHistory: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
@@ -459,6 +460,46 @@ describe('RightSidebar tabs', () => {
         fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         fireEvent.click(screen.getByRole('button', { name: 'UI', exact: true }));
         expect(await screen.findByRole('alert')).toHaveTextContent('Saved content changed while loading');
+    });
+
+    it('passes per-file validation errors through without hiding healthy Scene and UI entries', async () => {
+        vi.mocked(beeGameAdapter.getProjectGameContentFileList).mockResolvedValueOnce({ state: 'draft', documents: [
+            { path: 'scenes/main.json', revision: 'a', id: 'scene', kind: 'scene-2d' },
+            { path: 'ui/menu.json', revision: 'b', id: 'menu', kind: 'ui-screen' },
+            { path: 'ui/hud.json', revision: 'c', id: 'hud', kind: 'ui-hud', error: 'data.nodes.5.responsive.compact.layout: Unrecognized key: "gap"' },
+        ] });
+        render(<RightSidebar projectId="proj_1" lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
+            waitingPermission={getWaitingPermissionState([])} />);
+        fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'UI', exact: true }));
+        expect(await screen.findByRole('button', { name: /menu.json/ })).toBeEnabled();
+        expect(screen.getByRole('button', { name: /hud.json/ })).toBeDisabled();
+        expect(screen.getByRole('alert')).toHaveTextContent('data.nodes.5.responsive.compact.layout');
+        expect(screen.getByRole('alert')).toHaveTextContent('gap');
+        vi.mocked(beeGameAdapter.getProjectGameContentFileList).mockResolvedValueOnce({ state: 'draft', documents: [
+            { path: 'scenes/main.json', revision: 'a', id: 'scene', kind: 'scene-2d' },
+            { path: 'ui/hud.json', revision: 'c', id: 'hud', kind: 'ui-hud', error: 'Invalid UI' },
+        ] });
+        fireEvent.click(screen.getByRole('button', { name: '返回产物' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Scene', exact: true }));
+        expect(await screen.findByRole('button', { name: /main.json/ })).toBeEnabled();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('retains discovered source rows and index diagnostics when the registry itself is invalid', async () => {
+        vi.mocked(beeGameAdapter.getProjectGameContentFileList).mockResolvedValueOnce({ state: 'draft',
+            indexIssues: ['content/index.json: entryScene: expected string'], documents: [
+                { path: 'ui/menu.json', revision: 'a', id: 'menu', kind: 'ui-screen' },
+                { path: 'ui/broken.json', revision: 'b', id: 'broken', kind: 'ui', error: 'Invalid JSON' },
+            ] });
+        render(<RightSidebar projectId="proj_1" lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
+            waitingPermission={getWaitingPermissionState([])} />);
+        fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'UI', exact: true }));
+        expect(await screen.findByRole('button', { name: /menu.json/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /broken.json/ })).toBeDisabled();
+        expect(screen.getAllByRole('alert').map(item => item.textContent).join('\n')).toContain('content/index.json: entryScene');
+        expect(screen.getAllByRole('alert').map(item => item.textContent).join('\n')).toContain('不代表内容包合格');
     });
 
     it('shows durable foundation completion in the deliverables tab count before opening it', () => {

@@ -62,7 +62,10 @@ type V3Run = {
   chatSessionId: string
   requirements: { revision: string }
   paused?: { at: string }
-  writer?: { attemptId: string }
+  writer?: { attemptId: string; fence: number }
+  writerLiveness?: 'none' | 'local-active' | 'unknown'
+  recoveryEvidence?: string
+  recoveryDiagnostic?: string
   agentTurns?: Array<{
     attemptId: string
     status: 'running' | 'ended' | 'failed' | 'interrupted'
@@ -70,13 +73,40 @@ type V3Run = {
   }>
 }
 
-async function currentV3Run(projectId: string): Promise<V3Run> {
-  const { run } = await getJson<{ run: V3Run | null }>(
+async function readV3Run(projectId: string): Promise<V3Run | null> {
+  const { run, writerLiveness, recoveryEvidence, recoveryDiagnostic } = await getJson<{
+    run: V3Run | null; writerLiveness?: V3Run['writerLiveness']; recoveryEvidence?: string; recoveryDiagnostic?: string
+  }>(
     `/api/projects/${encodeURIComponent(projectId)}/workflow-v3`,
   )
-  if (!run?.agentTurns)
-    throw new Error('此项目没有 V3 Agent 任务；旧交付不能从聊天入口继续。')
+  if (!run?.agentTurns) return null
+  return { ...run, writerLiveness, recoveryEvidence, recoveryDiagnostic }
+}
+
+async function currentV3Run(projectId: string): Promise<V3Run> {
+  const run = await readV3Run(projectId)
+  if (!run) throw new Error('此项目没有 V3 Agent 任务；旧交付不能从聊天入口继续。')
   return run
+}
+
+export type TaskRecoveryStatus = { state: 'stopping' | 'recoverable' | 'blocked'; message: string; code: string }
+
+function assertWriterReleased(run: V3Run): void {
+  if (!run.writer) return
+  if (run.writerLiveness === 'local-active')
+    throw new Error('原任务仍在执行或清理中，尚未确认停止；不能继续或发送新任务。')
+  if (['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? ''))
+    throw new Error('已有旧执行退出证据，但占用尚未结算。请先清理执行占用；清理不会自动继续任务。')
+  const reason = ({
+    'exit-receipts-not-configured': '宿主未配置退出回执',
+    'exit-receipt-invalid': '退出证据无法校验',
+    'exit-evidence-read-failed': '退出证据读取失败',
+    'host-identity-unavailable': '无法核实主机启动身份',
+    'foreign-host': '执行属于另一台主机',
+    'same-boot': '同次开机中的旧执行退出状态未确认',
+    'ownership-missing': '缺少可信宿主执行记录',
+  } as Record<string, string>)[run.recoveryDiagnostic ?? ''] ?? '旧执行退出状态未确认'
+  throw new Error(`${reason}。暂停已记录不等于执行已停止；需在原主机核实并清理，不能直接解锁或重新执行。`)
 }
 
 async function sendV3Message(projectId: string, sessionId: string, input: {
@@ -89,6 +119,7 @@ async function sendV3Message(projectId: string, sessionId: string, input: {
   let run = await currentV3Run(projectId)
   if (run.chatSessionId !== sessionId)
     throw new Error('项目会话与 V3 任务不一致，请重新打开项目。')
+  assertWriterReleased(run)
   if (run.paused) {
     const resumed = await postJson<{ run: V3Run }>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow-v3/resume`,
@@ -403,12 +434,13 @@ export type BeeGameGameContentSnapshot = {
   state: 'awaiting_documents' | 'awaiting_assets' | 'awaiting_content' | 'ready' | 'draft'
   acceptedContentRevision?: string
   contentRevision?: string
+  indexIssues?: string[]
   index?: {
     schema: 'beegame-content-package.v2'
     id: string
     dimension: '2d' | '3d'
-    documentRevision: string
-    assetManifestRevision: string
+    documentRevision?: string
+    assetManifestRevision?: string
     entryScene: string
     sceneModel: 'game-object-v2'
     files: string[]
@@ -423,9 +455,10 @@ export type BeeGameGameContentSnapshot = {
 export type BeeGameContentFileListSnapshot = Omit<BeeGameGameContentSnapshot, 'documents'> & {
   documents?: Array<{
     path: string
-    revision: string
+    revision?: string
     id: string
-    kind: BeeGameEditableContentDocument['kind']
+    kind: BeeGameEditableContentDocument['kind'] | 'scene' | 'ui'
+    error?: string
   }>
 }
 
@@ -627,7 +660,7 @@ export const beeGameAdapter = {
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
     let run = await currentV3Run(data.project_id)
-    if (run.writer) throw new Error('原任务尚未确认停止，不能发起续作。')
+    assertWriterReleased(run)
     if (run.paused) {
       await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/workflow-v3/resume`, {
         planRevision: run.planRevision,
@@ -678,6 +711,31 @@ export const beeGameAdapter = {
       state: stopped.stopping ? 'stop_requested' : 'stopped',
       trace_id: stopped.run.id,
     }
+  },
+
+  /** Explicit recovery only: never calls resume or sends a model message. */
+  async getTaskRecovery(projectId: string): Promise<TaskRecoveryStatus | null> {
+    const run = await readV3Run(projectId)
+    if (!run?.writer || run.writerLiveness === 'local-active' && !run.paused) return null
+    let message = ''
+    try { assertWriterReleased(run) } catch (error) { message = (error as Error).message }
+    return { state: run.writerLiveness === 'local-active' ? 'stopping' :
+      ['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? '') ? 'recoverable' : 'blocked',
+      message, code: run.recoveryDiagnostic ?? 'exit-unconfirmed' }
+  },
+
+  async recoverTask(data: { project_id: string }): Promise<{ recovered: boolean; paused: boolean }> {
+    const run = await currentV3Run(data.project_id)
+    if (!run.writer) return { recovered: false, paused: Boolean(run.paused) }
+    if (run.writerLiveness === 'local-active' ||
+        !['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? ''))
+      assertWriterReleased(run)
+    const result = await postJson<{ run: V3Run }>(
+      `/api/projects/${encodeURIComponent(data.project_id)}/workflow-v3/recover-writer`,
+      { expectedVersion: run.version, attemptId: run.writer.attemptId, fence: run.writer.fence },
+    )
+    if (result.run.writer) throw new Error('旧执行占用尚未释放；没有恢复任务。')
+    return { recovered: true, paused: Boolean(result.run.paused) }
   },
 
   async getChatHistory(projectId: string): Promise<unknown[]> {
@@ -2505,7 +2563,9 @@ function getJsonErrorMessage(body: unknown): string | null {
   const quotaMessage = projectQuotaErrorMessage(body)
   if (quotaMessage) return quotaMessage
   if (typeof body !== 'object' || body === null) return null
-  const payload = body as { message?: unknown; error?: unknown; issues?: unknown }
+  const payload = body as { message?: unknown; error?: unknown; issues?: unknown; code?: unknown }
+  if (payload.code === 'writer-unresolved') return '旧执行尚未确认停止或结算，不能直接继续。请先检查执行占用恢复状态。'
+  if (payload.code === 'conversation-unavailable') return '缺少可校验的原生会话记录，不能直接继续；需要核实原会话或另行明确授权新的执行上下文，不会自动重跑。'
   if (Array.isArray(payload.issues) && payload.issues.some(issue => typeof issue === 'string')) {
     return [payload.message || payload.error, ...payload.issues].filter(value => typeof value === 'string' && value.trim()).join('\n')
   }

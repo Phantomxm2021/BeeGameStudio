@@ -16,7 +16,7 @@ import {createPreviewCapabilityManager} from '../../auth/preview-capability'
 import {registerV3Routes} from './routes'
 import {BeeGameSessionManager} from '../session-manager'
 import {projectPreviewCapabilityPath} from '../project-preview-capability'
-import {uiLayoutFixture,sceneLayoutFixture} from '../fixtures/layout-fixture'
+import {uiLayoutFixture,sceneLayoutFixture,writeDesignDocumentsFixture} from '../fixtures/layout-fixture'
 import {createV3Executor} from './execution'
 import {readContentView} from './content-view'
 import {agentTurnHandoffReason} from './agent-goal'
@@ -24,6 +24,8 @@ import {openPreviewTestAccess} from '../preview-test-access'
 import {sharedContentChecker} from '../content-checker-runtime'
 import {createAgentWorkflowApp} from '../../app'
 import {writeBeeGameAssetManifest} from '../asset-contracts'
+import {DESIGN_ACCEPTANCE_PATH} from '../design-handoff'
+import {initializeProjectGuide,refreshProjectGuide} from './project-guide'
 
 const JSZip=createRequire(import.meta.resolve('exceljs'))('jszip')
 const builder="import{cp,mkdir}from'node:fs/promises';await mkdir('dist',{recursive:true});await cp('src/index.html','dist/index.html');"
@@ -54,6 +56,68 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditab
     async close(){await measurement.close();await rm(root,{recursive:true,force:true})}}
 }
 const request={requestKey:'measure-1',runtimeArtifact:'dist',reportPaths:['README.md']}
+
+test.each(['closed','paused','stale'] as const)('design finalize respects the existing %s writer boundary',async state=>{
+  const f=await fixture()
+  let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
+  try {
+    await writeDesignDocumentsFixture(f.workspace,['GDD.md'])
+    tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:f.measurement})
+    const path=join(f.workspace,'docs/GDD.md')
+    await writeFile(path,(await readFile(path,'utf8')).replace('Fixture decision.','Changed decision.'))
+    const before=await readFile(path,'utf8')
+    if(state==='closed') await f.measurement.close()
+    else {
+      const next=await f.current();next.version++
+      if(state==='paused') next.paused={at:new Date().toISOString()}
+      else next.agentTurns![0]!.quiescedAt=new Date().toISOString()
+      await f.store.commit(next.projectId,next.ownerId,next.version-1,next,'fixture.boundary')
+      if(state==='stale') {
+        const settled=await f.current();settled.version++
+        settled.agentTurns![0]!.status='ended';delete settled.writer
+        await f.store.commit(settled.projectId,settled.ownerId,settled.version-1,settled,'fixture.settled')
+      }
+    }
+    const capability=JSON.parse(await readFile(projectPreviewCapabilityPath(f.workspace,'chat','measurement'),'utf8'))
+    const response=await fetch(capability.apiUrl,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({designAction:'finalize',documents:['GDD.md']})})
+    expect(response.status).toBe(409)
+    expect(await readFile(path,'utf8')).toBe(before)
+  }finally{await tools?.close();await f.close()}
+})
+
+test('existing handoff exposes acceptance and measures its evidence without treating a build as delivery PASS',async()=>{
+  const f=await fixture()
+  let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
+  try {
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    await mkdir(join(f.workspace,'reports'),{recursive:true})
+    await writeFile(join(f.workspace,'reports/observation.txt'),'Synthetic retained observation')
+    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({scope:'delivery',status:'blocked',
+      summary:'Gameplay observation remains unverified',environment:'Synthetic fixture',evidencePaths:['reports/observation.txt']}))
+    const measured=await f.measurement.measure({...request,reportPaths:[DESIGN_ACCEPTANCE_PATH]})
+    expect(measured.checks.find(check=>check.id==='build')?.status).toBe('passed')
+    expect(measured.reports.map(file=>file.path)).toEqual([DESIGN_ACCEPTANCE_PATH,'reports/observation.txt'])
+    const handoff=await f.measurement.handoff()
+    expect(handoff.acceptance).toMatchObject({valid:false,status:'blocked',quality:'unverified'})
+    expect(handoff.deliveryEligible).toBe(false)
+    tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:f.measurement})
+    const read=async(action:string)=>{
+      const child=Bun.spawn([process.execPath,join(f.workspace,tools!.directory,'handoff.mjs'),'--design',action],{
+        cwd:f.workspace,env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'chat','measurement')},
+        stdout:'pipe',stderr:'pipe'})
+      const result=JSON.parse(await new Response(child.stdout).text())
+      return {code:await child.exited,result}
+    }
+    expect((await read('help')).result.acceptanceInstruction).toContain('designRevision')
+    expect(await read('acceptance')).toMatchObject({code:1,result:{valid:false,status:'blocked'}})
+    const before=await f.current()
+    await writeFile(join(f.workspace,'reports/observation.txt'),'Changed observation, unchanged report')
+    expect((await f.measurement.handoff()).measurement?.freshness).toMatchObject({current:false,
+      changes:{reports:['reports/observation.txt']}})
+    expect(await f.current()).toEqual(before)
+  } finally { await tools?.close();await f.close() }
+},30000)
 
 test('required editable content cannot be omitted behind a successful build; diagnostic preview remains available',async()=>{
   const f=await fixture(builder,[],true)
@@ -102,7 +166,8 @@ test.each([true,false])('measurement checks registered Scene/UI without rejectin
     expect(record.error).toBeUndefined()
     expect(record.checks.map(check=>[check.id,check.status])).toEqual([
       ['build','passed'],['content-structure','passed'],['content-layout',invalid?'failed':'passed'],
-      ['content-resources','unverified'],['runtime-smoke','passed']])
+      ['content-resources','passed'],['runtime-smoke','passed']])
+    expect(record.checks.find(check=>check.id==='content-resources')?.observation).toContain('final resource coverage and runtime use remain unverified')
     expect(measurementSummary(record).contentRuntimeEvidence).toMatchObject({
       sampledDocuments:[],unprobedDocuments:['content/scenes/level.json','content/ui/menu.json']})
     const composition=record.checks[0]!.projectBuild!.packageComposition!
@@ -376,7 +441,7 @@ test('measurement read API separates Preview inspection from delivery selection 
       }
       const ordinary=await app.request('/api/projects/measure/preview',{method:'POST',
         headers:{'content-type':'application/json'},body:'{}'})
-      expect(ordinary.status).toBe(409)
+      expect(ordinary.status).toBe(view.writer?409:200)
     }
     expect(await inspect()).toMatchObject({freshness:{current:true,inputsCurrent:true,evidence:{artifactMatches:true}},selection:{eligible:true}})
     const ordinary=await app.request('/api/projects/measure/preview',{method:'POST',
@@ -399,7 +464,7 @@ test('measurement read API separates Preview inspection from delivery selection 
     const inspectedPreview=await app.request('/api/projects/measure/preview',{method:'POST',
       headers:{'content-type':'application/json'},body:'{}'})
     expect(inspectedPreview.status).toBe(200)
-    expect((await inspectedPreview.json()).message).toContain('native turn did not succeed')
+    expect(await inspectedPreview.json()).toMatchObject({status:'running',mode:'production'})
     expect((await app.request(path+'/export',{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({measurementId:record.id,requirementsRevision:view.requirements.revision,kind:'project'})})).status).toBe(409)
     expect((await (await app.request('/api/projects/measure/preview',{method:'DELETE'})).json()).status).toBe('stopped')
@@ -411,8 +476,8 @@ test('measurement read API separates Preview inspection from delivery selection 
     await writeFile(join(f.workspace,'tests/capture.mjs'),'// Added after measurement')
     const stalePreview=await app.request('/api/projects/measure/preview',{method:'POST',
       headers:{'content-type':'application/json'},body:'{}'})
-    expect(stalePreview.status).toBe(409)
-    expect(await stalePreview.json()).toMatchObject({code:'measurement-stale',error:'Exportable sources changed: tests/capture.mjs'})
+    expect(stalePreview.status).toBe(200)
+    expect(await stalePreview.json()).toMatchObject({status:'running',mode:'production'})
     await rm(join(f.workspace,'tests'),{recursive:true})
     await writeFile(join(f.workspace,'docs/notes.md'),'Revised design')
     expect(await inspect()).toMatchObject({freshness:{current:false,inputsCurrent:false,
@@ -535,6 +600,22 @@ test('native failed-command formatting retains front-loaded UI identities and ca
   const error:any={...record,checks:[{id:'ui-data-consumption',status:'unverified',observation:'UI probe file#node [source]: source unavailable'}]}
   const plain=measurementSummary(error,false).checks[0]!
   expect('observation' in plain ? plain.observation : undefined).toBe(error.checks[0].observation)
+})
+
+test('compact composition diagnostics retain failing node identities without repeating full geometry', () => {
+  const composition = { before: { status: 'failed', checked: ['control', 'badge-letter'],
+    issues: [{ id: 'badge-letter', kind: 'geometry', expected: { left: 10 }, actual: { left: 110 } }],
+    unverified: [{ id: 'dynamic-label', reason: 'State-dependent visibility' }] } }
+  const observation = JSON.stringify({ probes: [{ document: 'content/ui/result.json', nodeId: 'control', viewport: [960, 540],
+    status: 'failed', reason: 'Rendered composition differs', composition }] })
+  const record: any = { id: 'saved', requestKey: 'composition', requirementsRevision: 'r', runtimeArtifact: 'dist', reports: [], reportPaths: [],
+    checks: [{ id: 'ui-data-consumption', status: 'failed', observation }] }
+  const before = JSON.stringify(record), compact = measurementSummary(record, false)
+  expect(compact.diagnostics![0].composition.before).toEqual({ status: 'failed', checkedCount: 2,
+    issues: [{ id: 'badge-letter', kind: 'geometry' }], unverified: composition.before.unverified })
+  expect(JSON.stringify(record)).toBe(before)
+  const detailed = measurementSummary(record, true).checks[0]!
+  expect('observation' in detailed ? detailed.observation : undefined).toBe(observation)
 })
 
 test('compact inspection retains every batch identity and failure while omitting passed text-fit detail',()=>{
@@ -666,6 +747,20 @@ test('project navigation remains a measured source; guide edits do not silently 
       changes:{requirements:false,sources:['CLAUDE.md']}})
     expect(await f.current()).toEqual(before)
     expect(await readFile(join(f.workspace,'dist/index.html'),'utf8')).toContain('Actual fixture')
+  }finally{await f.close()}
+},30000)
+
+test('generated guide refreshes before build input capture and does not stale the resulting receipt at turn end',async()=>{
+  const f=await fixture()
+  try {
+    await initializeProjectGuide(f.workspace)
+    await mkdir(join(f.workspace,'docs'))
+    await writeFile(join(f.workspace,'docs/new-design.md'),'New saved design')
+    const measured=await f.measurement.measure(request)
+    expect(measured.checks.find(c=>c.id==='build')!.status).toBe('passed')
+    expect(await readFile(join(f.workspace,'CLAUDE.md'),'utf8')).toContain('docs/new-design.md')
+    expect(await refreshProjectGuide(f.workspace)).toBe(false)
+    expect((await f.measurement.context()).measurement?.freshness?.current).toBe(true)
   }finally{await f.close()}
 },30000)
 

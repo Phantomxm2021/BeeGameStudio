@@ -46,6 +46,8 @@ import {
   createMcpServer,
   deleteMcpServer,
   discoverActiveMcpServers,
+  discoverMcpServers,
+  importDiscoveredMcpServer,
   listMcpServers,
   testMcpServer,
   updateMcpServer,
@@ -159,7 +161,7 @@ export function SettingsMenu({
   const projectLifecycleCopy = getProjectLifecycleSettingsCopy(translateSettings);
   const userSkillsCopy = getUserSkillsSettingsCopy(translateSettings);
   const adminCopy = getAdminSettingsCopy(translateSettings);
-  const { showError } = useToastContext();
+  const { showError, showSuccess, showWarning } = useToastContext();
   const currentUser = useSystemStore(state => state.currentUser);
   const isDark = useSystemStore(state => state.isDark);
   const toggleTheme = useSystemStore(state => state.toggleTheme);
@@ -392,7 +394,7 @@ export function SettingsMenu({
         })
         .catch(error => {
           if (isCurrent()) {
-            setMcpStatus(error instanceof Error ? error.message : 'MCP settings unavailable');
+            showError(error instanceof Error ? error.message : 'MCP settings unavailable');
           }
         });
     },
@@ -762,16 +764,20 @@ export function SettingsMenu({
     try {
       const result = await testMcpServer(mcpServerToInput(server));
       setMcpHealthById(current => ({ ...current, [server.id]: result }));
+      if (result.status === 'untested') showWarning(result.message);
+      else if (!result.ok) showError(result.message || 'MCP connection test failed');
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'MCP connection test failed';
       setMcpHealthById(current => ({
         ...current,
         [server.id]: {
           ok: false,
           status: 'unavailable',
-          message: error instanceof Error ? error.message : 'MCP connection test failed',
+          message,
           checkedAt: new Date().toISOString(),
         },
       }));
+      showError(message);
     } finally {
       setTestingMcpServerId('');
     }
@@ -781,11 +787,22 @@ export function SettingsMenu({
     setMcpStatus('');
     setIsScanningActiveMcp(true);
     try {
-      const discovered = await discoverActiveMcpServers();
-      setActiveMcpServers(discovered);
-      if (!discovered.length) setMcpStatus(mcpCopy.form.noActiveDiscovered);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'MCP active scan failed');
+      const [configs, active] = await Promise.allSettled([discoverMcpServers(), discoverActiveMcpServers()]);
+      const activeServers = active.status === 'fulfilled' ? active.value : [];
+      // HTTP configurations already found by the live scan need only one row.
+      const configuredServers = configs.status === 'fulfilled'
+        ? configs.value.filter(server => !server.url || !activeServers.some(item => item.url === server.url))
+        : [];
+      setDiscoveredMcpServers(configuredServers);
+      setActiveMcpServers(activeServers);
+      const failure = [configs, active].find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') {
+        showError(failure.reason instanceof Error ? failure.reason.message : 'MCP discovery failed');
+      } else {
+        const count = configuredServers.length + activeServers.length;
+        if (!count) showWarning(mcpCopy.form.noActiveDiscovered);
+        else showSuccess(translateSettings('mcp.form.discoveryFound', { count }));
+      }
     } finally {
       setIsScanningActiveMcp(false);
     }
@@ -795,10 +812,8 @@ export function SettingsMenu({
     setMcpStatus('');
     setIsSavingMcp(true);
     try {
-      const payload = discoveredMcpServerToInput(server);
-      const saved = await createMcpServer(payload);
+      const saved = await importDiscoveredMcpServer(server);
       setMcpServers(current => [saved, ...current.filter(item => item.id !== saved.id)]);
-      void handleTestMcpServer(saved);
       setDiscoveredMcpServers(current =>
         current.map(item =>
           item.name === server.name && item.sourcePath === server.sourcePath ? { ...item, exists: true } : item,
@@ -1162,7 +1177,7 @@ export function SettingsMenu({
 
           <main data-testid="settings-modal-content" className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <fieldset disabled={isLoadingCurrentSection} aria-busy={isLoadingCurrentSection} className="contents">
-            <header className="shrink-0 px-6 pb-3 pt-5">
+            <header className={`shrink-0 px-6 ${activeSection === 'mcp' ? 'pb-5 pt-6' : 'pb-3 pt-5'}`}>
               <div className="flex items-end justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-xs text-muted-foreground">
@@ -1172,7 +1187,7 @@ export function SettingsMenu({
                         ? userSkillsCopy.tab
                         : t.systemSettings}
                   </div>
-                  <h2 className="mt-2 text-xl font-semibold text-foreground">{activeTabLabel}</h2>
+                  <h2 className={`mt-2 font-semibold text-foreground ${activeSection === 'mcp' ? 'text-2xl tracking-tight' : 'text-xl'}`}>{activeTabLabel}</h2>
                 </div>
                 {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
                   <MorphPopover open={modelAction === 'create'} onOpenChange={open => open ? openModelConfig('create') : closeModelConfig()}>
@@ -1200,7 +1215,7 @@ export function SettingsMenu({
                         setIsMcpActionMenuOpen(current => !current);
                         event.currentTarget.dataset.anchor = 'mcp-actions';
                       }}
-                      className="inline-flex size-9 items-center justify-center rounded-full bg-transparent text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <Plus className="size-5" />
                     </button>
@@ -1290,7 +1305,7 @@ export function SettingsMenu({
               </div>
             </header>
 
-            <div className="mx-6 h-px shrink-0 bg-border" />
+            {activeSection !== 'mcp' ? <div className="mx-6 h-px shrink-0 bg-border" /> : null}
 
             <motion.div
               key={`${activeSection}-${activeTab}`}

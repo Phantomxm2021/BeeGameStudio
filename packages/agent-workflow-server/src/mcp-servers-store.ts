@@ -56,6 +56,8 @@ export type DiscoveredMcpServer = McpServerInput & {
 
 export type McpServersStoreOptions = {
   dataDir?: string
+  homeDir?: string
+  existingServers?: McpServerConfig[]
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
   outboundTargetResolver?: typeof resolveApprovedOutboundTarget
 }
@@ -115,11 +117,11 @@ export function deleteMcpServer(
 export async function discoverMcpServers(
   options: McpServersStoreOptions = {},
 ): Promise<DiscoveredMcpServer[]> {
-  const existingServers = loadMcpServers(options)
+  const existingServers = options.existingServers ?? loadMcpServers(options)
   const discovered = new Map<string, DiscoveredMcpServer>()
 
   for (const filePath of getMcpDiscoveryPaths(options)) {
-    for (const server of readMcpServersFromJsonFile(filePath)) {
+    for (const server of readMcpServersFromConfigFile(filePath)) {
       const normalized = normalizeMcpServerInput(server, undefined)
       const publicInput = toPublicMcpServerInput(normalized)
       if ((publicInput.transport === 'http' || publicInput.transport === 'sse') &&
@@ -141,6 +143,17 @@ export async function discoverMcpServers(
   }
 
   return [...discovered.values()]
+}
+
+// Re-read only known discovery sources on import. Environment values remain on
+// the host instead of round-tripping redacted values through the browser.
+export function readDiscoveredMcpServerInput(
+  sourcePath: string,
+  name: string,
+  options: McpServersStoreOptions = {},
+): McpServerInput | undefined {
+  if (!getMcpDiscoveryPaths(options).includes(sourcePath)) return undefined
+  return readMcpServersFromConfigFile(sourcePath).find(server => server.name === name)
 }
 
 function loadMcpServers(options: McpServersStoreOptions): McpServerConfig[] {
@@ -238,12 +251,17 @@ function normalizeMcpServerInput(
 
 function getMcpDiscoveryPaths(options: McpServersStoreOptions): string[] {
   const dataDir = options.dataDir ?? getDefaultMcpServersStoreDir()
-  const home = homedir()
+  const home = options.homeDir ?? homedir()
   const candidates = [
     join(dataDir, '.mcp.json'),
     join(dataDir, 'mcp.json'),
     join(dataDir, STORE_FILE),
     join(home, '.mcp.json'),
+    join(home, '.claude.json'),
+    join(home, '.cursor', 'mcp.json'),
+    join(home, '.codex', 'config.toml'),
+    join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
+    join(home, '.config', 'Claude', 'claude_desktop_config.json'),
     join(home, '.config', 'mcp', 'mcp.json'),
     join(home, '.config', 'mcp', 'servers.json'),
     join(home, '.beegame', 'mcp.json'),
@@ -252,18 +270,24 @@ function getMcpDiscoveryPaths(options: McpServersStoreOptions): string[] {
   return [...new Set(candidates)].filter(path => existsSync(path))
 }
 
-function readMcpServersFromJsonFile(filePath: string): McpServerInput[] {
+function readMcpServersFromConfigFile(filePath: string): McpServerInput[] {
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown
-    return extractMcpServers(parsed)
+    const content = readFileSync(filePath, 'utf8')
+    parsed = filePath.endsWith('.toml') ? Bun.TOML.parse(content) : JSON.parse(content)
   } catch {
-    return []
+    // Parser errors can include source text containing credentials.
+    throw new Error(`Unable to read MCP configuration: ${filePath}`)
   }
+  if (filePath.endsWith(STORE_FILE) && isRecord(parsed) && parsed.version === 1) {
+    return loadMcpServers({ dataDir: dirname(filePath) })
+  }
+  return extractMcpServers(parsed)
 }
 
 function extractMcpServers(value: unknown): McpServerInput[] {
   if (!isRecord(value)) return []
-  const candidate = value.mcpServers ?? value.servers
+  const candidate = value.mcpServers ?? value.mcp_servers ?? value.servers
   if (Array.isArray(candidate)) {
     return candidate
       .map((entry, index) => toMcpServerInputFromUnknown(entry, `server-${index + 1}`))

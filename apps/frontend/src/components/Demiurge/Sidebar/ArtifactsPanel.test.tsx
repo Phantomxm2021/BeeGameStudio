@@ -74,6 +74,25 @@ describe('ArtifactsPanel', () => {
         expect(screen.getByRole('alert')).toHaveTextContent('Unable to load deliverables');
     });
 
+    it.each(['scene', 'ui'] as const)('keeps the %s list visible with the exact error on its affected file', kind => {
+        const actions = callbacks();
+        const error = 'data.nodes.5.responsive.compact.layout: Unrecognized key: "gap"';
+        render(<ArtifactsPanel artifacts={[]} isLoading={false} {...actions} lang="zh" editorFiles={[
+            { kind, id: 'healthy', path: `${kind}/healthy.json` },
+            { kind, id: 'invalid', path: `${kind}/invalid.json`, error },
+        ]} />);
+        fireEvent.click(screen.getByRole('button', { name: kind === 'scene' ? 'Scene' : 'UI', exact: true }));
+        const list = screen.getByRole('region', { name: `${kind === 'scene' ? 'Scene' : 'UI'} files` });
+        const invalid = within(list).getByRole('button', { name: /invalid.json/ });
+        expect(invalid).toBeDisabled();
+        expect(within(invalid).getByRole('alert')).toHaveTextContent(`文件校验错误：${error}`);
+        expect(within(list).queryByTestId('artifact-empty-card')).not.toBeInTheDocument();
+        fireEvent.click(invalid);
+        expect(actions.onOpenEditor).not.toHaveBeenCalled();
+        fireEvent.click(within(list).getByRole('button', { name: /healthy.json/ }));
+        expect(actions.onOpenEditor).toHaveBeenCalledWith(kind, `${kind}/healthy.json`);
+    });
+
     it.each([true, false])('moves project package download to Export (%s)', canExportProject => {
         const actions = callbacks();
         render(<ArtifactsPanel artifacts={[{ id: 'package', name: 'game.zip', package_download: true }]} isLoading={false} {...actions} canExportProject={canExportProject} />);

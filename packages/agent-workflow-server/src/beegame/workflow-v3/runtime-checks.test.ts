@@ -8,6 +8,9 @@ import { runChecks } from './checker-test-driver'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
+import { observeStaticBuild, observeStaticPublication } from './runtime-checks'
+import { readVersion } from './checks'
+import type { CheckResult } from './state'
 
 export const artifactTask: TaskSpec = { id: 'verify', kind: 'game.verify', goal: 'Check current static package', dependsOn: [], requirementIds: ['req.loop'], inputs: [],
   writablePaths: [], expectedOutputs: ['dist/index.html'], checks: ['delivery-package'], runtimeArtifact: 'dist' }
@@ -32,6 +35,27 @@ test.each([
   }finally{await rm(root,{recursive:true,force:true})}
 },30000)
 
+test('Preview smoke observes opaque-origin storage/Canvas failures without changing standalone publication semantics', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-preview-smoke-'))
+  try {
+    await mkdir(join(root, 'dist'))
+    await writeFile(join(root, 'dist/pixel.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="red"/></svg>')
+    const check = () => runChecks(root, { ...artifactTask, checks: ['runtime-smoke'] }, []).then(result => result.checks[0]!)
+    await writeFile(join(root, 'dist/index.html'), '<button>Play</button><script>localStorage.setItem("fixture","1")</script>')
+    const storage = await check()
+    expect(storage.status, storage.observation).toBe('failed')
+    expect(JSON.parse(storage.observation).environment).toMatchObject({ embedding: 'sandboxed-iframe', origin: 'null' })
+    await observeStaticPublication(root, 'dist', 'http://publication.invalid/nested/index.html')
+    for (const crossOrigin of [false, true]) {
+      await writeFile(join(root, 'dist/index.html'), '<button>Play</button><script>const image=new Image();' +
+        (crossOrigin ? 'image.crossOrigin="anonymous";' : '') +
+        'image.onload=()=>{const c=document.createElement("canvas");c.width=c.height=2;c.getContext("2d").drawImage(image,0,0);c.toDataURL();};image.src="./pixel.svg";</script>')
+      const image = await check()
+      expect(image.status, image.observation).toBe(crossOrigin ? 'passed' : 'failed')
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+}, 30000)
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'bgs-v3-package-'))
   await mkdir(join(root, 'dist'), { recursive: true })
@@ -55,6 +79,41 @@ async function fixture() {
   await cp(join(root, 'assets'), join(root, 'dist/assets'), { recursive: true })
   return root
 }
+
+test('Preview measurement rejects root-relative resources but accepts build-relative resources under its subpath', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-preview-base-'))
+  try {
+    await mkdir(join(root, 'dist'))
+    await writeFile(join(root, 'dist/data.json'), '{"value":1}')
+    for (const prefix of ['/', './']) {
+      await writeFile(join(root, 'dist/index.html'), '<button>Play</button><script type="module">' +
+        'const response=await fetch("'+prefix+'data.json");if(!response.ok)throw Error("Fixture resource failed");await response.json();</script>')
+      const check = (await runChecks(root, { ...artifactTask, checks: ['runtime-smoke'] }, [])).checks[0]!
+      expect(check.status, check.observation).toBe(prefix === '/' ? 'failed' : 'passed')
+      const observed = JSON.parse(check.observation)
+      expect(observed.missingFiles).toEqual(prefix === '/' ? ['/data.json (outside publication base /previews/measurement/)'] : [])
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+}, 30000)
+
+test('a stalled browser evaluation reaches the host deadline and does not block the next observation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-browser-deadline-'))
+  try {
+    await mkdir(join(root, 'dist'))
+    const path = 'dist/index.html'
+    await writeFile(join(root, path), '<button>Play</button><script>' +
+      'Object.defineProperty(window,"innerWidth",{get(){while(true){}}});</script>')
+    const result: CheckResult = { id: 'runtime-smoke', version: 'deadline-fixture', inputs: [await readVersion(root, path)],
+      status: 'unverified', observation: '', createdAt: new Date().toISOString() }
+    const started = Date.now()
+    await expect(observeStaticBuild(root, 'dist', [path], result, undefined, undefined, undefined, undefined, 2000))
+      .rejects.toThrow('Browser observation timed out after 2000ms; no automatic retry')
+    expect(Date.now() - started).toBeLessThan(8000)
+    await writeFile(join(root, path), '<button>Play</button>')
+    const next = (await runChecks(root, { ...artifactTask, checks: ['runtime-smoke'] }, [])).checks[0]!
+    expect(next.status, next.observation).toBe('passed')
+  } finally { await rm(root, { recursive: true, force: true }) }
+}, 15000)
 
 test('runtime artifact is an optional local path, never an arbitrary URL/host metadata', () => {
   expect(taskSchema.safeParse({ ...artifactTask, runtimeArtifact: '../other' }).success).toBe(false)

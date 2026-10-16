@@ -1,7 +1,7 @@
 // Capture the game's media decoder, not a host-created player. captureStream
 // intentionally ignores element volume/mute; observe those native properties
 // separately and never claim this measures the final output device/mix.
-export async function observeAudio(page, probe, requested) {
+export async function observeAudio(page, probe, requested, servingBase) {
   const target = page.locator(probe.selector)
   if (await target.count() !== 1) return { reason: 'Audio selector must identify exactly one actual HTML audio element' }
   const state = () => target.evaluate(element => element instanceof HTMLAudioElement ? {
@@ -26,7 +26,8 @@ export async function observeAudio(page, probe, requested) {
     if (!playing) return { reason: 'Game replaced the selected audio element during activation' }
     if (playing.paused || playing.ended || playing.error) return { audio: { initial, playing }, failed: true, reason: 'Declared game action did not produce native media playback' }
     const src = new URL(playing.src)
-    if (src.origin !== 'http://bgs-runtime.invalid' || decodeURIComponent(src.pathname).slice(1) !== probe.resource.path ||
+    const expected = new URL(probe.resource.path, servingBase)
+    if (src.origin !== expected.origin || decodeURIComponent(src.pathname) !== decodeURIComponent(expected.pathname) ||
         !requested.has(probe.document) || !requested.has(probe.resource.path))
       return { reason: 'Actual playing media/source does not isolate the selected registered Scene/audio member' }
     // The tap is a separate capture graph with no output connection. Resume

@@ -15,6 +15,7 @@ const {
     deleteMcpServer,
     discoverActiveMcpServers,
     discoverMcpServers,
+    importDiscoveredMcpServer,
     getBeeGameWorkspaceSettings,
     getWebToolsConfig,
     getRuntimeSettings,
@@ -46,6 +47,7 @@ const {
     runProjectRetention,
     showError,
     showSuccess,
+    showWarning,
 } = vi.hoisted(() => ({
     createModelConfig: vi.fn(),
     deleteModelConfig: vi.fn(),
@@ -55,6 +57,7 @@ const {
     deleteMcpServer: vi.fn(),
     discoverActiveMcpServers: vi.fn(),
     discoverMcpServers: vi.fn(),
+    importDiscoveredMcpServer: vi.fn(),
     getBeeGameWorkspaceSettings: vi.fn(),
     getInvitationPublicSettings: vi.fn(),
     getWebToolsConfig: vi.fn(),
@@ -84,6 +87,7 @@ const {
     runProjectRetention: vi.fn(),
     showError: vi.fn(),
     showSuccess: vi.fn(),
+    showWarning: vi.fn(),
 }));
 
 const desktopBridge = {
@@ -127,6 +131,7 @@ vi.mock('../../../services/mcpServersApi', () => ({
     deleteMcpServer,
     discoverActiveMcpServers,
     discoverMcpServers,
+    importDiscoveredMcpServer,
     listMcpServers,
     testMcpServer,
     updateMcpServer,
@@ -156,7 +161,7 @@ vi.mock('../../../contexts/ToastContext', () => ({
     useToastContext: () => ({
         showError,
         showSuccess,
-        showWarning: vi.fn(),
+        showWarning,
         showToast: vi.fn(),
         dismissToast: vi.fn(),
         dismissAll: vi.fn(),
@@ -238,6 +243,7 @@ describe('SettingsMenu model settings', () => {
         discoverActiveMcpServers.mockResolvedValue([]);
         discoverMcpServers.mockReset();
         discoverMcpServers.mockResolvedValue([]);
+        importDiscoveredMcpServer.mockReset();
         testMcpServer.mockReset();
         testMcpServer.mockResolvedValue({
             ok: false,
@@ -255,6 +261,7 @@ describe('SettingsMenu model settings', () => {
         deleteUserSkill.mockResolvedValue({ deleted: true });
         showError.mockReset();
         showSuccess.mockReset();
+        showWarning.mockReset();
         createModelConfig.mockReset();
         deleteModelConfig.mockReset();
         updateModelConfig.mockReset();
@@ -600,7 +607,7 @@ describe('SettingsMenu model settings', () => {
             await waitFor(() => expect(listMcpServers).toHaveBeenCalled());
             await openMcpActionsMenu();
             expect(screen.getByRole('menuitem', { name: '新增 Server' })).toBeInTheDocument();
-            expect(screen.queryByRole('menuitem', { name: '发现本机服务' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('menuitem', { name: '发现本机 MCP' })).not.toBeInTheDocument();
         } finally {
             useSystemStore.setState({ currentUser: null });
         }
@@ -1120,6 +1127,13 @@ describe('SettingsMenu model settings', () => {
         await userEvent.click(screen.getByRole('menuitem', { name: '新增 Server' }));
 
         expect(screen.getByLabelText('传输')).toBeInTheDocument();
+        await userEvent.click(screen.getByLabelText('传输'));
+        const transportOptions = screen.getByRole('listbox', { name: '传输' });
+        expect(transportOptions.parentElement).toBe(document.body);
+        expect(transportOptions).toHaveClass('z-[370]');
+        expect(transportOptions.style.zIndex).toBe('');
+        await userEvent.click(screen.getByRole('option', { name: 'stdio' }));
+        expect(screen.getByLabelText('名称')).toBeInTheDocument();
         expect(screen.queryByLabelText('命令')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('参数')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('作用域')).not.toBeInTheDocument();
@@ -1132,6 +1146,12 @@ describe('SettingsMenu model settings', () => {
         await userEvent.type(screen.getByLabelText('命令'), 'npx');
         await userEvent.type(screen.getByLabelText('参数'), 'unity-mcp');
         expect(screen.getByLabelText('作用域')).toBeInTheDocument();
+        await userEvent.click(screen.getByLabelText('作用域'));
+        const scopeOptions = screen.getByRole('listbox', { name: '作用域' });
+        expect(scopeOptions.parentElement).toBe(document.body);
+        expect(scopeOptions).toHaveClass('z-[370]');
+        await userEvent.click(screen.getByRole('option', { name: 'BeeGame' }));
+        expect(screen.getByLabelText('名称')).toHaveValue('Unity Bridge');
         await userEvent.type(screen.getByLabelText('环境变量'), 'UNITY_TOKEN=unity-secret-token');
         await userEvent.click(screen.getByRole('button', { name: '保存 Server' }));
 
@@ -1145,6 +1165,58 @@ describe('SettingsMenu model settings', () => {
             env: [{ key: 'UNITY_TOKEN', value: 'unity-secret-token' }],
             autoStart: true,
         }));
+    });
+
+    it.each([
+        ['untested', false, '未测试'],
+        ['unavailable', false, '不可用'],
+        ['available', true, '可用'],
+    ] as const)('displays the MCP test result %s without confusing untested and failure', async (status, ok, label) => {
+        listMcpServers.mockResolvedValueOnce([{
+            id: 'blender', name: 'Blender', enabled: true, transport: 'stdio', scope: 'beegame',
+            command: '/installed/mcp-for-blender', env: [], autoStart: true,
+        }]);
+        testMcpServer.mockResolvedValueOnce({ ok, status, message: 'Connection test detail', checkedAt: new Date().toISOString() });
+        renderSettings();
+        await openMcpSettings();
+        expect(await screen.findByText('Blender')).toBeInTheDocument();
+        const actions = screen.getAllByRole('button', { name: /操作/ });
+        await userEvent.click(actions[actions.length - 1]);
+        await userEvent.click(screen.getByRole('menuitem', { name: '测试连接' }));
+        await waitFor(() => expect(testMcpServer).toHaveBeenCalled());
+        expect(await screen.findByText(label, { exact: true })).toBeInTheDocument();
+        expect(screen.queryByText('Connection test detail')).not.toBeInTheDocument();
+        if (status === 'unavailable') {
+            await waitFor(() => expect(showError).toHaveBeenCalledWith('Connection test detail'));
+            expect(showError).toHaveBeenCalledTimes(1);
+        } else {
+            expect(showError).not.toHaveBeenCalled();
+        }
+        if (status === 'untested') {
+            await waitFor(() => expect(showWarning).toHaveBeenCalledWith('Connection test detail'));
+        } else {
+            expect(showWarning).not.toHaveBeenCalled();
+        }
+        if (status === 'untested') expect(screen.queryByText('不可用', { exact: true })).not.toBeInTheDocument();
+    });
+
+    it('reports a rejected MCP test through the global error notification without inline detail', async () => {
+        listMcpServers.mockResolvedValueOnce([{
+            id: 'failed', name: 'Failed MCP', enabled: true, transport: 'http', scope: 'beegame',
+            url: 'https://example.test/mcp', env: [], autoStart: true,
+        }]);
+        testMcpServer.mockRejectedValueOnce(new Error('Connection timed out'));
+        renderSettings();
+        await openMcpSettings();
+        expect(await screen.findByText('Failed MCP')).toBeInTheDocument();
+        const actions = screen.getAllByRole('button', { name: /操作/ });
+        await userEvent.click(actions[actions.length - 1]);
+        await userEvent.click(screen.getByRole('menuitem', { name: '测试连接' }));
+        await waitFor(() => expect(showError).toHaveBeenCalledWith('Connection timed out'));
+        expect(showError).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('不可用', { exact: true })).toBeInTheDocument();
+        expect(screen.queryByText('Connection timed out')).not.toBeInTheDocument();
+        expect(showWarning).not.toHaveBeenCalled();
     });
 
     it('scans running MCP servers and imports verified entries', async () => {
@@ -1183,10 +1255,12 @@ describe('SettingsMenu model settings', () => {
         renderSettings();
         await openMcpSettings();
         await openMcpActionsMenu();
-        await userEvent.click(screen.getByRole('menuitem', { name: '发现本机服务' }));
+        await userEvent.click(screen.getByRole('menuitem', { name: '发现本机 MCP' }));
 
         await waitFor(() => expect(discoverActiveMcpServers).toHaveBeenCalled());
-        expect(screen.getByText('本机服务')).toBeInTheDocument();
+        await waitFor(() => expect(showSuccess).toHaveBeenCalledWith('发现 1 个 MCP 服务或配置。'));
+        expect(screen.queryByText('发现 1 个 MCP 服务或配置。')).not.toBeInTheDocument();
+        expect(screen.getByText('本机 HTTP MCP')).toBeInTheDocument();
         expect(screen.getByText('Runtime MCP')).toBeInTheDocument();
         expect(screen.getByText('可用')).toBeInTheDocument();
 
@@ -1205,7 +1279,58 @@ describe('SettingsMenu model settings', () => {
         }
     });
 
-    it('opens the MCP edit popover from the selected server row', async () => {
+    it.each([false, true])('reports an empty or failed local MCP scan through global notifications (failed=%s)', async failed => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: ['workspace.manage', 'mcp.manage'] } });
+        try {
+            if (failed) discoverActiveMcpServers.mockRejectedValueOnce(new Error('Scan failed'));
+            else discoverActiveMcpServers.mockResolvedValueOnce([]);
+            renderSettings();
+            await openMcpSettings();
+            await openMcpActionsMenu();
+            await userEvent.click(screen.getByRole('menuitem', { name: '发现本机 MCP' }));
+            const message = failed ? 'Scan failed' : '未发现本机 MCP 服务或可导入配置。';
+            await waitFor(() => expect(failed ? showError : showWarning).toHaveBeenCalledWith(message));
+            expect(failed ? showError : showWarning).toHaveBeenCalledTimes(1);
+            expect(screen.queryByText(message)).not.toBeInTheDocument();
+            expect(showSuccess).not.toHaveBeenCalled();
+            expect(screen.queryByText('本机 HTTP MCP', { exact: true })).not.toBeInTheDocument();
+        } finally {
+            useSystemStore.setState({ currentUser: null });
+        }
+    });
+
+    it.each([false, true])('discovers stdio configurations without starting them and imports by source (HTTP scan fails=%s)', async failed => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: ['workspace.manage', 'mcp.manage'] } });
+        const discovered = {
+            name: 'Blender', enabled: true, transport: 'stdio', scope: 'beegame',
+            command: '/local/bin/blender-mcp', sourcePath: '/home/test/.codex/config.toml', exists: false,
+            env: [{ key: 'TOKEN', valuePreview: '••••' }],
+        };
+        discoverMcpServers.mockResolvedValueOnce([discovered]);
+        if (failed) discoverActiveMcpServers.mockRejectedValueOnce(new Error('HTTP scan failed'));
+        importDiscoveredMcpServer.mockResolvedValueOnce({ ...discovered, id: 'imported-blender' });
+        try {
+            renderSettings();
+            await openMcpSettings();
+            await openMcpActionsMenu();
+            await userEvent.click(screen.getByRole('menuitem', { name: '发现本机 MCP' }));
+            await waitFor(() => expect(screen.getByText('Blender')).toBeInTheDocument());
+            expect(discoverMcpServers).toHaveBeenCalledOnce();
+            expect(testMcpServer).not.toHaveBeenCalled();
+            expect(createMcpServer).not.toHaveBeenCalled();
+            expect(screen.queryByText('可用', { exact: true })).not.toBeInTheDocument();
+            if (failed) expect(showError).toHaveBeenCalledWith('HTTP scan failed');
+            else expect(showSuccess).toHaveBeenCalledWith('发现 1 个 MCP 服务或配置。');
+            await userEvent.click(screen.getByRole('button', { name: '导入', exact: true }));
+            await waitFor(() => expect(importDiscoveredMcpServer).toHaveBeenCalledWith(discovered));
+            expect(testMcpServer).not.toHaveBeenCalled();
+            expect(screen.getByRole('button', { name: '已存在', exact: true })).toBeDisabled();
+        } finally {
+            useSystemStore.setState({ currentUser: null });
+        }
+    });
+
+    it('opens MCP settings only through the row actions menu, not the card body', async () => {
         listMcpServers.mockResolvedValueOnce([
             {
                 id: 'mcp_existing',
@@ -1234,6 +1359,11 @@ describe('SettingsMenu model settings', () => {
 
         expect(await screen.findByText('Existing MCP')).toBeInTheDocument();
         expect(screen.queryByTestId('mcp-empty-state')).not.toBeInTheDocument();
+        await userEvent.click(screen.getByText('Existing MCP'));
+        expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();
+        await userEvent.click(screen.getByText('Existing MCP').closest('li')!);
+        expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
         const rowActions = screen.getAllByRole('button', { name: /操作/ });
         await userEvent.click(rowActions[rowActions.length - 1]);
         await userEvent.click(screen.getByRole('menuitem', { name: '编辑' }));

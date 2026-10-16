@@ -25,6 +25,19 @@ export type BeeGameDevPorts = {
 
 export type BeeGameDevProcessName = 'billing' | 'skills' | 'resources' | 'runtime' | 'frontend'
 
+/** Give the runtime its existing drain/receipt/settlement opportunity before
+ * the launcher exits. This does not claim safety after SIGKILL or a crash. */
+export async function stopBeeGameDevServices(services: Array<{ child: {
+  kill(signal: 'SIGTERM'): unknown; exited: Promise<number>; exitCode?: number | null
+} }>): Promise<void> {
+  const results = await Promise.allSettled(services.map(async ({ child }) => {
+    if (child.exitCode == null) child.kill('SIGTERM')
+    await child.exited
+  }))
+  const failures = results.filter(result => result.status === 'rejected')
+  if (failures.length) throw new Error('Some local services did not confirm shutdown')
+}
+
 /** A failed service is observable, not an instruction to stop its siblings. */
 export async function waitForBeeGameDevServices(
   services: Array<{ name: BeeGameDevProcessName; child: {
