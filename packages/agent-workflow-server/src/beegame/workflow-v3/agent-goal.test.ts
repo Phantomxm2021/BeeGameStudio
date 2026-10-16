@@ -1129,7 +1129,7 @@ test('first and resumed goals retain professional coverage and design dependenci
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     for (const skill of ['game-creative-director-expert','game-systems-designer-expert','game-level-designer-expert',
       'game-balance-designer-expert','gameplay-programmer','game-implementation-planning','game-art-director-expert',
-      'game-ui-ux-designer','game-audio-designer','game-content-pipeline-engineer']) expect(prompt).toContain(skill)
+      'game-ui-ux-designer','game-audio-designer','game-content-pipeline-engineer','game-plan-execution']) expect(prompt).toContain(skill)
     const steps=['1. Design records:', '2. Actual visual designs:', '3. Resources:', '4. UI/Scene JSON:', '5. Implementation and runtime verification:']
     const positions=steps.map(step=>prompt.indexOf(step))
     expect(positions.every((position,index)=>position>=0 && (!index || position>positions[index-1]!))).toBe(true)

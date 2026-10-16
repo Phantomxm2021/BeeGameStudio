@@ -35,7 +35,7 @@ For applicable new work, use this order; do not omit, replace or reverse require
 2. Actual visual designs: use existing image tools or supplied designs for complete UI screens/key states, scenes and needed props. Save and Read pictures; inspect composition, hierarchy, game visibility and style; link selections from owning records. Prose, palettes and JSON geometry do not replace visual design. Missing supplied pictures do not waive it.
 3. Resources: complete ASSET_PLAN.md from selected visual/audio designs; acquire suitable assets, inspect actual files/metrics and register them. Preserve the selected style; a screen board is not runtime UI.
 4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Finalize TECHNICAL_DESIGN.md tasks from these inputs.
-5. Implementation and runtime verification: implement those tasks using the saved content; play the required flow and compare actual screens, interaction and sound with the designs.
+5. Implementation and runtime verification: invoke game-plan-execution with saved content; play the required flow and compare actual screens, interaction and sound with the designs.
 Image-tool request JSON is a tool input, not a project UI/Scene layout. Reuse existing Skills and entries; add no separate plan or task database.
 
 ## Quality and evidence

@@ -5,23 +5,23 @@ description: Execute or resume game implementation plans in the existing project
 
 # Game Plan Execution
 
-Use when a project already has an implementation plan. Preserve the existing project and completed work; this does not require one continuously growing conversation. The plan captures prior decisions; source documents, observed behavior, and the user's latest instruction remain authoritative when they conflict.
+Use when a project already has an implementation plan. Implement its confirmed behavior and selected visual/content inputs without dropping scope, restyling or duplicating authored layouts. Local code organization and algorithms remain implementation choices. Preserve completed work and current user authorization; a plan cannot override its authoritative sources or a newer user instruction.
 
 ## Start or resume
 
-1. Read the plan and the source documents needed for the next unfinished task. Inspect the current files and tests before changing them; a previous run may already have implemented part of the task.
-2. Compare the plan's completed items with actual code, tests, and version history. Resume from the first genuinely unfinished behavior, not from a remembered chat summary. If the plan has no usable progress record, note completion and evidence in that same plan or the project's existing task list; do not create a parallel ledger.
-3. Check interfaces between dependent tasks before using them: IDs, data types, coordinate units, asset references, and exported functions. Resolve a mismatch against the authoritative content and design, then update the plan if its assumption was wrong.
+1. Read the existing task directory, dependencies and source locations. In BGS use the current supplied handoff entry with --design implementation, then native Read on the actual technical task sections and referenced design/content files; Read selected pictures for visual work. Use existing file/section reads, not another task API or copied task document. Inspect current code and partial work before editing.
+2. Keep the original task IDs in the existing execution task list, with concise progress and paths to retained test/runtime results. Do not append execution logs to finalized design documents or rewrite their indexes to mark progress. Check completed claims against actual code and current evidence. If the list is missing or stale, recover progress from existing files/results and check only what cannot be established; unknown is not complete.
+3. Before consuming a dependency, inspect its needed output and interface: actual action/state names, types/units, resource IDs and exports as applicable. A ticked task or existing file/name does not prove the capability works. Missing or conflicting outputs block their consumer, not unrelated work. Correct within current authority; a locked or out-of-scope design needs the existing authorized revision path.
 
 ## Execute one coherent slice
 
 For each task:
 
-1. Read its sources and define the expected observable result. If a requirement is underspecified, investigate the existing project conventions and make a reasoned decision within the task's scope; record a consequential deviation rather than silently inventing a new design.
+1. Read its exact sources and expected observable result. Investigate existing conventions for local coding choices. Missing consequential rules, selected designs, bindings or interfaces need their exact source/gap and affected task identified; do not invent product behavior or silently change scope to keep coding. Use the existing authorization path for required design corrections; continue independent work when possible.
 2. Implement the behavior in the owning code or content. For scene/UI delivery, consume the project's actual authored sources and resources without a second layout copy. Use native engine or framework sources when those are authoritative; no separate BGS JSON is required.
-3. Run the task's focused check and read the result. For deterministic code, use a test that distinguishes old and new behavior when practical. For visual or interactive behavior, inspect the running game at relevant viewports and input modes. Capture the actual observation, not just a command exit code.
+3. Check the result with the task's applicable method: focused rule/interface checks for foundations, actual runtime observations for visual/interactive results at required sizes/inputs. A task need not run a whole game independently. Reuse a current retained result covering several tasks rather than build, open a browser or capture again per task. Record coverage and expected/observed outcomes; pending integration is unverified, not complete.
 4. If the check fails, decide whether the code, the test, or the plan is wrong. Trace the cause; do not repeat the same failed command without changing the relevant condition. Identify the responsible source and apply a correction only within the current task's editing scope, then rerun the affected check. If the source is outside that scope, report the evidence, impact and needed correction rather than changing it or working around it.
-5. Mark the task complete only with its evidence. Record any remaining gap and proceed to the next dependency-ready task without seeking routine approval after every slice.
+5. Update the same-ID execution list item with the result location; complete it only when the required outcomes are evidenced. Code written, JSON loaded, a tick or a green build alone does not establish the delivered behavior. Keep failures and unobserved outcomes explicit; proceed to dependency-ready work without routine per-task approval.
 
 Keep narration and repeated source reading economical. Independent work may be delegated or parallelized when authorized and it truly has separate files and interfaces; neither per-task subagents nor per-task reviews are required. Choose the working context from the task's actual dependencies, not a requirement to carry the whole project history. A fresh or delegated context needs the goal, affected sources, current partial work, dependency outputs and relevant evidence/limitations, not copied documents or an acceptance verdict. Integrate returned work before accepting it.
 
@@ -35,6 +35,6 @@ Prefer the existing readable layout report/full JSON and measurement inspection 
 
 ## Finish the implementation
 
-Run the relevant integrated build and tests, then inspect a representative playable path including the actual scene/UI, resource consumption, controls, responsive layout, and the requested end condition. Compare the result with the plan and source requirements. A unit-test pass is not proof of a complete game. Report passed evidence and remaining gaps; use `evidence-before-completion` when making the final claim.
+Run the relevant integrated checks and a complete player path, reusing valid results. Then compare all current delivery requirements against the original confirmed scope and applicable professional records, selected pictures, Scene/UI and resources. Check that rules/actions take effect, required screens/states and Scenes appear as designed, intended assets/audio are consumed, and specified boundaries/recovery work. A representative route cannot stand in for other promised outcomes, sizes or inputs. Identify omissions, failures and missing observations even when all task items are ticked; do not invent extra scope or an exhaustive combination matrix. Report actual coverage and gaps; use `evidence-before-completion` when making the final claim.
 
 This Skill gives the Agent a repeatable execution loop. It does not require a new worktree, fixed task duration, mandatory commits, or BeeGameStudio intervention in task choices.
