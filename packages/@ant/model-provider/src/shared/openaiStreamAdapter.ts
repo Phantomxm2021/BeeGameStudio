@@ -127,15 +127,15 @@ export async function* adaptOpenAIStreamToAnthropic(
       } as unknown as BetaRawMessageStreamEvent
     }
 
-    // Skip chunks that carry only usage data (no delta content)
-    if (!delta) continue
+    // Some compatible endpoints omit delta on the terminal choice. Process
+    // finish_reason independently so an explicit completion is not discarded.
 
     // Handle reasoning_content → Anthropic thinking block.
     // Empty string is a valid signal: DeepSeek v4 thinking mode sometimes
     // returns reasoning_content: "" when the model answers directly. The
     // empty thinking block must round-trip back to the API in subsequent
     // requests, otherwise DeepSeek rejects with 400.
-    const reasoningContent = (delta as any).reasoning_content
+    const reasoningContent = (delta as any)?.reasoning_content
     if (reasoningContent != null) {
       if (!thinkingBlockOpen) {
         currentContentIndex++
@@ -166,7 +166,7 @@ export async function* adaptOpenAIStreamToAnthropic(
     }
 
     // Handle text content
-    if (delta.content != null && delta.content !== '') {
+    if (delta?.content != null && delta.content !== '') {
       if (!textBlockOpen) {
         // Close thinking block if still open
         if (thinkingBlockOpen) {
@@ -203,7 +203,7 @@ export async function* adaptOpenAIStreamToAnthropic(
     }
 
     // Handle tool calls
-    if (delta.tool_calls) {
+    if (delta?.tool_calls) {
       for (const tc of delta.tool_calls) {
         const tcIndex = tc.index
 

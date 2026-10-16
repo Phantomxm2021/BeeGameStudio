@@ -50,6 +50,31 @@ async function collectEvents(
 }
 
 describe('adaptOpenAIStreamToAnthropic', () => {
+  test.each([null, undefined])('accepts a terminal finish_reason when delta is %s', async delta => {
+    const events = await collectEvents([
+      makeChunk({ choices: [{ index: 0, delta: { content: 'OK' }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta, finish_reason: 'stop' }] }),
+      makeChunk({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 } }),
+    ])
+    expect(events.find(event => event.type === 'message_delta')).toMatchObject({
+      delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 1 },
+    })
+    expect(events.filter(event => event.type === 'content_block_stop')).toHaveLength(1)
+    expect(events.at(-1).type).toBe('message_stop')
+  })
+
+  test('completes tool arguments when the terminal chunk omits delta', async () => {
+    const events = await collectEvents([
+      makeChunk({ choices: [{ index: 0, delta: { tool_calls: [
+        { index: 0, id: 'tool-test', type: 'function', function: { name: 'test_sum', arguments: '{"a":17,"b":25}' } },
+      ] }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, finish_reason: 'tool_calls' }] }),
+    ])
+    expect(events.filter(event => event.type === 'content_block_stop')).toHaveLength(1)
+    expect(events.find(event => event.type === 'message_delta').delta.stop_reason).toBe('tool_use')
+    expect(events.at(-1).type).toBe('message_stop')
+  })
+
   test.each([
     { chunks: [] },
     {

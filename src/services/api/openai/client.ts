@@ -51,7 +51,7 @@ export function getOpenAIClient(options?: {
   fetchOverride?: typeof fetch
   source?: string
 }): OpenAI {
-  if (cachedClient) return cachedClient
+  if (cachedClient && !options?.fetchOverride) return cachedClient
 
   const apiKey = process.env.OPENAI_API_KEY || ''
   const baseURL = process.env.OPENAI_BASE_URL
@@ -65,6 +65,9 @@ export function getOpenAIClient(options?: {
     maxRetries: options?.maxRetries ?? 0,
     timeout: parseInt(process.env.API_TIMEOUT_MS || String(600 * 1000), 10),
     dangerouslyAllowBrowser: true,
+    // SDK error/debug logging can include raw SSE bodies and request credentials.
+    // Metadata-only stream diagnostics are emitted by the query path instead.
+    logLevel: 'off',
     ...(process.env.OPENAI_ORG_ID && {
       organization: process.env.OPENAI_ORG_ID,
     }),

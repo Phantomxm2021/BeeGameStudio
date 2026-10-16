@@ -1,7 +1,7 @@
 /** Metadata-only wire protocol. Never transport prompts, URLs, headers or raw errors. */
 export const NATIVE_DIAGNOSTIC_PREFIX = 'BEEGAME_NATIVE_DIAGNOSTIC '
 const events = ['cli_entry', 'cli_ready', 'client_start', 'client_ready', 'request_start',
-  'response_headers', 'first_stream_event', 'stream_end', 'stream_error', 'request_end', 'api_error', 'retry_wait',
+  'openai_stream_summary', 'response_headers', 'first_stream_event', 'stream_end', 'stream_error', 'request_end', 'api_error', 'retry_wait',
   'process_spawn', 'stdin_sent', 'stdout_first', 'model_first', 'usage_first',
   'stop_requested', 'process_exit', 'turn_accepted', 'turn_failed', 'stderr_summary', 'diagnostic_invalid', 'evidence_incomplete'] as const
 const categories = ['timeout', 'connection_refused', 'dns', 'tls', 'connection', 'authentication',
@@ -16,13 +16,20 @@ export type NativeDiagnostic = { event: typeof events[number]; category?: typeof
   outcome?: 'completed' | 'failed' | 'cancelled'; recovered?: boolean;
   thinkingPolicy?: 'enabled' | 'adaptive' | 'disabled'; thinkingParameter?: 'default' | 'enabled' | 'adaptive' | 'disabled';
   thinkingReturned?: boolean;
+  /** Chat Completions wire/SDK comparison; never includes payload or raw errors. */
+  streamFailure?: 'transport' | 'invalid_sse' | 'upstream_error' | 'upstream_incomplete' | 'sdk_parse' | 'adapter' | 'http' | 'unknown';
+  responseFormat?: 'event_stream' | 'other';
+  wireEvents?: number; parsedChunks?: number; invalidFrames?: number; skippedFrames?: number; maxGapMs?: number;
+  wireFinishSeen?: boolean; parsedFinishSeen?: boolean; doneSeen?: boolean; eofSeen?: boolean;
+  terminalWithoutDelta?: boolean; pendingFrame?: boolean;
   /** Native process cumulative accounting, not an actor's context length. */
   cumulativeInputTokens?: number; cumulativeOutputTokens?: number;
   cumulativeCacheReadTokens?: number; cumulativeCacheCreationTokens?: number;
   errorCode?: typeof errorCodes[number]; errorOrigin?: 'observer';
   lines?: number; pid?: number; exitCode?: number; signal?: 'SIGTERM' | 'SIGKILL' | 'other' }
 const numeric = ['request', 'originRequest', 'attempt', 'status', 'delayMs', 'bytes', 'lines', 'pid', 'exitCode',
-  'cumulativeInputTokens', 'cumulativeOutputTokens', 'cumulativeCacheReadTokens', 'cumulativeCacheCreationTokens'] as const
+  'cumulativeInputTokens', 'cumulativeOutputTokens', 'cumulativeCacheReadTokens', 'cumulativeCacheCreationTokens',
+  'wireEvents', 'parsedChunks', 'invalidFrames', 'skippedFrames', 'maxGapMs'] as const
 
 /** Rebuild from an allowlist, including when input came from the child process. */
 export function parseNativeDiagnostic(value: unknown): NativeDiagnostic | undefined {
@@ -50,12 +57,17 @@ export function parseNativeDiagnostic(value: unknown): NativeDiagnostic | undefi
   const enums = { mode: ['streaming', 'non_streaming_fallback'], phase: ['headers', 'body', 'query'],
     source: ['compact', 'main', 'other'], evidenceSource: ['cli_debug'],
     outcome: ['completed', 'failed', 'cancelled'], errorCode: errorCodes, errorOrigin: ['observer'],
+    streamFailure: ['transport', 'invalid_sse', 'upstream_error', 'upstream_incomplete', 'sdk_parse', 'adapter', 'http', 'unknown'],
+    responseFormat: ['event_stream', 'other'],
     thinkingPolicy: ['enabled', 'adaptive', 'disabled'], thinkingParameter: ['default', 'enabled', 'adaptive', 'disabled'] } as const
   for (const key of Object.keys(enums) as (keyof typeof enums)[]) {
     if ((enums[key] as readonly unknown[]).includes(record[key])) Object.assign(result, { [key]: record[key] })
   }
   if (typeof record.recovered === 'boolean') result.recovered = record.recovered
-  if (typeof record.thinkingReturned === 'boolean') result.thinkingReturned = record.thinkingReturned
+  for (const key of ['thinkingReturned', 'wireFinishSeen', 'parsedFinishSeen', 'doneSeen', 'eofSeen',
+    'terminalWithoutDelta', 'pendingFrame'] as const) {
+    if (typeof record[key] === 'boolean') result[key] = record[key]
+  }
   return result
 }
 

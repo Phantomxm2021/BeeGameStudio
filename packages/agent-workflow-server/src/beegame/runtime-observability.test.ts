@@ -123,6 +123,23 @@ describe('passive native runtime observability', () => {
       expect(raw).not.toContain('SECRET')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
+  test('persists sanitized stream comparison through the existing native diagnostic channel', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-stream-summary-'))
+    try {
+      const observer = createRuntimeObservability({ workspacePath, sessionId: 'session', provider: 'openai', model: 'fixture' })
+      observer.beginTurn({ requestId: 'turn' })
+      observer.observeDiagnostic({ event: 'openai_stream_summary', outcome: 'failed', streamFailure: 'upstream_incomplete',
+        bytes: 120, wireEvents: 1, parsedChunks: 1, wireFinishSeen: false, parsedFinishSeen: false, eofSeen: true,
+        headers: { authorization: 'PRIVATE_KEY' }, body: 'PRIVATE', error: 'PRIVATE' })
+      observer.finishTurn({ outcome: 'error' }); await observer.flush()
+      const raw = await readFile(join(workspacePath, '.beegame/logs/native-runtime.jsonl'), 'utf8')
+      const rows = raw.trim().split('\n').map(line => JSON.parse(line))
+      expect(rows.find(row => row.type === 'native_diagnostic')).toMatchObject({ requestId: 'turn',
+        diagnostic: { event: 'openai_stream_summary', streamFailure: 'upstream_incomplete',
+          wireFinishSeen: false, parsedFinishSeen: false, eofSeen: true } })
+      expect(raw).not.toContain('PRIVATE')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
   test('records stdout byte gaps without persisting streamed content', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-byte-gap-'))
     let nowMs = Date.parse('2026-08-12T10:00:00.000Z')

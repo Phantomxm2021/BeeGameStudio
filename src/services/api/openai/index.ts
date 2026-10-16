@@ -15,6 +15,7 @@ import type { AgentId } from '../../../types/ids.js'
 import type { Tools } from '../../../Tool.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getOpenAIClient } from './client.js'
+import { createOpenAIStreamDiagnostics } from './streamDiagnostics.js'
 import {
   formatOpenAIPromptCacheKey,
   getOfficialOpenAIPromptCacheKey,
@@ -227,6 +228,7 @@ export async function* queryModelOpenAI(
   StreamEvent | AssistantMessage | SystemAPIErrorMessage,
   void
 > {
+  let diagnostics: ReturnType<typeof createOpenAIStreamDiagnostics> | undefined
   try {
     // 1. Resolve model name
     const openaiModel = resolveOpenAIModel(options.model)
@@ -372,6 +374,9 @@ export async function* queryModelOpenAI(
     // 11. Call OpenAI API with streaming. ChatGPT subscription auth uses the
     // Codex Responses backend; API-key/OpenAI-compatible auth keeps the
     // existing Chat Completions adapter.
+    if (!useChatGPTResponses) diagnostics = createOpenAIStreamDiagnostics(
+      (options.fetchOverride as unknown as typeof fetch) ?? globalThis.fetch, options.querySource,
+    )
     const adaptedStream = useChatGPTResponses
       ? adaptResponsesStreamToAnthropic(
           await createChatGPTResponsesStream({
@@ -389,9 +394,9 @@ export async function* queryModelOpenAI(
           openaiModel,
         )
       : adaptOpenAIStreamToAnthropic(
-          await getOpenAIClient({
+          diagnostics!.observeParsed(await getOpenAIClient({
             maxRetries: 0,
-            fetchOverride: options.fetchOverride as unknown as typeof fetch,
+            fetchOverride: diagnostics!.fetch,
             source: options.querySource,
           }).chat.completions.create(
             buildOpenAIRequestBody({
@@ -406,7 +411,7 @@ export async function* queryModelOpenAI(
               promptCacheKey,
             }),
             { signal },
-          ),
+          )),
           openaiModel,
           { includeCacheWriteTokens: useOfficialOpenAICache },
         )
@@ -541,6 +546,7 @@ export async function* queryModelOpenAI(
 
     if (!messageStopped)
       throw new Error('OpenAI stream ended before message_stop')
+    diagnostics?.finish('completed')
 
     // Record LLM observation in Langfuse (no-op if not configured)
     recordLLMObservation(options.langfuseTrace ?? null, {
@@ -561,16 +567,26 @@ export async function* queryModelOpenAI(
       ...(enableThinking && { thinking: { type: 'enabled' } }),
     })
   } catch (error) {
+    const diagnostic = diagnostics?.finish(signal.aborted ? 'cancelled' : 'failed', error)
     // User cancellation is reported by the query loop, not as an API failure.
     if (signal.aborted) return
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    logForDebugging(`[OpenAI] Error: ${errorMessage}`, { level: 'error' })
+    // SyntaxError messages can quote the raw SSE payload. Keep those out of
+    // both debug logs and the API error persisted in the conversation.
+    const safeError = (diagnostic?.streamFailure === 'invalid_sse' || (diagnostics && error instanceof SyntaxError))
+      ? new Error('OpenAI stream contains an invalid JSON event') : error
+    const errorMessage = safeError instanceof Error ? safeError.message : String(safeError)
+    logForDebugging(diagnostic
+      ? `[OpenAI] Stream failed: ${diagnostic.streamFailure}`
+      : `[OpenAI] Error: ${errorMessage}`, { level: 'error' })
     yield createAssistantAPIErrorMessage({
       content: `API Error: ${errorMessage}`,
       apiError: 'api_error',
-      error: (error instanceof Error
-        ? error
-        : new Error(String(error))) as unknown as SDKAssistantMessageError,
+      error: (safeError instanceof Error
+        ? safeError
+        : new Error(String(safeError))) as unknown as SDKAssistantMessageError,
     })
+  } finally {
+    // Also cover consumers closing the generator before it finishes.
+    diagnostics?.finish('cancelled')
   }
 }

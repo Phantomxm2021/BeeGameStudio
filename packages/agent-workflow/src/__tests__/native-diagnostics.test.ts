@@ -55,3 +55,17 @@ test('legacy correlation metadata is sanitized and stripped before forwarding', 
   expect(takeNativeObserverMetadata(invalid)).toEqual({})
   expect([...invalid]).toEqual([])
 })
+
+
+test('stream summaries admit structural evidence only', () => {
+  const safe = { event: 'openai_stream_summary', streamFailure: 'upstream_incomplete',
+    responseFormat: 'event_stream', bytes: 120, wireEvents: 2, parsedChunks: 2,
+    invalidFrames: 0, skippedFrames: 0, maxGapMs: 300, wireFinishSeen: false,
+    parsedFinishSeen: false, doneSeen: true, eofSeen: true, pendingFrame: false,
+    terminalWithoutDelta: false }
+  expect(parseNativeDiagnostic({ ...safe, headers: { authorization: 'PRIVATE_KEY' },
+    body: 'PRIVATE', error: 'PRIVATE', finishReason: 'PRIVATE' })).toEqual(safe)
+  expect(parseNativeDiagnostic({ event: safe.event, streamFailure: 'PRIVATE', responseFormat: 'PRIVATE',
+    wireFinishSeen: 'PRIVATE' })).toEqual({ event: safe.event })
+  expect(parseNativeDiagnostic({ ...safe, wireEvents: -1 })).toBeUndefined()
+})
