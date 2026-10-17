@@ -8,7 +8,7 @@ import { designReadSchema, implementationReadSchema, bindingsReadSchema, verific
   readDesignHandoff, readImplementationTask, checkResourcesAndBindings, readVerificationResults,
   type VerificationReadBinding } from './workflow-read-tools'
 
-type LayoutChecker = Pick<typeof Checker, 'runGameContentCommand' | 'formatLayoutReport' | 'formatUiLayoutMeasurement' | 'formatSceneLayoutInspection'>
+type LayoutChecker = Pick<typeof Checker, 'runGameContentCommand' | 'formatLayoutReport' | 'formatUiLayoutMeasurement' | 'formatSceneLayoutInspection' | 'inspectContentDraft'>
 const inputSchema = z.strictObject({ detailsFor: z.string().optional() })
 
 /** Bound by the host at startup. The model selects presentation, never check scope. */
@@ -71,7 +71,7 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
     }
   })
   server.registerTool('CheckUiLayouts', {
-    description: 'Check all saved BGS UI layouts at authored reference/target sizes and host-required sizes, including linked Cameras and underlays. Use {} for effective variants, spatial observations, diagnostics and coverage; detailsFor:"content/ui/hud.json" also returns effective container/item constraints, position ownership and node coordinates. Edit constraints with native Edit, then recheck. Read-only; no Shell, builds, rendering or visual-design approval.',
+    description: 'Check all saved BGS UI layouts at authored reference/target sizes and host-required sizes, including linked Cameras and underlays. Use {} for effective variants, spatial observations, diagnostics and coverage; detailsFor:"content/ui/hud.json" also returns effective container/item constraints, position ownership, node coordinates and saved node facts (text, style, actions, bindings and other authored fields, once per source). Edit source with native Edit, then recheck. Read-only; no Shell, builds, rendering or visual-design approval.',
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     _meta: { 'anthropic/alwaysLoad': true },
@@ -94,6 +94,10 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
         text.push('Cannot expand coordinates for ' + JSON.stringify(detailsFor) + ': no measured screen/HUD geometry. See input issues and coverage above.')
         return { isError: true, content: [{ type: 'text' as const, text: text.join('\n\n') }] }
       }
+      if (detailsFor) text.push(
+        '## Saved node facts — ' + detailsFor,
+        'Authored values, including responsive overrides; effective geometry is reported above. Missing fields are not filled with defaults.',
+        JSON.stringify(checker.inspectContentDraft(root, detailsFor, ['--pointer', '/data/nodes'])))
       return { isError: result.valid !== true, content: [{ type: 'text' as const, text: text.join('\n\n') }] }
     } catch (error) {
       return { isError: true, content: [{ type: 'text' as const,

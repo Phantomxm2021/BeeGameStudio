@@ -120,6 +120,64 @@ test('expanding one UI never hides other files, linked Cameras or underlay failu
   } finally { await access.close() }
 }, 20_000)
 
+test('details return exact saved node facts once per selected source, without defaults or writes', async () => {
+  const { root, save } = fixture()
+  const draft: any = uiLayoutFixture()
+  Object.assign(draft.data.nodes[1], {
+    text: '开始游戏', style: { fontSize: 28, color: '#56E0FF' },
+    bindings: { text: 'session.startLabel' }, data: { font: { assetRef: 'font-ui', member: 'font.woff2' } },
+    responsive: { compact: { style: { fontSize: 22 } } },
+  })
+  save('ui/menu.json', draft)
+  const other: any = uiLayoutFixture()
+  other.id = 'other'; other.data.nodes[1].text = 'OTHER_SOURCE_TEXT'
+  save('ui/other.json', other)
+  const access = await connect(root)
+  const marker = '## Saved node facts — '
+  const facts = (result: Awaited<ReturnType<Client['callTool']>>) => {
+    const body = text(result)
+    expect(body.split(marker)).toHaveLength(2)
+    return JSON.parse(body.trim().split('\n').at(-1)!)
+  }
+  try {
+    const before = readFileSync(join(root, 'content/ui/menu.json'))
+    const files = readdirSync(root, { recursive: true })
+    const summary = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })
+    expect(text(summary)).not.toContain(marker)
+    expect(text(summary)).not.toContain('开始游戏')
+    const detailed = await access.client.callTool({ name: 'CheckUiLayouts', arguments: { detailsFor: 'content/ui/menu.json' } })
+    expect(detailed.isError).toBe(false)
+    expect(text(detailed)).toContain('600 × 360')
+    expect(text(detailed)).toContain('960 × 540')
+    expect(text(detailed)).toContain('content/ui/other.json') // Full check scope is retained.
+    expect(text(detailed)).not.toContain('OTHER_SOURCE_TEXT')
+    const saved = facts(detailed)
+    expect(saved).toMatchObject({ path: 'content/ui/menu.json', documentId: 'menu',
+      scope: 'draft-source-inspection', runtimeVerified: false })
+    expect(saved.fields).toEqual([{ pointer: '/data/nodes', value: draft.data.nodes }])
+    const play = saved.fields[0].value[1]
+    expect(play).toMatchObject({ text: '开始游戏', style: { fontSize: 28, color: '#56E0FF' },
+      actions: { click: 'start' }, bindings: { text: 'session.startLabel' },
+      data: { font: { assetRef: 'font-ui', member: 'font.woff2' } },
+      responsive: { compact: { style: { fontSize: 22 } } } })
+    expect(play.data).not.toHaveProperty('text')
+    expect(play.data.font).not.toHaveProperty('fontSize')
+    expect(saved.fields[0].value[0]).not.toHaveProperty('style')
+    expect(readFileSync(join(root, 'content/ui/menu.json'))).toEqual(before)
+
+    // A local source correction must be visible even when geometry fails.
+    draft.data.nodes[1].text = '重新开始'
+    draft.data.nodes[1].layout.size = [2000, 52]
+    save('ui/menu.json', draft)
+    const authored = readFileSync(join(root, 'content/ui/menu.json'))
+    const overflow = await access.client.callTool({ name: 'CheckUiLayouts', arguments: { detailsFor: 'content/ui/menu.json' } })
+    expect(overflow.isError).toBe(true)
+    expect(facts(overflow).fields[0].value[1].text).toBe('重新开始')
+    expect(readFileSync(join(root, 'content/ui/menu.json'))).toEqual(authored)
+    expect(readdirSync(root, { recursive: true })).toEqual(files)
+  } finally { await access.close() }
+}, 20_000)
+
 test('reports variant selection, effective flow constraints and existing spatial observations without treating overlap as failure', async () => {
   const { root, save } = fixture()
   const draft: any = uiLayoutFixture()
@@ -199,6 +257,10 @@ test('tool rejects command/size/workspace overrides, preserves missing-input err
     expect(linked.isError).toBe(true)
     expect(text(linked)).toContain('symbolic links')
     expect(text(linked)).not.toContain('PRIVATE_SENTINEL')
+    const linkedDetails = await access.client.callTool({ name: 'CheckUiLayouts', arguments: { detailsFor: 'content/ui/escape.json' } })
+    expect(linkedDetails.isError).toBe(true)
+    expect(text(linkedDetails)).not.toContain('PRIVATE_SENTINEL')
+    expect(text(linkedDetails)).not.toContain('## Saved node facts')
     rmSync(join(root, 'content/ui'), { recursive: true })
     const absent = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })
     expect(absent.isError).toBe(true)
