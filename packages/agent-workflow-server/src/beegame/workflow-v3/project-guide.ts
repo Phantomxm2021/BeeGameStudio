@@ -28,10 +28,10 @@ export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 
 ## Required design dependencies
 For applicable new work, use this order; do not omit, replace or reverse required dependencies:
-1. Design records: define gameplay, levels, balance, UI actions/navigation, art, audio and technical approach. Use prose/sketches for space needs; do not create UI/Scene JSON here. Technical/resource plans start as drafts.
+1. Design records: complete the eight design documents and their existing indexes, including TECHNICAL_DESIGN.md with the technical approach, module responsibilities, interfaces, data consumption, implementation tasks/dependencies and verification methods. Complete technical design in this stage before actual visual design or resource production. Describe unproduced inputs as planned, not delivered. Use prose/sketches for space needs; do not create UI/Scene JSON here.
 2. Actual visual designs: use existing image tools or supplied designs for complete UI screens/key states, scenes and needed props. Save and Read pictures; inspect composition, hierarchy, game visibility and style; link selections from owning records. Prose, palettes and JSON geometry do not replace visual design. Missing supplied pictures do not waive it.
-3. Resources: complete ASSET_PLAN.md from selected visual/audio designs; acquire suitable assets, inspect actual files/metrics and register them. Preserve the selected style; a screen board is not runtime UI.
-4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Finalize TECHNICAL_DESIGN.md tasks from these inputs.
+3. Resources: revise ASSET_PLAN.md from selected visual/audio designs; acquire suitable assets, inspect actual files/metrics and register them. Preserve the selected style; a screen board is not runtime UI.
+4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Revise the existing TECHNICAL_DESIGN.md and task index only for actual produced inputs and affected decisions; do not postpone technical design or recreate the plan here.
 5. Implementation and runtime verification: invoke game-plan-execution with saved content; play the required flow and compare actual screens, interaction and sound with the designs.
 Image-tool request JSON is a tool input, not a project UI/Scene layout. Reuse existing Skills and entries; add no separate plan or task database.
 

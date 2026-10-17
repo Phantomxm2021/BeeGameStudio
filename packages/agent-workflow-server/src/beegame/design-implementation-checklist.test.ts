@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
-import { checkDesignHandoff, designHandoffPath, designImplementationRevisionDocuments, designSupportingFiles, designReviewIndexes,
+import { checkDesignHandoff, checkDesignHandoffDraft, designHandoffPath, designImplementationRevisionDocuments, designSupportingFiles, designReviewIndexes,
   finalizeDesignDocuments, readDesignAcceptanceRequirements, readDesignImplementationChecklist, snapshotDesignDocuments } from './design-handoff'
 import { designDocumentFixture, designHandoffFixture, designRequirementChecksFixture, writeDesignDocumentFixture,
   writeDesignDocumentsFixture } from './fixtures/layout-fixture'
@@ -16,6 +16,22 @@ async function fixture(run: (workspace: string) => Promise<void>) {
   try { await writeDesignDocumentsFixture(workspace); await run(workspace) }
   finally { await rm(workspace, { recursive: true, force: true }) }
 }
+
+test('eight-document technical design and tasks can finalize before visual/resource/UI/Scene production', () => fixture(async workspace => {
+  await rm(join(workspace, 'content'), { recursive: true })
+  for (const name of ['UI_UX_SPEC.md', 'LEVEL_SCENE_DESIGN.md'] as const)
+    await writeFile(join(workspace, 'docs', name), '# Design\n- Version: v1.0\nFixture requirements; production inputs are planned, not delivered.\n')
+  const before = await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')
+  expect(checkDesignHandoffDraft(workspace, 'TECHNICAL_DESIGN.md', { finalTechnical: true }))
+    .toMatchObject({ valid: true, issues: [] })
+  expect(finalizeDesignDocuments(workspace, PROJECT_DOCUMENTS, snapshotDesignDocuments(workspace, PROJECT_DOCUMENTS)))
+    .toMatchObject({ issues: [], unsafeIssues: [] })
+  expect(checkDesignHandoff(workspace, PROJECT_DOCUMENTS)).toMatchObject({ valid: true, issues: [] })
+  expect(readDesignImplementationChecklist(workspace).items.map(item => item.id))
+    .toEqual(designHandoffFixture('TECHNICAL_DESIGN.md').implementationItems!.map(item => item.id))
+  expect(await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')).toBe(before)
+  for (const path of ['assets', 'content']) await expect(access(join(workspace, path))).rejects.toThrow()
+}))
 
 test('task view preserves eight owners and both decision and acceptance pointers without copying prose', () => fixture(async workspace => {
   const tech = designHandoffFixture('TECHNICAL_DESIGN.md')

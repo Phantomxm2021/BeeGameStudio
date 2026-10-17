@@ -166,6 +166,26 @@ describe('skill search prefetch', () => {
     }
   })
 
+  test('technical design Skills load eight-document completion and later revision guidance', async () => {
+    useSkillCatalog(fileURLToPath(new URL('../../../../.beegame/skills/builtinskills/', import.meta.url)))
+    const commands = await getSkillToolCommands(root)
+    for (const [name, timing, revision] of [
+      ['game-implementation-planning', 'complete TECHNICAL_DESIGN.md and its implementation tasks/index in the eight-document design-record stage',
+        'Later visual/resource/Scene/UI production updates affected references and decisions in this plan'],
+      ['gameplay-programmer', 'complete TECHNICAL_DESIGN.md during the eight-document stage',
+        'Later visual/resource/UI/Scene outputs revise this same design'],
+      ['game-plan-execution', 'BGS technical design and tasks are completed in the eight-document stage',
+        'reconcile affected task inputs with actual visual/resource/UI/Scene outputs in that same plan'],
+    ]) {
+      const skill = commands.find(item => item.name === 'bgs-builtins:' + name)
+      if (skill?.type !== 'prompt') throw new Error(name + ' is not model-invocable')
+      const prompt = JSON.stringify(await skill.getPromptForCommand('', unusedContext))
+      expect(prompt).toContain(timing!)
+      expect(prompt).toContain(revision!)
+      expect(prompt).not.toContain('Keep early technical notes as drafts')
+    }
+  })
+
   test('loads the explicitly supplied catalog through standard plugin discovery', async () => {
     useSkillCatalog(fileURLToPath(new URL(
       '../../../../.beegame/skills/builtinskills/', import.meta.url,

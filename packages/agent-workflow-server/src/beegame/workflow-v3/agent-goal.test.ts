@@ -695,6 +695,10 @@ test('shared guide supplies design methods once; incomplete guides retain the ex
   }
   for(const guide of ['', '# Custom navigation\nRun the saved command', '## Required design dependencies\nIncomplete'])
     expect(agentProfessionalContextForRun(run,true,guide)).toContain(PROJECT_WORKING_CONVENTIONS)
+  const deferredTechnicalGuide=PROJECT_WORKING_CONVENTIONS.replace(
+    'Complete technical design in this stage before actual visual design or resource production.',
+    'Technical/resource plans start as drafts.')
+  expect(agentProfessionalContextForRun(run,true,deferredTechnicalGuide)).toContain(PROJECT_WORKING_CONVENTIONS)
 })
 
 // Prompt contracts do not prove that a model read, understood or reproduced art.
@@ -704,7 +708,9 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   const first=agentProfessionalContextForRun(run), followup=agentProfessionalContextForRun(run,true)
   expect(first).toContain('existing eight documents under docs/')
   expect(first).toContain('TECHNICAL_DESIGN.md')
-  expect(first).toContain('Draft technical/resource plans first')
+  expect(first).toContain('Complete all eight documents and their existing indexes in the design-record stage')
+  expect(first).toContain('including the technical design and implementation tasks')
+  expect(first).not.toContain('Draft technical/resource plans first')
   expect(followup).not.toContain('eight documents')
   expect(followup).not.toContain('New design-led first-version deliverables')
   expect(followup).toContain('content/scenes/*.json')
@@ -724,6 +730,8 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).toContain('single source')
     expect(prompt).toContain('Prose, palettes and JSON geometry do not replace visual design')
     expect(prompt).toContain('do not create UI/Scene JSON here')
+    expect(prompt).toContain('Complete technical design in this stage before actual visual design or resource production')
+    expect(prompt).not.toContain('Technical/resource plans start as drafts')
     expect(prompt).not.toContain('without waiting for production assets')
     expect(prompt).toContain('every registered resource file_paths entry and dependency local_path')
     expect(prompt).not.toContain('request a separate shared PNG sheet')

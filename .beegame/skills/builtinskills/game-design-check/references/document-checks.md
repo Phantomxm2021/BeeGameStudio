@@ -24,7 +24,7 @@ Use for consequential semantic, ownership or coverage questions. These methods d
 - Do runtime choices meet the confirmed platform and actual authored needs? Are hard constraints distinguished from selected solutions and unverified performance assumptions?
 - At the current stage, is there an executable path from authored data and actual event/state producers to their consumers? Are data loading, binding, coordinate conversion and relevant ordering explained without replacing the designs?
 - Where required by the assignment, do initialization, interruption, restart, cleanup, loading failure and recovery support the specified behavior? For persistence, are saved data, lifetime, reset and failure behavior traceable to product requirements rather than inferred from the chosen storage?
-- Does an early baseline expose usable capabilities and risks while preserving genuinely pending inputs? Does the completed design reconcile those inputs rather than retaining superseded assumptions?
+- Is the technical document, including interfaces and implementation tasks/index, complete in the eight-document stage? Are unproduced inputs identified as planned rather than used to postpone technical design? Do later production changes revise only affected parts of the same plan from actual outputs?
 - Does the implementation checklist organize independently deliverable work with actual inputs, prerequisites and source-backed completion checks? Compare it with the original brief and professional decisions, not just registered IDs. Check that technical interfaces consume specialist rules rather than republishing tuning, geometry or sound tables. Preserve a real integration check without turning every task into the entire game.
 
 ## ART_DIRECTION.md
