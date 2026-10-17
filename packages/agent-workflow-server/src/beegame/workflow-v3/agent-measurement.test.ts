@@ -906,7 +906,14 @@ test('handoff is read-only and returns current source bytes and newest interrupt
   }
   try {
     const before=await f.current(),original=await readFile(join(f.workspace,'README.md'),'utf8')
-    expect((await command(f.workspace,'--help')).code).toBe(0)
+    const help=await command(f.workspace,'--help')
+    expect(help.code).toBe(0)
+    expect(help.stdout).toContain('--design help')
+    expect(help.stdout).toContain('index format and minimal JSON example')
+    const designHelp=await command(f.workspace,'--design','help')
+    expect(designHelp.code).toBe(0)
+    expect(JSON.parse(designHelp.stdout).instruction).toContain('Minimal new index envelope:')
+    expect(JSON.parse(designHelp.stdout).instruction).toContain('.beegame/design-handoffs/')
     const compact=await command(f.workspace,'README.md')
     expect(compact.code).toBe(0)
     const saved=JSON.parse(compact.stdout)
