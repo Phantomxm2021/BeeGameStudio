@@ -470,6 +470,73 @@ test('design appendix comes from actual shared geometry, preserves sources and n
   expect(() => generateUiLayoutAppendix(root, ['--layout-draft', '../draft.json', '960','540'])).toThrow()
 })
 
+test('registered UI/HUD appendix reuses draft geometry and preserves registration and path checks', async () => {
+  await initializeUiLayout()
+  const { root, index } = fixture()
+  mkdirSync(join(root, 'content/ui'))
+  index.files.push('ui/menu.json')
+  writeFileSync(join(root, 'content/index.json'), JSON.stringify(index))
+  writeFileSync(join(root, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
+  const source = uiLayoutFixture(28) as any
+  source.data.nodes[0].data.layoutCamera = { nodeId: 'root', path: 'content/scenes/level.json' }
+  const path = join(root, 'content/ui/menu.json')
+  const args = ['--layout', 'ui/menu.json', '960', '540']
+  for (const kind of ['ui-screen', 'ui-hud']) {
+    source.kind = kind
+    source.data.nodes[0].role = kind === 'ui-hud' ? 'hud-root' : 'screen-root'
+    const bytes = JSON.stringify(source)
+    writeFileSync(path, bytes)
+    const appendix = generateUiLayoutAppendix(root, args)
+    expect(appendix).toBe(generateUiLayoutAppendix(root, ['--layout', 'content/ui/menu.json', '960', '540']))
+    expect(appendix).toBe(generateUiLayoutAppendix(root, ['--layout-draft', 'content/ui/menu.json', '960', '540']))
+    expect(appendix).toContain('Source: "content/ui/menu.json"; SHA-256:')
+    expect(appendix).toContain('Source: "content/scenes/level.json"; SHA-256:')
+    expect(appendix).toContain('Host bounds')
+    expect(appendix).toMatch(/"belowMinimumControlSize":\s*\[\s*"play"/)
+    const inspection = runGameContentCommand(root, args) as any
+    expect(appendix).toContain(JSON.stringify(inspection.nodes.find((n: any) => n.id === 'play').bounds))
+    expect(readFileSync(path, 'utf8')).toBe(bytes)
+    const explicit = ['--game-view', 'root', '--camera', 'content/scenes/level.json']
+    expect(generateUiLayoutAppendix(root, [...args, ...explicit])).toBe(appendix)
+  }
+  writeFileSync(join(root, 'content/ui/unregistered.json'), JSON.stringify(source))
+  expect(() => generateUiLayoutAppendix(root, ['--layout', 'ui/unregistered.json', '960', '540'])).toThrow('registered')
+  expect(() => generateUiLayoutAppendix(root, ['--layout', '../outside.json', '960', '540'])).toThrow('registered')
+  const outside = join(root, 'outside.json')
+  writeFileSync(outside, JSON.stringify(source))
+  index.files.push('ui/escape.json')
+  writeFileSync(join(root, 'content/index.json'), JSON.stringify(index))
+  symlinkSync(outside, join(root, 'content/ui/escape.json'))
+  expect(() => generateUiLayoutAppendix(root, ['--layout', 'ui/escape.json', '960', '540'])).toThrow('outside')
+})
+
+test('layout CLI offers the appendix without changing default or detailed JSON output', async () => {
+  const { root, index } = fixture()
+  mkdirSync(join(root, 'content/ui'))
+  index.files.push('ui/menu.json')
+  writeFileSync(join(root, 'content/index.json'), JSON.stringify(index))
+  const path = join(root, 'content/ui/menu.json'), bytes = JSON.stringify(uiLayoutFixture(28))
+  writeFileSync(path, bytes)
+  const indexBytes = readFileSync(join(root, 'content/index.json'), 'utf8')
+  const checker = await sharedContentChecker()
+  const entry = join(root, 'check-content.mjs')
+  writeFileSync(entry, CONTENT_CHECKER_ENTRY)
+  const args = ['--layout', 'ui/menu.json', '960', '540']
+  for (const flags of [[], ['--details'], ['--appendix']]) {
+    const child = Bun.spawn([process.execPath, entry, ...args, ...flags], { cwd: root,
+      env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: checker.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
+    const [output, error, code] = await Promise.all([
+      new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+    ])
+    expect(code, error).toBe(0)
+    if (flags[0] === '--appendix') expect(output).toBe(generateUiLayoutAppendix(root, args) + '\n')
+    else expect(JSON.parse(output)).toEqual(formatGameContentResult(runGameContentCommand(root, args), flags[0] === '--details'))
+  }
+  expect(readFileSync(path, 'utf8')).toBe(bytes)
+  expect(readFileSync(join(root, 'content/index.json'), 'utf8')).toBe(indexBytes)
+  expect(CONTENT_CHECK_HELP).toContain('--appendix')
+})
+
 test('compact Scene diagnostics retain clipping and unknown geometry, including linked Scene results', () => {
   const scene = { view: { projection: 'orthographic' }, requiredVisibility: { status: 'failed' }, nodes: [
     { id: 'visible', enabled: true, fullyInside: true },

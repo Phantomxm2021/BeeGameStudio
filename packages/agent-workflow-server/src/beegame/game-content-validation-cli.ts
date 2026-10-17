@@ -253,17 +253,18 @@ export const CURRENT_CONTENT_CHECK_HELP = `Usage: bun <supplied-check-content-en
   --format examples         Executable minimal UI/index and an unbound Scene draft; no manual revision hashes
   --check-drafts FILE ...   Check saved draft structure together; resource bindings remain pending
   --inspect-draft FILE [--node ID | --pointer /json/pointer] ... Read exact draft fields together
-  --layout-draft FILE W H [--game-view ID --camera FILE] Inspect UI/Scene geometry without an index
+  --layout-draft FILE W H [--game-view ID --camera FILE] Inspect UI/Scene geometry without an index; --appendix prints UI/HUD coordinate tables
   --camera-draft FILE W H   Inspect a Camera input or the authored Camera in a scene-2d document
   --scene-layouts [W H ...] [--report] Batch saved Scenes at authored viewports, or explicit viewport pairs
   --design-layouts [--draft] [--report] Check saved UI geometry; --draft only defers missing TileSet bounds
-  --layout FILE W H [--nodes ID ...] Inspect registered content-relative layout; requires content/index.json
+  --layout FILE W H [--nodes ID ...] Inspect registered content-relative layout; requires content/index.json; --appendix prints full UI/HUD coordinate tables
   --inspect [FILE [--node ID]] Read registered content
   --scene-point FILE NODE W H Derive saved Scene world/logical-screen coordinates; not rendered pixels
   --read-design JSON        Batch exact sections: [{"document":"GDD.md","sections":["Exact heading"]}]
   --review-sources FILE ... [--details] Batch saved source hashes/headings; --details adds text, not a semantic review
 FILE is workspace-relative unless stated otherwise. Use --format for actual fields, not the generated runtime bundle.
 --report produces human-readable text and a saved JSON report path; omit it for JSON. --details retains full observations.
+--appendix replaces JSON with the existing UI/HUD coordinate tables and diagnostics; use it after FILE W H or the --game-view/--camera pair.
 Checks inspect selected saved inputs only. They do not create design records or certify complete gameplay/visual quality.
 `
 
@@ -280,11 +281,15 @@ function commandViewport(args: string[]): UiViewport {
 
 /** Generated design evidence, not another coordinate implementation or Content document. */
 export function generateUiLayoutAppendix(workspacePath: string, args: string[]) {
-  if (args[0] !== '--layout-draft') throw new Error('--appendix requires --layout-draft')
+  const registered = args[0] === '--layout'
+  if (!registered && args[0] !== '--layout-draft') throw new Error('--appendix requires --layout or --layout-draft')
+  // Validate the registered input through the same entry before reading it;
+  // the readable presentation must not bypass the index or path checks.
   const initial = runContentCommand(workspacePath, args)
-  if (initial.scope !== 'layout-draft-inspection') throw new Error('--appendix requires a UI screen or HUD')
-  const document = parseBeeGameContentDocument(readWorkspaceDraft(workspacePath, args[1]!))
-  if (document.kind !== 'ui-screen' && document.kind !== 'ui-hud') throw new Error('Expected UI draft')
+  if (initial.scope !== 'layout-draft-inspection' && initial.scope !== 'layout-inspection') throw new Error('--appendix requires a UI screen or HUD')
+  const sourcePath = registered && !args[1]!.startsWith('content/') ? 'content/' + args[1]! : args[1]!
+  const document = parseBeeGameContentDocument(readWorkspaceDraft(workspacePath, sourcePath))
+  if (document.kind !== 'ui-screen' && document.kind !== 'ui-hud') throw new Error('Expected UI screen or HUD')
   const options = args[6] === '--camera'
     ? { camera: layoutCameraSource(args[5]!, readWorkspaceDraft(workspacePath, args[7]!), workspacePath) }
     : readUiLayoutCamera(workspacePath, document)
@@ -296,7 +301,7 @@ export function generateUiLayoutAppendix(workspacePath: string, args: string[]) 
   for (const size of [[Number(args[2]), Number(args[3])], ...(targets ?? [])] as [number, number][])
     sizes.set(JSON.stringify(size), size)
   const cell = (value: unknown) => JSON.stringify(value ?? null).replaceAll('|', '&#124;').replaceAll('\n', ' ')
-  const sources = [args[1]!, ...(args[6] === '--camera' ? [args[7]!] :
+  const sources = [sourcePath, ...(args[6] === '--camera' ? [args[7]!] :
     typeof root?.data?.layoutCamera === 'object' && root.data.layoutCamera !== null &&
     'path' in root.data.layoutCamera ? [String(root.data.layoutCamera.path)] : [])]
   const lines = ['# Calculated UI layout', '',
