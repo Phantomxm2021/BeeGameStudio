@@ -65,11 +65,50 @@ test.each(['GDD.md', 'AUDIO_DESIGN.md', 'TECHNICAL_DESIGN.md'] as const)(
 )
 
 test.each([
+  ['## 2.1 `Core rule`', '### 3) **Acceptance** for `ready`'],
+  ['**Core rule**', 'Acceptance for `ready`'],
+])('Markdown heading pointers normalize without rewriting prose: %s / %s', (section, acceptance) => fixture(async workspace => {
+  const name = 'GDD.md', snapshot = snapshotDesignDocuments(workspace, [name])
+  const prose = '# Design\n## 2.1 `Core rule`\nDecision.\n## 3) **Acceptance** for `ready`\nExpected outcome.\n'
+  const path = join(workspace, designHandoffPath(name))
+  const saved = JSON.stringify({ outputs: [{ id: 'core', section,
+    acceptance: { section: acceptance, method: 'test' } }], evidence: [] })
+  await writeFile(join(workspace, 'docs', name), prose)
+  await writeFile(path, saved)
+  expect(checkDesignHandoffDraft(workspace, name).issues).toEqual([])
+  expect(await readFile(path, 'utf8')).toBe(saved)
+  expect(await readFile(join(workspace, 'docs', name), 'utf8')).toBe(prose)
+  expect(finalizeDesignDocuments(workspace, [name], snapshot).issues).toEqual([])
+  expect(JSON.parse(await readFile(path, 'utf8')).outputs[0]).toEqual({
+    id: 'core', section: '2.1 Core rule', acceptance: { section: '3) Acceptance for ready', method: 'test' },
+  })
+  expect(checkDesignHandoff(workspace, [name], { technicalBaseline: true }).valid).toBe(true)
+}))
+
+test.each([
+  ['## \\# ready\nLiteral marker.\n## ready\nOther.\n', '# ready'],
+  ['## Use \\`ready\\` literally\nLiteral markers.\n## Use ready literally\nOther.\n', 'Use `ready` literally'],
+])('exact literal heading wins over Markdown interpretation: %s / %s', (headings, section) => fixture(async workspace => {
+  const name = 'GDD.md', snapshot = snapshotDesignDocuments(workspace, [name])
+  const path = join(workspace, designHandoffPath(name))
+  await writeFile(join(workspace, 'docs', name), '# Design\n' + headings)
+  await writeFile(path, JSON.stringify({ outputs: [{ id: 'core', section,
+    acceptance: { section, method: 'test' } }], evidence: [] }))
+  expect(checkDesignHandoffDraft(workspace, name).valid).toBe(true)
+  expect(finalizeDesignDocuments(workspace, [name], snapshot).issues).toEqual([])
+  expect(JSON.parse(await readFile(path, 'utf8')).outputs[0].section).toBe(section)
+}))
+
+test.each([
   ['## 1. Rules\nA\n## 2. Rules\nB\n', 'Rules'],
   ['## 1. Rules\nA\n## 1. Rules\nB\n', 'Rules'],
   ['## 1. Rules\nA\n', 'Different rules'],
   ['## 20 enemies\nA\n', '10 enemies'],
   ['## 3D models\nA\n', 'models'],
+  ['## 1. `Rules`\nA\n## 2. **Rules**\nB\n', '### `Rules`'],
+  ['## `Rules`\nA\n## **Rules**\nB\n', 'Rules'],
+  ['## 1. `Rules`\nA\n', '## `Different rules`'],
+  ['## Rules\nA\n', '## Missing\n## Rules'],
 ])('no heading guesses or writes: %s / %s', (headings, pointer) => fixture(async workspace => {
   const snapshot = snapshotDesignDocuments(workspace, ['GDD.md'])
   await writeFile(join(workspace, 'docs/GDD.md'), '# Design\n' + headings)
@@ -82,17 +121,17 @@ test.each([
   expect(await readFile(path, 'utf8')).toBe(saved)
 }))
 
-test('numbering normalization includes task and retained-evidence pointers without changing their facts', () => fixture(async workspace => {
+test('heading normalization includes task and retained-evidence pointers without changing their facts', () => fixture(async workspace => {
   const name = 'TECHNICAL_DESIGN.md', snapshot = snapshotDesignDocuments(workspace, [name])
   await writeFile(join(workspace, 'docs', name),
-    '# Design\n## 1. Rules\nOwned rule.\n## 2. Task\nTask description.\n## 3. Proof\nRetained contract.\n')
+    '# Design\n## 1. `Rules`\nOwned rule.\n## 2. **Task**\nTask description.\n## 3. `Proof`\nRetained contract.\n')
   await writeFile(join(workspace, 'proof.json'), '{"value":3}')
   const path = join(workspace, designHandoffPath(name))
   await writeFile(path, JSON.stringify({
-    outputs: [{ id: 'rule', section: 'Rules', acceptance: { section: 'Rules', method: 'test' } }],
-    implementationItems: [{ id: 'task', section: 'Task', dependsOn: [],
+    outputs: [{ id: 'rule', section: '## `Rules`', acceptance: { section: '**Rules**', method: 'test' } }],
+    implementationItems: [{ id: 'task', section: '## **Task**', dependsOn: [],
       requirementRefs: [{ document: name, id: 'rule' }] }],
-    evidence: [{ id: 'proof', section: 'Proof', kind: 'contract', path: 'proof.json',
+    evidence: [{ id: 'proof', section: '### `Proof`', kind: 'contract', path: 'proof.json',
       source: 'Synthetic retained fact', pointer: '/value', expected: 3 }],
   }))
   expect(checkDesignHandoffDraft(workspace, name).valid).toBe(true)

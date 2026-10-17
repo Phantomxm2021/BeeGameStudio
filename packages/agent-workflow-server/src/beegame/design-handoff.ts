@@ -122,17 +122,26 @@ function documentStructure(body: string) {
   return { blocks, headings, headingNames }
 }
 
-/** Numbering is presentation, not a decision. Resolve only an identical title
+/** Markdown formatting and numbering are presentation, not a decision.
+ * Resolve only an identical title
  * with one real source location; never choose between same-title sections or
  * fuzzy-match words. Read checks normalize parsed copies; only authorized
  * finalization persists the exact source heading in an index. */
 function canonicalHeadingPointers<T extends Partial<DesignHandoff>>(handoff: T, headings: readonly string[]): T {
   const title = (heading: string) => heading.replace(/^(?:\d+(?:\.\d+)+[.)]?|\d+[.)])\s+/, '')
-  const exact = new Set(headings)
   const canonical = (section: string) => {
-    if (exact.has(section)) return section
-    const matches = headings.filter(heading => title(heading) === title(section))
-    return matches.length === 1 ? matches[0]! : section
+    // Prefer literal titles so meaningful Markdown characters are not reinterpreted.
+    let matches = headings.filter(heading => heading === section)
+    if (!matches.length) {
+      const parsed = /[\r\n]/.test(section) ? [] : documentStructure(
+        /^#{1,6}(?:[ \t]|$)/.test(section) ? section : '# ' + section,
+      ).headingNames
+      const rendered = parsed.length === 1 && parsed[0] ? parsed[0] : section
+      matches = headings.filter(heading => heading === rendered)
+      if (!matches.length) matches = headings.filter(heading => title(heading) === title(rendered))
+    }
+    if (matches.length > 1) throw Error('Ambiguous design section ' + JSON.stringify(section))
+    return matches[0] ?? section
   }
   for (const output of handoff.outputs ?? []) {
     output.section = canonical(output.section)
