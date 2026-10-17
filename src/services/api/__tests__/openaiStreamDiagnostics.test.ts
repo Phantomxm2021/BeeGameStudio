@@ -9,6 +9,7 @@ test('actual OpenAI query logs one safe summary, honors fetch overrides and neve
   expect(fixture.stderr.toString()).not.toContain('PRIVATE')
   const results = JSON.parse(fixture.stdout.toString().trim().split('\n').at(-1)!)
   expect(results.normal).toEqual({ calls: 1, outcome: 'completed' })
+  expect(results.emptyReasoning).toEqual({ calls: 1, outcome: 'completed' })
   expect(results.eof).toEqual({ calls: 1, outcome: 'failed', streamFailure: 'upstream_incomplete' })
   expect(results.invalid).toEqual({ calls: 1, outcome: 'failed', streamFailure: 'invalid_sse' })
   expect(results.http).toEqual({ calls: 1, outcome: 'failed', streamFailure: 'http' })

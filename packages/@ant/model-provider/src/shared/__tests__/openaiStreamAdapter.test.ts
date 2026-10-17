@@ -565,6 +565,59 @@ describe('thinking support (reasoning_content)', () => {
     expect(thinkingDeltas.length).toBe(0)
   })
 
+  test.each([undefined, '', 'Initial reasoning'])(
+    'keeps repeated empty reasoning placeholders out of the answer (initial reasoning: %s)',
+    async initialReasoning => {
+      const chunks = initialReasoning === undefined ? [] : [
+        makeChunk({ choices: [{ index: 0, delta: { reasoning_content: initialReasoning }, finish_reason: null }] }),
+      ]
+      const events = await collectEvents([
+        ...chunks,
+        makeChunk({ choices: [{ index: 0, delta: { reasoning_content: '', content: 'Full' }, finish_reason: null }] }),
+        makeChunk({ choices: [{ index: 0, delta: { reasoning_content: '' }, finish_reason: null }] }),
+        makeChunk({ choices: [{ index: 0, delta: { reasoning_content: '', content: ' answer' }, finish_reason: null }] }),
+        makeChunk({ choices: [{ index: 0, delta: { reasoning_content: '' }, finish_reason: 'stop' }] }),
+      ])
+
+      const starts = events.filter(event => event.type === 'content_block_start')
+      expect(starts.map(event => [event.index, event.content_block.type])).toEqual([
+        [0, 'thinking'], [1, 'text'],
+      ])
+      expect(starts[0].content_block.thinking).toBe('')
+      const textDeltas = events.filter(event => event.type === 'content_block_delta' && event.delta.type === 'text_delta')
+      expect(textDeltas.map(event => event.index)).toEqual([1, 1])
+      expect(textDeltas.map(event => event.delta.text).join('')).toBe('Full answer')
+      expect(events.filter(event => event.type === 'content_block_stop').map(event => event.index)).toEqual([0, 1])
+      expect(events.find(event => event.type === 'message_delta').delta.stop_reason).toBe('end_turn')
+      expect(events.at(-1).type).toBe('message_stop')
+    },
+  )
+
+  test('preserves the initial empty reasoning placeholder without reopening it during tool arguments', async () => {
+    const events = await collectEvents([
+      makeChunk({ choices: [{ index: 0, delta: {
+        reasoning_content: '',
+        tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'test_sum', arguments: '{"a":17,' } }],
+      }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: {
+        reasoning_content: '',
+        tool_calls: [{ index: 0, function: { arguments: '"b":25}' } }],
+      }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: { reasoning_content: '' }, finish_reason: 'tool_calls' }] }),
+    ])
+
+    const starts = events.filter(event => event.type === 'content_block_start')
+    expect(starts.map(event => [event.index, event.content_block.type])).toEqual([
+      [0, 'thinking'], [1, 'tool_use'],
+    ])
+    expect(starts[0].content_block.thinking).toBe('')
+    const argumentsDeltas = events.filter(event => event.type === 'content_block_delta' && event.delta.type === 'input_json_delta')
+    expect(argumentsDeltas.map(event => event.index)).toEqual([1, 1])
+    expect(JSON.parse(argumentsDeltas.map(event => event.delta.partial_json).join(''))).toEqual({ a: 17, b: 25 })
+    expect(events.filter(event => event.type === 'content_block_stop').map(event => event.index)).toEqual([0, 1])
+    expect(events.find(event => event.type === 'message_delta').delta.stop_reason).toBe('tool_use')
+  })
+
   test('thinking block index is 0, text block index is 1', async () => {
     const events = await collectEvents([
       makeChunk({

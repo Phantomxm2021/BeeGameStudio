@@ -136,7 +136,12 @@ export async function* adaptOpenAIStreamToAnthropic(
     // empty thinking block must round-trip back to the API in subsequent
     // requests, otherwise DeepSeek rejects with 400.
     const reasoningContent = (delta as any)?.reasoning_content
-    if (reasoningContent != null) {
+    // Preserve an initial empty placeholder, but do not reopen thinking for
+    // later empty fields: that would move the index away from the open text block.
+    if (
+      reasoningContent != null &&
+      (reasoningContent !== '' || currentContentIndex === -1)
+    ) {
       if (!thinkingBlockOpen) {
         currentContentIndex++
         thinkingBlockOpen = true

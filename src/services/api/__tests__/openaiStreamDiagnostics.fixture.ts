@@ -26,9 +26,15 @@ process.stderr.write = ((chunk: unknown) => { captured.push(String(chunk)); retu
 const encode = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`
 const text = encode({ choices: [{ index: 0, delta: { content: 'PRIVATE_REPLY' }, finish_reason: null }] })
 const terminal = encode({ choices: [{ index: 0, finish_reason: 'stop' }] })
+const emptyReasoningAnswer = [
+  { delta: { reasoning_content: '', content: 'PRIVATE' }, finish_reason: null },
+  { delta: { reasoning_content: '' }, finish_reason: null },
+  { delta: { reasoning_content: '', content: '_REPLY' }, finish_reason: null },
+  { delta: { reasoning_content: '' }, finish_reason: 'stop' },
+].map(choice => encode({ choices: [{ index: 0, ...choice }] })).join('') + 'data: [DONE]\n\n'
 const results: Record<string, unknown> = {}
 try {
-  for (const kind of ['normal', 'eof', 'invalid', 'http', 'cancelled'] as const) {
+  for (const kind of ['normal', 'emptyReasoning', 'eof', 'invalid', 'http', 'cancelled'] as const) {
     let calls = 0
     const abort = new AbortController()
     const offset = captured.length
@@ -40,7 +46,7 @@ try {
       if (kind === 'http') return new Response('{"error":{"message":"Offline service unavailable"}}', {
         status: 503, headers: { 'content-type': 'application/json' },
       })
-      return new Response(text + (kind === 'normal' ? terminal + 'data: [DONE]\n\n'
+      return new Response(kind === 'emptyReasoning' ? emptyReasoningAnswer : text + (kind === 'normal' ? terminal + 'data: [DONE]\n\n'
         : kind === 'invalid' ? 'data: PRIVATE_KEY_INVALID_JSON\n\n' : ''), {
         headers: { 'content-type': 'text/event-stream' },
       })
@@ -54,9 +60,21 @@ try {
     assert.equal(lines.length, 1)
     const diagnostic = JSON.parse(lines[0]!.slice(NATIVE_DIAGNOSTIC_PREFIX.length))
     const errors = output.filter(message => message.isApiErrorMessage || message.apiError)
-    if (kind === 'normal') {
+    if (kind === 'normal' || kind === 'emptyReasoning') {
       assert.equal(diagnostic.outcome, 'completed')
-      assert(output.some(message => message.type === 'assistant' && message.message.stop_reason === 'end_turn'))
+      const final = output.find(message => message.type === 'assistant' && message.message.stop_reason === 'end_turn')
+      assert(final)
+      assert.deepEqual(final.message.content.at(-1), { type: 'text', text: 'PRIVATE_REPLY' })
+      if (kind === 'emptyReasoning') {
+        assert.equal(final.message.content.length, 2)
+        assert.equal(final.message.content[0].type, 'thinking')
+        assert.equal(final.message.content[0].thinking, '')
+        assert.equal(final.message.content[0].text, undefined)
+        const streamed = output.filter(message => message.type === 'stream_event' &&
+          message.event.type === 'content_block_delta' && message.event.delta.type === 'text_delta')
+          .map(message => message.event.delta.text).join('')
+        assert.equal(streamed, final.message.content.at(-1).text)
+      }
     } else if (kind === 'cancelled') {
       assert.equal(diagnostic.outcome, 'cancelled')
       assert.equal(errors.length, 0)
