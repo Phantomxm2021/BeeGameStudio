@@ -10,7 +10,7 @@ const NAV_END = '<!-- bgs:source-navigation:end -->'
 // metadata resolves Skill names/namespaces; procedures stay in the Skills.
 export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - Preserve confirmed requirements, design standards, budget, authorization and unrelated work. Use project-relative paths.
-- Keep project-specific architecture decisions and confirmed runtime entry points outside the generated source-navigation block; update them when the implementation changes. Generated pointers list saved sources and declared commands, not verified runtime behavior.
+- Architecture decisions belong in their existing design/configuration sources, not this guide. Navigation pointers do not verify behavior.
 
 ## Professional methods
 - For a new complete game design, cover these responsibilities. Use the current session's native metadata to resolve names/namespaces, then invoke matching Skills with the Skill tool before related design or implementation decisions.

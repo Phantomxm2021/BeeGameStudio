@@ -106,6 +106,15 @@ export function bindProductionUiNode(node: UiNode, state?: Readonly<Record<strin
     for (const style of [bound.style, ...Object.values(bound.responsive ?? {}).map(variant => variant.style!)])
       if (typeof style.color === 'string' && style.background === undefined && style.backgroundColor === undefined) style.backgroundColor = style.color
   }
+  return resolveUiNodeBindings(bound,state)
+}
+
+/** Shared binding semantics without imposing the shared renderer's CSS subset
+ * on independent DOM consumers or source-derived geometry observations. */
+export function resolveUiNodeBindings(node: UiNode, state?: Readonly<Record<string, unknown>>): UiNode {
+  const bound = { ...node, style: { ...node.style },
+    ...(node.responsive ? { responsive: Object.fromEntries(Object.entries(node.responsive).map(([key,value]) =>
+      [key,{...value,style:{...value.style}}])) } : {}) }
   for (const [property, stateKey] of Object.entries(node.bindings ?? {})) {
     if (!state || !Object.hasOwn(state, stateKey)) throw Error(`Missing UI state binding: ${node.id}/${stateKey}`)
     const value = state[stateKey]

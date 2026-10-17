@@ -1,4 +1,5 @@
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative, dirname, extname } from 'node:path'
 import { artifactDigest } from '../runtime-acceptance'
@@ -126,10 +127,15 @@ export async function buildEditableProject(root:string, task:Pick<TaskSpec,'edit
       await mkdir(dirname(join(temporary,file.path)),{recursive:true});await Bun.write(join(temporary,file.path),data)
     }
     if(!sameFiles(files,await projectFiles(temporary,artifact,excludedReports)))throw new WorkflowError('project-copy-invalid','Build copy differs from exportable source bytes')
-    // Installed libraries are an explicit measured external build operand. They
-    // are never exported as sources or silently treated as a fresh installation.
+    // Keep dependency resolution inside the isolated copy. A root symlink back
+    // to the original project made Bun traverse/read original ancestor folders
+    // for React's transitive imports, which the sandbox correctly denied.
+    // Materialize the same measured bytes (reflink where supported), not a
+    // fresh install or a broader host read grant. Verify BEFORE executing code.
     if(dependencySha256) {
-      const {symlink}=await import('node:fs/promises');await symlink(join(base,'node_modules'),join(temporary,'node_modules'),'junction')
+      await cp(join(base,'node_modules'),join(temporary,'node_modules'),{recursive:true,dereference:true,mode:constants.COPYFILE_FICLONE})
+      if(await artifactDigest(temporary,'node_modules',true)!==dependencySha256 || await projectDependencies(base)!==dependencySha256)
+        throw new WorkflowError('dependency-copy-changed','Installed dependencies changed while materializing the isolated build; no code was executed')
     }
     const {commandCheck}=await import('./checks')
     const observed=await commandCheck(temporary,'build',signal)

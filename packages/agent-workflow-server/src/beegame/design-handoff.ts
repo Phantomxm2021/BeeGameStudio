@@ -10,7 +10,7 @@ import { array, enum as enumeration, literal, object, string, unknown } from 'zo
 import type { z } from 'zod'
 import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
 import { designFindingSourceIssues, type DesignFinding } from '@bee-game-studio/agent-workflow/design-review-result'
-import { parseBeeGameContentDocument, sceneDesignSource, BEEGAME_UI_ASSET_BACKED_ROLES, uiDesignData } from './game-content-schema'
+import { parseBeeGameContentDocument, parseBeeGameContentIndex, sceneDesignSource, BEEGAME_UI_ASSET_BACKED_ROLES, uiDesignData } from './game-content-schema'
 export { designReviewResultSchema, type DesignReviewStep, type DesignReviewResult, type DesignFinding } from '@bee-game-studio/agent-workflow/design-review-result'
 
 export type DesignDocument = typeof PROJECT_DOCUMENTS[number]
@@ -147,6 +147,10 @@ export function designHandoffPath(name: string) {
   if (!PROJECT_DOCUMENTS.some(document => document === name)) throw new Error('Unknown design document')
   return `${DESIGN_HANDOFF_DIRECTORY}/${name.slice(0, -3)}.json`
 }
+
+/** Reserved planning records. Native file tools author these before handoff;
+ * Shell never needs to mutate them or bypass the host's baseline authority. */
+export const PROJECT_DESIGN_PATHS = PROJECT_DOCUMENTS.flatMap(name => [`docs/${name}`, designHandoffPath(name)])
 export function designDocumentVersion(body: string): string {
   const versions = [...body.matchAll(/^\s*-\s*(?:Version|版本)\s*[:：]\s*v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?)\s*$/gim)]
   if (versions.length !== 1) throw new Error('Missing or malformed host version metadata. Save the document/index, then run handoff.mjs --design finalize DOCUMENT.md for this owner; do not add or synchronize version headers manually.')
@@ -227,6 +231,24 @@ export function isDesignUiFile(path: string) {
 }
 export function isDesignSceneFile(path: string) {
   return /^content\/scenes\/[A-Za-z0-9_./-]+\.json$/.test(path)
+}
+
+/** The same owner/registry identity check is useful before implementation and
+ * at acceptance. Return both owners' issues together, not one repair per run. */
+export function designContentLinkIssues(workspace: string, runtimeUi: Iterable<string>, runtimeScenes: Iterable<string>) {
+  const issues: string[] = []
+  for (const [owner, isOwned, registered] of [
+    ['UI_UX_SPEC.md', isDesignUiFile, new Set(runtimeUi)],
+    ['LEVEL_SCENE_DESIGN.md', isDesignSceneFile, new Set(runtimeScenes)],
+  ] as const) {
+    const declared = designSupportingFiles(workspace, [owner]).filter(isOwned)
+    const missing = [...registered].filter(path => !declared.includes(path))
+    const unregistered = declared.filter(path => !registered.has(path))
+    if (missing.length || unregistered.length) issues.push(owner + ' and content/index.json must reference the same sources. ' +
+      'Missing design links: ' + (missing.join(', ') || 'none') + '; unregistered design sources: ' + (unregistered.join(', ') || 'none') +
+      '. Use actual Markdown links, for example [layout](../content/ui/menu.json); plain text/backticks are not source links.')
+  }
+  return issues
 }
 function layoutTypography(style: Record<string, unknown> = {}) {
   const fields = Object.fromEntries(Object.entries(style).filter(([key]) =>
@@ -326,7 +348,7 @@ function handoffShapeIssues(name: DesignDocument, raw: unknown, error: z.ZodErro
     const target = `${designHandoffPath(name)} / ${issue.path.join('.') || 'root'}` +
       (typeof item?.id === 'string' ? ` (id: ${JSON.stringify(item.id)})` : '')
     const hint = field === 'implementationItems' && issue.path[2] === 'requirementRefs'
-      ? ' Each task needs at least one real owned-output reference {document,id}, including technical foundations and end-to-end tasks. Select relevant availableRequirements from --check-handoff-drafts TECHNICAL_DESIGN.md --final-technical; do not invent IDs or inspect checker source.' : ''
+      ? ' Each task needs at least one real owned-output reference {document,id}, including technical foundations and end-to-end tasks. Use handoff.mjs --design draft TECHNICAL_DESIGN.md for availableRequirements; do not invent IDs or inspect checker source.' : ''
     return `${name}: ${target}: ${issue.message}${hint}`
   })
 }
@@ -736,6 +758,19 @@ export function readDesignAcceptanceRequirements(workspace: string, options: { t
 export function readDesignImplementationChecklist(workspace: string) {
   const check = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
   if (!check.valid) throw new Error(check.issues.join('; '))
+  let registry: ReturnType<typeof parseBeeGameContentIndex> | undefined
+  try { registry = parseBeeGameContentIndex(JSON.parse(readRetained(workspace, 'content/index.json').toString('utf8'))) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  if (registry) {
+    // Legacy registries may omit documents metadata; use the actual saved
+    // documents, as acceptance already does, rather than trusting labels.
+    const sources = registry.files.map(file => ({ path: 'content/' + file,
+      kind: parseBeeGameContentDocument(JSON.parse(readRetained(workspace, 'content/' + file).toString('utf8'))).kind }))
+    const ui = sources.filter(entry => entry.kind.startsWith('ui-')).map(entry => entry.path)
+    const scenes = sources.filter(entry => entry.kind.startsWith('scene-')).map(entry => entry.path)
+    const issues = designContentLinkIssues(workspace, ui, scenes)
+    if (issues.length) throw new Error(issues.join('; '))
+  }
   const requirements = readDesignAcceptanceRequirements(workspace)
   const { handoff } = documentHandoff(workspace, 'TECHNICAL_DESIGN.md', readRetained(workspace, 'docs/TECHNICAL_DESIGN.md').toString('utf8'))
   return { source: designHandoffPath('TECHNICAL_DESIGN.md'), designRevision: check.revision,

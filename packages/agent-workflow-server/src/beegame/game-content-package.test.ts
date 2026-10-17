@@ -50,6 +50,18 @@ const logicalCameraData = {
 }
 
 describe('Unity-style Game Content scene contract', () => {
+  it('accepts the shared 2D color-only sprite without inventing an asset, but preserves resource requirements', () => {
+    const scene = (type: string, data: Record<string, unknown>, extra = {}) => ({
+      schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
+      data: { nodes: [{ id: 'board', components: [component('visual', type, { data, ...extra })] }] },
+    })
+    expect(audit(scene('sprite-renderer', { size: [40, 40], color: '#123456' }), '2d', { version: 9, requirements: [], resources: [] }).valid).toBe(true)
+    for (const data of [{ size: [40, 40] }, { color: '' }, { color: '   ' }, { color: 123 }])
+      expect(audit(scene('sprite-renderer', data)).issues.join(' ')).toContain('requires assetRef')
+    for (const type of ['mesh-filter', 'skinned-mesh-renderer'])
+      expect(audit(scene(type, { color: '#123456' })).issues.join(' ')).toContain('requires assetRef')
+    expect(audit(scene('sprite-renderer', { color: '#123456' }, { assetRef: 'RES-MISSING' })).valid).toBe(false)
+  })
   it('locates malformed root metadata at the authored node field, not a later generic layout error', () => {
     for (const [field, value] of Object.entries({ referenceResolution: { width: 960, height: 540 },
       targetViewports: [{ width: 960, height: 540 }], minimumControlSize: { width: 44, height: 44 }, orientation: 'wide' })) {

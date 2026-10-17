@@ -46,10 +46,29 @@ export async function capturePreviewSnapshot(mode, width, height, visit = withPr
   return report;
 }
 
+async function toolingIdentity() {
+  try {
+    if (process.versions.bun) throw Error('Child Node identity unavailable from a Bun adapter');
+    const hashes = {};
+    for (const name of ['preview-test-command.mjs', 'preview-test-client.mjs', 'preview-play-capture.mjs'])
+      hashes[name] = createHash('sha256').update(await readFile(new URL('./' + name, import.meta.url))).digest('hex');
+    const client = process.env.BEEGAME_PLAYWRIGHT_MODULE;
+    if (!client || new URL(client).protocol !== 'file:') throw Error('Shared client unavailable');
+    // Read only the pinned client's identity; never import/launch a browser to
+    // inspect a receipt. This is not a hash of the entire installed toolchain.
+    for (const name of ['package.json', 'browsers.json', 'index.mjs'])
+      hashes['playwright/' + name] = createHash('sha256').update(await readFile(new URL('./' + name, client))).digest('hex');
+    return { status: 'observed', node: process.versions.node, platform: process.platform, arch: process.arch, hashes };
+  } catch {
+    return { status: 'unverified', reason: 'Supplied test helper/client identity unavailable' };
+  }
+}
+
 async function executionInputs(root, file, signal, capabilityFile = process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE) {
   const scriptSha256 = createHash('sha256').update(await readFile(file)).digest('hex');
+  const tooling = await toolingIdentity();
   if (!capabilityFile)
-    return { scriptSha256, status: 'unverified', reason: 'No active source identity capability' };
+    return { scriptSha256, tooling, status: 'unverified', reason: 'No active source identity capability' };
   try {
     const capability = JSON.parse(await readFile(capabilityFile, 'utf8'));
     if (capability.version !== 1 || capability.workspace !== root || !capability.executionId || !capability.sessionId)
@@ -57,11 +76,12 @@ async function executionInputs(root, file, signal, capabilityFile = process.env.
     const api = new URL(capability.apiUrl);
     if (api.protocol !== 'http:' || api.hostname !== '127.0.0.1' || api.username || api.password || api.search || api.hash)
       throw Error('Invalid source identity endpoint');
-    const response = await fetch(api, { method: 'POST', redirect: 'error', headers: {'Content-Type':'application/json'},
+    const response = await fetch(api, { method: 'POST', redirect: 'error',
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000), headers: {'Content-Type':'application/json'},
       body: JSON.stringify({executionInputs:true}) });
     if (!response.ok) throw Error('Source identity inspection failed: HTTP ' + response.status);
-    return { scriptSha256, status: 'observed', inputs: await response.json() };
-  } catch (error) { return { scriptSha256, status: 'unverified', reason: error.message }; }
+    return { scriptSha256, tooling, status: 'observed', inputs: await response.json() };
+  } catch (error) { return { scriptSha256, tooling, status: 'unverified', reason: error.message }; }
 }
 
 /** Inspect exactly one retained receipt. No model, browser, build or test runs. */
@@ -90,17 +110,23 @@ export async function inspectPreviewTest(reportPath, { workspace = process.cwd()
     run:after.inputs.runId !== current.inputs.runId,
     dependencies:after.inputs.dependencySha256 !== current.inputs.dependencySha256 } : undefined;
   const inputsChanged = changes && (changes.sources.length || changes.script || changes.requirements || changes.run || changes.dependencies);
+  const toolingObserved = after?.tooling?.status === 'observed' && current.tooling?.status === 'observed';
   return {...summary, quality:'unverified', freshness: {status: observed
     ? inputsChanged ? 'changed' : 'unchanged-at-boundaries' : 'unverified',
     changedPaths, changes, reason: current.reason,
     currentAttemptDiffers:observed ? after.inputs.attemptId !== current.inputs.attemptId : undefined,
-    scope:'Boundary identity only, not browser consumption, assertion coverage or game quality.'}};
+    scope:'Source/dependency boundary identity only, not tooling, browser consumption, assertion coverage or game quality.'},
+    toolingFreshness: { status: toolingObserved
+      ? JSON.stringify(after.tooling) === JSON.stringify(current.tooling) ? 'unchanged-at-boundaries' : 'changed' : 'unverified',
+      scope: 'Node version/platform and supplied helper/client identity only. Actual browser binary, launch flags, OS state and assertion coverage remain unverified.' }};
 }
 
 /** Optional execution adapter, not a test framework. Run a caller-selected
  * Node test once with the current capability; retain complete output rather
  * than asking the model to rerun a test to recover truncated stdout. */
-export async function runPreviewTest(script, args = []) {
+export async function runPreviewTest(script, args = [], { timeoutMs = 300_000 } = {}) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000)
+    throw Error('Test execution timeout must be 1..300000 ms');
   const root = await realpath(process.cwd());
   const file = await realpath(resolve(root, script));
   const path = relative(root, file);
@@ -108,7 +134,7 @@ export async function runPreviewTest(script, args = []) {
   const api = await resolvePreviewApi();
   // Reading status validates a live capability without starting a browser or
   // preview. A retained script is never run with a revoked turn's access.
-  const status = await fetch(api + '/status', { redirect: 'error' });
+  const status = await fetch(api + '/status', { redirect: 'error', signal: AbortSignal.timeout(5000) });
   if (!status.ok) throw Error('PREVIEW_CAPABILITY_EXPIRED: Current preview access is unavailable');
   let parent = root;
   for (const name of ['.beegame', 'tmp']) {
@@ -118,29 +144,72 @@ export async function runPreviewTest(script, args = []) {
   }
   const directory = await mkdtemp(join(parent, 'preview-test-'));
   const reportPath = relative(root, join(directory, 'execution.json'));
-  const report = { script: path, runtime: 'node', startedAt: new Date().toISOString(), status: 'started',
+  const report = { script: path, runtime: 'node', timeoutMs, startedAt: new Date().toISOString(), status: 'started',
     stdoutPath: relative(root, join(directory, 'stdout.txt')), stderrPath: relative(root, join(directory, 'stderr.txt')),
     reportPath, quality: 'unverified', note: 'Process result only, not assertion or gameplay acceptance. Read these saved files without executing the test again.' };
-  report.before = await executionInputs(root, file);
   await writeFile(join(root, reportPath), JSON.stringify(report), { flag: 'wx', mode: 0o600 });
-  const stdout = await open(join(root, report.stdoutPath), 'wx', 0o600);
-  try {
-    const stderr = await open(join(root, report.stderrPath), 'wx', 0o600);
+  const controller = new AbortController();
+  let child, termination, interruption;
+  const kill = signal => {
+    if (!child?.pid) return;
     try {
-      const result = await new Promise(resolveResult => {
-        // No shell interpolation, retries, global installation or new permission.
-        const child = spawn('node', [file, ...args], { cwd: root, env: process.env, stdio: ['ignore', stdout.fd, stderr.fd] });
-        child.once('error', error => resolveResult({ status: 'launch-failed', error: error.message, exitCode: null }));
-        child.once('close', (exitCode, signal) => resolveResult({ status: 'exited', exitCode, signal }));
-      });
-      Object.assign(report, result, { finishedAt: new Date().toISOString() });
-      report.after = await executionInputs(root, file).catch(error => ({status:'unverified', reason:error.message}));
-      report.inputIdentity = report.before.status === 'observed' && report.after.status === 'observed'
-        ? JSON.stringify(report.before) === JSON.stringify(report.after) ? 'unchanged-at-boundaries' : 'changed'
-        : 'unverified';
-    } finally { await stderr.close(); }
-  } finally { await stdout.close(); }
-  await writeFile(join(root, reportPath), JSON.stringify(report, null, 2));
+      if (process.platform === 'win32') child.kill(signal);
+      else process.kill(-child.pid, signal);
+    } catch (error) { if (error.code !== 'ESRCH') child.kill(signal); }
+  };
+  const interrupt = (status, signal) => {
+    if (controller.signal.aborted) return;
+    interruption = { status, exitCode: null, ...(signal ? { cancelSignal: signal } : {}) };
+    controller.abort();
+    if (child?.pid) {
+      kill('SIGTERM');
+      // The group leader can exit before a descendant that ignores SIGTERM.
+      // Complete group cleanup even if the child's close event arrives first.
+      termination = new Promise(resolve => setTimeout(() => { kill('SIGKILL'); resolve(); }, 1000));
+    }
+  };
+  const onTerm = () => interrupt('interrupted', 'SIGTERM');
+  const onInt = () => interrupt('interrupted', 'SIGINT');
+  process.on('SIGTERM', onTerm); process.on('SIGINT', onInt);
+  const timer = setTimeout(() => interrupt('timed-out'), timeoutMs);
+  try {
+    report.before = await executionInputs(root, file, controller.signal);
+    const stdout = await open(join(root, report.stdoutPath), 'wx', 0o600);
+    try {
+      const stderr = await open(join(root, report.stderrPath), 'wx', 0o600);
+      try {
+        if (!controller.signal.aborted) {
+          const result = await new Promise(resolveResult => {
+            // Own only this test's process group, not the shared host browser.
+            // Under Node, use the exact runtime whose version was recorded,
+            // not another executable selected by a subsequently changed PATH.
+            child = spawn(process.versions.bun ? 'node' : process.execPath, [file, ...args], { cwd: root, env: process.env,
+              detached: process.platform !== 'win32', stdio: ['ignore', stdout.fd, stderr.fd] });
+            child.once('error', error => resolveResult({ status: 'launch-failed', error: error.message, exitCode: null }));
+            child.once('close', (exitCode, signal) => resolveResult({ status: 'exited', exitCode, signal }));
+          });
+          Object.assign(report, result);
+        }
+        report.after = controller.signal.aborted ? {status:'unverified', reason:'Test execution interrupted'}
+          : await executionInputs(root, file, controller.signal);
+        report.inputIdentity = report.before.status === 'observed' && report.after.status === 'observed'
+          ? JSON.stringify(report.before) === JSON.stringify(report.after) ? 'unchanged-at-boundaries' : 'changed'
+          : 'unverified';
+      } finally { await stderr.close(); }
+    } finally { await stdout.close(); }
+  } catch (error) {
+    Object.assign(report, {status:'error', exitCode:null,
+      error:'Test adapter failed (' + (error.code ?? error.name ?? 'unknown') + '); inspect retained output'});
+  } finally {
+    try {
+      await termination;
+      Object.assign(report, interruption, {finishedAt:new Date().toISOString()});
+      await writeFile(join(root, reportPath), JSON.stringify(report, null, 2));
+    } finally {
+      clearTimeout(timer);
+      process.off('SIGTERM', onTerm); process.off('SIGINT', onInt);
+    }
+  }
   // Full identities and output remain on disk; do not flood model history.
   const { before, after, ...summary } = report;
   return { ...summary, evidence: 'Boundary snapshots only; transient edits, browser consumption and assertions are not certified.' };

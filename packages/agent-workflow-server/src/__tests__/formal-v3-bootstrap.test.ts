@@ -40,7 +40,10 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
     const body = await response.json() as { session: { id: string }; project: { root_path: string } }
     for (let i = 0; i < 100 && prompts.length === 0; i++) await Bun.sleep(5)
     expect(prompts).toHaveLength(1)
-    expect(prompts[0]).toContain('first assignment ends at visual-direction handoff')
+    // Bootstrap starts the confirmed goal, not a planning-only first turn.
+    expect(prompts[0]).toContain('Develop the game from this complete confirmed goal')
+    expect(prompts[0]).toContain('no second production authorization or automatic paid retry')
+    expect(prompts[0]).not.toContain('first assignment ends at visual-direction handoff')
     expect(prompts[0]).not.toContain('current milestone and its deliverables')
     const run = await store.read('formal-game', 'owner')
     expect(run?.chatSessionId).toBe(body.session.id)

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import { mock } from 'bun:test'
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { getMacroDefines } from '../../../../scripts/defines.js'
 
 Object.assign(globalThis, { MACRO: Object.fromEntries(Object.entries(getMacroDefines())
@@ -86,6 +89,60 @@ try {
     }
     results[kind] = { calls, outcome: diagnostic.outcome, streamFailure: diagnostic.streamFailure }
   }
+  const directory = await mkdtemp(join(tmpdir(), 'bgs-reasoning-roundtrip-'))
+  try {
+    for (const kind of ['lateText', 'lateTool', 'lateNonempty', 'absent', 'null'] as const) {
+      const tool = kind !== 'lateText'
+      const reasoning = kind === 'lateNonempty' ? 'PRIVATE_REASONING' : ''
+      const chunk = (delta: unknown, finish_reason: string | null = null) => encode({ choices: [{ index: 0, delta, finish_reason }] })
+      const body = chunk(tool ? { tool_calls: [{ index: 0, id: 'call_late', type: 'function',
+        function: { name: 'test_sum', arguments: '{"a":17,' } }] } : { content: 'Full' })
+        + chunk(kind === 'absent' ? {} : { reasoning_content: kind === 'null' ? null : reasoning })
+        + chunk(tool ? { tool_calls: [{ index: 0, function: { arguments: '"b":25}' } }] } : { content: ' answer' })
+        + chunk({}, tool ? 'tool_calls' : 'stop') + 'data: [DONE]\n\n'
+      let calls = 0
+      const output: any[] = []
+      const prompt = createUserMessage({ content: 'PRIVATE_PROMPT' })
+      const options = { model: 'deepseek-v4.1-flash', querySource: 'main', maxOutputTokensOverride: 8,
+        fetchOverride: (async () => {
+          calls++
+          return new Response(body, { headers: { 'content-type': 'text/event-stream' } })
+        }) as typeof fetch } as any
+      for await (const message of queryModelOpenAI([prompt], asSystemPrompt(['PRIVATE_SYSTEM']), [], new AbortController().signal, options)) output.push(message)
+      const final = output.find(message => message.type === 'assistant' && !message.isApiErrorMessage)
+      assert(final, 'The real query must assemble the simulated response')
+      const thinking = final.message.content.filter((block: any) => block.type === 'thinking')
+      const present = kind !== 'absent' && kind !== 'null'
+      assert.equal(thinking.length, present ? 1 : 0)
+      if (present) assert.equal(thinking[0].thinking, reasoning)
+      const value = final.message.content.find((block: any) => block.type === (tool ? 'tool_use' : 'text'))
+      assert.deepEqual(tool ? value.input : value.text, tool ? { a: 17, b: 25 } : 'Full answer')
+      // Exercise a JSONL persistence boundary with synthetic messages only.
+      const path = join(directory, kind + '.jsonl')
+      await writeFile(path, JSON.stringify(final) + '\n', { flag: 'wx' })
+      const restored = JSON.parse(await readFile(path, 'utf8'))
+      assert.deepEqual(restored.message, final.message)
+      assert.equal(restored.uuid, final.uuid)
+      const next = createUserMessage({ content: tool
+        ? [{ type: 'tool_result', tool_use_id: 'call_late', content: '42' }] : 'Next question' })
+      options.fetchOverride = (async (_input: unknown, init: RequestInit) => {
+        calls++
+        const request = JSON.parse(String(init.body))
+        const previous = request.messages.find((message: any) => message.role === 'assistant')
+        assert(previous)
+        assert.equal(Object.hasOwn(previous, 'reasoning_content'), present)
+        if (present) assert.equal(previous.reasoning_content, reasoning)
+        if (tool) assert.deepEqual(JSON.parse(previous.tool_calls[0].function.arguments), { a: 17, b: 25 })
+        else assert.equal(previous.content, 'Full answer')
+        return new Response(text + terminal + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
+      }) as typeof fetch
+      const followup: any[] = []
+      for await (const message of queryModelOpenAI([prompt, restored, next], asSystemPrompt(['PRIVATE_SYSTEM']), [], new AbortController().signal, options)) followup.push(message)
+      assert(followup.some(message => message.type === 'assistant' && !message.isApiErrorMessage))
+      assert.equal(calls, 2, 'Exactly two mocked requests; no retry or real network')
+      results[kind] = { calls, reasoningPresent: present, persistedAndReturned: true }
+    }
+  } finally { await rm(directory, { recursive: true, force: true }) }
   assert(!captured.join('').includes('PRIVATE'), 'SDK and diagnostic logs must not contain credentials or payloads')
 } finally { process.stderr.write = originalWrite }
 console.log(JSON.stringify(results))

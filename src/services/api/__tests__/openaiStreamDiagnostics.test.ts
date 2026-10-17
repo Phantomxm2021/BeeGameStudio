@@ -14,4 +14,7 @@ test('actual OpenAI query logs one safe summary, honors fetch overrides and neve
   expect(results.invalid).toEqual({ calls: 1, outcome: 'failed', streamFailure: 'invalid_sse' })
   expect(results.http).toEqual({ calls: 1, outcome: 'failed', streamFailure: 'http' })
   expect(results.cancelled).toEqual({ calls: 1, outcome: 'cancelled' })
+  for (const kind of ['lateText', 'lateTool', 'lateNonempty', 'absent', 'null']) {
+    expect(results[kind]).toEqual({ calls: 2, reasoningPresent: !['absent', 'null'].includes(kind), persistedAndReturned: true })
+  }
 })

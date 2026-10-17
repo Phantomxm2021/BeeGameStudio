@@ -3,6 +3,7 @@ import { readFile, realpath } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 import { observeAudio } from './runtime-audio.mjs'
+import { PREVIEW_STORAGE_PATH, PREVIEW_STORAGE_HEADER, PREVIEW_STORAGE_VERSION, handlePreviewStorageRequest, setPreviewStorageItem } from '../preview-storage.mjs'
 
 let input = ''
 for await (const part of process.stdin) input += part
@@ -14,7 +15,35 @@ const url = new URL(endpoint)
 if (url.protocol !== 'ws:' || url.hostname !== '127.0.0.1') throw new Error('Expected the host-owned local test browser')
 const { chromium } = await import(process.env.BGS_PLAYWRIGHT_MODULE)
 const browser = await chromium.connectOverCDP(endpoint, { timeout: 15000 })
-const sharp = uiProbes?.some(probe => probe.mode === 'pixels') ? (await import(process.env.BGS_SHARP_MODULE)).default : undefined
+const sharp = uiProbes?.some(probe => probe.mode === 'pixels' || probe.mode === 'scene') ? (await import(process.env.BGS_SHARP_MODULE)).default : undefined
+
+// Source-derived convex Sprite polygon, not an observed target box. Two CSS
+// pixels tolerate antialiasing at edges; interiors and pixels outside the
+// polygon independently expose ignored rotation, scale and hierarchy.
+async function spriteMarker(png,polygon,marker,viewport) {
+  const {data,info}=await sharp(png).ensureAlpha().raw().toBuffer({resolveWithObject:true})
+  if(info.width!==viewport[0]||info.height!==viewport[1])return {status:'unverified',reason:'Scene geometry driver needs a Canvas CSS viewport matching the declared probe viewport'}
+  const area=polygon.reduce((sum,p,i)=>sum+p[0]*polygon[(i+1)%4][1]-polygon[(i+1)%4][0]*p[1],0)
+  if(Math.abs(area)<1)return {status:'unverified',reason:'Projected Sprite is degenerate'}
+  const orientation=Math.sign(area),mask=new Uint8Array(info.width*info.height)
+  let interior=0,matchedInterior=0,outside=0,count=0
+  for(let y=0;y<info.height;y++)for(let x=0;x<info.width;x++) {
+    let distance=Infinity
+    for(let i=0;i<4;i++) {
+      const a=polygon[i],b=polygon[(i+1)%4],dx=b[0]-a[0],dy=b[1]-a[1]
+      distance=Math.min(distance,orientation*(dx*(y+.5-a[1])-dy*(x+.5-a[0]))/Math.hypot(dx,dy))
+    }
+    const inside=distance>2,near=distance>=-2,offset=(y*info.width+x)*info.channels
+    mask[y*info.width+x]=(inside?2:0)|(near?1:0)
+    if(inside)interior++
+    if(marker.every((value,i)=>Math.abs(data[offset+i]-value)<=1)&&data[offset+3]>=254) {
+      count++;if(inside)matchedInterior++;if(!near)outside++
+    }
+  }
+  const status=!count||!interior?'unverified':matchedInterior/interior>=.9&&outside===0?'passed':'failed'
+  return {status,polygon,interior,matchedInterior,outside,count,expectedMaskHash:createHash('sha256').update(mask).digest('hex'),
+    ...(status!=='passed'?{reason:!count?'Source color marker was not observed; material/consumer/occlusion is unverified':'Actual Sprite pixels differ from source-derived transform geometry'}:{})}
+}
 // Serialized by Playwright into the game frame. A rotated/skewed rectangle's
 // AABB is not its interactive edge length; keep such controls unverified rather
 // than adding another transform solver beside the shared layout implementation.
@@ -24,12 +53,13 @@ function measureDomNodes(nodes) {
     try { matches = node.selector ? [...document.querySelectorAll(node.selector)] :
       [...document.querySelectorAll('[data-node-id]')].filter(element => element.getAttribute('data-node-id') === node.id) }
     catch { return { id: node.id, unverified: 'Invalid mapped node selector' } }
+    if (node.hidden && matches.length === 0) return { id: node.id, hidden: true }
     if (matches.length !== 1) return { id: node.id, unverified: matches.length ? 'Ambiguous node selector/data-node-id' : 'Missing node selector/data-node-id' }
     const element = matches[0], rect = element.getBoundingClientRect(), css = getComputedStyle(element)
     for (let parent = element; parent; parent = parent.parentElement) {
       const style = getComputedStyle(parent)
       if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0)
-        return { id: node.id, unverified: 'Saved-active node is hidden in this runtime state' }
+        return node.hidden ? { id: node.id, hidden: true } : { id: node.id, unverified: 'Saved-active node is hidden in this runtime state' }
       if (node.minimumControlSize) {
         const matrix = new DOMMatrixReadOnly(style.transform === 'none' ? undefined : style.transform)
         if (!matrix.is2D || Math.abs(matrix.b) > .000001 || Math.abs(matrix.c) > .000001 || matrix.a <= 0 || matrix.d <= 0 ||
@@ -38,6 +68,7 @@ function measureDomNodes(nodes) {
           return { id: node.id, unverified: 'Control edge size under rotation, skew, reflection or perspective is unverified; bounding boxes are insufficient' }
       }
     }
+    if (node.hidden) return { id: node.id, hidden: rect.width <= 0 || rect.height <= 0 }
     return { id: node.id, bounds: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, fontSize: parseFloat(css.fontSize) }
   })
 }
@@ -89,7 +120,9 @@ try {
   const context = await browser.newContext({ viewport: { width: probe?.viewport[0] ?? smokeViewport?.[0] ?? 1280, height: probe?.viewport[1] ?? smokeViewport?.[1] ?? 720 }, hasTouch: Boolean(smokeViewport || probe?.hasTouch), deviceScaleFactor: probe?.deviceScaleFactor ?? 1, serviceWorkers: 'block', acceptDownloads: false })
   try {
     const hostUrl = 'http://bgs-preview.invalid/'
-    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, HEAD, OPTIONS', 'access-control-allow-headers': '*' }
+    const saves = new Map()
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, HEAD, OPTIONS', 'access-control-allow-headers': '*',
+      'access-control-expose-headers': PREVIEW_STORAGE_HEADER, [PREVIEW_STORAGE_HEADER]: PREVIEW_STORAGE_VERSION }
     await context.routeWebSocket('**/*', socket => { unsupported.add('non-static WebSocket'); socket.close() })
     await context.route('**/*', async route => {
       try {
@@ -97,6 +130,14 @@ try {
         if (previewHost && url.href === hostUrl && route.request().method() === 'GET' &&
             route.request().isNavigationRequest() && !route.request().frame().parentFrame()) {
           await route.fulfill(previewHost); return
+        }
+        if (previewHost && url.origin === entry.origin && url.pathname === PREVIEW_STORAGE_PATH) {
+          const source = route.request()
+          const response = await handlePreviewStorageRequest(new Request(url, { method: source.method(), headers: source.headers(),
+            ...(source.postDataBuffer() ? { body: source.postDataBuffer() } : {}) }), {
+            getItem: key => saves.get(key) ?? null, setItem: (key, value) => setPreviewStorageItem(saves, key, value),
+          })
+          await route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() }); return
         }
         if (url.origin !== entry.origin || !['GET', 'HEAD', ...(previewHost ? ['OPTIONS'] : [])].includes(route.request().method())) {
           unsupported.add('external request or non-static method'); await route.abort(); return
@@ -153,7 +194,7 @@ try {
       if (!frame) throw Error('Preview measurement iframe is unavailable')
       page = frame
     }
-    const environment = { embedding: previewHost ? 'sandboxed-iframe' : 'standalone', ...await page.evaluate(() => ({origin:globalThis.origin,viewport:[innerWidth,innerHeight],devicePixelRatio,
+    const environment = { embedding: previewHost ? 'sandboxed-iframe' : 'standalone', storage: previewHost ? 'disposable-preview' : 'deployment-native', ...await page.evaluate(() => ({origin:globalThis.origin,viewport:[innerWidth,innerHeight],devicePixelRatio,
       maxTouchPoints:navigator.maxTouchPoints,coarsePointer:matchMedia('(pointer: coarse)').matches,hover:matchMedia('(hover: hover)').matches})) }
     if (probe?.mode === 'audio') {
       let observed
@@ -220,6 +261,7 @@ try {
         else {
           const screenshot = await locator.screenshot({animations:'disabled',timeout:5000,scale:'css'})
           scene = {sha256:createHash('sha256').update(screenshot).digest('hex'),canvas}
+          if(variant?.polygon)scene.geometry=await spriteMarker(screenshot,variant.polygon,probe.marker,probe.viewport)
         }
       }
       if (probe.coordinateRoot && !probe.mode && bounds && !reason) {
@@ -359,6 +401,11 @@ try {
       for (const actual of observed) {
         if (actual.unverified) { unverified.push({ id: actual.id, reason: actual.unverified }); continue }
         const expected = probe.composition.nodes.find(node => node.id === actual.id), physical = actual.bounds
+        if (expected.hidden) {
+          checked.push(actual.id)
+          if (!actual.hidden) issues.push({id:actual.id,kind:'visibility',expected:'hidden',actual:'visible'})
+          continue
+        }
         const box = coordinateSpace ? { left: (physical.left-coordinateSpace.root.left)/coordinateSpace.scale[0],
           top: (physical.top-coordinateSpace.root.top)/coordinateSpace.scale[1], right: (physical.right-coordinateSpace.root.left)/coordinateSpace.scale[0],
           bottom: (physical.bottom-coordinateSpace.root.top)/coordinateSpace.scale[1] } : physical
@@ -372,7 +419,7 @@ try {
             actual: [physical.right-physical.left, physical.bottom-physical.top] })
       }
       composition = { status: issues.length ? 'failed' : unverified.length || !checked.length ? 'unverified' : 'passed',
-        checked, issues, unverified, scope: 'Saved state-independent marked DOM geometry/font sizes/control minima only; no visual fidelity or dynamic-state verdict' }
+        checked, issues, unverified, scope: 'Saved marked DOM visibility/geometry/fonts/control minima for the declared binding-value scenario and click path; private state transitions, unselected states and visual fidelity are not certified' }
     }
     const surfacePresent = await page.locator('body').evaluate(body => {
       // Absolute-positioned UI/Canvas does not contribute to body height.
@@ -411,19 +458,30 @@ try {
     const results = [], errors = [], missing = new Set(), unsupported = new Set()
     const conditions = (probe, observed) => ({environment:observed.environment,
       activation:{kind:'locator-clicks',steps:probe.steps??[],...(probe.mode==='audio'?{playSteps:probe.playSteps,stopSteps:probe.stopSteps}:{})},
+      ...(probe.bindingValues ? {scenario:{bindingValues:probe.bindingValues,scope:'Declared scenario inputs; actual DOM outcomes are checked, private game state is not inferred'}} : {}),
       coverage:'Only this viewport, pixel density and declared activation path; no complete gameplay or visual-quality verdict'})
     for (const probe of uiProbes) {
       if (probe.mode === 'scene') {
         const baseline = await observe(probe), repeated = await observe(probe), changed = await observe(probe,probe.variants[0]), restored = await observe(probe)
         const observations = [baseline,repeated,changed,restored]
+        const transforms=[]
+        for(const variant of probe.variants.filter(v=>v.polygon)) {
+          const actual=await observe(probe,variant);observations.push(actual)
+          const geometry=actual.scene?.geometry
+          transforms.push({property:variant.property,...(geometry??{status:'unverified',reason:actual.reason??'No Sprite geometry observed'})})
+        }
+        for(const transform of transforms.slice(1))if(transform.status==='passed'&&transform.expectedMaskHash===transforms[0]?.expectedMaskHash) {
+          transform.status='unverified';transform.reason='This source change has no independently observable visible geometry at this viewport'
+        }
         let reason = observations.find(value => value.reason)?.reason
         if (!reason && (baseline.scene.sha256 !== repeated.scene.sha256 || baseline.scene.sha256 !== restored.scene.sha256))
           reason = 'Original Canvas is not stable across repeated/restored loads; node causality cannot be isolated'
         if (!reason && baseline.scene.sha256 === changed.scene.sha256)
           reason = 'Disabling the selected saved Scene node did not change the observed Canvas; node use is unverified'
-        const status = observations.some(value => value.errors.length || value.missingFiles.length) ? 'failed' : reason ? 'unverified' : 'passed'
+        reason ??= probe.transformUnverified ?? transforms.find(value=>value.status!=='passed')?.reason
+        const status = observations.some(value => value.errors.length || value.missingFiles.length)||transforms.some(value=>value.status==='failed') ? 'failed' : reason ? 'unverified' : 'passed'
         results.push({document:probe.document,nodeId:probe.nodeId,viewport:probe.viewport,status,reason,conditions:conditions(probe,baseline),
-          baseline:baseline.scene,repeated:repeated.scene,changed:changed.scene,restored:restored.scene})
+          baseline:baseline.scene,repeated:repeated.scene,changed:changed.scene,restored:restored.scene,transforms})
         for (const value of observations) {errors.push(...value.errors);value.missingFiles.forEach(file=>missing.add(file));value.unsupported.forEach(file=>unsupported.add(file))}
         continue
       }

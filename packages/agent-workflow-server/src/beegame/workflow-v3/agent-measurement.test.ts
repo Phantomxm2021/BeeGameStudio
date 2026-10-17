@@ -1313,10 +1313,14 @@ test('agent measurement build cannot read/write other project files or use the n
   const outside=join(f.root,'outside.txt')
   try {
     await writeFile(outside,'SYNTHETIC_PRIVATE')
+    await mkdir(join(f.workspace,'node_modules/tiny'),{recursive:true})
+    await writeFile(join(f.workspace,'node_modules/tiny/index.js'),'READ_ONLY_DEPENDENCY')
+    await writeFile(join(f.workspace,'package-lock.json'),JSON.stringify({lockfileVersion:3,packages:{}}))
     for(const [key,code] of [
       ['read','await Bun.file('+JSON.stringify(outside)+').text();'],
       ['write','await Bun.write('+JSON.stringify(outside)+',"overwritten");'],
       ['original-source','await Bun.file('+JSON.stringify(join(f.workspace,'README.md'))+').text();'],
+      ['dependency-write','await Bun.write("node_modules/tiny/index.js","overwritten");'],
       ['network','await fetch('+JSON.stringify(upstream.url.origin)+',{signal:AbortSignal.timeout(2000)});'],
     ]) {
       await writeFile(join(f.workspace,'build.mjs'),code+builder)
@@ -1324,10 +1328,26 @@ test('agent measurement build cannot read/write other project files or use the n
       expect(result.checks[0]?.status,JSON.stringify(result)).toBe('failed')
       expect(result.checks).toHaveLength(1)
       expect(await readFile(outside,'utf8')).toBe('SYNTHETIC_PRIVATE')
+      expect(await readFile(join(f.workspace,'node_modules/tiny/index.js'),'utf8')).toBe('READ_ONLY_DEPENDENCY')
     }
     expect(calls).toBe(0)
   }finally{upstream.stop(true);await f.close()}
 },15000)
+
+test('dependency aliases outside the project are rejected before materialization or executing build code',async()=>{
+  const f=await fixture()
+  try {
+    await writeFile(join(f.root,'outside-dependency.js'),'PRIVATE_FIXTURE')
+    await mkdir(join(f.workspace,'node_modules'))
+    await symlink(join(f.root,'outside-dependency.js'),join(f.workspace,'node_modules/escape.js'))
+    await writeFile(join(f.workspace,'package-lock.json'),JSON.stringify({lockfileVersion:3,packages:{}}))
+    await writeFile(join(f.workspace,'build.mjs'),'await Bun.write("MUST_NOT_BUILD","bad");'+builder)
+    const result=await f.measurement.measure({...request,requestKey:'dependency-escape'})
+    expect(result.error).toContain('outside the workspace')
+    expect(result.checks).toHaveLength(0)
+    expect(await Bun.file(join(f.workspace,'MUST_NOT_BUILD')).exists()).toBe(false)
+  }finally{await f.close()}
+})
 
 test('lost settlement leaves a durable unknown result; repeated request does not replay build',async()=>{
   const f=await fixture()

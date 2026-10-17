@@ -7,6 +7,12 @@ let cachedBundle: Promise<string> | undefined
 // Readable interface for the optional helper, not a second renderer or a
 // project execution plan. Keep signatures checked against the exported module.
 export const CONTENT_CONSUMER_API = {
+  createGameStorage: {
+    signature: 'await createGameStorage() -> {kind:"preview"|"deployment", getItem, setItem, removeItem}; all methods return Promises',
+    usage: 'const saves=await createGameStorage(); const best=Number(await saves.getItem("best") ?? 0); await saves.setItem("best",String(nextBest)); await saves.removeItem("best"); keys are nonempty strings (256 UTF-8 bytes max), values are strings (64 KiB max). Await writes and report errors; no silent in-memory fallback.',
+    isolation: 'Production Preview uses BGS host saves isolated by the authorized user and project, surviving new Preview URLs, browser sessions and BGS restarts on the same persistent dashboard data root (128 keys / 256 KiB per project). Deployment uses its own origin/path-scoped native localStorage; never Preview saves. Native localStorage/sessionStorage still throw in the opaque Preview iframe. No HTML or existing game sources are rewritten. Existing consumers must deliberately integrate this async API.',
+    measurement: 'Isolated measurement uses disposable saves with the same request validation and quotas. It cannot read or overwrite actual Preview saves, and is not proof of cross-session persistence.',
+  },
   createProductionUiSurface: {
     signature: 'await createProductionUiSurface(host: HTMLElement) -> {render, dispose}',
     render: 'surface.render(data, {width,height}, {state?, assets?, fonts?, onAction?, camera?}) -> resolved geometry array',

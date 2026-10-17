@@ -5,6 +5,7 @@ import type { WorkflowStore } from './store'
 import { editSchema, prepareSourceEdit, writeSourceEdit } from './source-edit'
 import { findSourceEdit, reserveSourceEdit, settleSourceEdit } from './changes'
 import { saveHostExitReceipt, type HostExitReceipts, type HostExitFacts } from './host-exit-receipt'
+import { baselineAfterSourceEdit } from './design-baseline'
 
 export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGameSessionManager; exitReceipts?: HostExitReceipts }) {
   const workerId = randomUUID(), pending = new Set<Promise<unknown>>(), active = new Map<string, { controller: AbortController }>()
@@ -66,6 +67,10 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
           const current = await input.store.read(run.projectId, run.ownerId)
           if (!current || current.id !== run.id) throw new WorkflowError('run-missing', 'Run disappeared during edit settlement')
           const result = settleSourceEdit(current, attempt.attemptId, attempt.fence, failure ? failure instanceof WorkflowError ? failure.message : 'Source edit filesystem operation failed; reload saved candidates. No game acceptance.' : undefined)
+          if (!failure && current.designBaseline) {
+            try { result.designBaseline = await baselineAfterSourceEdit(current,findSourceEdit(result,attempt.attemptId)!) }
+            catch { result.blockedReason = (result.blockedReason ?? 'Source save retained; unmeasured.') + ' Design baseline could not be advanced; saved sources remain unverified.' }
+          }
           try { await input.store.commit(run.projectId, run.ownerId, current.version, result, 'source-edit.settled');observedExits.delete(attempt.attemptId); settled = result; break }
           catch (error) { if (rebase || !(error instanceof WorkflowError) || error.code !== 'revision-conflict') throw error }
         }

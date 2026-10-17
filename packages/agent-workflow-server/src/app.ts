@@ -3,7 +3,8 @@ import { registerModelConnectionRoutes, validateDynamicGoConfig } from './model-
 import { validateModelAccess } from '@bee-game-studio/agent-workflow'
 import { registerV3Routes } from './beegame/workflow-v3/routes'
 import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
-import { createMeasuredPreview, type MeasuredPreviewManager } from './beegame/workflow-v3/measured-preview'
+import { createMeasuredPreview, type MeasuredPreviewManager, type CandidatePreview } from './beegame/workflow-v3/measured-preview'
+import { createPreviewStorageStore } from './beegame/preview-storage-store'
 import { WorkflowError } from './beegame/workflow-v3/state'
 import { projectExecutionTime } from './beegame/workflow-v3/execution-time'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, type WorkflowStore } from './beegame/workflow-v3/store'
@@ -644,13 +645,15 @@ export function createAgentWorkflowApp(
   const v3Store = options.workflowV3Store === false ? undefined : options.workflowV3Store ??
     (supabaseStore && v3ServiceKey && v3Url ? createRemoteWorkflowStore({ url: v3Url, serviceKey: v3ServiceKey, fetchImpl: serviceFetch }) :
       !supabaseStore && process.env.BEEGAME_WORKFLOW_V3_STORE === 'local-single-process' ? createLocalWorkflowStore(dashboardDataRoot) : undefined)
+  const previewStorage = createPreviewStorageStore(dashboardDataRoot)
   measuredPreview = createMeasuredPreview({
     origin: options.workflowV3PreviewOrigin ?? process.env.BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN,
     capabilities: previewCapabilities,
+    storage: previewStorage,
     readRun: async (projectId, ownerId) => v3Store?.read(projectId, ownerId),
     isBusy: run => beeGameSessions.hasActiveProjectTurn(run.ownerId, run.projectId, run.workspacePath),
   })
-  options.registerCleanup?.(async () => measuredPreview?.dispose())
+  options.registerCleanup?.(async () => { measuredPreview?.dispose(); previewStorage.close() })
   registerV3DebugPage(app, process.env.BEEGAME_WORKFLOW_V3_DEBUG === '1')
   const v3Routes = registerV3Routes(app, {
     deployment:()=>beeGameDeployments,
@@ -660,7 +663,7 @@ export function createAgentWorkflowApp(
     resourceLibraryBaseUrl: options.resourceSelectionRuntimeConfig?.baseUrl,
     // Evaluated only for an authorized production turn, after app setup.
     // Reuse the existing candidate Preview; no Task or engine routing.
-    openAgentPreview: value => openProjectPreviewAccess(value),
+    openAgentPreview: value => openProjectPreviewAccess({...value,isolatedProductionProjectId:value.projectId}),
     openAgentImage: value => {
       const personal = loadPersonalImageConnection(getUserDashboardDataRoot(dashboardDataRoot, value.user.id))
       return openImageGenerationAccess({ userId: value.user.id, projectId: value.projectId,
@@ -742,13 +745,34 @@ export function createAgentWorkflowApp(
     beeGamePreviews.dispose()
     await beeGameSessions.dispose()
   })
-  const openProjectPreviewAccess = (input: { request: Request; user: BeeGameUserContext; workspacePath: string; sessionId: string; keepProjectPreview?: boolean }) => {
+  const openProjectPreviewAccess = (input: { request: Request; user: BeeGameUserContext; workspacePath: string; sessionId: string; keepProjectPreview?: boolean; isolatedProductionProjectId?: string }) => {
     const { workspacePath, sessionId } = input
+    let production: {preview:CandidatePreview;writerId:string}|undefined
     const snapshot = () => {
+      if(production)return {status:'running',mode:'production',url:production.preview.url,message:production.preview.limitations.join(' ')}
       const value = beeGamePreviews.status(sessionId, workspacePath)
       return { ...value, ...(value.url ? { url: previewCapabilities.issueUrl(
         new URL(value.url, input.request.url).href, sessionId, input.user.id,
       ) } : {}) }
+    }
+    const closeProduction=()=>{
+      if(production)measuredPreview?.closeCandidate(input.isolatedProductionProjectId!,input.user.id,production.preview.id,production.writerId)
+      production=undefined
+    }
+    const start=async(mode:'development'|'production',restart=false)=>{
+      if(mode==='production'&&input.isolatedProductionProjectId) {
+        if(restart)closeProduction()
+        const run=await v3Store?.read(input.isolatedProductionProjectId,input.user.id)
+        if(!run?.writer||run.workspacePath!==workspacePath||run.chatSessionId!==sessionId||!measuredPreview)
+          throw new Error('Production Preview no longer belongs to this native project writer')
+        beeGamePreviews.stop(sessionId,workspacePath)
+        production={preview:await measuredPreview.openCandidate(run,run.writer),writerId:run.writer.attemptId}
+      }else {
+        closeProduction()
+        if(restart)await beeGamePreviews.restart({sessionId,workspacePath,mode})
+        else await beeGamePreviews.start({sessionId,workspacePath,mode})
+      }
+      return snapshot()
     }
     return openPreviewTestAccess({
       recordingRoot: join(getCurrentUserDataRoot(input.request), 'preview-tests', createHash('sha256').update(sessionId).digest('hex')),
@@ -760,17 +784,12 @@ export function createAgentWorkflowApp(
           counts: report.counts, files: report.files, droppedEvents: report.droppedEvents,
           truncatedEvents: report.truncatedEvents, gameplayVerdict: report.gameplayVerdict },
       }),
-      start: async mode => {
-        await beeGamePreviews.start({ sessionId, workspacePath, mode })
-        return snapshot()
-      },
-      restart: async mode => {
-        await beeGamePreviews.restart({ sessionId, workspacePath, mode })
-        return snapshot()
-      },
+      start: mode => start(mode),
+      restart: mode => start(mode,true),
       status: snapshot,
       stop: () => {
         if (input.keepProjectPreview) return
+        closeProduction()
         beeGamePreviews.stop(sessionId, workspacePath)
         previewCapabilities.revokeSession(sessionId)
       },
@@ -1335,12 +1354,12 @@ export function createAgentWorkflowApp(
     let authMethods
     try { authMethods = validateModelAccess(body.provider as ModelProviderKind, body.authMethods) }
     catch { return c.json({ error: 'Invalid provider or authentication methods' }, 400) }
+
     if (authMethods.includes('platform') && (typeof body.apiKey !== 'string' || !body.apiKey.trim())) return c.json({ error: 'Platform access requires an API key' }, 400)
     const outboundInspection = await inspectPermittedOutboundUrl(body.baseUrl)
     if (outboundInspection && !outboundInspection.approved) {
       return c.json(toOutboundTargetError(outboundInspection), 400)
     }
-
     try {
       await validateDynamicGoConfig({ provider: String(body.provider), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : undefined,
         models: toModelMap(body.models), authMethods }, assertPermittedOutboundUrl)
@@ -1387,6 +1406,7 @@ export function createAgentWorkflowApp(
       let authMethods
       try { authMethods = validateModelAccess((body.provider ?? existing.provider) as ModelProviderKind, body.authMethods ?? existing.authMethods) }
       catch { return c.json({ error: 'Invalid provider or authentication methods' }, 400) }
+
       const outboundInspection = await inspectPermittedOutboundUrl(body.baseUrl)
       if (outboundInspection && !outboundInspection.approved) {
         return c.json(toOutboundTargetError(outboundInspection), 400)

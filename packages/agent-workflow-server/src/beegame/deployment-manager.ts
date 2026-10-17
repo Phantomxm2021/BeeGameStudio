@@ -469,6 +469,10 @@ export class BeeGameDeploymentManager {
         await persistRecord!(record)
         await this.saveRecord({ ...record, status: 'publishing', updatedAt: new Date().toISOString() })
         await this.publisher.verifyPublished(record.url, files)
+        // Public verification awaits network I/O. The selected run may have
+        // changed since registration; revoke it through the existing failure
+        // path rather than completing with an obsolete eligibility decision.
+        await input.measured?.validate()
         record = { ...record, updatedAt: new Date().toISOString() }
       }
       await this.saveRecord(record)

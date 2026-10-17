@@ -23,7 +23,10 @@ export const taskSchema = z.object({
   editableProject: z.literal(true).optional(),
   // Optional independent DOM root of a fixed logical UI canvas. This selects
   // a measurement coordinate space, not a renderer or Agent technology choice.
-  uiProbes: z.array(uiProbeSchema.extend({coordinateRoot:z.string().trim().min(1).optional()})).min(1).optional(),
+  uiProbes: z.array(uiProbeSchema.extend({coordinateRoot:z.string().trim().min(1).optional(),
+    // Scenario inputs, never claimed observations of the game's private state.
+    bindingValues:z.record(z.string().trim().min(1),z.union([z.boolean(),z.number().finite(),z.string(),z.null()])).optional(),
+  })).min(1).optional(),
   sceneProbes: z.array(uiProbeSchema).min(1).optional(),
   pixelProbes: z.array(uiProbeSchema.extend({ componentId: z.string().trim().min(1).optional() })).min(1).optional(),
   audioProbes: z.array(uiProbeSchema.extend({
@@ -74,12 +77,19 @@ export type Run = {
   visualHandoffVersion?: 1;
   // Host-observed blank-project intake, not a phase or model-authored plan.
   // Absent on existing/imported runs; never infer it from missing content later.
-  creation?: { initialDelivery: 'playable-slice' | 'design-led-first-version'; editableContent: boolean; webStarter?: 'react-canvas-2d-v1' };
+  creation?: { initialDelivery: 'playable-slice' | 'design-led-first-version'; editableContent: boolean; webStarter?: 'react-canvas-2d-v1'; webBoot?: 'react-web-storage-v1' };
+  // Actual host-installed startup bytes, pinned once; system upgrades and
+  // follow-ups cannot silently rewrite a project's working runtime.
+  webBoot?: { version: 'react-web-storage-v1'; files: FileVersion[] };
   version: number; requestKey: string; status: 'planning' | 'running' | 'blocked' | 'completed';
   requirements: { revision: string; text: string; constraints: Record<string, unknown>; ids: string[]; sha256: string };
   // Retained as an optimistic revision for authorized requirement changes and
   // source edits; it no longer implies a host-authored Task plan.
   planRevision: number;
+  // Captured by the existing implementation handoff, not model approval or a
+  // new workflow phase. A normal follow-up cannot replace this authority.
+  designBaseline?: { revision: string; digestVersion: 1 | 2; capturedAt: string; attemptId: string;
+    requirementsRevision: string; protectedFiles: FileVersion[]; supportingFiles: Record<string, string>; registryRevision?: string; sourceEditId?: string };
   writer?: { attemptId: string; fence: number; workerId: string }; fence: number;
   // Native goal turns, not host-created Task specifications or release checks.
   agentTurns?: AgentTurn[];

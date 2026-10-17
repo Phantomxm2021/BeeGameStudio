@@ -28,7 +28,7 @@ export function createOpenAIStreamDiagnostics(
     source: source === 'compact' ? 'compact' : source === 'main' ? 'main' : 'other',
     bytes: 0, wireEvents: 0, parsedChunks: 0, invalidFrames: 0, skippedFrames: 0, maxGapMs: 0,
     wireFinishSeen: false, parsedFinishSeen: false, doneSeen: false, eofSeen: false,
-    terminalWithoutDelta: false, pendingFrame: false,
+    terminalWithoutDelta: false, pendingFrame: false, thinkingReturned: false,
   }
   // This bounded frame is transient and never passed to the log sink.
   let frame = '', line = '', skipping = false, previousCR = false
@@ -45,6 +45,8 @@ export function createOpenAIStreamDiagnostics(
         try {
           const value = JSON.parse(data)
           const choice = value?.choices?.[0]
+          // Presence includes an authentic empty string; never retain its text.
+          if (typeof choice?.delta?.reasoning_content === 'string') summary.thinkingReturned = true
           if (choice?.finish_reason) {
             summary.wireFinishSeen = true
             if (choice.delta == null) summary.terminalWithoutDelta = true

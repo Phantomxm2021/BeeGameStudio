@@ -28,14 +28,14 @@ async function fixture(legacy = true) {
 test('creation facts require a blank creative intake; source/import/unknown/explicit exclusion are not silently migrated',async()=>{
   const f=await fixture(false)
   try {
-    expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true,webStarter:'react-canvas-2d-v1'})
+    expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true,webStarter:'react-canvas-2d-v1',webBoot:'react-web-storage-v1'})
     for(const path of ['.beegame','transcripts','logs'])await mkdir(join(f.root,path))
     await writeFile(join(f.root,'logs/index.json'),'{}')
     expect(await observeProjectCreation(f.root,brief)).toEqual(f.run.creation)
     expect(await observeProjectCreation(f.root,{...brief,build_source:{kind:'import'}})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:undefined})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,settings:{...brief.settings,bgsVisualEditing:false}}))
-      .toEqual({initialDelivery:'design-led-first-version',editableContent:false})
+      .toEqual({initialDelivery:'design-led-first-version',editableContent:false,webBoot:'react-web-storage-v1'})
     expect((await observeProjectCreation(f.root,{...brief,settings:{platform:'Native',engine:'Unity'}}))?.webStarter).toBeUndefined()
     await writeFile(join(f.root,'README.md'),'Existing user source')
     expect(await observeProjectCreation(f.root,brief)).toBeUndefined()
@@ -164,7 +164,14 @@ test.each(['procedural','resources','pure-ui'])('built starter consumes edited s
       await rm(join(f.root,'content/scenes'),{recursive:true})
       expect(index).not.toHaveProperty('documentRevision')
       expect(index).not.toHaveProperty('assetManifestRevision')
-      expect((await registeredContentChecks(f.root,{},true)).every(c=>c.status==='passed')).toBe(true)
+    }
+    // Rendering alone previously hid the color-only Sprite/resource-check
+    // contradiction. Exercise both sides of the shipped content contract.
+    // The resource-loader fixture retains an unrelated example
+    // production obligation; it does not establish that asset's delivery.
+    if (mode !== 'resources') {
+      const contentChecks = await registeredContentChecks(f.root,{},true)
+      expect(contentChecks.filter(c=>c.status!=='passed')).toEqual([])
     }
     const build=Bun.spawn([process.execPath,join(dirname(require.resolve('vite/package.json')),'bin/vite.js'),'build'],
       {cwd:f.root,stdout:'pipe',stderr:'pipe'})

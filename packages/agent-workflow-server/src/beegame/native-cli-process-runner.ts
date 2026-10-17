@@ -179,6 +179,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       }) : undefined
       const projectAccess = taskAccess ? undefined : await projectExecutionAccess({
         workspacePath: input.cwd, sessionId: input.sessionId, environment: executionEnvironment,
+        ...(input.managedWebBoot ? {managedWebBoot:true as const} : {}),
         toolResultsDirectory,
         ...(input.toolPolicy ? { scopedTools: input.nativeTools } : {}),
       })

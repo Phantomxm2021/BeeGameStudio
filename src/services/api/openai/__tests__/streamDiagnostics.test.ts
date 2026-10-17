@@ -50,6 +50,14 @@ test('real SDK preserves split CRLF/UTF-8 SSE, delta-less terminal and trailing 
     terminalWithoutDelta: true, doneSeen: true, eofSeen: true, invalidFrames: 0, pendingFrame: false })
 })
 
+test.each([undefined, null, ''])('wire summary distinguishes empty reasoning from an absent/null field (%s)', async reasoning => {
+  const { summary, error } = await run(frame({ choices: [{ index: 0, delta: { content: 'Answer' }, finish_reason: null }] })
+    + frame({ choices: [{ index: 0, delta: reasoning === undefined ? {} : { reasoning_content: reasoning }, finish_reason: null }] })
+    + frame(terminal) + 'data: [DONE]\n\n')
+  expect(error).toBeUndefined()
+  expect(summary.thinkingReturned).toBe(reasoning === '')
+})
+
 test.each(['', 'data: [DONE]\n\n', 'data: {"PRIVATE_PARTIAL":'])('missing terminal remains a failure at EOF (%s)', async ending => {
   const { summary, stopped, error } = await run(frame(text) + ending)
   expect(error).toBeDefined()

@@ -38,6 +38,7 @@ it('drains the capsule over ten seconds and sends only one automatic retry', asy
     expect(retry.onRetry).not.toHaveBeenCalled();
     await act(async () => vi.advanceTimersByTime(5000));
     expect(retry.onRetry).toHaveBeenCalledExactlyOnceWith(true);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     await act(async () => vi.advanceTimersByTime(30_000));
     expect(retry.onRetry).toHaveBeenCalledTimes(1);
 });
@@ -46,13 +47,20 @@ it('manual retry wins over the timer, including rapid duplicate clicks', async (
     vi.useFakeTimers();
     let finish!: () => void;
     const retry = control({ onRetry: vi.fn(() => new Promise<void>(resolve => { finish = resolve; })) });
-    render(<RuntimeErrorNotice content="Connection error." retry={retry} lang="zh" />);
+    const view = render(<RuntimeErrorNotice key="failure" content="Connection error." retry={retry} lang="zh" />);
     await act(async () => vi.advanceTimersByTime(9900));
-    fireEvent.click(screen.getByRole('button', { name: '立即重试' }));
-    fireEvent.click(screen.getByRole('button', { name: '立即重试' }));
+    const button = screen.getByRole('button', { name: '立即重试' });
+    fireEvent.click(button);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(button);
     await act(async () => vi.advanceTimersByTime(20_000));
     expect(retry.onRetry).toHaveBeenCalledExactlyOnceWith(false);
     await act(async () => finish());
+    view.rerender(<RuntimeErrorNotice key="failure" content="Connection error." lang="zh" />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    view.rerender(<RuntimeErrorNotice key="new-failure" content="New connection error." lang="zh" retry={control({ messageId: 'new-failure', autoRetry: false })} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('New connection error.');
+    expect(screen.getByRole('button', { name: '立即重试' })).toBeEnabled();
 });
 
 it('shows only the retry capsule without a close button', () => {

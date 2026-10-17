@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { mapStoredModelConfigToRuntime } from '@bee-game-studio/agent-workflow'
+import { OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go'
 import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
 import {
   createProcessIsolatedModelRuntimeHost,
   getModelRuntimeWorkerEnvironment,
   serializeStructuredModelToolResult,
   type ModelRuntimeWorkerRequest,
+  type ModelRuntimeWorkerResponse,
 } from '../beegame/model-runtime-host'
 
 const providerUrl = 'https://provider.example.test/v1'
@@ -30,6 +33,52 @@ describe('OpenAI-compatible provider pinning', () => {
   afterEach(async () => {
     await rm(testRoot, { recursive: true, force: true })
   })
+
+  for (const provider of ['openai-compatible', 'anthropic-compatible'] as const) {
+    test(`the real isolated worker routes ${provider} Go side queries to the configured endpoint`, async () => {
+      const profile = OPENCODE_GO_PROFILES[provider]
+      const runtime = mapStoredModelConfigToRuntime({ provider, baseUrl: profile.baseUrl,
+        apiKey: 'offline-go-key', models: profile.defaults })
+      const requests: Array<Record<string, unknown>> = []
+      let child: ReturnType<typeof Bun.spawn>
+      let timeout: ReturnType<typeof setTimeout>
+      const result = new Promise<ModelRuntimeWorkerResponse>((resolve, reject) => {
+        child = Bun.spawn([process.execPath, '--preload', new URL('./model-runtime-worker.fixture.ts', import.meta.url).pathname,
+          new URL('../beegame/model-runtime-worker.ts', import.meta.url).pathname], {
+          env: { ...getModelRuntimeWorkerEnvironment(), BGS_SIMPLE: '1', BGS_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+            BEEGAME_CONFIG_DIR: join(testRoot, 'config'), NODE_ENV: 'test' },
+          stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+          ipc(raw) {
+            const response = raw as ModelRuntimeWorkerResponse | { type: 'fixture.request'; [key: string]: unknown }
+            if (response.type === 'fixture.request') requests.push(response)
+            if (response.type === 'model.result' || response.type === 'model.error') resolve(response)
+          },
+        })
+        timeout = setTimeout(() => reject(new Error('Offline worker did not finish')), 10_000)
+        child.send({ type: 'model.generate', requestId: 'offline', input: {
+          cwd: testRoot, runtimeEnv: { BGS_USE_OPENAI: '', BGS_USE_GEMINI: '', BGS_USE_GROK: '',
+            ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_API_KEY: '', ANTHROPIC_BASE_URL: '', ...runtime.env },
+          approvedOutboundTargets: { provider: { url: profile.baseUrl, addresses: ['93.184.216.34'], trustedDevelopmentProxy: true } },
+          systemPrompt: 'Return OFFLINE_OK.', messages: [{ role: 'user', content: 'Offline fixture' }],
+          maxTokens: 16, querySource: 'beegame_idea_intake',
+        } })
+      })
+      try {
+        const response = await result
+        expect(response).toMatchObject({ type: 'model.result', content: 'OFFLINE_OK', usage: { input_tokens: 10, output_tokens: 1 } })
+        expect(requests).toHaveLength(1)
+        expect(requests[0]).toMatchObject({
+          url: profile.baseUrl + (provider === 'openai-compatible' ? '/chat/completions' : '/v1/messages?beta=true'),
+          model: profile.defaults.balanced, sessionHeaderPresent: true,
+          [provider === 'openai-compatible' ? 'bearerMatches' : 'apiKeyMatches']: true,
+        })
+      } finally {
+        clearTimeout(timeout!)
+        child!.kill()
+        await child!.exited
+      }
+    })
+  }
 
   test('passes only approved, resolved provider targets to the isolated worker', async () => {
     const workerInputs: ModelRuntimeWorkerRequest['input'][] = []

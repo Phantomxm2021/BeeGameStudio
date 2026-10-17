@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { openAgentTools } from './agent-tools'
 import { projectPreviewCapabilityPath } from '../project-preview-capability'
 import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
+import { designHandoffPath } from '../design-handoff'
 
 test('baseline CLI summarizes integrity without hiding failures or certifying absent layouts', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-baseline-cli-')))
@@ -16,6 +17,7 @@ test('baseline CLI summarizes integrity without hiding failures or certifying ab
     async assertActive(write = false) { inspected.push(write) },
     async close() {},
     designFileChanges: () => ({scope: 'design-revision-files',attemptId: 'fixture',requestKey: 'fixture',status: 'unverified',files: []}),
+    lockDesignBaseline: unexpected,
     async handoff(paths = [], details = false) {
       sourceRequests.push({ paths, details })
       throw Error('Synthetic source inspection failure')
@@ -56,6 +58,23 @@ test('baseline CLI summarizes integrity without hiding failures or certifying ab
     expect(compact.stdout.length).toBeLessThan(detailed.stdout.length)
     expect(await readFile(join(root, 'docs/GDD.md'), 'utf8')).toBe(original)
 
+    const help = JSON.parse((await command('--design', 'help')).stdout)
+    expect(help.acceptanceInstruction).toContain('An existing measurement is immutable')
+    expect(help.acceptanceInstruction).not.toContain('attach the report to the existing measurement')
+    expect(help.acceptanceInstruction).toContain('verification.contentChecks')
+    const technicalPath = join(root, designHandoffPath('TECHNICAL_DESIGN.md'))
+    const technical = await readFile(technicalPath, 'utf8'), broken = JSON.parse(technical)
+    broken.implementationItems[0].requirementRefs = []
+    await writeFile(technicalPath, JSON.stringify(broken))
+    const draft = await command('--design', 'draft', 'TECHNICAL_DESIGN.md')
+    expect(draft.code, draft.stderr).toBe(1)
+    const diagnostic = JSON.parse(draft.stdout)
+    expect(diagnostic.availableRequirements).toContainEqual(expect.objectContaining({ document: 'GDD.md' }))
+    expect(diagnostic.issues.join(' ')).toContain('--design draft TECHNICAL_DESIGN.md')
+    expect(diagnostic.issues.join(' ')).not.toContain('--check-handoff-drafts')
+    expect(await readFile(technicalPath, 'utf8')).toBe(JSON.stringify(broken))
+    await writeFile(technicalPath, technical)
+
     // Details are a fresh read, not a cached success after input changes.
     await writeFile(join(root, 'docs/GDD.md'), 'Invalid fixture: required sections removed')
     const failed = await command('--design', 'baseline')
@@ -70,11 +89,14 @@ test('baseline CLI summarizes integrity without hiding failures or certifying ab
     expect(source.code).toBe(1)
     expect(sourceRequests).toEqual([{ paths: ['docs/GDD.md'], details: true }])
     expect(JSON.parse(source.stdout)).toEqual({ error: 'Synthetic source inspection failure' })
+    expect((await command('--design', 'draft', '../GDD.md')).code).toBe(1)
     const beforeInvalid = inspected.length
     for (const args of [
       ['--design', 'baseline', '--details', '--details'],
       ['--design', 'finalize', '--details'],
       ['--design', 'baseline', 'docs/GDD.md'],
+      ['--design', 'draft'],
+      ['--design', 'draft', 'GDD.md', 'TECHNICAL_DESIGN.md'],
     ]) expect((await command(...args)).code).toBe(1)
     expect(inspected).toHaveLength(beforeInvalid)
     expect(inspected.every(write => write === false)).toBe(true)

@@ -418,7 +418,12 @@ function validateComponentScene(input: {
         input.issues.push(
           `${input.path}: Scene component ${component.type} is not an asset consumer and cannot own assetRef (${node.id}).`,
         )
-      if (!input.bindingsPending && ['sprite-renderer', 'mesh-filter', 'skinned-mesh-renderer', 'tilemap'].includes(component.type) && !component.assetRef)
+      // The shared 2D surface already renders color-only sprites. They consume
+      // authored geometry/color, not an external asset; other consumers still
+      // require their actual resource binding.
+      const colorSprite = input.document.kind === 'scene-2d' && component.type === 'sprite-renderer' &&
+        typeof component.data?.color === 'string' && component.data.color.trim().length > 0
+      if (!input.bindingsPending && ['sprite-renderer', 'mesh-filter', 'skinned-mesh-renderer', 'tilemap'].includes(component.type) && !component.assetRef && !colorSprite)
         input.issues.push(
           `${input.path}: Scene component ${component.type} requires assetRef (${node.id}).`,
         )

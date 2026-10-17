@@ -2,6 +2,7 @@
  * Uses the same schema and geometry/atlas functions as BGS; no filesystem,
  * workflow, physics or gameplay policy belongs in this module. */
 export * from './game-content-schema'
+export { createGameStorage } from './preview-storage.mjs'
 export * from '../../../scene-editor/src/content-coordinates'
 export { resolveUiNodesForViewport } from '../../../scene-editor/src/ui-responsive'
 export { initializeUiLayout, type UiLayoutOptions } from '../../../scene-editor/src/ui-container-layout'

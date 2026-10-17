@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import sharp from 'sharp'
 import { createRun, digest, type AgentTurn } from './state'
 import { createLocalWorkflowStore } from './store'
-import { createAgentMeasurement } from './agent-measurement'
+import { createAgentMeasurement, registeredContentChecks } from './agent-measurement'
 import { openAgentTools } from './agent-tools'
 import { observeProjectCreation, installWebStarter } from './web-project-start'
 import { projectPreviewCapabilityPath } from '../project-preview-capability'
@@ -17,8 +17,8 @@ import { writeBeeGameAssetManifest } from '../asset-contracts'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { sharedPlaywright } from '../shared-playwright'
 
-// A new-policy project, not the legacy starter. The authored fixture explicitly
-// wires the public helpers; this proves integration, not model design ability.
+// A new-policy project, not the legacy starter. BGS installs its thin boot;
+// the authored game wires its own rendering helpers, not its storage service.
 test('new design-led project installs public helpers and consumes its registered resources in a nested build', async () => {
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-new-design-integration-')))
   const workspace=join(root,'project')
@@ -51,7 +51,7 @@ test('new design-led project installs public helpers and consumes its registered
         stdout:'pipe',stderr:'pipe'})
       const [code,out,error]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()])
       const result=JSON.parse(out)
-      expect({code,error}).toEqual({code:result.valid===false?1:0,error:''})
+      expect({code,error}).toEqual({code:result.valid===false||result.error?1:0,error:''})
       return result
     }
     await writeDesignDocumentsFixture(workspace)
@@ -95,7 +95,11 @@ test('new design-led project installs public helpers and consumes its registered
     expect((await command('handoff.mjs','--design','finalize')).valid).toBe(true)
     const implementation=await command('handoff.mjs','--design','implementation')
     expect(implementation.valid).toBe(true)
-    await writeFile(join(workspace,'src/main.js'),`import {parseBeeGameContentIndex,fetchStartupContentDocuments,readSceneData,readUiData,loadProductionResources,createProductionUiSurface,renderProductionScene2d} from './consumer.mjs';
+    await writeFile(join(workspace,'src/game.jsx'),`import {parseBeeGameContentIndex,fetchStartupContentDocuments,readSceneData,readUiData,loadProductionResources,createProductionUiSurface,renderProductionScene2d} from './consumer.mjs';
+export async function createGame({root,storage}) {
+if(!storage)throw Error('Thin entry did not initialize storage');
+root.innerHTML='<canvas id="scene"></canvas><div id="ui"></div>';
+const style=document.createElement('style');style.textContent='body{margin:0}#scene,#ui{position:absolute;inset:0;width:960px;height:540px}';document.head.append(style);
 const indexUrl=new URL('./content/index.json',document.baseURI);
 const docs=await fetchStartupContentDocuments(parseBeeGameContentIndex(await (await fetch(indexUrl)).json()),indexUrl);
 const resources=await loadProductionResources(new URL('./assets/asset-manifest.json',document.baseURI),docs);
@@ -104,12 +108,12 @@ renderProductionScene2d(document.querySelector('#scene'),readSceneData(docs.find
 const surface=await createProductionUiSurface(document.querySelector('#ui'));
 const ui=readUiData(docs.find(d=>d.kind==='ui-screen'));let clicks=0;
 const render=()=>surface.render(ui,viewport,{assets:resources.assets,fonts:resources.fonts,state:{status:String(clicks)},onAction:()=>{clicks++;render()}});
-render();addEventListener('pagehide',()=>{surface.dispose();resources.dispose()});
+render();return()=>{surface.dispose();resources.dispose();style.remove()};
+}
 `)
-    await writeFile(join(workspace,'index.html'),'<style>body{margin:0}#scene,#ui{position:absolute;inset:0;width:960px;height:540px}</style><canvas id="scene"></canvas><div id="ui"></div><script type="module" src="./main.js"></script>')
-    await writeFile(join(workspace,'scripts/build.mjs'),`import {mkdir,copyFile} from 'node:fs/promises';import {copyRegisteredRuntimeFiles} from './runtime-files.mjs';
-const result=await Bun.build({entrypoints:['src/main.js'],outdir:'dist',target:'browser'});if(!result.success)throw Error(String(result.logs));
-await mkdir('dist',{recursive:true});await copyFile('index.html','dist/index.html');await copyRegisteredRuntimeFiles(process.cwd(),'dist');`)
+    await writeFile(join(workspace,'scripts/build.mjs'),`import {copyRegisteredRuntimeFiles} from './runtime-files.mjs';
+const result=await Bun.build({entrypoints:['index.html'],outdir:'dist',target:'browser'});if(!result.success)throw Error(String(result.logs));
+await copyRegisteredRuntimeFiles(process.cwd(),'dist');`)
     const build=async()=>{
       const child=Bun.spawn([process.execPath,'scripts/build.mjs'],{cwd:workspace,stdout:'pipe',stderr:'pipe'})
       const [code,error]=await Promise.all([child.exited,new Response(child.stderr).text()])
@@ -191,16 +195,14 @@ await mkdir('dist',{recursive:true});await copyFile('index.html','dist/index.htm
       const path=join(workspace,'docs',name)
       await writeFile(path,(await readFile(path,'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm,''))
     }
-    await command('handoff.mjs','--design','finalize')
-    const sourceOnly=await command('handoff.mjs','--design','implementation')
-    const report=JSON.parse(await readFile(join(workspace,DESIGN_ACCEPTANCE_PATH),'utf8'))
-    report.verification={...report.verification,designRevision:sourceOnly.designRevision,contentChecks:[],
-      requirementChecks:designRequirementChecksFixture(workspace,[evidence])}
-    await writeFile(join(workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(report))
-    expect((await inspectDesignAcceptance(workspace,true,false)).valid).toBe(true)
+    expect((await command('handoff.mjs','--design','finalize')).error).toContain('Planning records are locked')
+    expect((await command('handoff.mjs','--design','implementation')).error).toContain('locked implementation baseline')
+    expect((await inspectDesignAcceptance(workspace,true,false)).valid).toBe(false)
     expect((await command('handoff.mjs','--design','acceptance')).valid).toBe(false)
     expect((await measurement.handoff()).acceptance.valid).toBe(false)
-    expect(await agentTurnHandoffReason(run,turn)).toContain('editable content is missing')
+    expect((await registeredContentChecks(workspace,brief.settings,true)).find(check=>check.id==='content-structure'))
+      .toMatchObject({status:'failed',observation:expect.stringContaining('content/index.json')})
+    expect(await agentTurnHandoffReason(run,turn)).toContain('Design revision is missing or changed')
   } finally {
     await browser?.close();server?.stop(true);await tools?.close();await measurement.close()
     await rm(root,{recursive:true,force:true})

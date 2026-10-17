@@ -59,6 +59,7 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
     result.coverage = { files: paths, limitations: [
       'Measured static build only; not published deployment, server/native/XR behavior or installation/export completeness.',
       'No proof of gameplay, original requirement coverage, aesthetics/audio quality or formal content consumption. Explicit user publication is separate.',
+      'Measurement save data is disposable and isolated from actual Preview saves; loading is not proof of cross-session persistence.',
     ] }
     if (id === 'delivery-package') {
       // Same bytes is a packaging check, NOT data-use proof or design authority.
@@ -118,8 +119,8 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
       try { probes = await prepareSceneProbes(root, task, result) }
       catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported Scene consumption input'; return result }
       result.coverage = { files: [...new Set(probes.map(probe => probe.document))], limitations: [
-        'Selected visible 2D Scene node only: disabling that node in a served JSON response must change a stable actual Canvas screenshot.',
-        'No proof of correct position, shape, resources, other nodes/states, gameplay or visual quality. An unchanged or unstable image remains unverified.',
+        'Selected color-only 2D Sprite: stable enabled causality plus source-derived pixel polygons for baseline, local position/rotation/scale and parent transforms.',
+        'Asset materials, other nodes/states, Canvas/window adaptation, gameplay and visual quality are not certified. Unsupported, occluded or unobservable geometry remains unverified; enabled-only evidence cannot pass transforms.',
       ] }
       await observeStaticBuild(root, artifact, paths, result, signal, probes)
     } else if (id === 'pixel-data-consumption') {
@@ -197,7 +198,7 @@ export async function observeStaticBuild(root: string, artifact: string, paths: 
     if (!node) throw new Error('Browser driver needs an installed Node executable; no runtime was downloaded')
     const files = paths.map(path => ({ path: path.slice(artifact.length+1), sha256: result.inputs.find(v => v.path === path)!.sha256,
       mime: Bun.file(resolve(root, path)).type || 'application/octet-stream' }))
-    const sharpModule = uiProbes?.some(probe => 'mode' in probe && probe.mode === 'pixels') ? (await sharedSharp()).moduleUrl : undefined
+    const sharpModule = uiProbes?.some(probe => 'mode' in probe && (probe.mode === 'pixels' || probe.mode === 'scene')) ? (await sharedSharp()).moduleUrl : undefined
     const observation = await new Promise<string>((resolvePromise, reject) => {
       child = spawn(node, [fileURLToPath(new URL('./runtime-browser.mjs', import.meta.url))], { cwd: root,
         env: { PATH: process.env.PATH, BGS_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl, BGS_SHARP_MODULE: sharpModule }, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] })

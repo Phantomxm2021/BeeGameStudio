@@ -20,6 +20,8 @@ test('template is read-only and remains available with an older saved content fo
     expect(PROJECT_GUIDE_TEMPLATE).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(PROJECT_GUIDE_TEMPLATE).toContain('For a new complete game design')
     expect(PROJECT_GUIDE_TEMPLATE).toContain('GDD.md')
+    expect(PROJECT_GUIDE_TEMPLATE).toContain('Architecture decisions belong in their existing design/configuration sources')
+    expect(PROJECT_GUIDE_TEMPLATE).not.toContain('update them when the implementation changes')
     expect(await readFile(file,'utf8')).toBe(saved)
     await expect(access(join(root,'CLAUDE.md'))).rejects.toThrow()
   }finally{await rm(root,{recursive:true,force:true})}

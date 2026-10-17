@@ -7,6 +7,7 @@ import { digest, WorkflowError, type Run, type CheckResult, type FileVersion, ty
 import { projectFiles, projectDependencies, sameFiles, changedProjectPaths } from './editable-project'
 import { EDITABLE_BUILD_CHECK_VERSION, CHECK_VERSIONS } from './check-versions'
 import { artifactDigest } from '../runtime-acceptance'
+import { designBaselineIssue } from './design-baseline'
 
 export function blockingRegisteredContentChecks(measurement: AgentMeasurement) {
   return measurement.checks.filter(check =>
@@ -117,6 +118,7 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     for(const report of measurement.reports)
       if(!await versionsMatch(run.workspacePath,[report]))changedReports.push(report.path)
     const changedSources=changedProjectPaths(proof.files,await projectFiles(run.workspacePath,artifact.path,proof.excludedReports))
+    const baselineIssue=designBaselineIssue(run,purpose!=='preview' && run.creation?.initialDelivery==='design-led-first-version')
     const dependenciesChanged=proof.dependencySha256!==await projectDependencies(run.workspacePath)
     // Export identity and observed runtime evidence are different facts. A
     // source-only edit must not be described as changed runtime bytes. These
@@ -147,6 +149,7 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
       !buildOrArtifactChanged
     const previewDiscussion=purpose==='preview' && pendingDiscussion
     const reasons=[
+      ...(baselineIssue?[baselineIssue]:[]),
       ...(changedReports.length?['Reports changed or are missing: '+changedReports.join(', ')+'. Finalize evidence before measuring; the receipt is already saved in BGS, not in these files.']:[]),
       ...(pendingDiscussion && !previewDiscussion?['Source/build/report inputs are unchanged after a settled chat message. Confirm that it did not change the game before publication; a question alone does not require a rebuild. If it changed requirements, remeasure affected results.']:[]),
       ...(!pendingDiscussion && (requirementsChanged || sourceSaveChanged)?['Requirements or an authorized source save changed; remeasure affected results']:[]),
@@ -156,7 +159,7 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
       ...(changes.checkInputs.length?['Saved check inputs or checker versions differ: '+changes.checkInputs.join(', ')]:[]),
       ...(consumptionBlocked?['Requested consumption checks have not passed: '+incomplete.join(', ')+'. Build/smoke observations remain separate from consumption evidence. Inspect actual failures and coverage; an unsupported probe does not mandate a renderer change or automatic retry.']:[]),
     ]
-    const inputChanges=sourceSaveChanged || changedReports.length || changedSources.length || dependenciesChanged || buildOrArtifactChanged
+    const inputChanges=Boolean(baselineIssue) || sourceSaveChanged || changedReports.length || changedSources.length || dependenciesChanged || buildOrArtifactChanged
     const code=!reasons.length ? 'current'
       : consumptionBlocked && !inputChanges && (!requirementsChanged || pendingDiscussion) ? 'preview-unverified'
       : pendingDiscussion && !previewDiscussion ? 'discussion-confirmation-required' : 'measurement-stale'

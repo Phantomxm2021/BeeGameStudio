@@ -13,8 +13,6 @@ import {
 import { OPENCODE_GO_PROFILES } from '../opencode-go'
 
 describe('agent workflow model configs', () => {
-  const legacyRuntimeEnvPrefix = ['CLAU', 'DE_CODE_USE_'].join('')
-
   beforeEach(() => {
     resetAgentWorkflow()
   })
@@ -47,7 +45,7 @@ describe('agent workflow model configs', () => {
     expect(runtime).toEqual({
       modelType: 'openai',
       env: {
-        [`${legacyRuntimeEnvPrefix}OPENAI`]: '1',
+        BGS_USE_OPENAI: '1',
         OPENAI_BASE_URL: 'https://llm.example.invalid/v1',
         OPENAI_API_KEY: 'sk-dashboard-secret',
         OPENAI_DEFAULT_HAIKU_MODEL: 'fast-model',

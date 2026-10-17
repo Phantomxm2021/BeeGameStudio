@@ -12,6 +12,7 @@ import { saveHostExitReceipt, type HostExitReceipts, type HostExitFacts } from '
 import { installWebStarter } from './web-project-start'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
 import { DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
+import { assertManagedWebBoot } from './managed-web-boot'
 
 type AgentExecutionOptions = Partial<StartBeeGameSessionInput> & {
   attachments?: BeeGameAttachment[]
@@ -61,6 +62,7 @@ export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVers
   ...professionalContextParagraphs,
   ...(!followup && run.creation?.initialDelivery === 'design-led-first-version' ? [firstVersionDeliveryContext] : []),
   ...(run.creation?.editableContent ? [editableWebDeliveryContext] : []),
+  ...(run.creation?.webBoot ? ['This new React/Web project uses BGS-maintained startup/storage wiring. The current webBoot facts supply the game factory contract; the existing implementation handoff installs the thin entry after planning, without a game/UI template.'] : []),
 ].join('\n')
 export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run['sourceEdits']> = []): string {
   return [...(message.intent==='discuss' ? ['This request authorizes discussion only, without changes or execution.'] : []),
@@ -236,10 +238,12 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     let image: AgentImageAccess | undefined
     let executionContext: Record<string, unknown> | undefined
     const measurement = createAgentMeasurement({run,turn,store:input.store,executionContext:()=>executionContext,
-      skillUses:()=>turnId ? skillEvidence(input.sessions.transcript(turn.sessionId).filter(e=>e.turnId===turnId)) : []})
+      skillUses:()=>turnId ? skillEvidence(input.sessions.transcript(turn.sessionId).filter(e=>e.turnId===turnId)) : [],
+      onDesignLocked:()=>input.sessions.setProjectDesignLocked(run.chatSessionId,true)})
     try {
       if (disposing || (await read(run)).paused) throw new Error('Worker stopped or user paused before dispatch')
       const previous=run.agentTurns!.filter(t=>t.attemptId!==turn.attemptId).at(-1)
+      await assertManagedWebBoot(run)
       if (!turn.message) await installWebStarter(run)
       const focused=turn.message?.contextMode==='focused'
       if(focused)executionContext=focusedExecutionFacts(run,await readSessionTranscriptFromDisk(run.chatSessionId,run.workspacePath))
@@ -255,6 +259,8 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         ...(focused ? {freshNativeContext:true} : turn.message && previous?.nativeSessionId ? {resumeNativeSessionId:previous.nativeSessionId}:{}),
         authToken:options.authToken, getValidAuthToken:options.getValidAuthToken })
       if (session.id!==run.chatSessionId) throw new Error('Native goal must use the bound project conversation')
+      input.sessions.setProjectDesignLocked(session.id,Boolean(run.designBaseline))
+      input.sessions.setProjectManagedWebBoot(session.id,Boolean(run.creation?.webBoot))
       await input.sessions.sendWithDisplay(session.id, turn.message ? agentMessagePrompt(turn.message,
         run.sourceEdits?.filter(e=>e.fence>(run.agentTurns?.at(-2)?.fence??0))) : agentGoalPrompt(run), {
         displayKind:turn.message ? 'workflow_v3_'+turn.message.intent : 'workflow_v3_goal',
@@ -404,6 +410,9 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         throw new WorkflowError('invalid-continuation','Continuation must address the latest interrupted or failed native turn',400)
     }
     const next=structuredClone(run);next.version++;next.fence++;next.status='running'
+    // Only the explicit change route grants replanning. A question, ordinary
+    // work or interrupted continuation does not release the design authority.
+    if (message?.intent === 'change') delete next.designBaseline
     if(message && ['change','message'].includes(message.intent)) {
       const original=run.requirementChanges?.[0]?.before ?? run.requirements
       const allMessages=[...run.agentTurns.flatMap(t=>t.message ? [t.message]:[]),message]

@@ -43,7 +43,7 @@ export function registerV3Routes(app: Hono, input: {
   readBody(request: Request): Promise<unknown>;
   registerCleanup?: (fn: () => Promise<void>) => void;
   resourceLibraryBaseUrl?: string;
-  openAgentPreview?: (value: {request: Request; user: BeeGameUserContext; workspacePath: string; sessionId: string}) => AgentPreviewAccess | Promise<AgentPreviewAccess>;
+  openAgentPreview?: (value: {request: Request; user: BeeGameUserContext; projectId: string; workspacePath: string; sessionId: string}) => AgentPreviewAccess | Promise<AgentPreviewAccess>;
   openAgentImage?: (value: {user: BeeGameUserContext; projectId: string; workspacePath: string; visualHandoffVersion?: 1; screenOrientation?: 'Landscape' | 'Portrait'}) => AgentImageAccess | Promise<AgentImageAccess>;
 }) {
   const executor = input.store ? createV3Executor({ store: input.store, sessions: input.sessions, exitReceipts:input.exitReceipts }) : undefined
@@ -321,7 +321,7 @@ export function registerV3Routes(app: Hono, input: {
         userDataRoot:input.getUserDataRoot?.(request),
         authToken:input.getAuthToken(request),getValidAuthToken:input.getValidAuthToken(request),
         openPreview:hasBeeGamePermission(ctx.user,'preview.manage') && input.openAgentPreview ?
-          ()=>input.openAgentPreview!({request,user:ctx.user,workspacePath:ctx.workspace,sessionId:body.chatSessionId}) : undefined,
+          ()=>input.openAgentPreview!({request,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:body.chatSessionId}) : undefined,
       })
       return {turn,runId:run.id,deliveryEligible:false}
   }
@@ -352,7 +352,7 @@ export function registerV3Routes(app: Hono, input: {
         userDataRoot:input.getUserDataRoot?.(c.req.raw),
         authToken:input.getAuthToken(c.req.raw),getValidAuthToken:input.getValidAuthToken(c.req.raw),
         openPreview:hasBeeGamePermission(ctx.user,'preview.manage') && input.openAgentPreview ?
-          ()=>input.openAgentPreview!({request:c.req.raw,user:ctx.user,workspacePath:ctx.workspace,sessionId:body.chatSessionId}) : undefined,
+          ()=>input.openAgentPreview!({request:c.req.raw,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:body.chatSessionId}) : undefined,
       })
       return c.json({turn,runId:ctx.run.id,deliveryEligible:false},202)
     } catch(error) {const detail=routeError(error);return c.json(detail,detail.status)}

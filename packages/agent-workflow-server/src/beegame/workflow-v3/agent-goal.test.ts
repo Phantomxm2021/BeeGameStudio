@@ -1,5 +1,4 @@
 import { test, expect } from 'bun:test'
-import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
 import { Hono } from 'hono'
 import { mkdtemp, mkdir, realpath, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -12,6 +11,55 @@ import { createRun, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
 import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS } from './project-guide'
+import { createAgentMeasurement } from './agent-measurement'
+import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
+import { readContentView } from './content-view'
+import { createV3Executor } from './execution'
+import { designBaselineIssue } from './design-baseline'
+
+test('only explicit change releases the implementation baseline; exact visual saves retain scoped authority across work/messages',async()=>{
+  const f=await fixture('wait'),editor=createV3Executor({store:f.store,sessions:f.sessions})
+  let measurement:ReturnType<typeof createAgentMeasurement>|undefined
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(()=>f.submissions.length===1)
+    await writeDesignDocumentsFixture(f.root)
+    await writeFile(join(f.root,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',dimension:'2d',entryScene:'level',
+      files:['ui/menu.json','scenes/level.json'],documents:[{id:'menu',path:'ui/menu.json',kind:'ui-screen',loadPhase:'startup'},{id:'level',path:'scenes/level.json',kind:'scene-2d',loadPhase:'startup'}]}))
+    measurement=createAgentMeasurement({run,turn:run.agentTurns![0]!,store:f.store,onDesignLocked:()=>f.sessions.setProjectDesignLocked(run.chatSessionId,true)})
+    await measurement.lockDesignBaseline()
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    const original=run.designBaseline!
+    f.setMode('normal')
+    await f.call('/stop','POST')
+    run=await f.wait(r=>!r.writer)
+    await f.call('/resume','POST',{planRevision:run.planRevision})
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    const view=await readContentView(f.root)
+    if(view.state!=='draft')throw Error('Fixture UI missing')
+    const entry=view.documents.find(doc=>doc.path==='ui/menu.json')!
+    if(!('document' in entry)||!entry.document)throw Error('Fixture document missing')
+    const document=structuredClone(entry.document) as any
+    document.data.nodes[1].layout.size[1]=64
+    await editor.edit(run,{path:'ui/menu.json',expectedRevision:entry.revision,document,requestKey:'exact-save',
+      workflow:{version:run.version,planRevision:run.planRevision,requirementsRevision:run.requirements.revision}})
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    expect(run.designBaseline?.sourceEditId).toBe(run.sourceEdits!.at(-1)!.attemptId)
+    expect(run.designBaseline?.revision).not.toBe(original.revision)
+    expect(run.designBaseline?.protectedFiles).toEqual(original.protectedFiles)
+    expect(designBaselineIssue(run)).toBeUndefined()
+    const saved=structuredClone(run.designBaseline)
+    for(const intent of ['work','message','change'] as const) {
+      const response=await f.call('/agent/messages','POST',{requestKey:intent,runId:run.id,chatSessionId:run.chatSessionId,
+        expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent,text:intent==='change'?'Explicitly revise the requested design':'Inspect or implement the existing design'})
+      expect(response.status,await response.clone().text()).toBe(202)
+      run=await f.wait(r=>Boolean(r.agentTurns!.at(-1)?.finishedAt)&&r.agentTurns!.at(-1)?.requestKey===intent)
+      expect(run.designBaseline).toEqual(intent==='change'?undefined:saved)
+    }
+    expect(run.requirementChanges?.at(-1)?.after.text).toContain('Explicitly revise the requested design')
+    expect(original.attemptId).toBe(run.agentTurns![0]!.attemptId)
+  }finally{await measurement?.close();await editor.dispose();await f.close()}
+},30000)
 
 test('resource obligations retain authorization and provenance without prescribing a sourcing or atlas tour', () => {
   for (const prompt of [agentProfessionalContext, agentProfessionalContextForRun({} as Run)]) {
@@ -161,7 +209,7 @@ test('blank confirmed Web intake uses the design-led first version without creat
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true,webStarter:'react-canvas-2d-v1'})
+    expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true,webStarter:'react-canvas-2d-v1',webBoot:'react-web-storage-v1'})
     const initialMessage = f.sessions.transcript(run.chatSessionId).find(event => event.type === 'user.message')!
     expect(initialMessage, run.blockedReason).toBeDefined()
     expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
@@ -228,6 +276,24 @@ test('saved guide markers do not trigger host repair or retain an exited writer'
     expect(run.writer).toBeUndefined()
     expect(run.blockedReason).not.toContain('Project navigation refresh failed')
     expect(await readFile(path,'utf8')).toBe(damaged)
+  }finally{await f.close()}
+})
+
+test('existing React/Web sources retain their own entry across goal intake and ordinary modification, without managed-boot migration',async()=>{
+  const f=await fixture()
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
+  try {
+    await writeFile(join(f.root,'index.html'),'EXISTING_AUTHOR_ENTRY')
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(r=>Boolean(r.agentTurns![0]?.finishedAt))
+    expect(run.creation).toBeUndefined();expect(run.webBoot).toBeUndefined()
+    await f.call('/agent/messages','POST',{requestKey:'modify-existing',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'work',text:'Modify only existing implementation; do not migrate the entry.'})
+    run=await f.wait(r=>Boolean(r.agentTurns![1]?.finishedAt))
+    expect(run.webBoot).toBeUndefined();expect(f.starts.every(start=>start.managedWebBoot===undefined)).toBe(true)
+    expect(await readFile(join(f.root,'index.html'),'utf8')).toBe('EXISTING_AUTHOR_ENTRY')
+    expect(await Bun.file(join(f.root,'src/bgs-entry.mjs')).exists()).toBe(false)
+    expect(await Bun.file(join(f.root,'src/bgs-storage.mjs')).exists()).toBe(false)
   }finally{await f.close()}
 })
 

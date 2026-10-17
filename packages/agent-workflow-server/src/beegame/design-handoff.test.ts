@@ -5,11 +5,29 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkDesignHandoff, checkDesignHandoffDraft, designCalculationFiles, designSupportingFiles, designDocumentVersion, designHandoffPath, isHigherDocumentVersion,
   readDesignAcceptanceRequirements, snapshotDesignDocuments, finalizeDesignDocuments, changedDesignSections, designReviewReadScope, designReviewIndexes,
-  DESIGN_HANDOFF_INSTRUCTION, type DesignDocument } from './design-handoff'
+  DESIGN_HANDOFF_INSTRUCTION, readDesignImplementationChecklist, type DesignDocument } from './design-handoff'
 import { designDocumentFixture, designHandoffFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
 import { checkDesignDocumentReferences } from './design-document-references'
 
 const digest = (body: string) => createHash('sha256').update(body).digest('hex')
+
+test('implementation exposes both owner/registry link errors before an acceptance report, including legacy registries', () => fixture(async workspace => {
+  // No documents metadata: kinds must come from the saved documents.
+  await writeFile(join(workspace, 'content/index.json'), JSON.stringify({ schema: 'beegame-content-package.v2',
+    id: 'fixture', dimension: '2d', entryScene: 'level', files: ['ui/menu.json', 'scenes/level.json'] }))
+  const originals = new Map<string, string>()
+  for (const owner of ['UI_UX_SPEC.md', 'LEVEL_SCENE_DESIGN.md']) {
+    const path = join(workspace, 'docs', owner), body = await readFile(path, 'utf8')
+    originals.set(path, body)
+    await writeFile(path, body.replace(/\[[^\]]*\]\((\.\.\/content\/[^)]+)\)/g, '`$1`'))
+  }
+  expect(checkDesignHandoff(workspace, [...originals.keys()].map(path => path.split('/').at(-1) as DesignDocument)).valid).toBe(true)
+  expect(() => readDesignImplementationChecklist(workspace)).toThrow('UI_UX_SPEC.md and content/index.json')
+  expect(() => readDesignImplementationChecklist(workspace)).toThrow('LEVEL_SCENE_DESIGN.md and content/index.json')
+  expect(() => readDesignImplementationChecklist(workspace)).toThrow('actual Markdown links')
+  for (const [path, body] of originals) await writeFile(path, body)
+  expect(readDesignImplementationChecklist(workspace).items.length).toBeGreaterThan(0)
+}))
 
 test('document handoff does not constrain HTML/SVG game implementation', () => fixture(async workspace => {
   await mkdir(join(workspace,'src'),{recursive:true})

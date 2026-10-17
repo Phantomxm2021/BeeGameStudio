@@ -5,7 +5,7 @@ import { z } from 'zod/v4'
 import { contentRuntimeCheckSchema } from './content-runtime-contract'
 import { parseBeeGameContentDocument, parseBeeGameContentIndex, isContentEntryKind } from './game-content-schema'
 import { auditUiInteractiveBounds, readUiLayoutCameras } from './ui-layout-audit'
-import { checkDesignHandoff, DESIGN_ACCEPTANCE_PATH, designHandoffPath, designSupportingFiles, isDesignUiFile, isDesignSceneFile, readDesignAcceptanceRequirements } from './design-handoff'
+import { checkDesignHandoff, DESIGN_ACCEPTANCE_PATH, designHandoffPath, designSupportingFiles, designContentLinkIssues, isDesignUiFile, isDesignSceneFile, readDesignAcceptanceRequirements } from './design-handoff'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
 import { designReviewResultSchema, type DesignFinding } from './design-handoff'
 
@@ -259,14 +259,9 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
     if (requireEditableContent && !index.documents.some(entry => entry.kind === 'ui-screen' || entry.kind === 'ui-hud'))
       return diagnostic('verification-incomplete', 'Required editable UI document must be registered')
   }
-  if (bindDesignSources) for (const [owner, declared, registered] of [
-    ['UI_UX_SPEC.md', designUi, runtimeUi], ['LEVEL_SCENE_DESIGN.md', designScenes, runtimeScenes],
-  ] as const) {
-    const missing = [...registered].filter(path => !declared.includes(path))
-    const unregistered = declared.filter(path => !registered.has(path))
-    if (missing.length || unregistered.length)
-      return diagnostic('verification-incomplete', owner + ' and content/index.json must reference the same sources. ' +
-        'Missing design links: ' + (missing.join(', ') || 'none') + '; unregistered design sources: ' + (unregistered.join(', ') || 'none'))
+  if (bindDesignSources) {
+    const issues = designContentLinkIssues(workspace, runtimeUi, runtimeScenes)
+    if (issues.length) return diagnostic('verification-incomplete', issues.join('; '))
   }
   const checks = verification?.contentChecks ?? []
   for (const check of checks) {

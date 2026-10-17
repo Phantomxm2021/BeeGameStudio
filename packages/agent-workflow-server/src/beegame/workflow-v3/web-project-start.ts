@@ -28,6 +28,7 @@ export async function observeProjectCreation(root: string, brief: {
   const settings = brief.settings
   const editableContent = settings.platform === 'Web' && settings.bgsVisualEditing !== false
   return {initialDelivery:'design-led-first-version',editableContent,
+    ...(settings.platform === 'Web' && settings.engine === 'React' ? {webBoot:'react-web-storage-v1' as const} : {}),
     ...(editableContent && settings.engine === 'React' && settings.dimension === '2D' &&
       ['Landscape','Portrait'].includes(String(settings.orientation)) ? {webStarter:'react-canvas-2d-v1' as const} : {})}
 }

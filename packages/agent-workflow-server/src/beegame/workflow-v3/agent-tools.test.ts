@@ -527,6 +527,11 @@ test('Preview test entry uses Node, retains complete output, and cannot reuse a 
   const preview=openPreviewTestAccess({start:async()=>({status:'running'}),status:()=>({status:'idle'}),stop(){},
     browser:{start:async()=>{throw Error('No browser requested')},status:()=>({status:'idle'}),close:async()=>{}} as any})
   const tools=await openAgentTools({workspacePath:root,sessionId:'test-entry',getAuthToken:()=>undefined,openPreview:()=>preview})
+  expect(tools.turnContext).toContain('Preview environment (available before starting it)')
+  expect(tools.turnContext).toContain('"origin":"opaque"')
+  expect(tools.turnContext).toContain('localStorage/sessionStorage can throw')
+  expect(tools.turnContext).toContain('async createGameStorage()')
+  expect(tools.turnContext).toContain('Root-absolute /assets or /content URLs escape')
   const run=async(...args:string[])=>{
     const child=Bun.spawn([Bun.which('node')!,join(root,tools.directory,'preview.mjs'),...args],{cwd:root,
       env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,

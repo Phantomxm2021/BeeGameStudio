@@ -51,9 +51,11 @@ export async function* adaptOpenAIStreamToAnthropic(
 
   // Track thinking block state
   let thinkingBlockOpen = false
+  let thinkingBlockSeen = false
 
   // Track text block state
   let textBlockOpen = false
+  let textBlockIndex = -1
 
   // Track raw OpenAI usage across chunks. The normalized Anthropic fields are
   // disjoint: ordinary input + cache reads + cache writes = total input.
@@ -136,15 +138,16 @@ export async function* adaptOpenAIStreamToAnthropic(
     // empty thinking block must round-trip back to the API in subsequent
     // requests, otherwise DeepSeek rejects with 400.
     const reasoningContent = (delta as any)?.reasoning_content
-    // Preserve an initial empty placeholder, but do not reopen thinking for
-    // later empty fields: that would move the index away from the open text block.
+    // Preserve the first observed empty field even if text/tools arrived first.
+    // Repeated empty fields must not reopen an already observed thinking block.
     if (
       reasoningContent != null &&
-      (reasoningContent !== '' || currentContentIndex === -1)
+      (reasoningContent !== '' || !thinkingBlockSeen)
     ) {
       if (!thinkingBlockOpen) {
         currentContentIndex++
         thinkingBlockOpen = true
+        thinkingBlockSeen = true
         openBlockIndices.add(currentContentIndex)
 
         yield {
@@ -185,6 +188,7 @@ export async function* adaptOpenAIStreamToAnthropic(
 
         currentContentIndex++
         textBlockOpen = true
+        textBlockIndex = currentContentIndex
         openBlockIndices.add(currentContentIndex)
 
         yield {
@@ -199,7 +203,7 @@ export async function* adaptOpenAIStreamToAnthropic(
 
       yield {
         type: 'content_block_delta',
-        index: currentContentIndex,
+        index: textBlockIndex,
         delta: {
           type: 'text_delta',
           text: delta.content,
@@ -227,9 +231,9 @@ export async function* adaptOpenAIStreamToAnthropic(
           if (textBlockOpen) {
             yield {
               type: 'content_block_stop',
-              index: currentContentIndex,
+              index: textBlockIndex,
             } as BetaRawMessageStreamEvent
-            openBlockIndices.delete(currentContentIndex)
+            openBlockIndices.delete(textBlockIndex)
             textBlockOpen = false
           }
 
@@ -289,9 +293,9 @@ export async function* adaptOpenAIStreamToAnthropic(
       if (textBlockOpen) {
         yield {
           type: 'content_block_stop',
-          index: currentContentIndex,
+          index: textBlockIndex,
         } as BetaRawMessageStreamEvent
-        openBlockIndices.delete(currentContentIndex)
+        openBlockIndices.delete(textBlockIndex)
         textBlockOpen = false
       }
 

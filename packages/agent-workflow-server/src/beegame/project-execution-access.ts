@@ -9,6 +9,8 @@ import { sharedPlaywright, preparePreviewRecorder } from './shared-playwright'
 import { sharedSharp, sharedFont } from './shared-sharp'
 import { sharedContentChecker } from './content-checker-runtime'
 import { projectPreviewCapabilityPath } from './project-preview-capability'
+import { PROJECT_DESIGN_PATHS } from './design-handoff'
+import { MANAGED_WEB_BOOT_PATHS } from './workflow-v3/managed-web-boot'
 
 const TOOL_READ_PATHS='BEEGAME_PROJECT_TOOL_READ_PATHS'
 const within=(parent:string,path:string)=>{
@@ -54,6 +56,7 @@ export async function projectExecutionAccess(input: {
   environment: Record<string, string>
   scopedTools?: readonly string[]
   toolResultsDirectory?: string
+  managedWebBoot?: true
 }) {
   const root = await realpath(input.workspacePath)
   const toolReadPaths=await hostToolReadPaths(root)
@@ -137,7 +140,10 @@ export async function projectExecutionAccess(input: {
       allowUnsandboxedCommands: false, excludedCommands: [],
       network: { allowedDomains: [], allowLocalBinding: true },
       filesystem: { denyRead: ['/'], allowRead: [root, ...readPaths, ...toolReadPaths],
-        allowWrite: [root, nativeOutput], denyWrite: [], allowGitConfig: true },
+        // Instructions are not a game output. Shell writes cannot bypass the
+        // existing explicit file-tool approval for changing the root guide.
+        allowWrite: [root, nativeOutput], denyWrite: ['CLAUDE.md', ...PROJECT_DESIGN_PATHS,
+          ...(input.managedWebBoot ? MANAGED_WEB_BOOT_PATHS : [])].map(path => resolve(root, path)), allowGitConfig: true },
     },
   }
   // Keep trusted host/plugin settings; project settings cannot broaden access.

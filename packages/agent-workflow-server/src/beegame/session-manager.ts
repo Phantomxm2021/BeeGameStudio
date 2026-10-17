@@ -1,5 +1,7 @@
 import type { DesignFileChanges } from './workflow-v3/state'
 import { createHash, randomUUID } from 'node:crypto'
+import { PROJECT_DESIGN_PATHS } from './design-handoff'
+import { MANAGED_WEB_BOOT_PATHS } from './workflow-v3/managed-web-boot'
 import { projectRuntimeDisplayReason } from './project-runtime-display'
 import { normalizeRuntimeEnvironment } from '../../../../src/utils/runtimeEnvironment'
 import { isEnvTruthy } from '../../../../src/utils/envUtils'
@@ -294,6 +296,8 @@ export type DeleteBeeGameSessionResult = {
 
 export type BeeGameSessionRunnerStartInput = {
   sessionId: string
+  /** Host-observed new-project contract, never inferred from project files. */
+  managedWebBoot?: true
   /** Host capability discovery, separate from the user's message. */
   systemContext?: string
   /** Host-confirmed UI check conditions; never accepted from model tool input. */
@@ -445,6 +449,8 @@ export type BeeGamePendingPermission = DashboardPermissionRequest & {
 }
 
 type SessionRecord = {
+  designLocked?: boolean
+  managedWebBoot?: boolean
   executionIdentity?: BeeGameRuntimeSnapshot['executionIdentity']
   /** Redact runtime credentials from persisted and streamed Chat events only. */
   redactVisible?: ReturnType<typeof createResponseRedactor>
@@ -1097,6 +1103,18 @@ export class BeeGameSessionManager {
     return this.sendWithDisplay(sessionId, text)
   }
 
+  setProjectDesignLocked(sessionId: string, locked: boolean) {
+    const record = this.sessions.get(sessionId)
+    if (!record?.projectId) throw new Error('Project session not found')
+    record.designLocked = locked
+  }
+
+  setProjectManagedWebBoot(sessionId: string, enabled: boolean) {
+    const record = this.sessions.get(sessionId)
+    if (!record?.projectId) throw new Error('Project session not found')
+    record.managedWebBoot = enabled
+  }
+
   async sendWithDisplay(
     sessionId: string,
     text: string,
@@ -1489,6 +1507,7 @@ export class BeeGameSessionManager {
         record.runner ??
         (await this.runner.start({
           sessionId: record.session.id,
+          ...(record.managedWebBoot ? {managedWebBoot:true as const} : {}),
           systemContext: record.systemContext,
           uiLayoutConstraints: record.uiLayoutConstraints,
           ...(record.isolatedTask ? { isolatedTask: record.isolatedTask } : {}),
@@ -3907,6 +3926,8 @@ type ProjectWorkspaceFileAccessAuthority = {
     | 'project_workspace_file_access'
     | 'project_workspace_boundary'
     | 'project_workspace_target_invalid'
+    | 'project_design_locked'
+    | 'project_managed_web_boot'
   message?: string
 }
 
@@ -3952,6 +3973,14 @@ function projectWorkspaceFileAccessAuthority(
       message: `${request.toolName} may not access files outside the project workspace.`,
     }
   }
+  // Keep instruction changes under the existing explicit permission authority,
+  // even when native omits a safety reason. Ordinary project outputs retain
+  // their current automatic workspace approval.
+  if (writing && record.designLocked && PROJECT_DESIGN_PATHS.includes(rel))
+    return { behavior: 'deny', reason: 'project_design_locked', message: 'Planning records are locked by the implementation baseline. An explicit user design change is required; finalize cannot replace the baseline.' }
+  if (writing && record.managedWebBoot && MANAGED_WEB_BOOT_PATHS.includes(rel as typeof MANAGED_WEB_BOOT_PATHS[number]))
+    return { behavior: 'deny', reason: 'project_managed_web_boot', message: 'BGS maintains this startup/storage entry. Implement the game in src/game.jsx; the existing implementation handoff installs the reserved files.' }
+  if (writing && rel === 'CLAUDE.md') return undefined
   // Native serializes safety/other reasons, but not the ordinary ask rule
   // installed by BGS. Preserve those native prompts without allowing a human
   // approval to bypass the project boundary above.

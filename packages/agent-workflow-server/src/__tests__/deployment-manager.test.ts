@@ -220,6 +220,34 @@ describe('BeeGameDeploymentManager', () => {
     if (rejectVerification) expect(result.url).toBe('')
   })
 
+  test.each([false, true])('measured publication revalidates after public verification: changed=%s', async changed => {
+    workspace = await realpath(workspace)
+    await mkdir(join(workspace, 'site'))
+    await writeFile(join(workspace, 'site/index.html'), '<main>Measured bytes</main>')
+    const artifact = { path: 'site', sha256: await artifactDigest(workspace, 'site', true) }
+    let eligible = true, verified = false
+    const statuses: string[] = []
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => { throw Error('No rebuild') },
+      publisher: {
+        publishStaticDirectory: async () => ({ url: 'https://publication.invalid/game/index.html' }),
+        verifyPublished: async () => { verified = true; eligible = !changed },
+      },
+    })
+    const result = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace,
+      measured: { runId: 'run', measurementId: 'measurement', artifact,
+        validate: async () => { if (!eligible) throw Error('Workflow changed during public verification') } },
+    }, undefined, async record => { statuses.push(record.status) })
+    expect(verified).toBe(true)
+    expect(result.status).toBe(changed ? 'failed' : 'succeeded')
+    expect(statuses).toEqual(changed ? ['succeeded', 'failed'] : ['succeeded'])
+    expect((await manager.list())[0]?.status).toBe(result.status)
+    if (changed) {
+      expect(result.message).toContain('Workflow changed during public verification')
+      expect(result.url).toBe('')
+    }
+  }, 30000)
+
   test('background publishing returns before build completion and deduplicates repeated clicks', async () => {
     let release!: () => void
     let runs = 0

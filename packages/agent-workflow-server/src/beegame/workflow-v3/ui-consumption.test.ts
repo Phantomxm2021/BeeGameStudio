@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { checkIsCurrent } from './checks'
@@ -8,6 +8,54 @@ import { uiLayoutFixture } from '../fixtures/layout-fixture'
 import type { TaskSpec } from './state'
 import { prepareUiProbes } from './ui-consumption'
 import { resolveUiNodesForViewport } from '../../../../scene-editor/src/ui-responsive'
+
+for (const mode of ['shown','hidden','ignore-visibility','ignore-width','partial-values'] as const)
+  test('declared UI binding scenario observes actual visibility and geometry: '+mode, async()=>{
+    const root=await mkdtemp(join(tmpdir(),'bgs-ui-state-scenario-'))
+    try {
+      const ui:any=uiLayoutFixture()
+      ui.data.nodes[0].layout.size=[1280,720]
+      ui.data.nodes[0].data.referenceResolution=[1280,720]
+      ui.data.nodes[0].data.targetViewports=[[1280,720]]
+      ui.data.nodes[1].bindings={enabled:'menuActive'}
+      ui.data.nodes.push(
+        {id:'toggle',parentId:'root',role:'button',text:'Toggle',layout:{position:[20,20],size:[100,52]}},
+        {id:'panel',parentId:'root',role:'container',enabled:false,bindings:{enabled:'showControls'},layout:{position:[100,100],size:[300,200]}},
+        {id:'bar',parentId:'panel',role:'container',bindings:{widthRatio:'progress'},layout:{position:[20,20],size:[120,30]}},
+      )
+      const body=JSON.stringify(ui),document='content/ui/menu.json'
+      await mkdir(join(root,'content/ui'),{recursive:true});await mkdir(join(root,'dist/content/ui'),{recursive:true})
+      await writeFile(join(root,document),body);await writeFile(join(root,'dist',document),body)
+      await writeFile(join(root,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',dimension:'2d',
+        entryScene:'menu',files:['ui/menu.json'],documents:[{id:'menu',kind:'ui-screen',path:'ui/menu.json',loadPhase:'startup'}]}))
+      await writeFile(join(root,'dist/index.html'),`<!doctype html><style>body{margin:0}div,button{position:absolute;box-sizing:border-box;border:0;padding:0;margin:0}button{font:16px/20px sans-serif}</style><script>
+        fetch('./content/ui/menu.json').then(r=>r.json()).then(d=>{
+          const state={menuActive:true,showControls:false,progress:.5},elements=new Map();
+          const render=()=>{for(const n of d.data.nodes){if(n.id==='root')continue;
+            let el=elements.get(n.id);if(!el){el=document.createElement(n.role==='button'?'button':'div');el.id=n.id;el.dataset.nodeId=n.id;el.textContent=n.text||'';
+              (elements.get(n.parentId)||document.body).append(el);elements.set(n.id,el);if(n.id==='toggle')el.onclick=()=>{state.showControls=true;render()};}
+            const size=[...n.layout.size],p=n.layout.position||[0,0];
+            if(n.bindings?.widthRatio && ${JSON.stringify(mode)}!=='ignore-width')size[0]*=state[n.bindings.widthRatio];
+            const enabled=n.bindings?.enabled?state[n.bindings.enabled]:n.enabled!==false;
+            Object.assign(el.style,{display:enabled||(${JSON.stringify(mode)}==='ignore-visibility'&&n.id==='panel')?'block':'none',
+              left:(n.id==='play'?640-size[0]/2+p[0]:p[0])+'px',top:(n.id==='play'?360-size[1]/2+p[1]:p[1])+'px',width:size[0]+'px',height:size[1]+'px'});
+          }};render();
+        });</script>`)
+      const shown=mode==='shown'||mode==='ignore-width'||mode==='partial-values'
+      const task:TaskSpec={id:'state',kind:'game.verify',goal:'Fixture binding scenario',dependsOn:[],requirementIds:['ui'],inputs:[],writablePaths:[],
+        expectedOutputs:['dist/index.html'],runtimeArtifact:'dist',checks:['ui-data-consumption'],uiProbes:[{document,nodeId:'play',selector:'#play',viewport:[1280,720],
+          ...(shown?{steps:[{click:'#toggle'}]}:{}),bindingValues:{menuActive:true,showControls:shown,...(mode==='partial-values'?{}:{progress:.5})}}]}
+      const result=(await runChecks(root,task,[])).checks[0]!
+      expect(result.status,result.observation).toBe(mode==='shown'||mode==='hidden'?'passed':mode==='partial-values'?'unverified':'failed')
+      const observation=JSON.parse(result.observation)
+      expect(observation.probes[0].conditions.scenario.bindingValues.showControls).toBe(shown)
+      if(mode==='shown')await expect(prepareUiProbes(root,task,{inputs:[]} as any,'selected',[390,844])).rejects.toThrow('explicit bindingValues scenario')
+      if(mode==='ignore-visibility')expect(observation.probes[0].composition.before.issues).toContainEqual(expect.objectContaining({id:'panel',kind:'visibility'}))
+      if(mode==='ignore-width')expect(observation.probes[0].composition.before.issues).toContainEqual(expect.objectContaining({id:'bar',kind:'geometry'}))
+      expect(await readFile(join(root,document),'utf8')).toBe(body)
+      expect(await readFile(join(root,'dist',document),'utf8')).toBe(body)
+    }finally{await rm(root,{recursive:true,force:true})}
+  },30000)
 
 test.each(['base', 'compact', 'portrait', 'bound-node', 'bound-parent'])('enabled probe respects the actual authored/state layer: %s', async mode => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-enabled-preparation-'))

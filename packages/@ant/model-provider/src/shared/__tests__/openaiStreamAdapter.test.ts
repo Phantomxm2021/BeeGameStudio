@@ -618,6 +618,39 @@ describe('thinking support (reasoning_content)', () => {
     expect(events.find(event => event.type === 'message_delta').delta.stop_reason).toBe('tool_use')
   })
 
+  test.each(['text', 'tool'] as const)('preserves a first empty reasoning field received after %s has started', async kind => {
+    const events = await collectEvents([
+      makeChunk({ choices: [{ index: 0, delta: kind === 'text' ? { content: 'Full' } : {
+        tool_calls: [{ index: 0, id: 'call_late', type: 'function', function: { name: 'test_sum', arguments: '{"a":17,' } }],
+      }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: { reasoning_content: '' }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: kind === 'text' ? { reasoning_content: '', content: ' answer' } : {
+        reasoning_content: '', tool_calls: [{ index: 0, function: { arguments: '"b":25}' } }],
+      }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: { reasoning_content: '' }, finish_reason: kind === 'text' ? 'stop' : 'tool_calls' }] }),
+    ])
+    const starts = events.filter(event => event.type === 'content_block_start')
+    expect(starts.map(event => [event.index, event.content_block.type])).toEqual([
+      [0, kind === 'text' ? 'text' : 'tool_use'], [1, 'thinking'],
+    ])
+    expect(starts[1].content_block.thinking).toBe('')
+    const deltas = events.filter(event => event.type === 'content_block_delta' &&
+      event.delta.type === (kind === 'text' ? 'text_delta' : 'input_json_delta'))
+    expect(deltas.map(event => event.index)).toEqual([0, 0])
+    const value = deltas.map(event => kind === 'text' ? event.delta.text : event.delta.partial_json).join('')
+    expect(kind === 'text' ? value : JSON.parse(value)).toEqual(kind === 'text' ? 'Full answer' : { a: 17, b: 25 })
+    expect(events.filter(event => event.type === 'content_block_stop').map(event => event.index).sort()).toEqual([0, 1])
+    expect(events.at(-1).type).toBe('message_stop')
+  })
+
+  test.each([undefined, null])('does not invent thinking when the upstream reasoning field is %s', async reasoning => {
+    const events = await collectEvents([
+      makeChunk({ choices: [{ index: 0, delta: { content: 'Answer' }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: reasoning === undefined ? {} : { reasoning_content: reasoning }, finish_reason: 'stop' }] }),
+    ])
+    expect(events.filter(event => event.type === 'content_block_start').map(event => event.content_block.type)).toEqual(['text'])
+  })
+
   test('thinking block index is 0, text block index is 1', async () => {
     const events = await collectEvents([
       makeChunk({

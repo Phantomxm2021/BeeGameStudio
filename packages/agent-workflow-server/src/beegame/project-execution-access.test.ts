@@ -14,6 +14,8 @@ import { CONTENT_CHECKER_PATH, materializeSceneUiFormat } from './scene-ui-conte
 import { sceneLayoutFixture, uiLayoutFixture } from './fixtures/layout-fixture'
 import { materializeBalanceCalculator } from './balance-calculation'
 import { nativeSessionOutputPath } from './native-runtime-process-path'
+import { PROJECT_DESIGN_PATHS } from './design-handoff'
+import { MANAGED_WEB_BOOT_PATHS } from './workflow-v3/managed-web-boot'
 
 test('host tool read grants are explicit per canonical project, never model/project settings or external writes',async()=>{
   const key='BEEGAME_PROJECT_TOOL_READ_PATHS',prior=process.env[key]
@@ -87,6 +89,7 @@ test('native project temp environment resolves inside the project before Bash to
     expect(access.nativeOutput.startsWith(workspace + '/')).toBe(false)
     expect(access.settings.sandbox.filesystem.allowWrite).toContain(access.nativeOutput)
     expect(access.settings.sandbox.filesystem.allowWrite).not.toContain(dirname(access.nativeOutput))
+    expect(access.settings.sandbox.filesystem.denyWrite).toEqual(['CLAUDE.md', ...PROJECT_DESIGN_PATHS].map(path=>join(workspace,path)))
     expect(access.environment.BEEGAME_NATIVE_TOOL_RESULTS_DIR).toBeUndefined()
     const playwright = sharedPlaywright()
     expect(access.environment.BEEGAME_PLAYWRIGHT_MODULE).toBe(playwright.moduleUrl)
@@ -239,7 +242,7 @@ test.skipIf(process.platform !== 'darwin')('project shell supports Git and local
   await mkdir(workspace)
   await writeFile(join(root, 'host-source.ts'), 'PRIVATE_HOST_FIXTURE')
   await symlink(join(root, 'host-source.ts'), join(workspace, 'escape.ts'))
-  const access = await projectExecutionAccess({ workspacePath: workspace, sessionId: 'test', environment: {} })
+  const access = await projectExecutionAccess({ workspacePath: workspace, sessionId: 'test', environment: {}, managedWebBoot:true })
   const fs = access.settings.sandbox.filesystem
   const run = async (command: string) => {
     const previous = process.cwd()
@@ -297,6 +300,28 @@ test.skipIf(process.platform !== 'darwin')('project shell supports Git and local
     expect(JSON.parse(media.stdout)).toMatchObject({ valid: true, outputs: [{ path: 'assets/pixel.png', width: 2, height: 2 }] })
     const protectedChecker = await run(`printf bad > ${JSON.stringify(checker.path)}`)
     expect(protectedChecker.code).not.toBe(0)
+    await writeFile(join(workspace, 'CLAUDE.md'), 'HOST_GUIDE_UNCHANGED')
+    for (const command of ['printf bad > CLAUDE.md', 'mv CLAUDE.md displaced.md', 'rm CLAUDE.md'])
+      expect((await run(command)).code, command).not.toBe(0)
+    expect(await readFile(join(workspace, 'CLAUDE.md'), 'utf8')).toBe('HOST_GUIDE_UNCHANGED')
+    await mkdir(join(workspace,'docs'),{recursive:true})
+    await mkdir(join(workspace,'.beegame/design-handoffs'),{recursive:true})
+    for (const path of PROJECT_DESIGN_PATHS) {
+      await writeFile(join(workspace,path),'HOST_PLAN_UNCHANGED')
+      expect((await run(`printf bad > ${JSON.stringify(path)}`)).code,path).not.toBe(0)
+      expect(await readFile(join(workspace,path),'utf8')).toBe('HOST_PLAN_UNCHANGED')
+    }
+    expect((await run('ln docs/GDD.md planning-link.md && printf bad > planning-link.md')).code).not.toBe(0)
+    expect(await readFile(join(workspace,'docs/GDD.md'),'utf8')).toBe('HOST_PLAN_UNCHANGED')
+    await mkdir(join(workspace,'src'),{recursive:true})
+    for(const path of MANAGED_WEB_BOOT_PATHS) {
+      await writeFile(join(workspace,path),'HOST_BOOT_UNCHANGED')
+      expect((await run(`printf bad > ${JSON.stringify(path)}`)).code,path).not.toBe(0)
+      expect(await readFile(join(workspace,path),'utf8')).toBe('HOST_BOOT_UNCHANGED')
+    }
+    for(const command of ['mv index.html displaced-boot.html','rm index.html','ln index.html boot-link.html && printf bad > boot-link.html'])
+      expect((await run(command)).code,command).not.toBe(0)
+    expect((await run('printf game > src/game.jsx')).code).toBe(0)
     const git = await run('git init -q && printf game > game.txt && git add game.txt && git -c user.name=Fixture -c user.email=fixture@example.test commit -qm first && git status --porcelain')
     expect(git.code, git.stderr).toBe(0)
     expect(git.stderr).toBe('')

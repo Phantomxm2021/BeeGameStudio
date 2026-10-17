@@ -3,7 +3,9 @@ import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentWorkflowApp, type AgentWorkflowAppOptions } from '../app'
-import { createRun } from '../beegame/workflow-v3/state'
+import { createRun, type Run } from '../beegame/workflow-v3/state'
+import { assertCommit } from '../beegame/workflow-v3/store'
+import { projectPreviewCapabilityPath } from '../beegame/project-preview-capability'
 import { sharedPlaywright } from '../beegame/shared-playwright'
 
 async function fixture(options: Partial<AgentWorkflowAppOptions> = {}) {
@@ -33,6 +35,54 @@ async function fixture(options: Partial<AgentWorkflowAppOptions> = {}) {
   return {root,workspace,run,before,app,request,counts:()=>({models,commits,processes}),async close(){for(const cleanup of cleanups)await cleanup();await rm(root,{recursive:true,force:true})}}
 }
 
+test('actual Agent production Preview API serves the isolated existing build without starting a project process',async()=>{
+  let current:Run|undefined,starts=0,previewUrl='',observedError:unknown
+  let f:Awaited<ReturnType<typeof fixture>>|undefined
+  try {
+    f=await fixture({workflowV3Store:{async read(){return current?structuredClone(current):undefined},
+      async commit(project,owner,version,next){
+        expect(current?.version??0).toBe(version)
+        assertCommit(project,owner,version,next,current);current=structuredClone(next)
+      }},sessionRunner:{async start(start){
+        starts++;const nativeId=crypto.randomUUID();start.onNativeSessionId?.(nativeId)
+        return {async submit(input){
+          try {
+            const capability=JSON.parse(await readFile(projectPreviewCapabilityPath(start.cwd,start.sessionId),'utf8'))
+            const response=await fetch(capability.apiUrl+'/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:'production'})})
+            const result=await response.json()
+            expect(response.status,JSON.stringify(result)).toBe(200)
+            previewUrl=result.preview.url
+            expect(result.preview.mode).toBe('production')
+            const asset=await f!.app.request(new URL('/assets/main.js',previewUrl))
+            expect(asset.status).toBe(200);expect(await asset.text()).toBe('/* existing build */')
+            expect(asset.headers.get('Access-Control-Allow-Origin')).toBe('*')
+            expect((await f!.app.request(new URL('/api/projects',previewUrl))).status).toBe(404)
+          }catch(error){observedError=error;throw error}
+          await input.onMessage({type:'result',subtype:'success',session_id:nativeId,total_cost_usd:0,result:'Synthetic Preview only, not acceptance'} as any)
+        },stop(){}}
+      }}})
+    await mkdir(join(f.workspace,'dist/assets'),{recursive:true})
+    await writeFile(join(f.workspace,'dist/index.html'),'<!doctype html><script src="/assets/main.js"></script>')
+    await writeFile(join(f.workspace,'dist/assets/main.js'),'/* existing build */')
+    await writeFile(join(f.workspace,'package.json'),JSON.stringify({scripts:{build:'touch MUST_NOT_BUILD'}}))
+    const session=await f.request('/api/projects/fixture/session/ensure','POST',{})
+    expect(session.status,await session.clone().text()).toBe(200)
+    const chatSessionId=(await session.json()).session.id
+    const accepted=await f.request('/api/projects/fixture/workflow-v3/agent/goal','POST',{requestKey:'preview-only',chatSessionId,
+      brief:{kind:'confirmed_build_brief',idea:'Synthetic Preview fixture',selected_option:{title:'Fixture',loop:'play'},
+        settings:{engine:'React',platform:'Web',dimension:'2D',orientation:'Landscape'},resource_library_usage:'optional',
+        document_language:'en',game_user_visible_language:'en',agent_response_language:'en'}})
+    expect(accepted.status,await accepted.clone().text()).toBe(202)
+    for(let i=0;i<500&&!current?.agentTurns?.[0]?.finishedAt;i++)await Bun.sleep(10)
+    expect(observedError).toBeUndefined()
+    expect(previewUrl).not.toBe('');expect(starts).toBe(1)
+    expect(current?.agentTurns?.[0]?.finishedAt).toBeDefined();expect(current?.writer).toBeUndefined()
+    expect(f.counts().processes).toBe(0)
+    expect(await Bun.file(join(f.workspace,'MUST_NOT_BUILD')).exists()).toBe(false)
+    expect((await f.app.request(previewUrl)).status).toBe(404)
+  }finally{await f?.close()}
+},30000)
+
 test('ordinary V3 Preview opens an existing build with no native session, valid content index or Measure; delivery still requires evidence', async () => {
   const f=await fixture()
   try {
@@ -54,6 +104,10 @@ test('ordinary V3 Preview opens an existing build with no native session, valid 
     const frame=await f.app.request(preview.url)
     expect(frame.status).toBe(200);expect(await frame.text()).toBe(bytes)
     expect(frame.headers.get('X-BeeGame-Preview-Mode')).toBe('candidate-static')
+    expect(frame.headers.get('X-BeeGame-Preview-Storage')).toBe('project-v1')
+    const saves=new URL('/__bgs/preview-storage',preview.url)
+    expect((await f.app.request(saves,{method:'POST',headers:{origin:'null','content-type':'application/json'},
+      body:JSON.stringify({key:'best',value:'44'})})).status).toBe(200)
     expect((await f.app.request(new URL('/api/projects',preview.url))).status).toBe(404)
     expect((await f.app.request(preview.url,{method:'POST'})).status).toBe(405)
     expect((await f.request('/api/projects/fixture/preview','POST',{},'other')).status).toBe(404)
@@ -65,7 +119,11 @@ test('ordinary V3 Preview opens an existing build with no native session, valid 
     const exported=await f.request('/api/projects/fixture/workflow-v3/export','POST',{
       measurementId:crypto.randomUUID(),requirementsRevision:f.run.requirements.revision,kind:'project'})
     expect(exported.status).toBe(409);expect((await exported.json()).code).toBe('preview-unverified')
-    expect((await f.request('/api/projects/fixture/preview/restart','POST',{})).status).toBe(200)
+    const restarted=await f.request('/api/projects/fixture/preview/restart','POST',{})
+    expect(restarted.status).toBe(200)
+    const reopenedUrl=(await restarted.json()).url
+    expect(await (await f.app.request(new URL('/__bgs/preview-storage?key=best',reopenedUrl))).json()).toEqual({value:'44'})
+    expect(await Bun.file(join(f.workspace,'preview-saves/saves.sqlite')).exists()).toBe(false)
     expect((await f.request('/api/projects/fixture/preview','DELETE')).status).toBe(200)
     expect((await (await f.request('/api/projects/fixture/runtime-state')).json()).build_report).toBeNull()
     expect((await f.app.request(preview.url)).status).toBe(404)
