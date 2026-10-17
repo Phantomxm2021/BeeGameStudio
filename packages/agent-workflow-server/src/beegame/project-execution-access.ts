@@ -156,5 +156,9 @@ export async function projectExecutionAccess(input: {
         return !isAbsolute(part) && part !== '..' && !part.startsWith('../')
       }))
     },
-    flags: ['--setting-sources', 'user', '--settings', JSON.stringify(settings)] }
+    // Native bypass skips routine prompts, while explicit ask/deny rules above
+    // still route file effects through the host boundary. Scoped roles retain
+    // their existing per-tool approvals; the OS sandbox remains mandatory.
+    flags: ['--setting-sources', 'user', '--permission-mode', input.scopedTools ? 'default' : 'bypassPermissions',
+      '--settings', JSON.stringify(settings)] }
 }

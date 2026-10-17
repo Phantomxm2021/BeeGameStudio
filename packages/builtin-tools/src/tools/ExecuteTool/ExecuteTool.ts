@@ -181,12 +181,16 @@ export const ExecuteTool = buildTool({
       }
     }
 
-    // Check permissions on the target tool
-    const permResult = await targetTool.checkPermissions?.(
+    // Use the native permission broker for the actual tool and parsed params.
+    // Calling checkPermissions directly skips rules and interactive approvals.
+    const permResult = await canUseTool(
+      targetTool,
       input.params as Record<string, unknown>,
       context,
+      parentMessage,
+      context.toolUseId ?? '',
     )
-    if (permResult && permResult.behavior === 'deny') {
+    if (permResult.behavior !== 'allow') {
       return {
         data: {
           result: null,
@@ -194,7 +198,7 @@ export const ExecuteTool = buildTool({
         },
         newMessages: [
           createUserMessage({
-            content: `Permission denied for tool "${input.tool_name}": ${permResult.message ?? 'Permission denied'}`,
+            content: `Permission denied for tool "${input.tool_name}": ${permResult.message ?? 'Permission not granted'}`,
           }),
         ],
       }
@@ -202,8 +206,8 @@ export const ExecuteTool = buildTool({
 
     // Delegate execution to the target tool
     const targetResult: ToolResult<unknown> = await targetTool.call(
-      input.params as Record<string, unknown>,
-      context,
+      permResult.updatedInput ?? input.params,
+      { ...context, userModified: permResult.userModified ?? false },
       canUseTool,
       parentMessage,
       onProgress,
@@ -217,10 +221,12 @@ export const ExecuteTool = buildTool({
       },
     }
   },
-  async checkPermissions() {
+  async checkPermissions(input) {
+    // The wrapper has no effect of its own; call() obtains permission for the
+    // target before execution, avoiding an extra prompt for this wrapper.
     return {
-      behavior: 'passthrough',
-      message: 'ExecuteExtraTool delegates permission to the target tool.',
+      behavior: 'allow',
+      updatedInput: input,
     }
   },
   renderToolUseMessage(input) {

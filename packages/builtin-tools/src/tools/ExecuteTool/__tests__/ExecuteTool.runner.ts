@@ -75,6 +75,7 @@ function makeContext(tools: unknown[] = []) {
     },
     cwd: '/tmp',
     sessionId: 'test',
+    toolUseId: 'outer-tool-use',
   } as never
 }
 
@@ -185,17 +186,20 @@ describe('ExecuteTool', () => {
 
   test('returns permission denied when target denies', async () => {
     const mockTarget = makeMockTool('SecretTool', 'secret')
-    mockTarget.checkPermissions = async () =>
-      ({
-        behavior: 'deny' as const,
-        message: 'Access denied',
-      }) as never
+    const call = mock(mockTarget.call)
+    mockTarget.call = call
+    // The supplied broker owns the full permission decision, including rules
+    // and user approval; the wrapper must not use checkPermissions directly.
+    const broker = mock(async () => ({
+      behavior: 'deny' as const,
+      message: 'Access denied',
+    }))
     const ctx = makeContext([mockTarget])
 
     const result = await ExecuteTool.call(
       { tool_name: 'SecretTool', params: {} },
       ctx,
-      async () => ({ behavior: 'allow' }),
+      broker,
       { type: 'assistant', content: [], uuid: 'msg1' } as never,
       undefined,
     )
@@ -205,6 +209,78 @@ describe('ExecuteTool', () => {
       tool_name: 'SecretTool',
     })
     expect(result.newMessages).toBeDefined()
+    expect(broker).toHaveBeenCalledTimes(1)
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  test('delegates actual params and call identity, and honors approved edits', async () => {
+    const { tool, calls } = makeMockToolWithSchema(
+      'WithDefaults',
+      z.object({
+        path: z.string(),
+        recurring: z.boolean().default(true),
+      }),
+    )
+    const ctx = makeContext([tool])
+    const parent = { type: 'assistant', content: [], uuid: 'msg1' } as never
+    const broker = mock(async () => ({
+      behavior: 'allow' as const,
+      updatedInput: { path: 'approved', recurring: true },
+      userModified: true,
+    }))
+    const originalCall = tool.call
+    const call = mock(
+      async (input: Record<string, unknown>, _context?: unknown) =>
+        originalCall(input),
+    )
+    tool.call = call
+
+    await ExecuteTool.call(
+      { tool_name: 'WithDefaults', params: { path: 'requested' } },
+      ctx,
+      broker,
+      parent,
+      undefined,
+    )
+
+    expect(broker).toHaveBeenCalledWith(
+      tool,
+      { path: 'requested', recurring: true },
+      ctx,
+      parent,
+      'outer-tool-use',
+    )
+    expect(calls).toEqual([{ path: 'approved', recurring: true }])
+    expect(call.mock.calls[0]![1]).toMatchObject({ userModified: true })
+  })
+
+  test('does not execute while approval remains unresolved or is cancelled', async () => {
+    const target = makeMockTool('TestTool')
+    const call = mock(target.call)
+    target.call = call
+    const ctx = makeContext([target])
+    const parent = { type: 'assistant', content: [], uuid: 'msg1' } as never
+    const result = await ExecuteTool.call(
+      { tool_name: 'TestTool', params: {} },
+      ctx,
+      async () => ({ behavior: 'ask', message: 'Approval required' }),
+      parent,
+      undefined,
+    )
+    expect(result.data.result).toBeNull()
+    const cancelled = new Error('Permission request cancelled')
+    await expect(
+      ExecuteTool.call(
+        { tool_name: 'TestTool', params: {} },
+        ctx,
+        async () => {
+          throw cancelled
+        },
+        parent,
+        undefined,
+      ),
+    ).rejects.toBe(cancelled)
+    expect(call).not.toHaveBeenCalled()
   })
 
   test('returns error when deferred tool has not been discovered via SearchExtraTools', async () => {

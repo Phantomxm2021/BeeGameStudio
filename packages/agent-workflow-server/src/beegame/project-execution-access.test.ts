@@ -145,6 +145,7 @@ test('scoped Review requests host permission before every role tool and cannot b
     expect(access.settings.disableAllHooks).toBe(true)
     expect(access.settings.sandbox.failIfUnavailable).toBe(true)
     expect(access.settings.sandbox.allowUnsandboxedCommands).toBe(false)
+    expect(access.flags[access.flags.indexOf('--permission-mode') + 1]).toBe('default')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -156,6 +157,7 @@ test('ordinary project file mutations cannot bypass host permission callbacks', 
     output = access.nativeOutput
     expect(access.settings.permissions.ask).toEqual(expect.arrayContaining(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']))
     expect(access.settings.sandbox.allowUnsandboxedCommands).toBe(false)
+    expect(access.flags[access.flags.indexOf('--permission-mode') + 1]).toBe('bypassPermissions')
   } finally {
     if (output) await rm(output, { recursive: true, force: true })
     await rm(root, { recursive: true, force: true })
