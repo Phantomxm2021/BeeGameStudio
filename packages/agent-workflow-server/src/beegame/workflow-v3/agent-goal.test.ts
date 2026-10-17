@@ -29,7 +29,7 @@ test('resource obligations retain authorization and provenance without prescribi
 test('task-specific countdown procedure stays in tool help instead of the universal production context', () => {
   expect(agentProfessionalContext).not.toContain('--countdown-blur-sample')
   expect(agentProfessionalContext).toContain('actual runtime')
-  expect(agentProfessionalContext).toContain('affected requirements')
+  expect(agentProfessionalContext).toContain('## Required design dependencies')
 })
 
 test('ended native goal exposes independent host evidence, never author acceptance',async()=>{
@@ -167,7 +167,7 @@ test('blank confirmed Web intake uses the design-led first version without creat
     expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
     expect(JSON.parse(String(initialMessage.payload?.confirmedBriefContext))).toEqual(f.body.brief)
     await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
-    expect(JSON.stringify(f.submissions[0]!.prompt)).toContain('design-led first-version delivery requirements')
+    expect(String(f.submissions[0]!.prompt)).toContain(JSON.stringify(f.body.brief))
     expect(f.starts[0].systemContext).toContain('existing eight documents under docs/')
     expect(f.starts[0].systemContext).toContain('Preserve confirmed requirements')
     const guide=await readFile(join(f.root,'CLAUDE.md'),'utf8')
@@ -191,7 +191,7 @@ test('blank confirmed Web intake uses the design-led first version without creat
     expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// retained user work')
     expect(run.creation?.initialDelivery).toBe('design-led-first-version')
     const refreshed=await readFile(join(f.root,'CLAUDE.md'),'utf8')
-    expect(refreshed).toContain('src/game.js')
+    expect(refreshed).toBe(guide)
     expect(refreshed.slice(refreshed.indexOf('## Professional methods'))).toBe(guide.slice(guide.indexOf('## Professional methods')))
   }finally{await f.close()}
 },30000)
@@ -216,7 +216,7 @@ test('existing sources and an already-running goal never receive a backfilled gu
   }finally{await existing.close();await running.close()}
 },30000)
 
-test('damaged generated navigation is reported without overwriting it or retaining an exited writer',async()=>{
+test('saved guide markers do not trigger host repair or retain an exited writer',async()=>{
   const f=await fixture()
   try {
     await initializeProjectGuide(f.root)
@@ -226,7 +226,7 @@ test('damaged generated navigation is reported without overwriting it or retaini
     const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
     expect(run.agentTurns![0].status).toBe('ended')
     expect(run.writer).toBeUndefined()
-    expect(run.blockedReason).toContain('Project navigation refresh failed')
+    expect(run.blockedReason).not.toContain('Project navigation refresh failed')
     expect(await readFile(path,'utf8')).toBe(damaged)
   }finally{await f.close()}
 })
@@ -302,9 +302,6 @@ test('initial goal continues through visual direction without host Tasks or a se
     const submit=f.submissions[0]!
     expect(submit.language).toBe('zh')
     expect(submit.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
-    expect(JSON.stringify(submit.prompt)).toContain('design-led first-version delivery requirements')
-    expect(JSON.stringify(submit.prompt)).toContain('guide resources, UI/Scene and actual runtime checks')
-    expect(JSON.stringify(submit.prompt)).toContain('no second production authorization or automatic paid retry')
     expect(JSON.stringify(submit.prompt)).not.toContain('first assignment ends at visual-direction handoff')
     expect(JSON.stringify(submit.prompt)).not.toContain('Professional coverage:')
     expect(f.starts[0].systemContext).toContain(agentProfessionalContextForRun(run))
@@ -314,7 +311,8 @@ test('initial goal continues through visual direction without host Tasks or a se
     expect(f.starts[0].systemContext).not.toContain('Maintain root CLAUDE.md')
     expect(f.starts[0].systemContext).toContain('project-navigation-sources')
     expect(JSON.stringify(submit.prompt)).not.toContain('BGS saved evidence')
-    expect(f.starts[0].systemContext).toContain('Optional BGS project tools')
+    expect(f.starts[0].systemContext.split('Run entries with --help:')).toHaveLength(2)
+    expect(f.starts[0].systemContext).not.toContain('Optional BGS project tools')
     expect(JSON.stringify(submit.prompt)).not.toContain('Optional BGS project tools')
     expect(String(submit.prompt)).toContain(JSON.stringify(f.body.brief))
     expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false)
@@ -334,7 +332,7 @@ test('initial goal continues through visual direction without host Tasks or a se
     expect(await readFile(join(f.root,'candidate.txt'),'utf8')).toBe('Synthetic partial candidate')
   }finally{await f.close()}
 })
-test('new goal receives the real catalog before native submission, once, without replacing user source choices',async()=>{
+test('goal and follow-ups leave catalog reads to the Agent and preserve user source choices',async()=>{
   const calls:unknown[]=[]
   const upstream=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
     calls.push({path:new URL(request.url).pathname,body:await request.json(),submissions:f.submissions.length})
@@ -346,11 +344,11 @@ test('new goal receives the real catalog before native submission, once, without
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    expect(calls).toEqual([{path:'/api/resource-catalog/packs',body:{limit:32},submissions:0}])
+    expect(calls).toHaveLength(0)
     const initial=f.starts[0].systemContext
-    expect(initial).toContain('fixture-audio')
+    expect(initial).not.toContain('fixture-audio')
     expect(String(f.submissions[0]!.prompt)).toContain(f.body.brief.idea)
-    expect(initial).toContain('Preserve explicit user source choices')
+    expect(initial).toContain('Honor explicit resource sources and usage rights')
     expect(JSON.parse(run.requirements.text)).toEqual(f.body.brief)
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     for(const intent of ['discuss','work','change'] as const) {
@@ -361,7 +359,7 @@ test('new goal receives the real catalog before native submission, once, without
       run=await f.wait(r=>Boolean(r.agentTurns?.[turnCount]?.finishedAt))
       expect(JSON.stringify(f.submissions[turnCount]!.prompt)).not.toContain('Initial built-in resource catalog')
     }
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(0)
     expect(f.submissions).toHaveLength(4)
   }finally{await f.close();upstream.stop(true)}
 })
@@ -379,7 +377,7 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect(run.requirements).toEqual(original);expect(run.requirementChanges).toBeUndefined()
     expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
     expect(f.starts[1].env.BEEGAME_CONFIG_DIR).toBe(f.starts[0].env.BEEGAME_CONFIG_DIR)
-    expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('answer only')
+    expect(String(f.submissions[1]!.prompt)).toContain('discussion only, without changes or execution')
     expect(JSON.stringify(f.submissions[1]!.prompt)).not.toContain('GDD.md')
     expect(f.starts[1].systemContext).not.toContain('Professional coverage:')
     expect(f.starts[1].systemContext).not.toContain('Current BGS tools directory')
@@ -405,7 +403,7 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect(JSON.stringify(f.submissions[2]!.prompt)).not.toContain('Professional coverage:')
     expect(f.starts[2].systemContext).toContain(agentProfessionalContextForRun(run,true))
     expect(f.starts[2].systemContext).not.toContain('New design-led first-version deliverables')
-    expect(f.starts[2].systemContext).toContain('Read reference pictures with the native Read tool')
+    expect(f.starts[2].systemContext).toContain('Save and Read pictures')
     const locator = /Current BGS tools directory \(relative to project root\): ("[^"]+")/
     const firstDirectory = f.starts[0].systemContext.match(locator)[1]
     const currentDirectory = f.starts[2].systemContext.match(locator)[1]
@@ -427,7 +425,7 @@ test('formal natural-language chat preserves the exact request without a UI inte
     expect((await f.call('/agent/messages','POST',question)).status).toBe(202)
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(JSON.stringify(f.submissions[1]!.prompt)).toContain(question.text)
-    expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('answer questions without changing files')
+    expect(f.submissions[1]!.prompt).toBe('User message:\n'+question.text)
     expect(JSON.parse(run.requirements.text).user_messages).toEqual([{requestKey:question.requestKey,text:question.text}])
     const change={...question,requestKey:'chat-change',expectedVersion:run.version,
       requirementsRevision:run.requirements.revision,text:'Make the level easier and update the design record.'}
@@ -476,7 +474,7 @@ test('first follow-up preserves requirements and resumes native history unless f
     expect(run.planRevision).toBe(planRevision)
     expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
     expect(run.agentTurns![1]!.nativeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
-    expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('not a requirement change')
+    expect(f.submissions[1]!.prompt).toBe('User message:\n'+message.text)
     expect(f.starts[1].systemContext).toContain('BGS saved evidence')
     expect(f.starts[1].systemContext).toContain('reportSemantics')
     expect(JSON.stringify(f.submissions[1]!.prompt)).not.toContain('authorized_user_changes')
@@ -490,12 +488,13 @@ test('first follow-up preserves requirements and resumes native history unless f
 test('project guide refreshes at the next turn, including discussion, without repeating user history or changing requirements',async()=>{
   const f=await fixture()
   try {
-    const file=join(f.root,'CLAUDE.md'),first='# Project navigation\nGUIDE_ROUTE_ONE\nRun: existing actual command\n'
+    const file=join(f.root,'CLAUDE.md'),first='# Project navigation\nGUIDE_ROUTE_ONE\nRun: existing actual command\n'+PROJECT_WORKING_CONVENTIONS+'\n'
     await writeFile(file,first)
     await f.call('/agent/goal','POST',f.body);let run=await f.wait(r=>Boolean(r.agentTurns![0]?.finishedAt))
     const requirements=structuredClone(run.requirements)
     expect(f.starts[0].systemContext.split('GUIDE_ROUTE_ONE')).toHaveLength(2)
     expect(f.starts[0].systemContext).toContain(PROJECT_WORKING_CONVENTIONS)
+    expect(f.starts[0].systemContext.split('## Required design dependencies')).toHaveLength(2)
     expect(f.starts[0].systemContext).toContain('Follow applicable project working conventions within current user authorization')
     expect(await readFile(file,'utf8')).toBe(first)
     expect(JSON.stringify(f.submissions[0].prompt)).not.toContain('GUIDE_ROUTE_ONE')
@@ -508,6 +507,7 @@ test('project guide refreshes at the next turn, including discussion, without re
     await send('work','guide-refresh')
     expect(f.starts[1].systemContext).toContain('GUIDE_ROUTE_TWO')
     expect(f.starts[1].systemContext).toContain(PROJECT_WORKING_CONVENTIONS)
+    expect(f.starts[1].systemContext.split('## Required design dependencies')).toHaveLength(2)
     expect(await readFile(file,'utf8')).toBe(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO'))
     expect(f.starts[1].systemContext).not.toContain('GUIDE_ROUTE_ONE')
     await send('discuss','guide-discuss')
@@ -624,18 +624,37 @@ test('focused facts retain failed execution and unresolved tool identities witho
     expect(JSON.stringify(facts.previousExecution)).not.toContain(value)
 })
 
-test('follow-up transport preserves a full acceptance request instead of narrowing it to changed domains',()=>{
+test('follow-up transport forwards the literal task without an execution prescription',()=>{
   const text='Inspect all eight design domains, relevant Skills and the full player journey. Change only actual defects; preserve unrelated results.'
-  for(const intent of ['work','change','continue'] as const) {
+  for(const intent of ['message','work','change','continue'] as const) {
     const prompt=agentMessagePrompt({intent,text} as Parameters<typeof agentMessagePrompt>[0])
-    expect(prompt.split('User message:\n')[1]).toBe(text)
+    expect(prompt).toBe('User message:\n'+text)
     expect(prompt).not.toContain('only affected domains')
     expect(prompt).not.toContain('not a new eight-document production run')
   }
 })
 
+test('goal settlement leaves the project guide unchanged after native source writes',async()=>{
+  const f=await fixture()
+  try {
+    await initializeProjectGuide(f.root)
+    const guide=await readFile(join(f.root,'CLAUDE.md'),'utf8')
+    await f.call('/agent/goal','POST',f.body)
+    await f.wait(run=>Boolean(run.agentTurns?.[0]?.finishedAt))
+    expect(await readFile(join(f.root,'candidate.txt'),'utf8')).toBe('Synthetic partial candidate')
+    expect(await readFile(join(f.root,'CLAUDE.md'),'utf8')).toBe(guide)
+  }finally{await f.close()}
+})
+
 test('focused facts retain literal user decisions and answered Questions, never tool history or permission grants',()=>{
-  const run={requirements:{text:'CURRENT_REQUIREMENTS',revision:'rev'},agentTurns:[
+  const requirements={text:JSON.stringify({idea:'CONFIRMED_GOAL',
+    user_messages:[{requestKey:'saved-message',text:'Keep the selected theme'}],
+    authorized_user_changes:[{requestKey:'saved-change',text:'Use keyboard controls'}]}),revision:'rev'}
+  const run={requirements,agentTurns:[
+    {attemptId:'message',requestKey:'saved-message',message:{intent:'message',text:'Keep the selected theme'}},
+    {attemptId:'change',requestKey:'saved-change',message:{intent:'change',text:'Use keyboard controls'}},
+    {attemptId:'work',requestKey:'old-work',message:{intent:'work',text:'OLD_EXECUTION_INSTRUCTION'}},
+    {attemptId:'continue',requestKey:'old-continue',message:{intent:'continue',text:'OLD_CONTINUATION_INSTRUCTION'}},
     {attemptId:'prior',requestKey:'prior',message:{intent:'discuss',text:'Use the blue option'}},
     {attemptId:'current',requestKey:'current',message:{intent:'work',text:'CURRENT_WORK'}},
   ]} as Run
@@ -649,10 +668,33 @@ test('focused facts retain literal user decisions and answered Questions, never 
   const facts=focusedExecutionFacts(run,events),text=JSON.stringify(facts)
   expect(text).toContain('Use the blue option');expect(text).toContain('Theme?');expect(text).toContain('Blue')
   expect(text).toContain('Literal ordinary Chat user choice')
-  for(const value of ['PRIVATE_OLD_MODEL_HISTORY','PRIVATE_OLD_TOOL_OUTPUT','OLD_PERMISSION','CURRENT_WORK'])expect(text).not.toContain(value)
+  expect(facts.requirements).toEqual(requirements)
+  for(const value of ['Keep the selected theme','Use keyboard controls'])expect(text.split(value)).toHaveLength(2)
+  expect(facts.priorUserRequests).toEqual([{requestKey:'prior',intent:'discuss',text:'Use the blue option'}])
+  for(const value of ['PRIVATE_OLD_MODEL_HISTORY','PRIVATE_OLD_TOOL_OUTPUT','OLD_PERMISSION','CURRENT_WORK',
+    'OLD_EXECUTION_INSTRUCTION','OLD_CONTINUATION_INSTRUCTION'])expect(text).not.toContain(value)
   expect(facts.answeredQuestions).toHaveLength(2)
   expect(facts.answeredQuestions[1]).toMatchObject({status:'deny',questions:[{question:'Unchosen route?'}]})
   expect(facts.answeredQuestions[1]).not.toHaveProperty('answers')
+})
+
+test('shared guide supplies design methods once; incomplete guides retain the existing fallback',()=>{
+  const run={creation:{initialDelivery:'design-led-first-version',editableContent:true}} as Run
+  const olderGuide=PROJECT_WORKING_CONVENTIONS.replace('\n\n## Quality and evidence',
+    '\nUse supplied native read tools and their schemas instead of Shell readers.\n\n## Quality and evidence')
+  for(const guide of [PROJECT_WORKING_CONVENTIONS,olderGuide]) {
+    const savedGuide=guide+'\nPROJECT_SPECIFIC_ROUTE'
+    const professional=agentProfessionalContextForRun(run,true,savedGuide)
+    const context=professional+'\n'+savedGuide
+    expect(context.split('## Professional methods')).toHaveLength(2)
+    expect(context.split('## Required design dependencies')).toHaveLength(2)
+    for(const step of ['1. Design records:','2. Actual visual designs:','3. Resources:',
+      '4. UI/Scene JSON:','5. Implementation and runtime verification:'])expect(context.split(step)).toHaveLength(2)
+    for(const value of ['game-plan-execution','game-implementation-planning','PROJECT_SPECIFIC_ROUTE',
+      'unknown paid replay or automatic paid retry','respect exclusions and the project budget','required licenses'])expect(context).toContain(value)
+  }
+  for(const guide of ['', '# Custom navigation\nRun the saved command', '## Required design dependencies\nIncomplete'])
+    expect(agentProfessionalContextForRun(run,true,guide)).toContain(PROJECT_WORKING_CONVENTIONS)
 })
 
 // Prompt contracts do not prove that a model read, understood or reproduced art.
@@ -667,11 +709,9 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   expect(followup).not.toContain('New design-led first-version deliverables')
   expect(followup).toContain('content/scenes/*.json')
   expect(followup).toContain('actual runtime')
-  expect(followup).toContain('Read reference pictures with the native Read tool')
-  expect(followup).toContain('Before creating or changing visual implementation')
-  expect(followup).toContain('compare actual screenshots')
-  expect(followup).toContain('not proof when affected sources include visual behavior')
-  expect(followup).toContain('Repair affected sources without restarting production')
+  expect(followup).toContain('Save and Read pictures')
+  expect(followup).toContain('compare actual screens, interaction and sound with the designs')
+  expect(followup).not.toContain('Before creating or changing visual implementation')
   expect(agentProfessionalContextForRun({...run,creation:undefined})).not.toContain('eight documents')
   expect(agentGoalPrompt(run)).toContain('ORIGINAL_CONFIRMED_GOAL')
 })
@@ -682,17 +722,10 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).toContain('with the Skill tool')
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(prompt).toContain('single source')
-    expect(prompt).toContain('A document link, filename, hash or generation record is not an image read')
-    expect(prompt).toContain('Missing or unreadable pictures require the exact path and read error')
-    expect(prompt).toContain('Read evidence proves access, not understanding or visual fidelity')
     expect(prompt).toContain('Prose, palettes and JSON geometry do not replace visual design')
-    expect(prompt).toContain('Check authored UI/Scene geometry with the existing layout tools after selected visual designs and corresponding resources exist')
     expect(prompt).toContain('do not create UI/Scene JSON here')
     expect(prompt).not.toContain('without waiting for production assets')
-    expect(prompt).toContain('unverified aesthetic judgment')
     expect(prompt).toContain('every registered resource file_paths entry and dependency local_path')
-    expect(prompt).toContain('do not change the renderer merely to fit a checker')
-    expect(prompt).toContain('not gameplay, visual or audio acceptance')
     expect(prompt).not.toContain('request a separate shared PNG sheet')
     expect(prompt).not.toContain('computed equal-cell grid')
     expect(prompt.length).toBeLessThan(7000)
@@ -849,7 +882,8 @@ test('native pause/cleanup revokes resource access before releasing its workspac
   try {
     await f.call('/agent/goal','POST',f.body);await f.wait(()=>f.submissions.length===1)
     const context=f.starts[0].systemContext
-    const path=context.match(/Assets: bun "([^"]+)"/)![1]!
+    const directory=JSON.parse(context.match(/Current BGS tools directory \(relative to project root\): ("[^"]+")/)![1]!)
+    const path=join(directory,'assets.mjs')
     const source=await readFile(join(f.root,path),'utf8')
     const config=JSON.parse(source.split('\n')[0]!.slice('const TOOL_CONFIG = '.length))
     const url=config.libraryBaseUrl+'/api/resource-search'
@@ -1151,14 +1185,14 @@ test('first and resumed goals retain professional coverage and design dependenci
     expect(positions.every((position,index)=>position>=0 && (!index || position>positions[index-1]!))).toBe(true)
     expect(prompt).toContain('only after selected visual designs and corresponding resources exist')
     expect(prompt).toContain('do not omit, replace or reverse required dependencies')
-    expect(prompt).toContain('reuse still-valid designs')
+    expect(prompt).toContain('Preserve confirmed requirements')
     expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
   }
-  expect(agentGoalPrompt(run)).toContain('Plan concrete tasks within the required design dependencies')
+  expect(agentGoalPrompt(run)).toContain('Develop the game from this complete confirmed goal')
   expect(agentGoalPrompt(run)).not.toContain('Plan and execute autonomously')
   expect(agentGoalPrompt(run)).toContain('CONFIRMED_GAME')
   const slice={...run,creation:{initialDelivery:'playable-slice'}} as Run
-  expect(agentGoalPrompt(slice)).toContain('within the required design dependencies')
+  expect(agentGoalPrompt(slice)).toContain('Reduced content quantity does not waive the required design dependencies')
 })
 
 test('turn-end host evidence lists actual design changes even when the native answer omits them',async()=>{

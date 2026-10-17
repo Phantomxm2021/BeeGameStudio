@@ -172,7 +172,10 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(tools.turnContext.length).toBeLessThan(2200)
     expect(tools.turnContext).not.toContain('React/Canvas does not waive promised editable data') // responsibility remains in the production system slot
     expect(tools.turnContext).toContain('Tool availability is not runtime consumption or quality evidence')
-    expect(tools.turnContext).toContain(tools.directory+'/consumer.mjs')
+    expect(tools.systemContext).toContain('consumer.mjs')
+    expect(tools.turnContext).not.toContain('consumer.mjs')
+    expect(tools.turnContext).not.toContain('Native bgs-ui-layout reads:')
+    expect(tools.turnContext).not.toContain('detailsFor:')
     // Even with all compactable turn text discarded, the system locator is
     // sufficient to invoke current adapters; it contains no bridge secret.
     const located = JSON.parse(tools.systemContext.match(/root\): ("[^"]+")/)![1]!)
@@ -259,87 +262,38 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
   } finally { await tools.close(); upstream.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 30000)
 
-test('initial catalog is one bounded metadata read, not selection, download or generation', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-initial-catalog-'))
-  const calls: { path: string; method: string; body: unknown; auth: string | null }[] = []
-  const pack = { packId: 'audio-pack', packName: 'Audio pack', dimension: 'agnostic', primaryCategory: 'audio',
-    readyElementCount: 54, formats: ['ogg'], styles: ['Sci-fi'], tags: ['SFX'], license: 'CC0',
-    description: 'DO_NOT_COPY_FULL_METADATA', usageTags: [] }
-  const upstream = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
-    calls.push({path:new URL(request.url).pathname,method:request.method,body:await request.json(),auth:request.headers.get('authorization')})
-    return Response.json({items:[pack],total:40,nextCursor:'next-page',facets:{}})
+test('tool preparation leaves catalog reads to the Agent through the existing authenticated entry',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-catalog-on-demand-'))
+  const calls:{path:string;auth:string|null}[]=[]
+  const upstream=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
+    calls.push({path:new URL(request.url).pathname,auth:request.headers.get('authorization')})
+    return Response.json({items:[{packId:'audio-pack',license:'CC0'}],total:1})
   }})
-  const tools = await openAgentTools({workspacePath:root,libraryBaseUrl:upstream.url.origin,
-    getAuthToken:()=> 'synthetic-catalog-token',readInitialCatalog:true})
+  const tools=await openAgentTools({workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic-catalog-token'})
   try {
-    expect(calls).toEqual([{path:'/api/resource-catalog/packs',method:'POST',body:{limit:32},auth:'Bearer synthetic-catalog-token'}])
-    expect(tools.turnContext).toContain('Initial built-in resource catalog')
-    expect(tools.turnContext).toContain('"total":40')
-    expect(tools.turnContext).toContain('"nextCursor":"next-page"')
-    expect(tools.turnContext).toContain('"readyElementCount":54')
-    expect(tools.turnContext).toContain('"packId":"audio-pack"')
-    expect(tools.turnContext).toContain('does not require adoption')
-    expect(tools.turnContext).toContain('Preserve explicit user source choices')
-    expect(tools.turnContext).not.toContain('DO_NOT_COPY_FULL_METADATA')
-    expect(tools.turnContext).not.toContain('synthetic-catalog-token')
+    expect(calls).toHaveLength(0)
+    expect(tools.turnContext).not.toContain('audio-pack')
+    expect(tools.turnContext).not.toContain('Initial built-in resource catalog')
+    const result=await command(root,tools.directory,'assets.mjs','catalog')
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain('audio-pack')
+    expect(calls).toEqual([{path:'/api/resource-catalog/packs',auth:'Bearer synthetic-catalog-token'}])
     await expect(access(join(root,'assets'))).rejects.toThrow()
-  } finally { await tools.close();upstream.stop(true);await rm(root,{recursive:true,force:true}) }
-})
-
-test('initial catalog distinguishes an observed empty page from failed or invalid responses', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-initial-catalog-error-'))
-  let reply = () => Response.json({items:[],total:0,facets:{}})
-  const upstream = Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>reply()})
-  try {
-    for (const [response, expected] of [
-      [()=>Response.json({items:[],total:0,facets:{}}),'"total":0'],
-      [()=>Response.json({error:'PRIVATE_UPSTREAM_DETAIL'},{status:503}),'unavailable (HTTP 503)'],
-      [()=>new Response('PRIVATE_UPSTREAM_DETAIL'),'unavailable'],
-      [()=>Response.json({items:[]}), 'unavailable'],
-    ] as const) {
-      reply=response
-      const tools=await openAgentTools({workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic',readInitialCatalog:true})
-      try {
-        expect(tools.turnContext).toContain(expected)
-        expect(tools.turnContext).not.toContain('PRIVATE_UPSTREAM_DETAIL')
-        if(expected!=='"total":0') {
-          expect(tools.turnContext).toContain('not an empty catalog')
-          expect(tools.turnContext).not.toContain('"total":0')
-        }
-      } finally {await tools.close()}
-    }
-  } finally {upstream.stop(true);await rm(root,{recursive:true,force:true})}
-})
-
-test('a stalled initial catalog times out without retrying or blocking tool preparation', async () => {
-  const root=await mkdtemp(join(tmpdir(),'bgs-initial-catalog-timeout-'))
-  let release!:()=>void, calls=0
-  const stalled=new Promise<void>(resolve=>{release=resolve})
-  const upstream=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(){
-    calls++;await stalled;return Response.json({items:[],total:0})
-  }})
-  try {
-    const tools=await openAgentTools({workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic',readInitialCatalog:true})
-    try {
-      expect(calls).toBe(1)
-      expect(tools.turnContext).toContain('request failed, timed out, or returned invalid data')
-      expect(tools.turnContext).not.toContain('"total":0')
-    } finally {await tools.close()}
-  } finally {release();upstream.stop(true);await rm(root,{recursive:true,force:true})}
-},10_000)
+  }finally{await tools.close();upstream.stop(true);await rm(root,{recursive:true,force:true})}
+},30000)
 
 test('missing credentials and invalid configuration do not become empty catalogs or block pure tools', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-agent-tools-unavailable-'))
   const upstream = Bun.serve({ hostname:'127.0.0.1', port:0, fetch:()=>{ throw Error('No unauthenticated upstream call allowed') } })
-  const tools = await openAgentTools({ workspacePath:root, libraryBaseUrl:upstream.url.origin, getAuthToken:()=>undefined,readInitialCatalog:true })
+  const tools = await openAgentTools({ workspacePath:root, libraryBaseUrl:upstream.url.origin, getAuthToken:()=>undefined })
   try {
-    expect(tools.turnContext).toContain('Initial built-in resource catalog: unavailable (HTTP 503)')
+    expect(tools.turnContext).toContain('Resource library bridge is configured; catalog requests verify authentication/availability')
     const failed = await command(root,tools.directory,'assets.mjs','catalog')
     expect(failed.code).toBe(1); expect(failed.stderr).toContain('not an empty search result')
-    const invalid = await openAgentTools({workspacePath:root,libraryBaseUrl:'file:///not-a-service',getAuthToken:()=>undefined,readInitialCatalog:true})
+    const invalid = await openAgentTools({workspacePath:root,libraryBaseUrl:'file:///not-a-service',getAuthToken:()=>undefined})
     try {
       expect(invalid.turnContext).toContain('could not start')
-      expect(invalid.turnContext).toContain('Initial built-in resource catalog: unavailable.')
+      expect(invalid.turnContext).not.toContain('Initial built-in resource catalog')
       expect((await command(root,invalid.directory,'check-content.mjs','--format','coordinates')).code).toBe(0)
       expect((await command(root,invalid.directory,'assets.mjs','catalog')).code).toBe(1)
     } finally { await invalid.close() }

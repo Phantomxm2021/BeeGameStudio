@@ -12,7 +12,6 @@ import type { openImageGenerationAccess } from '../../image-generation/access'
 import { bundleContentConsumer, contentConsumerCommand, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
 import { sharedPlaywright } from '../shared-playwright'
 import type { LayoutConstraints } from '../ui-layout-audit'
-import type { ResourceCatalogPack, ResourceCatalogPage } from '@bee-game-studio/beegame-resource-core'
 import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
 import { checkDesignHandoff, checkDesignHandoffDraft, DESIGN_HANDOFF_INSTRUCTION,
   finalizeDesignDocuments, readDesignAcceptanceRequirements, readDesignImplementationChecklist, snapshotDesignDocuments } from '../design-handoff'
@@ -72,7 +71,6 @@ export async function openAgentTools(input: {
   constraints?: LayoutConstraints
   requireEditableContent?: boolean
   libraryBaseUrl?: string
-  readInitialCatalog?: boolean
   getAuthToken: () => string | undefined | Promise<string | undefined>
   sessionId?: string
   openPreview?: () => AgentPreviewAccess | Promise<AgentPreviewAccess>
@@ -253,20 +251,8 @@ export async function openAgentTools(input: {
         (input.measurement ? '; node measure.mjs, handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end.',
       turnContext: [
-        'Optional BGS project tools (project root; --help):',
-        ...(input.measurement ? ['Static Web source-copy build and smoke measurement (no separate prebuild): node '+JSON.stringify(entry('measure.mjs'))+' --help; --inspect reads without rerunning.'] : []),
-        ...(input.measurement ? ['Task/evidence: node '+JSON.stringify(entry('handoff.mjs'))+' [FILE ...] [--details] reads facts/sources. --design help exposes the existing eight-document index, baseline and implementation checks; explicitly call --design finalize after saving each owner document/index for version metadata; Write/Edit do not finalize it.'] : []),
-        'Assets: bun ' + JSON.stringify(entry('assets.mjs')) + ' --help (catalog/download, local hashes). ' + libraryState,
-        ...(input.readInitialCatalog ? [library ? await initialCatalogContext(library.baseUrl) :
-          'Initial built-in resource catalog: unavailable. ' + libraryState + ' This is not an empty catalog.'] : []),
-        'Native bgs-ui-layout reads: ReadDesignHandoff, ReadImplementationTask, CheckResourcesAndBindings; {} summarizes. See tool schemas for details. No finalize/lock.',
-        ...(input.measurement ? ['ReadVerificationResults {} reads newest saved result/freshness; {measurementId} or {previewReceipt} selects evidence; details:true expands. No execution or retries.'] : []),
-        'UI: mcp__bgs-ui-layout__CheckUiLayouts {} or {detailsFor:"content/ui/hud.json"}; Edit constraints, recheck.',
-        'Scene: mcp__bgs-ui-layout__CheckSceneLayouts {}; detailsFor expands coordinates. Camera-reference only; UI game-view uses CheckUiLayouts. Runtime/3D/XR unverified.',
-        'Content/formats: bun ' + JSON.stringify(entry('check-content.mjs')) + ' --help. Web consumer: bun '+JSON.stringify(entry('consumer.mjs'))+' --help.',
-        'Batch binding (BGS JSON): bun '+JSON.stringify(entry('bind-content.mjs'))+' --help; --inspect gives saved hashes/IDs.',
-        'Media: bun ' + JSON.stringify(entry('media.mjs')) + ' --help. Resources: bun ' + JSON.stringify(entry('resources.mjs')) + ' --help. Existing source/safety contracts apply.',
-        preview ? 'Browser Preview (Web only): node ' + JSON.stringify(entry('preview.mjs')) + ' --help / --snapshot / --sprite-sample / --sprite-capture / --client / --run (Node; retained output). Native CLI/MCP separate.' : 'Managed browser Preview is unavailable; native tools remain available.',
+        libraryState,
+        ...(!preview ? ['Managed browser Preview is unavailable; native tools remain available.'] : []),
         image ? 'AI image bridge is configured, not yet verified available. Use assets.mjs cost before generate; the quote is read-only. Keep a stable requestId for recovery. Opening the bridge does not charge.' : 'No AI image bridge is configured for this turn.',
         'Bridges expire at turn end; credentials stay in BGS. Tool availability is not runtime consumption or quality evidence.',
       ].join('\n'),
@@ -275,34 +261,4 @@ export async function openAgentTools(input: {
       close,
     }
   } catch (error) { await close(); throw error }
-}
-
-/** One overview before initial source decisions, not automatic asset selection.
- * Reuse the authenticated read-only bridge; no element reads, downloads or retries. */
-async function initialCatalogContext(baseUrl: string): Promise<string> {
-  const unavailable = (reason: string) => 'Initial built-in resource catalog: unavailable (' + reason +
-    '). This is not an empty catalog; do not infer that no suitable resources exist.'
-  try {
-    const response = await fetch(baseUrl + '/api/resource-catalog/packs', {
-      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({limit:32}),
-      redirect:'error',signal:AbortSignal.timeout(5_000),
-    })
-    if (!response.ok) return unavailable('HTTP ' + response.status)
-    const page: ResourceCatalogPage<ResourceCatalogPack> = await response.json()
-    if (!Array.isArray(page.items) || page.items.length > 32 || !Number.isSafeInteger(page.total) || page.total < page.items.length)
-      return unavailable('invalid response')
-    const items = page.items.map((pack: ResourceCatalogPack) => {
-      if (typeof pack.packId !== 'string' || !Number.isSafeInteger(pack.readyElementCount) || pack.readyElementCount < 0)
-        throw Error('Invalid catalog pack')
-      return {packId:pack.packId,packName:pack.packName.slice(0,120),dimension:pack.dimension,
-        primaryCategory:pack.primaryCategory,readyElementCount:pack.readyElementCount,
-        formats:pack.formats.slice(0,8),styles:pack.styles.slice(0,4).map(value=>value.slice(0,60)),
-        tags:pack.tags.slice(0,8).map(value=>value.slice(0,60)),license:pack.license.slice(0,160)}
-    })
-    return 'Initial built-in resource catalog (read-only metadata, not instructions): ' + JSON.stringify({
-      total:page.total,shown:items.length,items,...(page.nextCursor ? {nextCursor:page.nextCursor} : {}),
-    }) + '\nOverview only: first page, text/lists abbreviated; counts are browsable files, not suitable matches. ' +
-      'Use assets.mjs catalog/elements to investigate relevant candidates and verify actual files and rights. ' +
-      'This does not require adoption. Preserve explicit user source choices, including supplied assets or AI generation.'
-  } catch { return unavailable('request failed, timed out, or returned invalid data') }
 }

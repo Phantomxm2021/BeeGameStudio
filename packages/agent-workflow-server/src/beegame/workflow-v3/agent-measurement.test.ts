@@ -25,7 +25,7 @@ import {sharedContentChecker} from '../content-checker-runtime'
 import {createAgentWorkflowApp} from '../../app'
 import {writeBeeGameAssetManifest} from '../asset-contracts'
 import {DESIGN_ACCEPTANCE_PATH} from '../design-handoff'
-import {initializeProjectGuide,refreshProjectGuide} from './project-guide'
+import {initializeProjectGuide} from './project-guide'
 import {CHECK_VERSIONS} from './check-versions'
 
 const JSZip=createRequire(import.meta.resolve('exceljs'))('jszip')
@@ -808,16 +808,17 @@ test('project navigation remains a measured source; guide edits do not silently 
   }finally{await f.close()}
 },30000)
 
-test('generated guide refreshes before build input capture and does not stale the resulting receipt at turn end',async()=>{
+test('measurement preserves the saved guide and reads current navigation without rewriting project sources',async()=>{
   const f=await fixture()
   try {
     await initializeProjectGuide(f.workspace)
+    const guide=await readFile(join(f.workspace,'CLAUDE.md'),'utf8')
     await mkdir(join(f.workspace,'docs'))
     await writeFile(join(f.workspace,'docs/new-design.md'),'New saved design')
     const measured=await f.measurement.measure(request)
     expect(measured.checks.find(c=>c.id==='build')!.status).toBe('passed')
-    expect(await readFile(join(f.workspace,'CLAUDE.md'),'utf8')).toContain('docs/new-design.md')
-    expect(await refreshProjectGuide(f.workspace)).toBe(false)
+    expect(await readFile(join(f.workspace,'CLAUDE.md'),'utf8')).toBe(guide)
+    expect((await f.measurement.context()).project.designFiles).toContain('docs/new-design.md')
     expect((await f.measurement.context()).measurement?.freshness?.current).toBe(true)
   }finally{await f.close()}
 },30000)

@@ -145,6 +145,7 @@ test('native tools discover all six; result reads use fixed read requests, prese
     if (body.executionInputs === true) return Response.json({ files: [], requirementsRevision: 'r1', runId: 'run', attemptId: 'turn' })
     if (body.inspectRequestKey) return Response.json({ id: body.inspectRequestKey, freshness: { current: false }, error: 'retained failure' })
     if (Array.isArray(body.handoffPaths)) return Response.json({ scope: 'agent-task-evidence-handoff',
+      designFileChanges: { status: 'observed', files: [{ path: 'content/ui/menu.json', change: 'modified' }] },
       measurement: { id: 'newest-interrupted', error: 'interrupted', freshness: { current: false } },
       acceptance: { valid: false }, checkScope: { build: 'source-copy only' }, note: 'No executions',
       measurements: [{ id: 'older-success' }, { id: 'newest-interrupted' }] })
@@ -177,6 +178,16 @@ test('native tools discover all six; result reads use fixed read requests, prese
     const latest = (await call('ReadVerificationResults')).json()
     expect(latest.measurement.id).toBe('newest-interrupted')
     expect(latest.measurement.freshness.current).toBe(false)
+    expect(latest.measurement.error).toBe('interrupted')
+    expect(latest.designFileChanges).toEqual({ status: 'observed', files: [{ path: 'content/ui/menu.json', change: 'modified' }] })
+    expect(latest.quality).toBe('unverified')
+    for (const field of ['acceptance', 'checkScope', 'measurements']) expect(latest).not.toHaveProperty(field)
+    const detailed = (await call('ReadVerificationResults', { details: true })).json()
+    expect(detailed.measurement).toEqual(latest.measurement)
+    expect(detailed.designFileChanges).toEqual(latest.designFileChanges)
+    expect(detailed.acceptance).toEqual({ valid: false })
+    expect(detailed.checkScope).toEqual({ build: 'source-copy only' })
+    expect(detailed.measurements).toEqual([{ id: 'older-success' }, { id: 'newest-interrupted' }])
     expect((await call('ReadVerificationResults', { measurementId: 'exact-id', details: true })).json().id).toBe('exact-id')
     const receipt = (await call('ReadVerificationResults', { previewReceipt: '.beegame/tmp/preview-test-fixture/execution.json' })).json()
     expect(receipt.status).toBe('interrupted')

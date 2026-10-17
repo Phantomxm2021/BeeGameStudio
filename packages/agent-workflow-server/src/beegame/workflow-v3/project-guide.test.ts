@@ -2,7 +2,7 @@ import {test,expect} from 'bun:test'
 import {mkdtemp,realpath,mkdir,writeFile,readFile,rm,symlink,access} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
-import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,PROJECT_WORKING_CONVENTIONS,projectNavigationSnapshot,projectGuideTemplate,initializeProjectGuide,refreshProjectGuide} from './project-guide'
+import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,PROJECT_WORKING_CONVENTIONS,projectNavigationSnapshot,projectGuideTemplate,initializeProjectGuide} from './project-guide'
 import {runGameContentCommand} from '../game-content-validation-cli'
 
 test('template is read-only and remains available with an older saved content format',async()=>{
@@ -25,48 +25,21 @@ test('template is read-only and remains available with an older saved content fo
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
-test('generated navigation refreshes from saved sources, retains authored text and does not rewrite unchanged facts',async()=>{
-  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-refresh-')))
+test('navigation templates read current facts without rewriting an existing project guide',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-snapshot-')))
   try {
     await initializeProjectGuide(root)
-    const path=join(root,'CLAUDE.md'),initial=await readFile(path,'utf8')
-    const suffix='\n## Project decisions\nConfirmed entry: src/main.ts\nUSER_NOTES_UNCHANGED\n'
-    await writeFile(path,initial+suffix)
-    for(const dir of ['docs','src','tests'])await mkdir(join(root,dir))
-    await writeFile(join(root,'docs/design.md'),'PROJECT_PROSE_NOT_COPIED')
+    const path=join(root,'CLAUDE.md'),saved=(await readFile(path,'utf8'))+'\nUSER_NOTES_UNCHANGED\n'
+    await writeFile(path,saved)
+    await mkdir(join(root,'src'))
     await writeFile(join(root,'src/main.ts'),'PROJECT_CODE_NOT_COPIED')
-    await writeFile(join(root,'tests/game.test.ts'),'')
-    await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'actual-dev-command',build:'actual-build-command'}}))
-    expect(await refreshProjectGuide(root)).toBe(true)
-    const updated=await readFile(path,'utf8')
-    for(const value of ['docs/design.md','src/main.ts','tests/game.test.ts','actual-dev-command','actual-build-command'])expect(updated).toContain(value)
-    expect(updated).not.toContain('PROJECT_PROSE_NOT_COPIED')
-    expect(updated).not.toContain('PROJECT_CODE_NOT_COPIED')
-    expect(updated.slice(updated.indexOf('## Professional methods'))).toBe((initial+suffix).slice(initial.indexOf('## Professional methods')))
-    expect(await refreshProjectGuide(root)).toBe(false)
-    await rm(join(root,'src/main.ts'))
-    await writeFile(join(root,'src/new-entry.ts'),'')
-    await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'changed-dev-command'}}))
-    expect(await refreshProjectGuide(root)).toBe(true)
-    const changed=await readFile(path,'utf8'),navigation=changed.slice(0,changed.indexOf('## Professional methods'))
-    expect(navigation).toContain('src/new-entry.ts')
-    expect(navigation).toContain('changed-dev-command')
-    expect(navigation).not.toContain('src/main.ts')
-    expect(navigation).not.toContain('actual-build-command')
-    expect(changed.endsWith(suffix)).toBe(true)
-    await writeFile(path,changed.replace('<!-- bgs:source-navigation:end -->',''))
-    const malformed=await readFile(path,'utf8')
-    await expect(refreshProjectGuide(root)).rejects.toThrow('markers are incomplete')
-    expect(await readFile(path,'utf8')).toBe(malformed)
-    await writeFile(path,'USER_GUIDE_WITHOUT_MANAGED_BLOCK')
-    expect(await refreshProjectGuide(root)).toBe(false)
-    await rm(path)
-    expect(await refreshProjectGuide(root)).toBe(false)
-    await expect(access(path)).rejects.toThrow()
-    await writeFile(join(root,'outside.md'),initial)
-    await symlink(join(root,'outside.md'),path)
-    expect(await refreshProjectGuide(root)).toBe(false)
-    expect(await readFile(join(root,'outside.md'),'utf8')).toBe(initial)
+    await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'actual-dev-command'}}))
+    const template=projectGuideTemplate(root).value
+    expect(template).toContain('src/main.ts')
+    expect(template).toContain('actual-dev-command')
+    expect(template).not.toContain('PROJECT_CODE_NOT_COPIED')
+    await initializeProjectGuide(root)
+    expect(await readFile(path,'utf8')).toBe(saved)
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
@@ -109,7 +82,7 @@ test('guide delegates discovery to native Skills without installation paths or a
     const result=projectGuideTemplate(workspace)
     expect(result.facts).toEqual(projectNavigationSnapshot(workspace))
     expect(result.value).toContain("current session's native metadata")
-    expect(result.value).toContain('base directory supplied by that invocation')
+    expect(result.value).not.toContain('base directory supplied by that invocation')
     expect(result.value).not.toContain(root)
     expect(result.value).not.toContain('Collection navigator:')
     expect(result.value).not.toContain('Built-in Skill index')
@@ -131,8 +104,8 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     const guide=await readFile(path,'utf8')
     expect(guide.split('\n').length).toBeLessThan(200)
     expect(guide).toContain('with the Skill tool')
-    expect(guide).toContain('only the references needed for the task')
-    expect(guide).toContain('Do not duplicate the catalog')
+    expect(guide).not.toContain('only the references needed for the task')
+    expect(guide).not.toContain('Do not duplicate the catalog')
     expect(guide).not.toContain('bgs-builtins:')
     expect(guide).toContain('game-ui-ux-designer')
     expect(guide).toContain('game-art-director-expert')
@@ -140,7 +113,9 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     expect(guide).toContain('do not create UI/Scene JSON here')
     expect(guide).toContain('only after selected visual designs and corresponding resources exist')
     expect(guide).not.toContain('Planning geometry supports layout checks')
-    expect(guide).toContain('reuse still-valid designs')
+    expect(guide).not.toContain('For follow-ups,')
+    expect(guide).not.toContain('instead of Shell readers')
+    expect(guide).not.toContain('For report-only work,')
     expect(guide).not.toContain('Collection navigator:')
     expect(guide).not.toContain(root)
     expect(projectGuideContext(await readProjectGuide(root))).toContain(guide)

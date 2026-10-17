@@ -11,10 +11,9 @@ const NAV_END = '<!-- bgs:source-navigation:end -->'
 export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - Preserve confirmed requirements, design standards, budget, authorization and unrelated work. Use project-relative paths.
 - Keep project-specific architecture decisions and confirmed runtime entry points outside the generated source-navigation block; update them when the implementation changes. Generated pointers list saved sources and declared commands, not verified runtime behavior.
-- For follow-ups, reuse still-valid designs, resources, methods and evidence. Check actual gaps or changed inputs, not a per-turn checklist. Repair affected sources without restarting production or lowering standards.
 
 ## Professional methods
-- For a new complete game design, cover these responsibilities. Use the current session's native metadata to resolve names/namespaces, then invoke matching Skills with the Skill tool before related design or implementation decisions. Reuse loaded methods; follow-ups cover affected responsibilities.
+- For a new complete game design, cover these responsibilities. Use the current session's native metadata to resolve names/namespaces, then invoke matching Skills with the Skill tool before related design or implementation decisions.
 
 | Design responsibility | Skills |
 | --- | --- |
@@ -27,8 +26,6 @@ export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 | AUDIO_DESIGN.md: audio | game-audio-designer |
 | ASSET_PLAN.md: resources | game-content-pipeline-engineer |
 
-- Read the invoked Skill and only the references needed for the task. Resolve paths from the base directory supplied by that invocation. Do not duplicate the catalog or procedures here. Report missing required methods; do not silently skip their responsibility.
-
 ## Required design dependencies
 For applicable new work, use this order; do not omit, replace or reverse required dependencies:
 1. Design records: define gameplay, levels, balance, UI actions/navigation, art, audio and technical approach. Use prose/sketches for space needs; do not create UI/Scene JSON here. Technical/resource plans start as drafts.
@@ -37,11 +34,10 @@ For applicable new work, use this order; do not omit, replace or reverse require
 4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Finalize TECHNICAL_DESIGN.md tasks from these inputs.
 5. Implementation and runtime verification: invoke game-plan-execution with saved content; play the required flow and compare actual screens, interaction and sound with the designs.
 Image-tool request JSON is a tool input, not a project UI/Scene layout. Reuse existing Skills and entries; add no separate plan or task database.
-Use supplied native read tools and their schemas instead of Shell readers. ReadVerificationResults reads current-turn file changes and retained results/freshness. For report-only work, read the snapshot once; without later writes, report directly. Missing inputs and stale/unfinished evidence stay unverified. Reads do not finalize, lock or start implementation.
 
 ## Quality and evidence
-- Skill invocation, complete documents, valid JSON and successful tools do not establish design quality. Inspect actual-size composition, hierarchy, style and state feedback; verify fidelity, gameplay, interaction and sound in the actual runtime.
-- Fix contradictions in owning sources. Obtain necessary evidence within authorization; report unresolved gaps rather than inventing evidence or passing them. Appearance and game feel remain unverified without actual observations.`
+- Skill invocation, complete documents, valid JSON and successful tools do not establish design quality.
+- Appearance and game feel remain unverified without actual observations.`
 
 // Only generated navigation is descriptive. Project-specific decisions remain
 // in existing design/configuration; this template adds no authored report.
@@ -134,7 +130,7 @@ function sourceNavigation(facts:ReturnType<typeof projectNavigationSnapshot>) {
   const paths=(xs:string[])=>xs.length?xs.map(p=>'`'+p.replaceAll('`','\\`')+'`').join(', '):'<not established>'
   const configuration=facts.rootFiles.filter(p=>!p.endsWith('.md'))
   return `${NAV_START}
-<!-- Refreshed from saved sources before measurement and at turn end; keep authored decisions outside this block. -->
+<!-- Source navigation snapshot; project decisions remain in their owning sources. -->
 ## Current route
 - Root source anchors (route not inferred): ${paths(configuration)}
 
@@ -190,33 +186,6 @@ async function readGuideText(file:Awaited<ReturnType<typeof open>>) {
   const data=buffer.subarray(0,bytes),text=new TextDecoder('utf-8',{fatal:true}).decode(data)
   if(text.includes('\u0000'))throw Error('Project guide must be UTF-8 text, not binary data')
   return {data,text}
-}
-
-/** Existing writer only. Update the explicitly generated block, never create a
- * missing guide or replace authored text. No change means no write. */
-export async function refreshProjectGuide(workspacePath:string):Promise<boolean> {
-  const candidate=await readProjectGuide(workspacePath)
-  if(candidate.status!=='loaded' || !candidate.text.includes(NAV_START) && !candidate.text.includes(NAV_END))return false
-  let file:Awaited<ReturnType<typeof open>>|undefined
-  try {
-    const root=await realpath(workspacePath)
-    file=await open(join(root,PATH),constants.O_RDWR|constants.O_NOFOLLOW|constants.O_NONBLOCK)
-    if((await file.stat()).nlink!==1)throw Error('Shared project guide files are not refreshed')
-    const {text}=await readGuideText(file)
-    const start=text.indexOf(NAV_START),end=text.indexOf(NAV_END)
-    if(start<0 && end<0)return false
-    if(start<0 || end<start || text.indexOf(NAV_START,start+NAV_START.length)>=0 || text.indexOf(NAV_END,end+NAV_END.length)>=0)
-      throw Error('Project guide navigation markers are incomplete or duplicated; authored text preserved')
-    const next=text.slice(0,start)+sourceNavigation(projectNavigationSnapshot(root))+text.slice(end+NAV_END.length)
-    if(next===text)return false
-    if(Buffer.byteLength(next)>MAX_BYTES)throw Error('Refreshed project guide exceeds 64 KiB; saved guide preserved')
-    await file.writeFile(next,'utf8')
-    await file.truncate(Buffer.byteLength(next))
-    return true
-  } catch(error) {
-    if((error as NodeJS.ErrnoException).code==='ENOENT')return false
-    throw error
-  } finally {await file?.close()}
 }
 
 /** Read one project-root regular file only. No search, @include expansion,

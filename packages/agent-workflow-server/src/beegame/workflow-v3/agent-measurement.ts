@@ -13,7 +13,7 @@ import { CHECK_VERSIONS } from './check-versions'
 import { sameJson, type WorkflowStore } from './store'
 import { inspectAgentMeasurementInputs } from './measured-build'
 import { reviewSourceSnapshot } from '../design-source-reading'
-import { projectNavigationSnapshot, refreshProjectGuide } from './project-guide'
+import { projectNavigationSnapshot } from './project-guide'
 import { priorMainSkillLoads } from './context'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
 import { snapshotDesignRevisionFiles, designRevisionFileDigest, DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
@@ -191,7 +191,6 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     try {
       // Refresh before hashing/building: guide maintenance must not stale the
       // just-created receipt when the turn settles without further source edits.
-      await refreshProjectGuide(root)
       // Only explicitly selected execution receipts may enter from host
       // metadata; never open arbitrary capabilities/settings or follow aliases.
       for (const path of request.reportPaths.filter(path=>path.startsWith('.beegame/')))

@@ -51,9 +51,10 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     else if(n===6)call={name:'Read',input:{file_path:join(workspace,'rules.mjs')}}
     else if(n===7)call={name:'Edit',input:{file_path:join(workspace,'rules.mjs'),old_string:'target = 2',new_string:'target = 3'}}
     else if(n>=9 && n<=11) {
-      const context=JSON.stringify(requests[0].messages)
-      const assets=context.match(/\.beegame\/tmp\/goal-tools-[A-Za-z0-9_-]+\/assets\.mjs/)?.[0]
-      if(!assets) throw Error('Actual native tool context must expose the assets entry')
+      const context=JSON.stringify(requests[0])
+      const directory=context.match(/\.beegame\/tmp\/goal-tools-[A-Za-z0-9_-]+/)?.[0]
+      if(!directory) throw Error('Actual native tool context must expose the tool directory')
+      const assets=directory+'/assets.mjs'
       const checker=assets.replace('assets.mjs','check-content.mjs')
       call={name:'Bash',input:{command:n===9 ? 'bun '+JSON.stringify(assets)+' catalog' :
         'bun '+JSON.stringify(checker)+(n===10?' --format coordinates':' --layout-draft menu.json 960 540')+
@@ -183,7 +184,7 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     expect(facts.skills).toMatchObject({recordedMainLoads:[],contextPresence:'not-transferred'})
     expect(facts.skills.contextPresence).toBe('not-transferred');expect(facts.skills.application).toBe('unverified')
     expect(facts.measurement.id).toBe(run.agentTurns![4]!.measurements!.at(-1)!.id)
-    expect(JSON.stringify(requests[25].messages)).toContain('not a requirement change')
+    expect(JSON.stringify(requests[25].messages)).not.toContain('Reuse applicable evidence and revise/retest actual affected results')
     expect(run.agentTurns![5]!.measurements).toBeUndefined()
     const runtime=(await readFile(join(workspace,'.beegame/logs/native-runtime.jsonl'),'utf8'))
       .trim().split('\n').map(line=>JSON.parse(line))
@@ -196,12 +197,13 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     expect(JSON.stringify(requests[11].messages)).toContain('agent-task-evidence-handoff')
     expect(JSON.stringify(requests[11].messages)).toContain('currentTurnUses')
     expect(JSON.stringify(requests[11].messages)).toContain('bgs-builtins:gameplay-programmer')
-    const toolContext=requests[0].messages.flatMap((m:any)=>Array.isArray(m.content)?m.content:[])
-      .find((block:any)=>block.type==='text' && block.text.startsWith('Optional BGS project tools'))?.text
+    const system=typeof requests[0].system==='string'?[{type:'text',text:requests[0].system}]:requests[0].system??[]
+    const toolContext=[...system,...requests[0].messages.flatMap((m:any)=>Array.isArray(m.content)?m.content:[])]
+      .find((block:any)=>block.type==='text' && block.text.includes('BGS saved evidence (not game acceptance): '))?.text
     expect(typeof toolContext).toBe('string')
     // Saved source names/task facts legitimately vary; do not impose a
     // combined character budget or repeat the goal just to fit this fixture.
-    const startupFacts=JSON.parse(toolContext.split('BGS saved evidence (not game acceptance): ')[1])
+    const startupFacts=JSON.parse(toolContext.split('BGS saved evidence (not game acceptance): ')[1].split('\n')[0])
     expect(startupFacts.task).not.toHaveProperty('text')
     expect(startupFacts.task.requestKey).toBe(turn.requestKey)
     expect(startupFacts.skills.currentTurnEvidence).toBe('live-native-tool-events')

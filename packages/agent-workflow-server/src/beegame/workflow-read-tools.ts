@@ -166,7 +166,7 @@ export async function readVerificationResults(workspace: string, input: unknown,
     return result
   }
   // Keep host freshness/failed/unfinished status; never search backward for a PASS.
-  return { scope: result.scope, designFileChanges: result.designFileChanges, measurement: result.measurement, checkScope: result.checkScope,
-    acceptance: result.acceptance, quality: 'unverified', note: result.note,
-    ...(details ? { measurements: result.measurements } : {}) }
+  return { scope: result.scope, designFileChanges: result.designFileChanges, measurement: result.measurement,
+    quality: 'unverified', note: result.note,
+    ...(details ? { checkScope: result.checkScope, acceptance: result.acceptance, measurements: result.measurements } : {}) }
 }

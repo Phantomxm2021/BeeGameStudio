@@ -7,7 +7,7 @@ import { skillEvidence } from './context'
 import { openAgentTools, type AgentPreviewAccess, type AgentImageAccess } from './agent-tools'
 import { createAgentMeasurement, AGENT_CONSUMPTION_CHECKS } from './agent-measurement'
 import { blockingRegisteredContentChecks, inspectAgentMeasurementInputs } from './measured-build'
-import { readProjectGuide, projectGuideContext, refreshProjectGuide, PROJECT_WORKING_CONVENTIONS } from './project-guide'
+import { readProjectGuide, projectGuideContext, PROJECT_WORKING_CONVENTIONS } from './project-guide'
 import { saveHostExitReceipt, type HostExitReceipts, type HostExitFacts } from './host-exit-receipt'
 import { installWebStarter } from './web-project-start'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
@@ -41,36 +41,30 @@ export const agentMessageSchema = z.object({
   {message:'Only explicit continuation requires continuationOf'}).refine(value=>value.contextMode!=='focused'||['work','change','continue'].includes(value.intent),
   {message:'Focused execution requires work, change or continuation, not discussion'})
 
-// Shared project conventions preserve design dependencies on initial and resumed
-// work. Keep provider/tool details here and professional procedures in Skills.
+// Business data and authorization contracts only. Execution methods stay in Skills.
 const professionalContextParagraphs = [
-  PROJECT_WORKING_CONVENTIONS,
-  'Before creating or changing visual implementation or production artwork, identify owning records and Read reference pictures with the native Read tool at their actual saved paths. A document link, filename, hash or generation record is not an image read. Reuse inspection only for applicable reference versions; a nonvisual claim is not proof when affected sources include visual behavior. Preserve selected geometry, typography, palette, resources and states; revise owning decisions only when authorized. Missing or unreadable pictures require the exact path and read error. Check authored UI/Scene geometry with the existing layout tools after selected visual designs and corresponding resources exist.',
   'Consume applicable BGS editable visual nodes and bindings in the actual runtime, without a second hardcoded layout. Unity/Godot use native data; do not migrate source-only projects or duplicate native content into Web JSON. Maintain resources and bindings together.',
   'Honor explicit resource sources and usage rights; AI is not the default for all core art. New AI production images use purpose: production and existing requirementIds. Use tool help for formats and contracts. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Procedural replacement of required art needs a concrete blocker and authorization; placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
   'Separate editable sources from publication output. Use registered runtime-file selection: preserve every registered resource file_paths entry and dependency local_path, including on-demand resources and required licenses. Do not copy all production material or auto-delete advisory inventory entries. Keep a single source, not another packaging manifest.',
-  'Verify affected requirements in the actual runtime; compare actual screenshots with selected designs, record differences and retain unverified aesthetic judgment. Read evidence proves access, not understanding or visual fidelity. Build, schema, document or reviewer PASS is not gameplay, visual or audio acceptance. Preserve failures; distinguish unsupported probes from defects; do not change the renderer merely to fit a checker. Observe applicable runtime behavior beyond host probe coverage.',
-  'Finish source/report edits before final measurement, which already builds its source copy. Inspect receipts without replay; keep new runs separate from retained evidence. Handoff actual paths, tested version and limitations; missing observations stay unverified. BGS does not reset conversations, choose agents or automatically retry paid work.',
 ]
 const firstVersionDeliveryContext = 'New design-led first-version deliverables use the existing eight documents under docs/: GDD.md, LEVEL_SCENE_DESIGN.md, BALANCE_DESIGN.md, TECHNICAL_DESIGN.md, ART_DIRECTION.md, UI_UX_SPEC.md, AUDIO_DESIGN.md and ASSET_PLAN.md. Use their existing indexes. Draft technical/resource plans first; complete them from selected visual designs, actual resources and authored UI/Scene inputs. Deliver the confirmed scope.'
 const editableWebDeliveryContext = 'This project requires BGS visual editing: deliver applicable content/scenes/*.json and content/ui/*.json through the existing content/index.json. Pure UI games may use a ui-screen/ui-hud entry without an empty Scene. React/Canvas does not waive runtime consumption of these saved sources.'
-export const agentProfessionalContext = [...professionalContextParagraphs, firstVersionDeliveryContext].join('\n')
-export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation'>>, followup = false) => [
+export const agentProfessionalContext = [PROJECT_WORKING_CONVENTIONS, ...professionalContextParagraphs, firstVersionDeliveryContext].join('\n')
+// Recognize the shared methods/order even in guides with older navigation hints.
+// Custom or unavailable guides still need the existing design conventions.
+const designMethods = PROJECT_WORKING_CONVENTIONS.slice(PROJECT_WORKING_CONVENTIONS.indexOf('| Design responsibility'),
+  PROJECT_WORKING_CONVENTIONS.indexOf('\n\n## Required design dependencies'))
+const designOrder = PROJECT_WORKING_CONVENTIONS.slice(PROJECT_WORKING_CONVENTIONS.indexOf('## Required design dependencies'),
+  PROJECT_WORKING_CONVENTIONS.indexOf('\n\n## Quality and evidence'))
+export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation'>>, followup = false, guideText = '') => [
+  ...(guideText.includes(designMethods) && guideText.includes(designOrder) ? [] : [PROJECT_WORKING_CONVENTIONS]),
   ...professionalContextParagraphs,
   ...(!followup && run.creation?.initialDelivery === 'design-led-first-version' ? [firstVersionDeliveryContext] : []),
   ...(run.creation?.editableContent ? [editableWebDeliveryContext] : []),
 ].join('\n')
 export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run['sourceEdits']> = []): string {
-  const context = message.intent==='discuss' ?
-    'Discuss the user’s question in this existing project. This message does not authorize changes or execution; answer only. Ask for authorization if changes are needed.' :
-    message.intent==='message' ?
-      'This is the user’s direct message in the existing project. Interpret its actual wording: answer questions without changing files; carry out clearly requested work or requirement changes within that wording; ask before taking a material action the user did not authorize or when the request is ambiguous. Preserve unrelated work. Do not treat this routing label as permission to modify the project.' :
-    message.intent==='work' ?
-      'The user authorizes work on the existing confirmed goal, not a requirement change or restart. Preserve the confirmed choices. Reuse applicable evidence and revise/retest actual affected results; ask before changing the goal or scope.' :
-    message.intent==='change' ?
-      'This is an explicitly authorized requirement change in the existing project, not a restart of the original goal. Read current affected sources, update their actual authority and consumers, preserve unrelated work, and rebuild/retest changed results. Earlier checks do not accept the changed version. Latest explicit user changes supersede conflicting original choices; ask when a material choice is missing.' :
-      'Continue only the work requested below in this same project, reusing valid saved results. Inspect unresolved partial work and external outcomes before relying on them; recheck only changed inputs or a concrete evidence gap. Do not replay commands or unknown paid operations, resend the original goal or redo unrelated work. Partial work is not acceptance.'
-  return [context, ...(edits.length ? ['User-authorized source saves since the preceding native turn (not acceptance; inspect current files):\n'+
+  return [...(message.intent==='discuss' ? ['This request authorizes discussion only, without changes or execution.'] : []),
+    ...(edits.length ? ['User-authorized source saves since the preceding native turn:\n'+
     JSON.stringify([...new Map(edits.map(e=>[e.sourceEdit.path,{path:e.sourceEdit.path,status:e.sourceEdit.status}])).values()])] : []),
     'User message:\n'+message.text].join('\n\n')
 }
@@ -88,15 +82,13 @@ function agentGoalDisplayText(run: Run): string {
 
 export function agentGoalPrompt(run: Run): string {
   if (run.creation?.initialDelivery === 'playable-slice') return [
-    'This first assignment delivers one small, complete player experience for user playtesting, not the full game. Plan concrete tasks within the required design dependencies; reduced content quantity does not waive applicable professional or visual design. Keep the complete confirmed goal below unchanged for subsequent work.',
+    'This first assignment delivers one small, complete player experience for user playtesting, not the full game. Reduced content quantity does not waive the required design dependencies. Keep the complete confirmed goal below unchanged for subsequent work.',
     'Reduce content quantity, not the controls, readability or audiovisual feedback needed to judge the chosen experience. Preserve confirmed core rules; a proposed rule change is not authorization to implement it. Record the experience focus and deferred content in the existing concise design record, implement and run it, and show the actual preview and observations. Identify unresolved experience questions, then end this turn for user feedback. Do not expand the full content set in this assignment or claim game acceptance.',
     ...(run.creation.webStarter ? ['The host supplied a generic React/Canvas connection scaffold: content/ is consumed by src/main.jsx, src/game.js owns simulation and UI state/actions. It is not gameplay or an approved art style. Extend the connected sources; do not replace saved Scene/UI data with a second hardcoded layout.'] : []),
     'Confirmed full goal (scope retained, not all due in this first assignment):\n'+run.requirements.text,
   ].join('\n\n')
   return [
-    'Develop the game from this complete confirmed goal in the current project. Plan concrete tasks within the required design dependencies; do not skip professional or visual design to reach implementation sooner. Use the existing handoff capabilities within this order.',
-    ...(run.visualHandoffVersion===1 ? ['Honor the design-led first-version delivery requirements in the system context within the confirmed scope. Complete-screen UI designs and scene/prop designs guide resources, UI/Scene and actual runtime checks; no second production authorization or automatic paid retry.'] : []),
-    'Preserve explicit user choices. Ask the user when a material choice or authorization is missing. Do not claim unperformed checks or game acceptance.',
+    'Develop the game from this complete confirmed goal in the current project.',
     'Confirmed goal:\n'+run.requirements.text,
   ].join('\n\n')
 }
@@ -133,7 +125,9 @@ export function focusedExecutionFacts(run: Run, events: Awaited<ReturnType<typeo
     ...(run.agentTurns?.at(-1) && isInitialSliceTurn(run,run.agentTurns.at(-1)!)
       ? {initialAssignment:agentGoalPrompt(run)} : {}),
     requirements:run.requirements,
-    priorUserRequests:run.agentTurns!.slice(0,-1).flatMap(t=>t.message?[{requestKey:t.requestKey,intent:t.message.intent,text:t.message.text}]:[]),
+    // Message/change text already belongs to requirements; old work/continue
+    // requests are execution history. Discussion may hold otherwise unsaved choices.
+    priorUserRequests:run.agentTurns!.slice(0,-1).flatMap(t=>t.message?.intent==='discuss'?[{requestKey:t.requestKey,intent:t.message.intent,text:t.message.text}]:[]),
     otherUserMessages,
     answeredQuestions,
     previousExecution:previous?{attemptId:previous.attemptId,requestKey:previous.requestKey,turnId:previous.turnId,
@@ -212,11 +206,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       if (!sameWriter(current, turn)) throw new WorkflowError('stale-attempt', 'Native goal writer changed')
       const saved = current.agentTurns!.find(t=>t.attemptId===turn.attemptId)!
       if (!saved.quiescedAt) throw new WorkflowError('writer-unresolved', 'Native exit is not confirmed')
-      let navigationNote=''
-      if(!current.paused && saved.message?.intent!=='discuss') {
-        try {await refreshProjectGuide(current.workspacePath)}
-        catch(error) {navigationNote=' Project navigation refresh failed: '+(error instanceof Error?error.message:String(error))}
-      }
       const next = structuredClone(current), result = next.agentTurns!.find(t=>t.attemptId===turn.attemptId)!
       result.status = interrupted || current.paused ? 'interrupted' : failed ? 'failed' : 'ended'
       result.finishedAt = new Date().toISOString()
@@ -225,7 +214,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       next.blockedReason = (current.paused ? 'User paused; no automatic retry.' :
         failed ?? ((isInitialSliceTurn(current,result)
           ? 'Initial playable-slice turn ended; inspect the actual preview and give feedback before expanding content. This is not full-game completion. ' : '') +
-          await agentTurnHandoffReason(current,saved)))+navigationNote
+          await agentTurnHandoffReason(current,saved)))
       try {
         await input.store.commit(run.projectId,run.ownerId,current.version,next,'agent.turn-settled')
         observedExits.delete(turn.attemptId)
@@ -285,7 +274,8 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         // Project conventions/navigation are one current file snapshot, including
         // discussion; production capabilities stay scoped to authorized work.
         prepareTurn:async ()=>{
-          const guide=projectGuideContext(await readProjectGuide(run.workspacePath))
+          const savedGuide=await readProjectGuide(run.workspacePath)
+          const guide=projectGuideContext(savedGuide)
           // A committed change whose native submission never started is not
           // in resumed model history. Carry its literal user data under this
           // new authorization; metadata-only confirmedBriefContext is not a
@@ -304,7 +294,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
             requireEditableContent:run.creation?.editableContent,
             sessionId:session.id,openPreview:options.openPreview ? async ()=>preview=await options.openPreview!() : undefined,
             libraryBaseUrl:input.resourceLibraryBaseUrl,
-            readInitialCatalog:!turn.message,
             getAuthToken:()=>options.getValidAuthToken?.() ?? options.authToken, measurement,
             openImage:options.openImage ? async ()=>image=await options.openImage!() : undefined })
           // Supply current host facts with the task, not solely through a
@@ -312,7 +301,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
           // reads inputs once; it does not build, review or rewrite history.
           const evidence=await measurement.context()
           return {...tools,turnContext:confirmedChanges,
-            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message))+'\n\n'+guide+'\n\n'+tools.systemContext+
+            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message),savedGuide.status==='loaded'?savedGuide.text:'')+'\n\n'+guide+'\n\n'+tools.systemContext+
               '\n'+tools.turnContext+'\nBGS saved evidence (not game acceptance): '+JSON.stringify(evidence)}
         },
       })
