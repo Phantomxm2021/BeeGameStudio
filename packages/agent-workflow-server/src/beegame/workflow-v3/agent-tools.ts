@@ -32,7 +32,7 @@ export function openDesignActions(root: string, requireEditableContent = false, 
     if (documents.length && action !== 'finalize' && action !== 'draft') throw Error('Document selection is supported only by finalize or draft')
     if (action === 'draft') {
       if (selected.length !== 1) throw Error('Draft inspection requires one design document')
-      return checkDesignHandoffDraft(root, selected[0]!, { finalTechnical: selected[0] === 'TECHNICAL_DESIGN.md' })
+      return checkDesignHandoffDraft(root, selected[0]!, { finalTechnical: selected[0] === 'TECHNICAL_DESIGN.md' ? 'when-ready' : false })
     }
     if (action === 'help') return { valid: true, instruction: DESIGN_HANDOFF_INSTRUCTION,
       acceptanceExample: {

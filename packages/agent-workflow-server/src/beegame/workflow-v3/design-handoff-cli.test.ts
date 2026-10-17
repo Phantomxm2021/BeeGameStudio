@@ -91,6 +91,34 @@ test('baseline CLI summarizes integrity without hiding failures or certifying ab
     expect(await readFile(technicalPath, 'utf8')).toBe(JSON.stringify(broken))
     await writeFile(technicalPath, technical)
 
+    // The real CLI must distinguish pending writing from errors, and still
+    // run the complete task coverage check once all owner inputs are saved.
+    const artPath = join(root, designHandoffPath('ART_DIRECTION.md'))
+    const art = await readFile(artPath, 'utf8')
+    await rm(artPath)
+    const pending = await command('--design', 'draft', 'TECHNICAL_DESIGN.md')
+    expect(pending.code, pending.stderr).toBe(0)
+    expect(JSON.parse(pending.stdout)).toMatchObject({
+      valid: true, issues: [], pendingDocuments: ['ART_DIRECTION.md'], taskCoverageChecked: false,
+    })
+    const wrongRef = JSON.parse(technical)
+    wrongRef.implementationItems[0].requirementRefs[0].id = 'invented'
+    await writeFile(technicalPath, JSON.stringify(wrongRef))
+    const invalidPending = await command('--design', 'draft', 'TECHNICAL_DESIGN.md')
+    expect(invalidPending.code).toBe(1)
+    expect(JSON.parse(invalidPending.stdout).issues.join(' ')).toContain('references missing requirement GDD.md#invented')
+    await writeFile(artPath, art)
+    const uncovered = JSON.parse(technical)
+    uncovered.implementationItems.shift()
+    await writeFile(technicalPath, JSON.stringify(uncovered))
+    const completeInputs = await command('--design', 'draft', 'TECHNICAL_DESIGN.md')
+    expect(completeInputs.code).toBe(1)
+    expect(JSON.parse(completeInputs.stdout)).toMatchObject({
+      valid: false, pendingDocuments: [], taskCoverageChecked: true,
+      issues: expect.arrayContaining([expect.stringContaining('required output GDD.md#play has no implementation item')]),
+    })
+    await writeFile(technicalPath, technical)
+
     // Details are a fresh read, not a cached success after input changes.
     await writeFile(join(root, 'docs/GDD.md'), 'Invalid fixture: required sections removed')
     const failed = await command('--design', 'baseline')

@@ -33,9 +33,12 @@ export type DesignHandoff = z.infer<typeof handoffSchema>
 /** Owned outcome/pointer/evidence feedback, without host versions, sibling readiness
  * or semantic certification. Catch malformed indexes in the author's short
  * history instead of deferring basic field errors to a full joint Revision. */
-export function checkDesignHandoffDraft(workspace: string, name: string, options: { finalTechnical?: boolean } = {}) {
+export function checkDesignHandoffDraft(workspace: string, name: string, options: { finalTechnical?: boolean | 'when-ready' } = {}) {
   const issues: string[] = []
   const availableRequirements: Array<{ document: DesignDocument; id: string; section: string }> = []
+  const pendingDocuments = new Set<DesignDocument>()
+  const allowPending = options.finalTechnical === 'when-ready'
+  let taskCoverageChecked = false
   try {
     // This public command takes either the logical name or its exact workspace
     // docs path. Do not use basename(), which would accept arbitrary/traversing paths.
@@ -51,19 +54,35 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
       JSON.parse(readRetained(workspace, designHandoffPath(name)).toString('utf8')), issues), headingNames)
     issues.push(...outputIssues(document, handoff.outputs ?? [], headings))
     const indexes: Partial<Record<DesignDocument, IndexedDesign>> = { [document]: { handoff, headings } }
-    const finalTechnical = document === 'TECHNICAL_DESIGN.md' && options.finalTechnical === true
-    // Earlier owners are finished only at final technical completion. Check
-    // declared task coverage here, without demanding host versions/hashes or
-    // repeating semantic review of their prose.
-    if (finalTechnical) for (const sibling of PROJECT_DOCUMENTS) {
+    const inspectTechnical = document === 'TECHNICAL_DESIGN.md' && Boolean(options.finalTechnical)
+    // Public draft reads available owners during writing. Explicit final checks
+    // remain strict; missing draft inputs never become a completed task check.
+    const readSibling = (sibling: DesignDocument, path: string) => {
+      if (allowPending) try { lstatSync(resolve(workspace, path)) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        pendingDocuments.add(sibling)
+        return undefined
+      }
+      // Do not classify a broken/unsafe alias or unreadable file as not authored.
+      return readRetained(workspace, path)
+    }
+    if (inspectTechnical) for (const sibling of PROJECT_DOCUMENTS) {
       if (sibling === document) continue
       try {
-        const source = documentStructure(readRetained(workspace, `docs/${sibling}`).toString('utf8'))
-        indexes[sibling] = { headings: source.headings, handoff: diagnosticHandoff(sibling,
-          JSON.parse(readRetained(workspace, designHandoffPath(sibling)).toString('utf8')), issues) }
+        const body = readSibling(sibling, `docs/${sibling}`)
+        const index = readSibling(sibling, designHandoffPath(sibling))
+        const source = body ? documentStructure(body.toString('utf8')) : undefined
+        const owner = index ? diagnosticHandoff(sibling, JSON.parse(index.toString('utf8')), issues) : undefined
+        if (!source || !owner) continue
+        if (source.blocks.length) issues.push(`${sibling}: Move inline bgs-handoff to ${designHandoffPath(sibling)}`)
+        const handoff = canonicalHeadingPointers(owner, source.headingNames)
+        indexes[sibling] = { headings: source.headings, handoff }
+        issues.push(...outputIssues(sibling, handoff.outputs ?? [], source.headings))
       } catch (error) { issues.push(`Cannot check task coverage against ${sibling}: ${error instanceof Error ? error.message : String(error)}`) }
     }
-    issues.push(...implementationIssues(indexes, finalTechnical))
+    taskCoverageChecked = inspectTechnical && !pendingDocuments.size
+    issues.push(...implementationIssues(indexes, taskCoverageChecked))
     if (!handoff.outputs?.length) issues.push('required owned delivery outcomes are missing')
     for (const output of handoff.outputs ?? []) if (!output.acceptance)
       issues.push(`output ${output.id} needs an acceptance section for its owned delivery`)
@@ -85,6 +104,7 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
       ({ document, id, section: outputSection })))
   }
   return { valid: !issues.length, issues: issues.map(issue => issue.startsWith(name + ':') ? issue : `${name}: ${issue}`),
+    ...(allowPending && name === 'TECHNICAL_DESIGN.md' ? { pendingDocuments: [...pendingDocuments], taskCoverageChecked } : {}),
     ...(availableRequirements.length ? { availableRequirements } : {}) }
 }
 

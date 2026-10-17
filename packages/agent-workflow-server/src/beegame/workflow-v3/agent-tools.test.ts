@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto'
 import { registeredContentChecks } from './agent-measurement'
 import { runArtifactCheck } from './runtime-checks'
 import { readContentView } from './content-view'
-import { designHandoffPath } from '../design-handoff'
+import { designHandoffPath, readDesignImplementationChecklist } from '../design-handoff'
 import { writeDesignDocumentsFixture, designHandoffFixture } from '../fixtures/layout-fixture'
 
 test('finalize supports existing scoped documents and preserves independent work when a sibling is invalid', async () => {
@@ -66,6 +66,92 @@ test('design handoff exposes early requirements and final implementation coverag
     expect(partial.requirements.some((item:any)=>item.document==='AUDIO_DESIGN.md')).toBe(false)
   } finally { await rm(root, {recursive:true,force:true}) }
 })
+
+test('technical draft defers incomplete owner coverage, then checks the full saved task set', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-incremental-technical-')))
+  try {
+    const early = ['GDD.md', 'LEVEL_SCENE_DESIGN.md', 'BALANCE_DESIGN.md', 'TECHNICAL_DESIGN.md'] as const
+    const pending = ['ART_DIRECTION.md', 'UI_UX_SPEC.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md'] as const
+    await writeDesignDocumentsFixture(root, early)
+    const design = openDesignActions(root)
+    const path = join(root, designHandoffPath('TECHNICAL_DESIGN.md'))
+    const original = await readFile(path, 'utf8')
+    expect(await design('draft', ['TECHNICAL_DESIGN.md'])).toMatchObject({
+      valid: true, issues: [], pendingDocuments: [...pending], taskCoverageChecked: false,
+      availableRequirements: expect.arrayContaining([expect.objectContaining({ document: 'GDD.md' })]),
+    })
+    expect(await readFile(path, 'utf8')).toBe(original)
+    for (const name of pending) await expect(access(join(root, 'docs', name))).rejects.toThrow()
+    expect(() => readDesignImplementationChecklist(root)).toThrow()
+
+    await writeDesignDocumentsFixture(root, pending)
+    expect(await design('draft', ['TECHNICAL_DESIGN.md'])).toMatchObject({
+      valid: true, issues: [], pendingDocuments: [], taskCoverageChecked: true,
+    })
+    const incomplete = JSON.parse(original)
+    incomplete.implementationItems = incomplete.implementationItems.filter((item: any) =>
+      !item.requirementRefs.some((ref: any) => ref.document === 'GDD.md'))
+    await writeFile(path, JSON.stringify(incomplete))
+    const uncovered = await design('draft', ['TECHNICAL_DESIGN.md']) as any
+    expect(uncovered).toMatchObject({ valid: false, pendingDocuments: [], taskCoverageChecked: true })
+    expect(uncovered.issues.join(' ')).toContain('required output GDD.md#play has no implementation item')
+    expect(await readFile(path, 'utf8')).toBe(JSON.stringify(incomplete))
+    expect(() => readDesignImplementationChecklist(root)).toThrow('has no implementation item')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test.each(['document', 'index'] as const)('technical draft distinguishes an unwritten sibling %s from a bad saved reference', async missing => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-technical-pending-pair-')))
+  try {
+    await writeDesignDocumentsFixture(root)
+    await rm(join(root, missing === 'document' ? 'docs/ART_DIRECTION.md' : designHandoffPath('ART_DIRECTION.md')))
+    expect(await openDesignActions(root)('draft', ['TECHNICAL_DESIGN.md'])).toMatchObject({
+      valid: true, issues: [], pendingDocuments: ['ART_DIRECTION.md'], taskCoverageChecked: false,
+    })
+    expect(() => readDesignImplementationChecklist(root)).toThrow()
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test.each(['missing-reference', 'bad-source-heading', 'malformed-index', 'invalid-index-fields', 'pending-malformed-index', 'cycle', 'dangling-source'] as const)(
+  'pending technical inputs do not hide an actual %s error', async fault => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-technical-draft-errors-')))
+    try {
+      await writeDesignDocumentsFixture(root, ['GDD.md', 'TECHNICAL_DESIGN.md'])
+      const technicalPath = join(root, designHandoffPath('TECHNICAL_DESIGN.md'))
+      const technical = JSON.parse(await readFile(technicalPath, 'utf8'))
+      let expected = ''
+      if (fault === 'missing-reference') {
+        technical.implementationItems[0].requirementRefs[0].id = 'invented'
+        await writeFile(technicalPath, JSON.stringify(technical))
+        expected = 'references missing requirement GDD.md#invented'
+      } else if (fault === 'bad-source-heading') {
+        const source = designHandoffFixture('GDD.md')
+        source.outputs[0]!.section = 'Absent heading'
+        await writeFile(join(root, designHandoffPath('GDD.md')), JSON.stringify(source))
+        expected = 'output play references an absent section'
+      } else if (fault === 'malformed-index' || fault === 'pending-malformed-index') {
+        await writeFile(join(root, designHandoffPath(fault === 'malformed-index' ? 'GDD.md' : 'ART_DIRECTION.md')), '{')
+        expected = 'Cannot check task coverage against ' + (fault === 'malformed-index' ? 'GDD.md' : 'ART_DIRECTION.md')
+      } else if (fault === 'invalid-index-fields') {
+        await writeFile(join(root, designHandoffPath('GDD.md')), JSON.stringify({ outputs: 'not-an-array' }))
+        expected = 'checks requiring handoff.outputs were not run because the field is invalid'
+      } else if (fault === 'cycle') {
+        technical.implementationItems[0].dependsOn = [technical.implementationItems[1].id]
+        technical.implementationItems[1].dependsOn = [technical.implementationItems[0].id]
+        await writeFile(technicalPath, JSON.stringify(technical))
+        expected = 'implementation dependency cycle'
+      } else {
+        await symlink(join(root, 'not-produced.md'), join(root, 'docs/ART_DIRECTION.md'))
+        expected = 'Cannot check task coverage against ART_DIRECTION.md'
+      }
+      const before = await readFile(technicalPath, 'utf8')
+      const draft = await openDesignActions(root)('draft', ['TECHNICAL_DESIGN.md']) as any
+      expect(draft.valid).toBe(false)
+      expect(draft.issues.join(' ')).toContain(expected)
+      expect(await readFile(technicalPath, 'utf8')).toBe(before)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  },
+)
 
 test('handoff sends reference reading to native Read without a visual certification command', async () => {
   const root = await mkdtemp(join(tmpdir(),'bgs-reference-help-'))
