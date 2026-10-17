@@ -18,6 +18,7 @@ import { runArtifactCheck } from './runtime-checks'
 import { readContentView } from './content-view'
 import { designHandoffPath, readDesignImplementationChecklist } from '../design-handoff'
 import { writeDesignDocumentsFixture, designHandoffFixture } from '../fixtures/layout-fixture'
+import { BALANCE_CALCULATOR_PATH } from '../balance-calculation'
 
 test('finalize supports existing scoped documents and preserves independent work when a sibling is invalid', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-scoped-design-')))
@@ -182,6 +183,43 @@ async function command(root: string, directory: string, name: string, ...args: s
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   return { stdout, stderr, code }
 }
+test('autonomous tools expose the optional balance CLI without executing or retrying project calculations', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs optional balance-')))
+  await writeFile(join(root, 'parameters.json'), JSON.stringify({ count: 12, rate: 3 }))
+  await writeFile(join(root, 'model.mjs'), `import {appendFile} from 'node:fs/promises';
+export async function calculate({readJson}) {
+  await appendFile('runs.txt', 'run\\n');
+  const p = await readJson('parameters.json');
+  return {tables:[{title:'Duration',columns:['seconds'],rows:[[p.count / p.rate]]}],
+    checks:[{name:'Nonnegative count',passed:p.count >= 0,details:String(p.count)}],
+    limitations:['Synthetic calculation, not a game simulator']};
+}`)
+  const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined })
+  try {
+    expect(tools.systemContext).toContain('Optional numerical calculation (project-root path): bun '+BALANCE_CALCULATOR_PATH+' --help')
+    const help = await command(root, '', BALANCE_CALCULATOR_PATH, '--help')
+    expect(help.code, help.stderr).toBe(0)
+    expect(help.stdout).toContain('calculate({readJson, readText})')
+    expect(help.stdout).toContain('--check-result')
+    await expect(access(join(root, 'runs.txt'))).rejects.toThrow()
+    const run = await command(root, '', BALANCE_CALCULATOR_PATH, 'model.mjs', 'result.md')
+    expect(run.code, run.stderr).toBe(0)
+    const result = await readFile(join(root, 'result.md'), 'utf8')
+    expect(result).toContain('| 4 |')
+    expect(await readFile(join(root, 'runs.txt'), 'utf8')).toBe('run\n')
+    const retained = await command(root, '', BALANCE_CALCULATOR_PATH, '--check-result', 'result.md')
+    expect(retained.code, retained.stderr).toBe(0)
+    expect(JSON.parse(retained.stdout)).toMatchObject({ valid: true, scope: 'calculation-input-freshness' })
+    expect(await readFile(join(root, 'runs.txt'), 'utf8')).toBe('run\n')
+    expect(await readFile(join(root, 'result.md'), 'utf8')).toBe(result)
+    await writeFile(join(root, 'parameters.json'), JSON.stringify({ count: -1, rate: 3 }))
+    const failed = await command(root, '', BALANCE_CALCULATOR_PATH, 'model.mjs', 'result.md')
+    expect(failed.code).toBe(1)
+    expect(failed.stderr).toContain('Scenario check failed: Nonnegative count')
+    expect(await readFile(join(root, 'result.md'), 'utf8')).toBe(result)
+    expect(await readFile(join(root, 'runs.txt'), 'utf8')).toBe('run\nrun\n')
+  } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
+}, 30000)
 test('actual author entry supplies executable pure UI examples with no manual hashes or dummy Scene', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-pure-ui-author-')))
   const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined })

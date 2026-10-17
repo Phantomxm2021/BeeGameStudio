@@ -18,6 +18,7 @@ import { checkDesignHandoff, checkDesignHandoffDraft, DESIGN_HANDOFF_INSTRUCTION
 import { DESIGN_RUNTIME_REPORT_INSTRUCTION, inspectDesignAcceptance } from '../runtime-acceptance'
 import { CONTENT_RUNTIME_REPORT_INSTRUCTION } from '../content-runtime-contract'
 import { PREVIEW_ENVIRONMENT } from '@bee-game-studio/agent-workflow/preview-environment'
+import { BALANCE_CALCULATOR_PATH, materializeBalanceCalculator } from '../balance-calculation'
 
 export type AgentPreviewAccess = ReturnType<typeof openPreviewTestAccess>
 export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
@@ -124,6 +125,7 @@ export async function openAgentTools(input: {
   })()
   let libraryState = 'Built-in resource library is not configured for this session.'
   try {
+    await materializeBalanceCalculator(root)
     if (input.measurement) {
       if(!input.sessionId)throw Error('Measurement requires the bound native session')
       const token = crypto.randomUUID()
@@ -268,7 +270,8 @@ export async function openAgentTools(input: {
       systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
         'Run entries with --help: bun assets.mjs, check-content.mjs, bind-content.mjs, consumer.mjs, media.mjs, resources.mjs'+
         (input.measurement ? '; node measure.mjs, handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
-        '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end.',
+        '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
+        'Optional numerical calculation (project-root path): bun '+BALANCE_CALCULATOR_PATH+' --help.',
       turnContext: [
         libraryState,
         ...(!preview ? ['Managed browser Preview is unavailable; native tools remain available.'] : []),
