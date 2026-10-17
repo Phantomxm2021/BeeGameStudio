@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import type { LayoutDiagnostic } from './ui-layout-audit'
+import type { LayoutDiagnostic, LayoutMeasurement } from './ui-layout-audit'
+import { summarizeUiLayoutInspection } from '../../../scene-editor/src/ui-layout-inspection'
 
 /** Presentation only: never substitutes for the complete host check. */
 export function formatLayoutReport(result: {
@@ -67,6 +68,36 @@ export function formatUiLayoutTable(nodes: ReturnType<typeof import('../../../sc
     ...nodes.map(node => '| ' + [node.id, node.parentId, node.active, node.layout?.position, node.layout?.size,
       node.layout?.anchor, node.pivot, node.bounds, node.textFit].map(cell).join(' | ') + ' |'),
   ].join('\n')
+}
+
+/** Explain already computed geometry; never select a different layout or infer design intent. */
+export function formatUiLayoutMeasurement(measurement: LayoutMeasurement, details = false) {
+  const { nodes, variants } = measurement
+  const observations = Object.fromEntries(Object.entries(summarizeUiLayoutInspection(nodes))
+    .filter(([, values]) => values.length))
+  const lines = [
+    'Effective variants (compact by width; portrait applied after compact): ' + JSON.stringify(variants),
+    'Spatial observations (overlapCandidates require design interpretation, not automatic failures): ' + JSON.stringify(observations),
+  ]
+  if (details) {
+    const byId = new Map(nodes.map(node => [node.id, node]))
+    const constraints = nodes.map(node => {
+      const layout = node.layout ?? {}, parent = byId.get(node.parentId ?? '')
+      const positionControlledBy = !node.active ? 'inactive' : !parent ? 'viewport root'
+        : parent.layout?.container && !layout.item?.absolute ? 'flow:' + parent.id : 'anchor'
+      return { id: node.id, positionControlledBy,
+        ...(layout.container ? { container: layout.container } : {}),
+        ...(layout.item ? { item: layout.item } : {}),
+        ...(layout.minSize ? { minSize: layout.minSize } : {}),
+        ...(layout.maxSize ? { maxSize: layout.maxSize } : {}) }
+    })
+    lines.push('Effective layout constraints (flow owns child position/size; edit constraints with native Edit): ' + JSON.stringify(constraints),
+      'Local position/size is parent-local; Host bounds is in host logical pixels.', formatUiLayoutTable(nodes))
+    const containment = nodes.filter(node => node.outsideParent || node.outsideContentArea)
+      .map(node => ({ id: node.id, parent: node.parentGeometry }))
+    if (containment.length) lines.push('Containment geometry: ' + JSON.stringify(containment))
+  }
+  return lines.join('\n')
 }
 
 /** Workspace-local immutable result, not a second design authority. Reject

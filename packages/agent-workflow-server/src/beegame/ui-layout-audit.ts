@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { inspectUiLayout, isUiControl, type UiLayoutInspectionOptions } from '../../../scene-editor/src/ui-layout-inspection'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
+import { uiViewportVariants } from '../../../scene-editor/src/ui-responsive'
 import type { SceneCameraInput } from '../../../scene-editor/src/scene-camera'
 import { inspectSceneLayout2d, sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
 import { parseBeeGameContentDocument, type BeeGameContentDocument } from './game-content-schema'
@@ -13,7 +14,8 @@ export type UiDocument = Extract<BeeGameContentDocument, { kind: 'ui-screen' | '
 export type LayoutDiagnostic = { source?: string; owner?: string; scene?: string; node?: string;
   viewport?: [number, number]; kind: string; message: string; closeWhen?: string;
   geometry?: Record<string, unknown> }
-export type LayoutMeasurement = { viewport: [number, number]; nodes: ReturnType<typeof inspectUiLayout> }
+export type LayoutMeasurement = { viewport: [number, number]; variants: ReturnType<typeof uiViewportVariants>;
+  nodes: ReturnType<typeof inspectUiLayout> }
 await initializeUiLayout()
 
 export const isViewportPair = (size: unknown): size is [number, number] => Array.isArray(size) &&
@@ -146,7 +148,7 @@ export function auditUiInteractiveBounds(document: UiDocument, options: UiLayout
     }
     try {
       resolved = inspectUiLayout(document.data.nodes, document.data.rootId, { width, height }, options)
-      design?.measurements?.push({ viewport: [width, height], nodes: resolved })
+      design?.measurements?.push({ viewport: [width, height], variants: uiViewportVariants(root, { width, height }), nodes: resolved })
       const game = options.camera && resolved.find(node => node.id === options.camera!.nodeId)
       if (options.camera && !game?.active)
         throw new Error('Connected game-view ' + JSON.stringify(options.camera.nodeId) +

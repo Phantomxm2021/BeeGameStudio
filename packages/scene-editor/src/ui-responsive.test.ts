@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveUiNodesForViewport, type UiResponsiveNode } from './ui-responsive'
+import { resolveUiNodesForViewport, uiViewportVariants, type UiResponsiveNode } from './ui-responsive'
 
 const nodes = [
   { id: 'root', layout: { size: [1280, 720] as [number, number] } },
@@ -11,6 +11,21 @@ const nodes = [
 ]
 
 describe('UI viewport projection', () => {
+  it('reports the same default/authored width boundary and portrait precedence used by projection', () => {
+    expect(uiViewportVariants(undefined, { width: 600, height: 400 })).toEqual({
+      compactMaxWidth: 600, compactMaxWidthSource: 'default', compact: true, portrait: false,
+    })
+    expect(uiViewportVariants(undefined, { width: 601, height: 390 }).compact).toBe(false)
+    const root = { id: 'root', data: { compactMaxWidth: 900 } }
+    expect(uiViewportVariants(root, { width: 844, height: 390 })).toEqual({
+      compactMaxWidth: 900, compactMaxWidthSource: 'authored', compact: true, portrait: false,
+    })
+    expect(uiViewportVariants(root, { width: 960, height: 390 }).compact).toBe(false)
+    expect(uiViewportVariants(root, { width: 390, height: 844 }).portrait).toBe(true)
+    expect(uiViewportVariants({ id: 'root', data: { compactMaxWidth: -1 } }, { width: 844, height: 390 })
+      .compactMaxWidthSource).toBe('default')
+  })
+
   it.each([[720, 640], [390, 844], [1280, 720]])('preserves a stretched screen root at %s × %s', (width, height) => {
     const authored: UiResponsiveNode[] = [
       { id: 'root', layout: { anchorMin: [0, 0], anchorMax: [1, 1], sizeDelta: [0, 0] } },

@@ -21,7 +21,7 @@ import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layou
 import { checkDesignLayouts, checkReviewDesignLayouts } from './design-layout-check'
 import { checkDesignDocumentReferences } from './design-document-references'
 import { formatLayoutReport, formatUiLayoutTable, retainLayoutReport } from './layout-report'
-export { formatLayoutReport, formatUiLayoutTable } from './layout-report'
+export { formatLayoutReport, formatUiLayoutTable, formatUiLayoutMeasurement } from './layout-report'
 import { isViewportPair, layoutCameraSource, readUiLayoutCamera, type LayoutConstraints } from './ui-layout-audit'
 import type { UiResponsiveNode, UiViewport } from '../../../scene-editor/src/ui-responsive'
 import { point2d } from '../../../scene-editor/src/content-coordinates'

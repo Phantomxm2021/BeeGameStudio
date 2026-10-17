@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs'
 import type { LayoutConstraints } from './ui-layout-audit'
 import type * as Checker from './game-content-validation-cli'
 
-type LayoutChecker = Pick<typeof Checker, 'runGameContentCommand' | 'formatLayoutReport' | 'formatUiLayoutTable'>
+type LayoutChecker = Pick<typeof Checker, 'runGameContentCommand' | 'formatLayoutReport' | 'formatUiLayoutMeasurement'>
 const inputSchema = z.strictObject({ detailsFor: z.string().optional() })
 
 /** Bound by the host at startup. The model selects presentation, never check scope. */
@@ -13,7 +13,7 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
   const root = realpathSync(workspace)
   const server = new McpServer({ name: 'bgs-ui-layout', version: '1' })
   server.registerTool('CheckUiLayouts', {
-    description: 'Check all saved BGS UI layouts at authored reference/target sizes and host-required sizes, including linked Cameras and underlays. Use {} for diagnostics and coverage; detailsFor:"content/ui/hud.json" also returns that file’s node coordinate tables. Read-only; no Shell, builds, rendering or visual-design approval.',
+    description: 'Check all saved BGS UI layouts at authored reference/target sizes and host-required sizes, including linked Cameras and underlays. Use {} for effective variants, spatial observations, diagnostics and coverage; detailsFor:"content/ui/hud.json" also returns effective container/item constraints, position ownership and node coordinates. Edit constraints with native Edit, then recheck. Read-only; no Shell, builds, rendering or visual-design approval.',
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     _meta: { 'anthropic/alwaysLoad': true },
@@ -23,21 +23,18 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
       if (detailsFor !== undefined && (!detailsFor.startsWith('content/ui/') || !detailsFor.endsWith('.json') ||
           detailsFor.includes('\\') || detailsFor.split('/').some(part => !part || part === '.' || part === '..')))
         throw Error('detailsFor must be an exact content/ui/*.json source path inside this project.')
-      const result = checker.runGameContentCommand(root, ['--design-layouts', ...(detailsFor ? ['--details'] : [])], constraints)
+      const result = checker.runGameContentCommand(root, ['--design-layouts', '--details'], constraints)
       // This fixed library operation returns the existing batch result, not CLI stdout.
       if (!('diagnostics' in result) || !Array.isArray(result.diagnostics) || !('valid' in result) || !('issues' in result))
         throw Error('UI layout checker did not return its batch result.')
       const text = [checker.formatLayoutReport(result as Parameters<LayoutChecker['formatLayoutReport']>[0])]
-      if (detailsFor) {
-        const measurements = 'measurements' in result && Array.isArray(result.measurements)
-          ? result.measurements.filter(item => item.source === detailsFor) : []
-        if (!measurements.length) {
-          text.push('Cannot expand coordinates for ' + JSON.stringify(detailsFor) + ': no measured screen/HUD geometry. See input issues and coverage above.')
-          return { isError: true, content: [{ type: 'text' as const, text: text.join('\n\n') }] }
-        }
-        for (const item of measurements) text.push(
-          '## ' + detailsFor + ' — ' + item.viewport.join(' × ') + (item.scene ? ' — ' + item.scene : ''),
-          'Local position/size is parent-local; Host bounds is in host logical pixels.', checker.formatUiLayoutTable(item.nodes))
+      const measurements = 'measurements' in result && Array.isArray(result.measurements) ? result.measurements : []
+      for (const item of measurements) text.push(
+        '## ' + item.source + ' — ' + item.viewport.join(' × ') + (item.scene ? ' — ' + item.scene : ''),
+        checker.formatUiLayoutMeasurement(item, item.source === detailsFor))
+      if (detailsFor && !measurements.some(item => item.source === detailsFor)) {
+        text.push('Cannot expand coordinates for ' + JSON.stringify(detailsFor) + ': no measured screen/HUD geometry. See input issues and coverage above.')
+        return { isError: true, content: [{ type: 'text' as const, text: text.join('\n\n') }] }
       }
       return { isError: result.valid !== true, content: [{ type: 'text' as const, text: text.join('\n\n') }] }
     } catch (error) {

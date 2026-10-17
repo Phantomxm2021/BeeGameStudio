@@ -120,6 +120,67 @@ test('expanding one UI never hides other files, linked Cameras or underlay failu
   } finally { await access.close() }
 }, 20_000)
 
+test('reports variant selection, effective flow constraints and existing spatial observations without treating overlap as failure', async () => {
+  const { root, save } = fixture()
+  const draft: any = uiLayoutFixture()
+  draft.data.nodes[0].data.targetViewports = [[844, 390]]
+  draft.data.nodes.splice(1, 1,
+    { id: 'group', role: 'container', parentId: 'root', layout: { anchor: 'middle-center', size: [320, 200],
+      container: { direction: 'column', gap: 20, align: 'center', justify: 'center' } },
+      responsive: { compact: { layout: { container: { direction: 'column', gap: 8 } } } } },
+    { id: 'caption', role: 'text', text: 'Synthetic', parentId: 'group', layout: { size: [200, 30] } },
+    { id: 'play', role: 'button', parentId: 'group', actions: { click: 'start' },
+      layout: { size: [200, 52], minSize: [88, 44], maxSize: [240, 60] } },
+    { id: 'overlay', role: 'button', parentId: 'group', layout: { anchor: 'bottom-right', size: [44, 44], item: { absolute: true } } },
+    { id: 'hidden', role: 'text', text: 'Hidden', parentId: 'group', enabled: false, layout: { size: [200, 30] } },
+    ...['one', 'two'].map(id => ({ id, role: 'text', text: id, parentId: 'root', layout: { position: [10, 10], size: [100, 30] } })))
+  save('ui/menu.json', draft)
+  const access = await connect(root)
+  try {
+    const before = readFileSync(join(root, 'content/ui/menu.json'))
+    const files = readdirSync(root, { recursive: true })
+    const summary = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })
+    expect(summary.isError).toBe(false)
+    expect(text(summary)).toContain('"compactMaxWidth":600,"compactMaxWidthSource":"default","compact":false')
+    expect(text(summary)).toContain('"overlapCandidates":[["one","two"]]')
+    expect(text(summary)).toContain('not automatic failures')
+    expect(text(summary)).not.toContain('Effective layout constraints')
+    expect(text(summary)).not.toContain('| Host bounds |')
+    expect(readFileSync(join(root, 'content/ui/menu.json'))).toEqual(before)
+
+    // A normal source edit selects compact; the tool must read it afresh and
+    // report the inherited alignment as well as the overriding gap.
+    draft.data.nodes[0].data.compactMaxWidth = 900
+    save('ui/menu.json', draft)
+    const authored = readFileSync(join(root, 'content/ui/menu.json'))
+    const detailed = await access.client.callTool({ name: 'CheckUiLayouts', arguments: { detailsFor: 'content/ui/menu.json' } })
+    expect(detailed.isError).toBe(false)
+    const body = text(detailed), phone = body.split('## content/ui/menu.json — 844 × 390')[1]!
+    expect(phone).toContain('"compactMaxWidth":900,"compactMaxWidthSource":"authored","compact":true')
+    expect(body).toContain('"compactMaxWidthSource":"authored","compact":false') // 960 stays base.
+    const effective = JSON.parse(phone.split('\n').find(line => line.startsWith('Effective layout constraints'))!.split(': ')[1]!)
+    expect(effective.find((node: any) => node.id === 'group').container)
+      .toEqual({ direction: 'column', gap: 8, align: 'center', justify: 'center' })
+    expect(phone).toContain('"id":"play","positionControlledBy":"flow:group","minSize":[88,44],"maxSize":[240,60]')
+    expect(phone).toContain('"id":"overlay","positionControlledBy":"anchor","item":{"absolute":true}')
+    expect(phone).toContain('"id":"hidden","positionControlledBy":"inactive"')
+    const measured: any = runGameContentCommand(root, ['--design-layouts', '--details'], conditions)
+    const nodes = measured.measurements.find((m: any) => m.viewport[0] === 844).nodes
+    expect(phone).toContain(JSON.stringify(nodes.find((n: any) => n.id === 'play').bounds))
+    expect(nodes.find((n: any) => n.id === 'play').bounds.top - nodes.find((n: any) => n.id === 'caption').bounds.bottom).toBe(8)
+    expect(readFileSync(join(root, 'content/ui/menu.json'))).toEqual(authored)
+    expect(readdirSync(root, { recursive: true })).toEqual(files)
+
+    draft.data.nodes[1].layout.size = [160, 40]
+    save('ui/menu.json', draft)
+    const overflow = await access.client.callTool({ name: 'CheckUiLayouts', arguments: { detailsFor: 'content/ui/menu.json' } })
+    expect(overflow.isError).toBe(true)
+    expect(text(overflow)).toContain('"outsideContentArea"')
+    expect(text(overflow)).toContain('Containment geometry:')
+    expect(text(overflow)).toContain('"contentBounds"')
+  } finally { await access.close() }
+}, 20_000)
+
 test('tool rejects command/size/workspace overrides, preserves missing-input errors and rejects symlinks without reading their contents', async () => {
   const { root } = fixture()
   const access = await connect(root)

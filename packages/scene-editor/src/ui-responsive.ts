@@ -42,6 +42,17 @@ export function uiCompactMaxWidth(root: UiResponsiveNode | undefined): number {
   return typeof authored === 'number' && Number.isFinite(authored) && authored > 0 ? authored : 600
 }
 
+/** Selection context shared by projection and its diagnostic output. */
+export function uiViewportVariants(root: UiResponsiveNode | undefined, viewport: UiViewport) {
+  const compactMaxWidth = uiCompactMaxWidth(root)
+  return {
+    compactMaxWidth,
+    compactMaxWidthSource: root?.data?.compactMaxWidth === compactMaxWidth ? 'authored' as const : 'default' as const,
+    compact: viewport.width <= compactMaxWidth,
+    portrait: viewport.height > viewport.width,
+  }
+}
+
 /** Compact is a width breakpoint, independent of a short desktop iframe's height.
  * Portrait is applied after compact, so it can refine a portrait layout. */
 export function resolveUiNodesForViewport<T extends UiResponsiveNode>(
@@ -50,9 +61,7 @@ export function resolveUiNodesForViewport<T extends UiResponsiveNode>(
   if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0)
     throw new Error('UI viewport dimensions must be positive finite numbers')
   const root = nodes.find(node => node.id === rootId)
-  const compactMaxWidth = uiCompactMaxWidth(root)
-  const compact = viewport.width <= compactMaxWidth
-  const portrait = viewport.height > viewport.width
+  const { compact, portrait } = uiViewportVariants(root, viewport)
   const projected = nodes.map(node => {
     let enabled = node.enabled
     let layout = node.layout

@@ -259,7 +259,7 @@ export async function openAgentTools(input: {
         'Assets: bun ' + JSON.stringify(entry('assets.mjs')) + ' --help (catalog/download, local hashes). ' + libraryState,
         ...(input.readInitialCatalog ? [library ? await initialCatalogContext(library.baseUrl) :
           'Initial built-in resource catalog: unavailable. ' + libraryState + ' This is not an empty catalog.'] : []),
-        'UI geometry: mcp__bgs-ui-layout__CheckUiLayouts {} checks all saved UI; {detailsFor:"content/ui/hud.json"} adds coordinates. Read-only; not visual/runtime acceptance.',
+        'UI geometry: mcp__bgs-ui-layout__CheckUiLayouts {} checks all saved UI and reports effective variants/spatial observations; {detailsFor:"content/ui/hud.json"} adds container constraints, position ownership and coordinates. Use native Edit for layout relationships, then recheck; flow owns child positions. Read-only; overlap candidates are not automatic failures or visual/runtime acceptance.',
         'Content structure/formats: bun ' + JSON.stringify(entry('check-content.mjs')) + ' --help; --format projectGuide batches source navigation. Web consumer: bun '+JSON.stringify(entry('consumer.mjs'))+' --help.',
         'Batch binding (BGS JSON): bun '+JSON.stringify(entry('bind-content.mjs'))+' --help; --inspect gives saved hashes/IDs.',
         'Media: bun ' + JSON.stringify(entry('media.mjs')) + ' --help (images/atlas). Resources: bun ' + JSON.stringify(entry('resources.mjs')) + ' --help (audio, fonts, registration). Existing safety/source contracts apply.',
