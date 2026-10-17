@@ -150,6 +150,7 @@ test('details return exact saved node facts once per selected source, without de
     expect(text(detailed)).toContain('600 × 360')
     expect(text(detailed)).toContain('960 × 540')
     expect(text(detailed)).toContain('content/ui/other.json') // Full check scope is retained.
+    expect(text(detailed)).not.toContain('## content/ui/other.json')
     expect(text(detailed)).not.toContain('OTHER_SOURCE_TEXT')
     const saved = facts(detailed)
     expect(saved).toMatchObject({ path: 'content/ui/menu.json', documentId: 'menu',
@@ -175,6 +176,53 @@ test('details return exact saved node facts once per selected source, without de
     expect(facts(overflow).fields[0].value[1].text).toBe('重新开始')
     expect(readFileSync(join(root, 'content/ui/menu.json'))).toEqual(authored)
     expect(readdirSync(root, { recursive: true })).toEqual(files)
+  } finally { await access.close() }
+}, 20_000)
+
+test('batch UI details share global facts, omit unselected summaries and retain every selected viewport and unrelated failure', async () => {
+  const { root, save } = fixture()
+  for (const id of ['pause', 'healthy', 'overflow']) {
+    const draft: any = uiLayoutFixture()
+    draft.id = id; draft.data.nodes[1].text = id + '_TEXT'
+    if (id === 'overflow') draft.data.nodes[1].layout.size = [2000, 52]
+    save('ui/' + id + '.json', draft)
+  }
+  const files = readdirSync(root, { recursive: true, encoding: 'utf8' })
+  const before = files.filter(path => path.endsWith('.json')).map(path => readFileSync(join(root, path)))
+  const access = await connect(root)
+  try {
+    const call = (detailsFor: string | string[]) => access.client.callTool({ name: 'CheckUiLayouts', arguments: { detailsFor } })
+    const menu = text(await call('content/ui/menu.json'))
+    expect(text(await call(['content/ui/menu.json']))).toBe(menu) // String compatibility.
+    const pause = text(await call('content/ui/pause.json'))
+    const result = await call(['content/ui/menu.json', 'content/ui/pause.json', 'content/ui/menu.json'])
+    const body = text(result)
+    expect(result.isError).toBe(true) // Unselected overflow still fails the full check.
+    for (const label of ['Saved-input checks:', 'Current source snapshot:', 'Coverage:', 'Authored values,'])
+      expect(body.split(label)).toHaveLength(2)
+    for (const id of ['menu', 'pause']) {
+      expect(body.split('## Saved node facts — content/ui/' + id + '.json')).toHaveLength(2)
+      for (const viewport of ['960 × 540', '600 × 360', '844 × 390'])
+        expect(body).toContain('## content/ui/' + id + '.json — ' + viewport)
+      const facts = (value: string) => value.split('## Saved node facts — content/ui/' + id + '.json\n\n')[1]!.split('\n')[0]!
+      expect(JSON.parse(facts(body))).toEqual(JSON.parse(facts(id === 'menu' ? menu : pause)))
+    }
+    for (const id of ['healthy', 'overflow']) {
+      expect(body).toContain('content/ui/' + id + '.json')
+      expect(body).not.toContain('## content/ui/' + id + '.json')
+      expect(body).not.toContain(id + '_TEXT')
+    }
+    const global = (value: string) => value.split('\n\n## ')[0]
+    expect(global(body)).toBe(global(menu)) // Every diagnostic/issue and source hash retained.
+    expect(body.length).toBeLessThan(menu.length + pause.length)
+    const partial = await call(['content/ui/menu.json', 'content/ui/missing.json'])
+    expect(partial.isError).toBe(true)
+    expect(text(partial)).toContain('## Saved node facts — content/ui/menu.json')
+    expect(text(partial)).toContain('"content/ui/missing.json": no measured screen/HUD geometry')
+    expect(text(partial)).not.toContain('## Saved node facts — content/ui/missing.json')
+    expect(readdirSync(root, { recursive: true })).toEqual(files)
+    expect(files.filter(path => path.endsWith('.json')).map(path => readFileSync(join(root, path)))).toEqual(before)
+    expect((await access.client.callTool({ name: 'CheckSceneLayouts', arguments: { detailsFor: ['content/scenes/level.json'] } })).isError).toBe(true)
   } finally { await access.close() }
 }, 20_000)
 
@@ -244,7 +292,8 @@ test('tool rejects command/size/workspace overrides, preserves missing-input err
   const access = await connect(root)
   try {
     for (const args of [{ width: '960 540' }, { workspace: '/tmp' }, { command: 'anything' },
-      { detailsFor: '../private.json' }, { detailsFor: '/tmp/private.json' }, { detailsFor: 'content/ui/../private.json' }]) {
+      { detailsFor: '../private.json' }, { detailsFor: '/tmp/private.json' }, { detailsFor: 'content/ui/../private.json' },
+      { detailsFor: [] }, { detailsFor: [42] }, { detailsFor: ['content/ui/menu.json', '../private.json'] }]) {
       expect((await access.client.callTool({ name: 'CheckUiLayouts', arguments: args })).isError).toBe(true)
     }
     const missing = await access.client.callTool({ name: 'CheckUiLayouts', arguments: { detailsFor: 'content/ui/missing.json' } })
@@ -261,6 +310,11 @@ test('tool rejects command/size/workspace overrides, preserves missing-input err
     expect(linkedDetails.isError).toBe(true)
     expect(text(linkedDetails)).not.toContain('PRIVATE_SENTINEL')
     expect(text(linkedDetails)).not.toContain('## Saved node facts')
+    const mixed = await access.client.callTool({ name: 'CheckUiLayouts', arguments: { detailsFor: ['content/ui/menu.json', 'content/ui/escape.json'] } })
+    expect(mixed.isError).toBe(true)
+    expect(text(mixed)).toContain('symbolic links')
+    expect(text(mixed)).not.toContain('## Saved node facts') // Existing discovery rejects the entire unsafe UI input set.
+    expect(text(mixed)).not.toContain('PRIVATE_SENTINEL')
     rmSync(join(root, 'content/ui'), { recursive: true })
     const absent = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })
     expect(absent.isError).toBe(true)

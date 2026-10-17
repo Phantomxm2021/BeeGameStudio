@@ -10,6 +10,7 @@ import { designReadSchema, implementationReadSchema, bindingsReadSchema, verific
 
 type LayoutChecker = Pick<typeof Checker, 'runGameContentCommand' | 'formatLayoutReport' | 'formatUiLayoutMeasurement' | 'formatSceneLayoutInspection' | 'inspectContentDraft'>
 const inputSchema = z.strictObject({ detailsFor: z.string().optional() })
+const uiInputSchema = z.strictObject({ detailsFor: z.union([z.string(), z.array(z.string()).min(1)]).optional() })
 
 /** Bound by the host at startup. The model selects presentation, never check scope. */
 export function createUiLayoutServer(workspace: string, constraints: LayoutConstraints, checker: LayoutChecker, verification?: VerificationReadBinding) {
@@ -71,15 +72,16 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
     }
   })
   server.registerTool('CheckUiLayouts', {
-    description: 'Check all saved BGS UI layouts at authored reference/target sizes and host-required sizes, including linked Cameras and underlays. Use {} for effective variants, spatial observations, diagnostics and coverage; detailsFor:"content/ui/hud.json" also returns effective container/item constraints, position ownership, node coordinates and saved node facts (text, style, actions, bindings and other authored fields, once per source). Edit source with native Edit, then recheck. Read-only; no Shell, builds, rendering or visual-design approval.',
-    inputSchema,
+    description: 'Check all saved BGS UI layouts at authored reference/target sizes and host-required sizes, including linked Cameras and underlays. Use {} for effective variants, spatial observations, diagnostics and coverage; detailsFor:"content/ui/hud.json" or an array of source paths expands only selected layouts with effective container/item constraints, position ownership, node coordinates and saved node facts (text, style, actions, bindings and other authored fields, once per source). Global diagnostics and coverage remain complete. Edit source with native Edit, then recheck. Read-only; no Shell, builds, rendering or visual-design approval.',
+    inputSchema: uiInputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     _meta: { 'anthropic/alwaysLoad': true },
   }, async input => {
     try {
-      const { detailsFor } = inputSchema.parse(input)
-      if (detailsFor !== undefined && (!detailsFor.startsWith('content/ui/') || !detailsFor.endsWith('.json') ||
-          detailsFor.includes('\\') || detailsFor.split('/').some(part => !part || part === '.' || part === '..')))
+      const { detailsFor } = uiInputSchema.parse(input)
+      const selected = new Set(detailsFor === undefined ? [] : typeof detailsFor === 'string' ? [detailsFor] : detailsFor)
+      if ([...selected].some(path => !path.startsWith('content/ui/') || !path.endsWith('.json') ||
+          path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..')))
         throw Error('detailsFor must be an exact content/ui/*.json source path inside this project.')
       const result = checker.runGameContentCommand(root, ['--design-layouts', '--details'], constraints)
       // This fixed library operation returns the existing batch result, not CLI stdout.
@@ -87,18 +89,19 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
         throw Error('UI layout checker did not return its batch result.')
       const text = [checker.formatLayoutReport(result as Parameters<LayoutChecker['formatLayoutReport']>[0])]
       const measurements = 'measurements' in result && Array.isArray(result.measurements) ? result.measurements : []
-      for (const item of measurements) text.push(
+      for (const item of measurements) if (detailsFor === undefined || selected.has(item.source)) text.push(
         '## ' + item.source + ' — ' + item.viewport.join(' × ') + (item.scene ? ' — ' + item.scene : ''),
-        checker.formatUiLayoutMeasurement(item, item.source === detailsFor))
-      if (detailsFor && !measurements.some(item => item.source === detailsFor)) {
-        text.push('Cannot expand coordinates for ' + JSON.stringify(detailsFor) + ': no measured screen/HUD geometry. See input issues and coverage above.')
-        return { isError: true, content: [{ type: 'text' as const, text: text.join('\n\n') }] }
-      }
-      if (detailsFor) text.push(
-        '## Saved node facts — ' + detailsFor,
-        'Authored values, including responsive overrides; effective geometry is reported above. Missing fields are not filled with defaults.',
-        JSON.stringify(checker.inspectContentDraft(root, detailsFor, ['--pointer', '/data/nodes'])))
-      return { isError: result.valid !== true, content: [{ type: 'text' as const, text: text.join('\n\n') }] }
+        checker.formatUiLayoutMeasurement(item, selected.has(item.source)))
+      const measured = new Set(measurements.map(item => item.source))
+      const missing = [...selected].filter(path => !measured.has(path))
+      for (const path of missing)
+        text.push('Cannot expand coordinates for ' + JSON.stringify(path) + ': no measured screen/HUD geometry. See input issues and coverage above.')
+      if ([...selected].some(path => measured.has(path))) text.push(
+        'Authored values, including responsive overrides; effective geometry is reported above. Missing fields are not filled with defaults.')
+      for (const path of selected) if (measured.has(path)) text.push(
+        '## Saved node facts — ' + path,
+        JSON.stringify(checker.inspectContentDraft(root, path, ['--pointer', '/data/nodes'])))
+      return { isError: result.valid !== true || missing.length > 0, content: [{ type: 'text' as const, text: text.join('\n\n') }] }
     } catch (error) {
       return { isError: true, content: [{ type: 'text' as const,
         text: 'CheckUiLayouts failed: ' + (error instanceof Error ? error.message : String(error)) }] }

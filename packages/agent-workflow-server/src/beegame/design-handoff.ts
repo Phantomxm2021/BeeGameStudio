@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { designSectionHashes, designDocumentSections } from './design-document-sections'
 import { checkCalculationResult } from './balance-calculation.mjs'
 import { readCalculationInputs } from './balance-calculation'
-import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { collectContentSourceFiles } from './content-source-files'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { array, enum as enumeration, literal, object, string, unknown } from 'zod'
@@ -584,6 +585,20 @@ export function designRevisionFileDigest(workspace: string, path: string): strin
 }
 export function snapshotDesignRevisionFiles(workspace: string): Record<string, string | null> {
   const paths = new Set<string>()
+  // Observe saved drafts independently of document links or content registration.
+  // Missing directories are normal before authoring; unsafe/unreadable inputs
+  // must invalidate the snapshot rather than produce a partial successful diff.
+  try {
+    if (lstatSync(resolve(workspace, 'content')).isSymbolicLink())
+      throw new Error('Design revision snapshot incomplete: content must not be a symlink')
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  const directories = (['content/ui', 'content/scenes'] as const).filter(directory => {
+    try { lstatSync(resolve(workspace, directory)); return true }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+  })
+  const issues: string[] = []
+  for (const path of collectContentSourceFiles(workspace, directories, issues)) paths.add(path)
+  if (issues.length) throw new Error('Design revision snapshot incomplete: ' + issues.join('; '))
   const evidenceFiles: Record<string, string | null> = {}
   for (const name of PROJECT_DOCUMENTS) {
     paths.add(`docs/${name}`)

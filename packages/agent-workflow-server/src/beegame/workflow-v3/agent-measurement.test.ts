@@ -1377,3 +1377,66 @@ test('missing documents are captured as absent; unsafe snapshot is unverified ra
     expect(f.measurement.designFileChanges()).toMatchObject({status:'unverified',files:[]})
   } finally {await f.close()}
 })
+
+test('turn snapshot discovers unlinked unregistered UI/Scene drafts, including malformed, added and removed files',async()=>{
+  const f=await fixture()
+  let reader:ReturnType<typeof createAgentMeasurement>|undefined
+  try {
+    await mkdir(join(f.workspace,'content/ui/nested'),{recursive:true})
+    await mkdir(join(f.workspace,'content/scenes/nested'),{recursive:true})
+    // No design documents, content index or valid draft schema is required to observe bytes.
+    for(const path of ['content/ui/title.json','content/scenes/nested/level.json','content/scenes/removed.json'])
+      await writeFile(join(f.workspace,path),'{unfinished')
+    reader=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store})
+    expect(reader.designFileChanges()).toMatchObject({status:'observed',files:[]})
+    await writeFile(join(f.workspace,'content/ui/title.json'),'{still unfinished')
+    await writeFile(join(f.workspace,'content/scenes/nested/level.json'),'{}')
+    await rm(join(f.workspace,'content/scenes/removed.json'))
+    await writeFile(join(f.workspace,'content/ui/nested/new.json'),'{}')
+    await writeFile(join(f.workspace,'content/index.json'),'{}')
+    await writeFile(join(f.workspace,'src/unrelated.json'),'{}')
+    const expected:{path:string;change:'added'|'modified'|'deleted'}[]=[
+      {path:'content/scenes/nested/level.json',change:'modified'},
+      {path:'content/scenes/removed.json',change:'deleted'},
+      {path:'content/ui/nested/new.json',change:'added'},
+      {path:'content/ui/title.json',change:'modified'},
+    ]
+    expect(reader.designFileChanges()).toMatchObject({status:'observed',files:expected})
+    expect((await reader.handoff()).designFileChanges.files).toEqual(expected)
+    expect(f.measurement.designFileChanges().files).toEqual([
+      {path:'content/scenes/nested/level.json',change:'added'},
+      {path:'content/ui/nested/new.json',change:'added'},
+      {path:'content/ui/title.json',change:'added'},
+    ]) // Directories absent at turn start are normal; later additions are observed.
+  } finally {await reader?.close();await f.close()}
+})
+
+test.each(['file','directory','root','broken-parent','not-directory'] as const)('unsafe content discovery (%s) makes the turn snapshot unverified',async kind=>{
+  const f=await fixture()
+  let reader:ReturnType<typeof createAgentMeasurement>|undefined
+  try {
+    await mkdir(join(f.workspace,'content/ui'),{recursive:true})
+    await writeFile(join(f.workspace,'content/ui/title.json'),'{}')
+    reader=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store})
+    expect(reader.designFileChanges()).toMatchObject({status:'observed',files:[]})
+    const outside=join(f.root,'outside');await mkdir(outside)
+    await writeFile(join(outside,'private.json'),'PRIVATE_SENTINEL')
+    if(kind==='file')await symlink(join(outside,'private.json'),join(f.workspace,'content/ui/escape.json'))
+    if(kind==='directory')await symlink(outside,join(f.workspace,'content/ui/nested'))
+    if(kind==='root'||kind==='not-directory') {
+      await rm(join(f.workspace,'content/ui'),{recursive:true})
+      if(kind==='root')await symlink(outside,join(f.workspace,'content/ui'))
+      else await writeFile(join(f.workspace,'content/ui'),'not a directory')
+    }
+    if(kind==='broken-parent') {
+      await rm(join(f.workspace,'content'),{recursive:true})
+      await symlink(join(f.root,'missing'),join(f.workspace,'content'))
+    }
+    expect(reader.designFileChanges()).toMatchObject({status:'unverified',files:[],error:expect.any(String)})
+    // An unsafe initial snapshot must also remain unverified, never a partial baseline.
+    const unsafe=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store})
+    try {expect(unsafe.designFileChanges()).toMatchObject({status:'unverified',files:[]})}
+    finally {await unsafe.close()}
+    expect(await readFile(join(outside,'private.json'),'utf8')).toBe('PRIVATE_SENTINEL')
+  } finally {await reader?.close();await f.close()}
+})
