@@ -28,11 +28,21 @@ const message = (type: ProjectEventMessage['type'], overrides: Partial<ProjectEv
 })
 
 describe('standalone chat projection', () => {
-  it('does not present settled host cleanup as a user stopping the task', () => {
-    const stopped = event({ type: 'session.stopped', payload: { type: 'session.stopped', reason: 'agent_goal_settled' } });
+  it.each(['agent_goal_settled', 'agent_message_resume'])('does not present internal %s cleanup as a task stop', reason => {
+    const stopped = frozen(event({ type: 'session.stopped', payload: { type: 'session.stopped', reason } }));
     expect(projectEventMessages('project-a', stopped)).toEqual([]);
-    expect(projectEventMessages('project-a', { ...stopped, payload: { type: 'session.stopped', reason: 'user_pause' } }))
+    expect(stopped.payload?.reason).toBe(reason);
+  });
+
+  it.each(['user_pause', 'user_stop', undefined])('preserves a real or legacy stop with reason %s', reason => {
+    const stopped = event({ type: 'session.stopped', payload: { type: 'session.stopped', reason } });
+    const messages = projectEventMessages('project-a', stopped);
+    expect(messages)
       .toContainEqual(expect.objectContaining({ type: 'status', status: 'stopped' }));
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'context_update',
+      task_kind: 'session_lifecycle', content: 'stopped' }));
+    expect(projectHistoryMessages(messages, new Map())).toContainEqual(expect.objectContaining({
+      taskKind: 'session_lifecycle', content: 'stopped' }));
   });
 
   it('keeps failure identity and error presentation identical in live output and history', () => {
