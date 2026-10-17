@@ -1,3 +1,4 @@
+import type { DesignFileChanges } from './state'
 import { randomUUID } from 'node:crypto'
 import { access, readFile, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -15,7 +16,7 @@ import { reviewSourceSnapshot } from '../design-source-reading'
 import { projectNavigationSnapshot, refreshProjectGuide } from './project-guide'
 import { priorMainSkillLoads } from './context'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
-import { DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
+import { snapshotDesignRevisionFiles, designRevisionFileDigest, DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
 
 export const AGENT_CONSUMPTION_CHECKS = ['ui-data-consumption','scene-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'] as const
 export const AGENT_CONSUMPTION_SUPPORT = {
@@ -125,6 +126,23 @@ export function agentSkillFacts(run:Run,turn:AgentTurn,liveUses?:SkillUse[]) {
  * request is recorded BEFORE executing scripts; unknown outcomes never replay. */
 export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store: WorkflowStore; executionContext?: ()=>Record<string, unknown>|undefined;
   skillUses?: ()=>SkillUse[] }) {
+  // Capture once for this user turn, not at compact, context read or finalize.
+  let before: Record<string, string | null> | undefined, snapshotError: string | undefined
+  try { before = snapshotDesignRevisionFiles(input.run.workspacePath) }
+  catch (error) { snapshotError = error instanceof Error ? error.message : String(error) }
+  function designFileChanges(): DesignFileChanges {
+    const identity = {scope: 'design-revision-files' as const, attemptId: input.turn.attemptId, requestKey: input.turn.requestKey}
+    try {
+      if (!before) return {...identity, status: 'unverified', files: [], error: snapshotError}
+      const after = snapshotDesignRevisionFiles(input.run.workspacePath)
+      // A removed index/reference must not hide deletion or editing of an old input.
+      for (const path of Object.keys(before)) after[path] = designRevisionFileDigest(input.run.workspacePath, path)
+      const files: DesignFileChanges['files'] = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()
+        .filter(path => (before![path] ?? null) !== (after[path] ?? null))
+        .map(path => ({path, change: before![path] == null ? 'added' : after[path] == null ? 'deleted' : 'modified'}))
+      return {...identity, status: 'observed', files}
+    } catch (error) { return {...identity, status: 'unverified', files: [], error: error instanceof Error ? error.message : String(error)} }
+  }
   const controller = new AbortController()
   let work: Promise<AgentMeasurement> | undefined
   const sameWriter = (run: Run) => run.id === input.run.id && run.workspacePath === input.run.workspacePath &&
@@ -215,6 +233,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     return record
   }
   return {
+    designFileChanges,
     async assertActive(write = false) {
       if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
       const run = await current()
@@ -274,6 +293,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent)
       return {
         ...(input.executionContext?.()?{executionContext:input.executionContext!()}:{}),
+        designFileChanges:designFileChanges(),
         scope:'agent-task-evidence-handoff',runId:run.id,version:run.version,measurement,acceptance,status:run.status,
         checkScope:measurementCheckScope(latest?.record),
         // run.blockedReason describes the previous settled turn while this

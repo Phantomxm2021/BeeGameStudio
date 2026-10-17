@@ -233,7 +233,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         input.sessions.recordHostEvidence(run.chatSessionId, {attemptId:turn.attemptId,turnId:result.turnId,
           execution:result.status,measurementId:measured?.id,checkStatuses:measured?.checks.map(({id,status})=>({id,status})) ?? [],
           unmeasured:['build','runtime-smoke',...AGENT_CONSUMPTION_CHECKS].filter(id=>!measured?.checks.some(check=>check.id===id)),
-          note:next.blockedReason})
+          note:next.blockedReason,designFileChanges:result.designFileChanges})
         return next
       }
       catch(error) { if (!(error instanceof WorkflowError) || error.code!=='revision-conflict' || i===1) throw error }
@@ -311,8 +311,9 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
           // discovery command that the model may filter or never call. This
           // reads inputs once; it does not build, review or rewrite history.
           const evidence=await measurement.context()
-          return {...tools,turnContext:tools.turnContext+confirmedChanges+'\nBGS saved evidence (not game acceptance): '+JSON.stringify(evidence),
-            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message))+'\n\n'+guide+'\n\n'+tools.systemContext}
+          return {...tools,turnContext:confirmedChanges,
+            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message))+'\n\n'+guide+'\n\n'+tools.systemContext+
+              '\n'+tools.turnContext+'\nBGS saved evidence (not game acceptance): '+JSON.stringify(evidence)}
         },
       })
       await input.sessions.waitForSessionIdle(session.id)
@@ -338,7 +339,8 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     const snapshot=input.sessions.runtimeSnapshot(turn.sessionId)
     observedExits.set(turn.attemptId,{runId:run.id,facts:{turnId,nativeSessionId:snapshot.nativeSessionId,
       usage:turnId && snapshot.turnDiagnostics?.turnId===turnId ? snapshot.turnDiagnostics.usage : undefined,
-      skillUses:skillEvidence(input.sessions.transcript(turn.sessionId).filter(e=>e.turnId===turnId)),quiescedAt:new Date().toISOString()}})
+      skillUses:skillEvidence(input.sessions.transcript(turn.sessionId).filter(e=>e.turnId===turnId)),
+      designFileChanges:measurement.designFileChanges(),quiescedAt:new Date().toISOString()}})
     await saveHostExitReceipt(input.exitReceipts,run,observedExits.get(turn.attemptId)!.facts)
     await persistObservedExit(run,turn)
     await settle(run,turn,failed)

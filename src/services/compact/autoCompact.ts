@@ -18,6 +18,7 @@ import { notifyCompaction } from '../api/promptCacheBreakDetection.js'
 import { setLastSummarizedMessageId } from '../SessionMemory/sessionMemoryUtils.js'
 import {
   type CompactionResult,
+  CompactRequestError,
   compactConversation,
   ERROR_MESSAGE_USER_ABORT,
   type RecompactionInfo,
@@ -361,6 +362,7 @@ export async function autoCompactIfNeeded(
       consecutiveFailures: 0,
     }
   } catch (error) {
+    if (error instanceof CompactRequestError) throw error
     if (!hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT)) {
       logError(error)
     }

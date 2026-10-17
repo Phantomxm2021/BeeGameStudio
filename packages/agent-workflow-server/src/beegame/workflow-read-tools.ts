@@ -33,9 +33,11 @@ export function readDesignHandoff(workspace: string, input: unknown) {
     catch (error) { issues.push(request.document + ': ' + reason(error)); return [] }
   })
   return { valid: !issues.length, scope: 'saved-design-handoff', issues,
-    documents: designSourceLocations(workspace, PROJECT_DOCUMENTS).map(document => ({ ...document,
+    documents: designSourceLocations(workspace, read.length ? [...new Set(read.map(item => item.document))] : PROJECT_DOCUMENTS).map(document => ({ ...document,
+      ...(read.length ? { sections: 'sections' in document ? document.sections.filter(section => read.some(request =>
+        request.document === document.document && request.sections.includes(section.heading))) : undefined } : {}),
       version: check.documentVersions[document.document as typeof PROJECT_DOCUMENTS[number]],
-      requirements: (check.availableRequirements ?? []).filter(item => item.document === document.document),
+      requirementCount: (check.availableRequirements ?? []).filter(item => item.document === document.document).length,
     })), sources,
     note: 'Saved source/index structure only, not design completeness, visual approval or implementation permission. Missing siblings do not hide readable sources. No metadata changes or baseline lock.' }
 }
@@ -56,12 +58,6 @@ export function readImplementationTask(workspace: string, input: unknown) {
   if (matches.length !== 1) return { ...result, valid: false,
     issues: [...issues, matches.length ? 'Ambiguous task ID: ' + id : 'Unknown task ID: ' + id] }
   const task = matches[0]!
-  const requests = new Map<string, Set<string>>()
-  const add = (document: string, section: string) => {
-    if (!requests.has(document)) requests.set(document, new Set())
-    requests.get(document)!.add(section)
-  }
-  add('TECHNICAL_DESIGN.md', task.section)
   const requirements = task.requirementRefs.map(ref => {
     const owner = indexes.find(index => index.document === ref.document)
     const outputs = owner && 'outputs' in owner ? owner.outputs.filter(output => output.id === ref.id) : []
@@ -70,21 +66,28 @@ export function readImplementationTask(workspace: string, input: unknown) {
       return { ...ref, unavailable: true }
     }
     const output = outputs[0]!
-    add(ref.document, output.section)
-    if (output.acceptance) add(ref.document, output.acceptance.section)
-    else issues.push(`Missing acceptance for ${ref.document}#${ref.id}`)
+    if (!output.acceptance) issues.push(`Missing acceptance for ${ref.document}#${ref.id}`)
     return { ...ref, section: output.section, acceptance: output.acceptance }
   })
-  const sources = [...requests].flatMap(([document, sections]) => {
-    try { return readDesignSections(workspace, [{ document, sections: [...sections] }]).sources }
-    catch {
-      return [...sections].flatMap(section => {
-        try { return readDesignSections(workspace, [{ document, sections: [section] }]).sources }
-        catch (error) { issues.push(document + ': ' + reason(error)); return [] }
-      })
+  let sources: ReturnType<typeof readDesignSections>['sources'] = []
+  try {
+    sources = readDesignSections(workspace, [{ document: 'TECHNICAL_DESIGN.md', sections: [task.section] }]).sources
+    // Legacy indexes can point every ID at one Markdown table. Return the
+    // exact ID row with its table header, preserving the shared prose around it.
+    const siblings = items.filter(item => item.section === task.section)
+    if (siblings.length > 1) for (const source of sources) for (const read of source.reads) {
+      const lines = read.text.split('\n')
+      const firstCell = (line: string) => line.trim().startsWith('|')
+        ? line.trim().split('|')[1]?.trim().replace(/^`(.*)`$/, '$1') : undefined
+      const matches = lines.filter(line => firstCell(line) === id)
+      if (matches.length === 1) {
+        const siblingIds = new Set(siblings.filter(item => item.id !== id).map(item => item.id))
+        read.text = lines.filter(line => !siblingIds.has(firstCell(line) ?? '')).join('\n')
+        Object.assign(read, { selection: 'task-table-row', taskId: id })
+      } else Object.assign(read, {selection: 'shared-section', note: 'No unique task ID row; this is shared source prose, not an isolated task.'})
     }
-  })
-  return { ...result, valid: !issues.length, task, requirements, sources }
+  } catch (error) { issues.push('TECHNICAL_DESIGN.md: ' + reason(error)) }
+  return { ...result, directory: directory.filter(item => item.id === id), valid: !issues.length, task, requirements, sources }
 }
 
 export async function checkResourcesAndBindings(workspace: string, input: unknown) {
@@ -163,7 +166,7 @@ export async function readVerificationResults(workspace: string, input: unknown,
     return result
   }
   // Keep host freshness/failed/unfinished status; never search backward for a PASS.
-  return { scope: result.scope, measurement: result.measurement, checkScope: result.checkScope,
+  return { scope: result.scope, designFileChanges: result.designFileChanges, measurement: result.measurement, checkScope: result.checkScope,
     acceptance: result.acceptance, quality: 'unverified', note: result.note,
     ...(details ? { measurements: result.measurements } : {}) }
 }

@@ -96,11 +96,17 @@ export type Run = {
 export class WorkflowError extends Error {
   constructor(readonly code: string, message: string, readonly status: 400 | 403 | 404 | 409 | 503 = 409) { super(message) }
 }
+export type DesignFileChanges = {
+  scope: 'design-revision-files'; attemptId: string; requestKey: string;
+  status: 'observed' | 'unverified'; files: Array<{ path: string; change: 'added' | 'modified' | 'deleted' }>;
+  error?: string;
+}
 export type AgentTurn = {
   attemptId: string; requestKey: string; sessionId: string; workerId: string; fence: number;
   status: 'running' | 'ended' | 'failed' | 'interrupted'; startedAt: string; finishedAt?: string;
   turnId?: string; nativeSessionId?: string; usage?: unknown; skillUses?: SkillUse[];
   quiescedAt?: string; error?: string;
+  designFileChanges?: DesignFileChanges;
   // Original host observed no native submission. Not inferred from missing
   // history/UUID or an error string; permits a separately authorized new work.
   notStarted?: true;

@@ -15,6 +15,7 @@ test('baseline CLI summarizes integrity without hiding failures or certifying ab
   const measurement: NonNullable<Parameters<typeof openAgentTools>[0]['measurement']> = {
     async assertActive(write = false) { inspected.push(write) },
     async close() {},
+    designFileChanges: () => ({scope: 'design-revision-files',attemptId: 'fixture',requestKey: 'fixture',status: 'unverified',files: []}),
     async handoff(paths = [], details = false) {
       sourceRequests.push({ paths, details })
       throw Error('Synthetic source inspection failure')

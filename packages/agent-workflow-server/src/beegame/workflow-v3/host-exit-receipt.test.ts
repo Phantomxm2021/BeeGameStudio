@@ -276,3 +276,17 @@ test('receipt write outage does not block normal database settlement; native cle
     }finally{await executor.dispose();await sessions.dispose();await f.close()}
   }
 })
+
+test('signed exit retains the same turn design-file diff across host reconstruction',async()=>{
+  const f=await fixture()
+  try {
+    const run=f.run,attemptId='snapshot-turn',workerId='snapshot-worker'
+    run.agentTurns=[{attemptId,workerId,fence:1,sessionId:run.chatSessionId,requestKey:'work',status:'running',startedAt:new Date().toISOString()}]
+    run.writer={attemptId,workerId,fence:1};run.fence=1
+    const facts={quiescedAt:new Date().toISOString(),designFileChanges:{scope:'design-revision-files' as const,
+      attemptId,requestKey:'work',status:'observed' as const,files:[{path:'content/ui/title.json',change:'modified' as const}]}}
+    await f.receipts().save(run,facts)
+    expect(await f.receipts().read(run)).toEqual(facts)
+    expect(f.calls).toBe(0)
+  }finally{await f.close()}
+})

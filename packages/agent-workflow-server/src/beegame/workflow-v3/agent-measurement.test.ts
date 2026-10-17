@@ -1338,3 +1338,42 @@ test('lost settlement leaves a durable unknown result; repeated request does not
   }finally{await uncertain.close();await f.close()}
 },10000)
 
+
+test('design file diff spans the entire user turn, survives repeated reads and detects removed references',async()=>{
+  const f=await fixture()
+  let reader:ReturnType<typeof createAgentMeasurement>|undefined
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    const path='content/ui/menu.json'
+    const original=await readFile(join(f.workspace,path),'utf8')
+    reader=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store})
+    expect(reader.designFileChanges()).toMatchObject({status:'observed',files:[]})
+    await writeFile(join(f.workspace,path),original+'\n')
+    expect((await reader.handoff()).designFileChanges.files).toContainEqual({path,change:'modified'})
+    // A context/handoff read (as happens after compact) cannot reset the start.
+    await reader.context()
+    expect(reader.designFileChanges().files).toContainEqual({path,change:'modified'})
+    const doc=join(f.workspace,'docs/UI_UX_SPEC.md')
+    await writeFile(doc,'# Design\n- Version: v1.0\nReference removed.\n')
+    await rm(join(f.workspace,path))
+    expect(reader.designFileChanges().files).toContainEqual({path,change:'deleted'})
+    const snapshot=reader.designFileChanges()
+    expect(snapshot.attemptId).toBe(f.turn.attemptId)
+    expect(snapshot.scope).toBe('design-revision-files')
+    await reader.close()
+    expect(reader.designFileChanges()).toEqual(snapshot) // exit facts remain readable after capability cleanup
+  } finally {await reader?.close();await f.close()}
+})
+
+test('missing documents are captured as absent; unsafe snapshot is unverified rather than an empty successful diff',async()=>{
+  const f=await fixture()
+  try {
+    expect(f.measurement.designFileChanges()).toMatchObject({status:'observed',files:[]})
+    await mkdir(join(f.workspace,'docs'),{recursive:true})
+    await writeFile(join(f.workspace,'docs/GDD.md'),'# New saved design\n')
+    expect(f.measurement.designFileChanges().files).toContainEqual({path:'docs/GDD.md',change:'added'})
+    await rm(join(f.workspace,'docs/GDD.md'))
+    await symlink(join(f.workspace,'README.md'),join(f.workspace,'docs/GDD.md'))
+    expect(f.measurement.designFileChanges()).toMatchObject({status:'unverified',files:[]})
+  } finally {await f.close()}
+})

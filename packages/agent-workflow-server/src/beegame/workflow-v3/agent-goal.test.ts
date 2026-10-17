@@ -1,4 +1,5 @@
 import { test, expect } from 'bun:test'
+import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
 import { Hono } from 'hono'
 import { mkdtemp, mkdir, realpath, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -311,10 +312,11 @@ test('initial goal continues through visual direction without host Tasks or a se
     expect(f.starts[0].systemContext).toContain('Current BGS tools directory')
     expect(f.starts[0].systemContext).toContain('node measure.mjs, handoff.mjs')
     expect(f.starts[0].systemContext).not.toContain('Maintain root CLAUDE.md')
-    expect(JSON.stringify(submit.prompt)).toContain('project-navigation-sources')
-    expect(Array.isArray(submit.prompt)).toBe(true)
-    expect((submit.prompt as {type:string;text:string}[])[0]!.text).toContain('Optional BGS project tools')
-    expect((submit.prompt as {type:string;text:string}[]).at(-1)!.text).toContain(JSON.stringify(f.body.brief))
+    expect(f.starts[0].systemContext).toContain('project-navigation-sources')
+    expect(JSON.stringify(submit.prompt)).not.toContain('BGS saved evidence')
+    expect(f.starts[0].systemContext).toContain('Optional BGS project tools')
+    expect(JSON.stringify(submit.prompt)).not.toContain('Optional BGS project tools')
+    expect(String(submit.prompt)).toContain(JSON.stringify(f.body.brief))
     expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false)
     expect(run.agentTurns![0]).toMatchObject({sessionId:f.body.chatSessionId,status:'ended',
       usage:expect.objectContaining({prompt_tokens:40,completion_tokens:8})})
@@ -345,9 +347,9 @@ test('new goal receives the real catalog before native submission, once, without
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
     expect(calls).toEqual([{path:'/api/resource-catalog/packs',body:{limit:32},submissions:0}])
-    const initial=JSON.stringify(f.submissions[0]!.prompt)
+    const initial=f.starts[0].systemContext
     expect(initial).toContain('fixture-audio')
-    expect(initial).toContain(f.body.brief.idea)
+    expect(String(f.submissions[0]!.prompt)).toContain(f.body.brief.idea)
     expect(initial).toContain('Preserve explicit user source choices')
     expect(JSON.parse(run.requirements.text)).toEqual(f.body.brief)
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
@@ -475,8 +477,8 @@ test('first follow-up preserves requirements and resumes native history unless f
     expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
     expect(run.agentTurns![1]!.nativeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
     expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('not a requirement change')
-    expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('BGS saved evidence')
-    expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('reportSemantics')
+    expect(f.starts[1].systemContext).toContain('BGS saved evidence')
+    expect(f.starts[1].systemContext).toContain('reportSemantics')
     expect(JSON.stringify(f.submissions[1]!.prompt)).not.toContain('authorized_user_changes')
     expect(run.deliveryEligible).toBe(false)
     expect((await f.call('/agent/messages','POST',message)).status).toBe(202)
@@ -536,10 +538,10 @@ test('focused work is explicit and retains Chat/sources but does not resume the 
     expect(run.agentTurns![1]!.nativeSessionId).not.toBe(native)
     expect(run.chatSessionId).toBe(chat);expect(run.requirements).toEqual(original)
     expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false)
-    expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('saved-user-inputs-and-current-requirements')
-    const facts=JSON.parse((f.submissions[1]!.prompt as Array<{text:string}>)[0]!.text.split('BGS saved evidence (not game acceptance): ')[1]!)
+    expect(f.starts[1].systemContext).toContain('saved-user-inputs-and-current-requirements')
+    const facts=JSON.parse(f.starts[1].systemContext.split('BGS saved evidence (not game acceptance): ')[1]!)
     expect(JSON.parse(facts.executionContext.requirements.text)).toEqual(f.body.brief)
-    expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('not-transferred')
+    expect(f.starts[1].systemContext).toContain('not-transferred')
     expect((await f.call('/agent/messages','POST',request)).status).toBe(202)
     expect(f.submissions).toHaveLength(2)
     const next=make('resume-focused','work')
@@ -556,7 +558,7 @@ test('focused work is explicit and retains Chat/sources but does not resume the 
     run=await f.wait(r=>r.agentTurns!.at(-1)!.requestKey==='new-work-after-exit'&&Boolean(r.agentTurns!.at(-1)!.finishedAt))
     expect(f.submissions).toHaveLength(5)
     expect(f.starts[4].resumeSessionId).toBeUndefined()
-    const focusedFacts=JSON.parse((f.submissions[4]!.prompt as Array<{text:string}>)[0]!.text.split('BGS saved evidence (not game acceptance): ')[1]!).executionContext
+    const focusedFacts=JSON.parse(f.starts[4].systemContext.split('BGS saved evidence (not game acceptance): ')[1]!).executionContext
     expect(focusedFacts.previousExecution).toMatchObject({attemptId:failed.attemptId,status:'failed',error:'Synthetic native failure',
       finishedAt:failed.finishedAt,quiescedAt:failed.quiescedAt,externalOutcomes:'not-inferred'})
     expect(run.agentTurns![3]).toEqual(failed)
@@ -722,7 +724,7 @@ for(const contextMode of ['resume','focused'] as const) test(contextMode+' conti
     else {
       expect(f.starts[1].resumeSessionId).toBeUndefined()
       expect(run.agentTurns![1]!.nativeSessionId).not.toBe(run.agentTurns![0]!.nativeSessionId)
-      const facts=JSON.parse((f.submissions[1]!.prompt as Array<{text:string}>)[0]!.text.split('BGS saved evidence (not game acceptance): ')[1]!).executionContext
+      const facts=JSON.parse(f.starts[1].systemContext.split('BGS saved evidence (not game acceptance): ')[1]!).executionContext
       expect(facts.previousExecution).toMatchObject({attemptId:continuation.continuationOf,status:'interrupted',externalOutcomes:'not-inferred'})
       expect(JSON.parse(facts.requirements.text)).toEqual(f.body.brief)
       expect(facts.omitted).toContain('session permissions')
@@ -846,7 +848,7 @@ test('native pause/cleanup revokes resource access before releasing its workspac
   const f=await fixture('wait',false,'https://unused-library.invalid')
   try {
     await f.call('/agent/goal','POST',f.body);await f.wait(()=>f.submissions.length===1)
-    const context=(f.submissions[0]!.prompt as {text:string}[])[0]!.text
+    const context=f.starts[0].systemContext
     const path=context.match(/Assets: bun "([^"]+)"/)![1]!
     const source=await readFile(join(f.root,path),'utf8')
     const config=JSON.parse(source.split('\n')[0]!.slice('const TOOL_CONFIG = '.length))
@@ -1157,4 +1159,25 @@ test('first and resumed goals retain professional coverage and design dependenci
   expect(agentGoalPrompt(run)).toContain('CONFIRMED_GAME')
   const slice={...run,creation:{initialDelivery:'playable-slice'}} as Run
   expect(agentGoalPrompt(slice)).toContain('within the required design dependencies')
+})
+
+test('turn-end host evidence lists actual design changes even when the native answer omits them',async()=>{
+  const f=await fixture('wait')
+  try {
+    await writeDesignDocumentsFixture(f.root)
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(()=>f.submissions.length===1)
+    const path='content/ui/menu.json'
+    await writeFile(join(f.root,path),(await readFile(join(f.root,path),'utf8'))+'\n')
+    // The synthetic native final answer contains no changed-file list.
+    await f.call('/stop','POST')
+    run=await f.wait(r=>!r.writer)
+    const files=run.agentTurns![0]!.designFileChanges!
+    expect(files).toMatchObject({status:'observed',attemptId:run.agentTurns![0]!.attemptId})
+    expect(files.files).toContainEqual({path,change:'modified'})
+    const host=f.sessions.transcript(run.chatSessionId).find(event=>event.payload?.subtype==='host_evidence')!
+    expect(host.payload!.designFileChanges).toEqual(files)
+    expect(host.text).toContain(path)
+    expect(run.deliveryEligible).toBe(false)
+  } finally {await f.close()}
 })

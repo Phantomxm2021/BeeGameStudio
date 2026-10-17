@@ -4,7 +4,7 @@ import {
   isPromptTooLongMessage,
 } from '../api/errors.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
-import { type CompactionResult, compactConversation } from './compact.js'
+import { type CompactionResult, CompactRequestError, compactConversation } from './compact.js'
 import { logError } from '../../utils/log.js'
 import { logForDebugging } from '../../utils/debug.js'
 import type { CacheSafeParams } from '../../utils/forkedAgent.js'
@@ -35,6 +35,7 @@ export const reactiveCompactOnPromptTooLong: (
       )
       return { ok: true, result }
     } catch (error) {
+      if (error instanceof CompactRequestError) throw error
       logError(error)
       return { ok: false, reason: String(error) }
     }
@@ -87,6 +88,7 @@ export const tryReactiveCompact: (params: {
     )
     return result
   } catch (error) {
+    if (error instanceof CompactRequestError) throw error
     logForDebugging(
       `reactiveCompact: emergency compaction failed — ${String(error)}`,
       { level: 'warn' },

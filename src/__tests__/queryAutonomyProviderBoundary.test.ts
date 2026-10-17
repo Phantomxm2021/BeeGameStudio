@@ -451,3 +451,20 @@ describe('query autonomy/provider boundary', () => {
     }
   })
 })
+
+test('a failed compact ends the query before a normal model call can spend more tokens', async () => {
+  const {CompactRequestError}=await import('../services/compact/compact')
+  const error=new CompactRequestError(Error('offline compact stream disconnected'))
+  let normalCalls=0, compactCalls=0
+  const run=async()=>{
+    for await(const _ of query({
+      messages:[createUserMessage({content:'Continue the existing work'})],systemPrompt:asSystemPrompt([]),userContext:{},systemContext:{},
+      canUseTool:async(_tool,input)=>({behavior:'allow',updatedInput:input}),toolUseContext:createToolUseContext(),querySource:'sdk',
+      deps:{uuid:()=> 'offline-compact-failure',microcompact:async(messages:unknown[])=>({messages}),
+        autocompact:async()=>{compactCalls++;throw error},callModel:async function*(){normalCalls++}} as never,
+    })) { /* No provider: even the model stub must not be reached. */ }
+  }
+  await expect(run()).rejects.toBe(error)
+  expect(compactCalls).toBe(1)
+  expect(normalCalls).toBe(0)
+})

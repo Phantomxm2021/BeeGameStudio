@@ -40,14 +40,14 @@ test('design read retains available source text with missing siblings; no finali
     { document: 'GDD.md', sections: ['Design'] }, { document: 'AUDIO_DESIGN.md', sections: ['Absent'] },
   ] })
   expect(result.valid).toBe(false)
-  expect(result.documents).toHaveLength(8)
+  expect(result.documents).toHaveLength(2)
   expect(result.sources[0]!.reads[0]!.text).toContain('Fixture decision.')
-  expect(result.documents.find(item => item.document === 'GDD.md')!.requirements[0]!.id).toBe('play')
+  expect(result.documents.find(item => item.document === 'GDD.md')!.requirementCount).toBe(1)
   expect(snapshot(root)).toEqual(before)
   expect(() => readDesignHandoff(root, { read: [{ document: '../secret.md', sections: ['Design'] }] })).toThrow()
 })
 
-test('task reader supplies exact task and owner/acceptance prose despite unrelated missing inputs', async () => {
+test('task reader supplies task prose and source pointers without eagerly expanding owner/acceptance bodies', async () => {
   const root = fixture(), handoff = designHandoffFixture('TECHNICAL_DESIGN.md')
   handoff.implementationItems = [{ id: 'restart', section: 'Restart task', dependsOn: ['initialize'],
     requirementRefs: [{ document: 'GDD.md', id: 'play' }] }]
@@ -60,8 +60,9 @@ test('task reader supplies exact task and owner/acceptance prose despite unrelat
   expect(result.valid).toBe(false) // unknown dependency and missing siblings remain visible
   expect('task' in result && result.task.id).toBe('restart')
   expect(JSON.stringify(result)).toContain('clear old timers')
-  expect(JSON.stringify(result)).toContain('Retry twice; old timers must not fire.')
-  expect(JSON.stringify(result)).toContain('Restart uses initial state.')
+  expect(JSON.stringify(result)).not.toContain('Retry twice; old timers must not fire.')
+  expect(JSON.stringify(result)).toContain('Restart acceptance')
+  expect(JSON.stringify(result)).not.toContain('Restart uses initial state.')
   expect(readImplementationTask(root, { id: 'unknown' }).issues.join(' ')).toContain('Unknown task ID')
   handoff.implementationItems.push(handoff.implementationItems[0]!)
   save(root, designHandoffPath('TECHNICAL_DESIGN.md'), handoff)
@@ -201,4 +202,23 @@ test('result access rejects another project/session before any host request', as
     await expect(readVerificationResults(root, {}, { capabilityFile: file, sessionId: 'other' })).rejects.toThrow('does not match')
     await expect(readVerificationResults(root, {})).rejects.toThrow('unavailable')
   } finally { await revoke() }
+})
+
+test('selected design reads omit unrelated directories and all requirement hashes; table task reads isolate the ID', async () => {
+  const root = fixture()
+  await writeDesignDocumentsFixture(root)
+  const selected = readDesignHandoff(root, {read:[{document:'GDD.md',sections:['Design']}]})
+  expect(selected.documents.map(doc=>doc.document)).toEqual(['GDD.md'])
+  expect(JSON.stringify(selected.documents)).not.toContain('"requirements":')
+  expect(readDesignHandoff(root, {}).documents).toHaveLength(8)
+  const handoff = designHandoffFixture('TECHNICAL_DESIGN.md')
+  handoff.implementationItems = ['T-01','T-02'].map(id=>({id,section:'Tasks',dependsOn:[],requirementRefs:[{document:'GDD.md',id:'play'}]}))
+  await writeDesignDocumentFixture(root,'TECHNICAL_DESIGN.md',handoff,
+    '# Design\n- Version: v1.0\n## Tasks\nShared initialization contract.\n| ID | Result |\n| --- | --- |\n| T-01 | Initialize unique task |\n| `T-02` | Restart unique task |\nShared acceptance applies.\n')
+  const before=snapshot(root), task=readImplementationTask(root,{id:'T-02'})
+  expect(JSON.stringify(task)).toContain('Restart unique task')
+  expect(JSON.stringify(task)).toContain('Shared initialization contract')
+  expect(JSON.stringify(task)).not.toContain('Initialize unique task')
+  expect(JSON.stringify(task)).toContain('task-table-row')
+  expect(snapshot(root)).toEqual(before)
 })

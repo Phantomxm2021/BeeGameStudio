@@ -1,3 +1,4 @@
+import type { DesignFileChanges } from './workflow-v3/state'
 import { createHash, randomUUID } from 'node:crypto'
 import { projectRuntimeDisplayReason } from './project-runtime-display'
 import { normalizeRuntimeEnvironment } from '../../../../src/utils/runtimeEnvironment'
@@ -1052,7 +1053,7 @@ export class BeeGameSessionManager {
   /** Display-only host snapshot, independent of the author's final answer. */
   recordHostEvidence(sessionId: string, facts: {
     attemptId: string; turnId?: string; execution: string; measurementId?: string;
-    checkStatuses: { id: string; status: string }[]; unmeasured: readonly string[]; note: string;
+    checkStatuses: { id: string; status: string }[]; unmeasured: readonly string[]; note: string; designFileChanges?: DesignFileChanges;
   }): void {
     const record = this.sessions.get(sessionId)
     if (!record) return
@@ -1063,6 +1064,11 @@ export class BeeGameSessionManager {
     const text = [
       zh ? 'BGS 宿主检查｜本轮执行已结束，不等于游戏验收通过' : 'BGS host evidence | Execution ended, not game acceptance',
       (zh ? '执行状态：' : 'Execution: ')+facts.execution,
+      ...(facts.designFileChanges ? [
+        (zh ? '本轮设计文件差异（不代表修改者或验收）：' : 'Design file changes this turn (not authorship or acceptance): ')+
+          (facts.designFileChanges.status === 'unverified' ? (zh ? '未验证' : 'unverified') :
+            facts.designFileChanges.files.map(file => file.path+' ('+file.change+')').join(', ') || (zh ? '无' : 'none')),
+      ] : []),
       facts.measurementId ? (zh ? '已保存测量（非整体验收）：' : 'Saved measurement (not acceptance): ')+facts.measurementId : (zh ? '没有宿主测量记录。' : 'No host measurement.'),
       ...facts.checkStatuses.map(check => check.id+': '+(zh ? statuses[check.status] ?? check.status : check.status)),
       ...(facts.unmeasured.length ? [(zh ? '未测量：' : 'Not measured: ')+facts.unmeasured.join(', ')] : []),
