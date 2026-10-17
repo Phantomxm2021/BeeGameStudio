@@ -11,7 +11,7 @@ const NAV_END = '<!-- bgs:source-navigation:end -->'
 export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - Preserve confirmed requirements, design standards, budget, authorization and unrelated work. Use project-relative paths.
 - Keep project-specific architecture decisions and confirmed runtime entry points outside the generated source-navigation block; update them when the implementation changes. Generated pointers list saved sources and declared commands, not verified runtime behavior.
-- For follow-ups, reuse still-valid designs, resources, methods and evidence. Repair affected sources without restarting production or lowering standards.
+- For follow-ups, reuse still-valid designs, resources, methods and evidence. Check actual gaps or changed inputs, not a per-turn checklist. Repair affected sources without restarting production or lowering standards.
 
 ## Professional methods
 - For a new complete game design, cover these responsibilities. Use the current session's native metadata to resolve names/namespaces, then invoke matching Skills with the Skill tool before related design or implementation decisions. Reuse loaded methods; follow-ups cover affected responsibilities.
@@ -37,7 +37,7 @@ For applicable new work, use this order; do not omit, replace or reverse require
 4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Finalize TECHNICAL_DESIGN.md tasks from these inputs.
 5. Implementation and runtime verification: invoke game-plan-execution with saved content; play the required flow and compare actual screens, interaction and sound with the designs.
 Image-tool request JSON is a tool input, not a project UI/Scene layout. Reuse existing Skills and entries; add no separate plan or task database.
-ReadDesignHandoff reads current saved inputs and selected original sections. ReadImplementationTask lists existing task IDs/dependencies or reads one task and referenced owner section locations; neither read locks or starts implementation. CheckResourcesAndBindings checks registered resources and all saved UI/Scene resource references. ReadVerificationResults reads retained results/freshness without executing checks. Use these native read-only tools before rebuilding Shell readers; detailed tool parameters are in their schemas. Missing inputs and stale/unfinished evidence stay unverified. Finalize and implementation handoff remain separate explicit operations.
+Use supplied native read tools and their schemas instead of Shell readers. ReadVerificationResults reads current-turn file changes and retained results/freshness. For report-only work, read the snapshot once; without later writes, report directly. Missing inputs and stale/unfinished evidence stay unverified. Reads do not finalize, lock or start implementation.
 
 ## Quality and evidence
 - Skill invocation, complete documents, valid JSON and successful tools do not establish design quality. Inspect actual-size composition, hierarchy, style and state feedback; verify fidelity, gameplay, interaction and sound in the actual runtime.
