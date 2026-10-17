@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { readBeeGameAssetManifestSync } from './asset-contracts'
-import { readTileSetResource } from './tilemap-contract'
+import { createSceneTileSetResolver, readTileSetResource } from './tilemap-contract'
 import { inspectSceneLayout2d, sceneCameraInput2d, sceneWorldTransforms2d } from '../../../scene-editor/src/scene-layout-inspection'
 import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-editor/src/scene-camera'
 import { auditBeeGameContentPackage, parseBeeGameContentIndex, contentDraftStructureIssues, type BeeGameContentPackage } from './game-content-package'
@@ -21,7 +21,7 @@ import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layou
 import { checkDesignLayouts, checkReviewDesignLayouts } from './design-layout-check'
 import { checkDesignDocumentReferences } from './design-document-references'
 import { formatLayoutReport, formatUiLayoutTable, retainLayoutReport } from './layout-report'
-export { formatLayoutReport, formatUiLayoutTable, formatUiLayoutMeasurement } from './layout-report'
+export { formatLayoutReport, formatUiLayoutTable, formatUiLayoutMeasurement, formatSceneLayoutInspection } from './layout-report'
 import { isViewportPair, layoutCameraSource, readUiLayoutCamera, type LayoutConstraints } from './ui-layout-audit'
 import type { UiResponsiveNode, UiViewport } from '../../../scene-editor/src/ui-responsive'
 import { point2d } from '../../../scene-editor/src/content-coordinates'
@@ -482,6 +482,7 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: La
     try { collect('content/scenes') } catch (error) { issues.push('Scene batch unavailable: ' + String(error)) }
     if (!files.length) issues.push('No saved Scene JSON found in content/scenes')
     const inspections = [], unverified: string[] = [], ids = new Set<string>()
+    const tileSet = createSceneTileSetResolver(root)
     const targets: Array<{ source: string; viewports: { width: number; height: number }[] }> = []
     for (const path of files.sort()) try {
       const doc = parseBeeGameContentDocument(readWorkspaceDraft(root, path))
@@ -497,7 +498,7 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: La
       const selectedViewports = viewports.length ? viewports : [{ width: authored!.width, height: authored!.height }]
       targets.push({ source: path, viewports: selectedViewports })
       for (const viewport of selectedViewports) {
-        const result = inspectSceneLayout2d(doc.data, viewport)
+        const result = inspectSceneLayout2d(doc.data, viewport, tileSet)
         const required = result.requiredVisibility
         if (!required) unverified.push(path + ': no declared required-visible nodes; optional offscreen geometry is not a failure.')
         if (required?.status === 'failed') issues.push(path + ': ' + viewport.width + 'x' + viewport.height + ' required Scene geometry outside Camera: ' + required.outside.join(', '))

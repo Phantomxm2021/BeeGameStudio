@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import type { LayoutDiagnostic, LayoutMeasurement } from './ui-layout-audit'
 import { summarizeUiLayoutInspection } from '../../../scene-editor/src/ui-layout-inspection'
+import type { inspectSceneLayout2d } from '../../../scene-editor/src/scene-layout-inspection'
 
 /** Presentation only: never substitutes for the complete host check. */
 export function formatLayoutReport(result: {
@@ -96,6 +97,31 @@ export function formatUiLayoutMeasurement(measurement: LayoutMeasurement, detail
     const containment = nodes.filter(node => node.outsideParent || node.outsideContentArea)
       .map(node => ({ id: node.id, parent: node.parentGeometry }))
     if (containment.length) lines.push('Containment geometry: ' + JSON.stringify(containment))
+  }
+  return lines.join('\n')
+}
+
+/** Display shared static XY observations, never a second Scene solver. */
+export function formatSceneLayoutInspection(inspection: ReturnType<typeof inspectSceneLayout2d>, details = false) {
+  const { nodes } = inspection
+  const lines = [
+    'Coordinate system: ' + JSON.stringify(inspection.coordinateSystem),
+    'Selected Camera: ' + JSON.stringify({ nodeId: inspection.cameraNodeId, ...inspection.camera, view: inspection.view }),
+    'Required visibility: ' + JSON.stringify(inspection.requiredVisibility ?? { status: 'unverified', reason: 'No required-visible nodes declared.' }),
+    'Spatial observations: ' + JSON.stringify({
+      outsideCameraView: nodes.filter(node => node.enabled && node.fullyInside === false).map(node => node.id),
+      geometryUnavailable: nodes.filter(node => node.enabled && node.geometryUnavailable)
+        .map(node => ({ id: node.id, reason: node.geometryUnavailable })),
+    }),
+  ]
+  if (details) {
+    const cell = (value: unknown) => JSON.stringify(value ?? null).replaceAll('|', '&#124;').replaceAll('\n', ' ')
+    lines.push('Local transforms are authored (omitted fields use identity); RectTransform offsets also affect world origins. World origin/bounds use Scene coordinates; projected bounds use viewport-local logical pixels. Rotation is in radians. Empty bounds are unknown or nonvisual, not visibility proof.',
+      '| ID | Parent | Enabled | Local transform / RectTransform | World origin | World bounds | Projected bounds | Inside Camera | Unknown geometry |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+      ...nodes.map(node => '| ' + [node.id, node.parentId, node.enabled,
+        { transform: node.localTransform, rectTransform: node.rectTransform }, node.worldOrigin,
+        node.worldBounds, node.screenBounds, node.fullyInside, node.geometryUnavailable].map(cell).join(' | ') + ' |'))
   }
   return lines.join('\n')
 }

@@ -52,8 +52,8 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
     const path = join(directory,'servers.json')
     await writeFile(path,JSON.stringify({mcpServers}),{flag:'wx',mode:0o600})
     return { flags:['--mcp-config',path,
-      // Only this host-bound read-only tool; external MCP permissions stay normal.
-      ...(uiLayoutConstraints ? ['--allowedTools=mcp__bgs-ui-layout__CheckUiLayouts'] : [])],
+      // Only these host-bound read-only tools; external MCP permissions stay normal.
+      ...(uiLayoutConstraints ? ['--allowedTools=mcp__bgs-ui-layout__CheckUiLayouts,mcp__bgs-ui-layout__CheckSceneLayouts'] : [])],
       context, close:()=>rm(directory,{recursive:true,force:true}) }
   } catch (error) { await rm(directory,{recursive:true,force:true}); throw error }
 }

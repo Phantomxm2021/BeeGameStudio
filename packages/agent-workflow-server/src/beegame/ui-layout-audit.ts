@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { inspectUiLayout, isUiControl, type UiLayoutInspectionOptions } from '../../../scene-editor/src/ui-layout-inspection'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
@@ -7,8 +7,7 @@ import type { SceneCameraInput } from '../../../scene-editor/src/scene-camera'
 import { inspectSceneLayout2d, sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
 import { parseBeeGameContentDocument, type BeeGameContentDocument } from './game-content-schema'
 import { sceneLayoutDraftIssues } from './game-content-package'
-import { readBeeGameAssetManifestSync } from './asset-contracts'
-import { readTileSetResource } from './tilemap-contract'
+import { createSceneTileSetResolver } from './tilemap-contract'
 
 export type UiDocument = Extract<BeeGameContentDocument, { kind: 'ui-screen' | 'ui-hud' | 'ui-flow' }>
 export type LayoutDiagnostic = { source?: string; owner?: string; scene?: string; node?: string;
@@ -36,15 +35,7 @@ export function layoutCameraSource(nodeId: string, source: unknown, workspacePat
     if (document.kind !== 'scene-2d') throw new Error('Connected Scene geometry requires a 2D Scene')
     const issues = sceneLayoutDraftIssues('Linked Scene', document)
     if (issues.length) throw new Error(issues.join('\n'))
-    const cache = new Map<string, ReturnType<typeof readTileSetResource>>()
-    const tileSet = workspacePath ? (id: string, member?: string) => {
-      if (!existsSync(resolve(workspacePath, 'assets/asset-manifest.json'))) return undefined
-      const manifest = readBeeGameAssetManifestSync(workspacePath)
-      if (!manifest.resources.some(resource => resource.id === id && resource.status === 'verified')) return undefined
-      const key = JSON.stringify([id, member])
-      if (!cache.has(key)) cache.set(key, readTileSetResource(workspacePath, manifest, id, member))
-      return cache.get(key)
-    } : undefined
+    const tileSet = workspacePath ? createSceneTileSetResolver(workspacePath) : undefined
     return { nodeId, input: sceneCameraInput2d(document.data).input, scene: document.data, tileSet }
   }
   return { nodeId, input: source as SceneCameraInput }

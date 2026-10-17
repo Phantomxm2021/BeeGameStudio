@@ -22,7 +22,7 @@ const conditions = { platform: 'Web', inputs: ['Touch'], orientation: 'Landscape
 async function connect(root: string) {
   const prepared = await prepareNativeMcpConfig({}, root, conditions)
   expect(prepared.flags.filter(flag => flag.startsWith('--allowedTools')))
-    .toEqual(['--allowedTools=mcp__bgs-ui-layout__CheckUiLayouts'])
+    .toEqual(['--allowedTools=mcp__bgs-ui-layout__CheckUiLayouts,mcp__bgs-ui-layout__CheckSceneLayouts'])
   const config = JSON.parse(readFileSync(prepared.flags[1]!, 'utf8'))
   const client = new Client({ name: 'offline-layout-test', version: '1' })
   try { await client.connect(new StdioClientTransport(config.mcpServers['bgs-ui-layout'])) }
@@ -71,7 +71,7 @@ test('native MCP exposes the read-only always-loaded tool and preserves host siz
   const access = await connect(root)
   try {
     const tools = (await access.client.listTools()).tools
-    expect(tools.map(t => t.name)).toEqual(['CheckUiLayouts'])
+    expect(tools.map(t => t.name).sort()).toEqual(['CheckSceneLayouts', 'CheckUiLayouts'])
     expect(tools[0]!.annotations?.readOnlyHint).toBe(true)
     expect(tools[0]!._meta?.['anthropic/alwaysLoad']).toBe(true)
     const summary = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })

@@ -1,9 +1,23 @@
 /** Filesystem validation of authored TileSet data. No game loading or rendering. */
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { resolve, relative, isAbsolute, basename, extname } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
+import { readBeeGameAssetManifestSync } from './asset-contracts'
 import { parseTileSet, type TileDefinition } from '../../../scene-editor/src/tilemap-data'
 import { parseSpriteSheet, atlasFrameName, spriteSheetSelection } from '../../../scene-editor/src/sprite-sheet'
+
+/** Per inspection call, shared by standalone Scenes and UI-linked framing. */
+export function createSceneTileSetResolver(workspace: string) {
+  const cache = new Map<string, ReturnType<typeof readTileSetResource>>()
+  return (id: string, member?: string) => {
+    if (!existsSync(resolve(workspace, 'assets/asset-manifest.json'))) return undefined
+    const manifest = readBeeGameAssetManifestSync(workspace)
+    if (!manifest.resources.some(resource => resource.id === id && resource.status === 'verified')) return undefined
+    const key = JSON.stringify([id, member])
+    if (!cache.has(key)) cache.set(key, readTileSetResource(workspace, manifest, id, member))
+    return cache.get(key)
+  }
+}
 
 /** Resolve exact registered identities, never choose a similar name or the
  * first of several files. Binding reuses the registered-file and atlas readers. */

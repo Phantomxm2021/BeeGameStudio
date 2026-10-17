@@ -127,7 +127,9 @@ export function inspectSceneLayout2d(data: SceneSpatialData, host: SceneViewport
       x <= view.rect.x + view.rect.width + 1e-6 && y <= view.rect.y + view.rect.height + 1e-6) : undefined
     const fullyInside = geometryUnavailable && knownInside !== false ? undefined : knownInside
     const cameraPoints = required === undefined ? [] : corners.map(([x,y]) => point2d(inverse, x, y).map(value => value / unit))
-    return { id: node.id, enabled: selected.active.get(node.id) === true, worldBounds, screenBounds, fullyInside,
+    return { id: node.id, parentId: node.parentId, enabled: selected.active.get(node.id) === true,
+      localTransform: node.transform, rectTransform: node.components?.find(c => c.type === 'rect-transform')?.data,
+      worldOrigin: point2d(poses.get(node.id)!, 0, 0), worldBounds, screenBounds, fullyInside,
       ...(cameraPoints.length ? { cameraBounds: boundsOf(cameraPoints) } : {}),
       ...(geometryUnavailable ? { geometryUnavailable } : {}) }
   })
@@ -152,7 +154,9 @@ export function inspectSceneLayout2d(data: SceneSpatialData, host: SceneViewport
       requiredNodeIds: required, checkedNodeIds: checked.map(node => node.id), outside, unavailable: [...unavailable, ...empty],
       ...(bounds && !unavailable.length && !empty.length ? { cameraBounds: bounds, supportedAspect: sceneCameraAspectRange(camera, bounds) } : {}) }
   }
-  return { cameraNodeId: cameraNode.id, view, worldToScreen: projection, nodes,
+  return { cameraNodeId: cameraNode.id, coordinateSystem: coordinates,
+    camera: { input: camera, localTransform: cameraNode.transform, worldOrigin: point2d(pose, 0, 0) },
+    view, worldToScreen: projection, nodes,
     ...(requiredVisibility ? { requiredVisibility } : {}),
     note: 'Static XY geometry only; offscreen objects can be intentional. Unknown bounds, depth/near-far clipping, occlusion, dynamic camera behavior and gameplay need runtime checks.' }
 }
