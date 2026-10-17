@@ -20,7 +20,8 @@ import { inspectUiLayout, inspectUiLayoutBoundaries, summarizeUiLayoutInspection
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import { checkDesignLayouts, checkReviewDesignLayouts } from './design-layout-check'
 import { checkDesignDocumentReferences } from './design-document-references'
-import { formatLayoutReport, retainLayoutReport } from './layout-report'
+import { formatLayoutReport, formatUiLayoutTable, retainLayoutReport } from './layout-report'
+export { formatLayoutReport, formatUiLayoutTable } from './layout-report'
 import { isViewportPair, layoutCameraSource, readUiLayoutCamera, type LayoutConstraints } from './ui-layout-audit'
 import type { UiResponsiveNode, UiViewport } from '../../../scene-editor/src/ui-responsive'
 import { point2d } from '../../../scene-editor/src/content-coordinates'
@@ -314,13 +315,7 @@ export function generateUiLayoutAppendix(workspacePath: string, args: string[]) 
     }), '']
   for (const [width, height] of sizes.values()) {
     const result = inspectUiGeometry(document.data, { width, height }, options)
-    lines.push(`## ${width} × ${height}`, '',
-      '| ID | Parent | Active | Local position | Local size | Anchor | Pivot | Host bounds | Text fit |',
-      '| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
-    for (const node of result.nodes) lines.push('| ' + [
-      node.id, node.parentId, node.active, node.layout?.position, node.layout?.size,
-      node.layout?.anchor, node.pivot, node.bounds, node.textFit,
-    ].map(cell).join(' | ') + ' |')
+    lines.push(`## ${width} × ${height}`, '', formatUiLayoutTable(result.nodes))
     lines.push('', 'Diagnostics (inspection ran; this is not a PASS):', '',
       '```json', JSON.stringify({ diagnostics: result.diagnostics, boundaryChecks: result.boundaryChecks,
         ...('gameView' in result ? { gameView: result.gameView, cameraView: result.cameraView,

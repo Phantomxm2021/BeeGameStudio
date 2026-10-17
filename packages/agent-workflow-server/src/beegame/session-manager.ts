@@ -295,6 +295,8 @@ export type BeeGameSessionRunnerStartInput = {
   sessionId: string
   /** Host capability discovery, separate from the user's message. */
   systemContext?: string
+  /** Host-confirmed UI check conditions; never accepted from model tool input. */
+  uiLayoutConstraints?: import('./ui-layout-audit').LayoutConstraints
   /** Optional private execution directory; Chat and billing retain project identity. */
   isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   /** Platform evidence root exposed only through read-only contract facts. */
@@ -446,6 +448,7 @@ type SessionRecord = {
   /** Redact runtime credentials from persisted and streamed Chat events only. */
   redactVisible?: ReturnType<typeof createResponseRedactor>
   systemContext?: string
+  uiLayoutConstraints?: BeeGameSessionRunnerStartInput['uiLayoutConstraints']
   preparingTurn?: boolean
   session: BeeGameSession
   isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
@@ -870,6 +873,7 @@ export class BeeGameSessionManager {
     record.runner = null
     record.nativeSessionId = nativeSessionId
     record.systemContext = undefined
+    record.uiLayoutConstraints = undefined
     this.persistRuntimeSnapshot(record)
   }
 
@@ -1104,7 +1108,8 @@ export class BeeGameSessionManager {
       confirmedBriefContext?: string
       onTurnAccepted?: (turnId: string) => void
       executionIdentity?: Pick<NonNullable<BeeGameRuntimeSnapshot['executionIdentity']>, 'attemptId'|'workerId'|'fence'>
-      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string; close?: () => Promise<void> }>
+      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string;
+        uiLayoutConstraints?: BeeGameSessionRunnerStartInput['uiLayoutConstraints']; close?: () => Promise<void> }>
       onTurnSettled?: () => Promise<void>
       onTurnReady?: () => void | Promise<void>
       usageExternallyAccounted?: boolean
@@ -1139,10 +1144,12 @@ export class BeeGameSessionManager {
       }
       const context = await display?.prepareTurn?.()
       close = context?.close
-      if (context && context.systemContext !== record.systemContext) {
+      if (context && (context.systemContext !== record.systemContext ||
+          JSON.stringify(context.uiLayoutConstraints) !== JSON.stringify(record.uiLayoutConstraints))) {
         await this.disposeRunner(record.runner, record)
         record.runner = null
         record.systemContext = context.systemContext
+        record.uiLayoutConstraints = context.uiLayoutConstraints
       }
       if (record.session.status !== 'running') throw new Error('Session was stopped during turn preparation')
       if (display?.confirmedBriefContext) {
@@ -1477,6 +1484,7 @@ export class BeeGameSessionManager {
         (await this.runner.start({
           sessionId: record.session.id,
           systemContext: record.systemContext,
+          uiLayoutConstraints: record.uiLayoutConstraints,
           ...(record.isolatedTask ? { isolatedTask: record.isolatedTask } : {}),
           ...(record.nativeSessionId
             ? { resumeSessionId: record.nativeSessionId }

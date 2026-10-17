@@ -7,7 +7,7 @@ export function formatLayoutReport(result: {
   valid: boolean; issues: string[]; diagnostics: LayoutDiagnostic[];
   coverage?: unknown; deferred?: string[]; inputs?: unknown;
   inputLocation?: unknown;
-}, fullResultPath: string): string {
+}, fullResultPath?: string): string {
   // Merge only identical failures/geometry. Different viewports, nodes,
   // measurements and close conditions must remain independently inspectable.
   const groups = new Map<string, { diagnostic: LayoutDiagnostic; scenes: Set<string>; count: number }>()
@@ -38,8 +38,9 @@ export function formatLayoutReport(result: {
   }
   return [
     `Saved-input checks: ${result.valid ? 'PASS (reported scope only)' : 'FAIL'}`,
-    'Not visual, font-fit, gameplay or runtime acceptance. All checked inputs and raw diagnostics are retained.',
-    `Full result: ${fullResultPath}`,
+    'Not visual, font-fit, gameplay or runtime acceptance. ' + (fullResultPath
+      ? 'All checked inputs and raw diagnostics are retained.' : 'Checked inputs and diagnostics are listed below.'),
+    ...(fullResultPath ? [`Full result: ${fullResultPath}`] : []),
     ...(result.inputLocation ? ['Current source snapshot: ' + JSON.stringify(result.inputLocation)] : []),
     `Failures: ${result.diagnostics.length} occurrences, ${groups.size} distinct diagnostics, ${otherIssues.length} additional issues.`,
     ...[...groups.values()].map(({ diagnostic: d, scenes, count }, index) => [
@@ -54,6 +55,17 @@ export function formatLayoutReport(result: {
     ...(additionalDeferred.length ? ['Deferred (not verified): ' + JSON.stringify(additionalDeferred)] : []),
     'Coverage: ' + JSON.stringify(result.coverage ?? {}),
     ...(result.inputs ? ['Check conditions: ' + JSON.stringify(result.inputs)] : []),
+  ].join('\n')
+}
+
+/** One coordinate presentation for the CLI appendix and native layout tool. */
+export function formatUiLayoutTable(nodes: ReturnType<typeof import('../../../scene-editor/src/ui-layout-inspection').inspectUiLayout>) {
+  const cell = (value: unknown) => JSON.stringify(value ?? null).replaceAll('|', '&#124;').replaceAll('\n', ' ')
+  return [
+    '| ID | Parent | Active | Local position | Local size | Anchor | Pivot | Host bounds | Text fit |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...nodes.map(node => '| ' + [node.id, node.parentId, node.active, node.layout?.position, node.layout?.size,
+      node.layout?.anchor, node.pivot, node.bounds, node.textFit].map(cell).join(' | ') + ' |'),
   ].join('\n')
 }
 

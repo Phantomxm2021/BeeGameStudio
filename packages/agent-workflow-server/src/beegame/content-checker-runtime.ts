@@ -18,14 +18,14 @@ try {
 }
 `
 
-let checker: Promise<{ root: string; path: string; moduleUrl: string }> | undefined
+let checker: Promise<{ root: string; path: string; moduleUrl: string; uiLayoutToolPath: string }> | undefined
 export const CURRENT_CONTENT_CHECKER_ENTRY = CONTENT_CHECKER_ENTRY
 export const CONTENT_BINDING_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'binding entry').replace('runGameContentCli', 'runContentBindingCli').replace('runGameContentCli', 'runContentBindingCli')
 export const MEDIA_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'media entry').replaceAll('runGameContentCli', 'runMediaProductionCli')
 export const RESOURCE_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'resource entry').replaceAll('runGameContentCli', 'runResourceProductionCli')
 export const DRAFT_EDITS_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'draft editing entry').replaceAll('runGameContentCli', 'runDraftEditsCli')
 export const COMPOSE_DRAFT_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'draft composition entry').replaceAll('runGameContentCli', 'runComposeDraftCli')
-export function sharedContentChecker(): Promise<{ root: string; path: string; moduleUrl: string }> {
+export function sharedContentChecker(): Promise<{ root: string; path: string; moduleUrl: string; uiLayoutToolPath: string }> {
   return checker ??= (async () => {
     // Build in a fresh process: repeated in-process Bun builds can misresolve
     // package-scoped imports in the long-lived server.
@@ -60,6 +60,12 @@ export function sharedContentChecker(): Promise<{ root: string; path: string; mo
     const [fontCode, fontSource, fontError] = await Promise.all([fontBuild.exited, new Response(fontBuild.stdout).text(), new Response(fontBuild.stderr).text()])
     if (fontCode !== 0 || !fontSource) throw Error('Cannot prepare font inspector: ' + fontError)
     await writeFile(join(root, 'font-inspection.mjs'), fontSource, { flag: 'wx', mode: 0o400 })
-    return { root, path, moduleUrl: pathToFileURL(path).href }
+    const toolBuild = Bun.spawn([process.execPath, 'build', fileURLToPath(new URL('./ui-layout-tool.ts', import.meta.url)),
+      '--target=bun', '--production'], { stdout: 'pipe', stderr: 'pipe' })
+    const [toolCode, toolSource, toolError] = await Promise.all([toolBuild.exited, new Response(toolBuild.stdout).text(), new Response(toolBuild.stderr).text()])
+    if (toolCode !== 0 || !toolSource) throw Error('Cannot prepare UI layout tool: ' + toolError)
+    const uiLayoutToolPath = join(root, 'ui-layout-tool.mjs')
+    await writeFile(uiLayoutToolPath, toolSource, { flag: 'wx', mode: 0o400 })
+    return { root, path, moduleUrl: pathToFileURL(path).href, uiLayoutToolPath }
   })().catch(error => { checker = undefined; throw error })
 }

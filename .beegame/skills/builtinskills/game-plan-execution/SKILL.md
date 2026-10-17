@@ -31,7 +31,7 @@ Group independent reads and corrections for the same established cause without m
 
 For BGS Preview, resolve the current supplied entry and its help. `--run` retains an `execution.json`, `stdoutPath` and `stderrPath`; `--inspect <execution.json>` reads that receipt and current boundary identity without running the test. Read the relevant saved output for assertion meaning: exit zero and unchanged identity do not prove correct coverage. Changed inputs or a host freshness rejection still require the appropriate new check; do not relabel old evidence. Expired access needs current authorized capability, not a copied URL or relaxed permissions.
 
-Prefer the existing readable layout report/full JSON and measurement inspection when those answer the question. Keep a concise status and decisive diagnostics in the handoff, with paths to full evidence; do not copy entire logs or Skill bodies into project guides. Saving request roundtrips is useful, but not a reason to skip necessary source reading or observations. Context caching and history recovery are host concerns, not repaired by another Skill rule.
+For saved BGS UI geometry, call CheckUiLayouts with `{}` or `{"detailsFor":"content/ui/<actual-source>.json"}`; it checks all saved UI and only expands the selected coordinates. Use existing measurement inspection for runtime evidence. Keep a concise status, decisive diagnostics and actual coverage in the handoff; do not copy entire logs or Skill bodies into project guides. Saving request roundtrips is useful, but not a reason to skip necessary source reading or observations. Context caching and history recovery are host concerns, not repaired by another Skill rule.
 
 ## Finish the implementation
 

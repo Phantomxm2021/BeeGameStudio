@@ -2,15 +2,17 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { McpServerConfig } from '../mcp-servers-store'
+import { sharedContentChecker } from './content-checker-runtime'
+import type { LayoutConstraints } from './ui-layout-audit'
 
 export const NATIVE_MCP_CONFIG_ENV = 'BEEGAME_NATIVE_MCP_SERVERS_JSON'
 
 /** Adapt owner-scoped BGS settings to the existing native MCP client. Secrets
  * stay in a host-private file, outside project reads and command-line JSON. */
-export async function prepareNativeMcpConfig(environment: Record<string,string>, workspace: string) {
+export async function prepareNativeMcpConfig(environment: Record<string,string>, workspace: string, uiLayoutConstraints?: LayoutConstraints) {
   const raw = environment[NATIVE_MCP_CONFIG_ENV]
-  if (!raw) return { flags: [] as string[], context: '', close: async () => {} }
-  const servers: McpServerConfig[] = JSON.parse(raw)
+  if (!raw && !uiLayoutConstraints) return { flags: [] as string[], context: '', close: async () => {} }
+  const servers: McpServerConfig[] = raw ? JSON.parse(raw) : []
   if (!Array.isArray(servers)) throw Error('Invalid BGS runtime MCP configuration')
   const root = await realpath(workspace), mcpServers: Record<string,unknown> = {}, unavailable: string[] = []
   for (const server of servers) {
@@ -36,6 +38,12 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
       mcpServers[key] = { type:server.transport, url:server.url }
     } else { skip('unsupported transport') }
   }
+  if (uiLayoutConstraints) {
+    if (mcpServers['bgs-ui-layout']) throw Error('bgs-ui-layout is reserved for the host UI layout tool')
+    const checker = await sharedContentChecker()
+    mcpServers['bgs-ui-layout'] = { type: 'stdio', command: process.execPath,
+      args: [checker.uiLayoutToolPath, checker.moduleUrl, root, JSON.stringify(uiLayoutConstraints)] }
+  }
   const context = 'BGS MCP: enabled auto-start servers use the native MCP client and normal tool permissions. ' +
     'Configured is not connected or verified. ' + (unavailable.length ? 'Not injected: ' + unavailable.join('; ') : '')
   if (!Object.keys(mcpServers).length) return { flags:[] as string[], context, close:async()=>{} }
@@ -43,6 +51,9 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
   try {
     const path = join(directory,'servers.json')
     await writeFile(path,JSON.stringify({mcpServers}),{flag:'wx',mode:0o600})
-    return { flags:['--mcp-config',path], context, close:()=>rm(directory,{recursive:true,force:true}) }
+    return { flags:['--mcp-config',path,
+      // Only this host-bound read-only tool; external MCP permissions stay normal.
+      ...(uiLayoutConstraints ? ['--allowedTools=mcp__bgs-ui-layout__CheckUiLayouts'] : [])],
+      context, close:()=>rm(directory,{recursive:true,force:true}) }
   } catch (error) { await rm(directory,{recursive:true,force:true}); throw error }
 }
