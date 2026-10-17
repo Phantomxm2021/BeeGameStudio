@@ -46,12 +46,12 @@ export async function capturePreviewSnapshot(mode, width, height, visit = withPr
   return report;
 }
 
-async function executionInputs(root, file) {
+async function executionInputs(root, file, signal, capabilityFile = process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE) {
   const scriptSha256 = createHash('sha256').update(await readFile(file)).digest('hex');
-  if (!process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE)
+  if (!capabilityFile)
     return { scriptSha256, status: 'unverified', reason: 'No active source identity capability' };
   try {
-    const capability = JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE, 'utf8'));
+    const capability = JSON.parse(await readFile(capabilityFile, 'utf8'));
     if (capability.version !== 1 || capability.workspace !== root || !capability.executionId || !capability.sessionId)
       throw Error('Mismatched source identity capability');
     const api = new URL(capability.apiUrl);
@@ -65,8 +65,8 @@ async function executionInputs(root, file) {
 }
 
 /** Inspect exactly one retained receipt. No model, browser, build or test runs. */
-export async function inspectPreviewTest(reportPath) {
-  const root = await realpath(process.cwd());
+export async function inspectPreviewTest(reportPath, { workspace = process.cwd(), capabilityFile = process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE } = {}) {
+  const root = await realpath(workspace);
   const file = resolve(root, reportPath), path = relative(root, file);
   if (!/^\.beegame\/tmp\/preview-test-[^/]+\/execution\.json$/.test(path) || await realpath(file) !== file)
     throw Error('Select an existing .beegame/tmp/preview-test-*/execution.json receipt in this workspace');
@@ -76,7 +76,7 @@ export async function inspectPreviewTest(reportPath) {
     throw Error('Saved test script is outside this workspace');
   const current = await (async () => {
     if (await realpath(script) !== script) throw Error('Saved script is now an alias')
-    return executionInputs(root, script)
+    return executionInputs(root, script, undefined, capabilityFile)
   })().catch(error => ({status:'unverified',reason:error.message}));
   const observed = report.after?.status === 'observed' && current.status === 'observed';
   const {before, after, ...summary} = report;

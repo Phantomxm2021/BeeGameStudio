@@ -256,6 +256,17 @@ export function undeclaredAssetReferenceIssues(path: string, document: BeeGameCo
   return issues
 }
 
+/** Binding readiness without a final package authority, geometry run or source writes. */
+export function contentBindingIssues(path: string, document: BeeGameContentDocument): string[] {
+  const issues = undeclaredAssetReferenceIssues(path, document)
+  validateNoResourcePathBypass(path, document.data, issues)
+  if (document.kind === 'ui-screen' || document.kind === 'ui-hud' || document.kind === 'ui-flow')
+    validateUiVocabulary({ path, document, issues })
+  if (document.kind === 'scene-2d' || document.kind === 'scene-3d')
+    validateComponentScene({ path, document, issues })
+  return issues
+}
+
 function validateAssetMembers(
   path: string,
   value: unknown,

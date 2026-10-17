@@ -4,14 +4,40 @@ import { z } from 'zod/v4'
 import { realpathSync } from 'node:fs'
 import type { LayoutConstraints } from './ui-layout-audit'
 import type * as Checker from './game-content-validation-cli'
+import { designReadSchema, implementationReadSchema, bindingsReadSchema, verificationReadSchema,
+  readDesignHandoff, readImplementationTask, checkResourcesAndBindings, readVerificationResults,
+  type VerificationReadBinding } from './workflow-read-tools'
 
 type LayoutChecker = Pick<typeof Checker, 'runGameContentCommand' | 'formatLayoutReport' | 'formatUiLayoutMeasurement' | 'formatSceneLayoutInspection'>
 const inputSchema = z.strictObject({ detailsFor: z.string().optional() })
 
 /** Bound by the host at startup. The model selects presentation, never check scope. */
-export function createUiLayoutServer(workspace: string, constraints: LayoutConstraints, checker: LayoutChecker) {
+export function createUiLayoutServer(workspace: string, constraints: LayoutConstraints, checker: LayoutChecker, verification?: VerificationReadBinding) {
   const root = realpathSync(workspace)
   const server = new McpServer({ name: 'bgs-ui-layout', version: '1' })
+  const readTool = (name: string, description: string, schema: z.ZodObject,
+    read: (input: unknown) => unknown | Promise<unknown>) => server.registerTool(name, {
+    description, inputSchema: schema,
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    _meta: { 'anthropic/alwaysLoad': true },
+  }, async input => {
+    try {
+      const result = await read(schema.parse(input))
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        isError: !!result && typeof result === 'object' && 'valid' in result && result.valid === false }
+    } catch (error) {
+      return { isError: true, content: [{ type: 'text' as const,
+        text: name + ' failed: ' + (error instanceof Error ? error.message : String(error)) }] }
+    }
+  })
+  readTool('ReadDesignHandoff', 'Read saved design inputs without finalizing or locking. {} returns all eight documents, versions, issues and actual heading locations. {read:[{document:"GDD.md",sections:["Exact heading"]}]} adds selected original prose; independently readable sources remain available when others are missing. Structure is not design approval.',
+    designReadSchema, input => readDesignHandoff(root, input))
+  readTool('ReadImplementationTask', 'Read existing TECHNICAL_DESIGN tasks: {} lists IDs, dependencies and issues; {id:"exact-task-id"} returns task prose and directly referenced owner decision/acceptance sections. No new plan, completion inference, baseline lock or implementation permission. Missing sources remain explicit.',
+    implementationReadSchema, input => readImplementationTask(root, input))
+  readTool('CheckResourcesAndBindings', 'Check actual registered resources and all saved UI/Scene resource references, files, members and atlas frames. {} returns concise results; {detailsFor:"content/ui/hud.json"} expands exact node/component bindings without narrowing checks. Action/state wiring and visual quality require runtime evidence. Read-only; no production, registration or edits.',
+    bindingsReadSchema, input => checkResourcesAndBindings(root, input))
+  readTool('ReadVerificationResults', 'Read retained verification without running it. {} returns newest host measurement including failed/unfinished results and freshness; {measurementId:"exact-id"} inspects a record; {previewReceipt:".beegame/tmp/preview-test-.../execution.json"} inspects one existing preview receipt. Optional details:true. Uses current bound turn access; never starts tests, builds, browsers, model calls or retries.',
+    verificationReadSchema, input => readVerificationResults(root, input, verification))
   server.registerTool('CheckSceneLayouts', {
     description: 'Check every saved BGS Scene structure and static 2D Camera-reference geometry, using registered TileSet bounds when available. Use {} for Camera/coordinate context, required visibility, observations and coverage; detailsFor:"content/scenes/level.json" adds parent/local/world/projected coordinate tables for that source without narrowing checks. Native Edit changes source transforms, cells or Camera, then recheck. Actual UI game-view framing uses CheckUiLayouts. 3D/XR geometry, collision clearance and traversal remain unverified. Read-only; no Shell, reports, builds or rendering.',
     inputSchema,
@@ -79,8 +105,9 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
 
 if (import.meta.main) {
   // These arguments come from the host-private MCP configuration, not tool input.
-  const [moduleUrl, workspace, constraints] = process.argv.slice(2)
+  const [moduleUrl, workspace, constraints, capabilityFile, sessionId] = process.argv.slice(2)
   if (!moduleUrl || !workspace || !constraints) throw Error('Missing host UI layout binding')
   const checker = await import(moduleUrl) as LayoutChecker
-  await createUiLayoutServer(workspace, JSON.parse(constraints), checker).connect(new StdioServerTransport())
+  await createUiLayoutServer(workspace, JSON.parse(constraints), checker,
+    capabilityFile && sessionId ? { capabilityFile, sessionId } : undefined).connect(new StdioServerTransport())
 }

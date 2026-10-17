@@ -4,12 +4,16 @@ import { join } from 'node:path'
 import type { McpServerConfig } from '../mcp-servers-store'
 import { sharedContentChecker } from './content-checker-runtime'
 import type { LayoutConstraints } from './ui-layout-audit'
+import { projectPreviewCapabilityPath } from './project-preview-capability'
+
+export const NATIVE_READ_TOOLS = ['CheckUiLayouts', 'CheckSceneLayouts', 'ReadDesignHandoff',
+  'ReadImplementationTask', 'CheckResourcesAndBindings', 'ReadVerificationResults'] as const
 
 export const NATIVE_MCP_CONFIG_ENV = 'BEEGAME_NATIVE_MCP_SERVERS_JSON'
 
 /** Adapt owner-scoped BGS settings to the existing native MCP client. Secrets
  * stay in a host-private file, outside project reads and command-line JSON. */
-export async function prepareNativeMcpConfig(environment: Record<string,string>, workspace: string, uiLayoutConstraints?: LayoutConstraints) {
+export async function prepareNativeMcpConfig(environment: Record<string,string>, workspace: string, uiLayoutConstraints?: LayoutConstraints, sessionId?: string) {
   const raw = environment[NATIVE_MCP_CONFIG_ENV]
   if (!raw && !uiLayoutConstraints) return { flags: [] as string[], context: '', close: async () => {} }
   const servers: McpServerConfig[] = raw ? JSON.parse(raw) : []
@@ -42,7 +46,8 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
     if (mcpServers['bgs-ui-layout']) throw Error('bgs-ui-layout is reserved for the host UI layout tool')
     const checker = await sharedContentChecker()
     mcpServers['bgs-ui-layout'] = { type: 'stdio', command: process.execPath,
-      args: [checker.uiLayoutToolPath, checker.moduleUrl, root, JSON.stringify(uiLayoutConstraints)] }
+      args: [checker.uiLayoutToolPath, checker.moduleUrl, root, JSON.stringify(uiLayoutConstraints),
+        ...(sessionId ? [projectPreviewCapabilityPath(root, sessionId, 'measurement'), sessionId] : [])] }
   }
   const context = 'BGS MCP: enabled auto-start servers use the native MCP client and normal tool permissions. ' +
     'Configured is not connected or verified. ' + (unavailable.length ? 'Not injected: ' + unavailable.join('; ') : '')
@@ -53,7 +58,7 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
     await writeFile(path,JSON.stringify({mcpServers}),{flag:'wx',mode:0o600})
     return { flags:['--mcp-config',path,
       // Only these host-bound read-only tools; external MCP permissions stay normal.
-      ...(uiLayoutConstraints ? ['--allowedTools=mcp__bgs-ui-layout__CheckUiLayouts,mcp__bgs-ui-layout__CheckSceneLayouts'] : [])],
+      ...(uiLayoutConstraints ? ['--allowedTools=' + NATIVE_READ_TOOLS.map(name => 'mcp__bgs-ui-layout__' + name).join(',')] : [])],
       context, close:()=>rm(directory,{recursive:true,force:true}) }
   } catch (error) { await rm(directory,{recursive:true,force:true}); throw error }
 }

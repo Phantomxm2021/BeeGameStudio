@@ -165,7 +165,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     let mcp: Awaited<ReturnType<typeof prepareNativeMcpConfig>> | undefined
     try {
       if (command.includes('--print') && !input.isolatedTask)
-        mcp = await prepareNativeMcpConfig(input.env, input.cwd, input.uiLayoutConstraints)
+        mcp = await prepareNativeMcpConfig(input.env, input.cwd, input.uiLayoutConstraints, input.sessionId)
       const executionEnvironment = { ...input.env,
         ...(skillPlugins ? { BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: skillPlugins.builtins } : {}) }
       const taskAccess = input.isolatedTask ? await createNativeTaskAccess({

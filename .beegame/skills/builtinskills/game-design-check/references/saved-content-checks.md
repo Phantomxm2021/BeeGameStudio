@@ -2,6 +2,8 @@
 
 Read only for an assigned geometry/integration question using these actual inputs, or a supplied legacy handoff. This reference preserves format-specific details without making them a default design-review workflow. Native engine or DOM tasks use their actual source and runtime, not BGS JSON created for a checker.
 
+For current BGS source reads, use ReadDesignHandoff `{}` for available inputs/issues/headings and `{read:[{document:"GDD.md",sections:["Exact heading"]}]}` for original clauses. ReadImplementationTask `{}` or `{"id":"actual-id"}` reads the existing task directory or task/owner sections without locking. CheckResourcesAndBindings `{}` checks actual registered files and saved UI/Scene references; `detailsFor` expands one file without narrowing checks. ReadVerificationResults reads existing results/freshness without running checks. These tools do not certify semantics or runtime quality; use native Read for additional sources and pictures.
+
 ## Linked Scene/UI geometry
 
 Use current saved owner-linked content and the current supplied check entry; resolve its actual path from the active task and read `--help`. `--check-drafts`, `--layout-draft`, `--design-layouts` and `--scene-layouts` answer different saved-source questions. Source coverage and agreement with prose still require inspecting the actual design. A linked Scene's identities, hierarchy, placement, collision and Camera must agree with the space requirements. Scene schema/Camera checks and visibility in the UI's actual allocated game-view establish different properties. Missing resource-dependent bounds or unsupported dynamic/3D/XR framing need a disclosed needed-by check, not guessed dimensions or semantic PASS.

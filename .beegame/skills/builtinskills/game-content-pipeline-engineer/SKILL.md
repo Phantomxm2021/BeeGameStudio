@@ -22,4 +22,6 @@ When planning resources, trace each required asset family (including fonts and p
 
 For an uncertain resource family, sourcing or consequential cost choice, read the applicable [resource matching and cost examples](references/resource-selection.md). Compare a small relevant sample in its intended composition before acquiring or producing the whole family; preserve the selected visual/audio intent and actual resource policy. A candidate list is not delivered resources, and a fallback is not permission to change a required appearance or behavior.
 
+For BGS saved sources, use CheckResourcesAndBindings `{}` to check all registered resources and saved UI/Scene references against actual files, hashes, members and atlas frames. `{"detailsFor":"content/ui/actual-file.json"}` expands node/component operands without narrowing checks. Missing inputs remain unverified. Correct authorized sources with existing Edit; this tool does not register, produce or bind resources, or prove runtime action/state wiring.
+
 Check a representative authored object in the editor and in the playable runtime when available. For engine-specific fields or import behavior, consult the documentation for the project's actual engine/version; use Unity, Unreal, or Godot concepts as references, not mandatory output formats.

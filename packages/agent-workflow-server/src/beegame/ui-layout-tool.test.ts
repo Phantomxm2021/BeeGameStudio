@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { prepareNativeMcpConfig, NATIVE_MCP_CONFIG_ENV } from './native-mcp-config'
+import { prepareNativeMcpConfig, NATIVE_MCP_CONFIG_ENV, NATIVE_READ_TOOLS } from './native-mcp-config'
 import { uiLayoutFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
 import { runGameContentCommand } from './game-content-validation-cli'
 import { BeeGameSessionManager, type BeeGameSessionRunnerStartInput } from './session-manager'
@@ -22,7 +22,7 @@ const conditions = { platform: 'Web', inputs: ['Touch'], orientation: 'Landscape
 async function connect(root: string) {
   const prepared = await prepareNativeMcpConfig({}, root, conditions)
   expect(prepared.flags.filter(flag => flag.startsWith('--allowedTools')))
-    .toEqual(['--allowedTools=mcp__bgs-ui-layout__CheckUiLayouts,mcp__bgs-ui-layout__CheckSceneLayouts'])
+    .toEqual(['--allowedTools=' + NATIVE_READ_TOOLS.map(name => 'mcp__bgs-ui-layout__' + name).join(',')])
   const config = JSON.parse(readFileSync(prepared.flags[1]!, 'utf8'))
   const client = new Client({ name: 'offline-layout-test', version: '1' })
   try { await client.connect(new StdioClientTransport(config.mcpServers['bgs-ui-layout'])) }
@@ -71,7 +71,7 @@ test('native MCP exposes the read-only always-loaded tool and preserves host siz
   const access = await connect(root)
   try {
     const tools = (await access.client.listTools()).tools
-    expect(tools.map(t => t.name).sort()).toEqual(['CheckSceneLayouts', 'CheckUiLayouts'])
+    expect(tools.map(t => t.name).sort()).toEqual([...NATIVE_READ_TOOLS].sort())
     expect(tools[0]!.annotations?.readOnlyHint).toBe(true)
     expect(tools[0]!._meta?.['anthropic/alwaysLoad']).toBe(true)
     const summary = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })

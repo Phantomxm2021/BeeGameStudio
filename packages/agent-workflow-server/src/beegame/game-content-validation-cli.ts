@@ -25,6 +25,7 @@ export { formatLayoutReport, formatUiLayoutTable, formatUiLayoutMeasurement, for
 import { isViewportPair, layoutCameraSource, readUiLayoutCamera, type LayoutConstraints } from './ui-layout-audit'
 import type { UiResponsiveNode, UiViewport } from '../../../scene-editor/src/ui-responsive'
 import { point2d } from '../../../scene-editor/src/content-coordinates'
+import { collectContentSourceFiles } from './content-source-files'
 
 function inspectUiGeometry(data: { nodes: readonly UiResponsiveNode[]; rootId: string }, viewport: UiViewport, options: UiLayoutInspectionOptions) {
   const nodes = inspectUiLayout(data.nodes, data.rootId, viewport, options)
@@ -467,19 +468,8 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: La
       if (!viewports.some(view => view.width === size[0] && view.height === size[1]))
         viewports.push({ width: size[0], height: size[1] })
     }
-    const root = realpathSync(workspacePath), files: string[] = [], issues: string[] = []
-    const collect = (directory: string) => {
-      // Never follow a directory or file symlink during batch discovery.
-      const actual = realpathSync(resolve(root, directory))
-      if (actual !== resolve(root, directory)) throw Error(directory + ': Scene input directory must not be a symlink')
-      for (const entry of readdirSync(actual, { withFileTypes: true })) {
-        const path = directory + '/' + entry.name
-        if (entry.isSymbolicLink()) { issues.push(path + ': Scene inputs must not be symlinks'); continue }
-        if (entry.isDirectory()) { try { collect(path) } catch (error) { issues.push(path + ': ' + String(error)) } }
-        else if (entry.isFile() && entry.name.endsWith('.json')) files.push(path)
-      }
-    }
-    try { collect('content/scenes') } catch (error) { issues.push('Scene batch unavailable: ' + String(error)) }
+    const root = realpathSync(workspacePath), issues: string[] = []
+    const files = collectContentSourceFiles(root, ['content/scenes'], issues)
     if (!files.length) issues.push('No saved Scene JSON found in content/scenes')
     const inspections = [], unverified: string[] = [], ids = new Set<string>()
     const tileSet = createSceneTileSetResolver(root)

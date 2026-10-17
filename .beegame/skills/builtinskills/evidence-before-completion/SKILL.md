@@ -19,6 +19,8 @@ Choose methods, tools and delegation proportional to the actual claim. Preserve 
 
 Document authoring does not require a separate self-review record or a dedicated checking subagent. Use a formal review/revision only when the actual assignment calls for it; this Skill neither creates that stage nor prescribes a separation of agents.
 
+For BGS retained evidence, use ReadVerificationResults `{}` for the newest host result and freshness, `{"measurementId":"actual-id"}` for one record, or `{"previewReceipt":".beegame/tmp/preview-test-.../execution.json"}` for one saved preview test. Optional `details:true` expands retained details; read saved output paths for assertions. These reads do not run checks. Missing/expired access or changed/unfinished evidence stays unverified; an older success does not replace a newer failure.
+
 ## Read only what applies
 
 - For detailed playable-path or runtime-performance measurement, use `game-playtest-performance` if that work is part of the request.
