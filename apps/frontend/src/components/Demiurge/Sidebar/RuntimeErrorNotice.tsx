@@ -56,9 +56,9 @@ export function RuntimeErrorNotice({ content, retry, lang }: {
         {retry && <div className="flex shrink-0 items-center gap-1">
             <button type="button" disabled={retry.disabled || pending} onClick={() => void fire()}
                 aria-label={t('modelRequestError.retryNow')}
-                className="relative isolate flex h-8 min-w-24 items-center justify-center gap-1.5 overflow-hidden rounded-full border border-[var(--border)] px-3 text-sm leading-5 whitespace-nowrap tabular-nums disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+                className={`relative isolate flex h-8 ${['en', 'zh', 'zh-TW', 'ja', 'ko'].includes(lang) ? 'w-32' : 'w-52'} items-center justify-center gap-1.5 overflow-hidden rounded-full border border-[var(--border)] px-3 text-sm leading-5 whitespace-nowrap tabular-nums disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]`}>
                 {armed && <span data-testid="retry-progress" aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 -z-10 bg-blue-500/15 transition-[width] duration-100 ease-linear motion-reduce:transition-none"
-                    style={{ width: `${(1 - remaining / 10_000) * 100}%` }} />}
+                    style={{ width: `${remaining / 10_000 * 100}%` }} />}
                 {pending && <RotateCw aria-hidden="true" className="size-3.5 animate-spin" />}
                 {pending ? t('modelRequestError.retrying') : armed
                     ? t('modelRequestError.retryIn', { seconds: Math.ceil(remaining / 1000) })

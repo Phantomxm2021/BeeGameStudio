@@ -24,13 +24,16 @@ it.each([
     expect(screen.getByRole('button')).toHaveTextContent(countdown);
 });
 
-it('fills the capsule over ten seconds and sends only one automatic retry', async () => {
+it('drains the capsule over ten seconds and sends only one automatic retry', async () => {
     vi.useFakeTimers();
     const retry = control();
     render(<RuntimeErrorNotice content="Selected model is at capacity." retry={retry} lang="en" />);
     expect(screen.getByRole('alert')).toHaveTextContent('Selected model is at capacity.');
     expect(screen.getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry in 10s');
-    await act(async () => vi.advanceTimersByTime(5000));
+    expect(screen.getByTestId('retry-progress')).toHaveStyle({ width: '100%' });
+    await act(async () => vi.advanceTimersByTime(2500));
+    expect(screen.getByTestId('retry-progress')).toHaveStyle({ width: '75%' });
+    await act(async () => vi.advanceTimersByTime(2500));
     expect(screen.getByTestId('retry-progress')).toHaveStyle({ width: '50%' });
     expect(retry.onRetry).not.toHaveBeenCalled();
     await act(async () => vi.advanceTimersByTime(5000));
