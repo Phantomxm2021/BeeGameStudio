@@ -2520,13 +2520,15 @@ export function createAgentWorkflowApp(
       state.execution_time = run?.workspacePath === project.root_path
         ? projectExecutionTime(run, beeGameSessions.hasActiveProjectTurn(user.id, projectId, run.workspacePath)) ?? null
         : null
-      const activeV3Preview = (await measuredPreview?.status(projectId, user.id))?.preview
+      const candidatePreview = (await measuredPreview?.candidateStatus(projectId, user.id))?.preview
+      const activeV3Preview = candidatePreview ?? (await measuredPreview?.status(projectId, user.id))?.preview
       if (activeV3Preview) {
         state.build_report = {
           status: 'passed', entrypoint: 'index.html', report_path: '', build_url: activeV3Preview.url,
-          agents: ['measured-preview'], generated_paths: [],
-          checks: [{ name: 'measured-build', status: 'passed', detail: 'Serving the selected measured artifact', path: '' }],
-          summary: 'Measured build Preview is available; game quality remains unverified.',
+          agents: [candidatePreview ? 'candidate-preview' : 'measured-preview'], generated_paths: [],
+          checks: [{ name: candidatePreview ? 'existing-static-build' : 'measured-build', status: 'passed',
+            detail: candidatePreview ? 'Serving the opened existing static build' : 'Serving the selected measured artifact', path: '' }],
+          summary: candidatePreview ? candidatePreview.limitations.join(' ') : 'Measured build Preview is available; game quality remains unverified.',
           failure_reason: '', created_at: new Date().toISOString(),
         }
       }

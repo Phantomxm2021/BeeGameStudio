@@ -44,6 +44,13 @@ test('ordinary V3 Preview opens an existing build with no native session, valid 
     const preview=await response.json()
     expect(preview).toMatchObject({status:'running',mode:'production',sessionId:'persisted-chat'})
     expect(preview.message).toContain('not measured delivery')
+    const runtime=await f.request('/api/projects/fixture/runtime-state')
+    expect(runtime.status).toBe(200)
+    expect((await runtime.json()).build_report).toMatchObject({
+      status:'passed',build_url:preview.url,agents:['candidate-preview'],
+      summary:expect.stringContaining('not measured delivery'),
+      checks:[{name:'existing-static-build',status:'passed'}],
+    })
     const frame=await f.app.request(preview.url)
     expect(frame.status).toBe(200);expect(await frame.text()).toBe(bytes)
     expect(frame.headers.get('X-BeeGame-Preview-Mode')).toBe('candidate-static')
@@ -60,6 +67,7 @@ test('ordinary V3 Preview opens an existing build with no native session, valid 
     expect(exported.status).toBe(409);expect((await exported.json()).code).toBe('preview-unverified')
     expect((await f.request('/api/projects/fixture/preview/restart','POST',{})).status).toBe(200)
     expect((await f.request('/api/projects/fixture/preview','DELETE')).status).toBe(200)
+    expect((await (await f.request('/api/projects/fixture/runtime-state')).json()).build_report).toBeNull()
     expect((await f.app.request(preview.url)).status).toBe(404)
     expect(f.run).toEqual(f.before);expect(f.counts()).toEqual({models:0,commits:0,processes:0})
     expect(await readFile(join(f.workspace,'dist/index.html'),'utf8')).toBe(bytes)
