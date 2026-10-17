@@ -473,10 +473,28 @@ test('consumer compatibility is batched/read-only and installation never overwri
     expect(reference.createProductionUiSurface.lifecycle).toContain('No update/setState')
     expect(reference.documents.fetchStartupContentDocuments).toContain('document[] (not a Map)')
     expect(reference.scene.sceneWorldTransforms2d).toContain('{poses: Map')
+    expect(reference.scene.sceneWorldTransforms2d).toContain('[a,b,c,d,tx,ty]')
+    expect(reference.scene.sceneWorldTransforms2d).toContain('{size:[width,height],position:[x,y]}')
+    expect(reference.scene.inspectSceneLayout2d).toContain('{left,top,right,bottom}')
+    expect(reference.scene.inspectSceneLayout2d).toContain('nonvisual nodes can lack bounds')
     expect(reference.resources.SurfaceImage).toContain('[sx,sy,sw,sh]')
     expect(reference.resources.resolveSurfaceImage).toContain('member?,frame?,initialFacing?')
     expect(reference.scene.resolveSceneCameraView).toContain('orthographicSize')
     const consumer = await import(join(root, tools.directory, 'content-consumer.mjs'))
+    const geometry = consumer.sceneWorldTransforms2d([
+      {id:'parent',transform:{position:[10,20,0],scale:[2,3,1]}},
+      {id:'panel',parentId:'parent',transform:{position:[1,2,0]},components:[{type:'rect-transform',data:{
+        anchorMin:[0,0],anchorMax:[0,0],pivot:[.5,.5],anchoredPosition:[4,5],sizeDelta:[20,10],
+      }}]},
+      {id:'anchor',parentId:'panel',transform:{position:[3,4,0]}},
+    ])
+    expect(geometry.poses).toBeInstanceOf(Map)
+    expect(geometry.rects).toBeInstanceOf(Map)
+    expect(geometry.rects.get('panel')).toEqual({size:[20,10],position:[4,5]})
+    expect(geometry.poses.get('panel')).toHaveLength(6)
+    expect(consumer.point2d(geometry.poses.get('panel'),1,1)).toEqual([22,44])
+    expect(geometry.poses.get('anchor').slice(4)).toEqual([26,53])
+    expect(geometry.rects.has('anchor')).toBe(false)
     for (const name of Object.keys(reference.layout).filter(name => name !== 'notes'))
       expect(typeof consumer[name], `Discoverable layout export: ${name}`).toBe('function')
     const image = { source: { width: 64, height: 32 }, url: 'https://fixture.test/sheet.png', frame: [16, 0, 16, 16] }

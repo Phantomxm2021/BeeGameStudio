@@ -101,7 +101,7 @@ export async function registeredContentChecks(root: string, constraints: Record<
 // Expose them through the already-used handoff/inspect, including when the
 // Agent has an old receipt or no receipt; help-only discovery was insufficient.
 function measurementCheckScope(record?: AgentMeasurement) {
-  return {build:'source-copy build only',runtimeSmoke:'initial static-browser load only',
+  return {build:'Host measurement scope: runs package.json scripts.build in an isolated source copy using installed dependencies. Source-copy describes the workspace, not a copy-only build requirement; project bundlers are allowed.',runtimeSmoke:'initial static-browser load only',
     consumptionOption:'--consumption-json',availableConsumptionChecks:AGENT_CONSUMPTION_CHECKS,
     consumptionSupport:AGENT_CONSUMPTION_SUPPORT,
     ...(record?.consumption?{consumption:record.consumption.checks}:{}),
@@ -315,7 +315,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
           checks:latest.checks.map(c=>({id:c.id,status:c.status})),reportPaths:latest.reportPaths}:null,
         // Startup stays unchanged. Availability/omissions travel in the normal
         // read-only handoff/inspection rather than every subsequent request.
-        checkScope:{build:'source-copy build only',runtimeSmoke:'initial static-browser load only',
+        checkScope:{build:'Host measurement scope: runs package.json scripts.build in an isolated source copy using installed dependencies. Source-copy describes the workspace, not a copy-only build requirement; project bundlers are allowed.',runtimeSmoke:'initial static-browser load only',
           ...(latest?.consumption?{consumption:latest.consumption.checks}:{})},
         reportSemantics:'not-verified',quality:'unverified',deliveryEligible:false}
     },

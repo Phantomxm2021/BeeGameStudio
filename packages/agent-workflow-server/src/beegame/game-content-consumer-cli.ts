@@ -43,8 +43,8 @@ export const CONTENT_CONSUMER_API = {
   },
   scene: {
     resolveSceneCameraView: 'resolveSceneCameraView({orthographic,viewport:{width,height},orthographicSize?,fieldOfView?,framing?}, {width:hostWidth,height:hostHeight}) -> {projection,framing,rect:{x,y,width,height},aspect,halfWidth,halfHeight,verticalFieldOfView}. viewport is the reference composition; rect uses host logical pixels. orthographicSize is world-unit half-height; fieldOfView uses degrees. framing defaults to keep-height; also keep-width/expand/letterbox. Half-extents exist only for orthographic projection; verticalFieldOfView only for perspective. Camera position/rotation are separate from this projection calculation.',
-    sceneWorldTransforms2d: 'sceneWorldTransforms2d(data.nodes) -> {poses: Map<nodeId, affine matrix>, rects: Map<nodeId, resolved rect>}',
-    inspectSceneLayout2d: 'inspectSceneLayout2d(data, {width,height}) -> {cameraNodeId, view, worldToScreen, nodes, requiredVisibility?, note}; nodes include screenBounds/worldBounds/fullyInside/geometryUnavailable',
+    sceneWorldTransforms2d: 'sceneWorldTransforms2d(data.nodes) -> {poses: Map<id,[a,b,c,d,tx,ty]>, rects: Map<id,{size:[width,height],position:[x,y]}>}; world x=a*x+c*y+tx, y=b*x+d*y+ty. Poses compose all transforms; rects are RectTransform-only, with local unscaled size and pivot offset.',
+    inspectSceneLayout2d: 'inspectSceneLayout2d(data,{width,height}) -> {cameraNodeId,view,worldToScreen,nodes,requiredVisibility?,note}; nodes: id,worldOrigin:[x,y],worldBounds?,screenBounds?,fullyInside?,geometryUnavailable?. Bounds={left,top,right,bottom}; nonvisual nodes can lack bounds.',
     sceneNodeClientPoint2d: 'sceneNodeClientPoint2d(data, nodeId, {width,height}, canvas.getBoundingClientRect(), localPoint?) -> client point',
     renderProductionScene2d: 'renderProductionScene2d(canvas, data, {width,height}, assets?) -> static presentation; no simulation, animation or physics',
   },

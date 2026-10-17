@@ -704,12 +704,17 @@ test('task context exposes current comparison before optional tool parsing; does
     expect((await f.measurement.context()).measurement).toBeNull()
     const record=await f.measurement.measure(request),before=await f.current()
     const context=await f.measurement.context()
-    expect(context.measurement).toMatchObject({id:record.id,requestKey:record.requestKey,freshness:{current:true,changes:{requirements:false,sources:[],reports:[]}}})
+    expect(context.measurement,JSON.stringify(record.checks)).toMatchObject({id:record.id,requestKey:record.requestKey,freshness:{current:true,changes:{requirements:false,sources:[],reports:[]}}})
     expect(context).toMatchObject({quality:'unverified',reportSemantics:'not-verified',deliveryEligible:false})
     expect(context.project).toMatchObject({testFiles:[],codeFiles:['src/index.html'],commands:{build:'bun build.mjs'}})
     expect(context.skills).toEqual({recordedMainLoads:[],contextPresence:'unverified',application:'unverified',currentTurnUses:[],currentTurnEvidence:'not-recorded-yet'})
     expect(context.checkScope.runtimeSmoke).toBe('initial static-browser load only')
     const handoff=await f.measurement.handoff()
+    const inspected=await f.measurement.inspect(record.id)
+    for(const scope of [context.checkScope,handoff.checkScope,inspected.checkScope]){
+      expect(scope.build).toContain('runs package.json scripts.build in an isolated source copy')
+      expect(scope.build).toContain('project bundlers are allowed')
+    }
     expect(handoff.checkScope.consumptionOption).toBe('--consumption-json')
     expect(handoff.checkScope.availableConsumptionChecks).toContain('ui-data-consumption')
     expect(handoff.checkScope.consumptionSupport.pixel).toContain('not DOM/CSS images, procedural Canvas')
