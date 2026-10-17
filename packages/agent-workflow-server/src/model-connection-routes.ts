@@ -1,9 +1,19 @@
 import type { Hono } from 'hono'
 import type { DashboardRepository } from './dashboard-repository'
 import type { BeeGameUserContext } from './auth/user-context'
-import { OPENCODE_GO_ID, isOpenCodeGoProvider } from '@bee-game-studio/agent-workflow/opencode-go'
+import { OPENCODE_GO_ID, isOpenCodeGoProvider, getOpenCodeGoProvider, OPENCODE_GO_CATALOG_URLS, fetchOpenCodeGoModels, validateOpenCodeGoConfig } from '@bee-game-studio/agent-workflow/opencode-go'
 import { connectionStatus, disconnectAccount, disconnectConnection, fetchClaudeSubscriptionUsage, ModelConnectionLogins, PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, PERSONAL_CLAUDE_ID, personalModelConfig, saveConnection } from './model-connections'
 import type { ModelAuthMethod, ModelProviderKind } from '@bee-game-studio/agent-workflow'
+
+export async function loadOpenCodeGoModels(assertPermittedUrl?: (url: string) => Promise<void>) {
+  for (const url of OPENCODE_GO_CATALOG_URLS) await assertPermittedUrl?.(url)
+  return fetchOpenCodeGoModels()
+}
+
+export async function validateDynamicGoConfig(config: Parameters<typeof validateOpenCodeGoConfig>[0], assertPermittedUrl?: (url: string) => Promise<void>) {
+  validateOpenCodeGoConfig(config)
+  if (getOpenCodeGoProvider(config.baseUrl)) validateOpenCodeGoConfig(config, await loadOpenCodeGoModels(assertPermittedUrl))
+}
 
 export function registerModelConnectionRoutes(app: Hono, options: {
   repository: DashboardRepository
@@ -35,6 +45,12 @@ export function registerModelConnectionRoutes(app: Hono, options: {
   app.get('/api/model-catalog', async c => c.json((await catalog(c.req.raw)).map(config => ({
     ...config, apiKeyPreview: '', connection: connectionStatus(options.getRoot(c.req.raw), config),
   }))))
+  app.get('/api/model-catalog/opencode-go', async c => {
+    options.getUser(c.req.raw)
+    c.header('Cache-Control', 'no-store')
+    try { return c.json(await loadOpenCodeGoModels(options.assertPermittedUrl)) }
+    catch { return c.json({ error: 'OpenCode Go model catalog is unavailable. Check the deployment outbound policy and try refreshing.' }, 502) }
+  })
   app.get('/api/model-accounts/claude/usage', async c => {
     try {
       return c.json({ usage: await fetchClaudeSubscriptionUsage(options.getRoot(c.req.raw)) })
@@ -59,6 +75,8 @@ export function registerModelConnectionRoutes(app: Hono, options: {
         try { await options.assertPermittedUrl?.(body.baseUrl) }
         catch { return c.json({ error: 'Model provider endpoint is blocked by the deployment outbound policy. Check the host allowlist and DNS configuration.' }, 400) }
       }
+      await validateDynamicGoConfig({ provider: config.provider, baseUrl: body.baseUrl ?? config.baseUrl,
+        models: body.models ?? config.models, authMethods: [body.method] }, options.assertPermittedUrl)
       const result = saveConnection(root, config, body.method as ModelAuthMethod, body.apiKey, body.preferred === true, { baseUrl: body.baseUrl, models: body.models })
       options.changed(options.getUser(c.req.raw).id)
       return c.json(result)

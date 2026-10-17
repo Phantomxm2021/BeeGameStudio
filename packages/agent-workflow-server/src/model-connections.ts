@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { mapStoredModelConfigToRuntime, validateModelAccess, type ModelAuthMethod, type ModelProviderKind, type ModelTierMap, type PublicModelConfig } from '@bee-game-studio/agent-workflow'
-import { OPENCODE_GO_ID, OPENCODE_GO_PROFILES, isOpenCodeGoProvider } from '@bee-game-studio/agent-workflow/opencode-go'
+import { OPENCODE_GO_ID, OPENCODE_GO_PROFILES, isOpenCodeGoProvider, validateOpenCodeGoConfig } from '@bee-game-studio/agent-workflow/opencode-go'
 import { getOauthConfig, OAUTH_BETA_HEADER } from '../../../src/constants/oauth'
 import { decryptSecret, encryptSecret } from './security/secret-crypto'
 
@@ -124,7 +124,7 @@ export function saveConnection(root: string, config: PublicModelConfig, method: 
     const profile = OPENCODE_GO_PROFILES[config.provider]
     if (config.baseUrl !== profile.baseUrl || (byok?.baseUrl !== undefined && byok.baseUrl !== profile.baseUrl)) throw new Error('Use the official OpenCode Go endpoint')
     const models = validateByokModels(byok?.models ?? config.models)
-    if (Object.values(models).some(model => !(profile.models as readonly string[]).includes(model))) throw new Error('Choose an OpenCode Go model supported by this protocol')
+    validateOpenCodeGoConfig({ provider: config.provider, baseUrl: profile.baseUrl, models, authMethods: ['byok'] })
     byok = { baseUrl: profile.baseUrl, models }
   }
   const allowed = validateModelAccess(config.provider, config.authMethods)

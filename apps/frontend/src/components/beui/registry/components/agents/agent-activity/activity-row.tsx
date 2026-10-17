@@ -226,7 +226,7 @@ function TraceRow({ item }: { item: AgentActivityTrace }) {
         aria-controls={item.content !== undefined ? contentId : undefined}
         onClick={() => item.onSelect ? item.onSelect() : setOpen(!open)}
         className="group flex min-h-9 max-w-full items-start gap-2.5 rounded-md py-1.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <span aria-hidden="true" className="mt-0.5 grid size-4 shrink-0 place-items-center opacity-75">{item.icon ?? <TraceIcon kind={item.kind} />}</span>
+        <span aria-hidden="true" className="mt-1 grid size-4 shrink-0 place-items-center opacity-75">{item.icon ?? <TraceIcon kind={item.kind} />}</span>
         <span className="min-w-0 line-clamp-2 break-words leading-6 [overflow-wrap:anywhere]">{item.label}</span>
         <ChevronRight aria-hidden="true" className={cn("mt-1 size-4 shrink-0 opacity-70 transition-transform", open && "rotate-90")} />
       </button>

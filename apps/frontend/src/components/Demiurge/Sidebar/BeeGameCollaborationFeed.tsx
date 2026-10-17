@@ -874,7 +874,7 @@ function ActivityTimeline({ parts, working, completedAt, lang, streamingMessageI
             return items;
         })}
         status={working ? 'working' : 'complete'} activeLabel={heading} summary={heading}
-        className="w-full text-[var(--text-secondary)]" />;
+        className="w-full text-[var(--text-secondary)]" contentClassName="pl-4" />;
 }
 
 function ThinkingActivityText({ part, lang, working }: { part: Extract<ResponsePart, { kind: 'thinking' }>; lang: Language; working: boolean }) {

@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono'
-import { registerModelConnectionRoutes } from './model-connection-routes'
+import { registerModelConnectionRoutes, validateDynamicGoConfig } from './model-connection-routes'
 import { validateModelAccess } from '@bee-game-studio/agent-workflow'
 import { registerV3Routes } from './beegame/workflow-v3/routes'
 import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
@@ -1340,6 +1340,11 @@ export function createAgentWorkflowApp(
       return c.json(toOutboundTargetError(outboundInspection), 400)
     }
 
+    try {
+      await validateDynamicGoConfig({ provider: String(body.provider), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : undefined,
+        models: toModelMap(body.models), authMethods }, assertPermittedOutboundUrl)
+    } catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
+
     const created = await dashboardRepository.createModelConfig(
       c.req.raw,
       user,
@@ -1385,6 +1390,10 @@ export function createAgentWorkflowApp(
       if (outboundInspection && !outboundInspection.approved) {
         return c.json(toOutboundTargetError(outboundInspection), 400)
       }
+      try {
+        await validateDynamicGoConfig({ provider: String(body.provider ?? existing.provider), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : existing.baseUrl,
+          models: isObject(body.models) ? toModelMap(body.models) : existing.models, authMethods }, assertPermittedOutboundUrl)
+      } catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
       const updated = await dashboardRepository.updateModelConfig(
         c.req.raw,
         user,

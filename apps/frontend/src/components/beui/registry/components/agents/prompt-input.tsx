@@ -205,7 +205,7 @@ export function PromptInput({
       onSubmit={submit}
       className={cn(
         "relative w-full border border-border/80 bg-background transition-colors focus-within:border-foreground/25",
-        compact ? "flex min-h-12 items-end gap-2 rounded-[24px] px-2 py-1.5" : "rounded-[10px] p-2",
+        compact ? "flex min-h-12 items-end gap-2 rounded-[24px] p-2" : "rounded-[10px] p-2",
         disabled && "opacity-60",
         className,
       )}
@@ -228,7 +228,7 @@ export function PromptInput({
         {...textareaProps}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={handleKeyDown}
-        className={cn(textClassName, "scrollbar-hide block resize-none overflow-y-auto bg-transparent text-foreground outline-none placeholder:text-muted-foreground/55", compact ? "min-w-0 flex-1 px-1 py-0" : "w-full px-2 pt-1.5")}
+        className={cn(textClassName, "scrollbar-hide block resize-none overflow-y-auto bg-transparent text-foreground outline-none placeholder:text-muted-foreground/55", compact ? "min-w-0 flex-1 px-1 py-1 leading-6" : "w-full px-2 pt-1.5")}
       />
 
       <div className={cn("flex min-h-8 items-center gap-1", compact ? "shrink-0" : "mt-1")}>

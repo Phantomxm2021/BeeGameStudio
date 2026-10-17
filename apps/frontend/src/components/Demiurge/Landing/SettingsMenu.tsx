@@ -89,6 +89,7 @@ import { useToastContext } from '../../../contexts/ToastContext';
 import { InvitationSettingsPanel } from '../../Settings/InvitationSettingsPanel';
 import { UserSkillsSettingsPanel } from '../../Settings/UserSkillsSettingsPanel';
 import { ModelConfigPanel } from '../../Settings/ModelConfigPanel';
+import { getOpenCodeGoProvider, OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
 import { WebToolsPanel } from '../../Settings/WebToolsPanel';
 import { Dialog, DialogContent } from '../../ui/dialog';
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../../beui/registry/components/motion/popover-morph';
@@ -206,6 +207,10 @@ export function SettingsMenu({
   const [isDefault, setIsDefault] = useState(true);
   const [published, setPublished] = useState(true);
   const [authMethods, setAuthMethods] = useState<ModelAuthMethod[]>(['platform']);
+  const goProvider = getOpenCodeGoProvider(baseUrl);
+  const goProfile = goProvider ? OPENCODE_GO_PROFILES[goProvider] : undefined;
+  const [goModelsReady, setGoModelsReady] = useState(false);
+  const goModelsComplete = !goProfile || goModelsReady;
   const [status, setStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const imageSettingsRef = useRef<ImageSettingsHandle>(null);
@@ -501,7 +506,7 @@ export function SettingsMenu({
     setIsSaving(true);
     try {
       const payload = {
-        name: name.trim() || 'BeeGame LLM',
+        name: name.trim() || (goProfile ? 'OpenCode Go' : 'BeeGame LLM'),
         published,
         authMethods,
         provider,
@@ -948,7 +953,7 @@ export function SettingsMenu({
                 ? true
                 : activeTab === 'credit'
                   ? true
-                  : isSavingCurrentTab || !authMethods.length || !balancedModel.trim() || (!selectedModelConfigId && authMethods.includes('platform') && !apiKey.trim());
+                  : isSavingCurrentTab || !authMethods.length || !balancedModel.trim() || !goModelsComplete || (!selectedModelConfigId && authMethods.includes('platform') && !apiKey.trim());
 
   const handleSaveSettings = async () => {
     if (activeSection !== 'platform') return;
@@ -1038,8 +1043,12 @@ export function SettingsMenu({
   const modelConfigEditor = (
     <>
       <ModelConfigPanel
+        language={lang}
+        onGoModelsReady={setGoModelsReady}
+        enableOpenCodeGo
         labels={{
           provider: text.provider,
+          protocol: lang.startsWith('zh') ? '协议' : 'Protocol',
           baseUrl: text.baseUrl,
           apiKey: text.apiKey,
           models: text.models,
@@ -1080,7 +1089,7 @@ export function SettingsMenu({
         </div>
         <fieldset className="border-t border-border pt-3">
           <legend className="text-sm text-muted-foreground">{lang.startsWith('zh') ? '允许的接入方式' : 'Allowed authentication methods'}</legend>
-          {(['platform', 'byok', ...(provider === 'anthropic-compatible' ? ['claude-subscription'] : provider === 'openai-compatible' ? ['chatgpt-subscription'] : [])] as ModelAuthMethod[]).map(method => {
+          {(['platform', 'byok', ...(goProfile ? [] : provider === 'anthropic-compatible' ? ['claude-subscription'] : provider === 'openai-compatible' ? ['chatgpt-subscription'] : [])] as ModelAuthMethod[]).map(method => {
             const label = method === 'platform' ? (lang.startsWith('zh') ? '平台凭据' : 'Platform credentials') : method === 'byok' ? 'BYOK' : method === 'claude-subscription' ? 'Claude subscription' : 'ChatGPT subscription';
             return <div key={method} className="flex min-h-11 items-center justify-between gap-4 text-sm">
               <span>{label}</span>

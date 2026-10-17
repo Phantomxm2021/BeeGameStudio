@@ -1,9 +1,11 @@
+import { goModelCatalog } from '../../../../../../tests/fixtures/opencode-go';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsMenu } from './SettingsMenu';
+import { OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
 import { useSystemStore } from '../../../store/systemStore';
 import { getImageGenerationSettings, saveImageGenerationSettings, getPersonalImageConnection, savePersonalImageConnection } from '../../../services/imageGenerationApi';
 vi.mock('../../../services/imageGenerationApi', () => ({ getImageGenerationSettings: vi.fn(), saveImageGenerationSettings: vi.fn(), getPersonalImageConnection: vi.fn(), savePersonalImageConnection: vi.fn() }));
@@ -21,6 +23,7 @@ const {
     getRuntimeSettings,
     getInvitationPublicSettings,
     listModelConfigs,
+    listOpenCodeGoModels,
     listModelCatalog,
     listInvitations,
     listMcpServers,
@@ -64,6 +67,7 @@ const {
     getRuntimeSettings: vi.fn(),
     listInvitations: vi.fn(),
     listModelConfigs: vi.fn(),
+    listOpenCodeGoModels: vi.fn(),
     listModelCatalog: vi.fn(),
     listMcpServers: vi.fn(),
     saveInvitationSettings: vi.fn(),
@@ -98,6 +102,7 @@ vi.mock('../../../services/modelConfigApi', () => ({
     createModelConfig,
     deleteModelConfig,
     listModelConfigs,
+    listOpenCodeGoModels,
     listModelCatalog,
     updateModelConfig,
     saveModelConnection,
@@ -216,6 +221,7 @@ describe('SettingsMenu model settings', () => {
         localStorage.clear();
         Object.assign(window, { BeeGameDesktop: desktopBridge });
         desktopBridge.chooseWorkspacePath.mockReset();
+        listOpenCodeGoModels.mockResolvedValue(goModelCatalog);
         listModelConfigs.mockResolvedValue([]);
         getBeeGameWorkspaceSettings.mockResolvedValue({
             workspacePath: '/tmp/beegame-projects',
@@ -1528,6 +1534,59 @@ describe('SettingsMenu model settings', () => {
             isDefault: true,
         }));
         expect(screen.queryByText('模型配置已保存')).not.toBeInTheDocument();
+    });
+
+    it.each(['anthropic-compatible', 'openai-compatible'] as const)('adds a platform OpenCode Go model with %s', async provider => {
+        const profile = OPENCODE_GO_PROFILES[provider];
+        createModelConfig.mockResolvedValue({ id: 'platform-go', name: 'OpenCode Go', provider, baseUrl: profile.baseUrl, models: profile.defaults, apiKeyPreview: 'go-...key', isDefault: true });
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        await userEvent.click(screen.getByRole('button', { name: '添加模型配置' }));
+        await userEvent.click(screen.getByLabelText('Provider'));
+        await userEvent.click(screen.getByRole('option', { name: 'OpenCode Go', exact: true }));
+        if (provider === 'openai-compatible') {
+            await userEvent.click(screen.getByLabelText('协议'));
+            await userEvent.click(screen.getByRole('option', { name: 'Chat Completions', exact: true }));
+        }
+        expect(screen.getByLabelText('Base URL')).toHaveValue(profile.baseUrl);
+        expect(screen.getByLabelText('Base URL')).toHaveAttribute('readonly');
+        expect(screen.getByLabelText('Balanced 模型')).toHaveTextContent(profile.defaults.balanced);
+        expect(screen.queryByRole('switch', { name: 'Claude subscription' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('switch', { name: 'ChatGPT subscription' })).not.toBeInTheDocument();
+        await userEvent.click(screen.getByLabelText('Fast 模型'));
+        expect(screen.queryByRole('option', { name: provider === 'openai-compatible' ? 'minimax-m3' : 'kimi-k3', exact: true })).not.toBeInTheDocument();
+        const newModel = provider === 'openai-compatible' ? 'new-chat-model' : 'new-anthropic-model';
+        await userEvent.click(screen.getByRole('option', { name: newModel, exact: true }));
+        await userEvent.type(screen.getByLabelText('API Key'), 'go-platform-key');
+        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+        await waitFor(() => expect(createModelConfig).toHaveBeenCalledWith({
+            name: 'OpenCode Go', provider, baseUrl: profile.baseUrl, apiKey: 'go-platform-key', models: { ...profile.defaults, fast: newModel },
+            authMethods: ['platform'], published: true, isDefault: true,
+        }));
+    });
+
+    it('restores a saved platform Go model and switches protocol without creating a new configuration', async () => {
+        const first = OPENCODE_GO_PROFILES['openai-compatible'];
+        const next = OPENCODE_GO_PROFILES['anthropic-compatible'];
+        const saved = { id: 'platform-go', name: 'Saved Go', provider: 'openai-compatible', baseUrl: first.baseUrl, models: first.defaults, apiKeyPreview: 'go-...key', isDefault: true, authMethods: ['platform'] };
+        listModelConfigs.mockResolvedValue([saved]);
+        updateModelConfig.mockResolvedValue({ ...saved, provider: 'anthropic-compatible', baseUrl: next.baseUrl, models: next.defaults });
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Saved Go 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '详情' }));
+        expect(screen.getByLabelText('Provider')).toHaveTextContent('OpenCode Go');
+        expect(screen.getByLabelText('协议')).toHaveTextContent('Chat Completions');
+        expect(screen.getByLabelText('API Key')).toHaveAttribute('placeholder', '已保存：go-...key');
+        await userEvent.click(screen.getByLabelText('协议'));
+        await userEvent.click(screen.getByRole('option', { name: 'Anthropic', exact: true }));
+        expect(screen.getByLabelText('Base URL')).toHaveValue(next.baseUrl);
+        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+        await waitFor(() => expect(updateModelConfig).toHaveBeenCalledWith('platform-go', {
+            name: 'Saved Go', provider: 'anthropic-compatible', baseUrl: next.baseUrl, models: next.defaults,
+            authMethods: ['platform'], published: true, isDefault: true,
+        }));
+        expect(createModelConfig).not.toHaveBeenCalled();
     });
 
     it('shows the specific outbound policy reason when a model provider cannot be saved', async () => {

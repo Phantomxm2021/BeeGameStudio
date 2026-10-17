@@ -1,10 +1,11 @@
+import { goCatalogResponse } from '../../../../tests/fixtures/opencode-go'
 import { OPENCODE_GO_ID, OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go'
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createModelConfig, exportModelConfigSnapshot, importModelConfigSnapshot, resetModelConfigs, validateModelAccess } from '@bee-game-studio/agent-workflow'
+import { createModelConfig, exportModelConfigSnapshot, importModelConfigSnapshot, mapModelConfigToRuntime, resetModelConfigs, validateModelAccess } from '@bee-game-studio/agent-workflow'
 import { connectionStatus, disconnectAccount, disconnectConnection, fetchClaudeSubscriptionUsage, ModelConnectionLogins, PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, personalModelAvailable, personalModelConfig, preferredModelId, resolveModelConnection, saveConnection } from '../model-connections'
 import { mergeRuntimeEnv } from '../beegame/session-manager'
 import { createAgentWorkflowApp } from '../app'
@@ -17,13 +18,21 @@ import axios from 'axios'
 
 let root: string
 let previousKey: string | undefined
+let previousCatalogFetch: typeof fetch
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'bgs-connections-'))
   previousKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
   process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 12).toString('base64')
   resetModelConfigs()
+  previousCatalogFetch = globalThis.fetch
+  globalThis.fetch = ((input, init) => {
+    const url = String(input)
+    if (url === 'https://opencode.ai/inference/go/v1/models' || url === 'https://models.dev/api.json') return Promise.resolve(goCatalogResponse(url))
+    return previousCatalogFetch(input, init)
+  }) as typeof fetch
 })
 afterEach(() => {
+  globalThis.fetch = previousCatalogFetch
   resetModelConfigs()
   if (previousKey === undefined) delete process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
   else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = previousKey
@@ -294,6 +303,39 @@ test('Claude code callback produces refreshable credentials consumed by the isol
 })
 
 for (const provider of ['anthropic-compatible', 'openai-compatible'] as const) {
+  test(`administrators can publish and edit a platform Go ${provider} model through the existing catalog`, async () => {
+    const cleanups: Array<() => void> = []
+    const app = createAgentWorkflowApp({ dashboardDataRoot: root, modelConfigStore: false, skillsConfig: false,
+      currentUser: { id: 'owner', role: 'owner' }, registerCleanup: cleanup => cleanups.push(cleanup),
+      outboundTargetResolver: async value => ({ url: new URL(value), addresses: ['93.184.216.34'], lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4) }),
+    })
+    const profile = OPENCODE_GO_PROFILES[provider]
+    const body = { name: 'Platform Go', provider, baseUrl: profile.baseUrl, apiKey: 'platform-go-fixture-key', models: profile.defaults,
+      published: true, authMethods: ['platform'], isDefault: true }
+    const post = (input: object) => app.request('/api/model-configs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+    try {
+      for (const invalid of [{ provider: provider === 'openai-compatible' ? 'anthropic-compatible' : 'openai-compatible' },
+        { models: { ...profile.defaults, balanced: 'unsupported-model' } }, { models: { balanced: profile.defaults.balanced } },
+        { authMethods: [provider === 'openai-compatible' ? 'chatgpt-subscription' : 'claude-subscription'] }]) {
+        expect((await post({ ...body, ...invalid })).status).toBe(400)
+      }
+      const response = await post(body)
+      expect(response.status).toBe(200)
+      const saved = await response.json()
+      expect(saved).toMatchObject({ provider, baseUrl: profile.baseUrl, models: profile.defaults, authMethods: ['platform'] })
+      expect(JSON.stringify(saved)).not.toContain(body.apiKey)
+      expect((await (await app.request('/api/model-catalog')).json()).some((item: { id: string }) => item.id === saved.id)).toBe(true)
+      const patch = (input: object) => app.request(`/api/model-configs/${saved.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+      expect((await patch({ models: { ...profile.defaults, fast: 'unsupported-model' } })).status).toBe(400)
+      expect((await patch({ published: false })).status).toBe(200)
+      expect((await patch({ published: true })).status).toBe(200)
+      const runtime = mapModelConfigToRuntime(saved.id)!
+      const env = resolveModelConnection(root, saved, runtime.env)
+      expect(env[provider === 'anthropic-compatible' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY']).toBe(body.apiKey)
+      expect(env[provider === 'anthropic-compatible' ? 'ANTHROPIC_BASE_URL' : 'OPENAI_BASE_URL']).toBe(profile.baseUrl)
+    } finally { cleanups.forEach(cleanup => cleanup()) }
+  })
+
   test(`OpenCode Go ${provider} is encrypted, isolated, selectable and routed through the existing runtime`, async () => {
     const profile = OPENCODE_GO_PROFILES[provider]
     const config = personalModelConfig(root, 'alice', OPENCODE_GO_ID, provider)!
@@ -371,6 +413,35 @@ test('Go save identifies deployment outbound policy rejection without persisting
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'Model provider endpoint is blocked by the deployment outbound policy. Check the host allowlist and DNS configuration.' })
     expect(existsSync(join(getUserDashboardDataRoot(root, 'alice'), '.runtime/model-connections.json'))).toBe(false)
+  } finally { cleanups.forEach(cleanup => cleanup()) }
+})
+
+test('dynamic Go catalog and personal saves accept newly listed IDs while failures preserve saved configuration', async () => {
+  const cleanups: Array<() => void> = []
+  const app = createAgentWorkflowApp({ dashboardDataRoot: root, skillsConfig: false, modelConfigStore: false,
+    currentUser: { id: 'alice', role: 'viewer' },
+    outboundTargetResolver: async value => ({ url: new URL(value), addresses: ['93.184.216.34'], lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4) }),
+    registerCleanup: cleanup => cleanups.push(cleanup),
+  })
+  try {
+    const response = await app.request('/api/model-catalog/opencode-go')
+    expect(response.status).toBe(200)
+    const catalog = await response.json()
+    expect(catalog['openai-compatible']).toContain('new-chat-model')
+    expect(catalog['anthropic-compatible']).toContain('new-anthropic-model')
+    expect(catalog['openai-compatible']).not.toContain('gpt-6-luna')
+    const body = { method: 'byok', provider: 'openai-compatible', baseUrl: OPENCODE_GO_PROFILES['openai-compatible'].baseUrl,
+      apiKey: 'catalog-fixture-key', models: { fast: 'new-chat-model', balanced: 'new-chat-model', strong: 'new-chat-model' } }
+    const put = () => app.request(`/api/model-connections/${OPENCODE_GO_ID}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    expect((await put()).status).toBe(200)
+    const path = join(getUserDashboardDataRoot(root, 'alice'), '.runtime/model-connections.json')
+    const before = readFileSync(path, 'utf8')
+    const catalogFetch = globalThis.fetch
+    globalThis.fetch = (async (input, init) => String(input) === 'https://opencode.ai/inference/go/v1/models'
+      ? Response.json({}, { status: 503 }) : catalogFetch(input, init)) as typeof fetch
+    expect((await app.request('/api/model-catalog/opencode-go')).status).toBe(502)
+    expect((await put()).status).toBe(400)
+    expect(readFileSync(path, 'utf8')).toBe(before)
   } finally { cleanups.forEach(cleanup => cleanup()) }
 })
 

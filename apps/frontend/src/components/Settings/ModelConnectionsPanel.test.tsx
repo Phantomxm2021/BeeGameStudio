@@ -1,3 +1,4 @@
+import { goModelCatalog } from '../../../../../tests/fixtures/opencode-go';
 import { OPENCODE_GO_ID, OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
 import { createRef } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
@@ -9,7 +10,7 @@ const { showError } = vi.hoisted(() => ({ showError: vi.fn() }));
 vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showError }) }));
 
 vi.mock('../../services/modelConfigApi', () => ({
-  listModelCatalog: vi.fn(), saveModelConnection: vi.fn(),
+  listOpenCodeGoModels: vi.fn(), listModelCatalog: vi.fn(), saveModelConnection: vi.fn(),
   startModelLogin: vi.fn(), readModelLogin: vi.fn(), completeModelLogin: vi.fn(), cancelModelLogin: vi.fn(), readClaudeSubscriptionUsage: vi.fn(),
 }));
 vi.mock('../beui/project-select', () => ({ ProjectSelect: ({ ariaLabel, value, options, onValueChange, disabled }: any) => <select aria-label={ariaLabel} value={value} disabled={disabled} onChange={event => onValueChange(event.target.value)}>{options.map((item: any) => <option key={item.value} value={item.value}>{item.label}</option>)}</select> }));
@@ -25,6 +26,7 @@ const catalog = (): api.CatalogModel[] => [
 const waitForCatalog = async () => { await act(async () => { await vi.mocked(api.listModelCatalog).mock.results[0]?.value; }); };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(api.listOpenCodeGoModels).mockResolvedValue(goModelCatalog);
   vi.mocked(api.listModelCatalog).mockResolvedValue(catalog());
   vi.mocked(api.saveModelConnection).mockResolvedValue(connection('byok', { hasKey: true, isPreferred: true }));
   vi.mocked(api.cancelModelLogin).mockResolvedValue({});
@@ -192,9 +194,56 @@ it('restores a preferred Go connection and requires a key again when switching p
   render(<ModelConnectionsPanel language="en" onSaveStateChange={saveState} />);
   expect(await screen.findByLabelText('Protocol')).toHaveValue('anthropic-compatible');
   expect(screen.getByLabelText('Fast model')).toHaveValue('minimax-m3');
-  expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: false, busy: false });
+  await waitFor(() => expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: false, busy: false }));
   await userEvent.selectOptions(screen.getByLabelText('Protocol'), 'openai-compatible');
   expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: true, busy: false });
+});
+
+it('loads new Go models dynamically and saves a newly listed choice', async () => {
+  const ref = createRef<ModelConnectionsHandle>();
+  render(<><ModelConnectionsPanel ref={ref} language="en" /><button onClick={() => ref.current?.saveByok()}>Footer save</button></>);
+  await waitForCatalog();
+  await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'opencode-go');
+  await screen.findAllByRole('option', { name: 'new-anthropic-model' });
+  await userEvent.selectOptions(screen.getByLabelText('Fast model'), 'new-anthropic-model');
+  await userEvent.type(screen.getByLabelText('OpenCode Go API Key'), 'fixture-key');
+  await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith(OPENCODE_GO_ID, 'byok', 'fixture-key', true,
+    expect.objectContaining({ models: { ...OPENCODE_GO_PROFILES['anthropic-compatible'].defaults, fast: 'new-anthropic-model' } })));
+});
+
+it('preserves saved model selections on catalog failure and refreshes only when requested', async () => {
+  vi.mocked(api.listOpenCodeGoModels).mockRejectedValueOnce(new Error('Unavailable'));
+  const saved = catalog();
+  const go = saved.find(item => item.id === OPENCODE_GO_ID)!;
+  go.connection = connection('byok', { hasKey: true, isPreferred: true, baseUrl: go.baseUrl,
+    models: { ...go.models, fast: 'minimax-m3' } });
+  vi.mocked(api.listModelCatalog).mockResolvedValue(saved);
+  const saveState = vi.fn();
+  render(<ModelConnectionsPanel language="en" onSaveStateChange={saveState} />);
+  await waitForCatalog();
+  expect(await screen.findByRole('status')).toHaveTextContent('Could not load models');
+  expect(screen.getByLabelText('Fast model')).toHaveValue('minimax-m3');
+  expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: true, busy: false });
+  expect(api.listOpenCodeGoModels).toHaveBeenCalledTimes(1);
+  expect(api.saveModelConnection).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: 'Refresh models' }));
+  await screen.findAllByRole('option', { name: 'new-anthropic-model' });
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(api.listOpenCodeGoModels).toHaveBeenCalledTimes(2);
+});
+
+it('ignores an older catalog response after switching protocol', async () => {
+  let resolve!: (value: typeof goModelCatalog) => void;
+  vi.mocked(api.listOpenCodeGoModels).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  render(<ModelConnectionsPanel language="en" />);
+  await waitForCatalog();
+  await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'opencode-go');
+  await userEvent.selectOptions(screen.getByLabelText('Protocol'), 'openai-compatible');
+  await screen.findAllByRole('option', { name: 'new-chat-model' });
+  await act(async () => resolve(goModelCatalog));
+  expect(screen.queryByRole('option', { name: 'new-anthropic-model' })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Balanced model')).toHaveValue('kimi-k2.7-code');
 });
 
 it('reactivates a saved Go connection separately from ordinary BYOK and reports failed saves', async () => {

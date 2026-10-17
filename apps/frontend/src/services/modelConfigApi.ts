@@ -63,6 +63,7 @@ export type ModelConnectionStatus = { method: ModelAuthMethod; hasKey: boolean; 
 export type CatalogModel = ModelConfig & { connection: ModelConnectionStatus };
 export type ModelLogin = { id: string; url: string; userCode?: string; method: ModelAuthMethod };
 export const listModelCatalog = (): Promise<CatalogModel[]> => apiClient.get('/api/model-catalog');
+export const listOpenCodeGoModels = (): Promise<import('@bee-game-studio/agent-workflow/opencode-go').OpenCodeGoModels> => apiClient.get('/api/model-catalog/opencode-go');
 export const saveModelConnection = (id: string, method: ModelAuthMethod, apiKey?: string, preferred = false, byok?: { provider?: ModelProviderKind; baseUrl: string; models: ModelTierMap }): Promise<ModelConnectionStatus> => apiClient.put(`/api/model-connections/${encodeURIComponent(id)}`, { method, ...(apiKey ? { apiKey } : {}), preferred, ...(method === 'byok' && byok ? byok : {}) });
 export const disconnectModelConnection = (id: string): Promise<unknown> => apiClient.delete(`/api/model-connections/${encodeURIComponent(id)}`);
 export const startModelLogin = (id: string, method: ModelAuthMethod): Promise<ModelLogin> => apiClient.post(`/api/model-connections/${encodeURIComponent(id)}/login`, { method });
