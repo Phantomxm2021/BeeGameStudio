@@ -5,6 +5,7 @@ import { registerV3Routes } from './beegame/workflow-v3/routes'
 import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
 import { createMeasuredPreview, type MeasuredPreviewManager } from './beegame/workflow-v3/measured-preview'
 import { WorkflowError } from './beegame/workflow-v3/state'
+import { projectExecutionTime } from './beegame/workflow-v3/execution-time'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, type WorkflowStore } from './beegame/workflow-v3/store'
 import { normalizeRuntimeEnvironment } from '../../../src/utils/runtimeEnvironment'
 import { UserQuestionValidationError } from './beegame/user-question'
@@ -2515,6 +2516,10 @@ export function createAgentWorkflowApp(
         previewCapabilities,
         dashboardRepository,
       })
+      const run = await v3Store?.read(projectId, user.id)
+      state.execution_time = run?.workspacePath === project.root_path
+        ? projectExecutionTime(run, beeGameSessions.hasActiveProjectTurn(user.id, projectId, run.workspacePath)) ?? null
+        : null
       const activeV3Preview = (await measuredPreview?.status(projectId, user.id))?.preview
       if (activeV3Preview) {
         state.build_report = {

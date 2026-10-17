@@ -958,7 +958,7 @@
       "stopping": "正在停止预览",
       "consumedCredits": "已消耗 Credit",
       "projectRunTime": "项目运行时间",
-      "projectRunTimeDetail": "自项目创建以来的时间，包含暂停时间",
+      "projectRunTimeDetail": "累计各轮 Agent 执行时间，包含工具和审批等待，不含轮次间的暂停与空闲。",
       "copyProjectName": "复制项目名称",
       "projectNameCopied": "已复制项目名称",
       "projectNameCopyFailed": "复制失败，请重试",

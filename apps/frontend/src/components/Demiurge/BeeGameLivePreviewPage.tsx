@@ -13,7 +13,7 @@ import {
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
-import type { BeeGameDeploymentDiscussionConfirmation, BeeGameDeploymentPayload, BuildReportPayload } from '../../services/api';
+import type { BeeGameDeploymentDiscussionConfirmation, BeeGameDeploymentPayload, BuildReportPayload, ProjectBaselineStatusPayload } from '../../services/api';
 import type { TokenUsage } from '../../types/message';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
@@ -59,7 +59,7 @@ interface BeeGameLivePreviewPageProps {
   tokenUsage?: TokenUsage | null;
   tokenUsageScope?: 'project' | 'session';
   settledProjectTokens?: number;
-  projectCreatedAt?: number;
+  projectExecutionTime?: ProjectBaselineStatusPayload['execution_time'];
   deployments?: BeeGameDeploymentPayload[];
   previewRefreshNonce?: number;
   onStartPreview?: () => void | Promise<void>;
@@ -137,7 +137,7 @@ export function BeeGameLivePreviewPage({
   tokenUsage,
   tokenUsageScope = 'project',
   settledProjectTokens,
-  projectCreatedAt,
+  projectExecutionTime,
   isSyncing,
   isInteractionLocked = false,
   isWorkspaceBusy = false,
@@ -303,7 +303,7 @@ export function BeeGameLivePreviewPage({
               <div id="beegame-project-hint" data-testid="beegame-project-hint" className="px-4 py-3">
                 <ProjectNameCopy name={projectName} copyLabel={labels.copyProjectName} copiedLabel={labels.projectNameCopied} failedLabel={labels.projectNameCopyFailed} />
                 <div className="mt-2">
-                  <ProjectElapsedRow startedAt={projectCreatedAt} label={labels.projectRunTime} detail={labels.projectRunTimeDetail} lang={lang} />
+                  <ProjectElapsedRow timing={projectExecutionTime} label={labels.projectRunTime} detail={labels.projectRunTimeDetail} lang={lang} />
                   <ProjectHintRow label={labels.consumedCredits} value={formatCreditAmount(credits?.consumedCredits)} />
                   <ProjectHintRow label={`${labels.inputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.input_tokens ?? tokenUsage?.prompt_tokens)} />
                   <ProjectHintRow label={`${labels.cachedInputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.cached_input_tokens ?? tokenUsage?.cache_read_tokens)} />
@@ -505,22 +505,26 @@ function ProjectNameCopy({ name, copyLabel, copiedLabel, failedLabel }: {
   </div>;
 }
 
-function ProjectElapsedRow({ startedAt, label, detail, lang }: {
-  startedAt?: number;
+function ProjectElapsedRow({ timing, label, detail, lang }: {
+  timing?: ProjectBaselineStatusPayload['execution_time'];
   label: string;
   detail: string;
   lang: Language;
 }) {
-  const [now, setNow] = useState(() => Date.now());
+  const [tick, setTick] = useState({ timing, deltaMs: 0 });
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    if (!timing?.running) return;
+    // Advance from receipt locally; a client/server clock offset must not inflate the total.
+    const receivedAt = Date.now();
+    const timer = window.setInterval(() => setTick({ timing, deltaMs: Math.max(0, Date.now() - receivedAt) }), 1_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [timing]);
 
-  if (!Number.isFinite(startedAt) || !startedAt || startedAt > now) {
+  if (!timing || !Number.isFinite(timing.elapsed_ms) || timing.elapsed_ms < 0) {
     return <ProjectHintRow label={label} value="—" detail={detail} />;
   }
-  const totalMinutes = Math.floor((now - startedAt) / 60_000);
+  const deltaMs = timing.running && tick.timing === timing ? tick.deltaMs : 0;
+  const totalMinutes = Math.floor((timing.elapsed_ms + deltaMs) / 60_000);
   const days = Math.floor(totalMinutes / 1_440);
   const hours = Math.floor((totalMinutes % 1_440) / 60);
   const minutes = totalMinutes % 60;

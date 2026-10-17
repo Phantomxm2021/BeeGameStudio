@@ -52,6 +52,16 @@ describe('API normalization', () => {
       .not.toHaveProperty('workflow')
   })
 
+  it('preserves valid project execution totals and rejects missing or malformed timing', () => {
+    const status = { project_id: 'project', phase: 'idle', blocked: false }
+    expect(normalizeProjectBaselineStatusPayload({ ...status, execution_time: { elapsed_ms: 60_000, running: false } }).execution_time)
+      .toEqual({ elapsed_ms: 60_000, running: false })
+    expect(normalizeProjectBaselineStatusPayload({ ...status, execution_time: { elapsed_ms: 0, running: true } }).execution_time)
+      .toEqual({ elapsed_ms: 0, running: true })
+    for (const value of [null, undefined, { elapsed_ms: -1, running: false }, { elapsed_ms: Infinity, running: false }, { elapsed_ms: 1, running: 'yes' }])
+      expect(normalizeProjectBaselineStatusPayload({ ...status, execution_time: value } as never).execution_time).toBeNull()
+  })
+
   it('keeps only canonical tool-permission fields', () => {
     const response = normalizePendingToolPermissionsResponse({
       items: [{

@@ -41,6 +41,7 @@ export interface StopTaskResponse {
 }
 
 export interface ProjectBaselineStatusPayload {
+  execution_time?: { elapsed_ms: number; running: boolean } | null
   project_id: string
   phase: string
   delivery_phase?: string
@@ -408,6 +409,9 @@ export const normalizeProjectBaselineStatusPayload = (
   }
   return {
     project_id: String(normalizedPayload.project_id ?? '').trim(),
+    execution_time: normalizedPayload.execution_time &&
+      Number.isFinite(normalizedPayload.execution_time.elapsed_ms) && normalizedPayload.execution_time.elapsed_ms >= 0 &&
+      typeof normalizedPayload.execution_time.running === 'boolean' ? normalizedPayload.execution_time : null,
     phase: String(normalizedPayload.phase ?? '').trim(),
     blocked: Boolean(normalizedPayload.blocked),
     blocked_reason: normalizedPayload.blocked_reason ?? null,

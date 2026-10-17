@@ -824,7 +824,7 @@
       "stopping": "正在停止預覽",
       "consumedCredits": "已消耗 Credit",
       "projectRunTime": "專案執行時間",
-      "projectRunTimeDetail": "自專案建立以來的時間，包含暫停時間",
+      "projectRunTimeDetail": "累計各輪 Agent 執行時間，包含工具和審批等待，不含輪次間的暫停與閒置。",
       "copyProjectName": "複製專案名稱",
       "projectNameCopied": "已複製專案名稱",
       "projectNameCopyFailed": "複製失敗，請重試",

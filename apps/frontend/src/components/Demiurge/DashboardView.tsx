@@ -363,7 +363,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         tokenUsage={liveSessionTokenUsage ?? settledProjectTokenUsage}
         tokenUsageScope={liveSessionTokenUsage ? 'session' : 'project'}
         settledProjectTokens={liveSessionTokenUsage ? creditSummary?.totalTokens : undefined}
-        projectCreatedAt={activeProject?.created_at}
+        projectExecutionTime={hasCurrentRuntimeSnapshot ? projectStatus.execution_time : undefined}
         deployments={deploymentHistory}
         previewRefreshNonce={previewRefreshNonce}
         onStartPreview={canManagePreview ? handleStartPreview : undefined}

@@ -157,7 +157,7 @@ describe('dashboard header', () => {
   );
 
   it('opens project usage in the BeUI popover with separate token categories', () => {
-    render(<BeeGameLivePreviewPage {...props} projectCreatedAt={Date.now() - 2 * 60 * 60_000} credits={{ consumedCredits: 1.25 }} tokenUsage={{ prompt_tokens: 123, input_tokens: 100, cache_read_tokens: 200, cached_input_tokens: 250, completion_tokens: 300, total_tokens: 600 }} />);
+    render(<BeeGameLivePreviewPage {...props} projectExecutionTime={{ elapsed_ms: 2 * 60 * 60_000, running: false }} credits={{ consumedCredits: 1.25 }} tokenUsage={{ prompt_tokens: 123, input_tokens: 100, cache_read_tokens: 200, cached_input_tokens: 250, completion_tokens: 300, total_tokens: 600 }} />);
     const trigger = screen.getByTestId('beegame-project-info-trigger');
     expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
     fireEvent.click(trigger);
@@ -166,6 +166,31 @@ describe('dashboard header', () => {
     for (const value of ['2小时 0分钟', '1.25', '100', '250', '300']) expect(panel.getByText(value)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('advances live execution time, freezes while paused, and resets the local tick on resume', () => {
+    vi.useFakeTimers();
+    const view = render(<BeeGameLivePreviewPage {...props} projectExecutionTime={{ elapsed_ms: 59_000, running: true }} />);
+    try {
+      fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
+      const panel = within(screen.getByTestId('beegame-project-hint'));
+      expect(panel.getByText('0分钟')).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1_000));
+      expect(panel.getByText('1分钟')).toBeInTheDocument();
+      view.rerender(<BeeGameLivePreviewPage {...props} projectExecutionTime={{ elapsed_ms: 60_000, running: false }} />);
+      act(() => vi.advanceTimersByTime(2 * 60_000));
+      expect(panel.getByText('1分钟')).toBeInTheDocument();
+      view.rerender(<BeeGameLivePreviewPage {...props} projectExecutionTime={{ elapsed_ms: 61_000, running: true }} />);
+      expect(panel.getByText('1分钟')).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(59_000));
+      expect(panel.getByText('2分钟')).toBeInTheDocument();
+      view.rerender(<BeeGameLivePreviewPage {...props} projectExecutionTime={null} />);
+      expect(panel.queryByText('2分钟')).not.toBeInTheDocument();
+      expect(panel.getAllByText('—')).toHaveLength(5);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it('labels live session tokens separately from settled project totals', () => {
