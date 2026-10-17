@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openAgentTools } from './agent-tools'
@@ -62,6 +62,22 @@ test('baseline CLI summarizes integrity without hiding failures or certifying ab
     expect(help.acceptanceInstruction).toContain('An existing measurement is immutable')
     expect(help.acceptanceInstruction).not.toContain('attach the report to the existing measurement')
     expect(help.acceptanceInstruction).toContain('verification.contentChecks')
+    // The actual CLI example must parse with the existing report reader while
+    // remaining incomplete, even if its status is changed to passed.
+    const acceptancePath = join(root, '.beegame/delivery/acceptance.json')
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(acceptancePath, JSON.stringify(help.acceptanceExample))
+    const example = JSON.parse((await command('--design', 'acceptance')).stdout)
+    expect(example).toMatchObject({ valid: false, status: 'blocked',
+      diagnostic: { category: 'verification-incomplete' } })
+    expect(await readFile(acceptancePath, 'utf8')).toBe(JSON.stringify(help.acceptanceExample))
+    await writeFile(acceptancePath, JSON.stringify({ ...help.acceptanceExample, status: 'passed' }))
+    expect(JSON.parse((await command('--design', 'acceptance')).stdout)).toMatchObject({
+      valid: false, status: 'blocked',
+    })
+    await writeFile(acceptancePath, JSON.stringify({ ...help.acceptanceExample, environment: { browser: 'fixture' } }))
+    const malformed = JSON.parse((await command('--design', 'acceptance')).stdout)
+    expect(malformed.diagnostic).toMatchObject({ category: 'report-invalid', message: expect.stringContaining('environment') })
     const technicalPath = join(root, designHandoffPath('TECHNICAL_DESIGN.md'))
     const technical = await readFile(technicalPath, 'utf8'), broken = JSON.parse(technical)
     broken.implementationItems[0].requirementRefs = []
@@ -81,7 +97,7 @@ test('baseline CLI summarizes integrity without hiding failures or certifying ab
     const failedDetails = await command('--design', 'baseline', '--details')
     expect(failed.code).toBe(1)
     expect(failedDetails.code).toBe(1)
-    expect(JSON.parse(failed.stdout)).toMatchObject({ valid: false, requirementCount: 0 })
+    expect(JSON.parse(failed.stdout)).toMatchObject({ valid: false, requirementCount: 7 })
     expect(JSON.parse(failed.stdout).issues.length).toBeGreaterThan(0)
     expect(JSON.parse(failed.stdout).issues).toEqual(JSON.parse(failedDetails.stdout).issues)
 

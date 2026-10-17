@@ -28,6 +28,11 @@ export const CONTENT_CONSUMER_API = {
     fetchContentDocument: 'await fetchContentDocument(index object, documentId, absolute indexUrl, fetcher?) -> one on-demand document',
     contentDocumentPath: 'contentDocumentPath(index object, documentId) -> registered content-relative path',
   },
+  resources: {
+    assets: 'loadProductionResources returns assets: ReadonlyMap<string, SurfaceImage>. Resolve authored assetRef/member/frame with resolveSurfaceImage; map values are decoded image records, not URLs.',
+    SurfaceImage: '{source: CanvasImageSource, url: string, frame?: [sx,sy,sw,sh], sheet?: parsed SpriteSheet}. frame is a source-image pixel rectangle; drawImage(source,...frame,dx,dy,dw,dh) crops it. Without frame, use the full source.',
+    resolveSurfaceImage: 'resolveSurfaceImage(assets, assetRef, {member?,frame?,initialFacing?} = {}) -> SurfaceImage; resolves registered member/frame keys and atlas metadata, throws when the decoded selection is missing.',
+  },
   layout: {
     initializeUiLayout: 'await initializeUiLayout() -> void; initialize shared container allocation before resolving layouts.',
     resolveUiNodesForViewport: 'resolveUiNodesForViewport(nodes, rootId, {width,height}, {measureText?}?) -> responsive nodes with allocated local layout; preserves source, not host bounds.',
@@ -37,6 +42,7 @@ export const CONTENT_CONSUMER_API = {
     notes: 'Logical host pixels. camera: {nodeId,input,scene?,tileSet?} links the game-view to an authored 2D Camera. Candidate-font metrics are preliminary. No wrapping/clipping, interaction or aesthetic verdict; use actual rendering for those.',
   },
   scene: {
+    resolveSceneCameraView: 'resolveSceneCameraView({orthographic,viewport:{width,height},orthographicSize?,fieldOfView?,framing?}, {width:hostWidth,height:hostHeight}) -> {projection,framing,rect:{x,y,width,height},aspect,halfWidth,halfHeight,verticalFieldOfView}. viewport is the reference composition; rect uses host logical pixels. orthographicSize is world-unit half-height; fieldOfView uses degrees. framing defaults to keep-height; also keep-width/expand/letterbox. Half-extents exist only for orthographic projection; verticalFieldOfView only for perspective. Camera position/rotation are separate from this projection calculation.',
     sceneWorldTransforms2d: 'sceneWorldTransforms2d(data.nodes) -> {poses: Map<nodeId, affine matrix>, rects: Map<nodeId, resolved rect>}',
     inspectSceneLayout2d: 'inspectSceneLayout2d(data, {width,height}) -> {cameraNodeId, view, worldToScreen, nodes, requiredVisibility?, note}; nodes include screenBounds/worldBounds/fullyInside/geometryUnavailable',
     sceneNodeClientPoint2d: 'sceneNodeClientPoint2d(data, nodeId, {width,height}, canvas.getBoundingClientRect(), localPoint?) -> client point',

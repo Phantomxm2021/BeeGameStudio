@@ -387,10 +387,22 @@ test('consumer compatibility is batched/read-only and installation never overwri
     expect(reference.createProductionUiSurface.lifecycle).toContain('No update/setState')
     expect(reference.documents.fetchStartupContentDocuments).toContain('document[] (not a Map)')
     expect(reference.scene.sceneWorldTransforms2d).toContain('{poses: Map')
+    expect(reference.resources.SurfaceImage).toContain('[sx,sy,sw,sh]')
+    expect(reference.resources.resolveSurfaceImage).toContain('member?,frame?,initialFacing?')
+    expect(reference.scene.resolveSceneCameraView).toContain('orthographicSize')
     const consumer = await import(join(root, tools.directory, 'content-consumer.mjs'))
     for (const name of Object.keys(reference.layout).filter(name => name !== 'notes'))
       expect(typeof consumer[name], `Discoverable layout export: ${name}`).toBe('function')
-    expect(api.stdout.length).toBeLessThan(6000)
+    const image = { source: { width: 64, height: 32 }, url: 'https://fixture.test/sheet.png', frame: [16, 0, 16, 16] }
+    const assets = new Map([['atlas:sheet#coin', image]])
+    expect(consumer.resolveSurfaceImage(assets, 'atlas', { member: 'sheet', frame: 'coin.png' })).toBe(image)
+    expect(() => consumer.resolveSurfaceImage(assets, 'atlas', { member: 'sheet', frame: 'missing' })).toThrow('Missing decoded')
+    expect(consumer.resolveSceneCameraView({ orthographic: true, viewport: { width: 960, height: 540 },
+      orthographicSize: 5 }, { width: 480, height: 480 })).toMatchObject({
+      projection: 'orthographic', framing: 'keep-height', halfWidth: 5, halfHeight: 5,
+      rect: { x: 0, y: 0, width: 480, height: 480 },
+    })
+    expect(api.stdout.length).toBeLessThan(7500)
     const doc={schema:'beegame-content.v1',id:'menu',kind:'ui-screen',assetRefs:[],data:{rootId:'root',nodes:[
       {id:'root',role:'screen-root'}, {id:'text',parentId:'root',role:'text',text:'Go',style:{align:'left',fontSize:18},layout:{size:[80,30]}},
       {id:'button',parentId:'root',role:'button',data:{action:'legacy-action'},layout:{size:[80,30]}},
