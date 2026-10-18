@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { BetaRawMessageStreamEvent } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import { normalizeOpenAIUsage, type AnthropicUsage } from '@ant/model-provider'
+import { normalizeOpenAIUsage, OpenAIProtocolError, type AnthropicUsage } from '@ant/model-provider'
 import { getValidChatGPTAuth } from './chatgptAuth.js'
 
 type ResponsesInputItem = Record<string, unknown>
@@ -223,7 +223,9 @@ export async function* parseSSE(
           .map(line => line.slice(5).trimStart())
           .join('\n')
         if (data && data !== '[DONE]') {
-          const parsed = JSON.parse(data) as unknown
+          let parsed: unknown
+          try { parsed = JSON.parse(data) }
+          catch { throw new OpenAIProtocolError('Responses stream contains an invalid JSON event') }
           if (parsed && typeof parsed === 'object') {
             yield parsed as Record<string, unknown>
           }
@@ -283,7 +285,11 @@ export function extractUsage(
 }
 
 function mapStopReason(response: Record<string, unknown> | undefined): string {
-  if (response?.status === 'incomplete') return 'max_tokens'
+  if (response?.status === 'incomplete') {
+    const reason = (response.incomplete_details as Record<string, unknown> | undefined)?.reason
+    return reason === 'max_output_tokens' ? 'max_tokens'
+      : typeof reason === 'string' ? reason : 'incomplete'
+  }
   return 'end_turn'
 }
 
@@ -294,13 +300,29 @@ export async function* adaptResponsesStreamToAnthropic(
   const messageId = `msg_${randomUUID().replace(/-/g, '').slice(0, 24)}`
   const toolBlocks = new Map<
     number,
-    { contentIndex: number; open: boolean; name: string; id: string }
+    { contentIndex: number; open: boolean; name: string; id: string; arguments: string }
   >()
   let started = false
   let currentContentIndex = -1
   let textBlockOpen = false
   let thinkingBlockOpen = false
-  let terminalSeen = false
+  let protocolError: OpenAIProtocolError | undefined
+
+  const completeArguments = function* (
+    block: { contentIndex: number; open: boolean; arguments: string },
+    value: unknown,
+  ) {
+    if (typeof value !== 'string' || value === block.arguments) return
+    if (block.arguments || !block.open) {
+      protocolError ??= new OpenAIProtocolError('Completed tool arguments differ from the streamed arguments')
+      return
+    }
+    block.arguments = value
+    if (value) yield {
+      type: 'content_block_delta', index: block.contentIndex,
+      delta: { type: 'input_json_delta', partial_json: value },
+    } as BetaRawMessageStreamEvent
+  }
 
   const ensureStarted = async function* () {
     if (started) return
@@ -329,7 +351,7 @@ export async function* adaptResponsesStreamToAnthropic(
     for await (const startedEvent of ensureStarted()) yield startedEvent
     const type = event.type
 
-    if (type === 'response.output_text.delta') {
+    if (type === 'response.output_text.delta' || type === 'response.refusal.delta') {
       if (!textBlockOpen) {
         if (thinkingBlockOpen) {
           yield {
@@ -354,7 +376,7 @@ export async function* adaptResponsesStreamToAnthropic(
       continue
     }
 
-    if (type === 'response.reasoning_text.delta') {
+    if (type === 'response.reasoning_text.delta' || type === 'response.reasoning_summary_text.delta') {
       if (!thinkingBlockOpen) {
         if (textBlockOpen) {
           yield {
@@ -384,6 +406,10 @@ export async function* adaptResponsesStreamToAnthropic(
       const outputIndex =
         typeof event.output_index === 'number' ? event.output_index : -1
       if (item?.type === 'function_call' && outputIndex >= 0) {
+        if (toolBlocks.has(outputIndex)) {
+          protocolError ??= new OpenAIProtocolError('Response repeated a tool output index')
+          continue
+        }
         if (textBlockOpen) {
           yield {
             type: 'content_block_stop',
@@ -399,19 +425,21 @@ export async function* adaptResponsesStreamToAnthropic(
           thinkingBlockOpen = false
         }
         currentContentIndex++
-        const id = String(item.call_id ?? item.id ?? `call_${outputIndex}`)
+        const id = String(item.call_id ?? '')
         const name = String(item.name ?? '')
         toolBlocks.set(outputIndex, {
           contentIndex: currentContentIndex,
           open: true,
           name,
           id,
+          arguments: '',
         })
         yield {
           type: 'content_block_start',
           index: currentContentIndex,
           content_block: { type: 'tool_use', id, name, input: {} },
         } as BetaRawMessageStreamEvent
+        yield* completeArguments(toolBlocks.get(outputIndex)!, item.arguments)
       }
       continue
     }
@@ -420,7 +448,8 @@ export async function* adaptResponsesStreamToAnthropic(
       const outputIndex =
         typeof event.output_index === 'number' ? event.output_index : -1
       const block = toolBlocks.get(outputIndex)
-      if (block) {
+      if (block?.open) {
+        block.arguments += String(event.delta ?? '')
         yield {
           type: 'content_block_delta',
           index: block.contentIndex,
@@ -429,7 +458,16 @@ export async function* adaptResponsesStreamToAnthropic(
             partial_json: String(event.delta ?? ''),
           },
         } as BetaRawMessageStreamEvent
+      } else {
+        protocolError ??= new OpenAIProtocolError('Tool arguments have no matching open tool block')
       }
+      continue
+    }
+
+    if (type === 'response.function_call_arguments.done') {
+      const block = toolBlocks.get(Number(event.output_index))
+      if (block) yield* completeArguments(block, event.arguments)
+      else protocolError ??= new OpenAIProtocolError('Completed tool arguments have no matching tool block')
       continue
     }
 
@@ -438,6 +476,8 @@ export async function* adaptResponsesStreamToAnthropic(
         typeof event.output_index === 'number' ? event.output_index : -1
       const block = toolBlocks.get(outputIndex)
       if (block?.open) {
+        const item = event.item as Record<string, unknown> | undefined
+        yield* completeArguments(block, item?.arguments)
         yield {
           type: 'content_block_stop',
           index: block.contentIndex,
@@ -447,9 +487,9 @@ export async function* adaptResponsesStreamToAnthropic(
       continue
     }
 
-    if (type === 'response.error') {
+    if (type === 'response.error' || type === 'error') {
       const error = event.error as Record<string, unknown> | undefined
-      throw new Error(String(error?.message ?? 'ChatGPT Responses API error'))
+      throw new Error(String(error?.message ?? event.message ?? 'ChatGPT Responses API error'))
     }
 
     if (type === 'response.failed') {
@@ -459,7 +499,6 @@ export async function* adaptResponsesStreamToAnthropic(
     }
 
     if (type === 'response.completed' || type === 'response.incomplete') {
-      terminalSeen = true
       if (textBlockOpen) {
         yield {
           type: 'content_block_stop',
@@ -474,20 +513,25 @@ export async function* adaptResponsesStreamToAnthropic(
         } as BetaRawMessageStreamEvent
         thinkingBlockOpen = false
       }
+      for (const block of toolBlocks.values()) {
+        if (!block.open) continue
+        yield { type: 'content_block_stop', index: block.contentIndex } as BetaRawMessageStreamEvent
+        block.open = false
+      }
       const response = event.response as Record<string, unknown> | undefined
+      const stopReason = type === 'response.completed' && toolBlocks.size > 0
+        ? 'tool_use' : mapStopReason(response)
       yield {
         type: 'message_delta',
-        delta: { stop_reason: mapStopReason(response), stop_sequence: null },
+        delta: { stop_reason: stopReason, stop_sequence: null },
         usage: extractUsage(response),
       } as unknown as BetaRawMessageStreamEvent
+      if (protocolError) throw protocolError
       yield { type: 'message_stop' } as BetaRawMessageStreamEvent
+      return
     }
   }
-  if (!terminalSeen) {
-    throw new Error(
-      'Responses stream ended before a terminal response event was received',
-    )
-  }
+  throw new Error('Responses stream ended before a terminal response event was received')
 }
 
 export async function createChatGPTResponsesStream(params: {

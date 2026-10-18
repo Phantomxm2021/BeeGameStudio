@@ -66,7 +66,7 @@ export {
   anthropicToolsToOpenAI,
   anthropicToolChoiceToOpenAI,
 } from './shared/openaiConvertTools.js'
-export { adaptOpenAIStreamToAnthropic } from './shared/openaiStreamAdapter.js'
+export { adaptOpenAIStreamToAnthropic, OpenAIProtocolError } from './shared/openaiStreamAdapter.js'
 export {
   normalizeOpenAIUsage,
   type AnthropicUsage,

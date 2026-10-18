@@ -17,7 +17,7 @@ export function anthropicToolsToOpenAI(
       // Only convert standard tools (skip server tools like computer_use, etc.)
       const toolType = (tool as unknown as { type?: string }).type
       return (
-        tool.type === 'custom' || !('type' in tool) || toolType !== 'server'
+        toolType === 'custom' || toolType == null
       )
     })
     .map(tool => {
@@ -135,6 +135,8 @@ export function anthropicToolChoiceToOpenAI(
   const type = tc.type as string
 
   switch (type) {
+    case 'none':
+      return 'none'
     case 'auto':
       return 'auto'
     case 'any':

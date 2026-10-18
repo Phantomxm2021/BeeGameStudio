@@ -14,6 +14,7 @@
  * what it emits — without any real HTTP calls.
  */
 import { describe, expect, test, mock, beforeEach, afterEach } from 'bun:test'
+import { OpenAIProtocolError } from '../../../../../packages/@ant/model-provider/src/shared/openaiStreamAdapter.js'
 import type { BetaRawMessageStreamEvent } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type {
   AssistantMessage,
@@ -203,6 +204,7 @@ let _searchExtraToolsEnabled = false
 let _lastCreateArgs: Record<string, any> | null = null
 
 mock.module('@ant/model-provider', () => ({
+  OpenAIProtocolError,
   resolveOpenAIModel: (m: string) => m,
   adaptOpenAIStreamToAnthropic: (_stream: any, _model: string) =>
     eventStream(_nextEvents),
@@ -437,7 +439,7 @@ describe('queryModelOpenAI — stop_reason propagation', () => {
     expect(assistantMessages[0]!.message.stop_reason).toBe('tool_use')
   })
 
-  test('assembled AssistantMessage has stop_reason max_tokens', async () => {
+  test('token truncation emits only the error signal, never an executable partial message', async () => {
     _nextEvents = [
       makeMessageStart(),
       makeContentBlockStart(0, 'text'),
@@ -449,13 +451,8 @@ describe('queryModelOpenAI — stop_reason propagation', () => {
 
     const { assistantMessages } = await runQueryModel(_nextEvents)
 
-    // Two assistant-typed items: the content message + the max_output_tokens error signal.
-    // The error signal is emitted as a synthetic assistant message by createAssistantAPIErrorMessage.
-    expect(assistantMessages).toHaveLength(2)
-    const contentMsg = assistantMessages[0]!
-    expect(contentMsg.message.stop_reason).toBe('max_tokens')
-    // Second item is the error signal (has apiError set)
-    const errorMsg = assistantMessages[1]!.message as any
+    expect(assistantMessages).toHaveLength(1)
+    const errorMsg = assistantMessages[0]!.message as any
     expect(errorMsg.apiError).toBe('max_output_tokens')
   })
 

@@ -17,4 +17,19 @@ test('actual OpenAI query logs one safe summary, honors fetch overrides and neve
   for (const kind of ['lateText', 'lateTool', 'lateNonempty', 'absent', 'null']) {
     expect(results[kind]).toEqual({ calls: 2, reasoningPresent: !['absent', 'null'].includes(kind), persistedAndReturned: true })
   }
+  for (const kind of ['bareCall', 'mixedBareCall', 'orphanToolFinish', 'invalidJson', 'arrayArguments', 'nullArguments',
+    'missingId', 'missingName', 'missingIndex', 'changedId', 'contentFiltered', 'unknownFinish', 'contentAfterFinish']) {
+    expect(results[kind]).toEqual({ calls: 1, errors: 1, outcome: 'failed', usageRetained: true })
+  }
+  for (const kind of ['structuredWrite', 'lateHeader', 'fencedExample', 'tildeExample', 'inlineExample', 'quotedExample', 'plainText', 'usageCorrection', 'otherXml']) {
+    expect(results[kind]).toEqual({ calls: 1, errors: 0, outcome: 'completed', usageRetained: true })
+  }
+  expect(results.truncatedTool).toEqual({ calls: 1, errors: 1, outcome: 'completed', usageRetained: true })
+  for (const kind of ['responsesInvalidJson', 'responsesArgumentMismatch', 'responsesNoCallId', 'responsesDuplicateId',
+    'responsesOrphanArguments', 'responsesFiltered', 'responsesLength', 'responsesBadSse']) {
+    expect(results[kind]).toEqual({ calls: 1, errors: 1, successfulReplies: 0 })
+  }
+  for (const kind of ['responsesNormal', 'responsesDoneArguments', 'responsesPrefilledArguments', 'responsesText']) {
+    expect(results[kind]).toEqual({ calls: 1, errors: 0, successfulReplies: 1 })
+  }
 })

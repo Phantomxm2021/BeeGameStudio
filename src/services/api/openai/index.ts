@@ -25,6 +25,7 @@ import {
   anthropicMessagesToOpenAI,
   resolveOpenAIModel,
   adaptOpenAIStreamToAnthropic,
+  OpenAIProtocolError,
   anthropicToolsToOpenAI,
   anthropicToolChoiceToOpenAI,
 } from '@ant/model-provider'
@@ -64,6 +65,7 @@ export {
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import type { Options } from '../claude.js'
 import { randomUUID } from 'crypto'
+import { Lexer, type Token, type Tokens } from 'marked'
 import {
   createAssistantAPIErrorMessage,
   createUserMessage,
@@ -143,6 +145,16 @@ function isOpenAIConvertibleMessage(
   return msg.type === 'assistant' || msg.type === 'user'
 }
 
+// Use the existing Markdown lexer so quoted examples remain ordinary text.
+function unquotedToolText(tokens: Token[]): string {
+  return tokens.map(token => {
+    if (['code', 'codespan', 'blockquote'].includes(token.type)) return '\n'
+    if (token.type === 'list') return token.items.map((item: Tokens.ListItem) => unquotedToolText(item.tokens)).join('\n')
+    if ('tokens' in token && token.tokens) return unquotedToolText(token.tokens)
+    return token.raw
+  }).join('')
+}
+
 /**
  * Assemble the final AssistantMessage (and optional max_tokens error) from
  * accumulated stream state after receiving `message_stop`.
@@ -177,6 +189,52 @@ function assembleFinalAssistantOutputs(params: {
     .map(k => contentBlocks[Number(k)])
     .filter(Boolean)
 
+  if (stopReason === 'max_tokens') {
+    // A truncated call must not reach tool execution, even if a JSON prefix
+    // happens to parse. Keep the existing token-limit error/recovery path.
+    return [createAssistantAPIErrorMessage({
+      content: `Output truncated: response exceeded the ${maxTokens} token limit. ` +
+        `Set OPENAI_MAX_TOKENS or CLAUDE_CODE_MAX_OUTPUT_TOKENS to override.`,
+      apiError: 'max_output_tokens',
+      error: 'max_output_tokens',
+    })]
+  }
+  if (stopReason !== 'end_turn' && stopReason !== 'tool_use') {
+    throw new OpenAIProtocolError(stopReason === 'content_filter'
+      ? 'Response was stopped by the provider content filter'
+      : 'Response contained an unsupported terminal reason')
+  }
+  if (stopReason === 'tool_use' && !allBlocks.some(block => block.type === 'tool_use')) {
+    throw new OpenAIProtocolError('Response ended with tool_calls but contained no structured tool call')
+  }
+  const toolIds = new Set<string>()
+  for (const block of allBlocks) {
+    if (block.type !== 'tool_use') continue
+    if (typeof block.id !== 'string' || !block.id || typeof block.name !== 'string' || !block.name || toolIds.has(block.id)) {
+      throw new OpenAIProtocolError('Tool call has a missing or duplicate ID or a missing function name')
+    }
+    toolIds.add(block.id)
+    let input: unknown = block.input
+    if (typeof input === 'string') {
+      try { input = JSON.parse(input || '{}') }
+      catch { throw new OpenAIProtocolError('Tool call arguments are not valid JSON') }
+    }
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new OpenAIProtocolError('Tool call arguments must be a JSON object')
+    }
+  }
+  // A transport-complete response can still contain leaked tool protocol. Never
+  // execute it as text or let the query loop mistake it for a final answer.
+  for (const block of allBlocks) {
+    if (block.type !== 'text' || typeof block.text !== 'string' || !block.text.includes('<tool_call')) continue
+    const text = unquotedToolText(Lexer.lex(block.text))
+    for (const match of text.matchAll(/<tool_call(?:_[\w-]+)?>\s*<function=([\w.:-]+)>\s*<parameter=[\w.:-]+>/g)) {
+      if (tools.some(tool => tool.name === match[1])) {
+        throw new OpenAIProtocolError('Response contains an unparsed tool call in text; expected structured tool_calls')
+      }
+    }
+  }
+
   if (allBlocks.length > 0 && partialMessage) {
     outputs.push({
       message: {
@@ -195,18 +253,6 @@ function assembleFinalAssistantOutputs(params: {
       uuid: randomUUID(),
       timestamp: new Date().toISOString(),
     } as AssistantMessage)
-  }
-
-  if (stopReason === 'max_tokens') {
-    outputs.push(
-      createAssistantAPIErrorMessage({
-        content:
-          `Output truncated: response exceeded the ${maxTokens} token limit. ` +
-          `Set OPENAI_MAX_TOKENS or CLAUDE_CODE_MAX_OUTPUT_TOKENS to override.`,
-        apiError: 'max_output_tokens',
-        error: 'max_output_tokens',
-      }),
-    )
   }
 
   return outputs
@@ -494,6 +540,19 @@ export async function* queryModelOpenAI(
           if (event.delta.stop_reason != null) {
             stopReason = event.delta.stop_reason
           }
+          // Both adapters emit one terminal usage delta. Account before a
+          // subsequent protocol error can prevent message_stop from arriving.
+          if (usage.input_tokens + usage.output_tokens > 0) {
+            const costUSD = calculateUSDCost(
+              openaiModel,
+              usage as unknown as BetaUsage,
+            )
+            addToTotalSessionCost(
+              costUSD,
+              usage as unknown as BetaUsage,
+              options.model,
+            )
+          }
           break
         }
         case 'message_stop': {
@@ -519,18 +578,6 @@ export async function* queryModelOpenAI(
             // Reset partialMessage so the post-loop safety fallback does not
             // yield a second identical AssistantMessage.
             partialMessage = null
-          }
-          // Track cost and token usage
-          if (usage.input_tokens + usage.output_tokens > 0) {
-            const costUSD = calculateUSDCost(
-              openaiModel,
-              usage as unknown as BetaUsage,
-            )
-            addToTotalSessionCost(
-              costUSD,
-              usage as unknown as BetaUsage,
-              options.model,
-            )
           }
           break
         }
@@ -579,7 +626,11 @@ export async function* queryModelOpenAI(
       ? `[OpenAI] Stream failed: ${diagnostic.streamFailure}`
       : `[OpenAI] Error: ${errorMessage}`, { level: 'error' })
     yield createAssistantAPIErrorMessage({
-      content: `API Error: ${errorMessage}`,
+      // Malformed tool output is not a transient request failure. Reuse the
+      // error path without labelling it for the UI's automatic request retry.
+      content: safeError instanceof OpenAIProtocolError
+        ? `OpenAI protocol error: ${errorMessage}`
+        : `API Error: ${errorMessage}`,
       apiError: 'api_error',
       error: (safeError instanceof Error
         ? safeError

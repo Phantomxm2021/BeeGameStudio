@@ -3,6 +3,8 @@ import type { ChatCompletionChunk } from 'openai/resources/chat/completions/comp
 import { randomUUID } from 'crypto'
 import { normalizeOpenAIUsage } from './openaiUsage.js'
 
+export class OpenAIProtocolError extends Error {}
+
 /**
  * Adapt an OpenAI streaming response into Anthropic BetaRawMessageStreamEvent.
  *
@@ -71,6 +73,7 @@ export async function* adaptOpenAIStreamToAnthropic(
   // Deferred finish state
   let pendingFinishReason: string | null = null
   let pendingHasToolCalls = false
+  let protocolError: OpenAIProtocolError | undefined
 
   for await (const chunk of stream) {
     const choice = chunk.choices?.[0]
@@ -131,6 +134,11 @@ export async function* adaptOpenAIStreamToAnthropic(
 
     // Some compatible endpoints omit delta on the terminal choice. Process
     // finish_reason independently so an explicit completion is not discarded.
+    if (pendingFinishReason !== null && (delta?.content || delta?.refusal ||
+      (delta as any)?.reasoning_content || delta?.tool_calls?.length)) {
+      protocolError ??= new OpenAIProtocolError('Response contained content after its terminal finish_reason')
+      continue
+    }
 
     // Handle reasoning_content → Anthropic thinking block.
     // Empty string is a valid signal: DeepSeek v4 thinking mode sometimes
@@ -174,7 +182,8 @@ export async function* adaptOpenAIStreamToAnthropic(
     }
 
     // Handle text content
-    if (delta?.content != null && delta.content !== '') {
+    const text = (delta?.content ?? '') + (delta?.refusal ?? '')
+    if (text !== '') {
       if (!textBlockOpen) {
         // Close thinking block if still open
         if (thinkingBlockOpen) {
@@ -206,7 +215,7 @@ export async function* adaptOpenAIStreamToAnthropic(
         index: textBlockIndex,
         delta: {
           type: 'text_delta',
-          text: delta.content,
+          text,
         },
       } as BetaRawMessageStreamEvent
     }
@@ -215,8 +224,30 @@ export async function* adaptOpenAIStreamToAnthropic(
     if (delta?.tool_calls) {
       for (const tc of delta.tool_calls) {
         const tcIndex = tc.index
+        if (!Number.isInteger(tcIndex) || tcIndex < 0) {
+          protocolError ??= new OpenAIProtocolError('Tool call is missing a valid index')
+          continue
+        }
 
         if (!toolBlocks.has(tcIndex)) {
+          toolBlocks.set(tcIndex, { contentIndex: -1, id: '', name: '', arguments: '' })
+        }
+        const block = toolBlocks.get(tcIndex)!
+        if (block.contentIndex >= 0 && ((tc.id && tc.id !== block.id) ||
+          (tc.function?.name && tc.function.name !== block.name))) {
+          protocolError ??= new OpenAIProtocolError('Tool call identity changed while streaming')
+          continue
+        }
+        block.id = tc.id || block.id
+        block.name = tc.function?.name || block.name
+        const fragment = tc.function?.arguments ?? ''
+        block.arguments += fragment
+        let argFragment = fragment
+
+        if (block.contentIndex < 0) {
+          // Headers may arrive after argument fragments. Do not invent an ID
+          // or publish an empty name that later metadata can no longer repair.
+          if (!block.id || !block.name) continue
           // Close thinking block if open
           if (thinkingBlockOpen) {
             yield {
@@ -239,16 +270,7 @@ export async function* adaptOpenAIStreamToAnthropic(
 
           // Start new tool_use block
           currentContentIndex++
-          const toolId =
-            tc.id || `toolu_${randomUUID().replace(/-/g, '').slice(0, 24)}`
-          const toolName = tc.function?.name || ''
-
-          toolBlocks.set(tcIndex, {
-            contentIndex: currentContentIndex,
-            id: toolId,
-            name: toolName,
-            arguments: '',
-          })
+          block.contentIndex = currentContentIndex
           openBlockIndices.add(currentContentIndex)
 
           yield {
@@ -256,20 +278,19 @@ export async function* adaptOpenAIStreamToAnthropic(
             index: currentContentIndex,
             content_block: {
               type: 'tool_use',
-              id: toolId,
-              name: toolName,
+              id: block.id,
+              name: block.name,
               input: {},
             },
           } as BetaRawMessageStreamEvent
+          argFragment = block.arguments
         }
 
         // Stream argument fragments
-        const argFragment = tc.function?.arguments
         if (argFragment) {
-          toolBlocks.get(tcIndex)!.arguments += argFragment
           yield {
             type: 'content_block_delta',
-            index: toolBlocks.get(tcIndex)!.contentIndex,
+            index: block.contentIndex,
             delta: {
               type: 'input_json_delta',
               partial_json: argFragment,
@@ -281,6 +302,9 @@ export async function* adaptOpenAIStreamToAnthropic(
 
     // Handle finish
     if (choice?.finish_reason) {
+      if (pendingFinishReason !== null && pendingFinishReason !== choice.finish_reason) {
+        protocolError ??= new OpenAIProtocolError('Response contained conflicting terminal finish reasons')
+      }
       if (thinkingBlockOpen) {
         yield {
           type: 'content_block_stop',
@@ -348,6 +372,11 @@ export async function* adaptOpenAIStreamToAnthropic(
       usage,
     } as BetaRawMessageStreamEvent
 
+    if ([...toolBlocks.values()].some(block => block.contentIndex < 0)) {
+      protocolError ??= new OpenAIProtocolError('Tool call is missing its ID or function name')
+    }
+    if (protocolError) throw protocolError
+
     yield {
       type: 'message_stop',
     } as BetaRawMessageStreamEvent
@@ -365,9 +394,7 @@ function mapFinishReason(reason: string): string {
       return 'tool_use'
     case 'length':
       return 'max_tokens'
-    case 'content_filter':
-      return 'end_turn'
     default:
-      return 'end_turn'
+      return reason
   }
 }

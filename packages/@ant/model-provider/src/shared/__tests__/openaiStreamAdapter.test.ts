@@ -50,6 +50,101 @@ async function collectEvents(
 }
 
 describe('adaptOpenAIStreamToAnthropic', () => {
+  test.each([
+    { order: ['text', 'thinking', 'text', 'thinking'] },
+    { order: ['thinking', 'tool', 'thinking', 'tool', 'text'] },
+    { order: ['tool', 'text', 'thinking', 'tool', 'thinking', 'text'] },
+  ])('keeps block ownership when content is interleaved: %j', async ({ order }) => {
+    const steps: readonly string[] = order
+    const chunks = steps.map((kind, i) => makeChunk({ choices: [{ index: 0, finish_reason: null,
+      delta: kind === 'text' ? { content: `text-${i}` }
+        : kind === 'thinking' ? { reasoning_content: `thinking-${i}` }
+        : { tool_calls: [{ index: 0, ...(steps.indexOf('tool') === i
+          ? { id: 'owned', function: { name: 'noop', arguments: '' } }
+          : { function: { arguments: '' } }) }] },
+    }] }))
+    chunks.push(makeChunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }))
+    const events = await collectEvents(chunks)
+    const blocks = new Map<number, { type: string; open: boolean }>()
+    for (const event of events) {
+      if (event.type === 'content_block_start') {
+        expect(blocks.has(event.index)).toBe(false)
+        blocks.set(event.index, { type: event.content_block.type, open: true })
+      } else if (event.type === 'content_block_delta') {
+        const block = blocks.get(event.index)!
+        expect(block?.open).toBe(true)
+        expect(block.type).toBe(({ text_delta: 'text', thinking_delta: 'thinking', input_json_delta: 'tool_use' } as Record<string, string>)[event.delta.type])
+      } else if (event.type === 'content_block_stop') {
+        expect(blocks.get(event.index)?.open).toBe(true)
+        blocks.get(event.index)!.open = false
+      }
+    }
+    expect([...blocks.values()].every(block => !block.open)).toBe(true)
+  })
+
+  test('preserves tool metadata supplied after an initial argument fragment', async () => {
+    const events = await collectEvents([
+      makeChunk({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"value":' } }] }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'late-id', function: { name: 'noop', arguments: '42}' } }] }, finish_reason: 'tool_calls' }] }),
+    ])
+    expect(events.find(e => e.type === 'content_block_start')?.content_block).toMatchObject({ type: 'tool_use', id: 'late-id', name: 'noop' })
+    expect(events.filter(e => e.delta?.type === 'input_json_delta').map(e => e.delta.partial_json).join('')).toBe('{"value":42}')
+  })
+
+  test('preserves refusal text instead of silently returning an empty answer', async () => {
+    const events = await collectEvents([makeChunk({ choices: [{ index: 0,
+      delta: { refusal: 'Cannot fulfill this request.' }, finish_reason: 'stop' }] })])
+    expect(events.filter(e => e.delta?.type === 'text_delta').map(e => e.delta.text).join('')).toBe('Cannot fulfill this request.')
+  })
+
+  test.each([1, 2, 7, 64])('preserves exact JSON across argument fragments of %i characters', async size => {
+    const input = { content: '中文 🚀\n"quoted" \\ slash <tool_call_sample>', nested: { value: [0, false, null] } }
+    const json = JSON.stringify(input)
+    const chunks = [makeChunk({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'fragments', function: { name: 'Write', arguments: '' } }] }, finish_reason: null }] })]
+    for (let offset = 0; offset < json.length; offset += size) {
+      chunks.push(makeChunk({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: json.slice(offset, offset + size) } }] }, finish_reason: null }] }))
+    }
+    chunks.push(makeChunk({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }))
+    const events = await collectEvents(chunks)
+    const actual = events.filter(e => e.delta?.type === 'input_json_delta').map(e => e.delta.partial_json).join('')
+    expect(actual).toBe(json)
+    expect(JSON.parse(actual)).toEqual(input)
+  })
+
+  test('preserves interleaved tool IDs, names and argument fragments alongside text and thinking', async () => {
+    const events = await collectEvents([
+      makeChunk({ choices: [{ index: 0, delta: { reasoning_content: '' }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: { content: 'Writing files.' }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: { tool_calls: [
+        { index: 0, id: 'write-one', type: 'function', function: { name: 'Write', arguments: '{"file_path":"/tmp/one.js",' } },
+        { index: 1, id: 'write-two', type: 'function', function: { name: 'Write', arguments: '{"file_path":"/tmp/two.js",' } },
+      ] }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: { tool_calls: [
+        { index: 1, function: { arguments: '"content":"two"}' } },
+        { index: 0, function: { arguments: '"content":"one"}' } },
+      ] }, finish_reason: null }] }),
+      makeChunk({ choices: [{ index: 0, delta: { content: 'Done.' }, finish_reason: 'stop' }] }),
+      makeChunk({ choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } }),
+    ])
+    const tools = events.filter(e => e.type === 'content_block_start' && e.content_block.type === 'tool_use')
+    expect(tools.map(e => [e.content_block.id, e.content_block.name])).toEqual([
+      ['write-one', 'Write'], ['write-two', 'Write'],
+    ])
+    for (const [position, tool] of tools.entries()) {
+      const args = events.filter(e => e.type === 'content_block_delta' && e.index === tool.index)
+        .map(e => e.delta.partial_json).join('')
+      expect(JSON.parse(args)).toEqual(position === 0
+        ? { file_path: '/tmp/one.js', content: 'one' }
+        : { file_path: '/tmp/two.js', content: 'two' })
+      expect(events.filter(e => e.type === 'content_block_stop' && e.index === tool.index)).toHaveLength(1)
+    }
+    expect(events.filter(e => e.delta?.type === 'text_delta').map(e => e.delta.text).join('')).toBe('Writing files.Done.')
+    expect(events.find(e => e.type === 'message_delta')).toMatchObject({
+      delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 12, output_tokens: 3 },
+    })
+    expect(events.at(-1).type).toBe('message_stop')
+  })
+
   test.each([null, undefined])('accepts a terminal finish_reason when delta is %s', async delta => {
     const events = await collectEvents([
       makeChunk({ choices: [{ index: 0, delta: { content: 'OK' }, finish_reason: null }] }),

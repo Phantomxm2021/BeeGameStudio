@@ -110,6 +110,74 @@ describe('Responses stream termination', () => {
     return result
   }
 
+  test('closes every parallel tool block and reports tool_use at completion', async () => {
+    const events = await collect([
+      { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', call_id: 'one', name: 'noop', arguments: '' } },
+      { type: 'response.output_item.added', output_index: 1, item: { type: 'function_call', call_id: 'two', name: 'noop', arguments: '' } },
+      { type: 'response.function_call_arguments.delta', output_index: 1, delta: '{"b":2}' },
+      { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"a":1}' },
+      { type: 'response.completed', response: { status: 'completed' } },
+    ])
+    const tools = events.filter((e: any) => e.type === 'content_block_start' && e.content_block.type === 'tool_use') as any[]
+    expect(tools).toHaveLength(2)
+    for (const tool of tools) expect(events.filter((e: any) => e.type === 'content_block_stop' && e.index === tool.index)).toHaveLength(1)
+    expect(events.find((e: any) => e.type === 'message_delta')).toMatchObject({ delta: { stop_reason: 'tool_use' } })
+  })
+
+  test('preserves canonical arguments when they arrive on item completion', async () => {
+    const events = await collect([
+      { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', call_id: 'one', name: 'noop', arguments: '' } },
+      { type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', call_id: 'one', name: 'noop', arguments: '{"a":1}' } },
+      { type: 'response.completed', response: { status: 'completed' } },
+    ])
+    expect(events.filter((e: any) => e.delta?.type === 'input_json_delta').map((e: any) => e.delta.partial_json).join('')).toBe('{"a":1}')
+  })
+
+  test('stops consuming after completion instead of accepting a second response', async () => {
+    const events = await collect([
+      { type: 'response.output_text.delta', delta: 'one' },
+      { type: 'response.completed', response: { status: 'completed' } },
+      { type: 'response.output_text.delta', delta: 'two' },
+      { type: 'response.completed', response: { status: 'completed' } },
+    ])
+    expect(events.filter(e => e.type === 'message_stop')).toHaveLength(1)
+    expect(events.filter((e: any) => e.delta?.type === 'text_delta').map((e: any) => e.delta.text).join('')).toBe('one')
+  })
+
+  test('preserves the actual Responses error event instead of treating it as EOF', async () => {
+    await expect(collect([{ type: 'error', code: 'server_error', message: 'upstream failed' }])).rejects.toThrow('upstream failed')
+  })
+
+  test('preserves refusal and reasoning summary events', async () => {
+    const events = await collect([
+      { type: 'response.reasoning_summary_text.delta', delta: 'Summary' },
+      { type: 'response.refusal.delta', delta: 'Cannot fulfill this request.' },
+      { type: 'response.completed', response: { status: 'completed' } },
+    ])
+    expect(events.filter((e: any) => e.delta?.type === 'thinking_delta').map((e: any) => e.delta.thinking).join('')).toBe('Summary')
+    expect(events.filter((e: any) => e.delta?.type === 'text_delta').map((e: any) => e.delta.text).join('')).toBe('Cannot fulfill this request.')
+  })
+
+  test('invalid SSE errors do not retain the response payload', async () => {
+    const consume = async () => {
+      for await (const _event of parseSSE(new Response('data: PRIVATE_INVALID_JSON\n\n'))) { /* consume */ }
+    }
+    await expect(consume()).rejects.toThrow('invalid JSON event')
+    try { await consume() } catch (error) { expect(String(error)).not.toContain('PRIVATE') }
+  })
+
+  test('does not label content-filter incompleteness as a token limit', async () => {
+    const events = await collect([{ type: 'response.incomplete', response: { status: 'incomplete', incomplete_details: { reason: 'content_filter' } } }])
+    expect(events.find((e: any) => e.type === 'message_delta')).toMatchObject({ delta: { stop_reason: 'content_filter' } })
+  })
+
+  test('does not silently discard tool arguments with no matching tool block', async () => {
+    await expect(collect([
+      { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"a":1}' },
+      { type: 'response.completed', response: { status: 'completed' } },
+    ])).rejects.toThrow('tool')
+  })
+
   test('rejects empty and partial streams', async () => {
     await expect(collect([])).rejects.toThrow('terminal response event')
     await expect(

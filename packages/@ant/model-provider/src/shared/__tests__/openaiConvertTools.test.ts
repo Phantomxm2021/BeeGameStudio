@@ -5,6 +5,13 @@ import {
 } from '../openaiConvertTools.js'
 
 describe('anthropicToolsToOpenAI', () => {
+  test('does not advertise Anthropic server tools as empty local functions', () => {
+    expect(anthropicToolsToOpenAI([
+      { type: 'web_search_20250305', name: 'web_search' },
+      { type: 'computer_20250124', name: 'computer' },
+      { type: 'custom', name: 'local', input_schema: { type: 'object', properties: {} } },
+    ] as any).map((tool: any) => tool.function.name)).toEqual(['local'])
+  })
   test('converts basic tool', () => {
     const tools = [
       {
@@ -154,6 +161,9 @@ describe('anthropicToolsToOpenAI', () => {
 })
 
 describe('anthropicToolChoiceToOpenAI', () => {
+  test('preserves an explicit prohibition on tool use', () => {
+    expect(anthropicToolChoiceToOpenAI({ type: 'none' })).toBe('none')
+  })
   test('maps auto', () => {
     expect(anthropicToolChoiceToOpenAI({ type: 'auto' })).toBe('auto')
   })

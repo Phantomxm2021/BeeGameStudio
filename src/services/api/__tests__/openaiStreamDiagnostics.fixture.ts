@@ -14,11 +14,16 @@ Object.assign(process.env, { NODE_ENV: 'test', BGS_SIMPLE: '1', BGS_DISABLE_NONE
 // This process cannot reach the network, including through a stale cached SDK.
 globalThis.fetch = (async () => { throw new Error('Unexpected network access') }) as typeof fetch
 const chatgptAuth = await import('../openai/chatgptAuth.js')
-mock.module('../openai/chatgptAuth.js', () => ({ ...chatgptAuth, isChatGPTAuthEnabled: () => false, getValidChatGPTAuth: async () => null }))
+let useResponses = false
+mock.module('../openai/chatgptAuth.js', () => ({ ...chatgptAuth, isChatGPTAuthEnabled: () => useResponses,
+  getValidChatGPTAuth: async () => useResponses ? { accessToken: 'PRIVATE_TOKEN' } : null }))
 const { getOpenAIClient } = await import('../openai/client.js')
 const { queryModelOpenAI } = await import('../openai/index.js')
 const { createUserMessage } = await import('../../../utils/messages.js')
 const { asSystemPrompt } = await import('../../../utils/systemPromptType.js')
+const { FileWriteTool } = await import('@bee-game-studio/builtin-tools/tools/FileWriteTool/FileWriteTool.js')
+const { getTotalInputTokens, getTotalOutputTokens, getTotalCacheReadInputTokens } = await import('../../../cost-tracker.js')
+const { isModelRequestFailure } = await import('../../../../apps/frontend/src/utils/modelRequestFailure.js')
 const { NATIVE_DIAGNOSTIC_PREFIX } = await import('@bee-game-studio/agent-workflow/native-diagnostics')
 
 // A cached client must not bypass the per-request fetch observer or retry setting.
@@ -143,6 +148,172 @@ try {
       results[kind] = { calls, reasoningPresent: present, persistedAndReturned: true }
     }
   } finally { await rm(directory, { recursive: true, force: true }) }
+  const bareCall = '<tool_call_offline><function=Write><parameter=file_path>/tmp/PRIVATE.js</parameter>'
+    + '<parameter=content>PRIVATE_CONTENT</parameter></function></tool_call>'
+  const toolCases = {
+    bareCall,
+    mixedBareCall: bareCall,
+    orphanToolFinish: '',
+    structuredWrite: '',
+    lateHeader: '',
+    invalidJson: '',
+    arrayArguments: '',
+    nullArguments: '',
+    missingId: '',
+    missingName: '',
+    missingIndex: '',
+    changedId: '',
+    contentFiltered: 'Partial answer',
+    unknownFinish: 'Partial answer',
+    contentAfterFinish: 'Initial answer',
+    truncatedTool: '',
+    fencedExample: 'Example:\n```xml\n' + bareCall + '\n```',
+    tildeExample: 'Example:\n~~~xml\n' + bareCall + '\n~~~',
+    inlineExample: 'Example: `' + bareCall + '`',
+    quotedExample: '> ' + bareCall,
+    plainText: 'Write is available; no file was requested.',
+    usageCorrection: 'Final usage is authoritative.',
+    otherXml: '<example><function=Write><parameter=file_path>sample</parameter></function></example>',
+  }
+  for (const [kind, answer] of Object.entries(toolCases)) {
+    let calls = 0
+    const offset = captured.length
+    const before = [getTotalInputTokens(), getTotalOutputTokens(), getTotalCacheReadInputTokens()]
+    const chunk = (delta: unknown, finish_reason: string | null = null) => encode({ choices: [{ index: 0, delta, finish_reason }] })
+    const args = { file_path: '/tmp/PRIVATE.js', content: 'PRIVATE_CONTENT' }
+    const structured = ['structuredWrite', 'mixedBareCall', 'lateHeader', 'invalidJson', 'arrayArguments',
+      'nullArguments', 'missingId', 'missingName', 'missingIndex', 'changedId', 'truncatedTool'].includes(kind)
+    const toolCall: any = { index: 0, id: 'offline-write', type: 'function',
+      function: { name: 'Write', arguments: kind === 'mixedBareCall' ? '{}' : JSON.stringify(args) } }
+    if (kind === 'invalidJson' || kind === 'truncatedTool') toolCall.function.arguments = '{"file_path":"PRIVATE"'
+    if (kind === 'arrayArguments') toolCall.function.arguments = '[]'
+    if (kind === 'nullArguments') toolCall.function.arguments = 'null'
+    if (kind === 'missingId') delete toolCall.id
+    if (kind === 'missingName') delete toolCall.function.name
+    if (kind === 'missingIndex') delete toolCall.index
+    const body = (kind === 'usageCorrection' ? encode({ choices: [{ index: 0, delta: { content: '' }, finish_reason: null }],
+      usage: { prompt_tokens: 12, completion_tokens: 0, total_tokens: 12, prompt_tokens_details: { cached_tokens: 8 } } }) : '')
+      + (kind === 'lateHeader' ? chunk({ tool_calls: [{ index: 0, function: { arguments: '' } }] }) : '')
+      + (structured ? chunk({ tool_calls: [toolCall] }) : '')
+      + (kind === 'changedId' ? chunk({ tool_calls: [{ index: 0, id: 'different-id' }] }) : '')
+      // Split inside the envelope so validation cannot depend on SSE boundaries.
+      + chunk({ content: answer.slice(0, 8) }) + chunk({ content: answer.slice(8) },
+        kind === 'orphanToolFinish' ? 'tool_calls' : kind === 'contentFiltered' ? 'content_filter'
+          : kind === 'unknownFinish' ? 'unknown' : kind === 'truncatedTool' ? 'length' : 'stop')
+      + (kind === 'contentAfterFinish' ? chunk({ content: 'PRIVATE_LATE' }) : '')
+      + encode({ choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15,
+        prompt_tokens_details: { cached_tokens: kind === 'usageCorrection' ? 0 : 8 } } }) + 'data: [DONE]\n\n'
+    const fetchOverride = (async (_input, init) => {
+      calls++
+      const request = JSON.parse(String(init?.body))
+      assert.equal(request.stream, true)
+      const write = request.tools.find((tool: any) => tool.function?.name === 'Write')
+      assert(write, 'Write must be offered as a structured function tool')
+      assert(write.function.parameters.required.includes('file_path'))
+      assert(write.function.parameters.required.includes('content'))
+      return new Response(body, { headers: { 'content-type': 'text/event-stream' } })
+    }) as typeof fetch
+    const output: any[] = []
+    for await (const message of queryModelOpenAI([createUserMessage({ content: 'PRIVATE_PROMPT' })],
+      asSystemPrompt(['PRIVATE_SYSTEM']), [FileWriteTool], new AbortController().signal,
+      { model: 'mimo-v2.6-flash', querySource: 'main', maxOutputTokensOverride: 8, fetchOverride } as any)) output.push(message)
+    const truncated = kind === 'truncatedTool'
+    const failed = ['bareCall', 'mixedBareCall', 'orphanToolFinish', 'invalidJson', 'arrayArguments', 'nullArguments',
+      'missingId', 'missingName', 'missingIndex', 'changedId', 'contentFiltered', 'unknownFinish', 'contentAfterFinish', 'truncatedTool'].includes(kind)
+    const errors = output.filter(message => message.isApiErrorMessage)
+    const assistants = output.filter(message => message.type === 'assistant' && !message.isApiErrorMessage)
+    assert.equal(calls, 1, 'Malformed tool output must not trigger retries')
+    assert.equal(errors.length, failed ? 1 : 0, kind)
+    assert.equal(assistants.length, failed ? 0 : 1, kind)
+    assert.equal(output.some(message => message.type === 'stream_event' && message.event.type === 'message_stop'), !failed || truncated, kind)
+    if (failed) {
+      assert(!JSON.stringify(errors).includes('PRIVATE'), 'Protocol errors must not echo tool arguments')
+      const errorText = errors[0].message.content.map((block: any) => block.text ?? '').join('')
+      if (!truncated) {
+        assert(errorText.startsWith('OpenAI protocol error:'))
+        assert.equal(isModelRequestFailure(errorText), false, 'Existing UI must not schedule an automatic retry')
+      } else assert.equal(errors[0].apiError, 'max_output_tokens')
+    }
+    else if (kind === 'structuredWrite' || kind === 'lateHeader') {
+      assert.equal(assistants[0].message.stop_reason, 'tool_use')
+      assert.deepEqual(assistants[0].message.content.find((block: any) => block.type === 'tool_use'), {
+        type: 'tool_use', id: 'offline-write', name: 'Write', input: args,
+      })
+    } else assert.deepEqual(assistants[0].message.content, [{ type: 'text', text: answer }])
+    const after = [getTotalInputTokens(), getTotalOutputTokens(), getTotalCacheReadInputTokens()]
+    assert.deepEqual(after.map((n, i) => n - before[i]!), kind === 'usageCorrection' ? [12, 3, 0] : [4, 3, 8], 'Keep authoritative final usage even when rejecting tool text')
+    const lines = captured.slice(offset).join('').split('\n').filter(line => line.startsWith(NATIVE_DIAGNOSTIC_PREFIX))
+    assert.equal(lines.length, 1)
+    const diagnostic = JSON.parse(lines[0]!.slice(NATIVE_DIAGNOSTIC_PREFIX.length))
+    assert.equal(diagnostic.outcome, failed && !truncated ? 'failed' : 'completed', kind)
+    if (failed && !truncated) assert.equal(diagnostic.streamFailure, 'adapter')
+    results[kind] = { calls, errors: errors.length, outcome: diagnostic.outcome, usageRetained: true }
+  }
+  useResponses = true
+  const responseArgs = JSON.stringify({ file_path: '/tmp/PRIVATE.js', content: 'PRIVATE_CONTENT' })
+  const item = { type: 'function_call', call_id: 'response-call', name: 'Write', arguments: '' }
+  const added = { type: 'response.output_item.added', output_index: 0, item }
+  const argumentDelta = { type: 'response.function_call_arguments.delta', output_index: 0, delta: responseArgs }
+  const argumentDone = { type: 'response.function_call_arguments.done', output_index: 0, arguments: responseArgs }
+  const itemDone = { type: 'response.output_item.done', output_index: 0, item: { ...item, arguments: responseArgs } }
+  const completed = { type: 'response.completed', response: { status: 'completed', usage: {
+    input_tokens: 12, output_tokens: 3, input_tokens_details: { cached_tokens: 8 },
+  } } }
+  const responseCases: Record<string, unknown[]> = {
+    responsesNormal: [added, argumentDelta, argumentDone, itemDone, completed],
+    responsesDoneArguments: [added, itemDone, completed],
+    responsesPrefilledArguments: [{ ...added, item: { ...item, arguments: responseArgs } }, itemDone, completed],
+    responsesInvalidJson: [added, { ...argumentDelta, delta: '{"PRIVATE":' }, completed],
+    responsesArgumentMismatch: [added, argumentDelta, { ...argumentDone, arguments: '{}' }, completed],
+    responsesNoCallId: [{ ...added, item: { ...item, call_id: undefined, id: 'item-is-not-call-id' } }, argumentDelta, completed],
+    responsesDuplicateId: [added, argumentDelta, { ...added, output_index: 1 }, { ...argumentDelta, output_index: 1 }, completed],
+    responsesOrphanArguments: [argumentDelta, completed],
+    responsesFiltered: [{ type: 'response.incomplete', response: { ...completed.response,
+      status: 'incomplete', incomplete_details: { reason: 'content_filter' } } }],
+    responsesLength: [added, argumentDelta, { type: 'response.incomplete', response: { ...completed.response,
+      status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } } }],
+    responsesBadSse: [],
+    responsesText: [{ type: 'response.output_text.delta', delta: 'Plain response' }, completed],
+  }
+  for (const [kind, events] of Object.entries(responseCases)) {
+    let calls = 0
+    const failed = !['responsesNormal', 'responsesDoneArguments', 'responsesPrefilledArguments', 'responsesText'].includes(kind)
+    const limit = kind === 'responsesLength'
+    const before = [getTotalInputTokens(), getTotalOutputTokens(), getTotalCacheReadInputTokens()]
+    const fetchOverride = (async (_input, init) => {
+      calls++
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer PRIVATE_TOKEN')
+      const request = JSON.parse(String(init?.body))
+      assert(request.tools.some((tool: any) => tool.type === 'function' && tool.name === 'Write'))
+      return new Response(kind === 'responsesBadSse' ? 'data: PRIVATE_INVALID_JSON\n\n' : events.map(encode).join(''), {
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    }) as typeof fetch
+    const output: any[] = []
+    for await (const message of queryModelOpenAI([createUserMessage({ content: 'PRIVATE_PROMPT' })],
+      asSystemPrompt(['PRIVATE_SYSTEM']), [FileWriteTool], new AbortController().signal,
+      { model: 'gpt-test', querySource: 'main', fetchOverride } as any)) output.push(message)
+    const errors = output.filter(message => message.isApiErrorMessage)
+    const assistants = output.filter(message => message.type === 'assistant' && !message.isApiErrorMessage)
+    assert.equal(calls, 1, kind)
+    assert.equal(errors.length, failed ? 1 : 0, kind)
+    assert.equal(assistants.length, failed ? 0 : 1, kind)
+    if (failed && !limit) {
+      const errorText = errors[0].message.content.map((block: any) => block.text ?? '').join('')
+      assert(errorText.startsWith('OpenAI protocol error:'), kind)
+      assert.equal(isModelRequestFailure(errorText), false, kind)
+      assert(!JSON.stringify(errors).includes('PRIVATE'), kind)
+    } else if (limit) assert.equal(errors[0].apiError, 'max_output_tokens')
+    else if (kind !== 'responsesText') {
+      assert.equal(assistants[0].message.stop_reason, 'tool_use')
+      assert.deepEqual(assistants[0].message.content.find((block: any) => block.type === 'tool_use').input, JSON.parse(responseArgs))
+    }
+    if (kind !== 'responsesBadSse') {
+      const after = [getTotalInputTokens(), getTotalOutputTokens(), getTotalCacheReadInputTokens()]
+      assert.deepEqual(after.map((n, i) => n - before[i]!), [4, 3, 8], kind)
+    }
+    results[kind] = { calls, errors: errors.length, successfulReplies: assistants.length }
+  }
   assert(!captured.join('').includes('PRIVATE'), 'SDK and diagnostic logs must not contain credentials or payloads')
 } finally { process.stderr.write = originalWrite }
 console.log(JSON.stringify(results))
