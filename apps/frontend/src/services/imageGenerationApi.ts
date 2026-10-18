@@ -14,9 +14,11 @@ export interface ImageGenerationSettings {
     maxRequestCredits: number;
     projectBudgetCredits: number;
   } | null;
-  provider: 'openai' | 'openrouter' | 'vercel' | 'cloudflare';
+  provider: 'openai' | 'openrouter' | 'vercel' | 'cloudflare' | 'chatgpt-subscription';
   baseUrl: string;
   model: string;
+  responseModel?: string;
+  subscriptionConnected?: boolean;
   quality: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   size: string;
   hasApiKey: boolean;
@@ -31,7 +33,7 @@ export const saveImageGenerationSettings = (
 
 export interface PersonalImageConnection {
   source: 'platform' | 'byok';
-  provider: ImageGenerationSettings['provider'];
+  provider: Exclude<ImageGenerationSettings['provider'], 'chatgpt-subscription'>;
   baseUrl: string;
   model: string;
   hasApiKey: boolean;

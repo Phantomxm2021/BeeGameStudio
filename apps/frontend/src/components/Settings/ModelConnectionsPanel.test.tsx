@@ -139,6 +139,84 @@ it('supports ChatGPT device login and activates the subscription', async () => {
   await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-chatgpt-subscription', 'chatgpt-subscription', undefined, true), { timeout: 3500 });
 });
 
+it('administrator authorization reuses device login without activating a model or requesting another login on reopen', async () => {
+  const authWindow = mockAuthorizationWindow();
+  const connected = catalog();
+  connected[3] = { ...connected[3], connection: connection('platform', { chatgptConnected: true }) };
+  vi.mocked(api.listModelCatalog).mockResolvedValueOnce(catalog()).mockResolvedValue(connected);
+  vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'admin-login', url: 'https://auth.openai.com/codex/device', userCode: 'ADMIN-CODE', method: 'chatgpt-subscription' });
+  vi.mocked(api.readModelLogin).mockResolvedValue({ status: 'complete' });
+  const rendered = render(<ModelConnectionsPanel language="en" chatgptAuthorizationOnly />);
+  await waitForCatalog();
+  expect(screen.queryByLabelText('Connection type')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }));
+  expect(await screen.findByText('ADMIN-CODE')).toBeInTheDocument();
+  expect(authWindow.replace).toHaveBeenCalledWith('https://auth.openai.com/codex/device');
+  expect(await screen.findByText('ChatGPT subscription connected', {}, { timeout: 3500 })).toBeInTheDocument();
+  expect(api.startModelLogin).toHaveBeenCalledExactlyOnceWith('personal-chatgpt-subscription', 'chatgpt-subscription');
+  expect(api.saveModelConnection).not.toHaveBeenCalled();
+  rendered.unmount();
+  render(<ModelConnectionsPanel language="en" chatgptAuthorizationOnly />);
+  expect(await screen.findByText('ChatGPT subscription connected')).toBeInTheDocument();
+  expect(api.startModelLogin).toHaveBeenCalledTimes(1);
+  expect(api.cancelModelLogin).not.toHaveBeenCalled();
+  expect(api.saveModelConnection).not.toHaveBeenCalled();
+});
+
+it('waits for the existing administrator login status before allowing authorization', async () => {
+  let resolve!: (models: api.CatalogModel[]) => void;
+  vi.mocked(api.listModelCatalog).mockImplementation(() => new Promise(done => { resolve = done; }));
+  render(<ModelConnectionsPanel language="en" chatgptAuthorizationOnly />);
+  const button = screen.getByRole('button', { name: 'Continue with ChatGPT' });
+  expect(button).toBeDisabled();
+  await userEvent.click(button);
+  const connected = catalog();
+  connected[3].connection.chatgptConnected = true;
+  await act(async () => resolve(connected));
+  expect(await screen.findByText('ChatGPT subscription connected')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Continue with ChatGPT' })).not.toBeInTheDocument();
+  expect(api.startModelLogin).not.toHaveBeenCalled();
+  expect(api.saveModelConnection).not.toHaveBeenCalled();
+});
+
+it('does not authorize when reading administrator login status fails', async () => {
+  vi.mocked(api.listModelCatalog).mockRejectedValue(new Error('fixture failure'));
+  render(<ModelConnectionsPanel language="en" chatgptAuthorizationOnly />);
+  expect(await screen.findByRole('status')).toHaveTextContent('Could not read login status');
+  expect(screen.getByRole('button', { name: 'Continue with ChatGPT' })).toBeDisabled();
+  expect(api.startModelLogin).not.toHaveBeenCalled();
+  expect(api.saveModelConnection).not.toHaveBeenCalled();
+});
+
+it.each(['poll', 'refresh'])('does not offer a duplicate administrator login after an uncertain %s response', async failure => {
+  mockAuthorizationWindow();
+  vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'admin-login', url: 'https://auth.openai.com/codex/device', userCode: 'ADMIN-CODE', method: 'chatgpt-subscription' });
+  if (failure === 'poll') vi.mocked(api.readModelLogin).mockRejectedValue(new Error('fixture transport failure'));
+  else {
+    vi.mocked(api.readModelLogin).mockResolvedValue({ status: 'complete' });
+    vi.mocked(api.listModelCatalog).mockResolvedValueOnce(catalog()).mockRejectedValue(new Error('fixture catalog failure'));
+  }
+  render(<ModelConnectionsPanel language="en" chatgptAuthorizationOnly />);
+  await waitForCatalog();
+  await userEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }));
+  expect(await screen.findByRole('status', {}, { timeout: 3500 })).toHaveTextContent('Reopen this page');
+  expect(screen.getByRole('button', { name: 'Continue with ChatGPT' })).toBeDisabled();
+  expect(api.startModelLogin).toHaveBeenCalledTimes(1);
+  expect(api.saveModelConnection).not.toHaveBeenCalled();
+});
+
+it('cancels an unfinished administrator authorization without changing model configuration', async () => {
+  mockAuthorizationWindow();
+  vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'admin-pending', url: 'https://auth.openai.com/codex/device', userCode: 'ADMIN-CODE', method: 'chatgpt-subscription' });
+  const rendered = render(<ModelConnectionsPanel language="en" chatgptAuthorizationOnly />);
+  await waitForCatalog();
+  await userEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }));
+  await screen.findByText('ADMIN-CODE');
+  rendered.unmount();
+  expect(api.cancelModelLogin).toHaveBeenCalledExactlyOnceWith('admin-pending');
+  expect(api.saveModelConnection).not.toHaveBeenCalled();
+});
+
 it('does not start login when the browser blocks the authorization window', async () => {
   vi.spyOn(window, 'open').mockReturnValue(null);
   render(<ModelConnectionsPanel language="en" />);

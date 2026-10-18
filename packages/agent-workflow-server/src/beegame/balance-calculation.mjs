@@ -150,12 +150,13 @@ export function checkCalculationResult(workspace, outputPath, helperPath = fileU
 
 function renderChecks(checks, label, requireChecks = false) {
   if (!Array.isArray(checks) || requireChecks && !checks.length) throw new Error(`${label} requires nonempty checks`)
-  return checks.map(check => {
+  for (const check of checks) {
     if (!check || !text(check.name) || typeof check.passed !== 'boolean' || !text(check.details))
       throw new Error('Each check requires a name, boolean passed and observed details')
-    if (!check.passed) throw new Error(`${label} failed: ${check.name}: ${check.details}`)
-    return `- ${cell(check.name)}: passed — ${cell(check.details)}`
-  })
+  }
+  const failures = checks.filter(check => !check.passed)
+  if (failures.length) throw new Error(failures.map(check => `${label} failed: ${check.name}: ${check.details}`).join('\n'))
+  return checks.map(check => `- ${cell(check.name)}: passed — ${cell(check.details)}`)
 }
 
 /** Reject values that JSON would silently drop/coerce, rather than fabricating an observation. */

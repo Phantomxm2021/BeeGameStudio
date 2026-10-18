@@ -15,13 +15,13 @@ const personalIds = [BYOK_ID, CLAUDE_ID, CHATGPT_ID, OPENCODE_GO_ID];
 export type ModelConnectionsHandle = { saveByok: () => void };
 export type ModelConnectionsSaveState = { visible: boolean; disabled: boolean; busy: boolean };
 
-export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { language: string; onSaveStateChange?: (state: ModelConnectionsSaveState) => void }>(function ModelConnectionsPanel({ language, onSaveStateChange }, ref) {
+export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { language: string; onSaveStateChange?: (state: ModelConnectionsSaveState) => void; chatgptAuthorizationOnly?: boolean }>(function ModelConnectionsPanel({ language, onSaveStateChange, chatgptAuthorizationOnly = false }, ref) {
   const goRef = useRef<ModelConnectionsHandle>(null);
   const { showError } = useToastContext();
   const zh = language.startsWith('zh');
   const copy = (cn: string, en: string) => zh ? cn : en;
   const [models, setModels] = useState<CatalogModel[]>([]);
-  const [mode, setMode] = useState<Mode>('official');
+  const [mode, setMode] = useState<Mode>(chatgptAuthorizationOnly ? 'chatgpt-subscription' : 'official');
   const [officialId, setOfficialId] = useState('');
   const [claudeUsage, setClaudeUsage] = useState<ClaudeSubscriptionUsage | null>(null);
   const [provider, setProvider] = useState<ModelProviderKind>('anthropic-compatible');
@@ -52,6 +52,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     mounted.current = true;
     void refresh().then(result => {
       if (!mounted.current) return;
+      if (chatgptAuthorizationOnly) { setMode('chatgpt-subscription'); return; }
       const active = result.find(item => item.connection.isPreferred) ?? result.find(item => item.isDefault);
       if (active?.id === OPENCODE_GO_ID) setMode('opencode-go');
       else if (active?.id === BYOK_ID) setMode('byok');
@@ -61,9 +62,9 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
       setOfficialId(active && !personalIds.includes(active.id) && active.authMethods?.includes('platform') ? active.id : result.find(item => !personalIds.includes(item.id) && item.authMethods?.includes('platform'))?.id ?? '');
       const personal = result.find(item => item.id === BYOK_ID);
       if (personal) { setProvider(personal.provider); setBaseUrl(personal.connection.baseUrl ?? ''); setTiers(personal.connection.models ?? {}); }
-    }).catch(() => { if (mounted.current) setStatus(copy('无法读取可用模型', 'Could not load available models')); });
+    }).catch(() => { if (mounted.current) setStatus(chatgptAuthorizationOnly ? copy('无法读取登录状态，请重新打开此页面。', 'Could not read login status. Reopen this page.') : copy('无法读取可用模型', 'Could not load available models')); });
     return () => { mounted.current = false; if (loginRef.current) void cancelModelLogin(loginRef.current.id).catch(() => {}); };
-  }, []);
+  }, [chatgptAuthorizationOnly]);
   useEffect(() => {
     if (!login || login.method !== 'chatgpt-subscription') return;
     let cancelled = false;
@@ -73,14 +74,32 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
         const result = await readModelLogin(login.id);
         if (cancelled) return;
         if (result.status === 'pending') { timer = setTimeout(poll, 2000); return; }
+        if (result.status === 'complete') {
+          // Administrator authorization must not change model selection or image billing.
+          if (!chatgptAuthorizationOnly) await saveModelConnection(CHATGPT_ID, login.method, undefined, true);
+          try { await refresh(); }
+          catch (error) {
+            if (!chatgptAuthorizationOnly) throw error;
+            if (mounted.current) {
+              setModels([]);
+              setStatus(copy('授权已完成，但无法读取登录状态，请重新打开此页面。', 'Authorization completed, but login status could not be read. Reopen this page.'));
+            }
+          }
+        }
+        if (cancelled) return;
         setLogin(undefined); loginRef.current = undefined;
-        if (result.status === 'complete') { await saveModelConnection(CHATGPT_ID, login.method, undefined, true); await refresh(); }
         if (result.status !== 'complete') showError(copy('登录失败，请重新登录。', 'Login failed. Start again.'));
-      } catch { if (!cancelled) { setLogin(undefined); loginRef.current = undefined; showError(copy('登录已过期，请重试。', 'Login expired. Start again.')); } }
+      } catch { if (!cancelled) {
+        setLogin(undefined); loginRef.current = undefined;
+        if (chatgptAuthorizationOnly) {
+          setModels([]);
+          setStatus(copy('无法确认登录结果，请重新打开此页面检查。', 'Could not confirm the login result. Reopen this page to check.'));
+        } else showError(copy('登录已过期，请重试。', 'Login expired. Start again.'));
+      } }
     };
     timer = setTimeout(poll, 2000);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [login, showError]);
+  }, [login, showError, chatgptAuthorizationOnly]);
   useEffect(() => {
     if (mode !== 'claude-subscription' || !connected) { setClaudeUsage(null); return; }
     let current = true;
@@ -139,14 +158,14 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
   useEffect(() => { if (mode === 'opencode-go') return; onSaveStateChange?.({ visible: mode === 'byok', disabled: busy || !byokComplete, busy }); }, [mode, busy, byokComplete, onSaveStateChange]);
 
   return <div className="flex min-h-0 flex-1 flex-col gap-4 py-4">
-    <ProjectSelect ariaLabel={copy('连接方式', 'Connection type')} value={mode} disabled={busy || !!login} triggerClassName="h-10" onValueChange={value => switchMode(value as Mode)} options={[{ value: 'official', label: 'Bee Game Studio LLM' }, { value: 'byok', label: 'BYOK' }, { value: 'opencode-go', label: 'OpenCode Go' }, { value: 'claude-subscription', label: 'Claude account with subscription' }, { value: 'chatgpt-subscription', label: 'ChatGPT account with subscription' }]} />
+    {!chatgptAuthorizationOnly && <ProjectSelect ariaLabel={copy('连接方式', 'Connection type')} value={mode} disabled={busy || !!login} triggerClassName="h-10" onValueChange={value => switchMode(value as Mode)} options={[{ value: 'official', label: 'Bee Game Studio LLM' }, { value: 'byok', label: 'BYOK' }, { value: 'opencode-go', label: 'OpenCode Go' }, { value: 'claude-subscription', label: 'Claude account with subscription' }, { value: 'chatgpt-subscription', label: 'ChatGPT account with subscription' }]} />}
     {mode === 'opencode-go' && <OpenCodeGoPanel ref={goRef} language={language} config={models.find(item => item.id === OPENCODE_GO_ID)} busy={busy} setBusy={setBusy} refresh={refresh} onSaveStateChange={onSaveStateChange} />}
     {mode === 'byok' && <div className="space-y-3">
       <ModelConfigPanel labels={{ provider: copy('服务商', 'Provider'), baseUrl: copy('接口 URL', 'Base URL'), apiKey: 'API Key', models: copy('模型', 'Models'), fast: copy('快速', 'Fast'), balanced: copy('均衡', 'Balanced'), strong: copy('强力', 'Strong'), fastModel: copy('快速模型', 'Fast model'), balancedModel: copy('均衡模型', 'Balanced model'), strongModel: copy('强力模型', 'Strong model') }} provider={provider} baseUrl={baseUrl} apiKey={key} fastModel={tiers.fast ?? ''} balancedModel={tiers.balanced ?? ''} strongModel={tiers.strong ?? ''} apiKeyPreview={byok?.connection.hasKey && !keyRequired ? '••••' : ''} savedPrefix={copy('已保存：', 'Saved: ')} onProviderChange={setProvider} onBaseUrlChange={setBaseUrl} onApiKeyChange={setKey} onFastModelChange={value => setTiers(current => ({ ...current, fast: value }))} onBalancedModelChange={value => setTiers(current => ({ ...current, balanced: value }))} onStrongModelChange={value => setTiers(current => ({ ...current, strong: value }))} onSubmit={event => { event.preventDefault(); if (byokComplete && !busy) saveByok(); }} />
     </div>}
     {(mode === 'claude-subscription' || mode === 'chatgpt-subscription') && <div className="flex min-h-48 flex-1 items-center justify-center">
       {!connected && !login && <div className="flex w-full max-w-sm flex-col items-center gap-4 text-center">
-        <button className="rounded-full bg-foreground px-6 py-3 text-sm font-medium text-background disabled:opacity-50" disabled={busy} onClick={beginLogin}>{mode === 'claude-subscription' ? copy('使用 Claude 账号登录授权', 'Continue with Claude') : copy('使用 ChatGPT 账号登录授权', 'Continue with ChatGPT')}</button>
+        <button className="rounded-full bg-foreground px-6 py-3 text-sm font-medium text-background disabled:opacity-50" disabled={busy || (chatgptAuthorizationOnly && !subscription)} onClick={beginLogin}>{mode === 'claude-subscription' ? copy('使用 Claude 账号登录授权', 'Continue with Claude') : copy('使用 ChatGPT 账号登录授权', 'Continue with ChatGPT')}</button>
       </div>}
       {login && <section className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-muted/20" aria-label={copy('等待授权', 'Authorization pending')}>
         <div className="space-y-4 p-5">
@@ -166,6 +185,6 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
         {mode === 'chatgpt-subscription' && <a className="mt-4 inline-block text-sm underline" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">{copy('查看 ChatGPT 用量', 'View ChatGPT usage')}</a>}
       </section>}
     </div>}
-    {status && mode !== 'claude-subscription' && mode !== 'chatgpt-subscription' && <p role="status" className="text-sm">{status}</p>}
+    {status && (chatgptAuthorizationOnly || (mode !== 'claude-subscription' && mode !== 'chatgpt-subscription')) && <p role="status" className="text-sm">{status}</p>}
   </div>;
 });

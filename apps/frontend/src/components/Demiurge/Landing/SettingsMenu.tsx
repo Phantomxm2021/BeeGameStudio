@@ -1444,6 +1444,11 @@ export function SettingsMenu({
 
               {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
                 <>
+                {currentUser?.role === 'owner' && <section aria-label={lang.startsWith('zh') ? '管理员 ChatGPT 订阅' : 'Administrator ChatGPT subscription'} className="border-b border-border py-3">
+                  <h3 className="text-sm font-medium">{lang.startsWith('zh') ? '管理员 ChatGPT 订阅' : 'Administrator ChatGPT subscription'}</h3>
+                  <p className="mt-2 text-xs text-muted-foreground">{lang.startsWith('zh') ? '与模型连接、生图服务共用同一份账户授权，无需重复登录。登录仅授权；模型及生图的启用、默认选择与计费仍分别配置。' : 'Shares the same account authorization with Model connections and Image service; no second sign-in is needed. Signing in does not change model or image activation, defaults, or billing settings.'}</p>
+                  <ModelConnectionsPanel key={currentUser.id} language={lang} chatgptAuthorizationOnly />
+                </section>}
                 {modelsLoading ? <p role="status" className="py-5 text-sm text-muted-foreground">{lang.startsWith('zh') ? '加载中…' : 'Loading…'}</p> : !existingConfigs.length && !status ? <p className="py-5 text-sm text-muted-foreground">{lang.startsWith('zh') ? '暂无模型配置，点击右上角 + 添加。' : 'No model configurations. Use + to add one.'}</p> : null}
                 <ul aria-label={lang.startsWith('zh') ? '模型配置列表' : 'Model configurations'} className="divide-y divide-border">
                   {existingConfigs.map(config => <li key={config.id} className="flex min-h-16 items-center gap-3 py-3">
@@ -1472,7 +1477,7 @@ export function SettingsMenu({
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'image' && effectiveCanManageModelConfig ? (
-                <ImageGenerationSettingsPanel ref={imageSettingsRef} language={lang} onStateChange={setImageSettingsState} onSaved={onClose} />
+                <ImageGenerationSettingsPanel ref={imageSettingsRef} language={lang} onStateChange={setImageSettingsState} onSaved={onClose} onOpenModelConnections={() => { setActiveSection('platform'); setActiveTab('model'); }} />
               ) : null}
               {activeSection === 'platform' && activeTab === 'model' && !modelAction && status ? (
                 <p role="status" className="mt-3 text-sm text-destructive">{status}</p>

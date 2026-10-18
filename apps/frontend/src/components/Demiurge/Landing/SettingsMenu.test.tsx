@@ -37,6 +37,9 @@ const {
     updateMcpServer,
     updateModelConfig,
     saveModelConnection,
+    startModelLogin,
+    readModelLogin,
+    cancelModelLogin,
     getCreditSummary,
     getBillingCreditPacks,
     getBillingEvents,
@@ -78,6 +81,9 @@ const {
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
     saveModelConnection: vi.fn(),
+    startModelLogin: vi.fn(),
+    readModelLogin: vi.fn(),
+    cancelModelLogin: vi.fn(),
     getCreditSummary: vi.fn(),
     getBillingCreditPacks: vi.fn(),
     getBillingEvents: vi.fn(),
@@ -106,6 +112,9 @@ vi.mock('../../../services/modelConfigApi', () => ({
     listModelCatalog,
     updateModelConfig,
     saveModelConnection,
+    startModelLogin,
+    readModelLogin,
+    cancelModelLogin,
 }));
 
 vi.mock('../../../services/beeGameAdapter', () => ({
@@ -215,6 +224,8 @@ const openUserSkillsSettings = async () => {
 
 describe('SettingsMenu model settings', () => {
     beforeEach(() => {
+        startModelLogin.mockReset(); readModelLogin.mockReset(); cancelModelLogin.mockReset();
+        cancelModelLogin.mockResolvedValue({});
         vi.mocked(getPersonalImageConnection).mockReset();
         vi.mocked(getPersonalImageConnection).mockResolvedValue({ source: 'platform', provider: 'openai', baseUrl: 'https://api.openai.com/v1/images/generations', model: 'image-model', hasApiKey: false, hasUpstreamApiKey: false });
         vi.mocked(savePersonalImageConnection).mockReset();
@@ -565,6 +576,43 @@ describe('SettingsMenu model settings', () => {
         } finally {
             useSystemStore.setState({ currentUser: null });
         }
+    });
+
+    it('authorizes ChatGPT from platform models once and shows the same login in Image service without changing activation or billing', async () => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: [] } });
+        let connected = false;
+        listModelCatalog.mockImplementation(async () => [{ id: 'personal-chatgpt-subscription', name: 'ChatGPT subscription',
+            provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'],
+            connection: { method: 'platform', hasKey: false, isPreferred: false, claudeConnected: false, chatgptConnected: connected } }]);
+        startModelLogin.mockResolvedValue({ id: 'admin-device', url: 'https://auth.openai.com/codex/device', userCode: 'ADMIN-CODE', method: 'chatgpt-subscription' });
+        readModelLogin.mockImplementation(async () => { connected = true; return { status: 'complete' }; });
+        vi.mocked(getImageGenerationSettings).mockImplementation(async () => ({ provider: 'chatgpt-subscription', baseUrl: 'https://chatgpt.com/backend-api/codex/responses',
+            model: 'fixture-image', responseModel: 'fixture-response', hasApiKey: false, subscriptionConnected: connected,
+            quality: 'medium', size: '1024x1024', billing: null }));
+        const open = vi.spyOn(window, 'open').mockReturnValue({ opener: null, location: { replace: vi.fn() }, close: vi.fn() } as unknown as Window);
+        saveModelConnection.mockClear(); vi.mocked(saveImageGenerationSettings).mockClear();
+        createModelConfig.mockClear(); updateModelConfig.mockClear();
+        try {
+            renderSettings();
+            await openPlatformSettingsTab('模型');
+            expect(screen.getByRole('region', { name: '管理员 ChatGPT 订阅' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: '连接方式' })).not.toBeInTheDocument();
+            const login = screen.getByRole('button', { name: '使用 ChatGPT 账号登录授权' });
+            await waitFor(() => expect(login).toBeEnabled());
+            await userEvent.click(login);
+            await screen.findByText('ADMIN-CODE');
+            expect(await screen.findByText('ChatGPT 订阅已连接', {}, { timeout: 3500 })).toBeInTheDocument();
+            await userEvent.click(screen.getByRole('tab', { name: '生图服务' }));
+            expect(await screen.findByText('当前管理员的 ChatGPT 账户已连接')).toBeInTheDocument();
+            expect(screen.getByRole('switch', { name: '配置图片计费（未配置时不允许提交生成）' })).not.toBeChecked();
+            await userEvent.click(screen.getByRole('button', { name: '前往平台模型' }));
+            expect(await screen.findByText('ChatGPT 订阅已连接')).toBeInTheDocument();
+            expect(startModelLogin).toHaveBeenCalledExactlyOnceWith('personal-chatgpt-subscription', 'chatgpt-subscription');
+            expect(open).toHaveBeenCalledTimes(1);
+            expect(saveModelConnection).not.toHaveBeenCalled();
+            expect(saveImageGenerationSettings).not.toHaveBeenCalled();
+            expect(createModelConfig).not.toHaveBeenCalled(); expect(updateModelConfig).not.toHaveBeenCalled();
+        } finally { open.mockRestore(); useSystemStore.setState({ currentUser: null }); }
     });
 
     it('lets an ordinary user select personal image generation without platform administration', async () => {

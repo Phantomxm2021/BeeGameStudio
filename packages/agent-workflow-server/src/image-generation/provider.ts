@@ -1,4 +1,4 @@
-import type { ImageGenerationConfig } from './config'
+import type { ImageGenerationConfig, ImageSource } from './config'
 
 export type ImageRequest = {
   prompt: string
@@ -16,7 +16,7 @@ export type ImageResult = {
   usage: unknown
 }
 export interface ImageGenerationProvider {
-  generate(config: ImageGenerationConfig, request: ImageRequest): Promise<ImageResult>
+  generate(config: ImageGenerationConfig, request: ImageRequest, context?: { ownerId: string; source?: ImageSource }): Promise<ImageResult>
 }
 
 export class ImageProviderError extends Error {

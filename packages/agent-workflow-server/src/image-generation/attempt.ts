@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import { imageConfigSchema, type ImageGenerationConfig } from './config'
+import { imageConfigSchema, type ImageGenerationConfig, type ImageSource } from './config'
 import { ImageProviderError, type ImageGenerationProvider, type ImageRequest, type ImageResult } from './provider'
 
 /** Host-owned storage only. Never place this directory inside an Agent workspace. */
@@ -11,6 +11,7 @@ export type ImageAttemptInput = {
   projectId: string
   requestId: string
   config: ImageGenerationConfig
+  source?: ImageSource
   request: ImageRequest
   recoverOnly?: boolean
   /** Host preflight for new work only; never part of the paid request digest. */
@@ -55,14 +56,16 @@ export class ImageAttemptStore {
     const config = imageConfigSchema.parse(input.config)
     if (![input.ownerId, input.projectId, input.requestId].every(value => value.trim().length > 0))
       throw new Error('Image attempt identity is required')
-    if (!config.apiKey || !input.request.prompt.trim() || input.request.prompt.length > 32000)
+    if ((!config.apiKey && input.source !== 'chatgpt-subscription' && config.provider !== 'chatgpt-subscription') || !input.request.prompt.trim() || input.request.prompt.length > 32000)
       throw new Error('Image provider configuration and prompt are required')
     input.request.signal?.throwIfAborted()
     const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
     const identity = hash([input.ownerId, input.projectId, input.requestId])
     // Never persist secrets, prompt text, or user identifiers in this receipt.
     const digest = hash([config.provider, config.baseUrl, config.model, input.request.quality ?? config.quality, input.request.size ?? config.size,
-      input.request.prompt, input.request.background ?? 'auto', input.request.referenceImage?.sha256 ?? null])
+      input.request.prompt, input.request.background ?? 'auto', input.request.referenceImage?.sha256 ?? null,
+      ...(input.source === 'chatgpt-subscription' ? [input.source, config.responseModel] : []),
+      ...(config.provider === 'chatgpt-subscription' ? [config.responseModel, config.subscriptionOwnerId] : [])])
     mkdirSync(this.root, { recursive: true, mode: 0o700 })
     const directory = join(this.root, identity)
     const target = join(directory, 'receipt.json')
@@ -96,7 +99,7 @@ export class ImageAttemptStore {
     // Defer invocation until the promise is registered for concurrent callers.
     const running = Promise.resolve().then(async () => {
       let result: ImageResult
-      try { result = await this.provider.generate(config, input.request) }
+      try { result = await this.provider.generate(config, input.request, { ownerId: input.ownerId, source: input.source }) }
       catch (error) {
         const rejected = error instanceof ImageProviderError && error.outcome === 'rejected'
         const status = error instanceof ImageProviderError ? error.status : undefined

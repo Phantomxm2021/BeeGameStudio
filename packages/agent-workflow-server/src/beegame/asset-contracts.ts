@@ -507,7 +507,7 @@ export async function registerBeeGameLocalResources(
   const root = normalizeWorkspacePath(workspacePath)
   let manifest = await readBeeGameAssetManifest(root)
   if (options.projectTarget && manifest.project_target && !isDeepStrictEqual(options.projectTarget, manifest.project_target))
-    throw new Error('Registration cannot change the established project target')
+    throw new Error('Registration cannot change the established project target. Omit projectTarget or pass the unchanged target; use files in its supported formats.')
   for (const requirement of options.requirements ?? []) {
     const existing = manifest.requirements.find(item => item.id === requirement.id)
     if (existing && !isDeepStrictEqual(existing, requirement))
@@ -1327,7 +1327,7 @@ function assertFilenameFormatAllowed(
   const format = normalizeFormat(extname(filename).slice(1))
   if (!format || !allowed.has(format))
     throw new Error(
-      `Resource format is not supported by the target: ${filename}; extension=${format || '(none)'}; allowed=${[...allowed].join(', ')}. Shared owner must verify actual runtime support before correcting projectTarget; registration never adds formats automatically.`,
+      `Resource format is not supported by the target: ${filename}; extension=${format || '(none)'}; allowed=${[...allowed].join(', ')}. Use files in the listed formats. Registration cannot change an established projectTarget or add formats.`,
     )
 }
 

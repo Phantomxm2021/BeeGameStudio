@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { BeeGameBillingConfig } from '@bee-game-studio/beegame-billing-core/billing-config'
 import { decodeImageSettings, selectImageConfig, loadLocalImageConfig } from './config-store'
+import { CHATGPT_IMAGE_ENDPOINT } from './config'
+import { getUserDashboardDataRoot } from '../local-runtime-service'
+import { hasChatGPTAccount } from '../model-connections'
 
 type Facts = { source: 'local-platform' | 'service-platform'; serviceHttpStatus?: number;
   databaseHttpStatus?: number; databaseHost?: string; rowExists?: boolean }
@@ -48,7 +51,12 @@ export async function loadRuntimeImageConfig(dataRoot: string,
     try { config = selectImageConfig(decodeImageSettings(body.config)) }
     catch { return fail('config-decode-or-schema') }
   }
-  if (!config.apiKey) return fail('provider-key-missing')
+  if (config.provider === 'chatgpt-subscription') {
+    if (!config.subscriptionOwnerId || !config.responseModel || config.baseUrl !== CHATGPT_IMAGE_ENDPOINT || config.apiKey || config.upstreamApiKey)
+      return fail('subscription-config-invalid')
+    if (!hasChatGPTAccount(getUserDashboardDataRoot(dataRoot, config.subscriptionOwnerId)))
+      return fail('subscription-login-unavailable')
+  } else if (!config.apiKey) return fail('provider-key-missing')
   console.info('[image-generation]', { event: 'configuration-loaded', ...facts,
     provider: config.provider, model: config.model })
   return config

@@ -108,10 +108,11 @@ import {
 import { type BeeGameProjectMetadata } from './project-metadata-store'
 import { createR2ProjectAssetStorageFromEnv } from './r2-project-asset-storage'
 import { syncRuntimeSettingsToDedicatedRuntimeConfig } from './runtime-settings-store'
-import { imageConfigPatchSchema, imageProviderSchema, publicImageConfig } from './image-generation/config'
+import { CHATGPT_IMAGE_ENDPOINT, imageConfigPatchSchema, imageProviderSchema, publicImageConfig, updateImageConfig } from './image-generation/config'
 import { ImageAttemptStore } from './image-generation/attempt'
 import { ImageGenerationService } from './image-generation/service'
-import { createImageGenerationProvider } from './image-generation'
+import { createHostedImageGenerationProvider } from './image-generation'
+import { hasChatGPTAccount } from './model-connections'
 import { openImageGenerationAccess } from './image-generation/access'
 import { loadRuntimeImageConfig } from './image-generation/runtime-config'
 import { loadPersonalImageConnection, publicPersonalImageConnection, savePersonalImageConnection } from './image-generation/personal-connection'
@@ -565,9 +566,8 @@ export function createAgentWorkflowApp(
   }
   const billingConfig = resolveBeeGameBillingConfig()
   const imageGeneration = new ImageGenerationService(
-    new ImageAttemptStore(resolve(dashboardDataRoot, 'image-attempts'), {
-      generate: (config, request) => createImageGenerationProvider(config.provider, (url, init) => serviceFetch(url, init)).generate(config, request),
-    }),
+    new ImageAttemptStore(resolve(dashboardDataRoot, 'image-attempts'),
+      createHostedImageGenerationProvider(dashboardDataRoot, ((url, init) => serviceFetch(url, init)) as typeof fetch)),
     createImageBillingClient(billingConfig, (url, init) => serviceFetch(url, init)),
   )
   const proxyBillingRequest = (request: Request, path: string) =>
@@ -670,7 +670,7 @@ export function createAgentWorkflowApp(
         workspacePath: value.workspacePath, service: imageGeneration, source: personal.source,
         requiredQuality: value.visualHandoffVersion === 1 ? 'low' : undefined,
         screenOrientation: value.screenOrientation,
-        loadConfig: personal.source === 'byok' ? async () => personal.config :
+        loadConfig: personal.source !== 'platform' ? async () => personal.config :
           () => loadRuntimeImageConfig(dashboardDataRoot, { remote: Boolean(supabaseStore), billing: billingConfig },
             (url, init) => serviceFetch(url, init)) })
     },
@@ -1552,7 +1552,10 @@ export function createAgentWorkflowApp(
     const provider = imageProviderSchema.optional().safeParse(c.req.query('provider'))
     if (!provider.success) return c.json({ error: 'Invalid image provider' }, 400)
     try {
-      return c.json(publicImageConfig(await dashboardRepository.loadImageGenerationConfig(c.req.raw, provider.data)))
+      const config = await dashboardRepository.loadImageGenerationConfig(c.req.raw, provider.data)
+      return c.json({ ...publicImageConfig(config), ...(config.provider === 'chatgpt-subscription' ? {
+        subscriptionConnected: hasChatGPTAccount(getCurrentUserDataRoot(c.req.raw)),
+      } : {}) })
     } catch {
       return c.json({ error: 'Image settings could not be loaded; check storage and migration configuration' }, 503)
     }
@@ -1586,13 +1589,23 @@ export function createAgentWorkflowApp(
     const parsed = imageConfigPatchSchema.safeParse(body)
     if (!parsed.success) return c.json({ error: 'Invalid image provider settings' }, 400)
     try {
-      const saved = await dashboardRepository.saveImageGenerationConfig(c.req.raw, parsed.data)
+      let patch = parsed.data
+      const previous = await dashboardRepository.loadImageGenerationConfig(c.req.raw, patch.provider)
+      if ((patch.provider ?? previous.provider) === 'chatgpt-subscription') {
+        // Saving explicitly designates the current administrator, never a caller-supplied user ID.
+        const config = updateImageConfig(previous, { ...patch, subscriptionOwnerId: user.id })
+        if (config.baseUrl !== CHATGPT_IMAGE_ENDPOINT || !config.responseModel || config.apiKey || config.upstreamApiKey ||
+            !hasChatGPTAccount(getCurrentUserDataRoot(c.req.raw)))
+          return c.json({ error: 'Connect your ChatGPT account first; use the fixed endpoint and explicit models without API keys' }, 400)
+        patch = { ...patch, subscriptionOwnerId: user.id }
+      }
+      const saved = await dashboardRepository.saveImageGenerationConfig(c.req.raw, patch)
       await dashboardRepository.appendAuditEvent(c.req.raw, user, {
         actorId: user.id, action: 'image_generation.settings.updated',
         targetType: 'image_generation', targetId: 'platform',
         metadata: { provider: saved.provider, model: saved.model, keyChanged: 'apiKey' in parsed.data, upstreamKeyChanged: 'upstreamApiKey' in parsed.data },
       })
-      return c.json(publicImageConfig(saved))
+      return c.json({ ...publicImageConfig(saved), ...(saved.provider === 'chatgpt-subscription' ? { subscriptionConnected: true } : {}) })
     } catch {
       return c.json({ error: 'Image settings could not be saved; check secret encryption and storage configuration' }, 503)
     }

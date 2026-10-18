@@ -213,7 +213,19 @@ test('batch registration computes hashes, preserves web provenance and leaves re
     try { await produceResources(root, invalid) } catch (error) { diagnostic = String(error) }
     for (const term of ['bad-image', 'bad-font', 'wrong-name', 'wrong-font-id', 'png', 'woff2', 'allowed=json', 'no registry changes'])
       expect(diagnostic).toContain(term)
+    expect(diagnostic).toContain('Use files in the listed formats')
+    expect(diagnostic).toContain('Registration cannot change an established projectTarget or add formats')
+    expect(diagnostic).not.toContain('before correcting projectTarget')
     expect(await readFile(join(root, 'assets/asset-manifest.json'), 'utf8')).toBe(before)
+    expect(RESOURCE_HELP).toContain('projectTarget cannot be changed through registration')
+    expect(RESOURCE_HELP).toContain('supply files in its listed formats')
+    await expect(produceResources(root, { ...request, projectTarget: { ...fixture.project_target,
+      asset_format_capabilities: [...fixture.project_target!.asset_format_capabilities, 'woff2'] } }))
+      .rejects.toThrow('Omit projectTarget or pass the unchanged target; use files in its supported formats')
+    expect(await readBeeGameAssetManifest(root)).toEqual(manifest)
+    const { projectTarget: _target, ...withoutTarget } = request
+    expect((await produceResources(root, withoutTarget)).valid).toBe(true)
+    expect(await readBeeGameAssetManifest(root)).toEqual(manifest)
     invalid.resources[1]!.file_paths = ['assets/runtime/font.woff2', ...Array.from({ length: 300 }, (_, i) => 'assets/runtime/font-' + i + '.woff2')]
     try { await produceResources(root, invalid) } catch (error) { diagnostic = String(error) }
     expect(diagnostic).toContain('301 files with this unsupported extension')

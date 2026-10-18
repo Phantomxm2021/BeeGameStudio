@@ -76,6 +76,7 @@ function hasAccount(root: string, provider: 'claude' | 'chatgpt') {
     return provider === 'claude' ? Boolean(tokens?.accessToken && tokens?.refreshToken) : Boolean(tokens?.access_token && tokens?.refresh_token && tokens?.id_token)
   } catch { return false }
 }
+export function hasChatGPTAccount(root: string) { return hasAccount(root, 'chatgpt') }
 export function connectionStatus(root: string, config: PublicModelConfig) {
   const state = read(root)
   const connection = state.connections[config.id]

@@ -411,6 +411,44 @@ test('read-only frozen native model still self-passes, but independent contact e
   expect(await readFile(sceneUrl, 'utf8')).toBe(sceneBytes)
 })
 
+test('CLI reports every failed check without rerunning calculations or replacing prior output', async () => {
+  await fixture(async workspace => {
+    expect((await command(workspace, 'model.mjs', 'calculated.md')).code).toBe(0)
+    const original = await readFile(join(workspace, 'calculated.md'), 'utf8')
+    const checks = [
+      { name: 'Stock boundary', passed: false, details: 'Observed -2; minimum 0' },
+      { name: 'Passing check', passed: true, details: 'Do not include in failure output' },
+      { name: '行动约束', passed: false, details: '实际 7 次；上限 5 次' },
+    ]
+    const countedModel = `import {appendFile} from 'node:fs/promises';\n` + model.replace(
+      "const p = await readJson('parameters.json');",
+      "await appendFile('calls.txt', 'calculate\\n'); const p = await readJson('parameters.json');",
+    )
+    for (const independent of [false, true]) {
+      await writeFile(join(workspace, 'calls.txt'), '')
+      await writeFile(join(workspace, 'model.mjs'), independent ? countedModel : countedModel.replace(
+        "checks: [{name:'Legal spending', passed:stock >= 0 && states[2] === states[1],\n      details:JSON.stringify(states)}]",
+        'checks: ' + JSON.stringify(checks),
+      ))
+      await writeFile(join(workspace, 'verify.mjs'), `import {appendFile} from 'node:fs/promises';
+        export async function verify() {
+          await appendFile('calls.txt', 'verify\\n');
+          return {checks:${JSON.stringify(checks)},limitations:[]};
+        }`)
+      const result = await command(workspace, 'model.mjs', 'calculated.md', '--verify', 'verify.mjs')
+      const label = independent ? 'Independent verification' : 'Scenario check'
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(result.stderr.trim()).toBe([
+        `${label} failed: Stock boundary: Observed -2; minimum 0`,
+        `${label} failed: 行动约束: 实际 7 次；上限 5 次`,
+      ].join('\n'))
+      expect(await readFile(join(workspace, 'calls.txt'), 'utf8')).toBe(independent ? 'calculate\nverify\n' : 'calculate\n')
+      expect(await readFile(join(workspace, 'calculated.md'), 'utf8')).toBe(original)
+    }
+  })
+})
+
 test('failed scenarios, non-finite arithmetic and malformed tables cannot overwrite valid results', async () => {
   await fixture(async workspace => {
     await command(workspace, 'model.mjs', 'calculated.md')

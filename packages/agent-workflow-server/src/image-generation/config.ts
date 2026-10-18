@@ -2,7 +2,10 @@ import { z } from 'zod'
 import { CLOUDFLARE_INITIAL_FIXED_CREDITS, imagePricingSchema } from './pricing'
 
 export const DEFAULT_IMAGE_MODEL = 'gpt-image-2.5-flare'
-export const imageProviderSchema = z.enum(['openai', 'openrouter', 'vercel', 'cloudflare'])
+export const CHATGPT_IMAGE_ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses'
+export const imageSourceSchema = z.enum(['platform', 'byok', 'chatgpt-subscription'])
+export type ImageSource = z.infer<typeof imageSourceSchema>
+export const imageProviderSchema = z.enum(['openai', 'openrouter', 'vercel', 'cloudflare', 'chatgpt-subscription'])
 export type ImageProviderKind = z.infer<typeof imageProviderSchema>
 export const imageConfigSchema = z.object({
   provider: imageProviderSchema.default('openai'),
@@ -14,6 +17,9 @@ export const imageConfigSchema = z.object({
       ctx.addIssue({ code: 'custom', message: 'Remote providers require HTTPS' })
   }),
   model: z.string().trim().min(1).max(200).default(DEFAULT_IMAGE_MODEL),
+  responseModel: z.string().trim().min(1).max(200).optional(),
+  // Assigned by the administrator-only route, never by a generation caller.
+  subscriptionOwnerId: z.string().trim().min(1).max(200).optional(),
   apiKey: z.string().trim().max(8192).default(''),
   upstreamApiKey: z.string().trim().max(8192).default(''),
   billing: imagePricingSchema.nullable().default(null),
@@ -31,15 +37,16 @@ export const imageConfigPatchSchema = z.record(z.string(), z.unknown()).transfor
   }
   return Object.fromEntries(Object.keys(raw).map(key => [key, parsed.data[key as keyof ImageGenerationConfig]])) as Partial<ImageGenerationConfig>
 })
-export type PublicImageGenerationConfig = Omit<ImageGenerationConfig, 'apiKey' | 'upstreamApiKey'> & { hasApiKey: boolean; hasUpstreamApiKey: boolean; fixedPricePresets?: Record<string, number> }
+export type PublicImageGenerationConfig = Omit<ImageGenerationConfig, 'apiKey' | 'upstreamApiKey' | 'subscriptionOwnerId'> & { hasApiKey: boolean; hasUpstreamApiKey: boolean; fixedPricePresets?: Record<string, number> }
 export function publicImageConfig(config: ImageGenerationConfig): PublicImageGenerationConfig {
-  const { apiKey, upstreamApiKey, ...publicFields } = config
+  const { apiKey, upstreamApiKey, subscriptionOwnerId, ...publicFields } = config
   return { ...publicFields, hasApiKey: Boolean(apiKey), hasUpstreamApiKey: Boolean(upstreamApiKey),
     ...(config.provider === 'cloudflare' ? { fixedPricePresets: CLOUDFLARE_INITIAL_FIXED_CREDITS } : {}) }
 }
 export function defaultImageConfig(provider: ImageProviderKind) {
   const baseUrl = { openai: 'https://api.openai.com/v1/images/generations', openrouter: 'https://openrouter.ai/api/v1/images',
-    vercel: 'https://ai-gateway.vercel.sh/v1/images/generations', cloudflare: 'https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/run' }[provider]
+    vercel: 'https://ai-gateway.vercel.sh/v1/images/generations', cloudflare: 'https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/run',
+    'chatgpt-subscription': CHATGPT_IMAGE_ENDPOINT }[provider]
   return imageConfigSchema.parse({ provider, baseUrl,
     model: provider === 'openrouter' || provider === 'vercel' || provider === 'cloudflare' ? 'openai/' + DEFAULT_IMAGE_MODEL : DEFAULT_IMAGE_MODEL })
 }

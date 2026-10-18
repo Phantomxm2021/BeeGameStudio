@@ -326,12 +326,45 @@ test('project asset command keeps the generated sheet intact and writes frame me
     expect(help.stdout).toContain('separate part files and repacking are not required')
     expect(help.stdout).toContain('operation:inspect')
     expect(help.stdout).toContain('Alpha bounds do not identify objects')
+    expect(help.stdout).toContain('"frames":{"name":{"x":0,"y":0,"w":32,"h":32}}')
+    expect(help.stdout).toContain('output sidecar format, not input')
+    expect(help.stdout).toContain('integer source-image pixels from the top-left')
+    expect(help.stdout).toContain('Both inputs are project-relative files under assets/')
     const mark = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#30b464' } }).png().toBuffer()
     const sheet = await sharp({ create: { width: 32, height: 16, channels: 4,
       background: { r: 0, g: 0, b: 0, alpha: 0 } } })
       .composite([{ input: mark, left: 2, top: 2 }, { input: mark, left: 18, top: 2 }]).png().toBuffer()
     await writeFile(join(root, 'assets/generated/elements.png'), sheet)
     const spec = join(root, 'assets/generated/frames.json')
+    const example = JSON.parse(help.stdout.split('Atlas input: ')[1]!.split('. Frame values')[0]!)
+    // Adapt the documented rectangle to this smaller synthetic image.
+    example.frames.name.w = 12; example.frames.name.h = 12
+    await writeFile(spec, JSON.stringify(example))
+    const documented = await run(root, script, 'atlas', 'assets/generated/elements.png',
+      'assets/generated/frames.json', 'assets/runtime/example.png')
+    expect(documented.code, documented.stderr).toBe(0)
+    expect(JSON.parse(await readFile(join(root, 'assets/runtime/example.json'), 'utf8')))
+      .toEqual({ frames: { name: { frame: example.frames.name } } })
+    for (const [frames, expected] of [
+      [[{ name: 'button', x: 0, y: 0, w: 12, h: 12 }], 'Atlas input:'],
+      [{ button: { frame: { x: 0, y: 0, w: 12, h: 12 } } }, 'Invalid atlas frame fields: button'],
+      [{ button: { x: 0.5, y: 0, w: 12, h: 12 } }, 'must be integers'],
+      [{ button: { x: 24, y: 0, w: 12, h: 12 } }, 'PNG=32x16'],
+      [{ button: { x: 0, y: 0, w: 0, h: 12 } }, 'w/h > 0'],
+      [{ 'bad name': { x: 0, y: 0, w: 12, h: 12 } }, 'Invalid atlas frame name'],
+    ] as const) {
+      await writeFile(spec, JSON.stringify({ frames }))
+      const rejected = await run(root, script, 'atlas', 'assets/generated/elements.png',
+        'assets/generated/frames.json', 'assets/runtime/rejected.png')
+      expect(rejected.code).not.toBe(0)
+      expect(rejected.stderr).toContain(expected)
+      if (expected === 'Invalid atlas frame fields: button') {
+        expect(rejected.stderr).toContain('output sidecar format, not input')
+        expect(rejected.stderr).not.toContain('Out-of-bounds')
+      }
+      await expect(readFile(join(root, 'assets/runtime/rejected.png'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(join(root, 'assets/runtime/rejected.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
     await writeFile(spec, JSON.stringify({ frames: {
       button: { x: 0, y: 0, w: 12, h: 12 },
       icon: { x: 16, y: 0, w: 12, h: 12 },
@@ -367,6 +400,7 @@ test('project asset command keeps the generated sheet intact and writes frame me
     const invalid = await run(root, script, 'atlas', 'assets/generated/elements.png',
       'assets/generated/frames.json', 'assets/runtime/overlap.png')
     expect(invalid.code).not.toBe(0)
+    expect(invalid.stderr).toContain('Overlapping atlas frames: b')
     await expect(readFile(join(root, 'assets/runtime/overlap.png'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally { await rm(root, { recursive: true, force: true }) }
 })

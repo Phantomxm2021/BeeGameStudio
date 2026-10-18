@@ -16,6 +16,8 @@ const catalogUsage = 'Catalog accepts structured filter arrays: '+catalogFilterK
   '. No free-text query/search. Use {"filters":{"formats":["png"]},"limit":10,"cursor":"<returned nextCursor>"}; flat filter arrays with limit/cursor also work.'
   + ' Catalog returns items, total, facets and optional nextCursor. readyElementCount counts technically browsable files, not proven matches. Empty usageTags means unclassified, not unavailable; inspect or audition before choosing a game role.'
 
+const atlasInputFormat = 'Atlas input: {"frames":{"name":{"x":0,"y":0,"w":32,"h":32}}}. Frame values are flat rectangles; nested {frame:{x,y,w,h}} is the output sidecar format, not input.'
+
 const usage = `Usage: bun <this-file> <command> [arguments]
   catalog [request-json]                Browse library packs and available facets
   elements <pack-id> [request-json]      Browse a selected pack's elements
@@ -33,6 +35,7 @@ For UI reference boards replace prompt with uiReference: {viewport:{width,height
 For production UI skins replace prompt with uiAssets:{elements:[{id,description,width,height},...]}, purpose:production, existing requirementIds and referenceImagePath pointing to the selected UI design. Descriptions identify appearance/state in that design, not an invented visual direction. ui-assets-plan reads/hashes the actual reference and computes a shared transparent grid; generate accepts the same request. It does not generate automatically or assign frame coordinates. Keep live text/values/progress/hit areas in runtime UI; use existing media/resources for inspected named frames. Procedural UI remains supported, but this production path does not turn a reference board into a runtime atlas or certify visual fidelity.
   atlas <assets/sheet.png> <assets/frames.json> <assets/runtime/name.png>
                                          Publish named rectangles as a PNG + same-basename atlas JSON
+${atlasInputFormat} Coordinates are integer source-image pixels from the top-left; x/y >= 0, w/h > 0. Rectangles must fit the PNG and not overlap. Both inputs are project-relative files under assets/; output is a new PNG under assets/runtime/.
 For compatible small AI-generated elements, prefer one shared sheet request; use atlas to publish inspected rectangles, then resources.mjs to register the pair. atlas copies the PNG bytes unchanged; separate part files and repacking are not required for a usable intact sheet. generate returns an image, not measured frame metadata. Inspect complete artwork, state alignment and sampling gutters; nonoverlap alone does not prove suitability. atlas does not pack separate images or approve appearance. A full-screen reference board is not automatically a production sheet. Split generation for a concrete visual/use need, preserving planned atlas delivery.
 For read-only decoded alpha/bounds measurements (operation:inspect), or a demonstrated need for crop/resize/composition and packing separate sprites, use ${TOOL_CONFIG.mediaCommand ?? 'bun .beegame/delivery/media.mjs'} --help. Alpha bounds do not identify objects or automatically define safe crops. Its JSON request supports named crop regions, explicit filtering/padding and compatible atlas output; no package installation or custom PNG encoder is needed.
 Honor explicit user source choices. For common sounds, icons and environment assets, first consider suitable supplied or built-in licensed resources. Prefer existing complete animations when suitable; a generated sheet does not guarantee temporal continuity. Consider AI generation for distinctive artwork when existing candidates do not fit, not as the default for all core art. Use focused web sourcing for a concrete gap, verifying rights and download/format feasibility; stop when a suitable candidate is found. These are source choices, not a mandatory source-by-source tour. Procedurally replacing required core artwork remains a fallback requiring a concrete blocker and user authorization; simple controls, geometric effects and an explicitly chosen procedural aesthetic are different. The same atlas format supports retrieved and generated assets. Dynamic text and live geometry need not become images.
@@ -164,18 +167,20 @@ async function saveBytes(response, output, reservedFile) {
 function atlasFrames(value, width, height) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       !value.frames || typeof value.frames !== 'object' || Array.isArray(value.frames))
-    throw new Error('Frame spec must contain frames: { name: {x,y,w,h} }')
+    throw new Error(atlasInputFormat)
   const entries = Object.entries(value.frames)
   if (!entries.length || entries.length > 128) throw new Error('Atlas needs 1–128 named frames')
   const frames = {}
   const rectangles = []
   for (const [name, rectangle] of entries) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name) ||
-        !rectangle || typeof rectangle !== 'object' || Array.isArray(rectangle) ||
-        !['x', 'y', 'w', 'h'].every(key => Number.isSafeInteger(rectangle[key])) ||
-        rectangle.x < 0 || rectangle.y < 0 || rectangle.w < 1 || rectangle.h < 1 ||
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name))
+      throw new Error('Invalid atlas frame name: ' + name + '. Use letters, digits, underscores or hyphens, starting with a letter or digit.')
+    if (!rectangle || typeof rectangle !== 'object' || Array.isArray(rectangle) ||
+        !['x', 'y', 'w', 'h'].every(key => Number.isSafeInteger(rectangle[key])))
+      throw new Error('Invalid atlas frame fields: ' + name + '. x, y, w and h must be integers. ' + atlasInputFormat)
+    if (rectangle.x < 0 || rectangle.y < 0 || rectangle.w < 1 || rectangle.h < 1 ||
         rectangle.x + rectangle.w > width || rectangle.y + rectangle.h > height)
-      throw new Error('Invalid or out-of-bounds atlas frame: ' + name)
+      throw new Error(`Out-of-bounds atlas frame: ${name}; x=${rectangle.x}, y=${rectangle.y}, w=${rectangle.w}, h=${rectangle.h}; PNG=${width}x${height}. Require x/y >= 0, w/h > 0, x+w <= ${width}, y+h <= ${height}.`)
     for (const previous of rectangles)
       if (rectangle.x < previous.x + previous.w && previous.x < rectangle.x + rectangle.w &&
           rectangle.y < previous.y + previous.h && previous.y < rectangle.y + rectangle.h)
@@ -376,9 +381,9 @@ async function main() {
     if (!quote.available) throw new Error('AI image generation unavailable: ' + (quote.unavailableReason ?? 'check model, credentials and billing'))
     if (submittedRequest.uiAssets !== undefined && quote.referenceImageSupported !== true)
       throw Error('UI skins require a provider that accepts the selected design image; no generation was submitted')
-    if (quote.provider === 'cloudflare' && quote.billingSource !== 'external') {
+    if (['cloudflare', 'chatgpt-subscription'].includes(quote.provider) && quote.billingSource !== 'external') {
       if (!Number.isSafeInteger(quote.quotedCreditsMicro) || quote.quotedCreditsMicro <= 0)
-        throw new Error('Cloudflare image has no fixed Credit price for this quality and size')
+        throw new Error('Image has no fixed Credit price for this quality and size')
       console.error('Image price: ' + quote.quotedCreditsMicro / 1_000_000 + ' Credits; reserving before generation')
     }
     const output = await assetDestination(args[1])

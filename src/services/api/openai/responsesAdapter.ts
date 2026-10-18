@@ -494,8 +494,9 @@ export async function createChatGPTResponsesStream(params: {
   request: ResponsesRequest
   signal: AbortSignal
   fetchOverride?: typeof fetch
+  configDirectory?: string
 }): Promise<AsyncIterable<Record<string, unknown>>> {
-  const auth = await getValidChatGPTAuth()
+  const auth = await getValidChatGPTAuth(params.configDirectory)
   const fetchFn = params.fetchOverride ?? (globalThis.fetch as typeof fetch)
   const headers: Record<string, string> = {
     Authorization: `Bearer ${auth.accessToken}`,
@@ -516,13 +517,14 @@ export async function createChatGPTResponsesStream(params: {
       headers,
       body: JSON.stringify(params.request),
       signal: params.signal,
+      redirect: 'error',
     },
   )
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new Error(
+    throw Object.assign(new Error(
       `ChatGPT Responses API request failed (${response.status})${text ? `: ${text.slice(0, 500)}` : ''}`,
-    )
+    ), { status: response.status })
   }
   return parseSSE(response)
 }

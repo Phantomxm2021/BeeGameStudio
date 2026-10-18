@@ -22,6 +22,8 @@ export type ChatGPTAuthTokens = {
   accountId?: string
   lastRefresh?: string
 }
+// Shared platform image requests can reach the same login concurrently.
+const pendingRefreshes = new Map<string, Promise<ChatGPTAuthTokens>>()
 
 export type ChatGPTAuth = {
   accessToken: string
@@ -339,9 +341,12 @@ export async function removeChatGPTAuth(): Promise<void> {
   })
 }
 
-export async function getValidChatGPTAuth(): Promise<ChatGPTAuth> {
-  let tokens = await readStoredAuth(authFilePath())
-  if (!tokens && process.env.BGS_SUBPROCESS_ENV_SCRUB !== '1') {
+export async function getValidChatGPTAuth(configDirectory?: string): Promise<ChatGPTAuth> {
+  // An embedding server must select its authenticated user's store explicitly;
+  // never fall back to the machine owner's Codex account for that user.
+  const path = configDirectory === undefined ? authFilePath() : join(configDirectory, AUTH_FILE)
+  let tokens = await readStoredAuth(path)
+  if (!tokens && configDirectory === undefined && process.env.BGS_SUBPROCESS_ENV_SCRUB !== '1') {
     tokens = await readStoredAuth(codexAuthFilePath())
     if (tokens) {
       logForDebugging('[OpenAI] Using ChatGPT auth from Codex auth.json')
@@ -354,8 +359,21 @@ export async function getValidChatGPTAuth(): Promise<ChatGPTAuth> {
   }
   const expiresAt = getTokenExpiryMs(tokens.accessToken)
   if (expiresAt !== null && expiresAt <= Date.now() + REFRESH_SKEW_MS) {
-    tokens = await refreshTokens(tokens)
-    await saveStoredAuth(tokens)
+    let pending = pendingRefreshes.get(path)
+    if (!pending) {
+      const original = tokens
+      pending = (async () => {
+        const current = await readStoredAuth(path) ?? original
+        const expiry = getTokenExpiryMs(current.accessToken)
+        if (expiry !== null && expiry > Date.now() + REFRESH_SKEW_MS) return current
+        const refreshed = await refreshTokens(current)
+        await saveStoredAuth(refreshed, path)
+        return refreshed
+      })()
+      pendingRefreshes.set(path, pending)
+    }
+    try { tokens = await pending }
+    finally { if (pendingRefreshes.get(path) === pending) pendingRefreshes.delete(path) }
   }
   return {
     accessToken: tokens.accessToken,

@@ -20,7 +20,10 @@ async function choose(name: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getImageGenerationSettings).mockImplementation(async provider => provider && provider !== 'openai'
+  vi.mocked(getImageGenerationSettings).mockImplementation(async provider => provider === 'chatgpt-subscription'
+    ? { ...config, provider, baseUrl: 'https://chatgpt.com/backend-api/codex/responses', hasApiKey: false,
+      model: 'fixture-image', responseModel: 'fixture-response', subscriptionConnected: true }
+    : provider && provider !== 'openai'
     ? { ...config, provider, model: provider + '-model', baseUrl: 'https://' + provider + '.example/v1', hasApiKey: false,
       ...(provider === 'cloudflare' ? { fixedPricePresets: { 'low:1024x1024': 3, 'low:1024x1536': 4,
         'low:1536x1024': 4, 'medium:1024x1024': 8, 'medium:1024x1536': 10, 'medium:1536x1024': 10 } } : {}) }
@@ -111,5 +114,44 @@ describe('image settings', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '保存设置' })).toBeEnabled();
+  });
+
+  it('configures shared subscription fixed prices, no keys or invented USD rates, through explicit save only', async () => {
+    render(<Harness />);
+    await screen.findByDisplayValue(config.model);
+    await userEvent.type(screen.getByLabelText('API Key'), 'preserved-openai-draft');
+    await choose('ChatGPT subscription');
+    await screen.findByDisplayValue('fixture-response');
+    expect(screen.getByText('当前管理员的 ChatGPT 账户已连接')).toBeInTheDocument();
+    expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument();
+    expect(saveImageGenerationSettings).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('switch', { name: '配置图片计费（未配置时不允许提交生成）' }));
+    expect(screen.queryByLabelText('图片输出')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('high:1024x1024 Credits')).toHaveValue(null);
+    await userEvent.type(screen.getByLabelText('medium:1024x1024 Credits'), '3');
+    await choose('OpenAI');
+    expect(screen.getByLabelText('API Key')).toHaveValue('preserved-openai-draft');
+    await choose('ChatGPT subscription');
+    expect(screen.getByLabelText('medium:1024x1024 Credits')).toHaveValue(3);
+    await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(saveImageGenerationSettings).toHaveBeenCalledOnce());
+    const saved = vi.mocked(saveImageGenerationSettings).mock.calls[0][0];
+    expect(saved).toMatchObject({ provider: 'chatgpt-subscription', model: 'fixture-image', responseModel: 'fixture-response',
+      billing: { fixedCreditsByVariant: { 'medium:1024x1024': 3 } } });
+    expect(saved).not.toHaveProperty('apiKey'); expect(saved).not.toHaveProperty('subscriptionConnected');
+    expect(saved).not.toHaveProperty('subscriptionOwnerId');
+  });
+
+  it('links to the existing login and prevents saving an unconnected administrator subscription', async () => {
+    vi.mocked(getImageGenerationSettings).mockResolvedValue({ ...config, provider: 'chatgpt-subscription',
+      hasApiKey: false, responseModel: 'fixture-response', subscriptionConnected: false });
+    const onOpenModelConnections = vi.fn(), onStateChange = vi.fn();
+    render(<ImageGenerationSettingsPanel language="zh" onStateChange={onStateChange} onOpenModelConnections={onOpenModelConnections} />);
+    await screen.findByDisplayValue('fixture-response');
+    await userEvent.click(screen.getByRole('button', { name: '前往平台模型' }));
+    expect(onOpenModelConnections).toHaveBeenCalledOnce();
+    expect(onStateChange).toHaveBeenLastCalledWith({ busy: false, canSave: false });
+    expect(saveImageGenerationSettings).not.toHaveBeenCalled();
   });
 });

@@ -3,14 +3,15 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { decryptSecret, encryptSecret } from '../security/secret-crypto'
-import { defaultImageConfig, imageConfigSchema, imageProviderSchema, type ImageGenerationConfig } from './config'
+import { CHATGPT_IMAGE_ENDPOINT, defaultImageConfig, imageConfigSchema, imageProviderSchema, imageSourceSchema, type ImageGenerationConfig } from './config'
 
-const sourceSchema = z.enum(['platform', 'byok'])
+const sourceSchema = imageSourceSchema
 const inputSchema = z.object({
   source: sourceSchema,
   provider: imageProviderSchema.optional(),
   baseUrl: z.string().optional(),
   model: z.string().optional(),
+  responseModel: z.string().optional(),
   apiKey: z.string().optional(),
   upstreamApiKey: z.string().optional(),
 }).strict()
@@ -33,14 +34,26 @@ export function loadPersonalImageConnection(root: string): Connection {
 
 export function publicPersonalImageConnection(connection: Connection) {
   const { apiKey, upstreamApiKey, provider, baseUrl, model } = connection.config
-  return { source: connection.source, provider, baseUrl, model: apiKey ? model : '',
+  return { source: connection.source, provider, baseUrl, model: apiKey || connection.source === 'chatgpt-subscription' ? model : '',
+    ...(connection.source === 'chatgpt-subscription' ? { responseModel: connection.config.responseModel } : {}),
     hasApiKey: Boolean(apiKey), hasUpstreamApiKey: Boolean(upstreamApiKey) }
 }
 
 export function savePersonalImageConnection(root: string, input: unknown) {
   const value = inputSchema.parse(input)
+  if (value.provider === 'chatgpt-subscription') throw new Error('Shared subscription is a platform-only provider')
   const previous = loadPersonalImageConnection(root)
   let config = previous.config
+  if (value.source === 'chatgpt-subscription') {
+    if (value.apiKey || value.upstreamApiKey || value.provider && value.provider !== 'openai' ||
+        value.baseUrl && value.baseUrl !== CHATGPT_IMAGE_ENDPOINT)
+      throw new Error('Subscription images use the existing account and fixed endpoint, not provider keys')
+    const sameSource = previous.source === value.source
+    config = imageConfigSchema.parse({ provider: 'openai', baseUrl: CHATGPT_IMAGE_ENDPOINT,
+      model: value.model?.trim() || (sameSource ? config.model : ''),
+      responseModel: value.responseModel?.trim() || (sameSource ? config.responseModel : ''),
+      apiKey: '', upstreamApiKey: '', billing: null })
+  }
   if (value.source === 'byok') {
     const provider = value.provider ?? config.provider
     const baseUrl = value.baseUrl?.trim() ?? config.baseUrl
