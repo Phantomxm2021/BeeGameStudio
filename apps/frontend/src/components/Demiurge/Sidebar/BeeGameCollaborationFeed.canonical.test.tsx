@@ -231,9 +231,15 @@ it('shows native context compaction as a live marker and then a completed separa
   const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[marker]} isLoading lang="zh" />);
   expect(screen.getByTestId('beegame-compaction-marker')).toHaveTextContent('正在压缩上下文');
   expect(screen.getByTestId('beegame-compaction-marker')).toHaveAttribute('role', 'status');
-  rerender(<BeeGameCollaborationFeed messages={[{ ...marker, content: 'compacted', streamStatus: 'complete' }]} lang="zh" />);
+  expect(screen.queryByTestId('beegame-loading-message')).not.toBeInTheDocument();
+  rerender(<BeeGameCollaborationFeed messages={[{ ...marker, content: 'compacted', streamStatus: 'complete' }]} isLoading lang="zh" />);
   expect(screen.getByTestId('beegame-compaction-marker')).toHaveTextContent('上下文已自动压缩');
   expect(screen.getByTestId('beegame-compaction-marker')).not.toHaveAttribute('role');
+  expect(screen.getByTestId('beegame-loading-message')).toBeInTheDocument();
+  rerender(<BeeGameCollaborationFeed messages={[marker, {
+    id: 'new-request', sender: 'user', content: '继续处理', timestamp: marker.timestamp + 1,
+  }]} isLoading lang="zh" />);
+  expect(screen.getByTestId('beegame-loading-message')).toBeInTheDocument();
 });
 
 it('renders delivery milestone and stop markers as separators', () => {

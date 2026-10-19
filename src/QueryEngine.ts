@@ -670,10 +670,26 @@ export class QueryEngine {
       })
     }
 
+    // The input is already persisted above. Acknowledge it before query()
+    // can block on compaction so SDK hosts can attribute live status events
+    // without waiting for the first model response or compact boundary.
+    for (const msgToAck of messagesToAck) {
+      if (msgToAck.type === 'user') {
+        yield {
+          type: 'user',
+          message: msgToAck.message,
+          session_id: getSessionId(),
+          parent_tool_use_id: null,
+          uuid: msgToAck.uuid,
+          timestamp: msgToAck.timestamp,
+          isReplay: true,
+        } as unknown as SDKUserMessageReplay
+      }
+    }
+
     // Track current message usage (reset on each message_start)
     let currentMessageUsage: NonNullableUsage = EMPTY_USAGE
     let turnCount = 1
-    let hasAcknowledgedInitialMessages = false
     // Track structured output from StructuredOutput tool calls
     let structuredOutputFromTool: unknown
     const structuredOutputCallIds = new Set<string>()
@@ -747,24 +763,6 @@ export class QueryEngine {
             void recordTranscript(messages)
           } else {
             await recordTranscript(messages)
-          }
-        }
-
-        // Acknowledge initial user messages after first transcript recording
-        if (!hasAcknowledgedInitialMessages && messagesToAck.length > 0) {
-          hasAcknowledgedInitialMessages = true
-          for (const msgToAck of messagesToAck) {
-            if (msgToAck.type === 'user') {
-              yield {
-                type: 'user',
-                message: msgToAck.message,
-                session_id: getSessionId(),
-                parent_tool_use_id: null,
-                uuid: msgToAck.uuid,
-                timestamp: msgToAck.timestamp,
-                isReplay: true,
-              } as unknown as SDKUserMessageReplay
-            }
           }
         }
       }

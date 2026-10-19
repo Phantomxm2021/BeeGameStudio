@@ -641,6 +641,8 @@ export const BeeGameCollaborationFeed = memo(({
     const latestResponseIndex = entries.reduce((last, entry, index) => entry.kind === 'response' ? index : last, -1);
     const latestUserIndex = entries.reduce((last, entry, index) => entry.kind === 'user' ? index : last, -1);
     const activeResponseIndex = latestResponseIndex > latestUserIndex ? latestResponseIndex : -1;
+    const isCompacting = entries.some((entry, index) => index > latestUserIndex && entry.kind === 'context' &&
+        entry.message.taskKind === 'context_compaction' && entry.message.streamStatus === 'streaming');
     const latestUserMessageId = [...entries].reverse().find(entry => entry.kind === 'user')?.message.id;
     const currentDetail = useMemo(() => {
         if (!detail) return null;
@@ -757,7 +759,7 @@ export const BeeGameCollaborationFeed = memo(({
                     )}
                 </Fragment>;
             })}
-            {isLoading && !hasStreamingMessage && activeResponseIndex < 0 ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><ReasoningText phrases={[text.thinkingActive || text.aiProcessing || '']} variant="scramble" /></MessageContent></Message> : null}
+            {isLoading && !isCompacting && !hasStreamingMessage && activeResponseIndex < 0 ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><ReasoningText phrases={[text.thinkingActive || text.aiProcessing || '']} variant="scramble" /></MessageContent></Message> : null}
         </MessageGroup>
         <Drawer
             open={Boolean(detail)}
