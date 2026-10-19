@@ -228,3 +228,23 @@ test('deployed thin entry uses the installed dependency closure without package 
     measurements: [{ region: { left: 0, top: 0, width: 8, height: 12 }, hasAlpha: true }] })
   expect((await readdir(join(root, 'assets'))).sort()).toEqual(before)
 }, 30_000)
+
+
+test('alpha inspection distinguishes transparent holes and opaque coverage in the same composition',async()=>{
+  const root=await fixture()
+  await mkdir(join(root,'assets/runtime'))
+  await writeFile(join(root,'assets/runtime/far.png'),await sharp({create:{width:2,height:1,channels:3,background:'#0000ff'}}).png().toBuffer())
+  await writeFile(join(root,'assets/runtime/near.png'),await sharp(Buffer.from([255,0,0,255,0,0,0,0]),{raw:{width:2,height:1,channels:4}}).png().toBuffer())
+  const request={operation:'inspect',inputs:[{input:'assets/runtime/far.png'},{input:'assets/runtime/near.png'}],alphaThreshold:0} as const
+  const inspected=await produceMedia(root,request,sharp)
+  expect(inspected).toMatchObject({measurements:[{hasAlpha:false,visiblePixels:2},{hasAlpha:true,visiblePixels:1}]})
+  await produceMedia(root,{operation:'images',jobs:[{input:'assets/runtime/far.png',output:'assets/composite.png',
+    overlays:[{input:'assets/runtime/near.png',left:0,top:0}]}]},sharp)
+  const visible=await sharp(join(root,'assets/composite.png')).ensureAlpha().raw().toBuffer()
+  expect([...visible]).toEqual([255,0,0,255,0,0,255,255])
+  await writeFile(join(root,'assets/runtime/near.png'),await sharp({create:{width:2,height:1,channels:3,background:'#ff0000'}}).png().toBuffer())
+  expect(await produceMedia(root,request,sharp)).toMatchObject({measurements:[{hasAlpha:false,visiblePixels:2},{hasAlpha:false,visiblePixels:2}]})
+  await produceMedia(root,{operation:'images',jobs:[{input:'assets/runtime/far.png',output:'assets/covered.png',
+    overlays:[{input:'assets/runtime/near.png',left:0,top:0}]}]},sharp)
+  expect([...await sharp(join(root,'assets/covered.png')).ensureAlpha().raw().toBuffer()]).toEqual([255,0,0,255,255,0,0,255])
+})

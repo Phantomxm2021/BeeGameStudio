@@ -175,11 +175,15 @@ describe('skill search prefetch', () => {
       ['gameplay-programmer', 'complete TECHNICAL_DESIGN.md during the eight-document stage',
         'Later visual/resource/UI/Scene outputs revise this same design'],
       ['game-plan-execution', 'BGS technical design and tasks are completed in the eight-document stage',
-        'reconcile affected task inputs with actual visual/resource/UI/Scene outputs in that same plan'],
+        'Retain concise progress, result paths and the mandatory points each result covers there'],
     ]) {
       const skill = commands.find(item => item.name === 'bgs-builtins:' + name)
-      if (skill?.type !== 'prompt') throw new Error(name + ' is not model-invocable')
-      const prompt = JSON.stringify(await skill.getPromptForCommand('', unusedContext))
+      if (skill?.type !== 'prompt' || !skill.skillRoot) throw new Error(name + ' is not model-invocable or has no source root')
+      const blocks = await skill.getPromptForCommand('', unusedContext)
+      const prompt = blocks.filter(block => block.type === 'text').map(block => block.text).join('\n')
+      // Verify that the native entry delivers the complete current method,
+      // not an old summary; this does not certify model compliance.
+      expect(prompt).toContain(parseFrontmatter(readFileSync(join(skill.skillRoot, 'SKILL.md'), 'utf8')).content)
       expect(prompt).toContain(timing!)
       expect(prompt).toContain(revision!)
       expect(prompt).not.toContain('Keep early technical notes as drafts')

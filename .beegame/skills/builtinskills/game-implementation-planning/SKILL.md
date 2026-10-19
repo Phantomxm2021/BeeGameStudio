@@ -18,7 +18,7 @@ Use for a multi-step game implementation once the relevant design or feature req
 
 Consolidate implementation tasks in TECHNICAL_DESIGN.md and its existing implementationItems index during the eight-document stage; professional records remain their design sources, not separate development backlogs. Map the owning files and cross-task interfaces before listing tasks. Share interface definitions once: producer/consumer, action or state names, inputs/outputs and consequential types/units. Reference existing definitions rather than inventing a general event framework or specifying every function. Later visual/resource/Scene/UI production updates affected references and decisions in this plan from actual outputs; preserve unaffected task IDs and content.
 
-Split by a result that can be implemented and checked: a reusable foundation or a player-visible behavior are both valid. Do not bundle all UI/gameplay into one task or split every function/field. Fold scaffolding into the task needing it. Order tasks by actual dependencies and name the outputs each consumer needs. A task need not launch a complete game independently; code checks can establish a foundation while visual/interaction completion needs integration observations.
+Split by an independently implementable and checkable result: a reusable foundation or a player-visible behavior are both valid. Modules may organize the plan, but their names alone do not define execution tasks. Group coupled work; split independently verifiable outcomes without prescribing a task count or one task per function/field. Fold scaffolding into its consumer. Order tasks by actual dependencies and name their needed outputs. A task need not launch a complete game independently; foundations and presentation need their applicable checks.
 
 For each task, record only what another implementer would otherwise have to guess:
 
@@ -26,12 +26,12 @@ For each task, record only what another implementer would otherwise have to gues
 Task: <stable task ID and observable result, not “work on UI”>
 Sources: <owner clauses/sections and available paths/IDs/pictures; identify unproduced inputs as planned>
 Files/interfaces: <owning code, consumed data and shared interface references>
-Behavior: <trigger, state change and relevant failure/repeat/reset boundaries>
-Check: <focused check or runtime observation, expected result and what it covers>
+Behavior: <list the mandatory outcomes from this project's sources, including applicable trigger/state/feedback and boundary conditions>
+Check: <for those outcomes: conditions/actions -> observable expected results, applicable test/inspection/runtime method and its coverage>
 Depends on: <task IDs or existing capabilities, and actual outputs needed>
 ```
 
-For example, “restart a run” consumes the restart rule, initial configuration and result-screen action binding, calls the shared new-run initialization and clears applicable old timers/listeners/callbacks. Its check observes restarting after an ended run and repeating that action without old-state effects. Name initialization and action-wiring dependencies. A shared Scene loader can be a separate foundation when several tasks need it; “create folders” is not an implementation outcome.
+Use concise points within Behavior and Check to keep required details visible; share original numeric tables and appearance definitions by reference. Map each mandatory point to its source and a check covering it; one check may cover several points. Name the applicable professional Skill when a task needs a specialist decision, rather than listing every Skill for every task. Interface names, source values and expected results must be usable without inventing product decisions. Do not write full implementations into the plan.
 
 For a consequential audiovisual uncertainty, let the next useful slice expose the actual resource, scene/UI and action feedback together before duplicating that treatment across similar content. Inspect the uncertainty while it is still cheap to correct, not only after bulk implementation. Use the selected designs and corresponding prepared resources; this does not add a prototype/approval stage or replace final scope coverage.
 
@@ -39,7 +39,7 @@ Keep code and checks proportional. Use focused tests for deterministic rules and
 
 ## Review the plan before using it
 
-- Compare the task set back to the original confirmed scope and all applicable selected inputs, not just registered output IDs. Every necessary behavior, screen/state, Scene, resource use and sound treatment needs an implementing task. Existing exclusions/deferments must trace to user authorization; unresolved inputs remain explicit gaps before use. Structural coverage cannot certify semantic completeness.
+- Walk the original confirmed requirements and applicable professional source sections, including selected designs and produced inputs when available. Locate each mandatory outcome in a task's Behavior and Check; a task citing a whole document or output ID alone is not coverage. Check the reverse direction too: task outcomes come from an authorized source, not a template. Carry applicable global constraints across tasks without copying them into each one. Keep omissions and unresolved inputs explicit; exclusions/deferments require user authorization. Revise affected tasks as production inputs arrive. Structural coverage cannot certify semantic completeness.
 - Neighboring tasks agree on IDs, coordinates, units, types, resource paths, and interface names. No task assumes output that an earlier task does not produce.
 - Each task has a meaningful completion check. Replace vague steps such as “handle edge cases” with the particular case and expected result.
 - The plan is shorter than the work it guides. If it becomes a second set of eight documents or a transcript of code to type, consolidate it.

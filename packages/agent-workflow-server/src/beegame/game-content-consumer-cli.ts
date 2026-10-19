@@ -17,7 +17,7 @@ export const CONTENT_CONSUMER_API = {
     signature: 'await createProductionUiSurface(host: HTMLElement) -> {render, dispose}',
     render: 'surface.render(data, {width,height}, {state?, assets?, fonts?, onAction?, camera?}) -> resolved geometry array',
     state: 'Record<string, unknown>; bindings.text/enabled read keys here. enabled activates/hides a subtree, not a visible control\'s disabled/interactable state. widthRatio accepts 0..1 for a fixed-width fill (including responsive fixed sizes; no stretch); styleColor binds text color or non-text backgroundColor. All use shared layout; invalid/missing values fail. onAction(action: string, nodeId: string) handles actions.click.',
-    assets: 'Use loadProductionResources(manifestUrl, documents, fetcher?) -> {assets,fonts,resourceUrl,dispose}. It reads the existing modular manifest and decodes referenced images/fonts; named frames/member aliases use the same editor keys. Call dispose on teardown. Manual maps remain supported; explicit members/frames must resolve, not fall back.',
+    assets: 'loadProductionResources(manifestUrl, documents, fetcher?) -> {assets,fonts,resourceUrl,dispose} decodes manifest images/fonts with editor frame/member keys. Dispose on teardown. Manual maps supported; explicit members/frames must resolve. Use assetRef/data.frame for button skin; text/actions stay live.',
     lifecycle: 'render replaces nodes; call it again with changed data/state/viewport. No update/setState/element lookup methods. Use host.querySelector with [data-node-id] for observations. dispose removes the surface.',
   },
   documents: {

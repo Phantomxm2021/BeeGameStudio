@@ -509,6 +509,9 @@ test('consumer compatibility is batched/read-only and installation never overwri
     expect(api.code,api.stderr).toBe(0)
     const reference=JSON.parse(api.stdout)
     expect(reference.createProductionUiSurface.lifecycle).toContain('No update/setState')
+    expect(reference.createProductionUiSurface.assets).toContain('text/actions stay live')
+    expect(reference.createProductionUiSurface).not.toHaveProperty('skinButtonExample')
+    expect(api.stdout).not.toContain('#38e8ff')
     expect(reference.documents.fetchStartupContentDocuments).toContain('document[] (not a Map)')
     expect(reference.scene.sceneWorldTransforms2d).toContain('{poses: Map')
     expect(reference.scene.sceneWorldTransforms2d).toContain('[a,b,c,d,tx,ty]')
@@ -829,6 +832,15 @@ test('optional Preview is published to the bound native session, lazy help works
     expect(tools.turnContext.length).toBeLessThan(2600)
     expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('POST /preview')
     expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('--snapshot development|production')
+    const help=(await command(root,tools.directory,'preview.mjs','--help')).stdout
+    expect(help).toContain('--keyboard-sample <JSON>')
+    expect(help).toContain('--countdown-blur-sample <JSON>')
+    expect(help).toContain('--sprite-sample <sheet.png>')
+    for(const script of ['```js','data-node-id="title"','captureFrame("playing")',
+      'Click start, observe countdown','key down/hold/up','asserts frame coverage, pause and resume'])
+      expect(help).not.toContain(script)
+    expect(help).toContain('Exit code is not test quality')
+
     const diagnostic=await command(root,tools.directory,'preview.mjs','--client')
     expect(diagnostic.code).toBe(0)
     const client=JSON.parse(diagnostic.stdout)
@@ -904,3 +916,47 @@ test('technical planning remains readable before its document/index exists and m
     await expect(access(join(root, 'docs/TECHNICAL_DESIGN.md'))).rejects.toThrow()
   } finally { await rm(root, {recursive:true,force:true}) }
 })
+
+
+test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('Preview capture helper retains two actual UI states in one offline playtest',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-visual-example-')))
+  let starts=0
+  const game=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response(
+    '<!doctype html><body style="background:#123;color:white"><h1 data-node-id="title">Fixture menu</h1><button data-node-id="play">Play</button><h1 data-node-id="hud" hidden>Fixture playing</h1><script>document.querySelector("button").onclick=()=>{document.querySelector("[data-node-id=title]").hidden=true;document.querySelector("button").hidden=true;document.querySelector("[data-node-id=hud]").hidden=false;document.body.style.background="#345"}</script>',
+    {headers:{'content-type':'text/html'}})})
+  let state={status:'idle',url:''}
+  const preview=openPreviewTestAccess({start:async()=>{starts++;return state={status:'running',url:game.url.origin}},
+    status:()=>state,stop(){},browser:createPreviewTestBrowser()})
+  const tools=await openAgentTools({workspacePath:root,sessionId:'visual-example',getAuthToken:()=>undefined,openPreview:()=>preview})
+  try {
+    // Synthetic input belongs to the test, not the general Preview help.
+    const script=join(root,'visual.mjs');await writeFile(script,`
+      const {withPlayCapture}=await import(process.env.BEEGAME_PREVIEW_TEST_MODULE);
+      const capture=await withPlayCapture({mode:'production',viewport:{width:1280,height:720}},async({gameFrame,captureFrame,runtimeErrors})=>{
+        await gameFrame.locator('[data-node-id="title"]').waitFor({state:'visible'});
+        await captureFrame('start');
+        await gameFrame.locator('[data-node-id="play"]').click();
+        await gameFrame.locator('[data-node-id="hud"]').waitFor({state:'visible'});
+        await captureFrame('playing');
+        return {runtimeErrors};
+      });
+      console.log(JSON.stringify(capture));`)
+    const child=Bun.spawn([Bun.which('node')!,join(root,tools.directory,'preview.mjs'),'--run',script],{
+      cwd:root,env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,
+        BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'visual-example'),
+        BEEGAME_PREVIEW_TEST_MODULE:new URL('./preview-test-client.mjs',(await sharedContentChecker()).moduleUrl).href,BEEGAME_PLAYWRIGHT_MODULE:sharedPlaywright().moduleUrl},stdout:'pipe',stderr:'pipe'})
+    const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
+    const receipt=JSON.parse(stdout)
+    const driverError=receipt.stderrPath?await readFile(join(root,receipt.stderrPath),'utf8'):''
+    expect(code,stderr+'\n'+stdout+'\n'+driverError).toBe(0)
+    const capture=JSON.parse(await readFile(join(root,receipt.stdoutPath),'utf8'))
+    expect(starts).toBe(1)
+    expect(capture.quality).toBe('unverified')
+    expect(capture.runtimeErrors).toMatchObject({pageErrors:0,consoleErrors:0,failedRequests:0,httpErrors:0})
+    expect(capture.frames.map((frame:any)=>frame.label)).toEqual(['start','playing'])
+    const images=await Promise.all(capture.frames.map((frame:any)=>readFile(join(root,frame.path))))
+    for(const image of images){expect(image.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');expect(image.readUInt32BE(16)).toBe(1280);expect(image.readUInt32BE(20)).toBe(720)}
+    expect(createHash('sha256').update(images[0]).digest('hex')).not.toBe(createHash('sha256').update(images[1]).digest('hex'))
+    expect(JSON.parse(await readFile(join(root,capture.directory,'observation.json'),'utf8')).frames).toEqual(capture.frames)
+  } finally {await tools.close();game.stop(true);await rm(root,{recursive:true,force:true})}
+},30000)
