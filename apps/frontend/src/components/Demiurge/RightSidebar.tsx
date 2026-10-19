@@ -732,14 +732,6 @@ export function RightSidebar({
 
                     <WorkflowRecoveryNotice key={`workflow-recovery:${projectId}`} projectId={projectId} lang={lang}
                         refreshKey={`${isLoading}:${isStopping}:${isRuntimeBusy}`} failed={projectStatus?.phase === 'paused' && projectStatus.blocked} onBlockedChange={setWriterBlocked} />
-                    {!canRetryModel && projectStatus?.phase === 'paused' && projectStatus.blocked && onContinueTask &&
-                        !isAgentWorking && <div role="status" className="border-b border-[var(--border)] px-4 py-3 text-sm">
-                            <p>{lang.startsWith('zh') ? '任务未完成，已有进度保留。继续会发起新的模型请求。' : 'The task is unfinished. Saved progress is retained. Continuing sends a new model request.'}</p>
-                            <button type="button" className="mt-2" disabled={!canSendMessage || writerBlocked || isStopping || isComposerLocked || waitingPermission.isBlockingChat}
-                                onClick={() => void onContinueTask()}>
-                                {lang.startsWith('zh') ? '继续原任务' : 'Continue task'}
-                            </button>
-                        </div>}
                     {/* Content Area */}
                     <TabsContent key={projectId} value="chat" keepMounted className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto data-[hidden]:hidden">
                             <ChatPanel 

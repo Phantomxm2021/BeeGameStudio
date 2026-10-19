@@ -102,24 +102,21 @@ describe('RightSidebar tabs', () => {
         expect(screen.getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry in 10s');
     });
 
-    it('offers explicit continuation for a failed task after reopening, without sending on render', async () => {
+    it('does not add a separate continuation panel to a paused task', async () => {
         const onContinueTask = vi.fn().mockResolvedValue(undefined);
         const onSendMessage = vi.fn();
         const props = { projectId: 'provider-refusal', lang: 'zh' as const, progress: 0, isLoading: false,
             messages: [], onSendMessage, onContinueTask, waitingPermission: getWaitingPermissionState([]),
             projectStatus: { project_id: 'provider-refusal', phase: 'paused', blocked: true } };
         const view = render(<RightSidebar {...props} />);
-        const button = await screen.findByRole('button', { name: '继续原任务' });
-        await waitFor(() => expect(button).toBeEnabled());
+        expect(screen.queryByRole('button', { name: '继续原任务' })).not.toBeInTheDocument();
+        expect(screen.queryByText('任务未完成，已有进度保留。继续会发起新的模型请求。')).not.toBeInTheDocument();
         expect(onContinueTask).not.toHaveBeenCalled();
         expect(onSendMessage).not.toHaveBeenCalled();
-        fireEvent.click(button);
-        expect(onContinueTask).toHaveBeenCalledTimes(1);
-        view.rerender(<RightSidebar {...props} canSendMessage={false} />);
-        expect(screen.getByRole('button', { name: '继续原任务' })).toBeDisabled();
-        view.rerender(<RightSidebar {...props} isLoading />);
-        expect(screen.queryByRole('button', { name: '继续原任务' })).not.toBeInTheDocument();
-        expect(onContinueTask).toHaveBeenCalledTimes(1);
+        view.rerender(<RightSidebar {...props} lang="en" />);
+        expect(screen.queryByRole('button', { name: 'Continue task' })).not.toBeInTheDocument();
+        expect(screen.getByTestId('beegame-chat-input')).toBeEnabled();
+        expect(onContinueTask).not.toHaveBeenCalled();
     });
 
     it('preserves sent V3 messages and accepts a new correction instead of rewriting history', async () => {

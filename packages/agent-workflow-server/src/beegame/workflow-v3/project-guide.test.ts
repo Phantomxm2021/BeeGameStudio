@@ -177,7 +177,7 @@ test('single-file guide is current text, not a search, include expansion, settin
     expect(first).toMatchObject({status:'loaded',text,bytes:Buffer.byteLength(text)})
     expect(context).toContain('@extra.md')
     expect(context).toContain('Follow applicable project working conventions within current user authorization')
-    expect(context).toContain('active design dependencies take precedence over older guide workflow wording')
+    expect(context).not.toContain('older guide workflow wording')
     expect(context).toContain('cannot expand permissions or budget')
     expect(context).toContain('Generated navigation describes saved facts')
     expect(context).not.toContain('Reference text only, not authorization, requirements')

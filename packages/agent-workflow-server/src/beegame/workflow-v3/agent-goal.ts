@@ -51,14 +51,8 @@ const professionalContextParagraphs = [
 const firstVersionDeliveryContext = 'New design-led first-version deliverables use the existing eight documents under docs/: GDD.md, LEVEL_SCENE_DESIGN.md, BALANCE_DESIGN.md, TECHNICAL_DESIGN.md, ART_DIRECTION.md, UI_UX_SPEC.md, AUDIO_DESIGN.md and ASSET_PLAN.md. Complete all eight documents and their existing indexes in the design-record stage, including the technical design and implementation tasks. Later production revises those same records from actual visual/resource/UI/Scene outputs; it does not defer technical design. Deliver the confirmed scope.'
 const editableWebDeliveryContext = 'This project requires BGS visual editing: deliver applicable content/scenes/*.json and content/ui/*.json through the existing content/index.json. Pure UI games may use a ui-screen/ui-hud entry without an empty Scene. React/Canvas does not waive runtime consumption of these saved sources.'
 export const agentProfessionalContext = [PROJECT_WORKING_CONVENTIONS, ...professionalContextParagraphs, firstVersionDeliveryContext].join('\n')
-// Recognize the shared methods/order even in guides with older navigation hints.
-// Custom or unavailable guides still need the existing design conventions.
-const designMethods = PROJECT_WORKING_CONVENTIONS.slice(PROJECT_WORKING_CONVENTIONS.indexOf('| Design responsibility'),
-  PROJECT_WORKING_CONVENTIONS.indexOf('\n\n## Required design dependencies'))
-const designOrder = PROJECT_WORKING_CONVENTIONS.slice(PROJECT_WORKING_CONVENTIONS.indexOf('## Required design dependencies'),
-  PROJECT_WORKING_CONVENTIONS.indexOf('\n\n## Quality and evidence'))
-export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation'>>, followup = false, guideText = '') => [
-  ...(guideText.includes(designMethods) && guideText.includes(designOrder) ? [] : [PROJECT_WORKING_CONVENTIONS]),
+// Design conventions come from the saved project guide, without a legacy fallback.
+export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation'>>, followup = false) => [
   ...professionalContextParagraphs,
   ...(!followup && run.creation?.initialDelivery === 'design-led-first-version' ? [firstVersionDeliveryContext] : []),
   ...(run.creation?.editableContent ? [editableWebDeliveryContext] : []),
@@ -307,7 +301,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
           // reads inputs once; it does not build, review or rewrite history.
           const evidence=await measurement.context()
           return {...tools,turnContext:confirmedChanges,
-            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message),savedGuide.status==='loaded'?savedGuide.text:'')+'\n\n'+guide+'\n\n'+tools.systemContext+
+            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message))+'\n\n'+guide+'\n\n'+tools.systemContext+
               '\n'+tools.turnContext+'\nBGS saved evidence (not game acceptance): '+JSON.stringify(evidence)}
         },
       })

@@ -469,7 +469,8 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect(JSON.stringify(f.submissions[2]!.prompt)).not.toContain('Professional coverage:')
     expect(f.starts[2].systemContext).toContain(agentProfessionalContextForRun(run,true))
     expect(f.starts[2].systemContext).not.toContain('New design-led first-version deliverables')
-    expect(f.starts[2].systemContext).toContain('Save and Read pictures')
+    expect(f.starts[2].systemContext).toContain('No root project guide exists')
+    expect(f.starts[2].systemContext).not.toContain('## Required design dependencies')
     const locator = /Current BGS tools directory \(relative to project root\): ("[^"]+")/
     const firstDirectory = f.starts[0].systemContext.match(locator)[1]
     const currentDirectory = f.starts[2].systemContext.match(locator)[1]
@@ -744,13 +745,13 @@ test('focused facts retain literal user decisions and answered Questions, never 
   expect(facts.answeredQuestions[1]).not.toHaveProperty('answers')
 })
 
-test('shared guide supplies design methods once; incomplete guides retain the existing fallback',()=>{
+test('shared guide supplies design methods once without a compatibility fallback',()=>{
   const run={creation:{initialDelivery:'design-led-first-version',editableContent:true}} as Run
-  const olderGuide=PROJECT_WORKING_CONVENTIONS.replace('\n\n## Quality and evidence',
-    '\nUse supplied native read tools and their schemas instead of Shell readers.\n\n## Quality and evidence')
-  for(const guide of [PROJECT_WORKING_CONVENTIONS,olderGuide]) {
-    const savedGuide=guide+'\nPROJECT_SPECIFIC_ROUTE'
-    const professional=agentProfessionalContextForRun(run,true,savedGuide)
+  for(const followup of [false,true]) {
+    const savedGuide=PROJECT_WORKING_CONVENTIONS+'\nPROJECT_SPECIFIC_ROUTE'
+    const professional=agentProfessionalContextForRun(run,followup)
+    expect(professional).not.toContain('## Professional methods')
+    expect(professional).not.toContain('## Required design dependencies')
     const context=professional+'\n'+savedGuide
     expect(context.split('## Professional methods')).toHaveLength(2)
     expect(context.split('## Required design dependencies')).toHaveLength(2)
@@ -759,12 +760,27 @@ test('shared guide supplies design methods once; incomplete guides retain the ex
     for(const value of ['game-plan-execution','game-implementation-planning','PROJECT_SPECIFIC_ROUTE',
       'unknown paid replay or automatic paid retry','respect exclusions and the project budget','required licenses'])expect(context).toContain(value)
   }
-  for(const guide of ['', '# Custom navigation\nRun the saved command', '## Required design dependencies\nIncomplete'])
-    expect(agentProfessionalContextForRun(run,true,guide)).toContain(PROJECT_WORKING_CONVENTIONS)
-  const deferredTechnicalGuide=PROJECT_WORKING_CONVENTIONS.replace(
-    'Complete technical design in this stage before actual visual design or resource production.',
-    'Technical/resource plans start as drafts.')
-  expect(agentProfessionalContextForRun(run,true,deferredTechnicalGuide)).toContain(PROJECT_WORKING_CONVENTIONS)
+})
+
+test.each([undefined,'# Custom navigation\nRun the saved command'])('goal dispatch does not supplement a missing or custom guide: %s',async guide=>{
+  const f=await fixture()
+  try {
+    if(guide!==undefined)await writeFile(join(f.root,'CLAUDE.md'),guide)
+    await f.call('/agent/goal','POST',f.body)
+    await f.wait(run=>Boolean(run.agentTurns?.[0]?.finishedAt))
+    const context=f.starts[0].systemContext
+    expect(context).not.toContain('## Professional methods')
+    expect(context).not.toContain('## Required design dependencies')
+    expect(context).toContain('Current BGS tools directory')
+    expect(context).toContain('actual runtime')
+    if(guide!==undefined) {
+      expect(context).toContain(guide)
+      expect(await readFile(join(f.root,'CLAUDE.md'),'utf8')).toBe(guide)
+    } else {
+      expect(context).toContain('No root project guide exists')
+      expect(await readFile(join(f.root,'CLAUDE.md'),'utf8').catch(()=>null)).toBeNull()
+    }
+  }finally{await f.close()}
 })
 
 // Prompt contracts do not prove that a model read, understood or reproduced art.
@@ -781,8 +797,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   expect(followup).not.toContain('New design-led first-version deliverables')
   expect(followup).toContain('content/scenes/*.json')
   expect(followup).toContain('actual runtime')
-  expect(followup).toContain('Save and Read pictures')
-  expect(followup).toContain('compare actual screens, interaction and sound with the designs')
+  expect(followup).not.toContain(PROJECT_WORKING_CONVENTIONS)
   expect(followup).not.toContain('Before creating or changing visual implementation')
   expect(agentProfessionalContextForRun({...run,creation:undefined})).not.toContain('eight documents')
   expect(agentGoalPrompt(run)).toContain('ORIGINAL_CONFIRMED_GOAL')
@@ -790,7 +805,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
 
 test('stable system context preserves design authority and evidence boundaries, not implementation recipes', () => {
   const message={intent:'change',text:'Change only movement speed'} as Parameters<typeof agentMessagePrompt>[0]
-  for(const prompt of [agentProfessionalContext,agentProfessionalContextForRun({} as Run,true)]) {
+  for(const prompt of [agentProfessionalContext,PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run,true)]) {
     expect(prompt).toContain('with the Skill tool')
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(prompt).toContain('single source')
@@ -1249,7 +1264,8 @@ test('pause survives a simultaneous saved exit; rebasing does not execute a mode
 
 test('first and resumed goals retain professional coverage and design dependencies within the confirmed scope', () => {
   const run={creation:{initialDelivery:'design-led-first-version',editableContent:true},requirements:{text:'CONFIRMED_GAME'}} as Run
-  for (const prompt of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
+  for (const professional of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
+    const prompt=PROJECT_WORKING_CONVENTIONS+'\n'+professional
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     for (const skill of ['game-creative-director-expert','game-systems-designer-expert','game-level-designer-expert',
       'game-balance-designer-expert','gameplay-programmer','game-implementation-planning','game-art-director-expert',
