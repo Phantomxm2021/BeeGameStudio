@@ -3,6 +3,7 @@ import type { UUID } from 'crypto'
 import { relative } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
 import { addInvokedSkill } from '../bootstrap/state.js'
+import { SKILL_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/SkillTool/constants.js'
 import { asSessionId } from '../types/ids.js'
 import type {
   AttributionSnapshotMessage,
@@ -384,14 +385,33 @@ function isTerminalToolResult(
 }
 
 /**
- * Restores skill state from invoked_skills attachments in messages.
- * This ensures that skills are preserved across resume after compaction.
- * Without this, if another compaction happens after resume, the skills would be lost
- * because STATE.invokedSkills would be empty.
+ * Restore already-loaded skill bodies, including inline Skill results saved
+ * before the first successful compaction. Never execute a skill or its hooks.
  * @internal Exported for testing - use loadConversationForResume instead
  */
 export function restoreSkillStateFromMessages(messages: Message[]): void {
+  const skillCalls = new Map<string, string>()
   for (const message of messages) {
+    if (message.isSidechain) continue
+    if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
+      for (const block of message.message.content) {
+        if (block.type !== 'tool_use' || block.name !== SKILL_TOOL_NAME) continue
+        const name = (block.input as { skill?: unknown } | undefined)?.skill
+        if (typeof name === 'string' && name.trim()) skillCalls.set(block.id, name)
+      }
+    }
+    if (message.type === 'user' && message.isMeta === true && typeof message.sourceToolUseID === 'string') {
+      const name = skillCalls.get(message.sourceToolUseID)
+      const blocks = message.message?.content
+      const content = typeof blocks === 'string' ? blocks : Array.isArray(blocks)
+        ? blocks.filter(block => block.type === 'text').map(block => block.text).join('\n\n') : ''
+      const header = /^Base directory for this skill: ([^\r\n]+)\r?\n\r?\n/.exec(content)
+      if (name && header && content.slice(header[0].length).trim()) {
+        // Legacy inline messages record a directory, not the original filename.
+        // Keep that exact source locator and body; do not guess or reload a file.
+        addInvokedSkill(name, header[1]!, content, null)
+      }
+    }
     if (message.type !== 'attachment') {
       continue
     }

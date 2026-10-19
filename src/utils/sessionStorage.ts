@@ -3072,12 +3072,11 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       return fallbackGoal ? { ...log, goal: fallbackGoal } : log
     }
 
-    // Find the most recent user/assistant leaf message from the transcript
+    // Leaf eligibility is determined by loadTranscriptFile, including saved
+    // Skill context when the session stopped immediately after compaction.
     const mostRecentLeaf = findLatestMessage(
       messages.values(),
-      msg =>
-        leafUuids.has(msg.uuid) &&
-        (msg.type === 'user' || msg.type === 'assistant'),
+      msg => leafUuids.has(msg.uuid),
     )
     if (!mostRecentLeaf) {
       const fallbackGoal = log.sessionId
@@ -3809,9 +3808,10 @@ export async function loadTranscriptFile(
   applySnipRemovals(messages)
 
   // Compute leaf UUIDs once at load time
-  // Only user/assistant messages should be considered as leaves for anchoring resume.
-  // Other message types (system, attachment) are metadata or auxiliary and shouldn't
-  // anchor a conversation chain.
+  // Skill context must survive a stop immediately after compaction, before the
+  // next assistant message. Other internal attachments remain auxiliary.
+  const canAnchorResume = (msg: TranscriptMessage) => msg.type === 'user' || msg.type === 'assistant' ||
+    (msg.type === 'attachment' && msg.attachment?.type === 'invoked_skills')
   //
   // We use standard parent relationship for main chain detection, but also need to
   // handle cases where the last message is a system/metadata message.
@@ -3837,7 +3837,7 @@ export async function loadTranscriptFile(
     // (these are mid-conversation nodes, not dead ends)
     const hasUserAssistantChild = new Set<UUID>()
     for (const msg of allMessages) {
-      if (msg.parentUuid && (msg.type === 'user' || msg.type === 'assistant')) {
+      if (msg.parentUuid && canAnchorResume(msg)) {
         hasUserAssistantChild.add(msg.parentUuid)
       }
     }
@@ -3855,7 +3855,7 @@ export async function loadTranscriptFile(
           break
         }
         seen.add(current.uuid)
-        if (current.type === 'user' || current.type === 'assistant') {
+        if (canAnchorResume(current)) {
           if (!hasUserAssistantChild.has(current.uuid)) {
             leafUuids.add(current.uuid)
           }
@@ -3878,7 +3878,7 @@ export async function loadTranscriptFile(
           break
         }
         seen.add(current.uuid)
-        if (current.type === 'user' || current.type === 'assistant') {
+        if (canAnchorResume(current)) {
           leafUuids.add(current.uuid)
           break
         }
@@ -4492,6 +4492,9 @@ export function isLoggableMessage(m: Message): boolean {
   // When enabled, we allow hook_additional_context through since it contains
   // user-configured hook output that is useful for session context on resume.
   if (m.type === 'attachment' && getUserType() !== 'ant') {
+    // The same Skill bodies already appear in inline messages. Persist their
+    // existing compact attachment so another resume can restore skill state.
+    if (m.attachment!.type === 'invoked_skills') return true
     if (
       m.attachment!.type === 'hook_additional_context' &&
       isEnvTruthy(process.env.CLAUDE_CODE_SAVE_HOOK_ADDITIONAL_CONTEXT)
