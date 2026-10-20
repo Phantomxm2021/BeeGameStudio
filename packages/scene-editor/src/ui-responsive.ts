@@ -26,6 +26,7 @@ export type UiResponsiveOverride = {
 
 export type UiResponsiveNode = {
   id: string
+  role?: string
   parentId?: string
   enabled?: boolean
   text?: string
@@ -36,6 +37,53 @@ export type UiResponsiveNode = {
 }
 
 export type UiViewport = { width: number; height: number }
+
+/** Shared aliases; renderer-specific support checks remain with the renderer. */
+export function normalizeUiStyle(style: Record<string, unknown> = {}, nodeId: string) {
+  const result = { ...style }
+  for (const [from, to] of [['cornerRadius', 'borderRadius'], ['shadow', 'boxShadow'], ['align', 'textAlign']]) {
+    if (result[from] === undefined) continue
+    if (result[to] !== undefined && result[to] !== result[from])
+      throw Error(`Conflicting UI style: ${nodeId}/${from} and ${to}`)
+    result[to] = result[from]; delete result[from]
+  }
+  return result
+}
+
+/** Resolve text inheritance before layout/measurement, without changing source. */
+export function resolveUiNodeStyle<T extends UiResponsiveNode>(node: T, byId: ReadonlyMap<string, UiResponsiveNode>): T {
+  const chain: UiResponsiveNode[] = [], seen = new Set<string>()
+  let current: UiResponsiveNode | undefined = node
+  while (current) {
+    if (seen.has(current.id)) throw Error(`UI style hierarchy cycle: ${current.id}`)
+    seen.add(current.id); chain.unshift(current)
+    current = current.parentId ? byId.get(current.parentId) : undefined
+  }
+  const inherited: Record<string, unknown> = {}
+  let font: unknown, own: Record<string, unknown> = {}
+  for (const ancestor of chain) {
+    own = normalizeUiStyle(ancestor.style, ancestor.id)
+    const label = ancestor.data?.label as { fontSize?: unknown; color?: unknown } | undefined
+    if (own.fontSize === undefined && (ancestor.data?.fontSize ?? label?.fontSize) !== undefined)
+      own.fontSize = ancestor.data?.fontSize ?? label?.fontSize
+    if (own.color === undefined && (ancestor.data?.color ?? label?.color) !== undefined)
+      own.color = ancestor.data?.color ?? label?.color
+    const background = ancestor.data?.background as { color?: unknown } | undefined
+    if ((ancestor.role === 'screen-root' || ancestor.role === 'hud-root') && own.background === undefined && own.backgroundColor === undefined && typeof background?.color === 'string')
+      own.backgroundColor = background.color
+    if (ancestor.role === 'shape' && own.background === undefined && own.backgroundColor === undefined && typeof own.color === 'string')
+      own.backgroundColor = own.color
+    if (ancestor.data?.font !== undefined) font = ancestor.data.font
+    else if (own.fontFamily !== undefined) font = undefined
+    for (const key of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'color', 'textAlign', 'verticalAlign'])
+      if (own[key] !== undefined) inherited[key] = own[key]
+  }
+  const style = { ...own, ...inherited }
+  // Shape color is a local fill alias, not an inherited text fill.
+  if (node.role === 'shape' && own.color === undefined) delete style.color
+  return { ...node, style: node.style !== undefined || Object.keys(style).length ? style : undefined,
+    ...(font !== undefined ? { data: { ...node.data, font } } : {}) }
+}
 
 export function uiCompactMaxWidth(root: UiResponsiveNode | undefined): number {
   const authored = root?.data?.compactMaxWidth
@@ -65,7 +113,7 @@ export function resolveUiNodesForViewport<T extends UiResponsiveNode>(
   const projected = nodes.map(node => {
     let enabled = node.enabled
     let layout = node.layout
-    let style = node.style
+    let style = node.style === undefined ? undefined : normalizeUiStyle(node.style, node.id)
     const overrides = [compact ? node.responsive?.compact : undefined, portrait ? node.responsive?.portrait : undefined]
     for (const override of overrides) {
       if (!override) continue
@@ -74,7 +122,7 @@ export function resolveUiNodesForViewport<T extends UiResponsiveNode>(
         ...(override.layout.container ? { container: { ...layout?.container, ...override.layout.container } } : {}),
         ...(override.layout.item ? { item: { ...layout?.item, ...override.layout.item } } : {}),
       }
-      if (override.style) style = { ...style, ...override.style }
+      if (override.style) style = { ...style, ...normalizeUiStyle(override.style, node.id) }
     }
     // A screen-space root fills the actual viewport; world-space UI keeps its authored size.
     if (node.id === rootId && node.data?.space !== 'world') layout = { ...layout, size: [viewport.width, viewport.height] }
@@ -83,6 +131,13 @@ export function resolveUiNodesForViewport<T extends UiResponsiveNode>(
   const byId = new Map(projected.map(node => [node.id, node]))
   if (byId.size !== nodes.length) throw new Error('Duplicate UI node IDs')
   if (!byId.has(rootId)) throw new Error(`Unknown UI root: ${rootId}`)
+  // Snapshot authored/effective styles before writing derived inheritance, so
+  // sibling iteration order never determines which properties are inherited.
+  const styleInputs = new Map(byId)
+  for (let i = 0; i < projected.length; i++) {
+    const styled = resolveUiNodeStyle(projected[i], styleInputs)
+    projected[i] = styled; byId.set(styled.id, styled)
+  }
   const children = new Map<string, T[]>()
   for (const node of projected) if (node.parentId) {
     const list = children.get(node.parentId) ?? []

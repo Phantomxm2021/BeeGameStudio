@@ -3,7 +3,7 @@ import { parseGridData, parseTilemapData, tileRect, validateTilemapGrid, type Ti
 import { resolveSceneCameraView, sceneCameraAspectRange, type SceneCameraInput, type SceneViewportSize } from './scene-camera'
 
 type Component = { type: string; assetRef?: string; data?: Record<string, unknown> }
-export type SceneSpatialNode = { id: string; parentId?: string; enabled?: boolean;
+export type SceneSpatialNode = { id: string; parentId?: string; enabled?: boolean; layer?: string; zIndex?: number;
   transform?: { position?: number[]; rotation?: number[]; scale?: number[] }; components?: Component[] }
 export type SceneSpatialData = { nodes: readonly SceneSpatialNode[]; cameraNodeId?: string; settings?: Record<string, unknown> }
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
@@ -69,6 +69,12 @@ export function sceneWorldTransforms2d(nodes: readonly SceneSpatialNode[]) {
 
 /** Geometric visibility, not gameplay, occlusion or aesthetics. No guessed image/TileSet sizes. */
 export function inspectSceneLayout2d(data: SceneSpatialData, host: SceneViewportSize,
+  tileSet?: (assetRef: string, member?: string) => TileSetData | undefined) {
+  return resolveSceneLayout2d(data,host,tileSet).inspection
+}
+
+// Share this frame's transforms with drawing without caching mutable scene data.
+export function resolveSceneLayout2d(data: SceneSpatialData, host: SceneViewportSize,
   tileSet?: (assetRef: string, member?: string) => TileSetData | undefined) {
   const coordinates = record(data.settings?.coordinateSystem)
   const unit = coordinates.pixelsPerUnit
@@ -154,9 +160,10 @@ export function inspectSceneLayout2d(data: SceneSpatialData, host: SceneViewport
       requiredNodeIds: required, checkedNodeIds: checked.map(node => node.id), outside, unavailable: [...unavailable, ...empty],
       ...(bounds && !unavailable.length && !empty.length ? { cameraBounds: bounds, supportedAspect: sceneCameraAspectRange(camera, bounds) } : {}) }
   }
-  return { cameraNodeId: cameraNode.id, coordinateSystem: coordinates,
+  const inspection = { cameraNodeId: cameraNode.id, coordinateSystem: coordinates,
     camera: { input: camera, localTransform: cameraNode.transform, worldOrigin: point2d(pose, 0, 0) },
     view, worldToScreen: projection, nodes,
     ...(requiredVisibility ? { requiredVisibility } : {}),
     note: 'Static XY geometry only; offscreen objects can be intentional. Unknown bounds, depth/near-far clipping, occlusion, dynamic camera behavior and gameplay need runtime checks.' }
+  return { inspection, poses, rects }
 }

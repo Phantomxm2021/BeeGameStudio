@@ -95,3 +95,10 @@ export function editorAtlasPath(resource: { root_path: string; file_paths: strin
   const candidates = [`${stem}.json`, `${stem}.atlas.json`].filter(path => resource.file_paths.includes(path));
   return candidates.includes(resource.root_path) ? resource.root_path : candidates[0];
 }
+
+/** Resource-owned selectors must not survive selecting a different image. */
+export function clearImageSelection(data: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...data }
+  for (const key of ['member', 'atlasMember', 'frame', 'frameTable', 'frameParts', 'stateFrames', 'initialFacing', 'frameSize']) delete next[key]
+  return next
+}

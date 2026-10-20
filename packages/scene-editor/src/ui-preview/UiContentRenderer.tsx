@@ -4,6 +4,7 @@ import { uiAnchor, uiPaintOrder } from '../content-coordinates';
 import { resolveUiImage, uiNodeImageSource } from './uiAtlas';
 export { uiNodeImageSource } from './uiAtlas';
 import { uiFontKey } from '../ui-font-reference';
+import { resolveUiNodeStyle } from '../ui-responsive';
 import type { BeeGameUiContentNode } from './types';
 
 export type UiNodeKind =
@@ -193,19 +194,7 @@ export function UiParticlePreview({ node, assetUrls }: { node: BeeGameUiContentN
 }
 
 export function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamilies: Record<string, string>, nodes: BeeGameUiContentNode[]): React.CSSProperties {
-  if (root) {
-    const background = typeof node.data?.background === 'object' && node.data.background !== null
-      ? node.data.background as { color?: unknown }
-      : undefined;
-    return {
-      position: 'absolute',
-      inset: 0,
-      overflow: 'hidden',
-      perspective: 1000,
-      transformStyle: 'preserve-3d',
-      background: typeof background?.color === 'string' ? background.color : undefined,
-    };
-  }
+  node = resolveUiNodeStyle(node, new Map(nodes.map(item => [item.id, item])));
   const [x, y] = nodePosition(node, nodes);
   const [presetX, presetY] = nodeAnchor(node);
   const [scaleX, scaleY] = node.layout?.scale ?? [1, 1];
@@ -220,14 +209,15 @@ export function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamil
   const dataAlpha = typeof style.opacity === 'number' ? style.opacity : typeof data.alpha === 'number' ? data.alpha : undefined;
   const background = typeof style.background === 'object' && style.background !== null ? style.background as { color?: string; opacity?: number; radius?: number } : undefined;
   const border = typeof style.border === 'object' && style.border !== null ? style.border as { width?: number; color?: string; radius?: number } : undefined;
-  const align = style.align ?? data.align;
+  const align = style.textAlign ?? data.align;
   const shape = style.shape ?? data.shape;
   const label = typeof data.label === 'object' && data.label !== null
     ? data.label as { content?: unknown; fontSize?: unknown; color?: unknown }
     : undefined;
   const resolvedFontSize = uiFontSize(node);
   const fontKey = uiFontKey(data.font);
-  const fontFamily = supportsTextNode(uiNodeKind(node.role)) && fontKey ? fontFamilies[fontKey] : undefined;
+  const fontFamily = supportsTextNode(uiNodeKind(node.role)) && fontKey ? fontFamilies[fontKey]
+    : typeof style.fontFamily === 'string' ? style.fontFamily : undefined;
   const worldSpace = data.space === 'world';
   const rotation3D = Array.isArray(data.rotation3D) ? data.rotation3D : [0, 0, (node.layout?.rotation ?? 0) * 180 / Math.PI];
   const positionZ = typeof data.positionZ === 'number' ? data.positionZ : 0;
@@ -242,12 +232,13 @@ export function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamil
       ? style.background
       : typeof style.fill === 'string'
         ? style.fill
-        : node.role === 'shape' ? (typeof style.color === 'string' ? style.color : dataColor) : undefined,
+        : undefined,
+    backgroundColor: typeof style.backgroundColor === 'string' ? style.backgroundColor : undefined,
     border: typeof style.border === 'string' ? `1px solid ${style.border}` : border ? `${border.width ?? 0}px solid ${border.color ?? 'transparent'}` : undefined,
-    borderRadius: typeof style.cornerRadius === 'number' ? style.cornerRadius : typeof style.radius === 'number' ? style.radius : border?.radius ?? background?.radius ?? (node.role === 'keycap' ? 6 : undefined),
+    borderRadius: typeof style.borderRadius === 'number' || typeof style.borderRadius === 'string' ? style.borderRadius : typeof style.radius === 'number' ? style.radius : border?.radius ?? background?.radius ?? (node.role === 'keycap' ? 6 : undefined),
     fontSize: resolvedFontSize,
     fontFamily,
-    fontWeight: typeof style.fontWeight === 'number' ? style.fontWeight : 400,
+    fontWeight: typeof style.fontWeight === 'number' || typeof style.fontWeight === 'string' ? style.fontWeight as React.CSSProperties['fontWeight'] : 400,
     textShadow: typeof style.textShadow === 'string' ? style.textShadow : undefined,
     boxShadow: typeof style.boxShadow === 'string' ? style.boxShadow : typeof style.shadow === 'string' ? style.shadow : undefined,
     fontVariantNumeric: typeof style.fontVariantNumeric === 'string' ? style.fontVariantNumeric as React.CSSProperties['fontVariantNumeric'] : undefined,
@@ -267,6 +258,10 @@ export function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamil
     else if (shape === 'circle' || shape === 'ellipse') output.borderRadius = '50%';
   }
   if (node.role === 'keycap') output.boxShadow = 'inset 0 -2px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.18)';
+  if (root) {
+    const { width: _width, height: _height, transform: _transform, transformOrigin: _origin, ...appearance } = output;
+    return { ...appearance, inset: 0, overflow: 'hidden', perspective: 1000, transformStyle: 'preserve-3d' };
+  }
   output.left = x;
   output.top = y;
   output.translate = `${-anchorX * 100}% ${-anchorY * 100}%`;

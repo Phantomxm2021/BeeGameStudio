@@ -204,7 +204,13 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
           throw new WorkflowError('report-alias','Execution receipt must not resolve through an alias')
       record.reports=await Promise.all(request.reportPaths.map(path=>readVersion(root,path)))
       if (request.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
-        const acceptance = await inspectDesignAcceptance(root,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent)
+        const acceptance = await inspectDesignAcceptance(root,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent,
+          {runId:run.id,requirementsRevision:run.requirements.revision})
+        // Reject unsupported PASS claims before building as well as malformed
+        // reports. Honest blocked/failed reports remain diagnostic inputs.
+        if (acceptance.diagnostic && (acceptance.diagnostic.category === 'report-invalid' ||
+            acceptance.declaredStatus === 'passed'))
+          throw new WorkflowError(acceptance.diagnostic.category, acceptance.summary)
         for (const evidence of acceptance.evidence)
           if (!record.reports.some(file=>file.path === evidence.path))
             record.reports.push(await readVersion(root,evidence.path))
@@ -239,6 +245,18 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
   }
   return {
     designFileChanges,
+    async authorizeDesignChange(toolUseID: string) {
+      if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
+      if (work || pendingBaselines.size) throw new WorkflowError('workspace-busy', 'Wait for the current measurement or baseline operation')
+      const run = await current()
+      if (run.paused) throw new WorkflowError('run-paused', 'Turn writes are paused')
+      if (!toolUseID || !run.designBaseline) throw new WorkflowError('design-baseline-missing', 'No locked design is available to revise')
+      const next = structuredClone(run)
+      delete next.designBaseline
+      next.version++; next.deliveryEligible = false
+      if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
+      await input.store.commit(run.projectId,run.ownerId,run.version,next,'agent.design-change-authorized:'+toolUseID)
+    },
     lockDesignBaseline() {
       const operation = (async()=>{
       if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
@@ -279,6 +297,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
       if (write && run.paused) throw new WorkflowError('run-paused', 'Turn writes are paused')
       if (write && run.designBaseline) throw new WorkflowError('design-baseline-locked', 'Planning records are locked; finalize cannot replace the implementation baseline')
+      return {runId:run.id,requirementsRevision:run.requirements.revision}
     },
     async executionInputs() {
       if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability closed')
@@ -332,7 +351,8 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       // place of the newest pending or failed record.
       const measurement=latest ? {freshness:await inspectAgentMeasurementInputs(run,latest.record),
         attemptId:latest.attemptId,...measurementSummary(latest.record,details)} : null
-      const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent)
+      const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent,
+        {runId:run.id,requirementsRevision:run.requirements.revision})
       return {
         ...(input.executionContext?.()?{executionContext:input.executionContext!()}:{}),
         designFileChanges:designFileChanges(),
@@ -437,6 +457,11 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
         }))
     } catch { return [] } // Preparation failures are retained in checks, not observations.
   })
+  const sceneNodes=bindingCheck?.coverage?.sceneNodeBindings?.map(node=>({...node,
+    observations:uiObservations.filter((probe:any)=>probe.document===node.document && probe.nodeId===node.nodeId)}))
+  const uiNodes=bindingInventory?.map(node=>({...node,
+    observations:uiObservations.filter((probe:any)=>probe.document===node.document && probe.nodeId===node.nodeId)}))
+  const hasUnsuccessfulObservation=(node:{observations:{status:string}[]})=>node.observations.some(probe=>probe.status!=='passed')
   // Native failed-command formatting keeps head/tail, not the middle of large
   // stdout. Keep receipt identity first, then all selected probe diagnostics before bulky scope/geometry;
   // --details still returns exact saved observations, including historical ones.
@@ -448,23 +473,32 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
     checkScope:measurementCheckScope(record),
     resourceStructureCoverage:bindingCheck?.coverage?.assetContract ?? null,
     sceneBindingCoverage:{sourceCheckStatus:bindingCheck?.status ?? 'unverified',
-      nodes:bindingCheck?.coverage?.sceneNodeBindings?.map(node=>({...node,
-        observations:uiObservations.filter((probe:any)=>probe.document===node.document && probe.nodeId===node.nodeId)})) ?? null,
+      nodeCount:sceneNodes?.length ?? null,unobservedNodeCount:sceneNodes?.filter(node=>!node.observations.length).length ?? null,
+      nodesScope:details?'all':'issues-only',
+      nodes:(details?sceneNodes:sceneNodes?.filter(hasUnsuccessfulObservation)) ?? null,
       limitation:'Empty observations mean no saved node-level runtime evidence, not a working assembly. Component/behavior metadata is declared structure only. 3D/native-engine/XR device behavior, spatial interaction and comfort remain unverified by the current browser probes.'},
-    uiBindingCoverage:{sourceCheckStatus:bindingCheck?.status ?? 'unverified',nodes:bindingInventory?.map(node=>({...node,
-      observations:uiObservations.filter((probe:any)=>probe.document===node.document && probe.nodeId===node.nodeId)})) ?? null,
+    uiBindingCoverage:{sourceCheckStatus:bindingCheck?.status ?? 'unverified',
+      nodeCount:uiNodes?.length ?? null,unobservedNodeCount:uiNodes?.filter(node=>!node.observations.length).length ?? null,
+      nodesScope:details?'all':'issues-only',
+      nodes:(details?uiNodes:uiNodes?.filter(node=>node.issues.length || node.resolution==='invalid' || node.resolution==='unverified' || hasUnsuccessfulObservation(node))) ?? null,
       limitation:'Null means no saved node inventory; an empty observations list means no node-level runtime evidence in this receipt. Layout/text-fit observations do not verify image/frame consumption. No binding does not prove procedural intent. Compare required screens with the design reference; omitted elements and visual fidelity remain unverified.'},
     ...(registered.length?{contentRuntimeEvidence:{registeredDocuments:registered,
       sampledDocuments:registered.filter(path=>sampled.has(path)),unprobedDocuments:registered.filter(path=>!sampled.has(path)),
       limitation:'A passed consumption check samples selected nodes or bindings only; it does not prove all Scene/UI nodes, states or visual quality.'}}:{}),
-    checks:record.checks.map(({id,status,observation,coverage,artifacts},i)=>({id,status,
-      ...(coverage?{coverage}:{}),
-      ...(details?{observation,artifacts,limitations:coverage?.limitations}:status!=='passed'?{
-        observation:feedback[i]?JSON.stringify(feedback[i]):observation}:{})})),
+    checks:record.checks.map((check,i)=>{
+      const {id,status,observation,coverage,artifacts}=check
+      // These inventories already have dedicated fields above. Keep one copy;
+      // compact reads retain failed observations, not every successful binding.
+      const {uiNodeBindings,sceneNodeBindings,assetContract,...scope}=coverage ?? {}
+      return {id,status,...(coverage?{coverage:check===bindingCheck?scope:coverage}:{}),
+        ...(details?{observation,artifacts,limitations:coverage?.limitations}:status!=='passed'?{
+          observation:feedback[i]?JSON.stringify(feedback[i]):observation}:{})}
+    }),
     sourceExclusions:record.checks.find(c=>c.id==='build')?.projectBuild?.excludedReports,
     packageComposition:record.checks.find(c=>c.id==='build')?.projectBuild?.packageComposition ?? null,
     measuredSourceFiles:record.checks.find(c=>c.id==='build')?.projectBuild?.files.length,
     ...(record.consumption?{consumption:details?record.consumption:{checks:record.consumption.checks}}:{}),
+    ...(!details?{detailsHint:'Read this measurement ID with details:true (CLI: --inspect ID --details) for all node bindings and saved observations; no verification is rerun.'}:{}),
     deliveryEligible:false,quality:'unverified',note:record.consumption?
       'Receipt records source-copy build, static smoke and explicitly selected consumption probes only. Reference this ID, not a source/report footer. Probe results do not prove report semantics, complete gameplay or game quality.':
       'Receipt is saved in BGS; reference this ID in the final reply, not in measured source/report files. Only source-copy build and static browser smoke are measured, not report semantics or game quality.'}

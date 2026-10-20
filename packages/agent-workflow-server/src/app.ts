@@ -651,6 +651,8 @@ export function createAgentWorkflowApp(
     capabilities: previewCapabilities,
     storage: previewStorage,
     readRun: async (projectId, ownerId) => v3Store?.read(projectId, ownerId),
+    readPreviewState: async (projectId, ownerId) => v3Store?.readPreviewState
+      ? v3Store.readPreviewState(projectId, ownerId) : v3Store?.read(projectId, ownerId),
     isBusy: run => beeGameSessions.hasActiveProjectTurn(run.ownerId, run.projectId, run.workspacePath),
   })
   options.registerCleanup?.(async () => { measuredPreview?.dispose(); previewStorage.close() })

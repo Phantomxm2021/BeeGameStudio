@@ -69,24 +69,35 @@ export function readImplementationTask(workspace: string, input: unknown) {
     if (!output.acceptance) issues.push(`Missing acceptance for ${ref.document}#${ref.id}`)
     return { ...ref, section: output.section, acceptance: output.acceptance }
   })
-  let sources: ReturnType<typeof readDesignSections>['sources'] = []
-  try {
-    sources = readDesignSections(workspace, [{ document: 'TECHNICAL_DESIGN.md', sections: [task.section] }]).sources
-    // Legacy indexes can point every ID at one Markdown table. Return the
-    // exact ID row with its table header, preserving the shared prose around it.
-    const siblings = items.filter(item => item.section === task.section)
-    if (siblings.length > 1) for (const source of sources) for (const read of source.reads) {
-      const lines = read.text.split('\n')
-      const firstCell = (line: string) => line.trim().startsWith('|')
-        ? line.trim().split('|')[1]?.trim().replace(/^`(.*)`$/, '$1') : undefined
-      const matches = lines.filter(line => firstCell(line) === id)
-      if (matches.length === 1) {
-        const siblingIds = new Set(siblings.filter(item => item.id !== id).map(item => item.id))
-        read.text = lines.filter(line => !siblingIds.has(firstCell(line) ?? '')).join('\n')
-        Object.assign(read, { selection: 'task-table-row', taskId: id })
-      } else Object.assign(read, {selection: 'shared-section', note: 'No unique task ID row; this is shared source prose, not an isolated task.'})
-    }
-  } catch (error) { issues.push('TECHNICAL_DESIGN.md: ' + reason(error)) }
+  const requests = new Map<string, Set<string>>([['TECHNICAL_DESIGN.md', new Set([task.section])]])
+  for (const requirement of requirements) {
+    if (!('section' in requirement)) continue
+    const sections = requests.get(requirement.document) ?? new Set<string>()
+    sections.add(requirement.section)
+    if (requirement.acceptance) sections.add(requirement.acceptance.section)
+    requests.set(requirement.document, sections)
+  }
+  const sources: ReturnType<typeof readDesignSections>['sources'] = []
+  for (const [document, requested] of requests) {
+    const location = designSourceLocations(workspace, [document])[0]!
+    const available = 'sections' in location ? location.sections : undefined
+    if (!available) { issues.push(document + ': ' + location.unavailable); continue }
+    // A broken pointer must not hide another independently readable section.
+    const sections = [...requested].filter(heading => {
+      if (available.filter(section => section.heading === heading).length === 1) return true
+      issues.push(`${document}: missing/ambiguous heading ${JSON.stringify(heading)}`)
+      return false
+    })
+    if (!sections.length) continue
+    try { sources.push(...readDesignSections(workspace, [{ document, sections }]).sources) }
+    catch (error) { issues.push(document + ': ' + reason(error)) }
+  }
+  // An ID-like table cell can be a shared interface or acceptance requirement.
+  // Keep source sections intact; the selected task/requirements already identify
+  // the requested work without silently rewriting authoritative prose.
+  const siblings = items.filter(item => item.section === task.section)
+  if (siblings.length > 1) for (const source of sources.filter(source => source.document === 'TECHNICAL_DESIGN.md')) for (const read of source.reads)
+    Object.assign(read, { selection: 'shared-section', note: 'Multiple tasks share this section; original source text is retained.' })
   return { ...result, directory: directory.filter(item => item.id === id), valid: !issues.length, task, requirements, sources }
 }
 
@@ -119,6 +130,7 @@ export async function checkResourcesAndBindings(workspace: string, input: unknow
   } catch (error) { issues.push(file + ': ' + reason(error)) }
   if (detailsFor && !bindings.files.some(file => file.file === detailsFor)) issues.push('Cannot expand unavailable binding input: ' + detailsFor)
   return { valid: !issues.length, scope: 'saved-resources-and-bindings', issues: [...new Set(issues)],
+    requirements: audit.requirements,
     resources: audit.resources.map(({ fileEvidence, ...resource }) => {
       const registered = manifest?.resources.find(item => item.id === resource.id)
       return { ...resource, assetKind: registered?.asset_kind, fulfills: registered?.fulfills,

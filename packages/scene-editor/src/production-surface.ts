@@ -1,11 +1,12 @@
-import { compose2d, point2d, uiPaintOrder } from './content-coordinates'
+import { compose2d, point2d, sceneLayerOrders, uiPaintOrder } from './content-coordinates'
 import { inspectUiLayout, type UiLayoutInspectionOptions } from './ui-layout-inspection'
 import { initializeUiLayout } from './ui-container-layout'
-import { resolveUiNodesForViewport, type UiResponsiveNode, type UiViewport } from './ui-responsive'
-import { inspectSceneLayout2d, sceneWorldTransforms2d, type SceneSpatialData } from './scene-layout-inspection'
+import { normalizeUiStyle, resolveUiNodesForViewport, type UiResponsiveNode, type UiViewport } from './ui-responsive'
+import { resolveSceneLayout2d, type SceneSpatialData } from './scene-layout-inspection'
 import { uiImageKey, uiNodeImageSource } from './ui-preview/uiAtlas'
 import { uiFontKey } from './ui-font-reference'
 import { spriteSheetSelection, type parseSpriteSheet } from './sprite-sheet'
+import { rendererOrder } from './model'
 
 type UiNode = UiResponsiveNode & {
   role: string
@@ -34,7 +35,7 @@ export const PRODUCTION_SURFACE_CAPABILITIES = {
   uiStyles: ['background', 'backgroundColor', 'color', 'border', 'borderColor', 'borderWidth', 'borderStyle',
     'borderRadius', 'boxShadow', 'textShadow', 'fontVariantNumeric', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'opacity', 'align', 'verticalAlign'],
   uiBindings: ['text', 'enabled', 'widthRatio', 'styleColor'],
-  sceneComponents: ['camera', 'sprite-renderer', 'image', 'text', 'rect-transform',
+  sceneComponents: ['camera', 'sprite-renderer', 'image', 'text', 'rect-transform', 'canvas', 'canvas-renderer',
     'box-collider-2d', 'circle-collider-2d', 'capsule-collider-2d', 'polygon-collider-2d'],
 } as const
 const uiRoles = new Set<string>(PRODUCTION_SURFACE_CAPABILITIES.uiRoles)
@@ -55,19 +56,24 @@ function drawSurfaceImage(ctx: CanvasRenderingContext2D, asset: SurfaceImage, x:
 /** Document vocabulary, not a second layout algorithm. CSS aliases are retained
  * for existing consumers; conflicting aliases cannot silently choose a side. */
 export function productionUiStyle(style: Record<string, unknown> = {}, nodeId: string) {
-  const result = { ...style }
+  const result = normalizeUiStyle(style, nodeId)
   const alias = (from: string, to: string, value = result[from]) => {
     if (result[to] !== undefined && result[to] !== value)
       throw Error(`Conflicting production UI style: ${nodeId}/${from} and ${to}`)
     result[to] = value; delete result[from]
   }
-  if (result.cornerRadius !== undefined) alias('cornerRadius', 'borderRadius')
-  if (result.shadow !== undefined) alias('shadow', 'boxShadow')
   if (result.background && typeof result.background === 'object') {
     const background = result.background as Record<string, unknown>
-    if (Object.keys(background).some(key => key !== 'color') || typeof background.color !== 'string')
+    if (Object.keys(background).some(key => !['color', 'opacity', 'radius'].includes(key)) || typeof background.color !== 'string' ||
+        background.opacity !== undefined && (typeof background.opacity !== 'number' || !Number.isFinite(background.opacity) || background.opacity < 0 || background.opacity > 1) ||
+        background.radius !== undefined && (typeof background.radius !== 'number' || !Number.isFinite(background.radius) || background.radius < 0))
       throw Error('Unsupported production UI background: ' + nodeId)
-    result.background = background.color
+    // Background alpha must not fade the label or the control's children.
+    result.background = background.opacity === undefined ? background.color :
+      `color-mix(in srgb, ${background.color} ${background.opacity * 100}%, transparent)`
+    const border = result.border as Record<string, unknown> | undefined
+    if (result.borderRadius === undefined && border?.radius === undefined && background.radius !== undefined)
+      result.borderRadius = background.radius
   }
   if (result.border && typeof result.border === 'object') {
     const border = result.border as Record<string, unknown>
@@ -82,12 +88,8 @@ export function productionUiStyle(style: Record<string, unknown> = {}, nodeId: s
     else if (['rect', 'rectangle', 'rounded-rect'].includes(String(result.shape))) delete result.shape
     else throw Error('Unsupported production UI shape: ' + nodeId)
   }
-  if (result.align !== undefined) {
-    if (!['left', 'center', 'right'].includes(String(result.align))) throw Error('Unsupported production UI style: ' + nodeId + '/align')
-    if (result.textAlign !== undefined && result.textAlign !== result.align) throw Error('Conflicting production UI style: ' + nodeId + '/align and textAlign')
-    result.textAlign = result.align
-    delete result.align
-  }
+  if (result.textAlign !== undefined && !['left', 'center', 'right'].includes(String(result.textAlign)))
+    throw Error('Unsupported production UI style: ' + nodeId + '/textAlign')
   if (result.verticalAlign !== undefined && !['top', 'middle', 'center', 'bottom'].includes(String(result.verticalAlign)))
     throw Error('Unsupported production UI style: ' + nodeId + '/verticalAlign')
   for (const [key, value] of Object.entries(result))
@@ -192,40 +194,40 @@ export async function createProductionUiSurface(host: HTMLElement) {
         if (node.data?.clipChildren === true) throw new Error('Unsupported production UI clipping: ' + node.id)
         const image = node.data?.image as Record<string,unknown> | undefined
         if (image?.type !== undefined && image.type !== 'simple') throw Error('Unsupported production UI image type: ' + node.id)
+        let fontFamily: string | undefined
         if (node.data?.font !== undefined) {
           const reference = uiFontKey(node.data.font)
           const face = reference ? options.fonts?.get(reference) : undefined
           if (!face || face.status !== 'loaded' || !document.fonts.has(face))
             throw new Error('Missing loaded production FontFace: ' + node.id)
+          fontFamily = face.family
         }
         if (node.data?.visibleWhen !== undefined) throw new Error(`Connect visibility through enabled/bindings, not an unevaluated expression: ${node.id}`)
         for (const key of Object.keys(node.actions ?? {}))
           if (key !== 'click') throw new Error(`Unsupported production UI action: ${node.id}/${key}`)
         if (node.actions?.click && !options.onAction) throw new Error(`No action handler: ${node.id}`)
-        return bindProductionUiNode(node, options.state)
+        const bound = bindProductionUiNode(node, options.state)
+        if (fontFamily) {
+          bound.style = { ...bound.style, fontFamily }
+          for (const variant of Object.values(bound.responsive ?? {})) variant.style!.fontFamily = fontFamily
+        }
+        return bound
       })
       const nodes = resolveUiNodesForViewport(source, data.rootId, viewport, options)
       const byId = new Map(nodes.map(node => [node.id, node]))
       const geometry = inspectUiLayout(source, data.rootId, viewport, options)
       const rectangles = new Map(geometry.map(node => [node.id, node]))
-      const inherited = ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'color', 'textAlign', 'verticalAlign']
       const styleOf = (node: UiNode): Record<string, unknown> => {
-        const chain: UiNode[] = []; let current: UiNode | undefined = node
-        while (current) { chain.unshift(current); current = current.parentId ? byId.get(current.parentId) : undefined }
-        const style: Record<string, unknown> = {}; let opacity = 1
-        for (const ancestor of chain) {
-          const fontRef = uiFontKey(ancestor.data?.font)
-          if (fontRef && ancestor.style?.fontFamily !== undefined && ancestor.style.fontFamily !== options.fonts!.get(fontRef)!.family)
-            throw new Error('UI fontFamily conflicts with loaded font resource: ' + ancestor.id)
-          for (const key of inherited) if (ancestor.style?.[key] !== undefined) style[key] = ancestor.style[key]
-          if (fontRef) style.fontFamily = options.fonts!.get(fontRef)!.family
+        let opacity = 1, ancestor: UiNode | undefined = node
+        while (ancestor) {
           if (ancestor.style?.opacity !== undefined) {
             const value = Number(ancestor.style.opacity)
             if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error('Invalid UI opacity: ' + ancestor.id)
             opacity *= value
           }
+          ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined
         }
-        return { ...node.style, ...style, opacity }
+        return { ...node.style, opacity }
       }
       const fragment = document.createDocumentFragment()
       for (const step of uiPaintOrder(nodes, data.rootId)) {
@@ -287,7 +289,12 @@ export async function createProductionUiSurface(host: HTMLElement) {
       // Validation/building is completed before replacing the previous surface.
       layer.style.width = `${viewport.width}px`
       layer.style.height = `${viewport.height}px`
+      const focused = document.activeElement
+      const focusedId = focused?.tagName === 'BUTTON' && layer.contains(focused)
+        ? (focused as HTMLElement).dataset.nodeId : undefined
       layer.replaceChildren(fragment)
+      if (focusedId) Array.from(layer.querySelectorAll<HTMLButtonElement>('button[data-node-id]'))
+        .find(button => button.dataset.nodeId === focusedId)?.focus({ preventScroll: true })
       return geometry
     },
     dispose() { disposed = true; layer.remove() },
@@ -306,10 +313,9 @@ export function sceneNodeClientPoint2d(data: SceneSpatialData, nodeId: string, v
       ![viewport.width, viewport.height, canvasBox.width, canvasBox.height].every(value => Number.isFinite(value) && value > 0) ||
       ![canvasBox.x, canvasBox.y, ...localPoint].every(Number.isFinite))
     throw new Error('Scene point projection needs a positive actual viewport/canvas box and finite local point')
-  const inspection = inspectSceneLayout2d(data, viewport)
+  const { inspection, poses } = resolveSceneLayout2d(data, viewport)
   const node = inspection.nodes.find(node => node.id === nodeId)
   if (!node || !node.enabled) throw new Error('Scene point target is missing or disabled: ' + nodeId)
-  const { poses } = sceneWorldTransforms2d(data.nodes)
   const [x, y] = point2d(compose2d(inspection.worldToScreen, poses.get(nodeId)!), localPoint[0], localPoint[1])
   const rect = inspection.view.rect
   if (x < rect.x || x > rect.x + rect.width || y < rect.y || y > rect.y + rect.height)
@@ -318,65 +324,172 @@ export function sceneNodeClientPoint2d(data: SceneSpatialData, nodeId: string, v
     y: canvasBox.y + y / viewport.height * canvasBox.height }
 }
 
+type SceneComponent = NonNullable<SceneSpatialData['nodes'][number]['components']>[number]
+
+// Match the existing editor adapter: nested material values override flat
+// values; alpha remains the legacy opacity alias.
+function sceneVisualStyle(component: SceneComponent, nodeId: string) {
+  const data = component.data ?? {}, material = data.material
+  if (material !== undefined && (!material || typeof material !== 'object' || Array.isArray(material)))
+    throw Error('Invalid production Scene material: ' + nodeId)
+  const values = material as Record<string, unknown> | undefined
+  const color = values?.color ?? data.color
+  const opacity = values?.opacity ?? data.opacity ?? data.alpha ?? 1
+  if (color !== undefined && typeof color !== 'string') throw Error('Invalid production Scene color: ' + nodeId)
+  if (typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity < 0 || opacity > 1)
+    throw Error('Invalid production Scene opacity: ' + nodeId)
+  return { color, opacity }
+}
+
+/** The CLI and drawing path share static capability checks. Decoding, fonts,
+ * browser rendering and gameplay still require execution. */
+export function inspectProductionSceneSupport(data: SceneSpatialData) {
+  return productionSceneSupport(data)
+}
+
+function productionSceneSupport(data: SceneSpatialData, styles?: Map<SceneComponent,ReturnType<typeof sceneVisualStyle>>) {
+  const issues: Array<{nodeId: string; property: string; reason: string}> = []
+  for (const node of data.nodes) for (const component of node.components ?? []) {
+    const fail = (property: string, reason: string) => issues.push({nodeId: node.id, property, reason})
+    if (!sceneComponents.has(component.type)) fail('type', `Unsupported production Scene component: ${node.id}/${component.type}`)
+    if (component.type === 'canvas' && component.data?.renderMode !== 'world-space')
+      fail('renderMode', `Unsupported production Scene Canvas renderMode: ${node.id}/${component.data?.renderMode}; only world-space is supported`)
+    for (const field of ['sortingOrder', 'sortingLayer', 'flipX', 'flipY'])
+      if (component.data?.[field] !== undefined) fail(field, 'Unsupported production Scene field: ' + node.id + '/' + field)
+    if (component.data?.visibleWhen !== undefined) fail('visibleWhen', `Unevaluated Scene visibility: ${node.id}`)
+    if (['sprite-renderer', 'image', 'text'].includes(component.type)) {
+      try {
+        const style = sceneVisualStyle(component, node.id)
+        styles?.set(component,style)
+      } catch (error) { fail('appearance', (error as Error).message) }
+    } else if (component.data?.opacity !== undefined) fail('opacity', 'Unsupported production Scene field: ' + node.id + '/opacity')
+  }
+  return {supported: issues.length === 0, issues, nodeCount: data.nodes.length, staticRenderingOnly: true,
+    runtimeVerified: false, visualDesign: 'unverified' as const,
+    note: 'Static field support only; geometry, decoded assets/fonts, appearance and dynamic behavior require their existing checks and runtime observations.'}
+}
+
+type SceneCanvases = { staging: HTMLCanvasElement; tint?: HTMLCanvasElement }
+
+function tintedSceneImage(asset: SurfaceImage, color: string, surfaces: SceneCanvases): SurfaceImage {
+  if (['#fff', '#ffffff', 'white'].includes(color.toLowerCase())) return asset
+  const source = asset.source as {width: number; height: number}
+  const canvas = surfaces.tint ??= (surfaces.staging.ownerDocument ?? document).createElement('canvas')
+  const width = asset.frame?.[2] ?? source.width, height = asset.frame?.[3] ?? source.height
+  if (canvas.width !== width) canvas.width = width
+  if (canvas.height !== height) canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw Error('Canvas 2D unavailable')
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = '#000'; ctx.fillStyle = color; ctx.fillRect(0, 0, 1, 1)
+  const tint = ctx.getImageData(0, 0, 1, 1).data
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  drawSurfaceImage(ctx, asset, 0, 0, canvas.width, canvas.height)
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  // Multiply unpremultiplied channels once for this static draw. Compositing
+  // multiply + an alpha mask changes translucent edge colors.
+  for (let i = 0; i < pixels.data.length; i += 4)
+    for (let channel = 0; channel < 4; channel++) pixels.data[i + channel] *= tint[channel] / 255
+  ctx.putImageData(pixels, 0, 0)
+  return {source: canvas, url: asset.url}
+}
+
+const sceneCanvases = new WeakMap<HTMLCanvasElement,SceneCanvases>()
+
 /** Static 2D presentation only. Collision, animation and gameplay are not
  * implemented by accepting their data. Unsupported capabilities are rejected. */
-export function renderProductionScene2d(canvas: HTMLCanvasElement, data: SceneSpatialData, viewport: UiViewport, assets: SurfaceAssets = new Map()) {
-  const inspection = inspectSceneLayout2d(data, viewport)
-  const { poses, rects } = sceneWorldTransforms2d(data.nodes)
+export function renderProductionScene2d(canvas: HTMLCanvasElement, data: SceneSpatialData, viewport: UiViewport, assets: SurfaceAssets = new Map(),
+  fonts: ReadonlyMap<string, FontFace> = new Map()) {
+  const styles = new Map<SceneComponent,ReturnType<typeof sceneVisualStyle>>()
+  const support = productionSceneSupport(data,styles)
+  if (!support.supported) throw Error(support.issues.map(issue => issue.reason).join('; '))
+  const { inspection, poses, rects } = resolveSceneLayout2d(data, viewport)
   const nodeById = new Map(inspection.nodes.map(node => [node.id, node]))
+  const images = new Map<SceneComponent,SurfaceImage>()
   for (const node of data.nodes) for (const component of node.components ?? []) {
-    if (!sceneComponents.has(component.type)) throw new Error(`Unsupported production Scene component: ${node.id}/${component.type}`)
-    for (const field of ['sortingOrder', 'sortingLayer', 'opacity', 'flipX', 'flipY'])
-      if (component.data?.[field] !== undefined) throw new Error('Unsupported production Scene field: ' + node.id + '/' + field)
-    if (component.data?.visibleWhen !== undefined) throw new Error(`Unevaluated Scene visibility: ${node.id}`)
-    if (component.assetRef) resolveSurfaceImage(assets, component.assetRef, component.data)
+    if (component.assetRef) images.set(component,resolveSurfaceImage(assets, component.assetRef, component.data))
+    if (component.type === 'text' && component.data?.font !== undefined) {
+      const reference = uiFontKey(component.data.font)
+      const face = reference ? fonts.get(reference) : undefined
+      if (!face || face.status !== 'loaded' || !document.fonts.has(face))
+        throw new Error('Missing loaded production Scene FontFace: ' + node.id)
+    }
   }
-  const staging = document.createElement('canvas')
-  staging.width = viewport.width
-  staging.height = viewport.height
+  let surfaces = sceneCanvases.get(canvas)
+  if (!surfaces) {
+    surfaces = { staging: (canvas.ownerDocument ?? document).createElement('canvas') }
+    sceneCanvases.set(canvas,surfaces)
+  }
+  const { staging } = surfaces
+  if (staging.width !== Math.trunc(viewport.width)) staging.width = viewport.width
+  if (staging.height !== Math.trunc(viewport.height)) staging.height = viewport.height
   const ctx = staging.getContext('2d')
   if (!ctx) throw new Error('Canvas 2D unavailable')
   ctx.clearRect(0, 0, staging.width, staging.height)
-  const view = inspection.view.rect
-  ctx.beginPath(); ctx.rect(view.x, view.y, view.width, view.height); ctx.clip()
-  for (const node of data.nodes) {
-    if (!nodeById.get(node.id)?.enabled) continue
-    for (const component of node.components ?? []) {
-      if (component.data?.enabled === false || !['sprite-renderer', 'image', 'text'].includes(component.type)) continue
-      const visual = component.data ?? {}
-      const size = rects.get(node.id)?.size ?? visual.size
-      if (!Array.isArray(size) || size.length !== 2 || !size.every(value => typeof value === 'number' && Number.isFinite(value) && value > 0))
-        throw new Error(`Production Scene visual needs explicit size: ${node.id}`)
-      const rect = node.components?.find(component => component.type === 'rect-transform')?.data
-      const pivot = rect?.pivot ?? visual.anchor ?? [.5, .5]
-      if (!Array.isArray(pivot) || pivot.length !== 2 || !pivot.every(Number.isFinite)) throw new Error(`Unsupported Scene pivot: ${node.id}`)
-      const matrix = compose2d(inspection.worldToScreen, poses.get(node.id)!)
-      ctx.save()
-      ctx.setTransform(...matrix)
-      const x = -pivot[0] * size[0], y = -pivot[1] * size[1]
-      if (component.type === 'text') {
-        if (typeof visual.text !== 'string') throw new Error(`Scene text missing: ${node.id}`)
-        if (typeof visual.fontSize !== 'number' || visual.fontSize <= 0 || typeof visual.fontFamily !== 'string')
-          throw new Error(`Scene text needs fontSize/fontFamily: ${node.id}`)
-        ctx.font = `${visual.fontSize}px ${visual.fontFamily}`
-        ctx.fillStyle = typeof visual.color === 'string' ? visual.color : '#fff'
-        ctx.textBaseline = 'top'
-        ctx.fillText(visual.text, x, y)
-      } else if (component.assetRef) {
-        const asset = resolveSurfaceImage(assets, component.assetRef, component.data)
-        if (asset.frame) ctx.drawImage(asset.source, ...asset.frame, x, y, size[0], size[1])
-        else ctx.drawImage(asset.source, x, y, size[0], size[1])
-      } else {
-        if (typeof visual.color !== 'string') throw new Error(`Scene visual needs a resource or color: ${node.id}`)
-        ctx.fillStyle = visual.color
-        ctx.fillRect(x, y, size[0], size[1])
+  ctx.save()
+  try {
+    const view = inspection.view.rect
+    ctx.beginPath(); ctx.rect(view.x, view.y, view.width, view.height); ctx.clip()
+    const layers = sceneLayerOrders(data.settings)
+    const layerValues = [...new Set([0, ...layers.values()])].sort((a, b) => a - b)
+    // Component sorting overrides are rejected above. Reuse the editor's layer /
+    // node-order calculation; stable sorting preserves source order for ties.
+    const order = (node: SceneSpatialData['nodes'][number]) => rendererOrder({ components: [], order: node.zIndex,
+      ...(layerValues.length > 1 ? { renderLayerRank: layerValues.indexOf(node.layer ? layers.get(node.layer) ?? 0 : 0) } : {}) })
+    for (const node of [...data.nodes].sort((a, b) => order(a) - order(b))) {
+      if (!nodeById.get(node.id)?.enabled) continue
+      for (const component of node.components ?? []) {
+        if (component.data?.enabled === false || !['sprite-renderer', 'image', 'text'].includes(component.type)) continue
+        const visual = component.data ?? {}
+        const {color, opacity} = styles.get(component)!
+        const size = rects.get(node.id)?.size ?? visual.size
+        if (!Array.isArray(size) || size.length !== 2 || !size.every(value => typeof value === 'number' && Number.isFinite(value) && value > 0))
+          throw new Error(`Production Scene visual needs explicit size: ${node.id}`)
+        const rect = node.components?.find(component => component.type === 'rect-transform')?.data
+        const pivot = rect?.pivot ?? visual.anchor ?? [.5, .5]
+        if (!Array.isArray(pivot) || pivot.length !== 2 || !pivot.every(Number.isFinite)) throw new Error(`Unsupported Scene pivot: ${node.id}`)
+        const matrix = compose2d(inspection.worldToScreen, poses.get(node.id)!)
+        ctx.save()
+        try {
+          ctx.setTransform(...matrix)
+          ctx.globalAlpha = opacity
+          const x = -pivot[0] * size[0], y = -pivot[1] * size[1]
+          if (component.type === 'text') {
+            if (typeof visual.text !== 'string') throw new Error(`Scene text missing: ${node.id}`)
+            const reference = uiFontKey(visual.font)
+            const family = reference ? fonts.get(reference)!.family : visual.fontFamily
+            if (typeof visual.fontSize !== 'number' || !Number.isFinite(visual.fontSize) || visual.fontSize <= 0 || typeof family !== 'string')
+              throw new Error(`Scene text needs fontSize/fontFamily: ${node.id}`)
+            ctx.font = `${visual.fontSize}px ${family}`
+            ctx.fillStyle = color ?? '#fff'
+            ctx.textBaseline = 'top'
+            ctx.fillText(visual.text, x, y)
+          } else if (component.assetRef) {
+            const selected = images.get(component)!
+          const asset = color === undefined ? selected : tintedSceneImage(selected, color, surfaces)
+            if (asset.frame) ctx.drawImage(asset.source, ...asset.frame, x, y, size[0], size[1])
+            else ctx.drawImage(asset.source, x, y, size[0], size[1])
+          } else {
+            if (color === undefined) throw new Error(`Scene visual needs a resource or color: ${node.id}`)
+            ctx.fillStyle = color
+            ctx.fillRect(x, y, size[0], size[1])
+          }
+        } finally { ctx.restore() }
       }
-      ctx.restore()
     }
-  }
+  } finally { ctx.restore() }
   const destination = canvas.getContext('2d')
   if (!destination) throw new Error('Canvas 2D unavailable')
-  canvas.width = staging.width; canvas.height = staging.height
-  destination.drawImage(staging, 0, 0)
+  if (canvas.width !== staging.width) canvas.width = staging.width
+  if (canvas.height !== staging.height) canvas.height = staging.height
+  destination.save()
+  try {
+    destination.setTransform(1,0,0,1,0,0)
+    destination.globalAlpha = 1
+    destination.globalCompositeOperation = 'copy'
+    destination.shadowColor = 'transparent'
+    destination.filter = 'none'
+    destination.drawImage(staging, 0, 0)
+  } finally { destination.restore() }
   return inspection
 }

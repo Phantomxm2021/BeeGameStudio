@@ -8,6 +8,8 @@ import { auditUiInteractiveBounds, readUiLayoutCameras } from './ui-layout-audit
 import { checkDesignHandoff, DESIGN_ACCEPTANCE_PATH, designHandoffPath, designSupportingFiles, designContentLinkIssues, isDesignUiFile, isDesignSceneFile, readDesignAcceptanceRequirements } from './design-handoff'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
 import { designReviewResultSchema, type DesignFinding } from './design-handoff'
+import { projectFiles, projectDependencies, changedProjectPaths, AGENT_EVIDENCE_DIRECTORY } from './workflow-v3/checks'
+import { projectPathSchema } from './workflow-v3/state'
 
 export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'The reviewed .beegame/design-handoffs/<document stem>.json is a small output/acceptance index; the pointed prose section owns each expectation. For outputs declaring acceptance, verification.requirementChecks records actual results: {document:design filename,id:owned output ID,documentSha256:SHA-256 of current docs/<document> bytes,handoffSha256:SHA-256 of its current index JSON bytes,method:"test"|"target-runtime"|"inspection",scenario:actual conditions/actions checked,observed:actual outcome,status:"passed"|"failed"|"unverified",evidencePaths:string[]}. Read the acceptance section for the expected result; do not invent an easier expectation in the report. Cover all declared requirements and their applicable scenarios, matching the source method and version. Existing reusable tests/observations may supply results; this is not a new stage or a separate test plan. Every evidence path must also appear in the report evidencePaths. Report failed or unverified checks honestly; they cannot accompany a delivery PASS. Evidence records must be actual test logs, runtime observations/captures or direct inspections, not a review verdict or copied design prose. Host-maintained design versions/hashes and structural coverage do not establish truthful observation, complete requirements or game quality.'
 
@@ -44,6 +46,7 @@ const reportSchema = z.object({
 })
 export type RuntimeAcceptance = {
   scope?: 'request' | 'delivery'
+  declaredStatus?: 'passed' | 'failed' | 'blocked'
   status: 'passed' | 'failed' | 'blocked'
   diagnostic?: AcceptanceDiagnostic
   summary: string
@@ -59,6 +62,75 @@ export type AcceptanceDiagnostic = {
   message: string
 }
 const diagnostic = (category: AcceptanceDiagnostic['category'], message: string): AcceptanceDiagnostic => ({ category, message })
+
+type ExecutionIdentity = { runId: string; requirementsRevision: string }
+const sha256 = z.string().regex(/^[a-f0-9]{64}$/)
+const executionSnapshotSchema = z.object({
+  status: z.literal('observed'), scriptSha256: sha256,
+  inputs: z.object({ runId: z.string().min(1), requirementsRevision: z.string().min(1),
+    files: z.array(z.object({ path: projectPathSchema, sha256 })).min(1), dependencySha256: sha256.optional() }),
+})
+
+/** Validate only known Preview receipts used to support a passed check. Other
+ * attachments can retain failed history; arbitrary logs are not parsed as verdicts. */
+async function previewEvidenceLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined,
+  evidencePaths: string[], identity?: ExecutionIdentity) {
+  const checks = [...(verification?.requirementChecks ?? []), ...(verification?.contentChecks ?? [])]
+  const supportingPaths = checks.length ? checks.filter(check => check.status === 'passed').flatMap(check => check.evidencePaths) : evidencePaths
+  const receipts = new Set<string>()
+  const root = await realpath(workspace)
+  for (const path of supportingPaths) {
+    // Recognize stdout/stderr too: citing the log must not bypass its execution result.
+    const normalized = relative(root, await realpath(resolve(root, path))).split('\\').join('/')
+    const match = /^(\.beegame\/tmp\/preview-test-[^/]+)\/(?:execution\.json|stdout\.txt|stderr\.txt)$/.exec(normalized)
+    if (match) receipts.add(match[1] + '/execution.json')
+  }
+  const retained: string[] = []
+  let current: { files: Awaited<ReturnType<typeof projectFiles>>; dependencySha256?: string } | undefined
+  const incomplete = (path: string, reason: string) => ({ evidencePaths: retained,
+    diagnostic: diagnostic('verification-incomplete', `Preview evidence ${path}: ${reason}`) })
+  for (const path of receipts) {
+    try {
+      const file = resolve(root, path)
+      await artifactDigest(root, path)
+      if (await realpath(file) !== file) throw Error('Execution receipt must not resolve through an alias')
+      const receipt = JSON.parse(await readFile(file, 'utf8'))
+      if (receipt.status !== 'exited' || receipt.exitCode !== 0 || receipt.signal != null || !receipt.finishedAt)
+        return incomplete(path, `execution did not succeed (${receipt.status ?? 'missing status'}, exit ${receipt.exitCode ?? 'unknown'}); cannot support PASS.`)
+      const before = executionSnapshotSchema.safeParse(receipt.before), after = executionSnapshotSchema.safeParse(receipt.after)
+      if (!before.success || !after.success || receipt.inputIdentity !== 'unchanged-at-boundaries')
+        return incomplete(path, 'Execution input identity is missing, changed or unverified.')
+      // Do not trust the summary flag when the retained boundaries contradict it.
+      if (JSON.stringify(receipt.before) !== JSON.stringify(receipt.after))
+        return incomplete(path, 'Inputs changed during execution; cannot establish an unchanged tested version.')
+      if (identity && (after.data.inputs.runId !== identity.runId || after.data.inputs.requirementsRevision !== identity.requirementsRevision))
+        return incomplete(path, 'Run or requirements identity changed; the receipt is stale.')
+      const script = z.string().min(1).parse(receipt.script), scriptFile = resolve(root, script)
+      const scriptSha256 = await artifactDigest(root, script)
+      if (await realpath(scriptFile) !== scriptFile) throw Error('Test script must not resolve through an alias')
+      current ??= { files: await projectFiles(root, '', [AGENT_EVIDENCE_DIRECTORY]), dependencySha256: await projectDependencies(root) }
+      const changes = { sources: changedProjectPaths(after.data.inputs.files, current.files),
+        script: after.data.scriptSha256 !== scriptSha256, dependencies: after.data.inputs.dependencySha256 !== current.dependencySha256 }
+      if (changes.sources.length || changes.script || changes.dependencies)
+        return incomplete(path, 'Tested inputs changed: ' + [changes.script ? 'test script' : '',
+          changes.dependencies ? 'dependencies' : '', ...changes.sources].filter(Boolean).join(', '))
+      const directory = path.slice(0, -'execution.json'.length)
+      if (receipt.reportPath !== path || receipt.stdoutPath !== directory + 'stdout.txt' || receipt.stderrPath !== directory + 'stderr.txt')
+        throw Error('Execution/output paths do not match the retained receipt')
+      // Bind the receipt and both logs even when the author cited only stdout.
+      // A later read must not accept rewritten evidence with unchanged game bytes.
+      for (const evidence of [path, receipt.stdoutPath, receipt.stderrPath]) {
+        if (await realpath(resolve(root, evidence)) !== resolve(root, evidence)) throw Error('Execution output must not resolve through an alias')
+        await artifactDigest(root, evidence)
+        retained.push(evidence)
+      }
+    } catch (error) {
+      return { evidencePaths: retained, diagnostic: diagnostic('report-invalid',
+        `Invalid Preview evidence ${path}: ${error instanceof Error ? error.message : String(error)}`) }
+    }
+  }
+  return { evidencePaths: retained, diagnostic: undefined }
+}
 
 export async function artifactDigest(workspace: string, path: string, allowDirectory = false): Promise<string> {
   if (isAbsolute(path) || path.replaceAll('\\', '/').split('/').includes('..'))
@@ -89,7 +161,7 @@ export async function artifactDigest(workspace: string, path: string, allowDirec
 
 /** Read an Agent-authored result at a fixed project path, without a workflow dispatch. */
 export async function readRuntimeAcceptanceReport(workspace: string, reportPath: string,
-  options: { requireDesignRevision?: boolean; requireEditableContent?: boolean } = {}): Promise<RuntimeAcceptance | undefined> {
+  options: { requireDesignRevision?: boolean; requireEditableContent?: boolean; executionIdentity?: ExecutionIdentity } = {}): Promise<RuntimeAcceptance | undefined> {
   let text: string
   try {
     await artifactDigest(workspace, reportPath) // Reject symlink escapes before reading the report.
@@ -123,11 +195,15 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
       limitation = await contentBindingLimitation(workspace, report.verification, report.evidencePaths, options.requireEditableContent,
         options.requireDesignRevision || report.verification?.designRevision !== undefined)
     if (report.scope !== 'request' && report.status === 'passed' && !limitation)
-      limitation = designRequirementLimitation(workspace, report.verification, report.evidencePaths)
+      limitation = await designRequirementLimitation(workspace, report.verification, report.evidencePaths)
+    const previewEvidence = report.status === 'passed' && !limitation
+      ? await previewEvidenceLimitation(workspace, report.verification, report.evidencePaths, options.executionIdentity) : undefined
+    limitation ??= previewEvidence?.diagnostic
     if (report.status === 'passed' && report.scope !== 'request' && !report.evidencePaths.length)
       throw new Error('Passed runtime acceptance requires saved evidence')
-    const evidence = await Promise.all([...new Set(report.evidencePaths)].map(async path => {
-      if (path === reportPath) throw new Error('The acceptance report cannot be its own evidence')
+    const reportFile = await realpath(resolve(workspace, reportPath))
+    const evidence = await Promise.all([...new Set([...report.evidencePaths, ...(previewEvidence?.evidencePaths ?? [])])].map(async path => {
+      if (await realpath(resolve(workspace, path)) === reportFile) throw new Error('The acceptance report cannot be its own evidence')
       return { path, sha256: await artifactDigest(workspace, path) }
     }))
     // Bind the actual tested output, even when build directories are excluded
@@ -135,6 +211,7 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
     const artifacts = await Promise.all([...new Set(report.artifactPaths ?? [])].map(async path =>
       ({ path, sha256: await artifactDigest(workspace, path, true) })))
     return { ...(report.scope ? { scope: report.scope } : {}),
+      declaredStatus: report.status,
       ...(report.verification ? { verification: report.verification } : {}),
       ...(report.designIssues ? { designIssues: report.designIssues } : {}),
       status: limitation ? 'blocked' : report.status,
@@ -147,12 +224,13 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
 
 /** Read-only view of the existing delivery report. Valid means declared
  * coverage/version/evidence integrity, never independent aesthetic approval. */
-export async function inspectDesignAcceptance(workspace: string, requireDesignRevision = false, requireEditableContent = false) {
+export async function inspectDesignAcceptance(workspace: string, requireDesignRevision = false, requireEditableContent = false, executionIdentity?: ExecutionIdentity) {
   const report = await readRuntimeAcceptanceReport(workspace, DESIGN_ACCEPTANCE_PATH,
-    {requireDesignRevision,requireEditableContent})
+    {requireDesignRevision,requireEditableContent,executionIdentity})
   const checks = report?.verification?.requirementChecks ?? []
   return {path:DESIGN_ACCEPTANCE_PATH, valid:report?.scope === 'delivery' && report.status === 'passed',
     status:report?.status ?? 'unverified',scope:report?.scope,
+    declaredStatus:report?.declaredStatus,
     summary:report?.summary ?? 'The itemized acceptance report is missing; completion is unverified.',
     diagnostic:report?.diagnostic,
     requirementChecks:checks,
@@ -175,7 +253,7 @@ function deliveryLimitation(report: { verification?: z.infer<typeof verification
 
 /** Checks declared requirement coverage/version, not the truth of an observation
  * or whether the author declared all necessary release requirements. */
-function designRequirementLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined, evidencePaths: string[]): AcceptanceDiagnostic | undefined {
+async function designRequirementLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined, evidencePaths: string[]): Promise<AcceptanceDiagnostic | undefined> {
   const requirements = readDesignAcceptanceRequirements(workspace)
   const checks = verification?.requirementChecks ?? []
   const seen = new Set<string>()
@@ -191,8 +269,12 @@ function designRequirementLimitation(workspace: string, verification: z.infer<ty
       return diagnostic('report-invalid', `Requirement ${check.document}#${check.id} requires ${source.method}, not ${check.method}.`)
     if (check.status !== 'passed')
       return diagnostic(check.status === 'failed' ? 'product-failed' : 'verification-incomplete', `Requirement ${check.document}#${check.id} is ${check.status}: ${check.observed}`)
-    if (check.evidencePaths.some(path => !evidencePaths.includes(path) || path === `docs/${check.document}` || path === designHandoffPath(check.document)))
+    if (check.evidencePaths.some(path => !evidencePaths.includes(path)))
       return diagnostic('report-invalid', `Requirement ${check.document}#${check.id} needs recorded result evidence, not its design source.`)
+    const sources = await Promise.all([`docs/${check.document}`, designHandoffPath(check.document)].map(path => realpath(resolve(workspace, path))))
+    for (const path of check.evidencePaths)
+      if (sources.includes(await realpath(resolve(workspace, path))))
+        return diagnostic('report-invalid', `Requirement ${check.document}#${check.id} needs recorded result evidence, not its design source.`)
   }
   const missing = requirements.filter(source => !checks.some(check => check.document === source.document && check.id === source.id))
   if (missing.length) return diagnostic('verification-incomplete', `Design requirements are unverified: ${missing.map(source => `${source.document}#${source.id}`).join(', ')}.`)
@@ -211,8 +293,8 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
   try { await artifactDigest(workspace, indexPath) }
   catch (error) {
     if (((error as Error).cause as NodeJS.ErrnoException)?.code === 'ENOENT')
-      return requireEditableContent || designUi.length || designScenes.length
-        ? diagnostic('verification-incomplete', 'Required or design-linked editable content is missing: ' + indexPath) : undefined
+      return requireEditableContent || designUi.length || designScenes.length || verification?.contentChecks?.length
+        ? diagnostic('verification-incomplete', 'Required, design-linked or checked editable content is missing: ' + indexPath) : undefined
     throw error
   }
   const index = parseBeeGameContentIndex(JSON.parse(await readFile(resolve(workspace, indexPath), 'utf8')))
@@ -300,14 +382,16 @@ function blocked(error: unknown): RuntimeAcceptance {
     environment: 'not-established', evidence: [] }
 }
 
-export async function runtimeEvidenceIsCurrent(workspace: string, reports: RuntimeAcceptance[]): Promise<boolean> {
+export async function runtimeEvidenceIsCurrent(workspace: string, reports: RuntimeAcceptance[], executionIdentity?: ExecutionIdentity): Promise<boolean> {
   if (!reports.length) return false
   try {
     for (const report of reports) {
       if (report.scope === 'request' || report.status !== 'passed' || !report.summary?.trim() || !report.environment?.trim() || !report.evidence?.length) return false
       if (deliveryLimitation(report)) return false
       if (await contentBindingLimitation(workspace, report.verification, report.evidence.map(file => file.path))) return false
-      if (designRequirementLimitation(workspace, report.verification, report.evidence.map(file => file.path))) return false
+      if (await designRequirementLimitation(workspace, report.verification, report.evidence.map(file => file.path))) return false
+      const previewEvidence = await previewEvidenceLimitation(workspace, report.verification, report.evidence.map(file => file.path), executionIdentity)
+      if (previewEvidence.diagnostic || previewEvidence.evidencePaths.some(path => !report.evidence.some(file => file.path === path))) return false
       if (report.verification?.designRevision) {
         const design = checkDesignHandoff(workspace,PROJECT_DOCUMENTS)
         if (!design.valid || design.revision !== report.verification.designRevision) return false

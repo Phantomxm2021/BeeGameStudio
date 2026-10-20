@@ -3,6 +3,7 @@ import {mkdtemp,mkdir,writeFile,rm,realpath} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {createRun} from './state'
+import {previewRunState} from './store'
 import {createMeasuredPreview} from './measured-preview'
 import {createPreviewCapabilityManager} from '../../auth/preview-capability'
 import {previewTestHostDocument} from '../preview-test-access'
@@ -63,3 +64,37 @@ test('writer Preview uses the ordinary isolated build root, preserves the opaque
     expect(await Bun.file(join(root,'MUST_NOT_BUILD')).exists()).toBe(false)
   }finally{await browser?.close();preview?.dispose();server.stop(true);await rm(root,{recursive:true,force:true})}
 },30000)
+
+
+test('candidate files use small state reads and retain identity, race, capability and byte guards',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-preview-state-')))
+  try {
+    await mkdir(join(root,'dist'));await writeFile(join(root,'dist/index.html'),'fixture')
+    for(const failure of ['none','version','writer','binding','owner','capability','bytes'] as const) {
+      const run=createRun({projectId:'project',ownerId:'owner',workspacePath:root,chatSessionId:'chat',requestKey:'goal',text:'Fixture',constraints:{},ids:['goal']})
+      let full=0,small=0,armed=false
+      const capabilities=createPreviewCapabilityManager()
+      const preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities,isBusy:()=>false,
+        readRun:async()=>{full++;return structuredClone(run)},
+        readPreviewState:async()=>{
+          small++
+          if(armed && small===2) {
+            if(failure==='version')run.version++
+            if(failure==='writer')run.writer={attemptId:'other',workerId:'w',fence:2}
+            if(failure==='binding')run.workspacePath+='/other'
+            if(failure==='owner')run.ownerId='other'
+            if(failure==='capability')preview.dispose()
+          }
+          return previewRunState(run)
+        }})
+      try {
+        const opened=await preview.openCandidate(run);full=0;small=0;armed=true
+        if(failure==='bytes')await writeFile(join(root,'dist/index.html'),'changed')
+        const response=await preview.handle(new Request(opened.url))
+        expect(response?.status).toBe(failure==='none'?200:409)
+        expect(full).toBe(0)
+        expect(small).toBe(failure==='bytes'?1:2)
+      }finally{preview.dispose();await writeFile(join(root,'dist/index.html'),'fixture')}
+    }
+  }finally{await rm(root,{recursive:true,force:true})}
+})

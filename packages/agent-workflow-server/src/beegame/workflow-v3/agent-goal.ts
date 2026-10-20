@@ -142,7 +142,8 @@ export async function agentTurnHandoffReason(run: Run, turn: AgentTurn) {
   const record=run.agentTurns?.flatMap(t=>t.measurements??[]).at(-1)
   let acceptanceNote = ''
   if (run.creation?.initialDelivery === 'design-led-first-version') {
-    const acceptance = await inspectDesignAcceptance(run.workspacePath,true,run.creation?.editableContent)
+    const acceptance = await inspectDesignAcceptance(run.workspacePath,true,run.creation?.editableContent,
+      {runId:run.id,requirementsRevision:run.requirements.revision})
     const counts = ['passed','failed','unverified'].map(status =>
       status + '=' + acceptance.requirementChecks.filter(check=>check.status===status).length).join(', ')
     acceptanceNote = ' Itemized acceptance: ' + (acceptance.valid ? 'report coverage/version/evidence validated; ' : acceptance.summary + ' ') + counts +

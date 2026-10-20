@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os'
 import {createRequire} from 'node:module'
 import {Hono} from 'hono'
 import {createRun,digest,type AgentTurn,type SkillUse} from './state'
-import {createLocalWorkflowStore} from './store'
+import {createLocalWorkflowStore,previewRunState} from './store'
 import {createAgentMeasurement,measurementSummary,measurementRequest} from './agent-measurement'
 import {formatError} from '../../../../../src/utils/toolErrors'
 import {openAgentTools} from './agent-tools'
@@ -16,7 +16,7 @@ import {createPreviewCapabilityManager} from '../../auth/preview-capability'
 import {registerV3Routes} from './routes'
 import {BeeGameSessionManager} from '../session-manager'
 import {projectPreviewCapabilityPath} from '../project-preview-capability'
-import {uiLayoutFixture,sceneLayoutFixture,writeDesignDocumentsFixture} from '../fixtures/layout-fixture'
+import {uiLayoutFixture,sceneLayoutFixture,writeDesignDocumentsFixture,designRequirementChecksFixture} from '../fixtures/layout-fixture'
 import {createV3Executor} from './execution'
 import {readContentView} from './content-view'
 import {agentTurnHandoffReason} from './agent-goal'
@@ -24,7 +24,9 @@ import {openPreviewTestAccess} from '../preview-test-access'
 import {sharedContentChecker} from '../content-checker-runtime'
 import {createAgentWorkflowApp} from '../../app'
 import {writeBeeGameAssetManifest} from '../asset-contracts'
-import {DESIGN_ACCEPTANCE_PATH} from '../design-handoff'
+import {DESIGN_ACCEPTANCE_PATH,checkDesignHandoff} from '../design-handoff'
+import {PROJECT_DOCUMENTS} from '../project-content-authority'
+import {artifactDigest} from '../runtime-acceptance'
 import {initializeProjectGuide} from './project-guide'
 import {CHECK_VERSIONS} from './check-versions'
 
@@ -57,6 +59,111 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditab
     async close(){await measurement.close();await rm(root,{recursive:true,force:true})}}
 }
 const request={requestKey:'measure-1',runtimeArtifact:'dist',reportPaths:['README.md']}
+
+test.each(['shape','json','evidence','missing'] as const)('invalid attached acceptance (%s) fails before build and the existing measurement CLI exits unsuccessfully',async kind=>{
+  const f=await fixture("throw Error('BUILD MUST NOT RUN')")
+  let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
+  try {
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    // Same malformed shape as the observed project: author checks are not the report schema.
+    if(kind!=='missing') await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),kind==='json' ? '{' :
+      JSON.stringify(kind==='evidence' ? {scope:'delivery',status:'blocked',summary:'Needs verification',
+        environment:'Synthetic fixture',evidencePaths:['missing-observation.txt']} : {schema:'bgs.acceptance.v1',
+        scope:'A playable game',checks:[{id:'start',status:'passed',evidence:'clicked'}]}))
+    tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:f.measurement})
+    const child=Bun.spawn([process.execPath,join(f.workspace,tools.directory,'measure.mjs'),
+      '--request',request.requestKey,'--artifact',request.runtimeArtifact,'--report',DESIGN_ACCEPTANCE_PATH],{
+      cwd:f.workspace,env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'chat','measurement')},
+      stdout:'pipe',stderr:'pipe'})
+    const result=JSON.parse(await new Response(child.stdout).text())
+    expect(await child.exited).toBe(1)
+    expect(result.error).toBeTruthy()
+    if(kind!=='missing') expect(result.error).toContain('Invalid runtime acceptance record')
+    if(kind==='shape') expect(result.error).toContain('scope:')
+    if(kind==='evidence') expect(result.error).toContain('missing-observation.txt')
+    expect(result.checks).toEqual([])
+    const saved=(await f.current()).agentTurns![0]!.measurements![0]!
+    expect(saved.error).toBe(result.error)
+    expect(saved.finishedAt).toBeTruthy()
+    expect(measurementSummary(saved,false).error).toBe(result.error)
+    expect(measurementSummary(saved,false)).toMatchObject({deliveryEligible:false,quality:'unverified'})
+    expect(await Bun.file(join(f.workspace,'dist/index.html')).exists()).toBe(false)
+    // Re-reading the same request cannot silently build or erase the failed result.
+    expect((await f.measurement.measure({...request,reportPaths:[DESIGN_ACCEPTANCE_PATH]})).id).toBe(saved.id)
+  } finally {await tools?.close();await f.close()}
+},30000)
+
+test.each(['missing-coverage','failed','timeout','source','run','requirements'] as const)(
+  'unsupported acceptance PASS (%s) is rejected consistently by handoff and measurement without building',async kind=>{
+  const f=await fixture("throw Error('BUILD MUST NOT RUN')")
+  let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    await writeFile(join(f.workspace,'content/index.json'),JSON.stringify({
+      schema:'beegame-content-package.v2',id:'fixture',dimension:'2d',sceneModel:'game-object-v2',
+      documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'level',
+      files:['ui/menu.json','scenes/level.json'],documents:[
+        {id:'menu',kind:'ui-screen',path:'ui/menu.json',loadPhase:'startup'},
+        {id:'level',kind:'scene-2d',path:'scenes/level.json',loadPhase:'startup'}]}))
+    const dir='.beegame/tmp/preview-test-acceptance', receiptPath=dir+'/execution.json'
+    await mkdir(join(f.workspace,dir),{recursive:true})
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    await writeFile(join(f.workspace,'test.mjs'),"console.log('synthetic observation')")
+    await writeFile(join(f.workspace,dir,'stdout.txt'),'Synthetic observation, not experience acceptance')
+    await writeFile(join(f.workspace,dir,'stderr.txt'),'')
+    tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:f.measurement})
+    const boundary={status:'observed',scriptSha256:await artifactDigest(f.workspace,'test.mjs'),inputs:await f.measurement.executionInputs()}
+    const receipt={script:'test.mjs',status:'exited',exitCode:0,signal:null,
+      startedAt:'2026-10-20T00:00:00Z',finishedAt:'2026-10-20T00:00:01Z',inputIdentity:'unchanged-at-boundaries',
+      before:boundary,after:structuredClone(boundary),reportPath:receiptPath,stdoutPath:dir+'/stdout.txt',stderrPath:dir+'/stderr.txt'}
+    const report={scope:'delivery',status:'passed',summary:'Synthetic declared PASS',environment:'Offline fixture',
+      evidencePaths:[receiptPath],artifactPaths:['src/index.html'],verification:{
+        target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],
+        designRevision:checkDesignHandoff(f.workspace,PROJECT_DOCUMENTS).revision,
+        requirementChecks:designRequirementChecksFixture(f.workspace,[receiptPath]),
+        contentChecks:[{kind:'ui-layout',document:'content/ui/menu.json',nodeId:'play',property:'layout'},
+          {kind:'scene-layout',document:'content/scenes/level.json',nodeId:'board',property:'transform'}]
+          .map(check=>({...check,change:'Synthetic change',expected:'Synthetic expected',observed:'Synthetic outcome',
+            status:'passed',evidencePaths:[receiptPath]}))}}
+    const save=async()=>{
+      await writeFile(join(f.workspace,receiptPath),JSON.stringify(receipt))
+      await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(report))
+    }
+    const command=async(entry:string,...args:string[])=>{
+      const child=Bun.spawn([process.execPath,join(f.workspace,tools!.directory,entry),...args],{
+        cwd:f.workspace,env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'chat','measurement')},
+        stdout:'pipe',stderr:'pipe'})
+      const [text,error,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
+      expect(text,error).toBeTruthy()
+      return {code,result:JSON.parse(text)}
+    }
+    await save()
+    expect(await command('handoff.mjs','--design','acceptance')).toMatchObject({code:0,result:{valid:true,quality:'unverified'}})
+    if(kind==='failed')receipt.exitCode=1
+    if(kind==='timeout')receipt.status='timed-out'
+    if(kind==='source')await writeFile(join(f.workspace,'src/index.html'),'Changed source')
+    if(kind==='run') {receipt.before.inputs.runId='another-run';receipt.after.inputs.runId='another-run'}
+    if(kind==='requirements') {
+      receipt.before.inputs.requirementsRevision='old-requirements';receipt.after.inputs.requirementsRevision='old-requirements'
+    }
+    if(kind==='missing-coverage') report.verification.requirementChecks=[]
+    await save()
+    const checked=await command('handoff.mjs','--design','acceptance')
+    expect(checked).toMatchObject({code:1,result:{valid:false,declaredStatus:'passed',status:'blocked',quality:'unverified'}})
+    if(kind==='run'||kind==='requirements')expect(checked.result.summary).toContain('Run or requirements identity changed')
+    const handoff=await f.measurement.handoff()
+    expect(handoff.acceptance.summary).toBe(checked.result.summary)
+    const measured=await command('measure.mjs','--request','reject-pass','--artifact','dist','--report',DESIGN_ACCEPTANCE_PATH)
+    expect(measured.code).toBe(1)
+    expect(measured.result.error).toBe(checked.result.summary)
+    expect(measured.result.checks).toEqual([])
+    expect(measured.result.quality).toBe('unverified')
+    expect(await Bun.file(join(f.workspace,'dist/index.html')).exists()).toBe(false)
+    const saved=(await f.current()).agentTurns![0]!.measurements![0]!
+    expect(saved.error).toBe(checked.result.summary)
+    expect((await f.measurement.measure({...request,requestKey:'reject-pass',reportPaths:[DESIGN_ACCEPTANCE_PATH]})).id).toBe(saved.id)
+  } finally {await tools?.close();await f.close()}
+},30000)
 
 test('unverified optional probes allow only diagnostic measured Preview; failure, missing checks and stale bytes remain blocked',async()=>{
   const f=await fixture()
@@ -129,20 +236,20 @@ test.each(['closed','paused','stale'] as const)('design finalize respects the ex
   }finally{await tools?.close();await f.close()}
 })
 
-test('existing handoff exposes acceptance and measures its evidence without treating a build as delivery PASS',async()=>{
+test.each(['blocked','failed'] as const)('existing handoff exposes %s acceptance and measures its evidence without treating a build as delivery PASS',async status=>{
   const f=await fixture()
   let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
   try {
     await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
     await mkdir(join(f.workspace,'reports'),{recursive:true})
     await writeFile(join(f.workspace,'reports/observation.txt'),'Synthetic retained observation')
-    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({scope:'delivery',status:'blocked',
+    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({scope:'delivery',status,
       summary:'Gameplay observation remains unverified',environment:'Synthetic fixture',evidencePaths:['reports/observation.txt']}))
     const measured=await f.measurement.measure({...request,reportPaths:[DESIGN_ACCEPTANCE_PATH]})
     expect(measured.checks.find(check=>check.id==='build')?.status).toBe('passed')
     expect(measured.reports.map(file=>file.path)).toEqual([DESIGN_ACCEPTANCE_PATH,'reports/observation.txt'])
     const handoff=await f.measurement.handoff()
-    expect(handoff.acceptance).toMatchObject({valid:false,status:'blocked',quality:'unverified'})
+    expect(handoff.acceptance).toMatchObject({valid:false,status,quality:'unverified'})
     expect(handoff.deliveryEligible).toBe(false)
     tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:f.measurement})
     const read=async(action:string)=>{
@@ -153,7 +260,7 @@ test('existing handoff exposes acceptance and measures its evidence without trea
       return {code:await child.exited,result}
     }
     expect((await read('help')).result.acceptanceInstruction).toContain('designRevision')
-    expect(await read('acceptance')).toMatchObject({code:1,result:{valid:false,status:'blocked'}})
+    expect(await read('acceptance')).toMatchObject({code:1,result:{valid:false,status}})
     const before=await f.current()
     await writeFile(join(f.workspace,'reports/observation.txt'),'Changed observation, unchanged report')
     expect((await f.measurement.handoff()).measurement?.freshness).toMatchObject({current:false,
@@ -218,7 +325,7 @@ test.each([true,false])('measurement checks registered Scene/UI without rejectin
       productionMaterials:{status:'unverified',candidates:null}})
     expect(measurementSummary(record,false).packageComposition).toEqual(composition)
     expect(run.agentTurns![0]!.measurements![0]!.checks[0]!.projectBuild!.packageComposition).toEqual(composition)
-    expect(measurementSummary(record,false).uiBindingCoverage.nodes).toEqual(
+    expect(measurementSummary(record,true).uiBindingCoverage.nodes).toEqual(
       ui.data.nodes.map((node:any)=>({document:'content/ui/menu.json',nodeId:node.id,role:node.role,
         bindings:[],resolution:'not-declared',issues:[],observations:[]})))
     if(invalid)expect(record.checks.find(check=>check.id==='content-layout')?.observation).toContain('root.data.orientation')
@@ -1290,7 +1397,7 @@ test('missing reports, failed builds, unknown reservations and new failures stay
     await writeFile(join(f.workspace,'build.mjs'),builder)
     const run=await f.settle()
     await expect(selectAgentMeasuredBuild(run,good.id)).rejects.toThrow('newer measurement')
-    await expect(selectAgentMeasuredBuild(run,failed.id)).rejects.toThrow('actual source-build')
+    await expect(selectAgentMeasuredBuild(run,failed.id)).rejects.toThrow('build: Host executed bun run build')
   }finally{await f.close()}
 },30000)
 
@@ -1473,3 +1580,89 @@ test.each(['file','directory','root','broken-parent','not-directory'] as const)(
     expect(await readFile(join(outside,'private.json'),'utf8')).toBe('PRIVATE_SENTINEL')
   } finally {await reader?.close();await f.close()}
 })
+
+
+test('publication exposes the saved measurement failure instead of blaming writer settlement or author PASS',async()=>{
+  const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    await f.measurement.lockDesignBaseline()
+    await writeFile(join(f.workspace,'docs/GDD.md'),(await readFile(join(f.workspace,'docs/GDD.md'),'utf8'))+'\nDesign correction.\n')
+    const failed=await f.measurement.measure(request)
+    expect(failed.checks).toHaveLength(0)
+    expect(failed.error).toContain('locked implementation baseline')
+    const run=await f.settle()
+    await expect(selectAgentMeasuredBuild(run,failed.id,false,'publication')).rejects.toMatchObject({code:'measurement-failed',message:expect.stringContaining(failed.error!)})
+    await expect(selectAgentMeasuredBuild(run,failed.id,true,'publication')).rejects.toMatchObject({code:'workspace-busy'})
+    const app=createAgentWorkflowApp({currentUser:{id:'owner',role:'owner'},workflowV3Store:f.store,
+      dashboardDataRoot:join(f.root,'dashboard'),defaultWorkspacePath:f.root,modelConfigStore:false,skillsConfig:false,
+      sessionRunner:{async start(){throw Error('No model dispatch in readiness')}},registerCleanup:fn=>cleanups.push(fn)})
+    await app.request('/api/projects',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({id:'measure',name:'Failed measurement fixture',root_path:f.workspace,created_at:Date.now()})})
+    const readiness=await app.request('/api/projects/measure/deployment-readiness')
+    expect(readiness.status).toBe(200)
+    expect(await readiness.json()).toMatchObject({allowed:false,code:'measurement-failed',issues:[expect.stringContaining(failed.error!)]})
+
+    const checkFailed=structuredClone(run),record=checkFailed.agentTurns![0]!.measurements![0]!
+    delete record.error
+    record.checks=[{id:'build',status:'failed',version:CHECK_VERSIONS.build,inputs:[],createdAt:new Date().toISOString(),observation:'Compilation failed in fixture game source'}]
+    await expect(selectAgentMeasuredBuild(checkFailed,failed.id,false,'publication')).rejects.toMatchObject({code:'measurement-failed',message:expect.stringContaining('Compilation failed in fixture game source')})
+  } finally {for(const cleanup of cleanups)await cleanup();await f.close()}
+})
+
+
+test('measured Preview reuses revision evidence while checking changed inputs and refreshing changed revisions',async()=>{
+  const f=await fixture()
+  let preview:ReturnType<typeof createMeasuredPreview>|undefined
+  try {
+    const measured=await f.measurement.measure(request)
+    const run=await f.settle()
+    let full=0,small=0
+    preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),isBusy:()=>false,
+      readRun:async()=>{full++;return structuredClone(run)},
+      readPreviewState:async()=>{small++;return previewRunState(run)}})
+    const opened=await preview.openAgent(run,measured.id);full=0;small=0
+    expect((await preview.handle(new Request(opened.url)))?.status).toBe(200)
+    expect(full).toBe(0);expect(small).toBe(2)
+    run.version++
+    expect((await preview.handle(new Request(opened.url)))?.status).toBe(200)
+    expect(full).toBe(1)
+    expect((await preview.handle(new Request(opened.url)))?.status).toBe(200)
+    expect(full).toBe(1)
+    // Same committed revision cannot hide an external source edit.
+    await writeFile(join(f.workspace,'README.md'),'Changed after measurement')
+    expect((await preview.handle(new Request(opened.url)))?.status).toBe(409)
+    expect(full).toBe(1)
+  }finally{preview?.dispose();await f.close()}
+},30000)
+
+
+test('parallel measured resource requests share only in-flight verification and recheck later source edits',async()=>{
+  const f=await fixture()
+  let preview:ReturnType<typeof createMeasuredPreview>|undefined
+  let release:()=>void=()=>{}
+  try {
+    const measured=await f.measurement.measure(request), run=await f.settle()
+    let full=0,armed=false,arrived=0
+    const gate=new Promise<void>(resolve=>{release=resolve})
+    let allArrived:()=>void=()=>{}
+    const arrivals=new Promise<void>(resolve=>{allArrived=resolve})
+    preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),isBusy:()=>false,
+      readRun:async()=>{full++;if(armed)await gate;return structuredClone(run)},
+      readPreviewState:async()=>{if(armed && ++arrived===8)allArrived();return previewRunState(run)}})
+    const opened=await preview.openAgent(run,measured.id)
+    full=0;armed=true;run.version++
+    const requests=Array.from({length:8},()=>preview!.handle(new Request(opened.url)))
+    await arrivals
+    await Bun.sleep(10)
+    const concurrentReads=full
+    release()
+    expect((await Promise.all(requests)).map(response=>response?.status)).toEqual(Array(8).fill(200))
+    expect(concurrentReads).toBe(1)
+    // There is no retained freshness cache: a later request sees edits even
+    // when the Run version has not changed.
+    await writeFile(join(f.workspace,'src/index.html'),'Changed unrequested source')
+    expect((await preview.handle(new Request(opened.url)))?.status).toBe(409)
+    expect((await preview.handle(new Request(opened.url)))?.status).toBe(404)
+  }finally{release();preview?.dispose();await f.close()}
+},30000)

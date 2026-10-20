@@ -21,6 +21,23 @@ const nodes = () => [
 afterEach(() => vi.unstubAllGlobals())
 
 describe('browser text/layout inspection', () => {
+  it('checks actual inherited text size rather than a smaller measurement-only default', async () => {
+    const { registered } = browserFixture()
+    const face = { family: 'Loaded', status: 'loaded' } as FontFace
+    registered.add(face)
+    const source = [
+      { id: 'root', style: { fontSize: 48 }, data: { font: { assetRef: 'FONT' } }, responsive: { compact: { style: { fontSize: 24 } } } },
+      { id: 'text', parentId: 'root', text: 'MMMM', layout: { size: [100,80] as [number,number] } },
+    ]
+    const before = structuredClone(source)
+    for (const [width, measured, fit] of [[900, 192, 'exceeds-intrinsic-bounds'], [400, 96, 'fits-intrinsic-bounds']] as const) {
+      const result = await inspectUiLayoutInBrowser(source, 'root', { width, height: 200 }, { fontFamily: () => 'Candidate', fontFaces: { FONT: face } })
+      expect(result.textMeasurements[0]).toMatchObject({ family: 'Loaded', assetRef: 'FONT', values: [{ text: 'MMMM', width: measured }] })
+      expect(result.nodes.find(node => node.id === 'text')!.textFit).toBe(fit)
+    }
+    expect(source).toEqual(before)
+  })
+
   it('measures actual selected styles and legal samples without changing input', async () => {
     const { fonts } = browserFixture()
     const source = nodes(), before = JSON.stringify(source)

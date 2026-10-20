@@ -6,8 +6,14 @@ import { isDeepStrictEqual } from 'node:util'
 import { digest, WorkflowError, type Run } from './state'
 import { MANAGED_WEB_BOOT_PATHS, MANAGED_WEB_BOOT_VERSION } from './managed-web-boot'
 
+export type PreviewRunState = Pick<Run, 'id' | 'projectId' | 'ownerId' | 'workspacePath' | 'version' | 'writer'>
+export const previewRunState = (run: PreviewRunState): PreviewRunState => ({
+  id: run.id, projectId: run.projectId, ownerId: run.ownerId, workspacePath: run.workspacePath,
+  version: run.version, ...(run.writer ? {writer: {...run.writer}} : {}),
+})
 export type WorkflowStore = {
   read(projectId: string, actorId: string): Promise<Run | undefined>
+  readPreviewState?(projectId: string, actorId: string): Promise<PreviewRunState | undefined>
   commit(projectId: string, actorId: string, expectedVersion: number, next: Run, event: string): Promise<void>
 }
 // JSONB may reorder keys. Compare JSON values, normalizing optional fields
@@ -39,6 +45,11 @@ export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
   }
   return {
+    async readPreviewState(projectId, actorId) {
+      const value = await load(projectId)
+      if (value && value.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
+      return value ? previewRunState(value.run) : undefined
+    },
     async read(projectId, actorId) {
       const value = await load(projectId)
       if (value && value.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
@@ -50,7 +61,7 @@ export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
         const value = await load(projectId)
         if (value && value.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
         if ((value?.run.version ?? 0) !== expectedVersion) throw new WorkflowError('revision-conflict', 'Workflow changed; read the current revision')
-        assertCommit(projectId, actorId, expectedVersion, next, value?.run)
+        assertCommit(projectId, actorId, expectedVersion, next, value?.run, event)
         await mkdir(join(root, 'workflow-v3'), { recursive: true })
         if (next.writer) for (const name of await readdir(join(root, 'workflow-v3'))) {
           if (!name.endsWith('.json') || join(root, 'workflow-v3', name) === file) continue
@@ -68,7 +79,7 @@ export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
     },
   }
 }
-export function assertCommit(projectId: string, actorId: string, version: number, next: Run, prior?: Run) {
+export function assertCommit(projectId: string, actorId: string, version: number, next: Run, prior?: Run, event?: string) {
   if (next.projectId !== projectId || next.ownerId !== actorId || next.protocol !== 'bgs.workflow.v3' || next.version !== version+1)
     throw new WorkflowError('invalid-commit', 'Invalid identity or revision', 400)
   if (prior && (prior.id !== next.id || prior.chatSessionId !== next.chatSessionId || prior.workspacePath !== next.workspacePath))
@@ -102,7 +113,13 @@ export function assertCommit(projectId: string, actorId: string, version: number
       baseline.requirementsRevision === old.requirementsRevision && baseline.digestVersion === old.digestVersion &&
       baseline.registryRevision === old.registryRevision &&
       sameJson(baseline.protectedFiles,old.protectedFiles)
-    if (!explicitChange && !exactSourceSave)
+    // A literal user answer may authorize a design correction inside the
+    // existing native turn. The host question guard commits only invalidation;
+    // native tools still have to finalize and capture the corrected inputs.
+    const questionChange = event?.startsWith('agent.design-change-authorized:') &&
+      event.length > 'agent.design-change-authorized:'.length && prior.writer && !prior.paused && !baseline &&
+      sameJson(next,{...prior,version:prior.version+1,designBaseline:undefined,deliveryEligible:false})
+    if (!explicitChange && !exactSourceSave && !questionChange)
       throw new WorkflowError('design-baseline-locked','Implementation baseline cannot be replaced by native work or a plain message')
   } else if (!prior?.designBaseline && next.designBaseline) {
     const baseline = next.designBaseline
@@ -201,6 +218,24 @@ export function createRemoteWorkflowStore(config: { url: string; serviceKey: str
     return response.json()
   }
   return {
+    async readPreviewState(projectId, actorId) {
+      // The existing project FK is one-to-one. Filter the live project owner,
+      // as the read RPC does, and project only the fields needed by Preview.
+      const query = new URLSearchParams({id: 'eq.'+projectId, owner_id: 'eq.'+actorId,
+        select: 'workflow:beegame_workflow_v3(id:state->>id,projectId:state->>projectId,ownerId:state->>ownerId,workspacePath:state->>workspacePath,version:state->version,writer:state->writer)'})
+      const response = await (config.fetchImpl ?? fetch)(config.url.replace(/\/+$/, '')+'/rest/v1/beegame_projects?'+query, {
+        headers: {apikey: config.serviceKey, authorization: 'Bearer '+config.serviceKey},
+      })
+      if (!response.ok) throw new WorkflowError('workflow-storage-unavailable', 'Preview state could not be read ('+response.status+')', 503)
+      const rows = await response.json() as Array<{workflow: PreviewRunState | null}>
+      if (!rows.length) throw new WorkflowError('project-forbidden', 'Project access denied', 403)
+      const state = rows[0]?.workflow
+      if (!state) return undefined
+      if (state.projectId !== projectId || state.ownerId !== actorId || !state.id || !state.workspacePath ||
+          !Number.isSafeInteger(state.version) || state.version < 1)
+        throw new WorkflowError('invalid-commit', 'Invalid Preview Run identity or revision', 400)
+      return previewRunState(state)
+    },
     async read(projectId, actorId) {
       const run = await call('beegame_workflow_v3_read', { p_project_id: projectId, p_actor_id: actorId })
       return run ? currentAgentRun(run) : undefined
@@ -215,7 +250,7 @@ export function createRemoteWorkflowStore(config: { url: string; serviceKey: str
         : undefined
       if (expectedVersion > 0 && prior?.version !== expectedVersion)
         throw new WorkflowError('revision-conflict', 'Workflow changed; read the current revision')
-      assertCommit(projectId, actorId, expectedVersion, next, prior)
+      assertCommit(projectId, actorId, expectedVersion, next, prior, event)
       await call('beegame_workflow_v3_commit', { p_project_id: projectId, p_actor_id: actorId,
         p_expected_version: expectedVersion, p_state: next, p_event: event })
     },

@@ -8,6 +8,7 @@ import { artifactDigest } from '../runtime-acceptance'
 import { readVersion } from './checks'
 import { handlePreviewStorageRequest, PreviewStorageError, PREVIEW_STORAGE_PATH, PREVIEW_STORAGE_HEADER, PREVIEW_STORAGE_VERSION } from '../preview-storage.mjs'
 import type { createPreviewStorageStore } from '../preview-storage-store'
+import type { PreviewRunState } from './store'
 
 export type MeasuredPreview = {
   id: string; runId: string; attemptId: string; measurementId: string
@@ -16,7 +17,7 @@ export type MeasuredPreview = {
 export type CandidatePreview = Omit<MeasuredPreview, 'attemptId' | 'measurementId'>
 type Entry = { token: string; identity: string; projectId: string; ownerId: string
   workspace: string; files: Map<string, string> } &
-  ({ kind: 'measured'; view: MeasuredPreview } | { kind: 'candidate'; view: CandidatePreview; writer?: NonNullable<Run['writer']> })
+  ({ kind: 'measured'; view: MeasuredPreview; run: Run; validation?: {version:number; result:Promise<void>} } | { kind: 'candidate'; view: CandidatePreview; writer?: NonNullable<Run['writer']> })
 
 /** Serve isolated static bytes, not a project dev script or rewritten HTML.
  * A dedicated origin preserves root-absolute URLs and never exposes BGS routes.
@@ -24,7 +25,8 @@ type Entry = { token: string; identity: string; projectId: string; ownerId: stri
 export function createMeasuredPreview(input: {
   origin?: string; capabilities: PreviewCapabilityManager
   readRun(projectId: string, ownerId: string): Promise<Run | undefined>
-  isBusy(run: Run): boolean
+  readPreviewState?(projectId: string, ownerId: string): Promise<PreviewRunState | undefined>
+  isBusy(run: PreviewRunState): boolean
   storage?: Pick<ReturnType<typeof createPreviewStorageStore>, 'forProject'>
 }) {
   let origin: URL | undefined
@@ -39,8 +41,9 @@ export function createMeasuredPreview(input: {
   }
   const byHost = new Map<string, Entry>(), byProject = new Map<string, Entry>()
   let disposed = false
+  const readState = input.readPreviewState ?? input.readRun
   const key = (projectId: string, ownerId: string, kind: Entry['kind'] = 'measured', writerId?: string) => JSON.stringify([projectId, ownerId, kind, writerId])
-  const writerMatches = (run: Run, writer: NonNullable<Run['writer']>) => run.writer?.attemptId === writer.attemptId &&
+  const writerMatches = (run: PreviewRunState, writer: NonNullable<Run['writer']>) => run.writer?.attemptId === writer.attemptId &&
     run.writer.fence === writer.fence && run.writer.workerId === writer.workerId
   const drop = (entry: Entry) => {
     byHost.delete(new URL(entry.view.url).hostname)
@@ -52,22 +55,39 @@ export function createMeasuredPreview(input: {
     const capability = input.capabilities.resolveRoute(entry.token)
     if (capability?.sessionId !== entry.identity || capability.userId !== entry.ownerId)
       throw new WorkflowError('preview-revoked', 'Preview capability is no longer valid')
-    const run = await input.readRun(entry.projectId, entry.ownerId)
-    if (!run || run.id !== entry.view.runId || run.workspacePath !== entry.workspace)
+    const state = await readState(entry.projectId, entry.ownerId)
+    if (!state || state.id !== entry.view.runId || state.projectId !== entry.projectId ||
+        state.ownerId !== entry.ownerId || state.workspacePath !== entry.workspace)
       throw new WorkflowError('preview-stale', 'Preview Run or workspace changed')
     if (entry.kind === 'candidate') {
-      if (entry.writer ? !writerMatches(run,entry.writer) : run.writer || input.isBusy(run))
+      if (entry.writer ? !writerMatches(state,entry.writer) : state.writer || input.isBusy(state))
         throw new WorkflowError('workspace-busy', entry.writer ? 'Preview belongs to a different or ended native writer' : 'Wait for the project writer to stop before opening Preview')
-      return run
+      return state
     }
-    const selected = await selectAgentMeasuredBuild(run,entry.view.measurementId,input.isBusy(run),'preview')
-    if (selected.artifact.path !== entry.view.artifact.path || selected.artifact.sha256 !== entry.view.artifact.sha256)
-      throw new WorkflowError('preview-stale', 'Measured artifact changed; explicitly reopen after verification')
-    // A later plain message may keep the same measured URL inspectable.
-    // Refresh its diagnostic caveats even when reusing an existing capability.
-    for (const limitation of selected.limitations)
-      if (!entry.view.limitations.includes(limitation)) entry.view.limitations.push(limitation)
-    return run
+    if (state.writer || input.isBusy(state)) throw new WorkflowError('workspace-busy', 'Wait for the native writer and owned tools to stop')
+    // Resource fan-out shares only the check already running for this revision.
+    // Never retain a freshness result: later requests must see external edits.
+    if (!entry.validation || entry.validation.version !== state.version)
+      entry.validation = {version:state.version,result:(async () => {
+        // Reuse the opened measurement at the same committed revision. Disk input
+        // checks below still run; a changed revision requires the current full Run.
+        const run = state.version === entry.run.version ? entry.run : await input.readRun(entry.projectId, entry.ownerId)
+        if (!run || run.id !== state.id || run.workspacePath !== state.workspacePath || run.version !== state.version ||
+            run.projectId !== state.projectId || run.ownerId !== state.ownerId)
+          throw new WorkflowError('preview-stale', 'Workflow changed while reading Preview evidence')
+        const selected = await selectAgentMeasuredBuild(run,entry.view.measurementId,input.isBusy(run),'preview')
+        if (selected.artifact.path !== entry.view.artifact.path || selected.artifact.sha256 !== entry.view.artifact.sha256)
+          throw new WorkflowError('preview-stale', 'Measured artifact changed; explicitly reopen after verification')
+        // A later plain message may keep the same measured URL inspectable.
+        // Refresh its diagnostic caveats even when reusing an existing capability.
+        for (const limitation of selected.limitations)
+          if (!entry.view.limitations.includes(limitation)) entry.view.limitations.push(limitation)
+        entry.run = run
+      })()}
+    const pending = entry.validation
+    try { await pending.result }
+    finally { if (entry.validation === pending) delete entry.validation }
+    return state
   }
   async function open(run: Run, measurementId: string): Promise<MeasuredPreview> {
       if (disposed) throw new WorkflowError('preview-unavailable', 'Preview manager stopped', 503)
@@ -99,7 +119,7 @@ export function createMeasuredPreview(input: {
           ...(selected.turn.status !== 'ended'
             ? ['The native turn did not succeed. This Preview only inspects current measured bytes; export and publication remain unavailable.'] : []),
           'Sandbox Preview only. Native localStorage remains unavailable; the async Preview save API is separate from deployment saves. No same-origin privileges, HTML injection or new runtime verdict. Explicit user publication is separate.'] }
-      const entry: Entry = { kind: 'measured', view, token, identity, projectId: run.projectId, ownerId: run.ownerId, workspace: run.workspacePath, files }
+      const entry: Entry = { kind: 'measured', view, run: structuredClone(run), token, identity, projectId: run.projectId, ownerId: run.ownerId, workspace: run.workspacePath, files }
       byProject.set(key(run.projectId, run.ownerId), entry); byHost.set(hostname, entry)
       return view
   }
@@ -210,8 +230,10 @@ export function createMeasuredPreview(input: {
         if (await realpath(file) !== file) throw new WorkflowError('preview-stale', 'Preview file became an alias')
         const bytes = await readFile(file)
         if (digest(bytes) !== expected) throw new WorkflowError('preview-stale', 'Preview file changed')
-        const after = await input.readRun(entry.projectId, entry.ownerId)
-        if (!after || (entry.kind==='candidate' && entry.writer ? !writerMatches(after,entry.writer) :
+        const after = await readState(entry.projectId, entry.ownerId)
+        if (!after || after.id !== run.id || after.workspacePath !== run.workspacePath ||
+            after.projectId !== entry.projectId || after.ownerId !== entry.ownerId ||
+            (entry.kind==='candidate' && entry.writer ? !writerMatches(after,entry.writer) :
             after.version !== run.version || after.writer || input.isBusy(after)) ||
             byHost.get(url.hostname) !== entry || !input.capabilities.resolveRoute(entry.token))
           throw new WorkflowError('preview-stale', 'Workflow changed during file read')

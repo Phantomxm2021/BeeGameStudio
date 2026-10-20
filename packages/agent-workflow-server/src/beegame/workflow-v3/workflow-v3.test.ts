@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test'
 import { createRun, type Run } from './state'
-import { assertCommit, createRemoteWorkflowStore } from './store'
+import { assertCommit, createRemoteWorkflowStore, previewRunState } from './store'
 
 function run(root = '/tmp/synthetic-game'): Run {
   return createRun({ projectId: 'synthetic', ownerId: 'alice', workspacePath: root, chatSessionId: 'chat',
@@ -74,4 +74,33 @@ test('rejected authorized database change explains both migration and invalid-hi
     .rejects.toThrow('20261010020000_workflow_v3_authorized_changes.sql')
   await expect(store.commit('synthetic', 'alice', 0, run(), 'created'))
     .rejects.toThrow('Original requirements and Run identity cannot be overwritten')
+})
+
+
+test('Preview projects current owner and minimal Run state without reading historical evidence', async () => {
+  const current = run(), state = previewRunState(current)
+  let result: unknown = [{workflow: state}], status = 200, calls = 0
+  const store = createRemoteWorkflowStore({url:'https://db.invalid', serviceKey:'host-only', fetchImpl:async(input, init)=>{
+    calls++
+    const url = new URL(String(input))
+    expect(url.pathname).toBe('/rest/v1/beegame_projects')
+    expect(url.searchParams.get('id')).toBe('eq.synthetic')
+    expect(url.searchParams.get('owner_id')).toBe('eq.alice')
+    expect(url.searchParams.get('select')).toContain('version:state->version')
+    expect(url.searchParams.get('select')).not.toMatch(/agentTurns|requirements|state[,)]/)
+    expect(init?.method ?? 'GET').toBe('GET')
+    return Response.json(result,{status})
+  }})
+  expect(await store.readPreviewState!('synthetic','alice')).toEqual(state)
+  result=[{workflow:{...state,writer:{attemptId:'other',workerId:'w',fence:2}}}]
+  expect((await store.readPreviewState!('synthetic','alice'))?.writer?.attemptId).toBe('other')
+  result=[{workflow:null}]
+  expect(await store.readPreviewState!('synthetic','alice')).toBeUndefined()
+  result=[]
+  await expect(store.readPreviewState!('synthetic','alice')).rejects.toThrow('Project access denied')
+  result=[{workflow:{...state,ownerId:'other'}}]
+  await expect(store.readPreviewState!('synthetic','alice')).rejects.toThrow('Invalid Preview Run')
+  status=503;result={message:'private database detail'}
+  await expect(store.readPreviewState!('synthetic','alice')).rejects.toThrow('Preview state could not be read (503)')
+  expect(calls).toBe(6)
 })

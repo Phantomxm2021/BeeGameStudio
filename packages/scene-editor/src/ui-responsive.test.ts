@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { resolveUiNodesForViewport, uiViewportVariants, type UiResponsiveNode } from './ui-responsive'
+import { initializeUiLayout } from './ui-container-layout'
+import { createUiTextMeasurer } from './ui-text-measurement'
+import { uiNodeStyle } from './ui-preview/UiContentRenderer'
 
 const nodes = [
   { id: 'root', layout: { size: [1280, 720] as [number, number] } },
@@ -11,6 +14,45 @@ const nodes = [
 ]
 
 describe('UI viewport projection', () => {
+  it('uses inherited/variant typography for both Yoga measurement and editor appearance', async () => {
+    await initializeUiLayout()
+    const source: any[] = [
+      { id: 'root', role: 'screen-root', style: { fontSize: 48, fontFamily: 'Authored', fontWeight: 700, align: 'right' },
+        layout: { container: { direction: 'column', align: 'start' } }, responsive: { compact: { style: { fontSize: 24, textAlign: 'left' } } } },
+      { id: 'text', parentId: 'root', role: 'text', text: 'MMMM' },
+      { id: 'panel', parentId: 'root', role: 'container', layout: { size: [100, 50] }, style: { backgroundColor: '#ff0000', borderRadius: 12 } },
+    ]
+    const before = structuredClone(source)
+    const context = { font: '', measureText(text: string) { return { width: text.length * Number(this.font.match(/([\d.]+)px/)![1]) } as TextMetrics } }
+    const measureText = createUiTextMeasurer(context)
+    for (const [width, size, align] of [[900, 48, 'right'], [400, 24, 'left']] as const) {
+      const resolved = resolveUiNodesForViewport(source, 'root', { width, height: 200 }, { measureText })
+      expect(resolved[1].style).toMatchObject({ fontSize: size, fontWeight: 700, textAlign: align })
+      expect(resolved[1].layout!.size![0]).toBeCloseTo(size * 4, 3)
+      expect(resolved[1].layout!.size![1]).toBeCloseTo(size * 1.35, 3)
+      expect(context.font).toBe(`700 ${size}px Authored`)
+      expect(uiNodeStyle(resolved[1], false, {}, resolved)).toMatchObject({ fontSize: size, fontWeight: 700, textAlign: align, fontFamily: 'Authored' })
+      expect(uiNodeStyle(resolved[2], false, {}, resolved)).toMatchObject({ backgroundColor: '#ff0000', borderRadius: 12 })
+    }
+    expect(source).toEqual(before)
+  })
+
+  it('inherits font references while allowing an explicit child family or resource override', () => {
+    const source: UiResponsiveNode[] = [
+      { id: 'root', data: { font: { assetRef: 'FONT', member: 'regular.ttf' } }, style: { color: 'blue' } },
+      { id: 'inherited', parentId: 'root' },
+      { id: 'system', parentId: 'root', style: { fontFamily: 'serif' } },
+      { id: 'own', parentId: 'root', data: { font: { assetRef: 'OTHER' } } },
+      { id: 'shape', parentId: 'root', role: 'shape', layout: { size: [20, 20] } },
+    ]
+    const result = resolveUiNodesForViewport(source, 'root', { width: 900, height: 200 })
+    expect(result[1].data?.font).toEqual(source[0].data?.font)
+    expect(result[2].data?.font).toBeUndefined()
+    expect(result[3].data?.font).toEqual({ assetRef: 'OTHER' })
+    expect(uiNodeStyle(result[4] as any, false, {}, result as any).backgroundColor).toBeUndefined()
+    expect(source[1].data).toBeUndefined()
+  })
+
   it('reports the same default/authored width boundary and portrait precedence used by projection', () => {
     expect(uiViewportVariants(undefined, { width: 600, height: 400 })).toEqual({
       compactMaxWidth: 600, compactMaxWidthSource: 'default', compact: true, portrait: false,

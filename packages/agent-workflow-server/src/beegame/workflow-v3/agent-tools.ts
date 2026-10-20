@@ -26,7 +26,7 @@ export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
 /** Same design indexes and writer lifetime; no new workflow state or copied plan. */
 export function openDesignActions(root: string, requireEditableContent = false, implementation?: () => Promise<unknown>) {
   let before = snapshotDesignDocuments(root, PROJECT_DOCUMENTS)
-  return async (action: string, documents: string[] = []) => {
+  return async (action: string, documents: string[] = [], executionIdentity?: {runId:string;requirementsRevision:string}) => {
     const selected = documents.map(name => name.startsWith('docs/') ? name.slice(5) : name)
     if (selected.some(name => !PROJECT_DOCUMENTS.includes(name as typeof PROJECT_DOCUMENTS[number])))
       throw Error('Expected an existing design document name')
@@ -71,7 +71,7 @@ export function openDesignActions(root: string, requireEditableContent = false, 
     if (action === 'implementation' && implementation) return implementation()
     if (action === 'implementation') return { valid: true, ...readDesignImplementationChecklist(root),
       requirements:readDesignAcceptanceRequirements(root) }
-    if (action === 'acceptance') return inspectDesignAcceptance(root,true,requireEditableContent)
+    if (action === 'acceptance') return inspectDesignAcceptance(root,true,requireEditableContent,executionIdentity)
     throw Error('Unknown design action; use --design help')
   }
 }
@@ -138,8 +138,8 @@ export async function openAgentTools(input: {
             if (Object.keys(body).some(key => !['designAction','documents'].includes(key)) || typeof body.designAction !== 'string' ||
                 body.documents !== undefined && (!Array.isArray(body.documents) || body.documents.some((name: unknown) => typeof name !== 'string')))
               throw Error('Design accepts designAction and optional document names')
-            await input.measurement!.assertActive(body.designAction === 'finalize')
-            return Response.json(await design(body.designAction, body.documents), { headers: { 'Cache-Control':'no-store' } })
+            const identity = await input.measurement!.assertActive(body.designAction === 'finalize')
+            return Response.json(await design(body.designAction, body.documents, identity), { headers: { 'Cache-Control':'no-store' } })
           }
           if (body && typeof body === 'object' && 'executionInputs' in body) {
             if (Object.keys(body).length !== 1 || body.executionInputs !== true)

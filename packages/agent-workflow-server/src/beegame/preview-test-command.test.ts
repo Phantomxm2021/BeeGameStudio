@@ -182,3 +182,27 @@ test('deadline also bounds source inspection and does not launch a test after ex
   expect(result.finishedAt).toBeString()
   await expect(readFile(join(root, 'should-not-run'))).rejects.toThrow()
 })
+
+
+test.skipIf(process.platform === 'win32')('normal script exit cannot leave owned background writers behind a successful receipt', async () => {
+  const background = `const fs=require('node:fs');process.on('SIGTERM',()=>{});
+    fs.writeFileSync('background-ready.txt','ready');setInterval(()=>fs.appendFileSync('background-writes.txt','x'),20);
+    setTimeout(()=>process.exit(0),5000);`;
+  await writeFile(join(root,'test.mjs'), `import {spawn} from 'node:child_process';import {writeFileSync,existsSync} from 'node:fs';
+    const sub=spawn(process.execPath,['-e',${JSON.stringify(background)}],{stdio:'ignore'});sub.unref();
+    writeFileSync('background.pid',String(sub.pid));
+    while(!existsSync('background-ready.txt'))await new Promise(resolve=>setTimeout(resolve,10));
+    process.exit(0);`)
+  let pid: number | undefined
+  try {
+    const child=launch("runPreviewTest('test.mjs')")
+    pid=Number(await ready('background.pid'))
+    const {code,result}=await complete(child)
+    expect(code).toBe(1)
+    expect(result).toMatchObject({status:'interrupted',exitCode:null,quality:'unverified'})
+    expect(result.error).toContain('background')
+    const before=await readFile(join(root,'background-writes.txt'),'utf8').catch(()=> '')
+    await Bun.sleep(100)
+    expect(await readFile(join(root,'background-writes.txt'),'utf8').catch(()=> '')).toBe(before)
+  } finally {if(pid)try{process.kill(pid,'SIGKILL')}catch{}}
+},10000)

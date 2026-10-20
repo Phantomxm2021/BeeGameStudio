@@ -9,7 +9,7 @@ export { initializeUiLayout, type UiLayoutOptions } from '../../../scene-editor/
 export { inspectUiLayout } from '../../../scene-editor/src/ui-layout-inspection'
 export { createUiTextMeasurer } from '../../../scene-editor/src/ui-text-measurement'
 export { inspectUiLayoutInBrowser, type UiBrowserInspectionOptions } from '../../../scene-editor/src/ui-browser-inspection'
-export { createProductionUiSurface, renderProductionScene2d, sceneNodeClientPoint2d, PRODUCTION_SURFACE_CAPABILITIES, inspectProductionUiSupport,
+export { createProductionUiSurface, renderProductionScene2d, sceneNodeClientPoint2d, PRODUCTION_SURFACE_CAPABILITIES, inspectProductionUiSupport, inspectProductionSceneSupport,
   resolveSurfaceImage, type SurfaceImage, type SurfaceAssets } from '../../../scene-editor/src/production-surface'
 export * from '../../../scene-editor/src/scene-camera'
 export { inspectSceneLayout2d, sceneWorldTransforms2d, sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
@@ -38,11 +38,18 @@ export async function loadProductionResources(manifestUrl: string | URL,
       /^[a-z][a-z0-9+.-]*:/i.test(path)) throw Error('Unsafe registered resource path')
     return new URL(path.split('/').map(encodeURIComponent).join('/'), base)
   }
-  const json = async (url: string | URL) => {
+  // Cache in-flight work as well as completed work within this load only.
+  const once = <T>(cache: Map<string,Promise<T>>, key: string, load: () => Promise<T>) => {
+    let pending = cache.get(key)
+    if (!pending) { pending = load(); cache.set(key,pending) }
+    return pending
+  }
+  const metadata = new Map<string,Promise<any>>()
+  const json = (url: string | URL) => once(metadata,String(url),async () => {
     const response = await fetcher(url)
     if (!response.ok) throw Error('Resource metadata HTTP ' + response.status + ': ' + url)
     return response.json()
-  }
+  })
   const index = await json(manifestUrl)
   if (index.version !== 9 || !Array.isArray(index.modules?.resources)) throw Error('Expected modular AssetManifest v9')
   const resources = await Promise.all(index.modules.resources.map((path: string) => json(urlFor(path)))) as
@@ -63,6 +70,8 @@ export async function loadProductionResources(manifestUrl: string | URL,
   }
   const assets = new Map<string,SurfaceImage>(), fonts = new Map<string,FontFace>()
   const bitmaps = new Map<string,ImageBitmap>(), faces = new Map<string,FontFace>()
+  const imageLoads = new Map<string,Promise<ImageBitmap>>(), faceLoads = new Map<string,Promise<FontFace>>()
+  const assetLoads = new Map<string,Promise<SurfaceImage>>()
   const dispose = () => { for (const bitmap of bitmaps.values()) bitmap.close(); for (const face of faces.values()) document.fonts.delete(face) }
   const loadImage = async (reference: {assetRef?:string;data?:Record<string,unknown>}) => {
     if (!reference.assetRef) return
@@ -76,18 +85,25 @@ export async function loadProductionResources(manifestUrl: string | URL,
       path = images[0]!
     }
     if (!/\.(png|jpe?g|webp|gif|avif)$/i.test(path)) throw Error('Unsupported static image format: ' + path)
-    if (!bitmaps.has(path)) {
-      const response = await fetcher(urlFor(path))
-      if (!response.ok) throw Error('Image HTTP ' + response.status + ': ' + path)
-      bitmaps.set(path,await createImageBitmap(await response.blob()))
-    }
-    if (!assets.has(key)) {
-      const source = bitmaps.get(path)!, metadata = editorAtlasPath(selected.resource,path)
-      const sheet = metadata ? parseSpriteSheet(await json(urlFor(metadata))) : undefined
-      if (metadata && !sheet) throw Error('Unsupported atlas metadata: ' + metadata)
+    const baseAsset = await once(assetLoads,key,async () => {
+      const atlasPath = editorAtlasPath(selected.resource,path)
+      const [source, rawSheet] = await Promise.all([
+        once(imageLoads,path,async () => {
+          const response = await fetcher(urlFor(path))
+          if (!response.ok) throw Error('Image HTTP ' + response.status + ': ' + path)
+          const bitmap = await createImageBitmap(await response.blob())
+          bitmaps.set(path,bitmap)
+          return bitmap
+        }),
+        atlasPath ? json(urlFor(atlasPath)) : undefined,
+      ])
+      const sheet = atlasPath ? parseSpriteSheet(rawSheet) : undefined
+      if (atlasPath && !sheet) throw Error('Unsupported atlas metadata: ' + atlasPath)
       if (sheet) validateSpriteSheetBounds(sheet,source.width,source.height)
-      assets.set(key,{source,url:urlFor(path).href,...(sheet?{sheet}:{})})
-    }
+      const asset = {source,url:urlFor(path).href,...(sheet?{sheet}:{})}
+      assets.set(key,asset)
+      return asset
+    })
     const frameKey = uiImageKey(assetRef,data)
     if (frameKey !== key && !assets.has(frameKey)) {
       const chosen = resolveSurfaceImage(assets,assetRef,data)
@@ -95,39 +111,55 @@ export async function loadProductionResources(manifestUrl: string | URL,
       // Isolate the selected pixels once: browser linear filtering must not
       // sample an adjacent atlas frame when scaling a tiny UI or Scene sprite.
       const cacheKey = JSON.stringify([path,chosen.frame])
-      if (!bitmaps.has(cacheKey)) bitmaps.set(cacheKey,await createImageBitmap(bitmaps.get(path)!,...chosen.frame))
-      assets.set(frameKey,{source:bitmaps.get(cacheKey)!,url:chosen.url})
+      const bitmap = await once(imageLoads,cacheKey,async () => {
+        const cropped = await createImageBitmap(baseAsset.source as ImageBitmap,...chosen.frame!)
+        bitmaps.set(cacheKey,cropped)
+        return cropped
+      })
+      assets.set(frameKey,{source:bitmap,url:chosen.url})
     }
   }
-  const loadFont = async (font: unknown, family?:unknown) => {
+  const loadFont = async (font: unknown) => {
+    if (font === undefined) return
     const key = uiFontKey(font)
-    if (!key || fonts.has(key)) return
+    if (!key) throw Error('Invalid production font reference; expected {assetRef, member?}')
+    if (fonts.has(key)) return
     const reference = font as {assetRef:string;member?:string}
     const {path} = locate(reference.assetRef,reference.member)
     if (!/\.(woff2?|ttf|otf)$/i.test(path)) throw Error('Unsupported font format: ' + path)
-    if (!faces.has(path)) {
+    const face = await once(faceLoads,path,async () => {
       const response = await fetcher(urlFor(path))
       if (!response.ok) throw Error('Font HTTP ' + response.status + ': ' + path)
-      const face = new FontFace(typeof family === 'string' ? family : 'bgs-' + ++productionFontSequence,await response.arrayBuffer())
+      const face = new FontFace('bgs-' + ++productionFontSequence,await response.arrayBuffer())
       await face.load(); document.fonts.add(face); faces.set(path,face)
-    }
-    fonts.set(key,faces.get(path)!)
+      return face
+    })
+    fonts.set(key,face)
   }
+  const jobs: Array<() => Promise<void>> = []
   try {
     for (const source of documents) {
       const doc = parseBeeGameContentDocument(source)
       for (const node of doc.data.nodes ?? []) {
         if (doc.kind.startsWith('ui-')) {
-          await loadImage(uiNodeImageSource(node))
-          await loadFont(node.data?.font,'style' in node ? node.style?.fontFamily : undefined)
+          jobs.push(() => loadImage(uiNodeImageSource(node)),() => loadFont(node.data?.font))
         } else for (const component of 'components' in node ? node.components ?? [] : []) {
           if (component.type === 'image' || component.type === 'sprite-renderer')
-            await loadImage({assetRef:component.assetRef,data:component.data})
+            jobs.push(() => loadImage({assetRef:component.assetRef,data:component.data}))
+          if (component.type === 'text') jobs.push(() => loadFont(component.data?.font))
         }
       }
     }
+    const results = await Promise.allSettled(jobs.map(load => load()))
+    const failed = results.find(result => result.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
     return {assets,fonts,resourceUrl:(id:string,member?:string)=>urlFor(locate(id,member).path).href,dispose}
-  } catch (error) { dispose(); throw error }
+  } catch (error) {
+    // A failed atlas request can finish before its bitmap. Drain those existing
+    // loads before cleanup so late successes cannot leak decoded resources.
+    await Promise.allSettled([...imageLoads.values(),...faceLoads.values()])
+    dispose(); throw error
+  }
 }
 
 export function readSceneData(value: unknown) {

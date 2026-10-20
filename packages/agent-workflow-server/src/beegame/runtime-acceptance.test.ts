@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import sharp from 'sharp'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -380,6 +380,16 @@ test('a readable UI JSON and browser screenshot do not certify that its layout i
     await writeFile(menuPath, JSON.stringify(invalidMenu))
     expect((await read([check]))?.summary).toContain('Authored UI control geometry violates declared bounds or minima')
     await writeFile(menuPath, originalMenu)
+    // Removing the registry must invalidate checks that claim to consume it,
+    // including retained reports without an optional designRevision.
+    const registryPath = join(workspace, 'content/index.json')
+    const registry = await readFile(registryPath, 'utf8')
+    await rm(registryPath)
+    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(false)
+    const absentRegistry = await read([check])
+    expect(absentRegistry?.status).toBe('blocked')
+    expect(absentRegistry?.summary).toContain('content/index.json')
+    await writeFile(registryPath, registry)
     // Historical PASS objects cannot bypass the new consumption coverage check.
     expect(await runtimeEvidenceIsCurrent(workspace, [{ ...accepted, verification: {
       ...accepted.verification!, contentChecks: undefined,
@@ -495,4 +505,24 @@ test.each(['scene-2d', 'scene-3d'] as const)('%s resource and geometry verificat
       expect(await readFile(join(workspace, 'content/world.json'), 'utf8')).toBe(source)
     }
   } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
+
+test.each(['report-dot','report-link','source-dot','source-link','index-dot','index-link'] as const)(
+  'evidence aliases cannot turn an authored source/verdict into a runtime observation: %s',async kind=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-evidence-alias-'))
+  try {
+    await writeDesignDocumentsFixture(root,['GDD.md'])
+    await writeFile(join(root,'game.js'),'Synthetic artifact')
+    const target=kind.startsWith('report')?'acceptance.json':kind.startsWith('source')?'docs/GDD.md':designHandoffPath('GDD.md')
+    const evidence=kind.endsWith('dot')?'./'+target:'observation.txt'
+    if(kind.endsWith('link'))await symlink(target,join(root,evidence))
+    const report={scope:'delivery',status:'passed',summary:'Synthetic verdict',environment:'Offline fixture',
+      artifactPaths:['game.js'],evidencePaths:[evidence],verification:{target:'deployment',observation:'target-runtime',
+        knownIssues:[],unverified:[],requirementChecks:designRequirementChecksFixture(root,[evidence])}}
+    await writeFile(join(root,'acceptance.json'),JSON.stringify(report))
+    const result=await readRuntimeAcceptanceReport(root,'acceptance.json')
+    expect(result).toMatchObject({status:'blocked',diagnostic:{category:'report-invalid'}})
+    expect(result!.summary).toContain(kind.startsWith('report')?'own evidence':'not its design source')
+  }finally{await rm(root,{recursive:true,force:true})}
 })

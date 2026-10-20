@@ -1,54 +1,33 @@
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve, relative, dirname, extname } from 'node:path'
+import { join, resolve, relative, dirname, extname, isAbsolute } from 'node:path'
 import { artifactDigest } from '../runtime-acceptance'
 import { readBeeGameAssetManifest } from '../asset-contracts'
 import { staticArtifactFiles } from './runtime-checks'
 import { digest, WorkflowError, type CheckResult, type FileVersion, type TaskSpec, type PackageComposition } from './state'
 import { EDITABLE_BUILD_CHECK_VERSION } from './check-versions'
 
-const safeDots = new Set(['.gitignore', '.editorconfig', '.browserslistrc'])
-const excludedNames = new Set(['node_modules', '.git', '.beegame', '.DS_Store'])
-// Autonomous Web builds reserve this directory for validation attachments.
-// It is absent from the measured build copy, not merely ignored after building.
-// Existing receipts retain their own recorded exclusions (often exact files).
-export const AGENT_EVIDENCE_DIRECTORY = 'reports'
-// SessionManager's reserved workspace records live outside .beegame too.
-// Keep other files in logs/ (they may be real game inputs), not a name-only
-// exclusion of every logging directory in the editable project.
-const hostRecord = (path:string) => path==='transcripts' || /^logs\/(index\.json|runtime-diagnostics\.jsonl(?:\.\d+)?)$/.test(path)
-/** No author-selected file list: enumerate the exportable project before build.
- * Private dot files are absent from the build copy, not silently required inputs.
- * Reports are host workflow evidence, not editable game source. */
-export async function projectFiles(root: string, artifact: string, excludedReports: string[]): Promise<FileVersion[]> {
-  const base = await realpath(root), files: FileVersion[] = []
-  async function visit(dir: string) {
-    for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a,b)=>a.name.localeCompare(b.name))) {
-      const target = resolve(dir,entry.name), path = relative(base,target).split('\\').join('/')
-      if (path===artifact || hostRecord(path) || excludedReports.some(report=>path===report || path.startsWith(report+'/')) || excludedNames.has(entry.name) || entry.name.startsWith('.') && !safeDots.has(entry.name)) continue
-      if (entry.name.includes('\\') || entry.isSymbolicLink() || await realpath(target)!==target)
-        throw new WorkflowError('project-alias', 'Editable project sources must not contain aliases: '+path)
-      if (entry.isDirectory()) await visit(target)
-      else if (entry.isFile()) files.push({path,sha256:digest(await readFile(target))})
-      else throw new WorkflowError('project-file-invalid','Editable project contains a non-regular source: '+path)
+// Keep the existing public imports while sharing only read-only input identity code.
+export { projectFiles, projectDependencies, sameFiles, changedProjectPaths, AGENT_EVIDENCE_DIRECTORY } from './checks'
+import { projectFiles, projectDependencies, sameFiles } from './checks'
+
+async function rebaseDependencyLinks(directory:string, sourceRoot:string, copyRoot:string) {
+  for (const entry of await readdir(directory,{withFileTypes:true})) {
+    const path=join(directory,entry.name)
+    if (entry.isDirectory()) await rebaseDependencyLinks(path,sourceRoot,copyRoot)
+    else if (entry.isSymbolicLink()) {
+      const link=await readlink(path)
+      if (!isAbsolute(link)) continue
+      // Relative links already relocate with the tree. Absolute internal links
+      // must not keep resolving back into the original project's dependencies.
+      const target=relative(sourceRoot,await realpath(link))
+      if (!target || target==='..' || target.startsWith('../') || isAbsolute(target))
+        throw new WorkflowError('dependency-alias','Installed dependency link resolves outside the workspace')
+      await rm(path)
+      await symlink(relative(dirname(path),join(copyRoot,target)),path)
     }
   }
-  await visit(base)
-  if (!files.some(f=>f.path==='package.json')) throw new WorkflowError('project-incomplete','Editable export needs a saved package.json',400)
-  return files.sort((a,b)=>a.path.localeCompare(b.path))
-}
-export const sameFiles = (a: FileVersion[], b: FileVersion[]) => JSON.stringify(a)===JSON.stringify(b)
-export function changedProjectPaths(previous: FileVersion[], current: FileVersion[]) {
-  const before=new Map(previous.map(f=>[f.path,f.sha256])),after=new Map(current.map(f=>[f.path,f.sha256]))
-  return [...new Set([...before.keys(),...after.keys()])].filter(path=>before.get(path)!==after.get(path)).sort()
-}
-export async function projectDependencies(root:string) {
-  try {
-    const dir=join(root,'node_modules'), info=await lstat(dir)
-    if (!info.isDirectory() || await realpath(dir)!==dir) throw new WorkflowError('dependency-alias','Installed dependency root must be a project-local directory')
-    return await artifactDigest(root,'node_modules',true)
-  } catch(error) { if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error }
 }
 async function canonicalParents(base:string, parent:string) {
   let current=base
@@ -130,10 +109,11 @@ export async function buildEditableProject(root:string, task:Pick<TaskSpec,'edit
     // Keep dependency resolution inside the isolated copy. A root symlink back
     // to the original project made Bun traverse/read original ancestor folders
     // for React's transitive imports, which the sandbox correctly denied.
-    // Materialize the same measured bytes (reflink where supported), not a
-    // fresh install or a broader host read grant. Verify BEFORE executing code.
+    // Preserve package-manager links: flattening .bin entries breaks their
+    // package-relative imports. Copy bytes locally and verify before execution.
     if(dependencySha256) {
-      await cp(join(base,'node_modules'),join(temporary,'node_modules'),{recursive:true,dereference:true,mode:constants.COPYFILE_FICLONE})
+      await cp(join(base,'node_modules'),join(temporary,'node_modules'),{recursive:true,dereference:false,verbatimSymlinks:true,mode:constants.COPYFILE_FICLONE})
+      await rebaseDependencyLinks(join(temporary,'node_modules'),base,temporary)
       if(await artifactDigest(temporary,'node_modules',true)!==dependencySha256 || await projectDependencies(base)!==dependencySha256)
         throw new WorkflowError('dependency-copy-changed','Installed dependencies changed while materializing the isolated build; no code was executed')
     }

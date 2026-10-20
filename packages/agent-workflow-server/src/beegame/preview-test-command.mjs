@@ -189,6 +189,16 @@ export async function runPreviewTest(script, args = [], { timeoutMs = 300_000 } 
             child.once('close', (exitCode, signal) => resolveResult({ status: 'exited', exitCode, signal }));
           });
           Object.assign(report, result);
+          // A detached test group can outlive its leader even after exit 0.
+          // Reuse cancellation cleanup; a still-writing descendant is not a
+          // settled execution and must not receive a successful receipt.
+          if (result.status === 'exited' && !controller.signal.aborted && process.platform !== 'win32') {
+            try {
+              process.kill(-child.pid, 0);
+              report.error = 'Test exited with background processes still running; owned group interrupted.';
+              interrupt('interrupted');
+            } catch (error) { if (error.code !== 'ESRCH') throw error; }
+          }
         }
         report.after = controller.signal.aborted ? {status:'unverified', reason:'Test execution interrupted'}
           : await executionInputs(root, file, controller.signal);

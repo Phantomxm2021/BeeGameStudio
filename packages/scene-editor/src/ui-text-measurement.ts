@@ -4,7 +4,7 @@ import type { UiLayoutOptions } from './ui-container-layout'
 /** Intrinsic text measurement, not a wrapping/shaping engine. Load fonts before using this. */
 export function createUiTextMeasurer(
   context: Pick<CanvasRenderingContext2D, 'font' | 'measureText'>,
-  fontFamily: (node: UiResponsiveNode) => string = () => 'sans-serif',
+  fontFamily: (node: UiResponsiveNode) => string = node => typeof node.style?.fontFamily === 'string' ? node.style.fontFamily : 'sans-serif',
 ): NonNullable<UiLayoutOptions['measureText']> {
   return node => {
     const style = node.style ?? {}
