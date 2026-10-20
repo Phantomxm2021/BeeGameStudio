@@ -25,6 +25,42 @@ const designContentChecks = () => [
 ].map(check=>({...check,change:'Synthetic fixture change',expected:'Synthetic expected',observed:'Synthetic expected',
   status:'passed',evidencePaths:['observed.txt']}))
 
+test.each([
+  ['content/ui/menu.json', false], ['content/ui/menu.json', true],
+  ['content/scenes/level.json', false], ['content/scenes/level.json', true],
+  ['content/index.json', false], ['content/index.json', true],
+] as const)('content input cannot substitute for a runtime observation: %s (alias=%s)', async (source, alias) => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-content-evidence-source-'))
+  try {
+    await writeDesignDocumentsFixture(root)
+    await registerDesignFixture(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, 'observed.txt'), 'Synthetic before/after observation; not a real game verdict')
+    await writeFile(join(root, 'game.js'), 'Synthetic build')
+    const support = alias ? 'input-alias.json' : source
+    if (alias) await symlink(join(root, source), join(root, support))
+    const report = { scope: 'delivery', status: 'passed', summary: 'Synthetic author verdict', environment: 'Offline fixture',
+      evidencePaths: ['observed.txt', support], artifactPaths: ['game.js'],
+      verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [],
+        contentChecks: designContentChecks(), requirementChecks: designRequirementChecksFixture(root, ['observed.txt']) } }
+    const save = () => writeFile(join(root, DESIGN_ACCEPTANCE_PATH), JSON.stringify(report))
+    await save()
+    // Source files can remain supporting attachments; the actual checks cite observations.
+    const accepted = (await readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH))!
+    expect(accepted.status).toBe('passed')
+    expect(await runtimeEvidenceIsCurrent(root, [accepted])).toBe(true)
+    report.verification.contentChecks[0]!.evidencePaths = [support]
+    await save()
+    const invalid = (await readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH))!
+    expect(invalid).toMatchObject({ status: 'blocked', diagnostic: { category: 'report-invalid' } })
+    expect(invalid.summary).toContain('runtime observation, not authored content')
+    // A retained PASS must obey the same rule, even without rereading its report.
+    expect(await runtimeEvidenceIsCurrent(root, [{ ...accepted, verification: {
+      ...accepted.verification!, contentChecks: report.verification.contentChecks as any,
+    } }])).toBe(false)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test('design-led acceptance still checks document coverage and revision without an image gate',async()=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-design-led-acceptance-'))
   try {

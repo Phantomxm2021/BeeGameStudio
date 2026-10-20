@@ -216,6 +216,7 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
     throw error
   }
   const index = parseBeeGameContentIndex(JSON.parse(await readFile(resolve(workspace, indexPath), 'utf8')))
+  const authoredInputs = new Set([await realpath(resolve(workspace, indexPath))])
   const required = new Map<string, Set<string>>()
   const nodeIds = new Map<string, Set<string>>()
   const tilemapNodes = new Map<string, Set<string>>()
@@ -229,6 +230,7 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
       throw new Error(`Invalid content path: ${file}`)
     const path = `content/${file}`
     await artifactDigest(workspace, path)
+    authoredInputs.add(await realpath(resolve(workspace, path)))
     const document = parseBeeGameContentDocument(JSON.parse(await readFile(resolve(workspace, path), 'utf8')))
     if (bindDesignSources || requireEditableContent) {
       const entries = index.documents?.filter(entry => entry.path === file) ?? []
@@ -272,6 +274,12 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
     if (check.status !== 'passed') return diagnostic(check.status === 'failed' ? 'product-failed' : 'verification-incomplete', `Content binding ${check.kind} is ${check.status}: ${check.observed}`)
     if (check.evidencePaths.some(path => !evidencePaths.includes(path)))
       return diagnostic('report-invalid', `Content binding ${check.kind} evidence must be included in evidencePaths.`)
+    // Authored bytes describe the input, not the observed effect of consuming it.
+    // Resolve aliases just as requirement evidence does; attachments may still
+    // include sources when the actual check cites a separate runtime observation.
+    for (const path of check.evidencePaths)
+      if (authoredInputs.has(await realpath(resolve(workspace, path))))
+        return diagnostic('report-invalid', `Content binding ${check.kind} needs a runtime observation, not authored content: ${path}.`)
   }
   const missing = [...required].flatMap(([kind, paths]) => [...paths].filter(document =>
     !checks.some(check => check.kind === kind && check.document === document &&
