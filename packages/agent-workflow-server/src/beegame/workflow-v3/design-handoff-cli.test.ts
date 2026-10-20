@@ -59,6 +59,8 @@ test('baseline CLI summarizes integrity without hiding failures or certifying ab
     expect(await readFile(join(root, 'docs/GDD.md'), 'utf8')).toBe(original)
 
     const help = JSON.parse((await command('--design', 'help')).stdout)
+    expect(help.writingOrder).toEqual(['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md',
+      'ART_DIRECTION.md','UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md'])
     expect(help.acceptanceInstruction).toContain('An existing measurement is immutable')
     expect(help.acceptanceInstruction).not.toContain('attach the report to the existing measurement')
     expect(help.acceptanceInstruction).toContain('verification.contentChecks')

@@ -3,6 +3,7 @@ import { readdirSync, realpathSync, statSync, fstatSync, openSync, readSync, clo
 import { open, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
+import { DESIGN_WRITING_ORDER, DESIGN_METHODS } from '@bee-game-studio/agent-workflow/design-review-result'
 
 const NAV_START = '<!-- bgs:source-navigation:start -->'
 const NAV_END = '<!-- bgs:source-navigation:end -->'
@@ -13,18 +14,11 @@ export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - Architecture decisions belong in their existing design/configuration sources, not this guide. Navigation pointers do not verify behavior.
 
 ## Professional methods
-- For a new complete game design, cover these responsibilities. Use the current session's native metadata to resolve names/namespaces, then invoke matching Skills with the Skill tool before related design or implementation decisions.
+- For a new complete game design, cover these responsibilities in the default writing order below. Apply confirmed platform/runtime constraints throughout. Use the current session's native metadata to resolve names/namespaces, then invoke matching Skills with the Skill tool before related design or implementation decisions. The new complete-design entry loads the first GDD method through the native command; reuse it rather than loading it again.
 
 | Design responsibility | Skills |
 | --- | --- |
-| GDD.md: direction/gameplay | game-creative-director-expert, game-systems-designer-expert |
-| LEVEL_SCENE_DESIGN.md: levels/scenes | game-level-designer-expert |
-| BALANCE_DESIGN.md: balance | game-balance-designer-expert |
-| TECHNICAL_DESIGN.md: technology/tasks | gameplay-programmer, game-implementation-planning |
-| ART_DIRECTION.md: art | game-art-director-expert |
-| UI_UX_SPEC.md: UI/UX | game-ui-ux-designer |
-| AUDIO_DESIGN.md: audio | game-audio-designer |
-| ASSET_PLAN.md: resources | game-content-pipeline-engineer |
+${DESIGN_WRITING_ORDER.map(document => `| ${document}: ${DESIGN_METHODS[document].responsibility} | ${DESIGN_METHODS[document].skills.join(', ')} |`).join('\n')}
 
 ## Required design dependencies
 For applicable new work, use this order; do not omit, replace or reverse required dependencies:

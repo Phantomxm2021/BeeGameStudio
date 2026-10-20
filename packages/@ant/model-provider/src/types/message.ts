@@ -38,6 +38,8 @@ export type Message = {
   type: MessageType
   uuid: UUID
   isMeta?: boolean
+  /** Populated by the native prompt loader, not model-authored content. */
+  invokedSkill?: { name: string; path: string }
   isCompactSummary?: boolean
   toolUseResult?: unknown
   isVisibleInTranscriptOnly?: boolean

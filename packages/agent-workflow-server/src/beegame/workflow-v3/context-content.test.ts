@@ -144,3 +144,13 @@ test('host build creates and checks actual first-build artifacts; zero exit with
     expect((await runChecks(root, buildTask, [])).checks[0]?.status).toBe('unverified')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test('native command receipt records a load without pretending the model invoked the Skill tool', () => {
+  const payload={type:'system',subtype:'status',skill:{name:'bgs-builtins:game-creative-director-expert',
+    source:'command',messageId:'body-uuid',status:'loaded'}}
+  expect(skillEvidence([{id:1,type:'system.status',payload}])).toEqual([
+    {name:payload.skill.name,messageId:'body-uuid',source:'command',eventId:1,status:'loaded'},
+  ])
+  expect(skillEvidence([{id:1,type:'assistant.message',payload},
+    {id:2,type:'system.status',payload:{...payload,skill:{...payload.skill,status:'pending'}}}])).toEqual([])
+})

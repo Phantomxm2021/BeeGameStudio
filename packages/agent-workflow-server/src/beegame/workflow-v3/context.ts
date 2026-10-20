@@ -2,11 +2,19 @@ import type { Run, SkillUse } from './state'
 
 type ToolEvent = { id: number; type: string; payload?: Record<string, unknown> }
 
-/** Only actual tool lifecycles count. Discovery, assistant prose and failed calls do not. */
+/** Native loader receipts and actual tool lifecycles only; never inferred from prose. */
 export function skillEvidence(events: ToolEvent[]): SkillUse[] {
   const uses = new Map<string, SkillUse>()
   for (const event of events) {
     const p = event.payload, toolUseID = p?.toolUseID
+    const skill = p?.skill as { name?: unknown; messageId?: unknown; source?: unknown; status?: unknown } | undefined
+    if (event.type === 'system.status' && p?.type === 'system' && p.subtype === 'status' &&
+        skill?.source === 'command' && skill.status === 'loaded' &&
+        typeof skill.name === 'string' && skill.name.trim() && typeof skill.messageId === 'string' && skill.messageId) {
+      uses.set('command:' + skill.messageId, { name: skill.name, messageId: skill.messageId, source: 'command',
+        eventId: event.id, status: 'loaded',
+        ...(typeof p.parent_tool_use_id === 'string' ? { parentToolUseID: p.parent_tool_use_id } : {}) })
+    }
     if (typeof toolUseID !== 'string') continue
     if (event.type === 'tool.started' && p?.toolName === 'Skill') {
       const name = (p.input as { skill?: unknown } | undefined)?.skill
@@ -28,9 +36,10 @@ export function priorMainSkillLoads(run:Run,attemptId:string) {
     return {recordedMainLoads:[],contextPresence:'not-transferred',application:'unverified'}
   const prior=at>=0?run.agentTurns!.slice(0,at):[]
   const nativeId=prior.at(-1)?.nativeSessionId
-  const loaded=new Map<string,{name:string;attemptId:string;toolUseID:string}>()
+  const loaded=new Map<string,{name:string;attemptId:string;toolUseID?:string;messageId?:string;source?:'command'}>()
   if(nativeId)for(const turn of prior)if(turn.nativeSessionId===nativeId)
     for(const skill of turn.skillUses??[])if(skill.status==='loaded'&&!skill.parentToolUseID)
-      loaded.set(skill.name,{name:skill.name,attemptId:turn.attemptId,toolUseID:skill.toolUseID})
+      loaded.set(skill.name,{name:skill.name,attemptId:turn.attemptId,...(skill.toolUseID?{toolUseID:skill.toolUseID}:{}),
+        ...(skill.messageId?{messageId:skill.messageId,source:skill.source}:{})})
   return {recordedMainLoads:[...loaded.values()],contextPresence:'unverified',application:'unverified'}
 }

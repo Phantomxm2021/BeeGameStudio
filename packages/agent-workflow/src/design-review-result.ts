@@ -2,11 +2,26 @@ import { array, enum as enumeration, object, string } from 'zod'
 import type { z } from 'zod'
 import { isDeepStrictEqual } from 'node:util'
 
-// Shared by the host release boundary and the native receipt-write boundary.
+// Document identities used by validation and persisted baseline hashing.
+// Preserve this serialization order; writing order comes from DESIGN_METHODS below.
 export const PROJECT_DOCUMENTS = [
   'GDD.md', 'LEVEL_SCENE_DESIGN.md', 'BALANCE_DESIGN.md', 'TECHNICAL_DESIGN.md',
   'ART_DIRECTION.md', 'UI_UX_SPEC.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md',
 ] as const
+// Default writing order and responsibilities. Procedure bodies stay in Skills;
+// navigation and initial dispatch share this map, not another execution scheduler.
+export const DESIGN_METHODS = {
+  'GDD.md': { responsibility: 'direction/gameplay', skills: ['game-creative-director-expert', 'game-systems-designer-expert'] },
+  'LEVEL_SCENE_DESIGN.md': { responsibility: 'levels/scenes', skills: ['game-level-designer-expert'] },
+  'BALANCE_DESIGN.md': { responsibility: 'balance', skills: ['game-balance-designer-expert'] },
+  'ART_DIRECTION.md': { responsibility: 'art', skills: ['game-art-director-expert'] },
+  'UI_UX_SPEC.md': { responsibility: 'UI/UX', skills: ['game-ui-ux-designer'] },
+  'AUDIO_DESIGN.md': { responsibility: 'audio', skills: ['game-audio-designer'] },
+  'ASSET_PLAN.md': { responsibility: 'resources', skills: ['game-content-pipeline-engineer'] },
+  'TECHNICAL_DESIGN.md': { responsibility: 'technology/tasks', skills: ['gameplay-programmer', 'game-implementation-planning'] },
+} as const satisfies Record<typeof PROJECT_DOCUMENTS[number], { responsibility: string; skills: readonly string[] }>
+export const DESIGN_WRITING_ORDER = Object.keys(DESIGN_METHODS) as Array<keyof typeof DESIGN_METHODS>
+
 const text = string().trim().min(1)
 const document = enumeration(PROJECT_DOCUMENTS)
 export const designReviewResultSchema = object({ step: enumeration(['inspect', 'revise', 'verify']),

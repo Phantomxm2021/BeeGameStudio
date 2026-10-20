@@ -83,8 +83,8 @@ test('input identity follows saved sources/links, not a generator public copy, a
   expect(changed.runtimeVerified).toBe(false)
   expect(publicBefore).toContain('wrong-copy')
   const format=runGameContentCommand(root,['--format','index']) as any
-  expect(format.value).not.toHaveProperty('documentRevision')
-  expect(format.value).not.toHaveProperty('assetManifestRevision')
+  expect(format.values.index).not.toHaveProperty('documentRevision')
+  expect(format.values.index).not.toHaveProperty('assetManifestRevision')
   expect(CONTENT_CHECK_HELP).toContain('not design agreement, runtime or quality acceptance')
 })
 
@@ -250,7 +250,7 @@ test('draft geometry checks targets without unfinished prose; final Review still
   const path = join(root, 'content/ui/menu.json'), ui = uiLayoutFixture()
   // The format's responsive shape is consumed at node level by the real schema.
   const format = runGameContentCommand(root, ['--format', 'uiDocument']) as any
-  const responsive = structuredClone(format.value.data.nodes.find((node: any) => node.responsive).responsive)
+  const responsive = structuredClone(format.values.uiDocument.data.nodes.find((node: any) => node.responsive).responsive)
   Object.assign(ui.data.nodes[1]!, { responsive })
   writeFileSync(path, JSON.stringify(ui))
   const before = readFileSync(path, 'utf8')
@@ -285,7 +285,9 @@ test('format entry reads one actual contract section without full Content or res
   expect(format).not.toHaveProperty('layoutDraftAppendixCommand')
   expect(runGameContentCommand(root, ['--format'])).toMatchObject({ ok: true, sections: Object.keys(format) })
   const result = runGameContentCommand(root, ['--format', 'coordinates'])
-  expect(result).toMatchObject({ ok: true, value: format.coordinates })
+  expect(result).toMatchObject({ ok: true, values: { coordinates: format.coordinates } })
+  expect(result).not.toHaveProperty('value')
+  expect(result).toMatchObject({ scope: 'content-format-selection' })
   expect(JSON.stringify(result).length).toBeLessThan(before.length / 8)
   for (const section of ['missing', '__proto__']) expect(() => runGameContentCommand(root, ['--format', section])).toThrow()
   expect(() => runGameContentCommand(root, ['--format', 'coordinates', 'extra'])).toThrow()
@@ -297,6 +299,9 @@ test('format entry reads one actual contract section without full Content or res
   expect(() => runGameContentCommand(root, ['--format', 'coordinates', 'missing'])).toThrow()
   expect(readFileSync(path, 'utf8')).toBe(before)
   const runtime = await sharedContentChecker()
+  const single = runGameContentCommand(root, ['--format', 'uiDocument']) as any
+  const batch = runGameContentCommand(root, ['--format', 'uiDocument', 'uiVocabulary']) as any
+  expect(single.values.uiDocument).toEqual(batch.values.uiDocument)
   const command = ['--format', 'uiDocument', 'uiVocabulary', 'uiLayoutContract']
   const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'), ...command],
     { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
@@ -310,10 +315,10 @@ test('format entry reads one actual contract section without full Content or res
     actions: { click: 'game.start' }, bindings: { text: 'session.label', enabled: 'session.showStart' },
   })
   const scene = runGameContentCommand(root, ['--format', 'sceneVocabulary']) as any
-  expect(scene.value.requiredData.grid.schema).toBe('grid.v1')
-  expect(scene.value.requiredData.tilemap.schema).toBe('tilemap.v1')
-  expect(scene.value.requiredData['tilemap-renderer'].schema).toBe('tilemap-renderer.v1')
-  expect(scene.value.tilemapHierarchy).toContain('ancestor')
+  expect(scene.values.sceneVocabulary.requiredData.grid.schema).toBe('grid.v1')
+  expect(scene.values.sceneVocabulary.requiredData.tilemap.schema).toBe('tilemap.v1')
+  expect(scene.values.sceneVocabulary.requiredData['tilemap-renderer'].schema).toBe('tilemap-renderer.v1')
+  expect(scene.values.sceneVocabulary.tilemapHierarchy).toContain('ancestor')
 })
 
 test('published linked UI and Tilemap examples run through real draft checks without production assets', async () => {
@@ -322,8 +327,8 @@ test('published linked UI and Tilemap examples run through real draft checks wit
   await materializeSceneUiFormat(root)
   mkdirSync(join(root, 'content/scenes'), { recursive: true })
   mkdirSync(join(root, 'content/ui'), { recursive: true })
-  const tilemap = (runGameContentCommand(root, ['--format', 'tilemap']) as any).value.examples.scene
-  const uiNodes = (runGameContentCommand(root, ['--format', 'uiLayoutContract']) as any).value.linkedGameViewExample.nodes
+  const tilemap = (runGameContentCommand(root, ['--format', 'tilemap']) as any).values.tilemap.examples.scene
+  const uiNodes = (runGameContentCommand(root, ['--format', 'uiLayoutContract']) as any).values.uiLayoutContract.linkedGameViewExample.nodes
   const ui = { schema: 'beegame-content.v1', id: 'linked-example', kind: 'ui-hud', assetRefs: [], data: { rootId: 'root', nodes: uiNodes } }
   const tilePath = join(root, 'content/scenes/tiles.json'), uiPath = join(root, 'content/ui/hud.json')
   writeFileSync(tilePath, JSON.stringify(tilemap))

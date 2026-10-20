@@ -697,7 +697,7 @@ test('inspection separates the active user task and live Skill facts from a hist
     expect((await active.inspect(record.id,true)).task).toEqual(handoff.task)
     expect(inspected.attemptId).toBe(original.attemptId)
     expect(inspected.measurementTask).toMatchObject({attemptId:original.attemptId,status:'failed',requestKey:original.requestKey})
-    expect(inspected.skills).toMatchObject({currentTurnUses:[],currentTurnEvidence:'live-native-tool-events',
+    expect(inspected.skills).toMatchObject({currentTurnUses:[],currentTurnEvidence:'live-native-load-events',
       recordedMainLoads:[{name:'old-general-method'}],application:'unverified'})
     liveUses=[{name:'domain-method',toolUseID:'child-skill',eventId:2,parentToolUseID:'delegated',status:'unverified'}]
     expect((await active.inspect(record.id)).skills.currentTurnUses[0]?.status).toBe('unverified')
@@ -731,7 +731,7 @@ test('inspection separates the active user task and live Skill facts from a hist
       const historical=await response.json()
       expect(historical.task).toEqual(result.task)
       expect(historical.measurementTask).toEqual(result.measurementTask)
-      expect(historical.skills).toMatchObject({currentTurnUses:liveUses,currentTurnEvidence:'saved-native-tool-events',application:'unverified'})
+      expect(historical.skills).toMatchObject({currentTurnUses:liveUses,currentTurnEvidence:'saved-native-load-events',application:'unverified'})
       expect(historical.quality).toBe('unverified');expect(historical.deliveryEligible).toBe(false)
       expect(await f.current()).toEqual(ended)
     }finally{await sessions.dispose()}
@@ -755,7 +755,7 @@ test('native failed-command formatting retains front-loaded UI identities and ca
   expect('observation' in details.checks[0]! ? details.checks[0].observation : undefined).toBe(observation)
   const output=formatError(Object.assign(new Error('Exit code 1'),{stdout:JSON.stringify({...details,
     task:{scope:'active-user-turn',text:'CURRENT_FULL_ACCEPTANCE_REQUEST'},
-    skills:{currentTurnUses:[],currentTurnEvidence:'live-native-tool-events',application:'unverified'}},null,2)}))
+    skills:{currentTurnUses:[],currentTurnEvidence:'live-native-load-events',application:'unverified'}},null,2)}))
   expect(output).toContain('characters truncated')
   expect(output).toContain('Target UI ancestor is hidden');expect(output).toContain('clippedCount')
   expect(output.indexOf('Target UI ancestor is hidden')).toBeLessThan(output.indexOf('characters truncated'))

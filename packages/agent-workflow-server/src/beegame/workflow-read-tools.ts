@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { z } from 'zod/v4'
-import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
+import { PROJECT_DOCUMENTS, DESIGN_WRITING_ORDER } from '@bee-game-studio/agent-workflow/design-review-result'
 import { checkDesignHandoff, checkDesignHandoffDraft, designReviewIndexes, type DesignHandoff } from './design-handoff'
 import { designSourceLocations, readDesignSections } from './design-source-reading'
 import { auditAssetContract } from './asset-contract-audit'
@@ -33,7 +33,7 @@ export function readDesignHandoff(workspace: string, input: unknown) {
     catch (error) { issues.push(request.document + ': ' + reason(error)); return [] }
   })
   return { valid: !issues.length, scope: 'saved-design-handoff', issues,
-    documents: designSourceLocations(workspace, read.length ? [...new Set(read.map(item => item.document))] : PROJECT_DOCUMENTS).map(document => ({ ...document,
+    documents: designSourceLocations(workspace, read.length ? [...new Set(read.map(item => item.document))] : DESIGN_WRITING_ORDER).map(document => ({ ...document,
       ...(read.length ? { sections: 'sections' in document ? document.sections.filter(section => read.some(request =>
         request.document === document.document && request.sections.includes(section.heading))) : undefined } : {}),
       version: check.documentVersions[document.document as typeof PROJECT_DOCUMENTS[number]],

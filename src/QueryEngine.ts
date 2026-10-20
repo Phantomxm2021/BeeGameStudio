@@ -687,6 +687,19 @@ export class QueryEngine {
       }
     }
 
+    // Report only completed native loads, after command acknowledgement. This
+    // also covers host-selected entry Skills without inventing a model tool call.
+    for (const loaded of messagesFromUserInput) {
+      if (loaded.type === 'user' && loaded.isMeta && loaded.invokedSkill) {
+        yield {
+          type: 'system', subtype: 'status', status: null,
+          session_id: getSessionId(), uuid: randomUUID(),
+          message: `Loaded skill: ${loaded.invokedSkill.name}`,
+          skill: { ...loaded.invokedSkill, messageId: loaded.uuid, source: 'command', status: 'loaded' },
+        } as unknown as SDKMessage
+      }
+    }
+
     // Track current message usage (reset on each message_start)
     let currentMessageUsage: NonNullableUsage = EMPTY_USAGE
     let turnCount = 1

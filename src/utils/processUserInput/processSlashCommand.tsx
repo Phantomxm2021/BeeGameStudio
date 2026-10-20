@@ -1192,6 +1192,7 @@ async function getMessagesForPromptSlashCommand(
     createUserMessage({
       content: mainMessageContent,
       isMeta: true,
+      invokedSkill: { name: command.name, path: skillPath },
     }),
     ...attachmentMessages,
     createAttachmentMessage({

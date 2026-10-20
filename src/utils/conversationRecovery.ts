@@ -400,17 +400,19 @@ export function restoreSkillStateFromMessages(messages: Message[]): void {
         if (typeof name === 'string' && name.trim()) skillCalls.set(block.id, name)
       }
     }
-    if (message.type === 'user' && message.isMeta === true && typeof message.sourceToolUseID === 'string') {
-      const name = skillCalls.get(message.sourceToolUseID)
+    if (message.type === 'user' && message.isMeta === true) {
       const blocks = message.message?.content
       const content = typeof blocks === 'string' ? blocks : Array.isArray(blocks)
         ? blocks.filter(block => block.type === 'text').map(block => block.text).join('\n\n') : ''
+      // New native command/tool loads retain their exact provenance on the body.
+      // Older Skill-tool transcripts instead correlate the body with a tool use.
       const header = /^Base directory for this skill: ([^\r\n]+)\r?\n\r?\n/.exec(content)
-      if (name && header && content.slice(header[0].length).trim()) {
-        // Legacy inline messages record a directory, not the original filename.
-        // Keep that exact source locator and body; do not guess or reload a file.
-        addInvokedSkill(name, header[1]!, content, null)
-      }
+      const loaded = message.invokedSkill ?? (typeof message.sourceToolUseID === 'string' && header &&
+        content.slice(header[0].length).trim()
+        ? { name: skillCalls.get(message.sourceToolUseID), path: header[1] } : undefined)
+      if (loaded && typeof loaded.name === 'string' && loaded.name.trim() &&
+          typeof loaded.path === 'string' && loaded.path.trim() && content.trim())
+        addInvokedSkill(loaded.name, loaded.path, content, null)
     }
     if (message.type !== 'attachment') {
       continue

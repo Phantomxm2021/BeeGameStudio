@@ -148,7 +148,7 @@ test('default Chat message uses the database-authorized requirement-change event
 
 async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false,resourceLibraryBaseUrl?:string,
   openAgentPreview?:(value:any)=>AgentPreviewAccess,openAgentImage?:(value:any)=>AgentImageAccess, extraEvents=0,
-  faults:{claimResponses?:number;exitWrites?:boolean;exitFailures?:number}={},libraryAuthToken?:string,blankProject=false) {
+  faults:{claimResponses?:number;exitWrites?:boolean;exitFailures?:number;missingEntrySkill?:boolean}={},libraryAuthToken?:string,blankProject=false) {
   const container=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-goal-unit-')))
   const root=blankProject?join(container,'project'):container
   if(blankProject)await mkdir(root)
@@ -166,6 +166,9 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
   const sessions=new BeeGameSessionManager({async start(input){starts.push(input);const nativeId=input.resumeSessionId??(starts.length===1?'11111111':String(starts.length).padStart(8,'0'))+'-2222-4333-8444-555555555555';input.onNativeSessionId?.(nativeId);return {
     async submit(input) {
       submissions.push(input)
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('/bgs-builtins:') && !faults.missingEntrySkill) await input.onMessage({type:'system',subtype:'status',status:null,
+        message:'Loaded entry skill',skill:{name:prompt.slice(1,prompt.indexOf(' ')),messageId:'entry-body',source:'command',status:'loaded'}} as any)
       await writeFile(join(root,'candidate.txt'),'Synthetic partial candidate')
       for(let i=0;i<extraEvents;i++)await input.onMessage({type:'assistant',session_id:nativeId,
         message:{id:'synthetic-'+i,role:'assistant',content:[{type:'text',text:'Synthetic audit event '+i}]}} as any)
@@ -216,7 +219,7 @@ test('blank confirmed Web intake uses the design-led first version without creat
     expect(JSON.parse(String(initialMessage.payload?.confirmedBriefContext))).toEqual(f.body.brief)
     await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
     expect(String(f.submissions[0]!.prompt)).toContain(JSON.stringify(f.body.brief))
-    expect(f.starts[0].systemContext).toContain('existing eight documents under docs/')
+    expect(f.starts[0].systemContext).toContain('design records live under docs/')
     expect(f.starts[0].systemContext).toContain('Preserve confirmed requirements')
     const guide=await readFile(join(f.root,'CLAUDE.md'),'utf8')
     expect(guide).not.toContain('Built-in Skill index')
@@ -377,7 +380,7 @@ test('initial goal continues through visual direction without host Tasks or a se
     expect(f.starts[0].systemContext).not.toContain('Maintain root CLAUDE.md')
     expect(f.starts[0].systemContext).toContain('project-navigation-sources')
     expect(JSON.stringify(submit.prompt)).not.toContain('BGS saved evidence')
-    expect(f.starts[0].systemContext.split('Run entries with --help:')).toHaveLength(2)
+    expect(f.starts[0].systemContext.split('Use the relevant entry with --help when its contract is needed:')).toHaveLength(2)
     expect(f.starts[0].systemContext).not.toContain('Optional BGS project tools')
     expect(JSON.stringify(submit.prompt)).not.toContain('Optional BGS project tools')
     expect(String(submit.prompt)).toContain(JSON.stringify(f.body.brief))
@@ -788,10 +791,8 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   const run={visualHandoffVersion,creation:{initialDelivery:'design-led-first-version',editableContent:true},
     requirements:{text:'ORIGINAL_CONFIRMED_GOAL'}} as Run
   const first=agentProfessionalContextForRun(run), followup=agentProfessionalContextForRun(run,true)
-  expect(first).toContain('existing eight documents under docs/')
-  expect(first).toContain('TECHNICAL_DESIGN.md')
-  expect(first).toContain('Complete all eight documents and their existing indexes in the design-record stage')
-  expect(first).toContain('including the technical design and implementation tasks')
+  expect(first).toContain('design dependencies and professional methods in the project guide')
+  expect(first).not.toContain('GDD.md,')
   expect(first).not.toContain('Draft technical/resource plans first')
   expect(followup).not.toContain('eight documents')
   expect(followup).not.toContain('New design-led first-version deliverables')
@@ -1304,4 +1305,29 @@ test('turn-end host evidence lists actual design changes even when the native an
     expect(host.text).toContain(path)
     expect(run.deliveryEligible).toBe(false)
   } finally {await f.close()}
+})
+
+test('only a new complete-design goal enters the native GDD method; follow-ups preserve literal intent', () => {
+  const run={creation:{initialDelivery:'design-led-first-version'},requirements:{text:'BRIEF budget 20000000'}} as Run
+  expect(agentGoalPrompt(run)).toStartWith('/bgs-builtins:game-creative-director-expert ')
+  expect(agentGoalPrompt(run)).toEndWith(run.requirements.text)
+  for(const other of [{...run,creation:undefined},{...run,creation:{initialDelivery:'playable-slice'}},
+    {...run,agentTurns:[{nativeSessionId:'existing-context'}]}])
+    expect(agentGoalPrompt(other as Run)).not.toStartWith('/')
+  for(const intent of ['message','work','continue','discuss','change'] as const)
+    expect(agentMessagePrompt({intent,text:'继续处理'} as any)).not.toContain('/bgs-builtins:')
+})
+
+test('a native local command completion without the required entry load is a failed goal, not completed design',async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{missingEntrySkill:true},undefined,true)
+  Object.assign(f.body.brief,{creation_mode:'creative',settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
+  try{
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.agentTurns![0]!.status).toBe('failed')
+    expect(run.agentTurns![0]!.error).toContain('Native entry Skill did not load')
+    expect(run.agentTurns![0]!.skillUses).toEqual([])
+    expect(run.deliveryEligible).toBe(false)
+    expect(f.submissions).toHaveLength(1)
+  }finally{await f.close()}
 })

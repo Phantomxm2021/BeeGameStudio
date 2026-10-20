@@ -104,3 +104,22 @@ test('a later invocation replaces the same skill without duplicating or reloadin
   expect(skills).toHaveLength(1)
   expect(skills[0]!.content).toBe(updated)
 })
+
+// Native command loads carry provenance on the same body, not a second copy.
+test('command-loaded Skill survives persisted stop, resume and compaction without a fabricated tool call', async () => {
+  const inline = message('user', [{type:'text',text:body}], {
+    isMeta: true, invokedSkill: {name:skillName,path:'plugin:'+skillName},
+  })
+  const resumed = await persisted([inline], 'command')
+  restoreSkillStateFromMessages(resumed)
+  expect([...getInvokedSkillsForAgent(null).values()]).toMatchObject([
+    {skillName,skillPath:'plugin:'+skillName,content:body},
+  ])
+  const attachment = createSkillAttachmentIfNeeded()!
+  clearInvokedSkills()
+  restoreSkillStateFromMessages(await persisted([attachment], 'command-compacted'))
+  expect([...getInvokedSkillsForAgent(null).values()][0]?.content).toBe(body)
+  clearInvokedSkills()
+  restoreSkillStateFromMessages([{...inline,isMeta:false},{...inline,isSidechain:true}])
+  expect(getInvokedSkillsForAgent(null).size).toBe(0)
+})

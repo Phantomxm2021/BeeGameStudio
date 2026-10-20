@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { DESIGN_METHODS } from '@bee-game-studio/agent-workflow/design-review-result'
 import { z } from 'zod/v4'
 import { readSessionTranscriptFromDisk, type BeeGameAttachment, type BeeGameSessionManager, type StartBeeGameSessionInput } from '../session-manager'
 import { pauseRun, digest, isInitialSliceTurn, WorkflowError, type Run, type AgentTurn, type AgentMessage } from './state'
@@ -48,7 +49,7 @@ const professionalContextParagraphs = [
   'Honor explicit resource sources and usage rights; AI is not the default for all core art. New AI production images use purpose: production and existing requirementIds. Use tool help for formats and contracts. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Procedural replacement of required art needs a concrete blocker and authorization; placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
   'Separate editable sources from publication output. Use registered runtime-file selection: preserve every registered resource file_paths entry and dependency local_path, including on-demand resources and required licenses. Do not copy all production material or auto-delete advisory inventory entries. Keep a single source, not another packaging manifest.',
 ]
-const firstVersionDeliveryContext = 'New design-led first-version deliverables use the existing eight documents under docs/: GDD.md, LEVEL_SCENE_DESIGN.md, BALANCE_DESIGN.md, TECHNICAL_DESIGN.md, ART_DIRECTION.md, UI_UX_SPEC.md, AUDIO_DESIGN.md and ASSET_PLAN.md. Complete all eight documents and their existing indexes in the design-record stage, including the technical design and implementation tasks. Later production revises those same records from actual visual/resource/UI/Scene outputs; it does not defer technical design. Deliver the confirmed scope.'
+const firstVersionDeliveryContext = 'Deliver the confirmed scope using the design dependencies and professional methods in the project guide; design records live under docs/. Subsequent production revises those same records.'
 const editableWebDeliveryContext = 'This project requires BGS visual editing: deliver applicable content/scenes/*.json and content/ui/*.json through the existing content/index.json. Pure UI games may use a ui-screen/ui-hud entry without an empty Scene. React/Canvas does not waive runtime consumption of these saved sources.'
 export const agentProfessionalContext = [PROJECT_WORKING_CONVENTIONS, ...professionalContextParagraphs, firstVersionDeliveryContext].join('\n')
 // Design conventions come from the saved project guide, without a legacy fallback.
@@ -83,8 +84,11 @@ export function agentGoalPrompt(run: Run): string {
     ...(run.creation.webStarter ? ['The host supplied a generic React/Canvas connection scaffold: content/ is consumed by src/main.jsx, src/game.js owns simulation and UI state/actions. It is not gameplay or an approved art style. Extend the connected sources; do not replace saved Scene/UI data with a second hardcoded layout.'] : []),
     'Confirmed full goal (scope retained, not all due in this first assignment):\n'+run.requirements.text,
   ].join('\n\n')
+  const initialDesign = run.creation?.initialDelivery === 'design-led-first-version' &&
+    !(run.agentTurns ?? []).some(turn => turn.nativeSessionId)
   return [
-    'Develop the game from this complete confirmed goal in the current project.',
+    (initialDesign ? `/bgs-builtins:${DESIGN_METHODS['GDD.md'].skills[0]} ` : '') +
+      'Develop the game from this complete confirmed goal in the current project.',
     'Confirmed goal:\n'+run.requirements.text,
   ].join('\n\n')
 }
@@ -256,8 +260,10 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       if (session.id!==run.chatSessionId) throw new Error('Native goal must use the bound project conversation')
       input.sessions.setProjectDesignLocked(session.id,Boolean(run.designBaseline))
       input.sessions.setProjectManagedWebBoot(session.id,Boolean(run.creation?.webBoot))
-      await input.sessions.sendWithDisplay(session.id, turn.message ? agentMessagePrompt(turn.message,
-        run.sourceEdits?.filter(e=>e.fence>(run.agentTurns?.at(-2)?.fence??0))) : agentGoalPrompt(run), {
+      const prompt = turn.message ? agentMessagePrompt(turn.message,
+        run.sourceEdits?.filter(e=>e.fence>(run.agentTurns?.at(-2)?.fence??0))) : agentGoalPrompt(run)
+      const entrySkill = !turn.message && prompt.startsWith('/') ? prompt.slice(1, prompt.indexOf(' ')) : undefined
+      await input.sessions.sendWithDisplay(session.id, prompt, {
         displayKind:turn.message ? 'workflow_v3_'+turn.message.intent : 'workflow_v3_goal',
         displayText:turn.message?.text ?? agentGoalDisplayText(run),
         attachments:options.attachments,
@@ -312,6 +318,10 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       if(failure) throw new Error(failure.text || 'Native goal turn failed; partial candidates are not accepted')
       if (!turnId || !events.some(e=>e.type==='turn.completed') || events.some(e=>e.type==='turn.failed'))
         throw new Error('Native goal turn did not complete; partial candidates are not accepted')
+      // A missing/disabled native entry can return a local command message
+      // without querying. Do not record that as successful goal execution.
+      if (entrySkill && !skillEvidence(events).some(use => use.source === 'command' && use.name === entrySkill && use.status === 'loaded'))
+        throw new Error(`Native entry Skill did not load: ${entrySkill}; the goal was not completed`)
       if (input.sessions.runtimeSnapshot(session.id).activeSubagentToolUseIds.length)
         throw new Error('Native background work is unfinished')
     } catch (error) { failed=error instanceof Error?error.message:'Native goal execution failed' }

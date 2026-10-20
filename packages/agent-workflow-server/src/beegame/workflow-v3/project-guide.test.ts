@@ -3,6 +3,8 @@ import {mkdtemp,realpath,mkdir,writeFile,readFile,rm,symlink,access} from 'node:
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,PROJECT_WORKING_CONVENTIONS,projectNavigationSnapshot,projectGuideTemplate,initializeProjectGuide} from './project-guide'
+import {DESIGN_WRITING_ORDER, DESIGN_METHODS} from '@bee-game-studio/agent-workflow/design-review-result'
+import {readDesignHandoff} from '../workflow-read-tools'
 import {runGameContentCommand} from '../game-content-validation-cli'
 
 test('template is read-only and remains available with an older saved content format',async()=>{
@@ -11,11 +13,11 @@ test('template is read-only and remains available with an older saved content fo
     await mkdir(join(root,'.beegame/delivery'),{recursive:true})
     const file=join(root,'.beegame/delivery/content-format.json'),saved='{"coordinates":{"saved":true},"index":{"documentRevision":"must-copy-manually"},"uiDocument":{"obsolete":true}}'
     await writeFile(file,saved)
-    expect(runGameContentCommand(root,['--format','projectGuide'])).toMatchObject({ok:true,value:projectGuideTemplate(root).value})
+    expect(runGameContentCommand(root,['--format','projectGuide'])).toMatchObject({ok:true,values:{projectGuide:projectGuideTemplate(root).value}})
     expect(runGameContentCommand(root,['--format'])).toMatchObject({sections:expect.arrayContaining(['projectGuide'])})
-    expect(runGameContentCommand(root,['--format','coordinates'])).not.toMatchObject({value:{saved:true}})
-    expect((runGameContentCommand(root,['--format','index']) as any).value).not.toHaveProperty('documentRevision')
-    expect((runGameContentCommand(root,['--format','uiDocument']) as any).value.data.nodes[0].data.referenceResolution).toHaveLength(2)
+    expect(runGameContentCommand(root,['--format','coordinates'])).not.toMatchObject({values:{coordinates:{saved:true}}})
+    expect((runGameContentCommand(root,['--format','index']) as any).values.index).not.toHaveProperty('documentRevision')
+    expect((runGameContentCommand(root,['--format','uiDocument']) as any).values.uiDocument.data.nodes[0].data.referenceResolution).toHaveLength(2)
     expect(PROJECT_GUIDE_TEMPLATE).toContain('before related design or implementation decisions')
     expect(PROJECT_GUIDE_TEMPLATE).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(PROJECT_GUIDE_TEMPLATE).toContain('For a new complete game design')
@@ -215,5 +217,25 @@ test('unsafe, non-text and oversized guides are diagnosed without stale content 
     const large=await readProjectGuide(workspace)
     expect(large).toMatchObject({status:'unavailable',reason:expect.stringContaining('no truncated guide')})
     expect(await readFile(path,'utf8')).toHaveLength(65537)
+  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('professional navigation and the default read directory share the writing order',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-writing-order-')))
+  try {
+    expect(DESIGN_WRITING_ORDER).toEqual(['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md',
+      'ART_DIRECTION.md','UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md'])
+    expect(readDesignHandoff(root,{}).documents.map(item=>item.document)).toEqual(DESIGN_WRITING_ORDER)
+    let previous=-1
+    for(const document of DESIGN_WRITING_ORDER){
+      const row=`| ${document}: ${DESIGN_METHODS[document].responsibility} | ${DESIGN_METHODS[document].skills.join(', ')} |`
+      const position=PROJECT_WORKING_CONVENTIONS.indexOf(row)
+      expect(position).toBeGreaterThan(previous);previous=position
+    }
+    const selected=runGameContentCommand(root,['--format','projectGuide']) as any
+    const batch=runGameContentCommand(root,['--format','coordinates','projectGuide']) as any
+    expect(batch.values.projectGuide).toBe(selected.values.projectGuide)
+    expect(batch.issues).toEqual(selected.issues)
+    expect(batch.verified).toBe(selected.verified)
   }finally{await rm(root,{recursive:true,force:true})}
 })

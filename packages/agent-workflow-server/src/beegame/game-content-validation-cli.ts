@@ -251,7 +251,7 @@ export function inspectContentDraft(workspacePath: string, path: string, selecto
 export const CURRENT_CONTENT_CHECK_HELP = `Usage: bun <supplied-check-content-entry> [workspace] [command] [--details]
   (no command), --current   Check saved index/content and real resource references; not design agreement, runtime or quality acceptance
   --package-metadata FILE ... Legacy compatibility hashes only; not needed for new indexes; no writes
-  --format [SECTION ...]    List format sections or read selected sections together; projectGuide is optional navigation, not a new design contract
+  --format [SECTION ...]    No sections: {ok,scope,sections:[names]}; selected: {ok,scope,values:{SECTION:content}} for one or many sections. projectGuide is optional navigation, not a new design contract
   --format examples         Executable minimal UI/index and an unbound Scene draft; no manual revision hashes
   --check-drafts FILE ...   Check saved draft structure together; resource bindings remain pending
   --inspect-draft FILE [--node ID | --pointer /json/pointer] ... Read exact draft fields together
@@ -535,10 +535,9 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: La
       if (!Object.hasOwn(reference, section)) throw new Error(`Unknown content format section: ${section}; example: --format coordinates`)
     const navigation=sections.includes('projectGuide')?projectGuideTemplate(workspacePath):undefined
     if(navigation)reference.projectGuide=navigation.value
-    if (sections.length > 1) return { ok: true, scope: 'content-format-selection',
-      values: Object.fromEntries(sections.map(section => [section, (reference as Record<string, unknown>)[section]])) }
-    return { ok: true, scope: 'content-format-section', section: args[1], value: (reference as Record<string, unknown>)[args[1]!],
-      ...(navigation?{issues:navigation.facts.issues,verified:navigation.facts.verified}: {}) }
+    return { ok: true, scope: 'content-format-selection',
+      values: Object.fromEntries(sections.map(section => [section, reference[section]])),
+      ...(navigation ? { issues: navigation.facts.issues, verified: navigation.facts.verified } : {}) }
   }
   if (args[0] === '--design-references') {
     let document: string | undefined

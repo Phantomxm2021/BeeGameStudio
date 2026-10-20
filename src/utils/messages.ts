@@ -473,6 +473,7 @@ export function createUserMessage({
   timestamp,
   imagePasteIds,
   sourceToolAssistantUUID,
+  invokedSkill,
   permissionMode,
   origin,
 }: {
@@ -492,6 +493,8 @@ export function createUserMessage({
   imagePasteIds?: number[]
   // For tool_result messages: the UUID of the assistant message containing the matching tool_use
   sourceToolAssistantUUID?: UUID
+  /** Native loader provenance; not authored prose or proof of application. */
+  invokedSkill?: { name: string; path: string }
   // Permission mode when message was sent (for rewind restoration)
   permissionMode?: PermissionMode
   summarizeMetadata?: {
@@ -516,6 +519,7 @@ export function createUserMessage({
     uuid: (uuid as UUID | undefined) || randomUUID(),
     timestamp: timestamp ?? new Date().toISOString(),
     toolUseResult,
+    ...(invokedSkill ? { invokedSkill } : {}),
     mcpMeta,
     imagePasteIds,
     sourceToolAssistantUUID,

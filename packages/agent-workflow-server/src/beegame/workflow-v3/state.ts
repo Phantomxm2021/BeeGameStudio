@@ -69,7 +69,7 @@ export type CheckResult = { id: string; version: string; status: 'passed' | 'fai
     version: 'v3-editable-build.1'; files: FileVersion[]; excludedReports: string[];
     artifact: FileVersion; dependencySha256?: string; runtime: string; packageComposition?: PackageComposition;
   } }
-export type SkillUse = { name: string; toolUseID: string; eventId: number; parentToolUseID?: string; status: 'loaded' | 'failed' | 'unverified' }
+export type SkillUse = { name: string; toolUseID?: string; messageId?: string; source?: 'command'; eventId: number; parentToolUseID?: string; status: 'loaded' | 'failed' | 'unverified' }
 export type Run = {
   protocol: typeof V3_PROTOCOL; id: string; projectId: string; ownerId: string; workspacePath: string; chatSessionId: string;
   // Identifies runs that receive the two-board visual contract; the historical

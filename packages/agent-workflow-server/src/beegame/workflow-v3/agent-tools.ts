@@ -12,7 +12,7 @@ import type { openImageGenerationAccess } from '../../image-generation/access'
 import { bundleContentConsumer, contentConsumerCommand, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
 import { sharedPlaywright } from '../shared-playwright'
 import type { LayoutConstraints } from '../ui-layout-audit'
-import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
+import { PROJECT_DOCUMENTS, DESIGN_WRITING_ORDER } from '@bee-game-studio/agent-workflow/design-review-result'
 import { checkDesignHandoff, checkDesignHandoffDraft, DESIGN_HANDOFF_INSTRUCTION,
   finalizeDesignDocuments, readDesignAcceptanceRequirements, readDesignImplementationChecklist, snapshotDesignDocuments } from '../design-handoff'
 import { DESIGN_RUNTIME_REPORT_INSTRUCTION, inspectDesignAcceptance } from '../runtime-acceptance'
@@ -35,7 +35,7 @@ export function openDesignActions(root: string, requireEditableContent = false, 
       if (selected.length !== 1) throw Error('Draft inspection requires one design document')
       return checkDesignHandoffDraft(root, selected[0]!, { finalTechnical: selected[0] === 'TECHNICAL_DESIGN.md' ? 'when-ready' : false })
     }
-    if (action === 'help') return { valid: true, instruction: DESIGN_HANDOFF_INSTRUCTION,
+    if (action === 'help') return { valid: true, writingOrder: DESIGN_WRITING_ORDER, instruction: DESIGN_HANDOFF_INSTRUCTION,
       acceptanceExample: {
         scope: 'delivery', status: 'blocked', summary: 'Example only: runtime verification is incomplete.',
         environment: 'Describe the actual engine/build, browser/device and viewport as a string.',
@@ -266,7 +266,7 @@ export async function openAgentTools(input: {
       // Keep the locator outside compactable message history. Capabilities
       // still expire normally; this is only the current turn's tool location.
       systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
-        'Run entries with --help: bun assets.mjs, check-content.mjs, bind-content.mjs, consumer.mjs, media.mjs, resources.mjs'+
+        'Use the relevant entry with --help when its contract is needed: bun assets.mjs, check-content.mjs, bind-content.mjs, consumer.mjs, media.mjs, resources.mjs'+
         (input.measurement ? '; node measure.mjs, handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
         'Optional numerical calculation (project-root path): bun '+BALANCE_CALCULATOR_PATH+' --help.',
