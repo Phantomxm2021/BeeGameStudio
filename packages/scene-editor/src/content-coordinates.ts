@@ -26,6 +26,17 @@ export const CONTENT_COORDINATE_CONTRACT = {
 } as const
 
 export const UI_PAINT_PHASES = ['background', 'content'] as const
+
+/** Shared Content layer priorities for editor import and static rendering. */
+export function sceneLayerOrders(settings?: Record<string, unknown>): Map<string, number> {
+  if (!Array.isArray(settings?.layers)) return new Map()
+  return new Map(settings.layers.flatMap((item, index) => {
+    const layer = item && typeof item === 'object' ? item as Record<string, unknown> : undefined
+    return typeof layer?.id === 'string' ? [[layer.id,
+      typeof layer.order === 'number' && Number.isFinite(layer.order) ? layer.order : index] as const] : []
+  }))
+}
+
 export type UiPaintPhase = typeof UI_PAINT_PHASES[number]
 export type UiPaintNode = Readonly<{ id: string; parentId?: string; enabled?: boolean }>
 export type UiPaintStep = Readonly<{ nodeId: string; phase: UiPaintPhase }>

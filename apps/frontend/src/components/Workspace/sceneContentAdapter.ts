@@ -1,4 +1,4 @@
-import { canvasReferenceSize, spriteSheetSelection, parseGridData, parseTilemapData, parseTilemapRendererData, validateTilemapGrid } from '@beegame/scene-editor';
+import { canvasReferenceSize, sceneLayerOrders as layerOrders, spriteSheetSelection, parseGridData, parseTilemapData, parseTilemapRendererData, validateTilemapGrid } from '@beegame/scene-editor';
 import type { MaterialOverride, SceneAsset, SceneComponent, SceneDocument, SceneNode, Transform } from '@beegame/scene-editor';
 import type { BeeGameContentNode, BeeGameSceneContentDocument } from '../../services/beeGameAdapter';
 
@@ -21,11 +21,6 @@ function canvasMetrics(settings?: Record<string, unknown>): CanvasMetrics {
   const height = Math.max(1, finite(coordinateSystem?.height, finite(viewport?.height, 720)));
   const pixelsPerUnit = Math.max(.0001, finite(coordinateSystem?.pixelsPerUnit, PIXELS_PER_EDITOR_UNIT));
   return { width, height, pixelsPerUnit };
-}
-
-function layerOrders(settings?: Record<string, unknown>): Map<string, number> {
-  if (!Array.isArray(settings?.layers)) return new Map();
-  return new Map(settings.layers.flatMap((item, index) => { const layer = record(item); return typeof layer?.id === 'string' ? [[layer.id, finite(layer.order, index)] as const] : []; }));
 }
 
 function editorTransform(node: BeeGameContentNode, dimension: '2d' | '3d', layers: Map<string, number>, metrics: CanvasMetrics): Transform {

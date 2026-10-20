@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import { affine2d, canvasReferenceSize, compose2d, point2d, rectLayout, uiAnchor, uiLocalMatrix, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE } from './content-coordinates'
+import { affine2d, canvasReferenceSize, compose2d, point2d, rectLayout, sceneLayerOrders, uiAnchor, uiLocalMatrix, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE } from './content-coordinates'
 import { editorRect, rectTransform } from './rect-transform'
 import { identityTransform, makeFixture, type SceneNode } from './model'
 import { nodeWorldMatrix, transformSelection } from './selection-transform'
 
 describe('Content coordinates', () => {
+  it('preserves signed layer priorities and uses source positions for unspecified or non-finite orders', () => {
+    const settings = { layers: [
+      { id: 'foreground', order: 12 }, { id: 'background', order: -4 },
+      { id: 'implicit' }, { id: 'invalid', order: Infinity }, { id: 'default', order: 0 },
+    ] }
+    const before = structuredClone(settings)
+    expect([...sceneLayerOrders(settings)]).toEqual([
+      ['foreground', 12], ['background', -4], ['implicit', 2], ['invalid', 3], ['default', 0],
+    ])
+    expect(settings).toEqual(before)
+  })
+  it('handles absent layers and ignores entries without a layer identity', () => {
+    for (const settings of [undefined, {}, { layers: null }, { layers: {} }])
+      expect(sceneLayerOrders(settings).size).toBe(0)
+    expect([...sceneLayerOrders({ layers: [null, 'invalid', {}, { id: 7 }, { id: 'valid' }] })])
+      .toEqual([['valid', 4]])
+  })
   it('uses x,y order for all nine anchors, keeping old spellings as aliases', () => {
     for (const [row, y] of [['top', 0], ['middle', .5], ['bottom', 1]] as const)
       for (const [col, x] of [['left', 0], ['center', .5], ['right', 1]] as const)
