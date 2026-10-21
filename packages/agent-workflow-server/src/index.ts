@@ -35,6 +35,9 @@ if (import.meta.main) {
     process.once(signal, () => {
       if (shuttingDown) return
       shuttingDown = true
+      // Stop new connections immediately; app cleanup also rejects requests
+      // arriving over an existing connection while admitted work drains.
+      void activeServer?.stop(false)
       void (async () => {
         for (const cleanup of cleanupHandlers) await cleanup()
         activeServer?.stop(true)

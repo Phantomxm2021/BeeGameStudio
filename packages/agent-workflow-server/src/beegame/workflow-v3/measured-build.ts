@@ -32,6 +32,11 @@ export async function selectAgentMeasuredBuild(run: Run, measurementId: string, 
   // build. Editable/static export retains the successful-turn requirement.
   const settled = turn?.status === 'ended' || purpose !== 'delivery' &&
     (turn?.status === 'failed' || turn?.status === 'interrupted')
+  const failedChecks = measurement?.checks.filter(check => ['build','runtime-smoke'].includes(check.id) &&
+    (check.status === 'failed' || check.status === 'execution-error')) ?? []
+  if (measurement?.error || failedChecks.length)
+    throw new WorkflowError('measurement-failed','Build/runtime measurement failed: '+
+      (measurement?.error ?? failedChecks.map(check => check.id+': '+check.observation).join('; ')))
   if(!turn?.quiescedAt || !settled || !measurement?.finishedAt || measurement.error ||
       !build || !smoke || !proof || !artifact || proof.artifact.sha256!==artifact.sha256 || !smoke.coverage?.files.length)
     throw new WorkflowError('preview-unverified',purpose === 'delivery'

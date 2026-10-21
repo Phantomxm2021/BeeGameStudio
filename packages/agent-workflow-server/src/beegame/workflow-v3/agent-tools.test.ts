@@ -33,7 +33,7 @@ test('finalize supports existing scoped documents and preserves independent work
     expect(await design('finalize',['docs/GDD.md'])).toMatchObject({valid:true,finalized:['GDD.md']})
     expect(await readFile(path,'utf8')).toBe(original)
     await writeFile(path,original.replace('Changed decision.','Another decision.'))
-    expect(await design('finalize')).toMatchObject({valid:false,finalized:['GDD.md']})
+    expect(await design('finalize')).toMatchObject({valid:true,finalized:['GDD.md','AUDIO_DESIGN.md']})
     const finalized = await readFile(path,'utf8')
     expect(finalized).not.toBe(original)
     await design('finalize')
@@ -43,7 +43,7 @@ test('finalize supports existing scoped documents and preserves independent work
   } finally { await rm(root,{recursive:true,force:true}) }
 })
 
-test('design handoff exposes early requirements and final implementation coverage without a second plan', async () => {
+test('design handoff exposes early requirements and optional implementation pointers without a required task graph', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-design-actions-')))
   try {
     await writeDesignDocumentsFixture(root)
@@ -56,7 +56,7 @@ test('design handoff exposes early requirements and final implementation coverag
     const baseline = await design('baseline') as any
     expect(baseline.valid).toBe(true)
     expect(baseline.requirements).toHaveLength(8)
-    await expect(design('implementation')).rejects.toThrow('implementationItems')
+    expect(await design('implementation')).toMatchObject({ valid: true, items: [] })
     await writeFile(techPath, JSON.stringify(designHandoffFixture('TECHNICAL_DESIGN.md')))
     expect(await design('finalize')).toMatchObject({valid:true})
     expect(await design('implementation')).toMatchObject({valid:true,globalSources:baseline.requirements.map((r:any)=>'docs/'+r.document)})
@@ -68,7 +68,7 @@ test('design handoff exposes early requirements and final implementation coverag
   } finally { await rm(root, {recursive:true,force:true}) }
 })
 
-test('technical draft defers incomplete owner coverage, then checks the full saved task set', async () => {
+test('technical draft checks supplied references without requiring full task coverage', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-incremental-technical-')))
   try {
     const early = ['GDD.md', 'LEVEL_SCENE_DESIGN.md', 'BALANCE_DESIGN.md', 'TECHNICAL_DESIGN.md'] as const
@@ -78,7 +78,7 @@ test('technical draft defers incomplete owner coverage, then checks the full sav
     const path = join(root, designHandoffPath('TECHNICAL_DESIGN.md'))
     const original = await readFile(path, 'utf8')
     expect(await design('draft', ['TECHNICAL_DESIGN.md'])).toMatchObject({
-      valid: true, issues: [], pendingDocuments: [...pending], taskCoverageChecked: false,
+      valid: true, issues: [], pendingDocuments: [...pending], taskReferencesChecked: false,
       availableRequirements: expect.arrayContaining([expect.objectContaining({ document: 'GDD.md' })]),
     })
     expect(await readFile(path, 'utf8')).toBe(original)
@@ -87,17 +87,16 @@ test('technical draft defers incomplete owner coverage, then checks the full sav
 
     await writeDesignDocumentsFixture(root, pending)
     expect(await design('draft', ['TECHNICAL_DESIGN.md'])).toMatchObject({
-      valid: true, issues: [], pendingDocuments: [], taskCoverageChecked: true,
+      valid: true, issues: [], pendingDocuments: [], taskReferencesChecked: true,
     })
     const incomplete = JSON.parse(original)
     incomplete.implementationItems = incomplete.implementationItems.filter((item: any) =>
       !item.requirementRefs.some((ref: any) => ref.document === 'GDD.md'))
     await writeFile(path, JSON.stringify(incomplete))
     const uncovered = await design('draft', ['TECHNICAL_DESIGN.md']) as any
-    expect(uncovered).toMatchObject({ valid: false, pendingDocuments: [], taskCoverageChecked: true })
-    expect(uncovered.issues.join(' ')).toContain('required output GDD.md#play has no implementation item')
+    expect(uncovered).toMatchObject({ valid: true, issues: [], pendingDocuments: [], taskReferencesChecked: true })
     expect(await readFile(path, 'utf8')).toBe(JSON.stringify(incomplete))
-    expect(() => readDesignImplementationChecklist(root)).toThrow('has no implementation item')
+    expect(readDesignImplementationChecklist(root).items.some(item => item.id === 'fixture-GDD')).toBe(false)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -107,7 +106,7 @@ test.each(['document', 'index'] as const)('technical draft distinguishes an unwr
     await writeDesignDocumentsFixture(root)
     await rm(join(root, missing === 'document' ? 'docs/ART_DIRECTION.md' : designHandoffPath('ART_DIRECTION.md')))
     expect(await openDesignActions(root)('draft', ['TECHNICAL_DESIGN.md'])).toMatchObject({
-      valid: true, issues: [], pendingDocuments: ['ART_DIRECTION.md'], taskCoverageChecked: false,
+      valid: missing === 'document', pendingDocuments: missing === 'document' ? ['ART_DIRECTION.md'] : [], taskReferencesChecked: missing === 'index',
     })
     expect(() => readDesignImplementationChecklist(root)).toThrow()
   } finally { await rm(root, { recursive: true, force: true }) }
@@ -132,7 +131,7 @@ test.each(['missing-reference', 'bad-source-heading', 'malformed-index', 'invali
         expected = 'output play references an absent section'
       } else if (fault === 'malformed-index' || fault === 'pending-malformed-index') {
         await writeFile(join(root, designHandoffPath(fault === 'malformed-index' ? 'GDD.md' : 'ART_DIRECTION.md')), '{')
-        expected = 'Cannot check task coverage against ' + (fault === 'malformed-index' ? 'GDD.md' : 'ART_DIRECTION.md')
+        expected = 'Cannot check existing task references against ' + (fault === 'malformed-index' ? 'GDD.md' : 'ART_DIRECTION.md')
       } else if (fault === 'invalid-index-fields') {
         await writeFile(join(root, designHandoffPath('GDD.md')), JSON.stringify({ outputs: 'not-an-array' }))
         expected = 'checks requiring handoff.outputs were not run because the field is invalid'
@@ -143,7 +142,8 @@ test.each(['missing-reference', 'bad-source-heading', 'malformed-index', 'invali
         expected = 'implementation dependency cycle'
       } else {
         await symlink(join(root, 'not-produced.md'), join(root, 'docs/ART_DIRECTION.md'))
-        expected = 'Cannot check task coverage against ART_DIRECTION.md'
+        expect(() => openDesignActions(root)).toThrow('symlink')
+        return
       }
       const before = await readFile(technicalPath, 'utf8')
       const draft = await openDesignActions(root)('draft', ['TECHNICAL_DESIGN.md']) as any
@@ -158,16 +158,15 @@ test('handoff sends reference reading to native Read without a visual certificat
   const root = await mkdtemp(join(tmpdir(),'bgs-reference-help-'))
   try {
     const design = openDesignActions(root)
-    const help = await design('help') as any
-    expect(help.instruction).toContain('Read reference pictures with the native Read tool')
-    expect(help.instruction).toContain('report the exact path and read error')
-    expect(help.instruction).toContain('create them only after selected actual visual designs and corresponding resources exist')
-    expect(help.instruction).toContain('complete TECHNICAL_DESIGN.md and its implementation tasks/index during the eight-document design-record stage')
-    expect(help.instruction).toContain('revise affected sections and task references in this same plan')
+    const help = await design('help', [], undefined, true) as any
+    expect(help.instruction).toContain('Read selected reference pictures')
+    expect(help.instruction).toContain('Unproduced inputs remain planned')
+    expect(help.instruction).toContain('reconcile actual resources and Editor data in their owning documents before implementation')
+    expect(help.instruction).toContain('including the technical approach and necessary implementation guidance in TECHNICAL_DESIGN.md')
+    expect(help.instruction).toContain('BGS does not require output indexes, task graphs or coverage mappings')
     expect(help.instruction).not.toContain('Technical notes before these inputs are drafts')
     expect(help.instruction).not.toContain('begin their geometry during planning')
-    expect(help.help).toContain('Baseline checks index integrity, not visual design or layout geometry')
-    expect(help.help).toContain('First select actual visual designs and obtain corresponding resources; then author UI/Scene JSON')
+    expect(help.help).toContain('Baseline checks saved sources and any existing index integrity, not visual design or layout geometry')
     expect(help.help).toContain('--design baseline --details')
     expect(help.help).not.toContain('baseline|visual')
     expect(help.help).not.toContain('generation record')
@@ -226,7 +225,7 @@ test('actual author entry supplies executable pure UI examples with no manual ha
   try {
     const format = await command(root, tools.directory, 'check-content.mjs', '--format', 'examples')
     expect(format.code, format.stdout+format.stderr).toBe(0)
-    const examples = JSON.parse(format.stdout).value
+    const examples = JSON.parse(format.stdout).values.examples
     expect(examples.index).not.toHaveProperty('documentRevision')
     expect(examples.index).not.toHaveProperty('assetManifestRevision')
     expect(examples.index).not.toHaveProperty('sceneModel')
@@ -381,7 +380,7 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(corrupt.code).toBe(1) // only absent format falls back; corruption stays visible
     await writeFile(join(root,'.beegame/delivery/content-format.json'),JSON.stringify({fixtureSection:{kept:true}}))
     const retained = await command(root,tools.directory,'check-content.mjs','--format','fixtureSection')
-    expect(JSON.parse(retained.stdout).value).toEqual({kept:true})
+    expect(JSON.parse(retained.stdout).values.fixtureSection).toEqual({kept:true})
     expect(await readFile(join(root,'.beegame/delivery/content-format.json'),'utf8')).toBe('{"fixtureSection":{"kept":true}}')
     await tools.close()
     const closed = await command(root, tools.directory, 'assets.mjs', 'catalog')
@@ -485,6 +484,15 @@ test('a chosen consumer copy remains buildable without the temporary host tools'
     expect(installed.code,installed.stderr).toBe(0)
     expect(JSON.parse(installed.stdout)).toMatchObject({alreadyPresent:false,runtimeVerified:false})
     expect(JSON.parse((await command(root,tools.directory,'consumer.mjs','--install','src/bgs-content-consumer.mjs')).stdout).alreadyPresent).toBe(true)
+    const publicationHelp = await command(root,tools.directory,'consumer.mjs','--help')
+    expect(publicationHelp.code,publicationHelp.stderr).toBe(0)
+    expect(publicationHelp.stdout).toContain('every registered resource file_paths entry and dependency local_path')
+    expect(publicationHelp.stdout).toContain('required licenses')
+    expect(publicationHelp.stdout).toContain('another packaging manifest')
+    const assetHelp = await command(root,tools.directory,'assets.mjs','--help')
+    expect(assetHelp.code,assetHelp.stderr).toBe(0)
+    expect(assetHelp.stdout).toContain('purpose: reference|experiment|production')
+    expect(assetHelp.stdout).toContain('existing Manifest requirementIds')
     const publication=await command(root,tools.directory,'consumer.mjs','--install-runtime-files','src/bgs-runtime-files.mjs')
     expect(publication.code,publication.stderr).toBe(0)
     expect(await readFile(join(root,'src/bgs-runtime-files.mjs'),'utf8')).toContain('copyRegisteredRuntimeFiles')
@@ -547,7 +555,8 @@ test('consumer compatibility is batched/read-only and installation never overwri
       projection: 'orthographic', framing: 'keep-height', halfWidth: 5, halfHeight: 5,
       rect: { x: 0, y: 0, width: 480, height: 480 },
     })
-    expect(api.stdout.length).toBeLessThan(7500)
+    // Include the renderer's actual capability table instead of requiring a source scan.
+    expect(api.stdout.length).toBeLessThan(9000)
     const doc={schema:'beegame-content.v1',id:'menu',kind:'ui-screen',assetRefs:[],data:{rootId:'root',nodes:[
       {id:'root',role:'screen-root'}, {id:'text',parentId:'root',role:'text',text:'Go',style:{align:'left',fontSize:18},layout:{size:[80,30]}},
       {id:'button',parentId:'root',role:'button',data:{action:'legacy-action'},layout:{size:[80,30]}},

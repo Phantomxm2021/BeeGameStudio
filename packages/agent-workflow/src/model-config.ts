@@ -1,27 +1,50 @@
 import { randomUUID } from 'node:crypto'
-import { OPENCODE_GO_PROFILES } from './opencode-go'
 
-export type ModelProviderKind =
-  | 'anthropic-compatible'
-  | 'openai-compatible'
-  | 'gemini'
-  | 'grok'
+import {
+  resolveModelApiProtocol,
+  type ModelApiProtocol,
+  type ModelProviderKind,
+} from './model-protocol'
+export {
+  resolveModelApiProtocol,
+  type ModelApiProtocol,
+  type ModelProviderKind,
+} from './model-protocol'
 
-export type ModelAuthMethod = 'platform' | 'byok' | 'claude-subscription' | 'chatgpt-subscription'
+export type ModelAuthMethod = 'platform' | 'byok' | 'chatgpt-subscription'
 
-export function modelAuthMethods(provider: ModelProviderKind): ModelAuthMethod[] {
-  return ['platform', 'byok', ...(provider === 'anthropic-compatible'
-    ? ['claude-subscription' as const] : provider === 'openai-compatible'
-      ? ['chatgpt-subscription' as const] : [])]
+export function modelAuthMethods(
+  provider: ModelProviderKind,
+): ModelAuthMethod[] {
+  return [
+    'platform',
+    'byok',
+    ...(provider === 'openai-compatible'
+      ? ['chatgpt-subscription' as const]
+      : []),
+  ]
 }
 
-export function validateModelAccess(provider: ModelProviderKind, methods: unknown): ModelAuthMethod[] {
-  if (!['anthropic-compatible', 'openai-compatible', 'gemini', 'grok'].includes(provider)) {
+export function validateModelAccess(
+  provider: ModelProviderKind,
+  methods: unknown,
+): ModelAuthMethod[] {
+  if (
+    !['anthropic-compatible', 'openai-compatible', 'gemini', 'grok'].includes(
+      provider,
+    )
+  ) {
     throw new Error('Unsupported model provider')
   }
   if (methods === undefined) return ['platform']
-  if (!Array.isArray(methods) || !methods.length || methods.some(method => !modelAuthMethods(provider).includes(method))) {
-    throw new Error('Choose at least one authentication method supported by this provider')
+  if (
+    !Array.isArray(methods) ||
+    !methods.length ||
+    methods.some(method => !modelAuthMethods(provider).includes(method))
+  ) {
+    throw new Error(
+      'Choose at least one authentication method supported by this provider',
+    )
   }
   return [...new Set(methods)]
 }
@@ -39,6 +62,7 @@ export type PublicModelConfig = {
   ownerId: string
   name: string
   provider: ModelProviderKind
+  apiProtocol?: ModelApiProtocol
   baseUrl?: string
   apiKeyPreview: string
   apiKey?: undefined
@@ -53,6 +77,7 @@ export type ModelConfigInput = {
   authMethods?: ModelAuthMethod[]
   name: string
   provider: ModelProviderKind
+  apiProtocol?: ModelApiProtocol
   baseUrl?: string
   apiKey: string
   models: ModelTierMap
@@ -62,7 +87,14 @@ export type ModelConfigInput = {
 export type ModelConfigUpdate = Partial<
   Pick<
     ModelConfigInput,
-    'name' | 'provider' | 'baseUrl' | 'apiKey' | 'models' | 'published' | 'authMethods'
+    | 'name'
+    | 'provider'
+    | 'apiProtocol'
+    | 'baseUrl'
+    | 'apiKey'
+    | 'models'
+    | 'published'
+    | 'authMethods'
   > & {
     isDefault: boolean
     clearSecret: boolean
@@ -76,6 +108,7 @@ export type RuntimeModelConfig = {
 
 export type StoredModelConfigRuntimeInput = {
   provider: ModelProviderKind
+  apiProtocol?: ModelApiProtocol
   baseUrl?: string
   apiKey: string
   models: ModelTierMap
@@ -107,6 +140,7 @@ export function exportModelConfigSnapshot(): ModelConfigSnapshotRecord[] {
     ownerId: config.ownerId,
     name: config.name,
     provider: config.provider,
+    apiProtocol: config.apiProtocol,
     ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
     apiKey: config.apiKey,
     models: { ...config.models },
@@ -121,13 +155,19 @@ export function importModelConfigSnapshot(
 ): void {
   configs.clear()
   for (const config of snapshot) {
+    const methods = config.authMethods?.filter(method =>
+      modelAuthMethods(config.provider).includes(method),
+    ) ?? ['platform']
+    resolveModelApiProtocol(config.provider, config.apiProtocol)
+    const supported = methods.length > 0
     configs.set(config.id, {
-      published: config.published ?? true,
-      authMethods: validateModelAccess(config.provider, config.authMethods),
+      published: supported && (config.published ?? true),
+      authMethods: methods.length ? methods : ['platform'],
       id: config.id,
       ownerId: config.ownerId,
       name: config.name,
       provider: config.provider,
+      apiProtocol: config.apiProtocol,
       ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
       apiKey: config.apiKey,
       models: { ...config.models },
@@ -150,6 +190,7 @@ export function createModelConfig(
     ownerId,
     name: input.name,
     provider: input.provider,
+    apiProtocol: resolveModelApiProtocol(input.provider, input.apiProtocol),
     ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
     apiKey: input.apiKey,
     models: { ...input.models },
@@ -185,7 +226,17 @@ export function updateModelConfig(
   const record = configs.get(id)
   if (!record) return undefined
 
-  const methods = validateModelAccess(patch.provider ?? record.provider, patch.authMethods ?? record.authMethods)
+  const methods = validateModelAccess(
+    patch.provider ?? record.provider,
+    patch.authMethods ?? record.authMethods,
+  )
+  const provider = patch.provider ?? record.provider
+  const protocol = resolveModelApiProtocol(
+    provider,
+    patch.apiProtocol ??
+      (provider === record.provider ? record.apiProtocol : undefined),
+  )
+  record.apiProtocol = protocol
   record.authMethods = methods
   if (patch.published !== undefined) record.published = patch.published
   if (patch.name !== undefined) record.name = patch.name
@@ -198,7 +249,8 @@ export function updateModelConfig(
     }
   }
   if (patch.clearSecret) record.apiKey = ''
-  else if (patch.apiKey !== undefined && patch.apiKey.trim()) record.apiKey = patch.apiKey
+  else if (patch.apiKey !== undefined && patch.apiKey.trim())
+    record.apiKey = patch.apiKey
   if (patch.models !== undefined) record.models = { ...patch.models }
   if (patch.isDefault !== undefined) {
     if (patch.isDefault) {
@@ -228,56 +280,40 @@ export function mapModelConfigToRuntime(
 export function mapStoredModelConfigToRuntime(
   record: StoredModelConfigRuntimeInput,
 ): RuntimeModelConfig {
-  switch (record.provider) {
-    case 'anthropic-compatible':
-      return {
-        modelType: 'anthropic',
-        env: compactEnv({
-          ANTHROPIC_BASE_URL: record.baseUrl,
-          // Go's Messages gateway reads x-api-key; let the SDK supply it.
-          [record.baseUrl?.replace(/\/$/, '') === OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl
-            ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN']: record.apiKey,
-          BGS_DEFAULT_FAST_MODEL: record.models.fast,
-          BGS_DEFAULT_BALANCED_MODEL: record.models.balanced,
-          BGS_DEFAULT_STRONG_MODEL: record.models.strong,
-        }),
-      }
-    case 'openai-compatible':
-      return {
-        modelType: 'openai',
-        env: compactEnv({
-          BGS_USE_OPENAI: '1',
-          OPENAI_BASE_URL: record.baseUrl,
-          OPENAI_API_KEY: record.apiKey,
-          OPENAI_DEFAULT_HAIKU_MODEL: record.models.fast,
-          OPENAI_DEFAULT_SONNET_MODEL: record.models.balanced,
-          OPENAI_DEFAULT_OPUS_MODEL: record.models.strong,
-        }),
-      }
-    case 'gemini':
-      return {
-        modelType: 'gemini',
-        env: compactEnv({
-          BGS_USE_GEMINI: '1',
-          GEMINI_BASE_URL: record.baseUrl,
-          GEMINI_API_KEY: record.apiKey,
-          GEMINI_DEFAULT_HAIKU_MODEL: record.models.fast,
-          GEMINI_DEFAULT_SONNET_MODEL: record.models.balanced,
-          GEMINI_DEFAULT_OPUS_MODEL: record.models.strong,
-        }),
-      }
-    case 'grok':
-      return {
-        modelType: 'grok',
-        env: compactEnv({
-          BGS_USE_GROK: '1',
-          GROK_BASE_URL: record.baseUrl,
-          GROK_API_KEY: record.apiKey,
-          GROK_DEFAULT_HAIKU_MODEL: record.models.fast,
-          GROK_DEFAULT_SONNET_MODEL: record.models.balanced,
-          GROK_DEFAULT_OPUS_MODEL: record.models.strong,
-        }),
-      }
+  const modelType =
+    record.provider === 'anthropic-compatible'
+      ? 'anthropic'
+      : record.provider === 'openai-compatible'
+        ? 'openai'
+        : record.provider
+  const prefix = {
+    anthropic: 'ANTHROPIC',
+    openai: 'OPENAI',
+    gemini: 'GEMINI',
+    grok: 'GROK',
+  }[modelType]
+  const baseUrl =
+    record.baseUrl ||
+    {
+      anthropic: 'https://api.anthropic.com',
+      openai: 'https://api.openai.com/v1',
+      gemini: 'https://generativelanguage.googleapis.com/v1beta',
+      grok: 'https://api.x.ai/v1',
+    }[modelType]
+  return {
+    modelType,
+    env: compactEnv({
+      [prefix + '_BASE_URL']: baseUrl,
+      [prefix + '_API_KEY']: record.apiKey,
+      BEEGAME_API_PROTOCOL: resolveModelApiProtocol(
+        record.provider,
+        record.apiProtocol,
+      ),
+      BGS_DEFAULT_FAST_MODEL: record.models.fast,
+      BGS_DEFAULT_BALANCED_MODEL: record.models.balanced,
+      BGS_DEFAULT_STRONG_MODEL: record.models.strong,
+      BEEGAME_MODEL: record.models.balanced,
+    }),
   }
 }
 
@@ -297,6 +333,7 @@ function toPublicConfig(record: StoredModelConfig): PublicModelConfig {
     ownerId: record.ownerId,
     name: record.name,
     provider: record.provider,
+    apiProtocol: record.apiProtocol,
     ...(record.baseUrl ? { baseUrl: record.baseUrl } : {}),
     apiKeyPreview: maskApiKey(record.apiKey),
     models: { ...record.models },

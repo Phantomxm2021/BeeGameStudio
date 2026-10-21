@@ -33,6 +33,8 @@ describe('dashboard credits refresh', () => {
     view.rerender({ enabled: true });
     await act(async () => {});
     expect(getCreditBalance).toHaveBeenCalledTimes(1);
+    expect(getCreditBalance).toHaveBeenCalledWith(true);
+    expect(getCreditSummary).toHaveBeenCalledWith('project', true);
     view.rerender({ enabled: false });
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(getCreditBalance).toHaveBeenCalledTimes(1);

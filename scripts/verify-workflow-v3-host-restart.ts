@@ -4,7 +4,6 @@ import { join, dirname, basename } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { loadEnvFile } from './beegame-migration-cli'
-import { getMacroDefines } from './defines'
 import { getSecretEncryptionKey } from '../packages/agent-workflow-server/src/security/secret-crypto'
 import { getDashboardDataRoot } from '../packages/agent-workflow-server/src/local-runtime-service'
 import { createRemoteWorkflowStore, type WorkflowStore } from '../packages/agent-workflow-server/src/beegame/workflow-v3/store'
@@ -26,8 +25,6 @@ const serverRequire=createRequire(new URL('../packages/agent-workflow-server/pac
 const {createTLSAwareFetch}=await import(serverRequire.resolve('@bee-game-studio/security-core'))
 const initialize = (envFile: string) => {
   loadEnvFile(envFile)
-  Object.assign(globalThis,{MACRO:Object.fromEntries(Object.entries(getMacroDefines())
-    .map(([key,value])=>[key.replace('MACRO.',''),JSON.parse(value)]))})
   const url=process.env.BEEGAME_SUPABASE_URL ?? process.env.SUPABASE_URL
   const serviceKey=process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY
   if(!url || !serviceKey || !process.env.AGENT_WORKFLOW_WORKSPACE_PATH || !getSecretEncryptionKey())

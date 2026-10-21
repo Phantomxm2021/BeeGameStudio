@@ -1,10 +1,16 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 
 const repoRoot = join(import.meta.dir, '..', '..')
 
 describe('Docker dependency registry', () => {
+  test('every explicit backend COPY input exists in the current source tree', () => {
+    const dockerfile = readFileSync(join(repoRoot, 'docker/Dockerfile.backend'), 'utf8')
+    for (const line of dockerfile.split('\n').filter(line => line.startsWith('COPY ') && !line.includes('--from='))) {
+      for (const source of line.split(/\s+/).slice(1, -1)) expect(existsSync(join(repoRoot, source))).toBe(true)
+    }
+  })
   test('keeps Bun lockfile tarballs away from legacy taobao mirror registries', () => {
     const lockfile = readFileSync(join(repoRoot, 'bun.lock'), 'utf8')
 
@@ -20,7 +26,7 @@ describe('Docker dependency registry', () => {
     expect(frontendDockerfile).toContain('--registry=${NPM_INSTALL_REGISTRY}')
     expect(frontendDockerfile).toContain('--replace-registry-host=always')
     expect(frontendDockerfile).toContain('--fetch-retries=5')
-    expect(frontendDockerfile).not.toContain('bun install --frozen-lockfile')
+    expect(frontendDockerfile).not.toContain('bun install --ignore-scripts --frozen-lockfile')
     expect(frontendDockerfile).not.toContain('COPY packages ./packages')
   })
 
@@ -30,8 +36,8 @@ describe('Docker dependency registry', () => {
     expect(dockerfile).toContain('ARG BUN_INSTALL_NETWORK_CONCURRENCY=2')
     expect(dockerfile).toContain('ARG BUN_INSTALL_REGISTRY=https://registry.npmmirror.com/')
     expect(dockerfile).toContain('--mount=type=cache,target=/root/.bun/install/cache')
-    expect(dockerfile).toContain('bun install --frozen-lockfile --registry=${BUN_INSTALL_REGISTRY} --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress')
-    expect(dockerfile.match(/bun install --frozen-lockfile/g)).toHaveLength(1)
+    expect(dockerfile).toContain('bun install --ignore-scripts --frozen-lockfile --registry=${BUN_INSTALL_REGISTRY} --network-concurrency=${BUN_INSTALL_NETWORK_CONCURRENCY} --no-progress')
+    expect(dockerfile.match(/bun install --ignore-scripts --frozen-lockfile/g)).toHaveLength(1)
     expect(dockerfile).toContain('FROM backend-source AS runtime')
     expect(dockerfile).toContain('FROM oven/bun:1.3-alpine AS billing')
     expect(dockerfile).toContain('FROM oven/bun:1.3-alpine AS skills')
@@ -40,11 +46,11 @@ describe('Docker dependency registry', () => {
 
   test('keeps backend source copies after dependency install for Docker cache reuse', () => {
     const backendDockerfile = readFileSync(join(repoRoot, 'docker/Dockerfile.backend'), 'utf8')
-    const installIndex = backendDockerfile.indexOf('bun install --frozen-lockfile')
+    const installIndex = backendDockerfile.indexOf('bun install --ignore-scripts --frozen-lockfile')
 
     expect(installIndex).toBeGreaterThan(-1)
     expect(backendDockerfile.indexOf('COPY packages ./packages')).toBeGreaterThan(installIndex)
-    expect(backendDockerfile.indexOf('COPY src ./src')).toBeGreaterThan(installIndex)
+    expect(backendDockerfile).not.toContain('COPY src ./src')
     expect(backendDockerfile.indexOf('COPY packages/agent-workflow-server/package.json ./packages/agent-workflow-server/package.json')).toBeLessThan(installIndex)
   })
 

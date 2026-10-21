@@ -71,3 +71,12 @@ describe('terminal Chat activity', () => {
     expect(thought).toMatchObject({ content: 'Checking assets', streamStatus: 'complete', completionReason: 'stopped' });
   });
 });
+
+it('does not extend a previously completed turn when a later session stop arrives', () => {
+  const result = settleChatActivity([
+    { taskId: 'p', turnId: 'old', timestamp: 100, streamStatus: 'complete', turnCompletedAt: 200 },
+    { taskId: 'p', turnId: 'current', timestamp: 300, toolStatus: 'running' },
+  ], { taskId: 'p', at: 500, completedAt: 500, reason: 'stopped' });
+  expect(result[0].turnCompletedAt).toBe(200);
+  expect(result[1]).toMatchObject({ turnCompletedAt: 500, completionReason: 'stopped', toolStatus: 'failed' });
+});

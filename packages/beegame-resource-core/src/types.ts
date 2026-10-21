@@ -255,7 +255,7 @@ export type ResourceSelectionDependency = {
 }
 
 /**
- * One exact element resolved after Claude Code has already made the artistic
+ * One exact element resolved after Bgs has already made the artistic
  * choice. It carries no role, score, or generated rationale: the service only
  * validates identity, publication state, version, and the dependency closure.
  */

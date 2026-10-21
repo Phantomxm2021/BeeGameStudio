@@ -1,40 +1,14 @@
 import { test, expect } from 'bun:test'
-import { mkdtempSync, readFileSync, statSync, rmSync } from 'node:fs'
+import { mkdtempSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { mapWebToolsConfigToRuntimeEnv, syncWebToolsToRuntimeConfig } from '../web-tools-store'
-import { mapRuntimeSettingsToEnv, syncRuntimeSettingsToDedicatedRuntimeConfig } from '../runtime-settings-store'
+import { saveWebToolsConfig, loadWebToolsConfig } from '../web-tools-store'
 
-test('materializes native web settings, preserves platform fields and clears stale credentials', () => {
-  const dataDir = mkdtempSync(join(tmpdir(), 'web-runtime-'))
+test('preserves legacy search preferences without generating Claude runtime settings', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'web-store-'))
   try {
-    syncRuntimeSettingsToDedicatedRuntimeConfig({ skillSearchEnabled: true }, { dataDir })
-    const path = join(mapRuntimeSettingsToEnv({}, { dataDir }).BEEGAME_CONFIG_DIR!, 'settings.json')
-    const config = {
-      webSearchAdapter: 'exa' as const, webFetchAdapter: 'http' as const,
-      exaApiKey: 'test-secret', exaEndpointUrl: 'https://example.test/mcp',
-      braveApiKey: 'test-brave', tavilyEndpointUrl: 'https://example.test',
-      webFetchHttpTimeoutMs: 15000,
-    }
-    syncWebToolsToRuntimeConfig(config, { dataDir })
-    const runtimeSettings = JSON.parse(readFileSync(path, 'utf8'))
-    expect(runtimeSettings).toMatchObject({
-      webSearchAdapter: 'exa', webFetchAdapter: 'http',
-      exaEndpointUrl: 'https://example.test/mcp',
-      tavilyEndpointUrl: 'https://example.test',
-      webFetchHttpTimeoutMs: 15000, skillSearchEnabled: true,
-    })
-    expect(runtimeSettings).not.toHaveProperty('braveApiKey')
-    expect(runtimeSettings).not.toHaveProperty('exaApiKey')
-    expect(mapWebToolsConfigToRuntimeEnv(config)).toMatchObject({
-      BRAVE_SEARCH_API_KEY: 'test-brave', EXA_API_KEY: 'test-secret',
-    })
-    expect(statSync(path).mode & 0o777).toBe(0o600)
-    syncWebToolsToRuntimeConfig({ webSearchAdapter: 'bing' }, { dataDir })
-    const next = JSON.parse(readFileSync(path, 'utf8'))
-    expect(next).toMatchObject({ webSearchAdapter: 'bing', skillSearchEnabled: true })
-    for (const key of Object.keys(config).filter(key => key !== 'webSearchAdapter')) expect(next).not.toHaveProperty(key)
-  } finally {
-    rmSync(dataDir, { recursive: true, force: true })
-  }
+    saveWebToolsConfig({webSearchAdapter:'bing'}, {dataDir})
+    expect(loadWebToolsConfig({dataDir})).toMatchObject({webSearchAdapter:'bing'})
+    expect(existsSync(join(dataDir,'.runtime','app','settings.json'))).toBe(false)
+  } finally { rmSync(dataDir,{recursive:true,force:true}) }
 })

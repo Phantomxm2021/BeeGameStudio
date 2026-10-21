@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { createChatGPTResponsesStream } from '../../../../src/services/api/openai/responsesAdapter'
+import { createChatGPTResponsesStream } from '../bgs/auth'
+import { withBgsAccountUse } from '../bgs/account-activity'
 import { CHATGPT_IMAGE_ENDPOINT, type ImageGenerationConfig } from './config'
 import { ImageProviderError, type ImageGenerationProvider, type ImageRequest, type ImageResult } from './provider'
 
@@ -10,6 +11,10 @@ export class ChatGPTSubscriptionImageProvider implements ImageGenerationProvider
     private readonly request: typeof fetch = fetch) {}
 
   async generate(config: ImageGenerationConfig, input: ImageRequest): Promise<ImageResult> {
+    return withBgsAccountUse(this.configDirectory, () => this.generateWithAccount(config, input))
+  }
+
+  private async generateWithAccount(config: ImageGenerationConfig, input: ImageRequest): Promise<ImageResult> {
     if (!['openai', 'chatgpt-subscription'].includes(config.provider) || config.baseUrl !== CHATGPT_IMAGE_ENDPOINT || !config.responseModel ||
         config.apiKey || config.upstreamApiKey || !input.prompt.trim() || input.prompt.length > 32000 || input.referenceImage)
       throw new ImageProviderError('Invalid subscription image configuration', 'rejected', undefined, 'subscription-configuration')

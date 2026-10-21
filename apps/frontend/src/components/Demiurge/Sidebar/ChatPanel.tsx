@@ -1,5 +1,6 @@
 import type { ModelRequestRetryControl } from './RuntimeErrorNotice';
 import { memo, useRef, useState } from 'react';
+import { McpElicitationPanel } from './McpElicitationPanel';
 import { CornerDownRight, Ellipsis, FileText, ListEnd, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
 import {
@@ -50,7 +51,7 @@ interface ChatPanelProps {
 
     // Tool permission controls
     onResolveToolPermission?: (
-        permission: { gate_id: string },
+        permission: { gate_id: string; intent?: 'change' },
         decision?: 'allow' | 'deny',
         scope?: 'once' | 'session',
         answers?: Record<string, string>
@@ -164,11 +165,12 @@ const BeUiPermissionPanel = ({
             : 'pending';
     const parameterLabel = command ? text.permissionCommandLabel : text.permissionTargetLabel;
     const toolName = permission.permission_tool_name || (command ? 'terminal.run' : 'workspace.access');
+    const toolLabel = /^(Bgs|Codex)(Permissions|Command|FileChange)$/.test(toolName) ? toolName.replace(/^(Bgs|Codex)/, 'BGS') : toolName;
 
     return (
         <div data-testid="beegame-permission-panel" className="mb-3">
             <ToolApproval
-                tool={toolName}
+                tool={toolLabel}
                 title={command ? text.permissionBashTitle : text.permissionToolTitle}
                 status={approvalStatus}
                 description={`${text.permissionPanelDescription} ${text.permissionRiskGeneric}`}
@@ -176,7 +178,8 @@ const BeUiPermissionPanel = ({
                     id: command ? 'command' : 'target',
                     label: parameterLabel,
                     value: command ? <ToolApprovalCode code={safeTarget} language="bash" /> : safeTarget,
-                }]}
+                }, ...(toolName.startsWith('Bgs') ? [{ id: 'requested-access', label: text.permissionTargetLabel,
+                    value: <ToolApprovalCode code={JSON.stringify(permission.artifact?.input, null, 2)} language="json" /> }] : [])]}
                 onApprove={() => void onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'once')}
                 onAlwaysAllow={supportsSessionPermission
                     ? () => void onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'session')
@@ -335,6 +338,13 @@ export const ChatPanel = memo(({
                         key={permission.gate_id}
                         input={permission.artifact?.input}
                         lang={lang}
+                        busy={permissionState.gateId === permission.gate_id && permissionState.phase === 'submitting'}
+                        error={permissionState.gateId === permission.gate_id && permissionState.phase === 'failed' ? permissionState.message : undefined}
+                        allowDesignChange={permission.artifact?.designChangeAllowed === true}
+                        onSubmit={onResolveToolPermission ? (answers, intent) => onResolveToolPermission({...toPermissionPayload(permission), ...(intent ? {intent} : {})}, 'allow', 'once', answers) : undefined}
+                        onDismiss={onResolveToolPermission ? () => onResolveToolPermission(toPermissionPayload(permission), 'deny') : undefined}
+                    /> : permission.permission_tool_name === 'McpElicitation' ? <McpElicitationPanel
+                        key={permission.gate_id} input={permission.artifact?.input} language={lang}
                         busy={permissionState.gateId === permission.gate_id && permissionState.phase === 'submitting'}
                         error={permissionState.gateId === permission.gate_id && permissionState.phase === 'failed' ? permissionState.message : undefined}
                         onSubmit={onResolveToolPermission ? answers => onResolveToolPermission(toPermissionPayload(permission), 'allow', 'once', answers) : undefined}

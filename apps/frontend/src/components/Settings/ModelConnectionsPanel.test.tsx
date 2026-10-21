@@ -11,15 +11,14 @@ vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showEr
 
 vi.mock('../../services/modelConfigApi', () => ({
   listOpenCodeGoModels: vi.fn(), listModelCatalog: vi.fn(), saveModelConnection: vi.fn(),
-  startModelLogin: vi.fn(), readModelLogin: vi.fn(), completeModelLogin: vi.fn(), cancelModelLogin: vi.fn(), readClaudeSubscriptionUsage: vi.fn(),
+  startModelLogin: vi.fn(), readModelLogin: vi.fn(), cancelModelLogin: vi.fn(),
 }));
 vi.mock('../beui/project-select', () => ({ ProjectSelect: ({ ariaLabel, value, options, onValueChange, disabled }: any) => <select aria-label={ariaLabel} value={value} disabled={disabled} onChange={event => onValueChange(event.target.value)}>{options.map((item: any) => <option key={item.value} value={item.value}>{item.label}</option>)}</select> }));
 
-const connection = (method: api.ModelAuthMethod = 'platform', extra: Partial<api.ModelConnectionStatus> = {}): api.ModelConnectionStatus => ({ method, hasKey: false, isPreferred: false, claudeConnected: false, chatgptConnected: false, ...extra });
+const connection = (method: api.ModelAuthMethod = 'platform', extra: Partial<api.ModelConnectionStatus> = {}): api.ModelConnectionStatus => ({ method, hasKey: false, isPreferred: false, chatgptConnected: false, ...extra });
 const catalog = (): api.CatalogModel[] => [
-  { id: 'official', name: 'Published Claude', provider: 'anthropic-compatible', models: { balanced: 'published' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: connection() },
+  { id: 'official', name: 'Published Claude', provider: 'openai-compatible', models: { balanced: 'published' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: connection() },
   { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
-  { id: 'personal-claude-subscription', name: 'Claude subscription', provider: 'anthropic-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['claude-subscription'], connection: connection() },
   { id: 'personal-chatgpt-subscription', name: 'ChatGPT subscription', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'], connection: connection() },
   { id: OPENCODE_GO_ID, name: 'OpenCode Go', provider: 'anthropic-compatible', baseUrl: OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl, models: OPENCODE_GO_PROFILES['anthropic-compatible'].defaults, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
 ];
@@ -30,7 +29,6 @@ beforeEach(() => {
   vi.mocked(api.listModelCatalog).mockResolvedValue(catalog());
   vi.mocked(api.saveModelConnection).mockResolvedValue(connection('byok', { hasKey: true, isPreferred: true }));
   vi.mocked(api.cancelModelLogin).mockResolvedValue({});
-  vi.mocked(api.readClaudeSubscriptionUsage).mockResolvedValue({ usage: null });
 });
 afterEach(() => vi.restoreAllMocks());
 const mockAuthorizationWindow = () => {
@@ -48,7 +46,7 @@ it('shows direct subscription choices and keeps official as the default', async 
   expect(screen.getByRole('option', { name: 'Bee Game Studio LLM' })).toBeInTheDocument();
   expect(screen.queryByRole('option', { name: 'Published Claude' })).not.toBeInTheDocument();
   expect(screen.getByRole('option', { name: 'BYOK' })).toBeInTheDocument();
-  expect(screen.getByRole('option', { name: 'Claude account with subscription' })).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: 'Claude account with subscription' })).not.toBeInTheDocument();
   expect(screen.getByRole('option', { name: 'ChatGPT account with subscription' })).toBeInTheDocument();
   expect(api.saveModelConnection).not.toHaveBeenCalled();
 });
@@ -66,7 +64,7 @@ it('saves one independent BYOK config with provider, URL, key and three tiers', 
   await userEvent.type(screen.getByLabelText('Strong model'), 'strong-id');
   expect(screen.queryByRole('button', { name: 'Save BYOK' })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
-  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'user-fixture-secret', true, { provider: 'openai-compatible', baseUrl: 'https://personal.example/v1', models: { fast: 'fast-id', balanced: 'balanced-id', strong: 'strong-id' } }));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'user-fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://personal.example/v1', models: { fast: 'fast-id', balanced: 'balanced-id', strong: 'strong-id' } }));
   expect(screen.getByLabelText('API Key')).toHaveValue('');
 });
 
@@ -91,35 +89,17 @@ it('loads and edits saved personal tiers without re-entering an unchanged key', 
   await userEvent.clear(screen.getByLabelText('Strong model'));
   await userEvent.type(screen.getByLabelText('Strong model'), 'strong-new');
   await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
-  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', '', true, { provider: 'openai-compatible', baseUrl: 'https://personal.example/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong-new' } }));
-});
-
-it('supports Claude subscription authorization independently of official models', async () => {
-  const authWindow = mockAuthorizationWindow();
-  vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'login', url: 'https://claude.ai/oauth/authorize?state=fixture', method: 'claude-subscription' });
-  vi.mocked(api.completeModelLogin).mockResolvedValue({ status: 'complete' });
-  render(<ModelConnectionsPanel language="en" />);
-  await waitForCatalog();
-  await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'claude-subscription');
-  expect(screen.queryByLabelText('Subscription account')).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole('button', { name: 'Continue with Claude' }));
-  await waitFor(() => expect(authWindow.replace).toHaveBeenCalledWith('https://claude.ai/oauth/authorize?state=fixture'));
-  expect(authWindow.open).toHaveBeenCalledWith('about:blank', '_blank');
-  expect(screen.queryByRole('link', { name: 'Open provider authorization' })).not.toBeInTheDocument();
-  await userEvent.type(screen.getByLabelText('Claude code#state'), 'code#fixture');
-  expect(screen.getByRole('region', { name: 'Authorization pending' })).toHaveTextContent('Complete authorization in the new tab');
-  await userEvent.click(screen.getByRole('button', { name: 'Finish connecting' }));
-  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-claude-subscription', 'claude-subscription', undefined, true, undefined));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', '', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://personal.example/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong-new' } }));
 });
 
 it('cancels an unfinished subscription login when the panel closes', async () => {
   const authWindow = mockAuthorizationWindow();
-  vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'login', url: 'https://claude.ai/oauth/authorize', method: 'claude-subscription' });
+  vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'login', url: 'https://auth.openai.com/fixture', method: 'chatgpt-subscription' });
   const rendered = render(<ModelConnectionsPanel language="en" />);
   await waitForCatalog();
-  await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'claude-subscription');
-  await userEvent.click(screen.getByRole('button', { name: 'Continue with Claude' }));
-  await waitFor(() => expect(authWindow.replace).toHaveBeenCalledWith('https://claude.ai/oauth/authorize'));
+  await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'chatgpt-subscription');
+  await userEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }));
+  await waitFor(() => expect(authWindow.replace).toHaveBeenCalledWith('https://auth.openai.com/fixture'));
   rendered.unmount();
   expect(api.cancelModelLogin).toHaveBeenCalledWith('login');
 });
@@ -142,7 +122,7 @@ it('supports ChatGPT device login and activates the subscription', async () => {
 it('administrator authorization reuses device login without activating a model or requesting another login on reopen', async () => {
   const authWindow = mockAuthorizationWindow();
   const connected = catalog();
-  connected[3] = { ...connected[3], connection: connection('platform', { chatgptConnected: true }) };
+  connected[2] = { ...connected[2], connection: connection('platform', { chatgptConnected: true }) };
   vi.mocked(api.listModelCatalog).mockResolvedValueOnce(catalog()).mockResolvedValue(connected);
   vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'admin-login', url: 'https://auth.openai.com/codex/device', userCode: 'ADMIN-CODE', method: 'chatgpt-subscription' });
   vi.mocked(api.readModelLogin).mockResolvedValue({ status: 'complete' });
@@ -171,7 +151,7 @@ it('waits for the existing administrator login status before allowing authorizat
   expect(button).toBeDisabled();
   await userEvent.click(button);
   const connected = catalog();
-  connected[3].connection.chatgptConnected = true;
+  connected[2].connection.chatgptConnected = true;
   await act(async () => resolve(connected));
   expect(await screen.findByText('ChatGPT subscription connected')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Continue with ChatGPT' })).not.toBeInTheDocument();
@@ -227,18 +207,31 @@ it('does not start login when the browser blocks the authorization window', asyn
   expect(api.startModelLogin).not.toHaveBeenCalled();
 });
 
-it('shows real Claude subscription usage when available and does not invent ChatGPT quota', async () => {
-  const models = catalog();
-  models[2] = { ...models[2], connection: connection('claude-subscription', { claudeConnected: true, isPreferred: true }) };
-  models[3] = { ...models[3], connection: connection('chatgpt-subscription', { chatgptConnected: true }) };
-  vi.mocked(api.listModelCatalog).mockResolvedValue(models);
-  vi.mocked(api.readClaudeSubscriptionUsage).mockResolvedValue({ usage: { fiveHourUsedPercent: 42, sevenDayUsedPercent: 18 } });
+it('offers OpenCode Go alongside BYOK and ChatGPT without restoring Claude Code login', async () => {
   render(<ModelConnectionsPanel language="en" />);
-  expect(await screen.findByText('5-hour usage: 42%')).toBeInTheDocument();
-  expect(screen.getByText('7-day usage: 18%')).toBeInTheDocument();
-  await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'chatgpt-subscription');
-  expect(screen.queryByLabelText('Claude subscription usage')).not.toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'View ChatGPT usage' })).toHaveAttribute('href', 'https://chatgpt.com/settings/usage');
+  await waitForCatalog();
+  expect(screen.getByRole('option', { name: 'OpenCode Go' })).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: /Claude/i })).not.toBeInTheDocument();
+  expect(screen.getByRole('option', { name: /ChatGPT/ })).toBeInTheDocument();
+  expect(api.listOpenCodeGoModels).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  ['openai-compatible', 'responses'], ['openai-compatible', 'chat-completions'],
+  ['anthropic-compatible', 'anthropic-messages'], ['gemini', 'gemini'], ['grok', 'chat-completions'],
+] as const)('saves the explicit protocol for %s / %s', async (provider, apiProtocol) => {
+  const ref=createRef<ModelConnectionsHandle>();
+  render(<><ModelConnectionsPanel ref={ref} language="en" /><button onClick={()=>ref.current?.saveByok()}>Footer save</button></>);
+  await waitForCatalog();
+  await userEvent.selectOptions(screen.getByLabelText('Connection type'),'byok');
+  await userEvent.selectOptions(screen.getByLabelText('Provider'),provider);
+  if(provider==='openai-compatible'||provider==='grok') await userEvent.selectOptions(screen.getByLabelText('API Protocol'),apiProtocol);
+  await userEvent.type(screen.getByLabelText('Base URL'),'https://fixture.example/v1');
+  await userEvent.type(screen.getByLabelText('API Key'),'fixture-key');
+  for(const label of ['Fast model','Balanced model','Strong model']) await userEvent.type(screen.getByLabelText(label),'fixture-model');
+  await userEvent.click(screen.getByRole('button',{name:'Footer save'}));
+  await waitFor(()=>expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok','byok','fixture-key',true,{provider,apiProtocol,baseUrl:'https://fixture.example/v1',models:{fast:'fixture-model',balanced:'fixture-model',strong:'fixture-model'}}));
 });
 
 it('saves Go through the existing footer and restricts model choices to the selected protocol', async () => {

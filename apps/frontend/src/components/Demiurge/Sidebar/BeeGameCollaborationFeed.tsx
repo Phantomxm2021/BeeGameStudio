@@ -1,6 +1,6 @@
 import { RuntimeErrorNotice, type ModelRequestRetryControl } from './RuntimeErrorNotice';
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, Bot, Check, ChevronDown, CircleCheck, Copy, FileText, Hourglass, ImageIcon, LoaderCircle, Minus, Monitor, Pencil, Send, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, Check, ChevronDown, CircleCheck, Copy, FileText, Hourglass, ImageIcon, LoaderCircle, Minus, Pencil, Search, Send, SquareTerminal, Wrench, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { type ChatDisplayMessage, type ChatDisplaySource } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatMarkdownContent';
@@ -23,10 +23,12 @@ import { Drawer } from '../../beui/registry/components/motion/drawer';
 import { AnimatedBadge, type AnimatedBadgeStatus } from '../../beui/registry/components/motion/animated-badge';
 import { Loader } from '../../beui/registry/components/motion/loader';
 import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
+import { activityToolKind, toolActivitySummary, type ActivityToolKind } from '../../../utils/toolActivitySummary';
 import { useSmoothStreamText } from '../../../hooks/useSmoothStreamText';
 import { ArtifactCard } from './ArtifactCard';
 import { ChatAttachmentView } from './ChatAttachmentView';
 import { SubagentActivityView } from './SubagentActivityView';
+import { SourceCodeBlock } from './SourceCodeBlock';
 import { Button } from '../../beui/project-button';
 
 type BeeGameCollaborationFeedProps = {
@@ -90,6 +92,9 @@ type NormalizedTool = {
     kind: ToolKind;
     timestamp: number;
     startedAt?: number;
+    turnCompletedAt?: number;
+    exitCode?: number;
+    durationMs?: number;
     turnId?: string;
     toolUseId?: string;
     isSubagent?: boolean;
@@ -101,7 +106,7 @@ type NormalizedTool = {
     after?: string;
 };
 
-type ToolKind = 'search' | 'read' | 'write' | 'edit' | 'bash' | 'todo' | 'subagent' | 'generic';
+type ToolKind = ActivityToolKind;
 
 const GENERIC_TOOL_NAME = 'Tool';
 
@@ -131,17 +136,7 @@ const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
 
 const displayText = (value: string): string => shortenAbsolutePathsForDisplay(value);
 
-const getToolKind = (toolName?: string): ToolKind => {
-    const normalized = String(toolName || '').trim().toLowerCase();
-    if (normalized === 'search' || normalized === 'grep' || normalized === 'glob' || normalized === 'websearch' || normalized === 'web_search') return 'search';
-    if (normalized === 'todowrite' || normalized === 'todo_write') return 'todo';
-    if (normalized === 'read') return 'read';
-    if (normalized === 'write') return 'write';
-    if (normalized === 'edit' || normalized === 'multiedit') return 'edit';
-    if (normalized === 'bash') return 'bash';
-    if (normalized === 'agent' || normalized === 'task' || normalized === 'subagent') return 'subagent';
-    return 'generic';
-};
+const getToolKind = (toolName?: string): ToolKind => activityToolKind(toolName || '');
 
 const isHiddenPresentationTool = (toolName?: string): boolean => (
     String(toolName || '').trim().toLowerCase() === 'structuredoutput'
@@ -178,7 +173,10 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         artifactId: String(message.artifactId || message.artifact_id || '').trim() || undefined,
         kind,
         timestamp: Number(message.timestamp || 0),
-        startedAt: status === 'running' ? message.timestamp : undefined,
+        startedAt: status === 'running' || (message.completionReason && message.turnCompletedAt) ? message.timestamp : undefined,
+        turnCompletedAt: message.turnCompletedAt,
+        exitCode: message.toolExitCode,
+        durationMs: message.toolDurationMs,
         turnId: message.turnId || message.turn_id,
         toolUseId: message.toolUseId,
         isSubagent: Boolean(message.isSubagentTool),
@@ -239,53 +237,35 @@ function toActivityItem(
                 working={matchesStreamingMessage(part.message, streamingMessageId)} />,
         };
     }
-    const tool = part.tool;
-    const description = tool.input && typeof tool.input === 'object' && 'description' in tool.input
-        && typeof tool.input.description === 'string' ? tool.input.description.trim() : '';
-    const imageOutput = tool.attachments?.some(attachment => attachment.type === 'image');
-    const action = tool.kind === 'read' ? (lang === 'zh' ? '读取' : 'Read')
-        : tool.kind === 'write' ? (lang === 'zh' ? '写入' : 'Write')
-        : tool.kind === 'edit' ? (lang === 'zh' ? '编辑' : 'Edit')
-        : tool.kind === 'search' ? (lang === 'zh' ? '搜索' : 'Search') : '';
-    const target = tool.detail.replace(/^(?:Target|Command):\s*/, '');
-    const title = description || (target ? `${action ? `${action} ` : ''}${target}`
-        : imageOutput ? (lang === 'zh' ? '图片输出' : 'Image output') : tool.name);
-    const outcome = tool.completionReason === 'stopped' ? (lang === 'zh' ? '已停止' : 'Stopped')
-        : tool.completionReason === 'incomplete' ? (lang === 'zh' ? '未完成' : 'Incomplete')
-        : tool.status === 'failed' ? (lang === 'zh' ? '失败' : 'Failed') : '';
     return {
-        id: `activity-tool-${tool.id}`,
-        type: 'trace',
-        kind: 'run',
-        icon: imageOutput ? <ImageIcon className="size-4" /> : <Monitor className="size-4" />,
-        label: <>{displayText(title)}{outcome && <span className={tool.status === 'failed' && !tool.completionReason ? 'text-destructive' : 'text-muted-foreground'}> · {outcome}</span>}</>,
-        onSelect: () => onOpenTool(tool),
+        id: `activity-tool-${part.tool.id}`,
+        type: 'text',
+        content: <ToolActivity tool={part.tool} lang={lang} onOpenFull={() => onOpenTool(part.tool)} />,
     };
 }
 
 function parseDiffLines(diff: string): FileDiffLine[] {
     const lines: FileDiffLine[] = [];
-    let oldLine = 1;
-    let newLine = 1;
+    const hasHunks = /^@@ -\d/m.test(diff);
+    let oldLine: number | undefined, newLine: number | undefined;
+    let oldRemaining = 0, newRemaining = 0;
     for (const [index, line] of diff.split('\n').entries()) {
-        const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        const hunk = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
         if (hunk) {
-            oldLine = Number(hunk[1]);
-            newLine = Number(hunk[2]);
+            oldLine = Number(hunk[1]); newLine = Number(hunk[3]);
+            oldRemaining = Number(hunk[2] ?? 1); newRemaining = Number(hunk[4] ?? 1);
             continue;
         }
-        if (line.startsWith('---') || line.startsWith('+++')) continue;
+        if (hasHunks && !oldRemaining && !newRemaining) continue;
+        if (!hasHunks && (/^(?:---|\+\+\+|diff |index |@@|\\)/.test(line))) continue;
+        if (!/^[+ -]/.test(line)) continue;
         const type = line.startsWith('+') ? 'added' : line.startsWith('-') ? 'removed' : 'context';
-        const content = type === 'context' ? line.startsWith(' ') ? line.slice(1) : line : line.slice(1);
-        lines.push({
-            id: `diff-line-${index}`,
-            type,
-            ...(type !== 'added' ? { oldLine } : {}),
-            ...(type !== 'removed' ? { newLine } : {}),
-            content,
+        lines.push({ id: `diff-line-${index}`, type, content: line.slice(1),
+            ...(type !== 'added' && oldLine !== undefined ? { oldLine } : {}),
+            ...(type !== 'removed' && newLine !== undefined ? { newLine } : {}),
         });
-        if (type !== 'added') oldLine += 1;
-        if (type !== 'removed') newLine += 1;
+        if (type !== 'added' && oldLine !== undefined) { oldLine++; oldRemaining--; }
+        if (type !== 'removed' && newLine !== undefined) { newLine++; newRemaining--; }
     }
     return lines;
 }
@@ -343,6 +323,9 @@ const mergeToolPart = (
                 after: tool.after ?? current.after,
                 timestamp: Math.max(current.timestamp, tool.timestamp),
                 startedAt: current.startedAt ?? tool.startedAt,
+                exitCode: tool.exitCode ?? current.exitCode,
+                durationMs: tool.durationMs ?? current.durationMs,
+                input: tool.input ?? current.input,
                 status: tool.status === 'running' ? current.status : tool.status,
             },
             timestamp: Math.max(existing.part.timestamp, tool.timestamp),
@@ -448,6 +431,7 @@ const getMessageSources = (message: ChatDisplayMessage): ChatDisplaySource[] => 
 const messageTimestamp = (message: ChatDisplayMessage): number => Number(message.timestamp || Number.POSITIVE_INFINITY);
 
 const matchesStreamingMessage = (message: ChatDisplayMessage, streamingMessageId: string | null): boolean => {
+    if (message.completionReason || message.turnCompletedAt) return false;
     if (message.streamStatus) return message.streamStatus === 'streaming';
     if (!streamingMessageId) return false;
     const id = String(message.id || '');
@@ -491,8 +475,7 @@ const messageTimeLabel = (message: ChatDisplayMessage, lang: Language): string |
 
 const responseTimeLabel = (entry: AgentResponseTurn, lang: Language): string | undefined => {
     const completedAt = entry.parts
-        .filter((part) => part.kind !== 'tool')
-        .map((part) => part.message.turnCompletedAt)
+        .map((part) => part.kind === 'tool' ? part.tool.turnCompletedAt : part.message.turnCompletedAt)
         .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const timestamps = entry.parts.map((part) => part.timestamp).filter(Number.isFinite);
     if (completedAt.length === 0 && timestamps.length === 0) return undefined;
@@ -637,7 +620,23 @@ export const BeeGameCollaborationFeed = memo(({
 }: BeeGameCollaborationFeedProps) => {
     const text = useBeeGameText(lang);
     const [detail, setDetail] = useState<AgentRunDetail | null>(null);
-    const entries = useMemo(() => buildFeedEntries(messages), [messages]);
+    const entries = useMemo(() => {
+        const result = buildFeedEntries(messages);
+        // Transcript flags can outlive a worker after interruption or a missed
+        // terminal event. The runtime busy signal owns whether activity is live.
+        if (!isLoading) for (const entry of result) {
+            if (entry.kind !== 'response') continue;
+            for (const part of entry.parts) {
+                if (part.kind === 'tool') {
+                    if (part.tool.status === 'running' && !part.tool.completionReason)
+                        part.tool = { ...part.tool, completionReason: 'incomplete' };
+                } else if (matchesStreamingMessage(part.message, streamingMessageId)) {
+                    part.message = { ...part.message, completionReason: 'incomplete', streamStatus: 'complete' };
+                }
+            }
+        }
+        return result;
+    }, [messages, isLoading, streamingMessageId]);
     const latestResponseIndex = entries.reduce((last, entry, index) => entry.kind === 'response' ? index : last, -1);
     const latestUserIndex = entries.reduce((last, entry, index) => entry.kind === 'user' ? index : last, -1);
     const activeResponseIndex = latestResponseIndex > latestUserIndex ? latestResponseIndex : -1;
@@ -655,7 +654,7 @@ export const BeeGameCollaborationFeed = memo(({
         return detail;
     }, [detail, entries]);
     const hasStreamingMessage = Boolean(entries.some((entry) => entry.kind === 'response' && entry.parts.some((part) => (
-        (part.kind === 'tool' && part.tool.status === 'running') ||
+        (part.kind === 'tool' && part.tool.status === 'running' && !part.tool.completionReason) ||
         ((part.kind === 'thinking' || part.kind === 'agent') && matchesStreamingMessage(part.message, streamingMessageId))
     ))));
     const entriesWithDates = useMemo(() => {
@@ -714,11 +713,11 @@ export const BeeGameCollaborationFeed = memo(({
                     >
                         <MessageContent>
                             {(() => {
-                                const streaming = entry.parts.some(part => part.kind === 'tool'
-                                    ? part.tool.status === 'running' : matchesStreamingMessage(part.message, streamingMessageId));
-                                const completedAt = entry.parts.flatMap(part => part.kind !== 'tool' && part.message.turnCompletedAt
-                                    ? [part.message.turnCompletedAt] : []).at(-1);
-                                const working = !completedAt && (streaming || (isLoading && entryIndex === activeResponseIndex));
+                                const completedAt = entry.parts.map(part => part.kind === 'tool' ? part.tool.turnCompletedAt : part.message.turnCompletedAt)
+                                    .filter((at): at is number => at !== undefined).at(-1);
+                                const childRunning = entry.parts.some(part => part.kind === 'tool' && part.tool.isSubagent &&
+                                    part.tool.status === 'running' && !part.tool.completionReason && !part.tool.turnCompletedAt);
+                                const working = isLoading && entryIndex === activeResponseIndex && (!completedAt || childRunning);
                                 const { activity, final } = splitResponseParts(entry.parts, !working && !hasLaterResponseInTurn);
                                 const responseText = final
                                     .filter((part): part is Extract<ResponsePart, { kind: 'agent' }> => part.kind === 'agent')
@@ -742,6 +741,7 @@ export const BeeGameCollaborationFeed = memo(({
                                     {activity.length > 0 && <ActivityTimeline
                                         parts={activity}
                                         working={working}
+                                        hasFinalResponse={final.length > 0}
                                         completedAt={completedAt}
                                         lang={lang}
                                         streamingMessageId={streamingMessageId}
@@ -781,25 +781,89 @@ export const BeeGameCollaborationFeed = memo(({
 
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
 
-function ToolResultDetail({ tool, lang }: { tool: NormalizedTool; lang: Language }) {
-    return <ToolResult title={displayText(tool.name)} status={tool.status === 'completed' ? 'success' : tool.status === 'failed' ? 'error' : 'running'}
-        defaultOpen collapseOnComplete={false} kind={tool.kind === 'bash' ? 'terminal' : 'custom'} copyText={displayText(tool.output)}>
-        <div className="space-y-4">
-            {tool.input !== undefined && <section>
-                <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{lang === 'zh' ? '输入' : 'Input'}</h3>
-                <ToolResultOutput language="json">{displayText(JSON.stringify(tool.input, null, 2))}</ToolResultOutput>
+function toolActivityState(tool: NormalizedTool, lang: Language) {
+    const state = tool.completionReason || tool.status;
+    const labels = lang === 'zh'
+        ? { running: '运行中', completed: '完成', failed: '失败', stopped: '已停止', incomplete: '未完成' }
+        : { running: 'Running', completed: 'Completed', failed: 'Failed', stopped: 'Stopped', incomplete: 'Incomplete' };
+    const endedAt = state === 'running' ? Date.now() : tool.turnCompletedAt ??
+        (tool.status === 'running' ? undefined : tool.timestamp);
+    const elapsed = tool.durationMs ?? (tool.startedAt === undefined || endedAt === undefined ? undefined
+        : Math.max(0, endedAt - tool.startedAt));
+    const seconds = elapsed === undefined ? undefined : Math.floor(elapsed / 1000);
+    const duration = seconds === undefined ? '' : seconds < 1 ? '<1s' : seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    return { state, label: labels[state], duration };
+}
+
+function ToolActivity({ tool, lang, onOpenFull }: { tool: NormalizedTool; lang: Language; onOpenFull: () => void }) {
+    const [open, setOpen] = useState(false);
+    const { state } = toolActivityState(tool, lang);
+    const lines = tool.diff ? parseDiffLines(tool.diff) : [];
+    // An attempted or interrupted edit must not acquire FileDiff's "applied" badge.
+    if (state === 'completed' && lines.some(line => line.type === 'added' || line.type === 'removed')) return <div data-tool-id={tool.id} data-tool-state={state}>
+        <FileDiff file={toolActivitySummary(tool.name, tool.input, tool.detail, lang === 'zh')} lines={lines}
+            status="complete" open={open} onOpenChange={setOpen} collapseOnComplete={false} copyText={tool.diff}>
+            <button type="button" onClick={onOpenFull} className="ml-6 py-2 text-xs text-muted-foreground hover:text-foreground">
+                {lang === 'zh' ? '查看完整详情' : 'Open full details'}
+            </button>
+        </FileDiff>
+    </div>;
+    return <div data-tool-state={state}><ToolResultDetail tool={tool} lang={lang} inline open={open} onOpenChange={setOpen} onOpenFull={onOpenFull} /></div>;
+}
+
+function ToolResultDetail({ tool, lang, inline = false, open, onOpenChange, onOpenFull }: {
+    tool: NormalizedTool; lang: Language; inline?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void; onOpenFull?: () => void;
+}) {
+    const { state, label, duration } = toolActivityState(tool, lang);
+    const data = tool.input && typeof tool.input === 'object' ? tool.input as Record<string, unknown> : {};
+    const path = typeof data.file_path === 'string' ? data.file_path : typeof data.path === 'string' ? data.path : undefined;
+    const sourceRead = tool.kind === 'read' && Boolean(path) && state === 'completed';
+    const command = tool.kind === 'bash' && tool.input && typeof tool.input === 'object' && 'command' in tool.input
+        && typeof tool.input.command === 'string' ? tool.input.command : undefined;
+    const inputTitle = command !== undefined ? (lang === 'zh' ? '原始命令' : 'Original command') : (lang === 'zh' ? '输入' : 'Input');
+    const inputContent = command !== undefined ? <ToolResultOutput language="bash">{command}</ToolResultOutput>
+        : tool.input !== undefined && (!inline || !sourceRead) ? <ToolResultOutput language="json">{displayText(JSON.stringify(tool.input, null, 2))}</ToolResultOutput> : undefined;
+    const Icon = tool.kind === 'image' ? ImageIcon : tool.kind === 'read' ? FileText
+        : ['write', 'edit'].includes(tool.kind) ? Pencil : tool.kind === 'search' ? Search
+        : tool.kind === 'bash' ? SquareTerminal : Wrench;
+    return <ToolResult title={inline ? displayText(toolActivitySummary(tool.name, tool.input, tool.detail, lang === 'zh')) : displayText(tool.name)}
+        data-tool-id={tool.id} icon={<Icon className="size-4" />} statusLabel={label}
+        status={state === 'completed' ? 'success' : state === 'failed' ? 'error'
+        : state === 'stopped' ? 'cancelled' : state === 'incomplete' ? 'incomplete' : 'running'}
+        meta={[duration, tool.exitCode === undefined || (inline && tool.exitCode === 0) ? '' : `${lang === 'zh' ? '退出码' : 'Exit code'} ${tool.exitCode}`].filter(Boolean).join(' · ')}
+        defaultOpen={!inline} open={open} onOpenChange={onOpenChange} collapseOnComplete={false}
+        kind={tool.kind === 'bash' ? 'terminal' : 'custom'} copyText={sourceRead ? undefined : tool.kind === 'bash' ? tool.output : displayText(tool.output)}>
+        {(!inline || open) && <div className="space-y-4">
+            {!inline && inputContent && <section>
+                <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{inputTitle}</h3>
+                {inputContent}
             </section>}
             <section>
                 <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{lang === 'zh' ? '输出' : 'Output'}</h3>
-                <ToolResultOutput>{displayText(tool.output || (lang === 'zh' ? '暂无输出' : 'No output yet'))}</ToolResultOutput>
+                {tool.name.toLowerCase() === 'websearch' && tool.output
+                    ? <MarkdownRenderer content={tool.output} messageId={`${tool.id}-search-results`} lang={lang} />
+                    : sourceRead
+                        ? <SourceCodeBlock path={path} output={tool.output} />
+                        : <ToolResultOutput language="text">{(tool.kind === 'bash' ? tool.output : displayText(tool.output)) || (lang === 'zh' ? '暂无输出' : 'No output yet')}</ToolResultOutput>}
             </section>
-        </div>
+            {inline && inputContent && <details>
+                <summary className="cursor-pointer text-xs text-muted-foreground">{inputTitle}</summary>
+                <div className="mt-2">{inputContent}</div>
+            </details>}
+            {inline && tool.exitCode !== undefined && <p className="text-xs text-muted-foreground">
+                {lang === 'zh' ? '退出码' : 'Exit code'} {tool.exitCode}
+            </p>}
+            {onOpenFull && <button type="button" onClick={onOpenFull} className="text-xs text-muted-foreground hover:text-foreground">
+                {lang === 'zh' ? '查看完整详情' : 'Open full details'}
+            </button>}
+        </div>}
     </ToolResult>;
 }
 
-function ActivityTimeline({ parts, working, completedAt, lang, streamingMessageId, onOpenTool, onOpenSubagent, onPreviewArtifact }: {
+function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang, streamingMessageId, onOpenTool, onOpenSubagent, onPreviewArtifact }: {
     parts: ResponsePart[];
     working: boolean;
+    hasFinalResponse: boolean;
     completedAt?: number;
     lang: Language;
     streamingMessageId: string | null;
@@ -807,6 +871,7 @@ function ActivityTimeline({ parts, working, completedAt, lang, streamingMessageI
     onOpenSubagent: (tool: NormalizedTool) => void;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
 }) {
+    const text = useBeeGameText(lang).chatActivity;
     const [now, setNow] = useState(Date.now);
     useEffect(() => {
         if (!working) return;
@@ -818,7 +883,8 @@ function ActivityTimeline({ parts, working, completedAt, lang, streamingMessageI
     const first = parts[0];
     const last = parts.at(-1);
     const startedAt = first?.kind === 'tool' ? first.tool.startedAt : first?.timestamp;
-    const endedAt = working ? now : completedAt ?? (last?.kind === 'tool' ? last.tool.timestamp
+    const endedAt = working ? now : completedAt ?? (last?.kind === 'tool'
+        ? last.tool.status !== 'running' && !last.tool.completionReason ? last.tool.timestamp : undefined
         : last?.kind === 'thinking' && last.durationMs !== undefined ? last.timestamp + last.durationMs : undefined);
     const elapsed = startedAt !== undefined && endedAt !== undefined && Number.isFinite(startedAt)
         && Number.isFinite(endedAt) && startedAt > 0 && endedAt >= startedAt ? endedAt - startedAt : undefined;
@@ -830,17 +896,37 @@ function ActivityTimeline({ parts, working, completedAt, lang, streamingMessageI
     const outcomes = parts.map(part => part.kind === 'tool'
         ? part.tool.completionReason || (part.tool.status === 'failed' ? 'failed' : undefined)
         : part.message.completionReason);
-    const outcomeSummary = (['failed', 'stopped', 'incomplete'] as const).flatMap(state => {
-        const count = outcomes.filter(outcome => outcome === state).length;
-        const label = lang === 'zh' ? { failed: '次失败', stopped: '次已停止', incomplete: '次未完成' }[state] : state;
-        return count ? [`${count} ${label}`] : [];
-    }).join(' · ');
-    const label = working ? (lang === 'zh' ? `正在执行${duration ? ` · ${duration}` : ''}` : `Working${duration ? ` for ${duration}` : ''}`)
-        : duration ? (lang === 'zh' ? `执行用时 ${duration}` : `Worked for ${duration}`)
-        : (lang === 'zh' ? '活动记录' : 'Activity');
-    const heading = <>{label}{outcomeSummary && <span className="ml-2 text-xs">· {outcomeSummary}</span>}</>;
-    return <AgentActivity
+    // A tool failure is evidence of a failed operation, not of overall task
+    // failure (or successful recovery). Keep that distinction in the public notice.
+    const issue = outcomes.includes('failed') ? (working ? text.failedWorking : text.failed)
+        : outcomes.includes('stopped') ? text.stopped
+        : outcomes.includes('incomplete') ? text.incomplete : undefined;
+    const heading = `${text.details}${duration ? ` · ${duration}` : ''}`;
+    const latestProgress = [...parts].reverse().find((part): part is Extract<ResponsePart, { kind: 'agent' }> =>
+        part.kind === 'agent' && messagePresentation(part.message) !== 'artifact');
+    // Show the latest progress until a final reply arrives. Earlier commentary
+    // remains in the chronological log; artifacts and requests stay accessible.
+    const visibleParts = parts.filter(part => part.kind === 'agent' && (
+        part.message.requiresUserAction || messagePresentation(part.message) === 'artifact' ||
+        (!hasFinalResponse && part.sourceMessageId === latestProgress?.sourceMessageId)
+    ));
+    const visible = new Set(visibleParts);
+    const hasDetails = parts.some(part => !visible.has(part));
+    return <>
+        <ResponseParts parts={visibleParts} lang={lang} streamingMessageId={streamingMessageId} onPreviewArtifact={onPreviewArtifact} />
+        {working && <div role="status" data-testid="beegame-work-status"
+            className="my-3 flex items-center gap-2 text-sm text-[var(--text-muted)]">
+            <LoaderCircle aria-hidden="true" className="size-3.5 shrink-0 motion-safe:animate-spin" />
+            {text.working}
+        </div>}
+        {issue && <div role="status" data-testid="beegame-activity-issue"
+            className="my-3 flex items-start gap-2 text-sm text-[var(--text-secondary)]">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <span>{issue}</span>
+        </div>}
+        {hasDetails && <AgentActivity
         items={parts.flatMap((part, index): AgentActivityItem[] => {
+            if (visible.has(part)) return [];
             if (part.kind === 'agent') return [{ id: `activity-message-${part.message.id}`, type: 'text',
                 content: <ResponseParts parts={[part]} lang={lang} streamingMessageId={streamingMessageId} onPreviewArtifact={onPreviewArtifact} /> }];
             const isSubagent = (candidate: ResponsePart | undefined): boolean =>
@@ -866,23 +952,20 @@ function ActivityTimeline({ parts, working, completedAt, lang, streamingMessageI
                     content: <div className="chat-image-gallery" role="group" aria-label={lang === 'zh' ? '工具输出素材' : 'Tool media'}>
                         {tool.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} animateReveal />)}
                     </div> });
-                if (tool.diff) {
-                    const lines = parseDiffLines(tool.diff);
-                    items.push({ id: `activity-diff-${tool.id}`, type: 'text', content: <FileDiff file={displayText(tool.detail || tool.name)}
-                        lines={lines} status={tool.status === 'running' ? 'streaming' : 'complete'} defaultOpen={false}
-                        copyText={lines.map(line => line.content).join('\n')} /> });
-                }
+
             }
             return items;
         })}
+        variant="timeline" defaultOpen={false} collapseOnComplete={false} maxHeight={360}
         status={working ? 'working' : 'complete'} activeLabel={heading} summary={heading}
-        className="w-full text-[var(--text-secondary)]" contentClassName="pl-4" />;
+        className="w-full text-[var(--text-secondary)]" contentClassName="pl-4" />}
+    </>;
 }
 
 function ThinkingActivityText({ part, lang, working }: { part: Extract<ResponsePart, { kind: 'thinking' }>; lang: Language; working: boolean }) {
     const thought = displayText(part.message.thought || part.message.content || '');
     const visibleThought = useSmoothStreamText(thought, working);
-    return <MarkdownRenderer content={visibleThought} messageId={part.message.id} lang={lang} />;
+    return <MarkdownRenderer content={visibleThought} messageId={part.message.id} lang={lang} streaming={working} />;
 }
 
 function subagentStatus(tool: NormalizedTool, lang: Language) {
@@ -1146,7 +1229,7 @@ function LongMarkdownMessage({
                 className={isLong && !open ? 'overflow-hidden' : undefined}
                 style={isLong && !open ? { maxHeight: LONG_MARKDOWN_COLLAPSED_HEIGHT } : undefined}
             >
-                <MarkdownRenderer content={visibleContent} messageId={message.id} lang={lang} />
+                <MarkdownRenderer content={visibleContent} messageId={message.id} lang={lang} streaming={streaming} />
             </div>
             {isLong && !open ? <div
                 aria-hidden="true"

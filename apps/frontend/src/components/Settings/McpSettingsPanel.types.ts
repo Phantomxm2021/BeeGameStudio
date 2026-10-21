@@ -27,5 +27,5 @@ export function toPopoverAnchorRect(rect: DOMRect): PopoverAnchorRect {
 }
 
 export function isMcpFormSaveable(form: McpServerForm): boolean {
-  return Boolean(form.name.trim()) && (form.transport === 'stdio' ? Boolean(form.command.trim()) : Boolean(form.url.trim()));
+  return form.transport !== 'sse' && Boolean(form.name.trim()) && (form.transport === 'stdio' ? Boolean(form.command.trim()) : Boolean(form.url.trim()));
 }

@@ -8,7 +8,8 @@ import { MANAGED_WEB_BOOT_PATHS } from './workflow-v3/managed-web-boot'
 test('new-project managed entry rejects native mutations and aliases, without reserving old projects or game implementation',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-boot-permissions-'))),workspace=join(root,'project')
   await mkdir(join(workspace,'src'),{recursive:true});await writeFile(join(workspace,'index.html'),'Host entry')
-  await symlink(join(workspace,'index.html'),join(workspace,'entry-alias.html'))
+  await writeFile(join(workspace,'src/bgs-entry.mjs'),'Host adapter')
+  await symlink(join(workspace,'src/bgs-entry.mjs'),join(workspace,'entry-alias.html'))
   const decisions:DashboardPermissionDecision[]=[]
   let id=''
   const manager=new BeeGameSessionManager({async start(start){
@@ -16,7 +17,7 @@ test('new-project managed entry rejects native mutations and aliases, without re
     return {stop(){},async submit(turn){
       for(const toolName of ['Write','Edit','MultiEdit','NotebookEdit']) {
         const key=toolName==='NotebookEdit'?'notebook_path':'file_path'
-        for(const path of [...MANAGED_WEB_BOOT_PATHS,'entry-alias.html','src/game.jsx'])
+        for(const path of [...MANAGED_WEB_BOOT_PATHS,'entry-alias.html','index.html','src/game.jsx'])
           decisions.push(await turn.requestPermission({toolName,toolUseID:crypto.randomUUID(),input:{[key]:join(workspace,path)},message:'Fixture decision'}))
       }
       manager.setProjectManagedWebBoot(id,false)
@@ -28,7 +29,7 @@ test('new-project managed entry rejects native mutations and aliases, without re
     id=manager.start({workspacePath:workspace,userId:'owner',projectId:'fixture'}).id
     manager.setProjectManagedWebBoot(id,true)
     await manager.sendWithDisplay(id,'Fixture checks');await manager.waitForSessionIdle(id)
-    expect(decisions.map(d=>d.behavior)).toEqual([...Array(4).fill(['deny','deny','deny','deny','allow']).flat(),'allow'])
+    expect(decisions.map(d=>d.behavior)).toEqual([...Array(4).fill(['deny','deny','deny','allow','allow']).flat(),'allow'])
     expect(manager.pendingPermissionsForProject('owner','fixture',workspace)).toHaveLength(0)
   }finally{await manager.dispose();await rm(root,{recursive:true,force:true})}
 })
@@ -59,15 +60,15 @@ test('implementation baseline locks native planning writes without blocking code
   }finally{await manager.dispose();await rm(base,{recursive:true,force:true})}
 })
 
-test.each(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])('root CLAUDE.md requires existing explicit approval for %s, including aliases', async toolName => {
+test.each(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])('root AGENTS.md requires existing explicit approval for %s, including aliases', async toolName => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'bgs-guide-permission-'))), workspace = join(base, 'project')
   await mkdir(workspace)
-  await writeFile(join(workspace, 'CLAUDE.md'), 'UNCHANGED_INSTRUCTIONS')
-  await symlink(join(workspace, 'CLAUDE.md'), join(workspace, 'guide-alias.md'))
+  await writeFile(join(workspace, 'AGENTS.md'), 'UNCHANGED_INSTRUCTIONS')
+  await symlink(join(workspace, 'AGENTS.md'), join(workspace, 'guide-alias.md'))
   const decisions: DashboardPermissionDecision[] = []
   const key = toolName === 'NotebookEdit' ? 'notebook_path' : 'file_path'
   const manager = new BeeGameSessionManager({ start: async () => ({ stop() {}, async submit(turn) {
-    for (const path of ['CLAUDE.md', 'guide-alias.md'])
+    for (const path of ['AGENTS.md', 'guide-alias.md'])
       decisions.push(await turn.requestPermission({ toolName, toolUseID: path, input: { [key]: join(workspace, path) }, message: 'Change root instructions' }))
     decisions.push(await turn.requestPermission({ toolName, toolUseID: 'ordinary', input: { [key]: join(workspace, 'src/game.txt') }, message: 'Ordinary output' }))
     await turn.onMessage({ type: 'result', subtype: 'success', result: 'Fixture complete' })
@@ -75,7 +76,7 @@ test.each(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])('root CLAUDE.md requir
   try {
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
     await manager.sendWithDisplay(session.id, 'Offline permission decisions only')
-    for (const path of ['CLAUDE.md', 'guide-alias.md']) {
+    for (const path of ['AGENTS.md', 'guide-alias.md']) {
       for (let i = 0; i < 200 && !manager.pendingPermissionsForProject('owner', 'project', workspace).length; i++) await Bun.sleep(5)
       const [pending] = manager.pendingPermissionsForProject('owner', 'project', workspace)
       expect(pending?.toolUseID).toBe(path)
@@ -84,7 +85,7 @@ test.each(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])('root CLAUDE.md requir
     }
     await manager.waitForSessionIdle(session.id)
     expect(decisions.map(value => value.behavior)).toEqual(['deny', 'deny', 'allow'])
-    expect(await Bun.file(join(workspace, 'CLAUDE.md')).text()).toBe('UNCHANGED_INSTRUCTIONS')
+    expect(await Bun.file(join(workspace, 'AGENTS.md')).text()).toBe('UNCHANGED_INSTRUCTIONS')
   } finally { await manager.dispose(); await rm(base, { recursive: true, force: true }) }
 })
 

@@ -50,6 +50,7 @@ export interface FileDiffProps {
   copyText?: string;
   onCopy?: () => void | Promise<void>;
   className?: string;
+  children?: ReactNode;
 }
 
 function ChangeCount({ value, type }: { value: number; type: "added" | "removed" }) {
@@ -76,6 +77,7 @@ export function FileDiff({
   copyText,
   onCopy,
   className,
+  children,
 }: FileDiffProps) {
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
@@ -187,6 +189,7 @@ export function FileDiff({
             ) : null}
           </div>
         </div>
+        {children}
       </AgentDisclosure>
     </div>
   );

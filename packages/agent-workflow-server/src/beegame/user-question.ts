@@ -1,11 +1,17 @@
+import { elicitationAnswer } from '../bgs/interactions'
+
 export class UserQuestionValidationError extends Error {}
 
-/** Keep Claude's original questions intact; the UI supplies only user answers. */
+/** Keep the agent's original questions intact; the UI supplies only user answers. */
 export function answeredQuestionInput(
   toolName: string,
   input: Record<string, unknown>,
   answers: unknown,
 ): Record<string, unknown> {
+  if (toolName === 'McpElicitation') {
+    try { return elicitationAnswer(input, answers) }
+    catch (error) { throw new UserQuestionValidationError(error instanceof Error ? error.message : 'Invalid MCP response') }
+  }
   if (toolName !== 'AskUserQuestion')
     throw new UserQuestionValidationError('Answers are only supported for AskUserQuestion')
   const questions = input.questions

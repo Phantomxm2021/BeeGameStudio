@@ -12,6 +12,7 @@ type ModelConfigRow = {
   id: string
   owner_id: string
   provider: string
+  api_protocol?:import('@bee-game-studio/agent-workflow').ModelApiProtocol | null
   base_url: string | null
   api_key_ciphertext: string | null
   models: Record<string, unknown>
@@ -39,7 +40,7 @@ export function createSupabaseResourceModelConfigResolver(options: {
       const ownerFilter = `owner_id=eq.${encodeURIComponent(ownerId)}`
       const idFilter = requestedId ? `&id=eq.${encodeURIComponent(requestedId)}` : ''
       const response = await fetchImpl(
-        `${rest}/beegame_model_configs?${ownerFilter}${idFilter}&select=id,owner_id,provider,base_url,api_key_ciphertext,models,is_default&order=is_default.desc,updated_at.desc&limit=1`,
+        `${rest}/beegame_model_configs?${ownerFilter}${idFilter}&select=id,owner_id,provider,api_protocol,base_url,api_key_ciphertext,models,is_default&order=is_default.desc,updated_at.desc&limit=1`,
         { headers },
       )
       if (!response.ok) throw new Error(`Model config lookup failed (${response.status})`)
@@ -58,7 +59,7 @@ export function createSupabaseResourceModelConfigResolver(options: {
         : ''
       const runtime = mapStoredModelConfigToRuntime({
         provider,
-        ...(row.base_url ? { baseUrl: row.base_url } : {}),
+        ...(row.api_protocol?{apiProtocol:row.api_protocol}:{}),        ...(row.base_url ? { baseUrl: row.base_url } : {}),
         apiKey,
         models,
       })

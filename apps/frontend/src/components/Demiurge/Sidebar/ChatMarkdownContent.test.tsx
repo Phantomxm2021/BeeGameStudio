@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('img-fx', async () => {
   const React = await import('react');
@@ -11,9 +11,32 @@ vi.mock('img-fx', async () => {
 import { MarkdownRenderer } from './ChatMarkdownContent';
 
 describe('MarkdownRenderer structured output', () => {
-  it('keeps literal escapes and identifiers inside code unchanged', () => {
+  it('keeps a streamed CodeBlock mounted when more code arrives and when streaming completes', () => {
+    const initial = '```ts\nconst first = 1;\n';
+    const { container, rerender } = render(<MarkdownRenderer content={initial} streaming />);
+    const code = container.querySelector('pre');
+    expect(screen.getByText('Writing')).toBeInTheDocument();
+    const completed = initial + 'const second = 2;\n```';
+    rerender(<MarkdownRenderer content={completed} streaming />);
+    expect(container.querySelector('pre')).toBe(code);
+    rerender(<MarkdownRenderer content={completed} />);
+    expect(container.querySelector('pre')).toBe(code);
+    expect(screen.getByText('Ready')).toBeInTheDocument();
+    expect(container.querySelectorAll('pre pre')).toHaveLength(0);
+  });
+
+  it('preserves unsupported-language code as literal text and keeps inline code inline', () => {
+    render(<MarkdownRenderer content={'`inline`\n\n```unknown-language\n<fixture>\\n</fixture>\n```'} />);
+    expect(screen.getByText('inline').tagName).toBe('CODE');
+    expect(document.querySelector('pre code')).toHaveTextContent('<fixture>\\n</fixture>');
+    expect(document.querySelector('fixture')).toBeNull();
+  });
+  it('copies literal escapes and identifiers inside code unchanged', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     render(<MarkdownRenderer content={'```js\nconst wp_1 = "a\\nb";\n```'} />);
-    expect(document.querySelector('pre code')?.textContent).toBe('const wp_1 = "a\\nb";\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('const wp_1 = "a\\nb";\n'));
   });
 
   it('renders markdown images with the image effect within the chat width', async () => {
@@ -88,7 +111,7 @@ describe('MarkdownRenderer structured output', () => {
     // Should find a pre element (block)
     const preElement = document.querySelector('pre');
     expect(preElement).not.toBeNull();
-    expect(preElement?.className).toContain('bg-[var(--surface-3)]');
+    expect(screen.getByRole('button', { name: 'Copy code' })).toBeInTheDocument();
     expect(preElement?.textContent).toContain('[A] -> [B]');
   });
 

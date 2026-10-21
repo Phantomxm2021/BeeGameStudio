@@ -1,3 +1,5 @@
+import {providerConfig} from '../model-providers/config'
+import { withBgsAccountUse } from '../bgs/account-activity'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import {
@@ -45,6 +47,8 @@ export type BeeGameModelGenerateInput = {
 }
 
 export type BeeGameModelUsage = {
+  /** Supplier receipt is a known lower bound, possibly with no reported tokens. */
+  incomplete?: true
   input_tokens: number
   output_tokens: number
   cache_read_tokens: number
@@ -62,66 +66,16 @@ export type BeeGameModelRuntimeFailureStage =
   | 'model_response'
 
 export class BeeGameModelRuntimeError extends Error {
+  readonly usage?: BeeGameModelUsage
   constructor(
     message: string,
     readonly stage: BeeGameModelRuntimeFailureStage,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; usage?: BeeGameModelUsage },
   ) {
     super(message, options)
     this.name = 'BeeGameModelRuntimeError'
+    this.usage = options?.usage
   }
-}
-
-export function serializeStructuredModelToolResult(value: unknown, expectedName: string): string {
-  if (!value || typeof value !== 'object' || !('content' in value)) {
-    throw new Error('Structured model result is missing the required tool call')
-  }
-  const resultRecord = value as Record<string, unknown>
-  if (resultRecord?.stop_reason === 'max_tokens') {
-    throw new Error('Structured model provider output was truncated before tool arguments completed')
-  }
-  const content = (value as { content?: unknown }).content
-  if (!Array.isArray(content)) {
-    throw new Error('Structured model result is missing the required tool call')
-  }
-  const toolUses = content.filter(block => {
-    if (!block || typeof block !== 'object') return false
-    const record = block as Record<string, unknown>
-    return record.type === 'tool_use' && record.name === expectedName
-  }) as Array<{ input?: unknown }>
-  if (toolUses.length !== 1 || toolUses[0]?.input === undefined) {
-    throw new Error(`Structured model result must contain exactly one ${expectedName} tool call`)
-  }
-  const toolInput = toolUses[0].input
-  let canonicalInput = toolInput
-  if (
-    toolInput &&
-    typeof toolInput === 'object' &&
-    !Array.isArray(toolInput) &&
-    Object.prototype.hasOwnProperty.call(toolInput, 'raw_arguments')
-  ) {
-    const inputRecord = toolInput as Record<string, unknown>
-    const canonicalFields = Object.fromEntries(
-      Object.entries(inputRecord).filter(([key]) => key !== 'raw_arguments'),
-    )
-    if (Object.keys(canonicalFields).length > 0) {
-      // Some Anthropic-compatible gateways return parsed tool fields together
-      // with their own raw diagnostic. The parsed fields are the canonical
-      // contract; the diagnostic must never cross this boundary.
-      canonicalInput = canonicalFields
-    } else {
-      const rawArguments = inputRecord.raw_arguments
-      if (typeof rawArguments !== 'string') {
-        throw new Error('Structured model tool arguments are not valid JSON')
-      }
-      try {
-        canonicalInput = JSON.parse(rawArguments)
-      } catch (error) {
-        throw new Error('Structured model tool arguments are not valid JSON', { cause: error })
-      }
-    }
-  }
-  return JSON.stringify(canonicalInput)
 }
 
 export type BeeGameModelRuntimeHost = {
@@ -156,6 +110,7 @@ export type ModelRuntimeWorkerResponse =
   | {
       type: 'model.error'
       requestId: string
+      usage?: BeeGameModelUsage
       message: string
       stage: BeeGameModelRuntimeFailureStage
     }
@@ -163,13 +118,6 @@ export type ModelRuntimeWorkerResponse =
 const WORKER_PATH = fileURLToPath(
   new URL('./model-runtime-worker.ts', import.meta.url),
 )
-
-const RUNTIME_PROVIDER_URL_KEYS = [
-  'ANTHROPIC_BASE_URL',
-  'OPENAI_BASE_URL',
-  'GEMINI_BASE_URL',
-  'GROK_BASE_URL',
-] as const
 
 const MODEL_RUNTIME_TRANSPORT_ENV_KEYS = [
   'HTTP_PROXY',
@@ -181,27 +129,23 @@ const MODEL_RUNTIME_TRANSPORT_ENV_KEYS = [
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
   'NODE_EXTRA_CA_CERTS',
-  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS',
-  'CLAUDE_CODE_CLIENT_CERT',
-  'CLAUDE_CODE_CLIENT_KEY',
-  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
-  'BGS_API_UNIX_SOCKET',
+  'BEEGAME_CLIENT_CERT',
+  'BEEGAME_CLIENT_KEY',
+  'BEEGAME_CLIENT_KEY_PASSPHRASE',
 ] as const
 
-// The model worker must use the same verified network path as the host. Keep
-// this list explicit so provider credentials and arbitrary process settings do
-// not cross the isolation boundary.
+// Share the approved transport and operator-selected Bgs executable only;
+// provider credentials and arbitrary settings stay outside this environment.
 export function getModelRuntimeWorkerEnvironment(): Record<string, string> {
   return {
     ...getSafeRuntimeProcessEnvironment(),
     BGS_PROVIDER_MANAGED_BY_HOST: '1',
+    ...(process.env.BEEGAME_BGS_PATH ? { BEEGAME_BGS_PATH: process.env.BEEGAME_BGS_PATH } : {}),
     ...Object.fromEntries(
       MODEL_RUNTIME_TRANSPORT_ENV_KEYS.flatMap(key => {
         // Bun can expose proxy variables through getters without enumerating
         // them. Read the existing transport whitelist directly, not a spread.
-        const value = key === 'BGS_API_UNIX_SOCKET'
-          ? process.env.BGS_API_UNIX_SOCKET ?? process.env.ANTHROPIC_UNIX_SOCKET
-          : process.env[key]
+        const value = process.env[key]
         return value === undefined ? [] : [[key, value]]
       }),
     ),
@@ -219,23 +163,20 @@ export function createProcessIsolatedModelRuntimeHost(options: {
     options.resolveOutboundTarget ?? resolveApprovedOutboundTarget
   const executeWorker = options.runWorker ?? runWorker
 
-  const generateWithUsage = async (
+  const execute = async (
     input: BeeGameModelGenerateInput,
   ): Promise<BeeGameModelGeneration> => {
+    if (input.temperature !== undefined && (!Number.isFinite(input.temperature) || input.temperature < 0 || input.temperature > 2))
+      throw Error('Model temperature must be a finite number between 0 and 2')
+    if (input.temperature !== undefined && input.runtimeEnv.OPENAI_AUTH_MODE === 'chatgpt')
+      throw Error('ChatGPT subscription requests do not support an explicit temperature')
     const approvedOutboundTargets: Record<string, ApprovedOutboundTarget> = {}
-    for (const key of RUNTIME_PROVIDER_URL_KEYS) {
-      const value = input.runtimeEnv[key]
-      if (!value) continue
-      const target = await resolveOutboundTarget(
-        value,
-        options.outboundTargetPolicyOptions,
-      )
-      if (!target) throw new Error('Outbound URL is not permitted')
-      approvedOutboundTargets[key] = target
-    }
-    if (Object.keys(approvedOutboundTargets).length === 0) {
-      throw new Error('The selected model config has no runtime endpoint')
-    }
+    const endpoint=input.runtimeEnv.OPENAI_AUTH_MODE==='chatgpt'
+      ? 'https://chatgpt.com/backend-api/codex/responses'
+      : providerConfig(input.runtimeEnv,input.modelType,{requireApiKey:false}).baseUrl
+    const target=await resolveOutboundTarget(endpoint,options.outboundTargetPolicyOptions)
+    if(!target)throw Error('Outbound URL is not permitted')
+    approvedOutboundTargets.OPENAI_BASE_URL=target
 
     const result = await executeWorker({
       ...input,
@@ -254,6 +195,9 @@ export function createProcessIsolatedModelRuntimeHost(options: {
     })
     return typeof result === 'string' ? { content: result } : result
   }
+  const generateWithUsage = (input: BeeGameModelGenerateInput) => input.runtimeEnv.OPENAI_AUTH_MODE === 'chatgpt'
+    ? withBgsAccountUse(input.runtimeEnv.BEEGAME_CONFIG_DIR!, () => execute(input))
+    : execute(input)
   return {
     generate: async input => (await generateWithUsage(input)).content,
     generateWithUsage,
@@ -266,6 +210,7 @@ async function runWorker(
   const requestId = randomUUID()
   return new Promise<BeeGameModelGeneration>((resolve, reject) => {
     let settled = false
+    let watchdog: ReturnType<typeof setTimeout> | undefined
     const child = Bun.spawn([process.execPath, WORKER_PATH], {
       env: getModelRuntimeWorkerEnvironment(),
       stdin: 'ignore',
@@ -275,6 +220,7 @@ async function runWorker(
         const message = raw as ModelRuntimeWorkerResponse
         if (message.requestId !== requestId || settled) return
         settled = true
+        clearTimeout(watchdog)
         child.kill()
         if (message.type === 'model.result') {
           resolve({
@@ -282,13 +228,22 @@ async function runWorker(
             ...(message.usage ? { usage: message.usage } : {}),
           })
         } else {
-          reject(new BeeGameModelRuntimeError(message.message, message.stage))
+          reject(new BeeGameModelRuntimeError(message.message, message.stage, { usage: message.usage }))
         }
       },
     })
+    // The worker has a 120-second request deadline. Bound the process too,
+    // because a stuck transport/IPC cleanup must not leave intake running forever.
+    watchdog = setTimeout(() => {
+      if (settled) return
+      settled = true
+      child.kill()
+      reject(new BeeGameModelRuntimeError('Model runtime timed out', 'model_request'))
+    }, 130_000)
     child.exited.then(code => {
       if (settled) return
       settled = true
+      clearTimeout(watchdog)
       reject(new BeeGameModelRuntimeError(`Model runtime process exited (${code})`, 'model_request'))
     })
     child.send({

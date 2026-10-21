@@ -5,6 +5,7 @@ import type { BeeGameAssetManifest } from './asset-contracts'
 import { readBeeGameAssetManifestSync } from './asset-contracts'
 import { parseTileSet, type TileDefinition } from '../../../scene-editor/src/tilemap-data'
 import { parseSpriteSheet, atlasFrameName, spriteSheetSelection } from '../../../scene-editor/src/sprite-sheet'
+import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
 
 /** Per inspection call, shared by standalone Scenes and UI-linked framing. */
 export function createSceneTileSetResolver(workspace: string) {
@@ -41,8 +42,11 @@ export function validateResourceSelections(workspace: string, manifest: BeeGameA
       readRegisteredResourceFile(workspace, manifest, record.assetRef, selected)
       if (fields.atlasMember || fields.frame) {
         const tablePath = fields.atlasMember ? member(fields.atlasMember)
-          : resource.file_paths.find(path => path === selected.replace(/\.[^.]+$/, '.json'))
-        if (!tablePath) throw Error(`No registered atlas metadata for ${record.assetRef}/${selected}`)
+          : editorAtlasPath(resource, selected)
+        if (!tablePath) {
+          const stem = selected.replace(/\.[^.]+$/, '')
+          throw Error(`No registered atlas metadata for ${record.assetRef}/${selected}; expected ${stem}.json or ${stem}.atlas.json. Registered JSON files: ${resource.file_paths.filter(path => /\.json$/i.test(path)).join(', ') || '(none)'}. Use atlasMember for another registered metadata path.`)
+        }
         const sheet = parseSpriteSheet(JSON.parse(readRegisteredResourceFile(workspace, manifest, record.assetRef, tablePath).bytes.toString()))
         if (!sheet) throw Error('Unsupported atlas metadata: ' + tablePath)
         if (typeof fields.frame === 'string') {

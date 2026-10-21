@@ -42,7 +42,7 @@ export function layoutCameraSource(nodeId: string, source: unknown, workspacePat
 }
 
 /** Only a link to the existing camera input, never a second table of camera values. */
-export function readUiLayoutCamera(workspacePath: string, document: Pick<UiDocument, 'data'>): UiLayoutInspectionOptions {
+export function readUiLayoutCamera(workspacePath: string, document: Pick<UiDocument, 'data'>): UiLayoutInspectionOptions & { scenePath?: string } {
   const variants = readUiLayoutCameras(workspacePath, document)
   if (variants.length > 1) throw new Error('Multiple layoutCamera Scenes: use --review-layouts to check all, or --game-view ID --camera SCENE_PATH to inspect one.')
   return variants[0]!

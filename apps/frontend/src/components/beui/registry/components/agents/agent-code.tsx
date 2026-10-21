@@ -17,6 +17,15 @@ export type AgentCodeLanguage =
   | "tsx"
   | "typescript";
 
+/** Unsupported grammars remain literal text rather than failing a response. */
+export function agentCodeLanguage(value?: string): AgentCodeLanguage {
+  const language = value?.toLowerCase();
+  if (["js", "ts", "javascript", "typescript", "mjs", "cjs"].includes(language || "")) return "typescript";
+  if (language === "jsx" || language === "tsx") return "tsx";
+  if (["sh", "shell", "zsh", "bash"].includes(language || "")) return "bash";
+  return language === "json" || language === "diff" ? language : "text";
+}
+
 export interface AgentCodeToken {
   content: string;
   offset: number;

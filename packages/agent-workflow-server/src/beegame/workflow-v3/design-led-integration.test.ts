@@ -66,7 +66,7 @@ test('new design-led project installs public helpers and consumes its registered
     await command('consumer.mjs','--install-runtime-files','scripts/runtime-files.mjs')
     const manifest=assetManifestAuthoringExamples().canonical
     manifest.project_target!.asset_format_capabilities=['png','json']
-    const sheet='assets/runtime/sheet.png',atlas='assets/runtime/sheet.json',unbound='assets/runtime/unbound.png'
+    const sheet='assets/runtime/sheet.png',atlas='assets/runtime/sheet.atlas.json',unbound='assets/runtime/unbound.png'
     await writeFile(join(workspace,sheet),await sharp(Buffer.from([255,0,0,255,0,255,0,255]),{raw:{width:2,height:1,channels:4}}).png().toBuffer())
     await writeFile(join(workspace,unbound),await readFile(join(workspace,sheet)))
     await writeFile(join(workspace,atlas),JSON.stringify({frameWidth:1,frameHeight:1,framesPerFacing:1,facings:['right','left']}))
@@ -95,6 +95,10 @@ test('new design-led project installs public helpers and consumes its registered
     expect((await command('handoff.mjs','--design','finalize')).valid).toBe(true)
     const implementation=await command('handoff.mjs','--design','implementation')
     expect(implementation.valid).toBe(true)
+    expect(implementation.execution.sources).toContain('choose Skills and work organization as needed')
+    expect(implementation.execution).not.toHaveProperty('skill')
+    expect(implementation.webBoot.factory).toBe('export async function createGame({root, storage})')
+    expect(implementation.designBaseline.revision).toBeString()
     await writeFile(join(workspace,'src/game.jsx'),`import {parseBeeGameContentIndex,fetchStartupContentDocuments,readSceneData,readUiData,loadProductionResources,createProductionUiSurface,renderProductionScene2d} from './consumer.mjs';
 export async function createGame({root,storage}) {
 if(!storage)throw Error('Thin entry did not initialize storage');
@@ -202,7 +206,7 @@ await copyRegisteredRuntimeFiles(process.cwd(),'dist');`)
     expect((await measurement.handoff()).acceptance.valid).toBe(false)
     expect((await registeredContentChecks(workspace,brief.settings,true)).find(check=>check.id==='content-structure'))
       .toMatchObject({status:'failed',observation:expect.stringContaining('content/index.json')})
-    expect(await agentTurnHandoffReason(run,turn)).toContain('Design revision is missing or changed')
+    expect(await agentTurnHandoffReason(run,turn)).toContain('execution completion is not acceptance') // No attached measurement in this run snapshot.
   } finally {
     await browser?.close();server?.stop(true);await tools?.close();await measurement.close()
     await rm(root,{recursive:true,force:true})

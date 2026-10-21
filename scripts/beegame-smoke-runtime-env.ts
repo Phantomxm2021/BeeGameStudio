@@ -1,51 +1,24 @@
 type JsonObject = Record<string, unknown>
 
-const PROVIDER_REQUIREMENTS = [
-  {
-    label: 'OpenAI-compatible',
-    keys: [
-      'BGS_USE_OPENAI',
-      'OPENAI_API_KEY',
-      'OPENAI_BASE_URL',
-      'OPENAI_DEFAULT_SONNET_MODEL',
-    ],
-  },
-  {
-    label: 'Anthropic-compatible',
-    keys: [
-      'ANTHROPIC_AUTH_TOKEN',
-      'ANTHROPIC_BASE_URL',
-      'BGS_DEFAULT_BALANCED_MODEL',
-    ],
-  },
-  {
-    label: 'Gemini',
-    keys: [
-      'BGS_USE_GEMINI',
-      'GEMINI_API_KEY',
-      'GEMINI_DEFAULT_SONNET_MODEL',
-    ],
-  },
-  {
-    label: 'Grok',
-    keys: [
-      'BGS_USE_GROK',
-      'GROK_API_KEY',
-      'GROK_DEFAULT_SONNET_MODEL',
-    ],
-  },
-] as const
-
 export function assertSmokeRuntimeEnv(
   env: JsonObject,
   context: {
     modelConfigOwnerId?: string
   } = {},
 ): void {
-  const matchedProvider = PROVIDER_REQUIREMENTS.find(provider =>
-    provider.keys.every(key => stringField(env[key])),
+  const model =
+    stringField(env.BEEGAME_MODEL) ||
+    stringField(env.BGS_DEFAULT_BALANCED_MODEL)
+  if (
+    model &&
+    ['OPENAI', 'ANTHROPIC', 'GEMINI', 'GROK'].some(
+      prefix =>
+        stringField(env[prefix + '_BASE_URL']) &&
+        (stringField(env[prefix + '_API_KEY']) ||
+          (prefix === 'ANTHROPIC' && stringField(env.ANTHROPIC_AUTH_TOKEN))),
+    )
   )
-  if (matchedProvider) return
+    return
 
   const diagnostics = context.modelConfigOwnerId?.trim()
     ? ` effective model config owner: ${context.modelConfigOwnerId.trim()}.`
@@ -62,7 +35,9 @@ export function summarizeRuntimeEnv(env: JsonObject): JsonObject {
       .map(([key, value]) => [
         key,
         typeof value === 'string' && value
-          ? shouldRedact(key) ? '<redacted>' : '<set>'
+          ? shouldRedact(key)
+            ? '<redacted>'
+            : '<set>'
           : '<empty>',
       ]),
   )

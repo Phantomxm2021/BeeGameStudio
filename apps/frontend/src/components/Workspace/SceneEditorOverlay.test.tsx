@@ -9,16 +9,18 @@ import { editorDocumentToSceneContent } from './sceneContentAdapter';
 import * as sceneAdapter from './sceneContentAdapter';
 import { Texture } from 'three';
 
+const editorUploads = vi.hoisted(() => ({ current: undefined as undefined | ((files: File[]) => Promise<Record<string, import('@beegame/scene-editor').SceneAsset>>) }));
+
 vi.mock('@beegame/scene-editor', async importOriginal => ({
   ...await importOriginal<typeof import('@beegame/scene-editor')>(),
-  SceneEditor: ({ initialDocument, sceneChoices, onSelectScene }: { initialDocument: SceneDocument; sceneChoices?: {id: string; label: string}[]; onSelectScene?: (id: string) => void }) => (
+  SceneEditor: ({ initialDocument, sceneChoices, onSelectScene, onUploadAssets }: { onUploadAssets?: typeof editorUploads.current; initialDocument: SceneDocument; sceneChoices?: {id: string; label: string}[]; onSelectScene?: (id: string) => void }) => { editorUploads.current = onUploadAssets; return (
     <div data-testid="loaded-scene">
       {initialDocument.name}
       {Object.values(initialDocument.assets).map(asset => <span key={asset.id}>{asset.name}{asset.spriteSheet ? ` frame ${('frames' in asset.spriteSheet ? Object.keys(asset.spriteSheet.frames).length : asset.spriteSheet.frameWidth)}` : ''}</span>)}
       <output data-testid="scene-data">{JSON.stringify(initialDocument)}</output>
       {sceneChoices?.map(choice => <button key={choice.id} onClick={() => onSelectScene?.(choice.id)}>{choice.label}</button>)}
     </div>
-  ),
+  ); },
 }));
 
 describe('SceneEditorOverlay loading experience', () => {
@@ -292,4 +294,30 @@ describe('SceneEditorOverlay loading experience', () => {
     expect(signals.every(signal => signal.aborted)).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+});
+
+it('loads a grouped upload into the existing Scene resource catalog without reopening the document', async () => {
+  const revision = 'a'.repeat(64);
+  const doc = { schema: 'beegame-content.v1' as const, id: 'upload', kind: 'scene-2d' as const, assetRefs: [], data: { nodes: [{ id: 'root', components: [] }] } };
+  vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({state:'ready', index: {
+    schema:'beegame-content-package.v2', id:'content', dimension:'2d', documentRevision:revision, assetManifestRevision:revision,
+    entryScene:'upload', sceneModel:'game-object-v2', files:['scenes/upload.json'],
+  }, documents:[{path:'content/scenes/upload.json',revision,document:doc}]});
+  vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({contract_state:'ready',version:9,requirements:[],resources:[]});
+  const resource = {id:'NEW',status:'verified',root_path:'assets/icons.png',file_paths:['assets/icons.png','assets/icons.atlas.json'],source:{type:'user-provided'}} as const;
+  const upload = vi.spyOn(beeGameAdapter,'uploadProjectAsset').mockResolvedValue({resource,manifest:{version:9,requirements:[],resources:[resource]}} as any);
+  vi.spyOn(beeGameAdapter,'loadProjectAssetFile').mockImplementation(async (_project, _resource, path) => new Blob([path.endsWith('.json')
+    ? JSON.stringify({frames:{play:{frame:{x:0,y:0,w:1,h:1}}}}) : 'offline image'],{type:path.endsWith('.json')?'application/json':'image/png'}));
+  const convert = vi.spyOn(sceneAdapter,'sceneContentToEditorDocument');
+  render(<SceneEditorOverlay projectId="upload-scene" onClose={vi.fn()}/>);
+  await screen.findByTestId('loaded-scene');
+  const before = screen.getByTestId('scene-data').textContent;
+  const files = [new File(['image'],'icons.png'),new File(['json'],'icons.atlas.json')];
+  let added!: Record<string, import('@beegame/scene-editor').SceneAsset>;
+  await act(async () => { added = await editorUploads.current!(files); });
+  expect(upload).toHaveBeenCalledWith('upload-scene',expect.stringMatching(/^user-/),files);
+  expect(added.NEW).toMatchObject({mimeType:'image/png',spriteSheet:{frames:{play:{x:0,y:0,width:1,height:1}}}});
+  expect(added.NEW.bytes).toMatch(/^data:image\/png/);
+  expect(convert).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId('scene-data').textContent).toBe(before);
 });

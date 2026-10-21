@@ -39,7 +39,17 @@
     "account": "Konto"
   },
   "beegame": {
+    "chatActivity": {
+      "details": "Ausführungsdetails",
+      "working": "Deine Anfrage wird bearbeitet",
+      "failedWorking": "Ein Vorgang ist fehlgeschlagen; die Arbeit wird fortgesetzt.",
+      "failed": "Während dieser Aufgabe ist ein Vorgang fehlgeschlagen. Prüfe die abschließende Antwort oder die Ausführungsdetails.",
+      "stopped": "Ein Teil der Arbeit wurde gestoppt.",
+      "incomplete": "Ein Teil der Arbeit ist unvollständig; das Ergebnis wurde noch nicht bestätigt."
+    },
     "modelRequestError": {
+      "connection": "Die Verbindung zum Dienst ist fehlgeschlagen. Diese Antwort konnte nicht abgeschlossen werden.",
+      "details": "Fehlerdetails",
       "capacity": "Das ausgewählte Modell ist ausgelastet. Bitte versuche ein anderes Modell.",
       "retry": "Erneut versuchen",
       "retryNow": "Jetzt erneut versuchen",
@@ -333,7 +343,7 @@
         "argsHint": "One argument per line",
         "envHint": "One KEY=value per line. Leave saved secrets blank to keep them.",
         "stdio": "stdio",
-        "sse": "SSE",
+        "sse": "Altes SSE wird nicht unterstützt. Verwenden Sie einen Streamable-HTTP-Endpunkt.",
         "http": "HTTP",
         "beegame": "BeeGame",
         "global": "Global",

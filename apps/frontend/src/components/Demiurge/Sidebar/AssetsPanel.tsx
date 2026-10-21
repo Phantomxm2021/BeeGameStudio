@@ -1,7 +1,7 @@
-import { memo, useRef } from 'react';
+import { memo } from 'react';
 import type { ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Box, CheckCircle2, CircleAlert, Cuboid, FileJson, Image, Info, Music, Upload } from 'lucide-react';
+import { ArrowLeft, Box, CheckCircle2, CircleAlert, Cuboid, FileJson, Image, Info, Music } from 'lucide-react';
 import type {
   BeeGameAssetManifestPayload, BeeGameAssetRequirementPayload,
   BeeGameProjectResourcePayload,
@@ -12,13 +12,13 @@ import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../beui/project-button';
 import { ArtifactEmptyCard } from './ArtifactEmptyCard';
-import { useToastContext } from '../../../contexts/ToastContext';
+import { ResourceUploadButton } from '../../../../../../packages/scene-editor/src/resource-upload';
 
 interface AssetsPanelProps {
     manifest: BeeGameAssetManifestPayload | null;
     isLoading: boolean;
   isUploadingResource?: boolean;
-  onUpload?: (file: File) => Promise<void>;
+  onUpload?: (file: File | readonly File[]) => Promise<void>;
   onBack?: () => void;
     acceptance?: ProjectBaselineStatusPayload['acceptance'];
     lang?: Language;
@@ -27,7 +27,7 @@ interface AssetsPanelProps {
 type AssetsPanelText = Record<string, string>;
 
 /**
- * Project resources are shown as requirements and independently replaceable files.
+ * Project resources are shown as requirements and registered files.
  */
 export const AssetsPanel = memo(({
     manifest,
@@ -58,7 +58,7 @@ export const AssetsPanel = memo(({
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                     <AcceptancePill acceptance={acceptance} text={text} />
-            {onUpload ? <ResourceUploadButton text={text} disabled={isUploadingResource} onUpload={onUpload} /> : null}
+            {onUpload ? <ResourceUploadButton label={text.upload} disabled={isUploadingResource} onUpload={files => onUpload(files.length === 1 ? files[0] : files)} /> : null}
           </div>
             </header>
 
@@ -127,47 +127,6 @@ function AssetSection({ title, subdued = false, children }: { title: string; sub
             {children}
         </section>
     );
-}
-
-function ResourceUploadButton({
-  text,
-  disabled,
-  onUpload,
-}: {
-  text: AssetsPanelText;
-  disabled: boolean;
-  onUpload: (file: File) => Promise<void>;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { showError } = useToastContext();
-  const handleFile = async (file?: File) => {
-    if (!file) return;
-    try {
-      await onUpload(file);
-    } catch (cause) {
-      showError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      if (inputRef.current) inputRef.current.value = '';
-    }
-  };
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <label
-        className={`type-caption-2 inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] ${disabled ? 'pointer-events-none opacity-50' : 'cursor-pointer'}`}
-      >
-        <Upload className="h-3.5 w-3.5" />
-        {text.upload}
-        <input
-          ref={inputRef}
-          aria-label={text.upload}
-          type="file"
-          disabled={disabled}
-          className="hidden"
-          onChange={event => void handleFile(event.currentTarget.files?.[0])}
-        />
-      </label>
-    </div>
-  );
 }
 
 function ResourceCard({ resource, text }: { resource: BeeGameProjectResourcePayload; text: AssetsPanelText }) {

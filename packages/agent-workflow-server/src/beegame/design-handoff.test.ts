@@ -121,6 +121,29 @@ test.each([
   expect(await readFile(path, 'utf8')).toBe(saved)
 }))
 
+test.each([
+  ['## 4.1 Resource atlas\nDecision.\n', '4.1 Resource atlas', true],
+  ['## 4.1 Resource `atlas`\nDecision.\n', '4.1 Resource `atlas`', true],
+  ['## 4.1 Resource atlas\nDecision.\n', 'Resource atlas', true],
+  ['## Use \\`atlas\\` literally\nDecision.\n## Use atlas literally\nOther.\n', 'Use `atlas` literally', true],
+  ['## 1. Resource\nA.\n## 2. Resource\nB.\n', 'Resource', false],
+  ['## Resource\nA.\n## Resource\nB.\n', 'Resource', false],
+  ['## Resource\nDecision.\n', 'Missing section', false],
+])('draft and baseline agree on saved heading pointers: %s / %s', (headings, section, valid) => fixture(async workspace => {
+  const name = 'ASSET_PLAN.md', prose = '# Plan\n- Version: v1.0\n' + headings
+  const index = JSON.stringify({ version: 2, documentVersion: '1.0',
+    outputs: [{ id: 'resource', section, acceptance: { section, method: 'inspection' } }], evidence: [] })
+  const path = join(workspace, designHandoffPath(name))
+  await writeFile(join(workspace, 'docs', name), prose)
+  await writeFile(path, index)
+  expect(checkDesignHandoffDraft(workspace, name).valid).toBe(valid)
+  const baseline = checkDesignHandoff(workspace, [name], { planningInputs: true })
+  expect(baseline.valid).toBe(valid)
+  expect(baseline.availableRequirements).toHaveLength(valid ? 1 : 0)
+  expect(await readFile(path, 'utf8')).toBe(index)
+  expect(await readFile(join(workspace, 'docs', name), 'utf8')).toBe(prose)
+}))
+
 test('heading normalization includes task and retained-evidence pointers without changing their facts', () => fixture(async workspace => {
   const name = 'TECHNICAL_DESIGN.md', snapshot = snapshotDesignDocuments(workspace, [name])
   await writeFile(join(workspace, 'docs', name),
@@ -222,13 +245,13 @@ test('a changed outcome selects its acceptance and exact task consumers, not oth
   expect(designReviewReadScope(workspace, ['GDD.md'], [], { 'GDD.md': null })['GDD.md']).toBeNull()
 }))
 
-test('owned draft checking rejects empty outcomes and missing acceptance without requiring siblings', () => fixture(async (workspace, put) => {
+test('owned draft checking does not require outcome registration or sibling delivery', () => fixture(async (workspace, put) => {
   for (const name of ['ART_DIRECTION.md', 'TECHNICAL_DESIGN.md'] as const) {
-    await put(name, h => h.outputs = [])
-    expect(checkDesignHandoffDraft(workspace, name).issues.join(' ')).toContain('owned delivery outcomes are missing')
+    await put(name, h => { h.outputs = []; delete h.implementationItems })
+    expect(checkDesignHandoffDraft(workspace, name).issues).toEqual([])
   }
   await put('ART_DIRECTION.md', h => delete h.outputs[0].acceptance)
-  expect(checkDesignHandoffDraft(workspace, 'ART_DIRECTION.md').issues.join(' ')).toContain('needs an acceptance section')
+  expect(checkDesignHandoffDraft(workspace, 'ART_DIRECTION.md').issues).toEqual([])
   await rm(join(workspace, 'docs/GDD.md'))
   await put('ART_DIRECTION.md', () => {})
   await writeFile(join(workspace, 'docs/ART_DIRECTION.md'), '# Design\n[Pending audio](AUDIO_DESIGN.md)\n')
@@ -256,9 +279,8 @@ test.each(['missing', 'contract', 'capability', 'documentation', 'section', 'dup
   }),
 )
 
-test('the supplied new-index envelope validates and rejects version 1', () => fixture(async workspace => {
-  const sample = DESIGN_HANDOFF_INSTRUCTION.split('Minimal new index envelope: ')[1]!.split('. Replace example')[0]!
-  const envelope = JSON.parse(sample)
+test('existing index envelopes remain readable and reject malformed or unsupported fields', () => fixture(async workspace => {
+  const envelope: any = { outputs: [{ id: 'owned-outcome', section: 'Design', acceptance: { section: 'Design', method: 'test' } }], evidence: [] }
   envelope.outputs[0].section = 'Design'
   envelope.outputs[0].acceptance.section = 'Design'
   await writeFile(join(workspace, designHandoffPath('GDD.md')), JSON.stringify(envelope))
@@ -344,12 +366,12 @@ test('minimal output index is consumed by runtime acceptance without business mi
   const before = await readFile(join(workspace, designHandoffPath('GDD.md')), 'utf8')
   const check = checkDesignHandoff(workspace, ['GDD.md'], { nextConsumers: ['resources'], inputs: ['Touch'] })
   expect(check.valid).toBe(true)
-  expect(check.note).toContain('semantic adequacy')
+  expect(check.note).toContain('do not establish design completeness')
   expect(check.documentVersions).toEqual({ 'GDD.md': '1.0' })
   expect(readDesignAcceptanceRequirements(workspace).filter(source => source.document === 'GDD.md'))
     .toMatchObject([{ document: 'GDD.md', id: 'play', section: 'Design', method: 'test' }])
   expect(await readFile(join(workspace, designHandoffPath('GDD.md')), 'utf8')).toBe(before)
-  expect(DESIGN_HANDOFF_INSTRUCTION).toContain('Authors do not calculate or synchronize versions/hashes')
+  expect(DESIGN_HANDOFF_INSTRUCTION).toContain('Plain documents need no finalize command or version header')
 }))
 test('version 1 sidecars are rejected without rewriting files', () => fixture(async workspace => {
   const legacy = { ...designHandoffFixture('GDD.md'), version: 1, readiness: false, states: [{ transitions: false }],
@@ -373,7 +395,7 @@ test('v2 rejects retired mirrors instead of starting another business validation
   expect(() => readDesignAcceptanceRequirements(workspace)).toThrow()
   expect(await readFile(join(workspace, designHandoffPath('GDD.md')), 'utf8')).toBe(before)
 }))
-test('inline, missing and malformed indexes remain release failures without silent migration', () => fixture(async workspace => {
+test('missing indexes are optional while supplied inline or malformed indexes are diagnosed without migration', () => fixture(async workspace => {
   const source = join(workspace, 'docs/GDD.md'), path = join(workspace, designHandoffPath('GDD.md'))
   const fence = String.fromCharCode(96).repeat(3)
   const body = (await readFile(source, 'utf8')) + '\n' + fence + 'bgs-handoff\n{}\n' + fence + '\n'
@@ -382,7 +404,7 @@ test('inline, missing and malformed indexes remain release failures without sile
   expect(await readFile(source, 'utf8')).toBe(body)
   await writeFile(source, designDocumentFixture('GDD.md'))
   await rm(path)
-  expect(checkDesignHandoff(workspace, ['GDD.md']).valid).toBe(false)
+  expect(checkDesignHandoff(workspace, ['GDD.md']).valid).toBe(true)
   expect(finalizeDesignDocuments(workspace, ['GDD.md'], snapshotDesignDocuments(workspace, ['GDD.md'])).unsafeIssues).toEqual([])
   await writeFile(path, '{broken}')
   const snapshot = snapshotDesignDocuments(workspace, ['GDD.md'])
@@ -397,14 +419,13 @@ test('inline, missing and malformed indexes remain release failures without sile
   expect(finalizeDesignDocuments(workspace, ['GDD.md'], emptySnapshot).issues).toEqual([])
   expect(designDocumentVersion(await readFile(source, 'utf8'))).toBe('1.1')
 }))
-test.each(['section', 'acceptance-section', 'duplicate', 'method', 'missing-core'] as const)(
+test.each(['section', 'acceptance-section', 'duplicate', 'method'] as const)(
   'actual consumer index rejects %s failure', kind => fixture(async (workspace, put) => {
     await put('GDD.md', h => {
       if (kind === 'section') h.outputs[0].section = 'Absent'
       if (kind === 'acceptance-section') h.outputs[0].acceptance.section = 'Absent'
       if (kind === 'duplicate') h.outputs.push(h.outputs[0])
       if (kind === 'method') h.outputs[0].acceptance.method = 'review'
-      if (kind === 'missing-core') delete h.outputs[0].acceptance
     })
     expect(checkDesignHandoff(workspace, ['GDD.md']).valid).toBe(false)
     expect(() => readDesignAcceptanceRequirements(workspace)).toThrow()
@@ -580,8 +601,8 @@ test('reference links do not authenticate images, grant writes or bind image byt
   expect(checkDesignHandoff(workspace,['ART_DIRECTION.md']).revision).toBe(before.revision)
   expect(finalizeDesignDocuments(workspace,['ART_DIRECTION.md'],snapshot).issues).toEqual([])
   expect(designDocumentVersion(await readFile(doc,'utf8'))).toBe('1.0')
-  expect(DESIGN_HANDOFF_INSTRUCTION).toContain('native Read tool')
-  expect(DESIGN_HANDOFF_INSTRUCTION).toContain('report the exact path and read error')
+  expect(DESIGN_HANDOFF_INSTRUCTION).toContain('Read selected reference pictures')
+  expect(DESIGN_HANDOFF_INSTRUCTION).toContain('hashes are not proof of delivery')
   expect(DESIGN_HANDOFF_INSTRUCTION).not.toContain('host matches')
 }))
 
@@ -644,7 +665,7 @@ test.each(['missing-document', 'missing-index', 'malformed-index'] as const)(
     ui.outputs[0]!.section = 'Absent heading'
     await writeFile(join(workspace, designHandoffPath('UI_UX_SPEC.md')), JSON.stringify(ui))
     const result = checkDesignHandoffDraft(workspace, 'TECHNICAL_DESIGN.md', {finalTechnical:true})
-    expect(result.valid).toBe(false)
+    expect(result.valid).toBe(mode === 'missing-index')
     expect(result.availableRequirements?.some(item=>item.document==='GDD.md')).toBe(true)
     expect(result.availableRequirements?.some(item=>item.document==='UI_UX_SPEC.md')).toBe(false)
     expect(result.availableRequirements?.some(item=>item.document==='TECHNICAL_DESIGN.md')).toBe(false)

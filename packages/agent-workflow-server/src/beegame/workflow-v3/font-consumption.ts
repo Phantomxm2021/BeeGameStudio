@@ -46,7 +46,9 @@ export async function prepareFontProbes(root: string, task: Pick<TaskSpec, 'uiPr
   }
   const resources = await runContentCheck(root, 'content-resources', { ...task, expectedOutputs: [...documents.keys()] }, [], {})
   result.inputs.push(...resources.inputs)
-  if (resources.status !== 'passed') throw Error('Saved font resources unverified: '+resources.observation)
+  // Incomplete structural inspection must not prevent independent runtime evidence.
+  // Keep its verdict separate; invalid contracts still block these probes.
+  if (resources.status !== 'passed' && resources.status !== 'unverified') throw Error('Saved font resources invalid: '+resources.observation)
   const manifest = readBeeGameAssetManifestSync(root), prepared: PreparedFontProbe[] = []
   for (const probe of task.uiProbes) {
     const doc = documents.get(probe.document)

@@ -16,7 +16,7 @@ export const OpenCodeGoPanel = forwardRef<ModelConnectionsHandle, {
 }>(function OpenCodeGoPanel({ language, config, busy, setBusy, refresh, onSaveStateChange }, ref) {
   const copy = (cn: string, en: string) => language.startsWith('zh') ? cn : en;
   const { showError } = useToastContext();
-  const [provider, setProvider] = useState<OpenCodeGoProvider>(config?.provider === 'openai-compatible' ? 'openai-compatible' : 'anthropic-compatible');
+  const [provider, setProvider] = useState<OpenCodeGoProvider>(config?.provider==='anthropic-compatible'?'anthropic-compatible':'openai-compatible');
   const [models, setModels] = useState<ModelTierMap>(config?.connection.models ?? OPENCODE_GO_PROFILES[provider].defaults);
   const [key, setKey] = useState('');
   const profile = OPENCODE_GO_PROFILES[provider];

@@ -26,7 +26,7 @@ import { resolveEffectiveResourceMetadata } from './metadata-policy'
 
 /**
  * Browse published Packs without assigning project-specific game roles.
- * Filtering is exact and metadata-driven; free-form intent remains Claude
+ * Filtering is exact and metadata-driven; free-form intent remains Bgs
  * Code's reasoning input and is never interpreted here with name heuristics.
  */
 export function browseResourceCatalogPacks(

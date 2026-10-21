@@ -15,6 +15,21 @@ export function registerBeeGameUsageControlRoutes(
 ): void {
   registerUsageRoute(app, deps, '/api/internal/usage/events', false)
   registerUsageRoute(app, deps, '/api/internal/usage/debits', true)
+  app.post('/api/internal/usage/authorize', async c => {
+    const forbidden = requireUsageServiceToken(c.req.raw, deps.billingConfig)
+    if (forbidden) return forbidden
+    c.header('Cache-Control', 'no-store')
+    const userId = stringValue((await readJson(c.req.raw)).userId)
+    if (!userId) return c.json({ error: 'User id is required' }, 400)
+    if (!deps.dashboardRepository.getUsageWalletForUser)
+      return c.json({ error: 'Usage wallet is unavailable' }, 503)
+    const wallet = await deps.dashboardRepository.getUsageWalletForUser(userId)
+    if (!Number.isSafeInteger(wallet.balanceCreditsMicro) || wallet.balanceCreditsMicro < 0)
+      return c.json({ error: 'Usage wallet returned an invalid balance' }, 503)
+    if (wallet.balanceCreditsMicro === 0)
+      return c.json({ error: 'Insufficient realtime usage credits', code: 'insufficient_usage_credits' }, 402)
+    return c.json({ available: true })
+  })
   app.get('/api/internal/images/config', async c => {
     if (c.req.header('origin')) return c.json({ error: 'Browser access denied' }, 403)
     const forbidden = requireUsageServiceToken(c.req.raw, deps.billingConfig)

@@ -39,7 +39,17 @@
     "account": "계정"
   },
   "beegame": {
+    "chatActivity": {
+      "details": "실행 상세",
+      "working": "요청을 처리하고 있어요",
+      "failedWorking": "일부 작업에 실패했지만 계속 진행하고 있어요.",
+      "failed": "진행 중 일부 작업에 실패했어요. 최종 답변이나 실행 상세를 확인해 주세요.",
+      "stopped": "일부 작업이 중지되었어요.",
+      "incomplete": "일부 작업이 완료되지 않아 결과가 아직 확인되지 않았어요."
+    },
     "modelRequestError": {
+      "connection": "서비스 연결 오류로 이번 답변을 완료하지 못했어요.",
+      "details": "오류 상세",
       "capacity": "선택한 모델의 처리 용량이 가득 찼습니다. 다른 모델을 사용해 주세요.",
       "retry": "재시도",
       "retryNow": "지금 재시도",
@@ -333,7 +343,7 @@
         "argsHint": "One argument per line",
         "envHint": "One KEY=value per line. Leave saved secrets blank to keep them.",
         "stdio": "stdio",
-        "sse": "SSE",
+        "sse": "기존 SSE는 지원하지 않습니다. Streamable HTTP 엔드포인트를 사용하세요.",
         "http": "HTTP",
         "beegame": "BeeGame",
         "global": "Global",

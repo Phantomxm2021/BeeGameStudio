@@ -20,18 +20,16 @@ describe('BeeGame Supabase smoke runtime env', () => {
 
   test('accepts an OpenAI-compatible runtime env without exposing secrets in summary', () => {
     const env = {
-      BGS_USE_OPENAI: '1',
       OPENAI_API_KEY: 'sk-secret',
       OPENAI_BASE_URL: 'https://llm.example/v1',
-      OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+      BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
     }
 
     expect(() => assertSmokeRuntimeEnv(env)).not.toThrow()
     expect(summarizeRuntimeEnv(env)).toEqual({
-      BGS_USE_OPENAI: '<set>',
       OPENAI_API_KEY: '<redacted>',
       OPENAI_BASE_URL: '<set>',
-      OPENAI_DEFAULT_SONNET_MODEL: '<set>',
+      BGS_DEFAULT_BALANCED_MODEL: '<set>',
     })
   })
 })

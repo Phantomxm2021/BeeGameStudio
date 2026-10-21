@@ -1,7 +1,9 @@
+import type {ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
+export type {ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
 import apiClient from './apiClient';
 
 export type ModelProviderKind = 'anthropic-compatible' | 'openai-compatible' | 'gemini' | 'grok';
-export type ModelAuthMethod = 'platform' | 'byok' | 'claude-subscription' | 'chatgpt-subscription';
+export type ModelAuthMethod = 'platform' | 'byok' | 'chatgpt-subscription';
 
 export type ModelTierMap = {
   fast?: string;
@@ -15,6 +17,7 @@ export type ModelConfig = {
   id: string;
   name: string;
   provider: ModelProviderKind;
+  apiProtocol?: ModelApiProtocol;
   baseUrl?: string;
   apiKeyPreview: string;
   models: ModelTierMap;
@@ -26,6 +29,7 @@ export type CreateModelConfigInput = {
   authMethods?: ModelAuthMethod[];
   name: string;
   provider: ModelProviderKind;
+  apiProtocol?: ModelApiProtocol;
   baseUrl?: string;
   apiKey: string;
   models: ModelTierMap;
@@ -37,6 +41,7 @@ export type UpdateModelConfigInput = {
   authMethods?: ModelAuthMethod[];
   name?: string;
   provider?: ModelProviderKind;
+  apiProtocol?: ModelApiProtocol;
   baseUrl?: string;
   apiKey?: string;
   models?: ModelTierMap;
@@ -59,17 +64,14 @@ export const deleteModelConfig = (id: string): Promise<{ deleted: boolean }> => 
   apiClient.delete(`/api/model-configs/${encodeURIComponent(id)}`)
 );
 
-export type ModelConnectionStatus = { method: ModelAuthMethod; hasKey: boolean; disabled?: boolean; isPreferred: boolean; baseUrl?: string; models?: ModelTierMap; claudeConnected: boolean; chatgptConnected: boolean };
+export type ModelConnectionStatus = { method: ModelAuthMethod; hasKey: boolean; disabled?: boolean; isPreferred: boolean; baseUrl?: string; models?: ModelTierMap; apiProtocol?:ModelApiProtocol; chatgptConnected: boolean };
 export type CatalogModel = ModelConfig & { connection: ModelConnectionStatus };
 export type ModelLogin = { id: string; url: string; userCode?: string; method: ModelAuthMethod };
 export const listModelCatalog = (): Promise<CatalogModel[]> => apiClient.get('/api/model-catalog');
 export const listOpenCodeGoModels = (): Promise<import('@bee-game-studio/agent-workflow/opencode-go').OpenCodeGoModels> => apiClient.get('/api/model-catalog/opencode-go');
-export const saveModelConnection = (id: string, method: ModelAuthMethod, apiKey?: string, preferred = false, byok?: { provider?: ModelProviderKind; baseUrl: string; models: ModelTierMap }): Promise<ModelConnectionStatus> => apiClient.put(`/api/model-connections/${encodeURIComponent(id)}`, { method, ...(apiKey ? { apiKey } : {}), preferred, ...(method === 'byok' && byok ? byok : {}) });
+export const saveModelConnection = (id: string, method: ModelAuthMethod, apiKey?: string, preferred = false, byok?: { provider?: ModelProviderKind; apiProtocol?:ModelApiProtocol; baseUrl: string; models: ModelTierMap }): Promise<ModelConnectionStatus> => apiClient.put(`/api/model-connections/${encodeURIComponent(id)}`, { method, ...(apiKey ? { apiKey } : {}), preferred, ...(method === 'byok' && byok ? byok : {}) });
 export const disconnectModelConnection = (id: string): Promise<unknown> => apiClient.delete(`/api/model-connections/${encodeURIComponent(id)}`);
 export const startModelLogin = (id: string, method: ModelAuthMethod): Promise<ModelLogin> => apiClient.post(`/api/model-connections/${encodeURIComponent(id)}/login`, { method });
 export const readModelLogin = (id: string): Promise<{ status: 'pending' | 'complete' | 'failed' }> => apiClient.get(`/api/model-logins/${encodeURIComponent(id)}`);
-export const completeModelLogin = (id: string, code: string): Promise<unknown> => apiClient.post(`/api/model-logins/${encodeURIComponent(id)}`, { code });
 export const cancelModelLogin = (id: string): Promise<unknown> => apiClient.delete(`/api/model-logins/${encodeURIComponent(id)}`);
-export const disconnectModelAccount = (provider: 'claude' | 'chatgpt'): Promise<unknown> => apiClient.delete(`/api/model-accounts/${provider}`);
-export type ClaudeSubscriptionUsage = { fiveHourUsedPercent?: number; sevenDayUsedPercent?: number };
-export const readClaudeSubscriptionUsage = (): Promise<{ usage: ClaudeSubscriptionUsage | null }> => apiClient.get('/api/model-accounts/claude/usage');
+export const disconnectModelAccount = (provider: 'chatgpt'): Promise<unknown> => apiClient.delete(`/api/model-accounts/${provider}`);

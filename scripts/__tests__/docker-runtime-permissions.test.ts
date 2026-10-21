@@ -18,7 +18,7 @@ describe('Docker runtime permissions', () => {
     )
 
     expect(dockerfile).toContain('su-exec')
-    expect(dockerfile).toContain('COPY .beegame/skills/builtinskills ./.beegame/skills/builtinskills')
+    expect(dockerfile).toContain('COPY .beegame/skills/bgs-game-skills ./.beegame/skills/bgs-game-skills')
     expect(runtimeTarget).not.toContain('\nUSER bun\n')
     expect(entrypoint).toContain('runtime_user="${BEEGAME_RUNTIME_USER:-bun}"')
     expect(entrypoint).toContain('runtime_group="${BEEGAME_RUNTIME_GROUP:-bun}"')

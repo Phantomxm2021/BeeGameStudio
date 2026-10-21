@@ -9,19 +9,32 @@ import { sceneLayoutFixture, uiLayoutFixture } from '../fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
 import type { TaskSpec } from './state'
+import { audioProbeWav } from './audio-consumption'
+import { runContentCheck } from './content-checks'
 
-for(const mode of ['consume','hidpi','unscaled-backing','unscaled-backing-default','parent','camera','ignore-parent','ignore-camera','ignore-position','ignore-size','wrong-position','ignore-image','hidden','no-fetch','stale-copy','missing-probe','atlas','wrong-frame','ui','missing-viewport','shared','3d'] as const){
+for(const mode of ['consume','unsupported-peer','hidpi','unscaled-backing','unscaled-backing-default','parent','camera','ignore-parent','ignore-camera','ignore-position','ignore-size','wrong-position','ignore-image','hidden','no-fetch','stale-copy','missing-probe','atlas','atlas-sidecar','wrong-frame','wrong-frame-sidecar','shared-atlas-sidecar','ui','missing-viewport','shared','3d'] as const){
   test('actual Canvas source and image consumption: '+mode,async()=>{
     const root=await mkdtemp(join(tmpdir(),'bgs-v3-pixels-'))
     try{
       const manifest=assetManifestAuthoringExamples().canonical, resource=manifest.resources[0]!
       manifest.project_target!.asset_format_capabilities=['json','png']
       resource.root_path='assets/runtime/example/image.png';resource.file_paths=[resource.root_path]
-      const atlas=mode==='atlas'||mode==='wrong-frame'
-      if(atlas)resource.file_paths.push('assets/runtime/example/image.json')
+      const atlas=['atlas','atlas-sidecar','wrong-frame','wrong-frame-sidecar','shared-atlas-sidecar'].includes(mode)
+      const atlasPath='assets/runtime/example/image'+(mode.endsWith('-sidecar')?'.atlas.json':'.json')
+      if(atlas)resource.file_paths.push(atlasPath)
+      // This fixture replaces the example JSON data with actual raster assets.
+      const kind=atlas?'sprite-atlas':'image'
+      resource.asset_kind=kind
+      manifest.requirements[0]!.acquisition_profile.asset_kinds=[kind]
       await mkdir(join(root,'assets/runtime/example'),{recursive:true})
       await writeFile(join(root,resource.root_path),await sharp({create:{width:80,height:40,channels:4,background:'#327bb8'}}).png().toBuffer())
-      if(atlas)await writeFile(join(root,'assets/runtime/example/image.json'),JSON.stringify({frames:{
+      if(mode==='unsupported-peer'){
+        const audioPath='assets/runtime/example/unrelated.wav'
+        await writeFile(join(root,audioPath),audioProbeWav(false))
+        manifest.requirements.push({id:'other-audio',required:true,acquisition_profile:{dimensions:['agnostic'],asset_kinds:['audio-clip'],styles:[]}})
+        manifest.resources.push({...resource,id:'other-audio-file',fulfills:['other-audio'],asset_kind:'audio-clip',root_path:audioPath,file_paths:[audioPath]})
+      }
+      if(atlas)await writeFile(join(root,atlasPath),JSON.stringify({frames:{
         left:{frame:{x:0,y:0,w:40,h:40}},right:{frame:{x:40,y:0,w:40,h:40}},
       }}))
       await writeBeeGameAssetManifest(root,manifest)
@@ -33,7 +46,7 @@ for(const mode of ['consume','hidpi','unscaled-backing','unscaled-backing-defaul
         scene.data.nodes.push({id:'group',transform:{position:[12,8,0],scale:[1.5,1.25,1]}})
       }
       if(mode==='camera'||mode==='ignore-camera')scene.data.nodes[0].transform={position:[25,15,0]}
-      if(mode==='shared'){
+      if(mode==='shared'||mode==='shared-atlas-sidecar'){
         const other={...structuredClone(scene.data.nodes[1]),id:'other',transform:{position:[50,50,0]}}
         other.components[0].id='sprite-other';scene.data.nodes.push(other)
       }
@@ -66,7 +79,7 @@ for(const mode of ['consume','hidpi','unscaled-backing','unscaled-backing-defaul
         ${mode==='camera'?'const camera=d.data.nodes.find(x=>x.id===d.data.cameraNodeId);for(let i=0;i<2;i++)p[i]-=camera.transform.position[i];':''}
         const w=s[0]*scale[0],h=s[1]*scale[1];
         ${mode==='ignore-image'?'ctx.fillStyle="#abc";ctx.fillRect(380-w/2,220-h/2,w,h);':
-          atlas?`ctx.drawImage(im,${mode==='wrong-frame'?'40':'0'},0,40,40,480+p[0]-w/2,270+p[1]-h/2,w,h);`:
+          atlas?`ctx.drawImage(im,${mode.startsWith('wrong-frame')?'40':'0'},0,40,40,480+p[0]-w/2,270+p[1]-h/2,w,h);`:
           `ctx.drawImage(im,480+p[0]${mode==='wrong-position'?'*2':''}-w/2,270+p[1]-h/2,w,h);`}
       `
       await writeFile(join(root,'dist/index.html'),'<style>body{margin:0}canvas{'+(mode==='hidden'?'display:none':'')+'}</style><canvas width="960" height="540"></canvas><script type="module">'+script+'</script>')
@@ -75,9 +88,14 @@ for(const mode of ['consume','hidpi','unscaled-backing','unscaled-backing-defaul
         pixelProbes:[{document:path,nodeId:isUi?'play':'board',...(isUi?{}:{componentId:'sprite'}),selector:'canvas',viewport:[960,540],
           ...(['hidpi','unscaled-backing'].includes(mode)?{deviceScaleFactor:2}:{})}]}
       if(mode==='missing-probe')task.pixelProbes![0]!.nodeId='missing'
-      if(mode==='shared')task.pixelProbes!.push({...task.pixelProbes![0]!,nodeId:'other',componentId:'sprite-other'})
+      if(mode==='shared'||mode==='shared-atlas-sidecar')task.pixelProbes!.push({...task.pixelProbes![0]!,nodeId:'other',componentId:'sprite-other'})
+      if(mode==='unsupported-peer'){
+        const structural=await runContentCheck(root,'content-resources',{expectedOutputs:[path]},[],{})
+        expect(structural.status).toBe('unverified')
+        expect(structural.coverage?.assetContract?.requirements.find(row=>row.id==='other-audio')?.structure?.status).toBe('unverified')
+      }
       const result=(await runChecks(root,task,[])).checks[0]!
-      const expected=['consume','hidpi','unscaled-backing-default','atlas','ui','parent','camera'].includes(mode)?'passed':['unscaled-backing','ignore-position','ignore-size','wrong-position','ignore-parent','ignore-camera'].includes(mode)?'failed':'unverified'
+      const expected=['consume','unsupported-peer','hidpi','unscaled-backing-default','atlas','atlas-sidecar','ui','parent','camera'].includes(mode)?'passed':['unscaled-backing','ignore-position','ignore-size','wrong-position','ignore-parent','ignore-camera'].includes(mode)?'failed':'unverified'
       expect(result.status,result.observation).toBe(expected)
       if(['hidpi','unscaled-backing','unscaled-backing-default'].includes(mode)) {
         const conditions=JSON.parse(result.observation).probes[0].conditions
@@ -86,7 +104,7 @@ for(const mode of ['consume','hidpi','unscaled-backing','unscaled-backing-defaul
         expect(conditions.activation).toEqual({kind:'locator-clicks',steps:[]})
         expect(conditions.coverage).toContain('no complete gameplay')
       }
-      if(mode==='shared')expect(result.observation).toContain('Shared identical image/frame')
+      if(mode==='shared'||mode==='shared-atlas-sidecar')expect(result.observation).toContain('Shared identical image/frame')
       expect(await Bun.file(join(root,path)).text()).toBe(body)
       const originalImage=await Bun.file(join(root,resource.root_path)).arrayBuffer(),packedImage=await Bun.file(join(root,'dist',resource.root_path)).arrayBuffer()
       expect(originalImage).toEqual(packedImage)

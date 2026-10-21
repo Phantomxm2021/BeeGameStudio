@@ -1,4 +1,4 @@
-import { Bot, Brain, ShieldCheck } from 'lucide-react';
+import { Bot, ShieldCheck } from 'lucide-react';
 import type { RuntimeSettingsConfig } from '../../services/runtimeSettingsApi';
 import { Switch } from '../ui/switch';
 
@@ -21,18 +21,6 @@ type RuntimeCapabilityItem = RuntimeCapabilityCopy['items'][keyof RuntimeSetting
 
 function getRuntimeCapabilityItems(copy: RuntimeCapabilityCopy): RuntimeCapabilityItem[] {
   return [
-    'autoMemoryEnabled',
-    'autoDreamEnabled',
-    'verificationAgentEnabled',
-    'agentTeamsEnabled',
-    'promptSuggestionEnabled',
-    'awaySummaryEnabled',
-    'coordinatorModeEnabled',
-    'skillSearchEnabled',
-    'treeSitterBashEnabled',
-    'webBrowserToolEnabled',
-    'bashClassifierEnabled',
-    'mcpSkillsEnabled',
     'resourceLibraryEnabled',
   ].map(key => ({ key: key as keyof RuntimeSettingsConfig, ...copy.items[key as keyof RuntimeSettingsConfig] }));
 }
@@ -51,7 +39,7 @@ export function RuntimeSettingsPanel({
   return (
     <div className="divide-y divide-border">
       {getRuntimeCapabilityItems(copy).map(item => {
-        const Icon = item.scope === 'restart' ? ShieldCheck : item.key === 'autoDreamEnabled' ? Brain : Bot;
+        const Icon = item.scope === 'restart' ? ShieldCheck : Bot;
         const checked = Boolean(settings[item.key]);
         return (
           <div key={item.key} className="grid min-h-16 gap-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">

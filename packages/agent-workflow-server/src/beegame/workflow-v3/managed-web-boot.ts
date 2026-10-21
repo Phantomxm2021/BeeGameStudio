@@ -4,12 +4,12 @@ import { digest, WorkflowError, type Run } from './state'
 import { versionsMatch } from './checks'
 
 export const MANAGED_WEB_BOOT_VERSION = 'react-web-storage-v1' as const
-export const MANAGED_WEB_BOOT_PATHS = ['index.html', 'src/bgs-entry.mjs', 'src/bgs-storage.mjs'] as const
+export const MANAGED_WEB_BOOT_PATHS = ['src/bgs-entry.mjs', 'src/bgs-storage.mjs'] as const
 export const MANAGED_WEB_BOOT_CONTRACT = {
   entry: 'index.html', gameModule: 'src/game.jsx',
   factory: 'export async function createGame({root, storage})',
   lifecycle: 'Mount the game into root; storage is already initialized. Await storage.getItem/setItem/removeItem. An optional returned function disposes the game.',
-  ownership: 'BGS maintains index.html, src/bgs-entry.mjs and src/bgs-storage.mjs. The implementation handoff installs them after planning. Author game logic/UI/styles/build configuration, not these reserved files. Build from index.html. No game/UI/Scene template is installed.',
+  ownership: 'BGS maintains only src/bgs-entry.mjs and src/bgs-storage.mjs. The implementation handoff installs them and supplies index.html when absent. index.html belongs to the project: maintain its title, metadata and markup normally, preserving the root mount and startup script connection. Author game logic/UI/styles/build configuration; no game/UI/Scene template is installed.',
 } as const
 
 // This source is the actual application entry, not an example the author must
@@ -53,11 +53,14 @@ export async function assertManagedWebBoot(run: Run, required = false) {
     return
   }
   const root = await realpath(run.workspacePath)
-  const canonical = await Promise.all(run.webBoot.files.map(async ({path}) => {
+  // Older snapshots also pinned index.html. Leave their saved identity intact,
+  // but apply the same narrowed protection without migrating project files.
+  const protectedFiles = run.webBoot.files.filter(file => file.path !== 'index.html')
+  const canonical = await Promise.all(protectedFiles.map(async ({path}) => {
     const file = join(root, path)
     try { return await realpath(file) === file && (await lstat(file)).isFile() } catch { return false }
   }))
-  if (canonical.some(value => !value) || !await versionsMatch(run.workspacePath, run.webBoot.files))
+  if (canonical.some(value => !value) || !await versionsMatch(run.workspacePath, protectedFiles))
     throw new WorkflowError('web-boot-changed', 'Managed Web entry changed or is missing. Existing sources were preserved; BGS will not silently overwrite the startup/storage wiring.')
 }
 
@@ -90,7 +93,7 @@ export async function installManagedWebBoot(run: Run, signal: AbortSignal): Prom
     }
     try {
       const file = join(root, path)
-      if (!(await lstat(file)).isFile() || await realpath(file) !== file || await readFile(file, 'utf8') !== body) throw conflict(path)
+      if (!(await lstat(file)).isFile() || await realpath(file) !== file || path !== 'index.html' && await readFile(file, 'utf8') !== body) throw conflict(path)
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   }
   for (const [path, body] of Object.entries(files)) {
@@ -100,7 +103,7 @@ export async function installManagedWebBoot(run: Run, signal: AbortSignal): Prom
     if (await realpath(parent) !== parent || !(await lstat(parent)).isDirectory()) throw conflict(path)
     const file = join(root, path)
     await writeFile(file, body, { flag: 'wx', mode: 0o600 }).catch(async error => {
-      if (error.code !== 'EEXIST' || !(await lstat(file)).isFile() || await realpath(file) !== file || await readFile(file, 'utf8') !== body) throw conflict(path)
+      if (error.code !== 'EEXIST' || !(await lstat(file)).isFile() || await realpath(file) !== file || path !== 'index.html' && await readFile(file, 'utf8') !== body) throw conflict(path)
     })
   }
   check()

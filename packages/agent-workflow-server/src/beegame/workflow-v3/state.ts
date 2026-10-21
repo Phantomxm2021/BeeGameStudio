@@ -114,7 +114,7 @@ export type DesignFileChanges = {
 export type AgentTurn = {
   attemptId: string; requestKey: string; sessionId: string; workerId: string; fence: number;
   status: 'running' | 'ended' | 'failed' | 'interrupted'; startedAt: string; finishedAt?: string;
-  turnId?: string; nativeSessionId?: string; usage?: unknown; skillUses?: SkillUse[];
+  turnId?: string; nativeRuntime?: 'bgs'; nativeSessionId?: string; usage?: unknown; skillUses?: SkillUse[];
   quiescedAt?: string; error?: string;
   designFileChanges?: DesignFileChanges;
   // Original host observed no native submission. Not inferred from missing

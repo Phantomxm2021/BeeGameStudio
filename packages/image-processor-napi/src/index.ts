@@ -41,7 +41,7 @@ function createDarwinNativeModule(): NativeModule {
       try {
         // Use osascript to read clipboard image as PNG data and write to a temp file,
         // then read the temp file back
-        const tmpPath = `/tmp/claude_clipboard_native_${Date.now()}.png`
+        const tmpPath = `/tmp/bgs_image_native_${Date.now()}.png`
         const script = `
 set png_data to (the clipboard as «class PNGf»)
 set fp to open for access POSIX file "${tmpPath}" with write permission

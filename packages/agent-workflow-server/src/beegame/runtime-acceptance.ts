@@ -11,7 +11,8 @@ import { designReviewResultSchema, type DesignFinding } from './design-handoff'
 import { projectFiles, projectDependencies, changedProjectPaths, AGENT_EVIDENCE_DIRECTORY } from './workflow-v3/checks'
 import { projectPathSchema } from './workflow-v3/state'
 
-export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'The reviewed .beegame/design-handoffs/<document stem>.json is a small output/acceptance index; the pointed prose section owns each expectation. For outputs declaring acceptance, verification.requirementChecks records actual results: {document:design filename,id:owned output ID,documentSha256:SHA-256 of current docs/<document> bytes,handoffSha256:SHA-256 of its current index JSON bytes,method:"test"|"target-runtime"|"inspection",scenario:actual conditions/actions checked,observed:actual outcome,status:"passed"|"failed"|"unverified",evidencePaths:string[]}. Read the acceptance section for the expected result; do not invent an easier expectation in the report. Cover all declared requirements and their applicable scenarios, matching the source method and version. Existing reusable tests/observations may supply results; this is not a new stage or a separate test plan. Every evidence path must also appear in the report evidencePaths. Report failed or unverified checks honestly; they cannot accompany a delivery PASS. Evidence records must be actual test logs, runtime observations/captures or direct inspections, not a review verdict or copied design prose. Host-maintained design versions/hashes and structural coverage do not establish truthful observation, complete requirements or game quality.'
+export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'Compare actual results with confirmed requirements and original design sources. Record real test/runtime/inspection evidence, knownIssues and unverified outcomes; a model declaration is not independent acceptance. Existing indexed requirementChecks remain supported with their original document/id, source hashes, method, scenario, observed result, status and evidencePaths; do not create indexes or coverage mappings to write a report. Every cited evidence path must appear in evidencePaths. Failed or unverified checks cannot support PASS. BGS validates retained evidence and data contracts, not complete requirements, truthful observations or visual/game quality.'
+
 
 const requirementCheckSchema = z.object({
   document: z.enum(PROJECT_DOCUMENTS), id: z.string().trim().min(1),
@@ -231,12 +232,12 @@ export async function inspectDesignAcceptance(workspace: string, requireDesignRe
   return {path:DESIGN_ACCEPTANCE_PATH, valid:report?.scope === 'delivery' && report.status === 'passed',
     status:report?.status ?? 'unverified',scope:report?.scope,
     declaredStatus:report?.declaredStatus,
-    summary:report?.summary ?? 'The itemized acceptance report is missing; completion is unverified.',
+    summary:report?.summary ?? 'No runtime acceptance report is recorded; runtime verification is unverified.',
     diagnostic:report?.diagnostic,
     requirementChecks:checks,
     evidence:report?.evidence ?? [],artifacts:report?.artifacts ?? [],
     quality:'unverified' as const,
-    note:'Declared requirement coverage, current design revision and retained evidence only. Observation truth, original semantic completeness, visual restoration and experience quality are not certified by this read.'}
+    note:'Reported checks, current design revision and retained evidence integrity only. Missing indexes/checks do not establish coverage. Observation truth, original semantic completeness, visual restoration and experience quality remain unverified by this read.'}
 }
 
 function deliveryLimitation(report: { verification?: z.infer<typeof verificationSchema> }): AcceptanceDiagnostic | undefined {
@@ -276,8 +277,7 @@ async function designRequirementLimitation(workspace: string, verification: z.in
       if (sources.includes(await realpath(resolve(workspace, path))))
         return diagnostic('report-invalid', `Requirement ${check.document}#${check.id} needs recorded result evidence, not its design source.`)
   }
-  const missing = requirements.filter(source => !checks.some(check => check.document === source.document && check.id === source.id))
-  if (missing.length) return diagnostic('verification-incomplete', `Design requirements are unverified: ${missing.map(source => `${source.document}#${source.id}`).join(', ')}.`)
+
 }
 
 /** Verify coverage and evidence identity, not source-code patterns or claimed

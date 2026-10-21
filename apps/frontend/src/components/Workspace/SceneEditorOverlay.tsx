@@ -50,6 +50,8 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [editorDirty, setEditorDirty] = useState(false);
   const [editorSaving, setEditorSaving] = useState(false);
+  const [uploadingAssets, setUploadingAssets] = useState(false);
+  const uploadAssetsRef = useRef<((files: File[]) => Promise<Record<string, SceneAsset>>) | undefined>(undefined);
   const loadControllerRef = useRef<AbortController | undefined>(undefined);
   const canonicalRef = useRef<{
     path: string;
@@ -137,145 +139,156 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
         const sceneLoadLabel = targetScene.document.id;
         // The picker must include verified project resources, not just existing scene references.
         if (!active || signal.aborted) return;
-        const assets: Record<string, SceneAsset> = {};
-        const assetMembers: Record<string, Record<string, string>> = {};
-        const assetFailures: Array<{ id: string; detail: string }> = [];
-        const requiredAssets = new Set(sceneEntries.flatMap(scene => scene.document.assetRefs));
-        const failedAsset = (id: string, path: string, error: unknown) => {
-          const detail = `${id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`;
-          // TileSet image dependencies are known only after JSON has loaded.
-          // Classify failures after all metadata, not by async completion order.
-          assetFailures.push({ id, detail });
-        };
-        const availableResources = manifest.resources.filter(resource => resource.status === 'verified');
-        for (const resource of availableResources) {
-          assets[resource.id] = {
-            id: resource.id,
-            resourceId: resource.id,
-            name: resource.root_path.split('/').at(-1) ?? resource.id,
-            mimeType: assetMimeType(resource.root_path),
-            path: resource.root_path,
+        const progress = updateLoadState;
+        async function loadResourceAssets(resources: typeof manifest.resources, initial: boolean) {
+          const updateLoadState = initial ? progress : () => {};
+          const assets: Record<string, SceneAsset> = {};
+          const assetMembers: Record<string, Record<string, string>> = {};
+          const assetFailures: Array<{ id: string; detail: string }> = [];
+          const requiredAssets = new Set(initial ? sceneEntries.flatMap(scene => scene.document.assetRefs) : resources.map(resource => resource.id));
+          const failedAsset = (id: string, path: string, error: unknown) => {
+            const detail = `${id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`;
+            // TileSet image dependencies are known only after JSON has loaded.
+            // Classify failures after all metadata, not by async completion order.
+            assetFailures.push({ id, detail });
           };
-        }
-        const loadTargets = availableResources.flatMap(resource => resource.file_paths
-          .filter(path => SCENE_PREVIEW.test(path) || SCENE_FONT.test(path) || /\.json$/i.test(path))
-          .map(path => ({ resource, path, name: `${resource.id} · ${path.split('/').at(-1) ?? path}` })));
-        const totalFiles = loadTargets.length;
-        let loadedFiles = 0;
-        const markFileLoaded = (name: string) => {
-          loadedFiles += 1;
-          updateLoadState({
-            progress: totalFiles ? 42 + Math.round((loadedFiles / totalFiles) * 48) : 90,
-            label: sceneLoadLabel,
-            detail: totalFiles ? `${name} · ${loadedFiles} of ${totalFiles}` : 'No external scene assets required',
-          });
-        };
-        updateLoadState({
-          progress: 42,
-          label: sceneLoadLabel,
-          detail: totalFiles ? `${loadTargets[0].name} · 0 of ${totalFiles}` : 'No external scene assets required',
-        });
-        // One file-level queue keeps the former 4 x 4 ceiling without making
-        // small packs/metadata wait for a resource-level slot or all its images.
-        const loadedFilesData = await mapEditorAssets(loadTargets, async ({ resource, path, name }) => {
-          try {
-            const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
-            if (/\.json$/i.test(path)) {
-              const value = JSON.parse(await blob.text()) as unknown;
-              throwIfAborted(signal);
-              const sheet = parseSpriteSheet(value);
-              const tileSet = (value as { schema?: string } | null)?.schema === 'beegame-tileset.v1' ? parseTileSet(value) : undefined;
-              return { resourceId: resource.id, path, sheet, tileSet };
-            }
-            return { resourceId: resource.id, path, bytes: await blobToDataUrl(blob, signal) };
-          } catch (error) {
-            if (isAbortError(error)) throw error;
-            failedAsset(resource.id, path, error);
-            return undefined;
-          } finally {
-            if (!signal.aborted) markFileLoaded(name);
-          }
-        }, signal, 16);
-        const filesByResource = new Map<string, NonNullable<typeof loadedFilesData[number]>[]>();
-        for (const item of loadedFilesData) {
-          if (!item) continue;
-          const files = filesByResource.get(item.resourceId) ?? [];
-          files.push(item);
-          filesByResource.set(item.resourceId, files);
-        }
-        for (const resource of availableResources) {
-          // Fonts are first-class scene text assets. Keep them in the same
-          // asset table as images so the scene viewport can resolve the exact
-          // authored font reference instead of falling back to a system font.
-          const previewPaths = resource.file_paths.filter(path => SCENE_PREVIEW.test(path) || SCENE_FONT.test(path));
-          const stemCounts = new Map<string, number>();
-          for (const path of previewPaths) stemCounts.set(fileStem(path), (stemCounts.get(fileStem(path)) ?? 0) + 1);
-          const members: Record<string, string> = {};
-          const tables: Record<string, SpriteSheet> = {};
-          for (const item of filesByResource.get(resource.id) ?? []) {
-            if (item.bytes === undefined) {
-              const { path, sheet, tileSet } = item;
-              if (sheet) tables[path] = sheet;
-              if (sheet || tileSet) {
-                const id = tileSet && path === resource.root_path ? resource.id : `${resource.id}:${path}`;
-                assets[id] = { id, resourceId: resource.id, name: path.split('/').at(-1)!, path, mimeType: 'application/json', ...(sheet ? { spriteSheet: sheet } : {}), ...(tileSet ? { tileSet } : {}) };
-                members[path] = id;
-              }
-              continue;
-            }
-            const member = fileStem(item.path);
-            const assetId = item.path === resource.root_path ? resource.id : `${resource.id}:${item.path}`;
-            assets[assetId] = {
-              id: assetId,
+          const availableResources = resources.filter(resource => resource.status === 'verified');
+          for (const resource of availableResources) {
+            assets[resource.id] = {
+              id: resource.id,
               resourceId: resource.id,
-              name: item.path.split('/').at(-1) ?? assetId,
-              mimeType: assetMimeType(item.path),
-              path: item.path,
-              bytes: item.bytes,
+              name: resource.root_path.split('/').at(-1) ?? resource.id,
+              mimeType: assetMimeType(resource.root_path),
+              path: resource.root_path,
             };
-            if (stemCounts.get(member) === 1) members[member] = assetId;
-            members[item.path] = assetId;
           }
-          for (const path of previewPaths) {
-            const assetId = members[path];
-            const metadataPath = editorAtlasPath(resource, path);
-            const table = metadataPath ? tables[metadataPath] : undefined;
-            if (assetId && table) assets[assetId].spriteSheet = table;
-          }
-          const rootPath = previewPaths.find(path => editorAtlasPath(resource, path) === resource.root_path)
-            ?? preferredScenePreviewPath(resource.root_path, previewPaths);
-          const rootMemberId = rootPath ? members[rootPath] : undefined;
-          if (rootMemberId && !assets[resource.id].tileSet) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
-          assetMembers[resource.id] = members;
-        }
-        if (!active || signal.aborted) return;
-        // Resolve the same explicit dependency chain as the authored contract:
-        // Tilemap -> TileSet -> image (+ named atlas frame).
-        for (const scene of sceneEntries) for (const node of scene.document.data.nodes) for (const component of node.components ?? []) {
-          if (component.type !== 'tilemap' || !component.assetRef) continue;
-          const member = component.data?.member;
-          const id = typeof member === 'string' ? assetMembers[component.assetRef]?.[member] : component.assetRef;
-          const tileSet = id && assets[id]?.tileSet;
-          if (!tileSet) throw new Error(`Tilemap ${node.id}: TileSet unavailable: ${component.assetRef}${member ? ':' + member : ''}`);
-          for (const [tileId, tile] of Object.entries(tileSet.tiles)) {
-            requiredAssets.add(tile.sprite.assetRef);
-            for (const path of [tile.sprite.member, tile.sprite.atlasMember].filter((path): path is string => !!path)) {
-              if (!assetMembers[tile.sprite.assetRef]?.[path])
-                throw new Error(`Tilemap ${node.id}, tile ${tileId}: resource file unavailable: ${tile.sprite.assetRef}:${path}`);
+          const loadTargets = availableResources.flatMap(resource => resource.file_paths
+            .filter(path => SCENE_PREVIEW.test(path) || SCENE_FONT.test(path) || /\.json$/i.test(path))
+            .map(path => ({ resource, path, name: `${resource.id} · ${path.split('/').at(-1) ?? path}` })));
+          const totalFiles = loadTargets.length;
+          let loadedFiles = 0;
+          const markFileLoaded = (name: string) => {
+            loadedFiles += 1;
+            updateLoadState({
+              progress: totalFiles ? 42 + Math.round((loadedFiles / totalFiles) * 48) : 90,
+              label: sceneLoadLabel,
+              detail: totalFiles ? `${name} · ${loadedFiles} of ${totalFiles}` : 'No external scene assets required',
+            });
+          };
+          updateLoadState({
+            progress: 42,
+            label: sceneLoadLabel,
+            detail: totalFiles ? `${loadTargets[0].name} · 0 of ${totalFiles}` : 'No external scene assets required',
+          });
+          // One file-level queue keeps the former 4 x 4 ceiling without making
+          // small packs/metadata wait for a resource-level slot or all its images.
+          const loadedFilesData = await mapEditorAssets(loadTargets, async ({ resource, path, name }) => {
+            try {
+              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
+              if (/\.json$/i.test(path)) {
+                const value = JSON.parse(await blob.text()) as unknown;
+                throwIfAborted(signal);
+                const sheet = parseSpriteSheet(value);
+                const tileSet = (value as { schema?: string } | null)?.schema === 'beegame-tileset.v1' ? parseTileSet(value) : undefined;
+                return { resourceId: resource.id, path, sheet, tileSet };
+              }
+              return { resourceId: resource.id, path, bytes: await blobToDataUrl(blob, signal) };
+            } catch (error) {
+              if (isAbortError(error)) throw error;
+              failedAsset(resource.id, path, error);
+              return undefined;
+            } finally {
+              if (!signal.aborted) markFileLoaded(name);
             }
-            if (tile.sprite.atlasMember) {
-              const atlas = assets[assetMembers[tile.sprite.assetRef][tile.sprite.atlasMember]]?.spriteSheet;
-              if (!atlas || !('frames' in atlas) || !atlas.frames[atlasFrameName(tile.sprite.frame!)])
-                throw new Error(`Tilemap ${node.id}, tile ${tileId}: atlas frame unavailable: ${tile.sprite.frame}`);
+          }, signal, 16);
+          const filesByResource = new Map<string, NonNullable<typeof loadedFilesData[number]>[]>();
+          for (const item of loadedFilesData) {
+            if (!item) continue;
+            const files = filesByResource.get(item.resourceId) ?? [];
+            files.push(item);
+            filesByResource.set(item.resourceId, files);
+          }
+          for (const resource of availableResources) {
+            // Fonts are first-class scene text assets. Keep them in the same
+            // asset table as images so the scene viewport can resolve the exact
+            // authored font reference instead of falling back to a system font.
+            const previewPaths = resource.file_paths.filter(path => SCENE_PREVIEW.test(path) || SCENE_FONT.test(path));
+            const stemCounts = new Map<string, number>();
+            for (const path of previewPaths) stemCounts.set(fileStem(path), (stemCounts.get(fileStem(path)) ?? 0) + 1);
+            const members: Record<string, string> = {};
+            const tables: Record<string, SpriteSheet> = {};
+            for (const item of filesByResource.get(resource.id) ?? []) {
+              if (item.bytes === undefined) {
+                const { path, sheet, tileSet } = item;
+                if (sheet) tables[path] = sheet;
+                if (sheet || tileSet) {
+                  const id = tileSet && path === resource.root_path ? resource.id : `${resource.id}:${path}`;
+                  assets[id] = { id, resourceId: resource.id, name: path.split('/').at(-1)!, path, mimeType: 'application/json', ...(sheet ? { spriteSheet: sheet } : {}), ...(tileSet ? { tileSet } : {}) };
+                  members[path] = id;
+                }
+                continue;
+              }
+              const member = fileStem(item.path);
+              const assetId = item.path === resource.root_path ? resource.id : `${resource.id}:${item.path}`;
+              assets[assetId] = {
+                id: assetId,
+                resourceId: resource.id,
+                name: item.path.split('/').at(-1) ?? assetId,
+                mimeType: assetMimeType(item.path),
+                path: item.path,
+                bytes: item.bytes,
+              };
+              if (stemCounts.get(member) === 1) members[member] = assetId;
+              members[item.path] = assetId;
+            }
+            for (const path of previewPaths) {
+              const assetId = members[path];
+              const metadataPath = editorAtlasPath(resource, path);
+              const table = metadataPath ? tables[metadataPath] : undefined;
+              if (assetId && table) assets[assetId].spriteSheet = table;
+            }
+            const rootPath = previewPaths.find(path => editorAtlasPath(resource, path) === resource.root_path)
+              ?? preferredScenePreviewPath(resource.root_path, previewPaths);
+            const rootMemberId = rootPath ? members[rootPath] : undefined;
+            if (rootMemberId && !assets[resource.id].tileSet) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
+            assetMembers[resource.id] = members;
+          }
+          if (!active || signal.aborted) throw new DOMException('Editor closed', 'AbortError');
+          // Resolve the same explicit dependency chain as the authored contract:
+          // Tilemap -> TileSet -> image (+ named atlas frame).
+          for (const scene of initial ? sceneEntries : []) for (const node of scene.document.data.nodes) for (const component of node.components ?? []) {
+            if (component.type !== 'tilemap' || !component.assetRef) continue;
+            const member = component.data?.member;
+            const id = typeof member === 'string' ? assetMembers[component.assetRef]?.[member] : component.assetRef;
+            const tileSet = id && assets[id]?.tileSet;
+            if (!tileSet) throw new Error(`Tilemap ${node.id}: TileSet unavailable: ${component.assetRef}${member ? ':' + member : ''}`);
+            for (const [tileId, tile] of Object.entries(tileSet.tiles)) {
+              requiredAssets.add(tile.sprite.assetRef);
+              for (const path of [tile.sprite.member, tile.sprite.atlasMember].filter((path): path is string => !!path)) {
+                if (!assetMembers[tile.sprite.assetRef]?.[path])
+                  throw new Error(`Tilemap ${node.id}, tile ${tileId}: resource file unavailable: ${tile.sprite.assetRef}:${path}`);
+              }
+              if (tile.sprite.atlasMember) {
+                const atlas = assets[assetMembers[tile.sprite.assetRef][tile.sprite.atlasMember]]?.spriteSheet;
+                if (!atlas || !('frames' in atlas) || !atlas.frames[atlasFrameName(tile.sprite.frame!)])
+                  throw new Error(`Tilemap ${node.id}, tile ${tileId}: atlas frame unavailable: ${tile.sprite.frame}`);
+              }
             }
           }
+          const requiredFailures = assetFailures.filter(failure => requiredAssets.has(failure.id)).map(failure => failure.detail);
+          for (const failure of assetFailures.filter(failure => !requiredAssets.has(failure.id))) console.warn('Optional scene asset unavailable:', failure.detail);
+          if (requiredFailures.length) throw new Error(requiredFailures.join(' · '));
+          return { assets, assetMembers };
         }
-        const requiredFailures = assetFailures.filter(failure => requiredAssets.has(failure.id)).map(failure => failure.detail);
-        for (const failure of assetFailures.filter(failure => !requiredAssets.has(failure.id))) console.warn('Optional scene asset unavailable:', failure.detail);
-        if (requiredFailures.length) {
-          setLoadState({ status: 'error', progress: 90, label: 'Assets could not be loaded', detail: `${requiredFailures.slice(0, 3).join(' · ')}${requiredFailures.length > 3 ? ` · +${requiredFailures.length - 3} more` : ''}` });
-          return;
-        }
+        let { assets, assetMembers } = await loadResourceAssets(manifest.resources, true);
+        uploadAssetsRef.current = async files => {
+          const result = await beeGameAdapter.uploadProjectAsset(projectId, `user-${crypto.randomUUID()}`, files);
+          if (!active || signal.aborted) throw new DOMException('Editor closed during upload', 'AbortError');
+          const imported = await loadResourceAssets(result.manifest.resources.filter(resource => resource.id === result.resource.id), false);
+          assets = { ...assets, ...imported.assets };
+          assetMembers = { ...assetMembers, ...imported.assetMembers };
+          return imported.assets;
+        };
         updateLoadState({ progress: 94, label: sceneLoadLabel, detail: 'Resolving hierarchy, transforms, and sprite regions…' });
         const availableScenes = sceneEntries.map(scene => {
           let editorDocument: SceneDocument | undefined;
@@ -284,14 +297,14 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
             revision: scene.revision,
             document: scene.document,
             // Materialize only the opened scene, then reuse it when switching back.
-            loadDocument: () => editorDocument ??= sceneContentToEditorDocument({
+            loadDocument: () => { editorDocument ??= sceneContentToEditorDocument({
               document: scene.document,
               documentRevision: scene.revision,
               foundationDocumentRevision: snapshot.index!.documentRevision,
               assetManifestRevision: snapshot.index!.assetManifestRevision,
               assets,
               assetMembers,
-            }),
+            }); return { ...editorDocument, assets: { ...editorDocument.assets, ...assets } }; },
           };
         });
         const entry = availableScenes.find(scene => scene.path === targetScene.path);
@@ -310,6 +323,7 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
         }
       });
     return () => {
+      uploadAssetsRef.current = undefined;
       active = false;
       controller.abort();
       if (loadControllerRef.current === controller) loadControllerRef.current = undefined;
@@ -349,7 +363,7 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
   };
 
   const chooseScene = (path: string) => {
-    if (editorDirty || editorSaving) return;
+    if (editorDirty || editorSaving || uploadingAssets) return;
     const next = scenes.find(scene => scene.path === path);
     if (!next) return;
     try {
@@ -402,13 +416,19 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
               initialView={initialDocument.dimension === '2d'
                 ? { position: [0, 0, 10], target: [0, 0, 0], showGizmos: true }
                 : { position: [7, 5, 7], target: [0, 0, 0], showGizmos: true }}
+              onUploadAssets={async files => {
+                if (!uploadAssetsRef.current) throw new Error('Editor resources are unavailable');
+                setUploadingAssets(true);
+                try { return await uploadAssetsRef.current(files); }
+                finally { setUploadingAssets(false); }
+              }}
               onSave={save}
               onClose={closeEditor}
               onDirtyChange={(dirty, saving) => { setEditorDirty(dirty); setEditorSaving(saving); }}
               sceneChoices={scenes.map(scene => ({ id: scene.path, label: scene.document.id }))}
               selectedSceneId={selectedScenePath}
               onSelectScene={chooseScene}
-              sceneSwitchDisabled={editorDirty || editorSaving}
+              sceneSwitchDisabled={editorDirty || editorSaving || uploadingAssets}
             />
           </div>
         </Suspense>

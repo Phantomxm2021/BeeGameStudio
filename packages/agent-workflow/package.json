@@ -9,16 +9,14 @@
     ".": "./src/index.ts",
     "./opencode-go": "./src/opencode-go.ts",
     "./native-diagnostics": "./src/native-diagnostics.ts",
-    "./standard-cli-usage": "./src/standard-cli-usage.ts",
-    "./standard-cli-cache": "./src/standard-cli-cache.ts",
-    "./standard-cli-provider": "./src/standard-cli-provider.ts",
     "./native-response-trace": "./src/native-response-trace.ts",
     "./subagent-activity": "./src/subagent-activity.ts",
-    "./native-file-agent": "./src/native-file-agent.ts",
-    "./native-task-access": "./src/native-task-access.ts",
     "./design-review-result": "./src/design-review-result.ts",
     "./preview-environment": "./src/preview-environment.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./runtime-environment": "./src/runtime-environment.ts",
+    "./runtime-path": "./src/runtime-path.ts",
+    "./model-protocol": "./src/model-protocol.ts"
   },
   "dependencies": {
     "zod": "^4.3.6"

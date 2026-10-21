@@ -24,7 +24,7 @@ describe('single native runtime boundary', () => {
 
   test('session manager imports only the native process runner', () => {
     const source = readFileSync(resolve(beegameRoot, 'session-manager.ts'), 'utf8')
-    expect(source).toContain("from './native-cli-process-runner'")
+    expect(source).toContain("from '../bgs/runner'")
     expect(source).not.toContain('query-engine')
   })
 })

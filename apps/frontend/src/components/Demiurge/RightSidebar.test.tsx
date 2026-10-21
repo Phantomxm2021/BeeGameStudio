@@ -22,7 +22,6 @@ vi.mock('../../contexts/ToastContext', () => ({
 
 vi.mock('../../services/api', () => ({
     api: {
-        getTaskRecovery: vi.fn().mockResolvedValue(null),
         getArtifacts: vi.fn().mockResolvedValue([]),
         getChatHistoryPaginationState: vi.fn(() => ({ initialized: false, hasMore: false })),
         getOlderChatHistory: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
@@ -84,21 +83,40 @@ describe('RightSidebar tabs', () => {
         expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn', true);
     });
 
-    it('does not start the countdown while failed execution ownership is unknown', async () => {
+    it('keeps incomplete streams manual even if a stale automatic retry ID is supplied', async () => {
         vi.useFakeTimers();
-        const pending = deferred<null>();
-        vi.mocked(api.getTaskRecovery).mockReturnValueOnce(pending.promise);
-        const onContinueTask = vi.fn();
-        render(<RightSidebar projectId="waiting-for-cleanup" lang="en" progress={0} isLoading={false}
-            messages={[{ id: 'failed', sender: 'system', type: 'error', turnId: 'failed-turn',
-                content: 'API Error: Connection error.', timestamp: Date.now() }]}
-            projectStatus={{ project_id: 'waiting-for-cleanup', phase: 'paused', blocked: true }}
+        const onContinueTask = vi.fn().mockResolvedValue(undefined);
+        render(<RightSidebar projectId="incomplete-stream" lang="en" progress={0} isLoading={false}
+            messages={[{ id: 'incomplete', sender: 'system', type: 'error', turnId: 'failed-turn',
+                content: 'API Error: OpenAI stream ended before a terminal finish_reason was received', timestamp: Date.now() }]}
+            projectStatus={{ project_id: 'incomplete-stream', phase: 'paused', blocked: true }}
             autoRetryTurnId="failed-turn" onContinueTask={onContinueTask} onSendMessage={vi.fn()}
             waitingPermission={getWaitingPermissionState([])} />);
+        const button = screen.getByRole('button', { name: 'Retry now' });
+        expect(button).toHaveTextContent('Retry');
+        expect(button).not.toHaveTextContent('Retry in');
+        await act(async () => vi.advanceTimersByTime(20_000));
+        expect(onContinueTask).not.toHaveBeenCalled();
+        fireEvent.click(button);
+        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn', false);
+    });
+
+    it('keeps retry disabled during stop without showing a recovery panel', async () => {
+        vi.useFakeTimers();
+        const onContinueTask = vi.fn();
+        const props = { projectId: 'waiting-for-cleanup', lang: 'en' as const, progress: 0, isLoading: false,
+            messages: [{ id: 'failed', sender: 'system', type: 'error' as const, turnId: 'failed-turn',
+                content: 'API Error: Connection error.', timestamp: Date.now() }],
+            projectStatus: { project_id: 'waiting-for-cleanup', phase: 'paused', blocked: true },
+            autoRetryTurnId: 'failed-turn', onContinueTask, onSendMessage: vi.fn(),
+            waitingPermission: getWaitingPermissionState([]) };
+        const view = render(<RightSidebar {...props} isStopping />);
         await act(async () => vi.advanceTimersByTime(20_000));
         expect(onContinueTask).not.toHaveBeenCalled();
         expect(screen.getByRole('button', { name: 'Retry now' })).toBeDisabled();
-        await act(async () => { pending.resolve(null); await pending.promise; });
+        expect(screen.queryByRole('button', { name: 'Settle previous execution' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
+        view.rerender(<RightSidebar {...props} isStopping={false} />);
         expect(screen.getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry in 10s');
     });
 
@@ -218,21 +236,22 @@ describe('RightSidebar tabs', () => {
         await act(async () => request.resolve(true));
         expect(getChatInput()).toHaveValue('Second project draft');
     });
-    it('shows a live question even after a completed workflow and submits it as an answer', async () => {
+    it.each([false, true])('submits a live question with explicit design authorization only when selected: %s', async authorizeChange => {
         const onResolveToolPermission = vi.fn().mockResolvedValue(undefined);
         const projectStatus = { project_id: 'p', workflow: { status: 'completed' as const } };
         render(<RightSidebar projectId="p" lang="en" progress={100} isLoading={false}
             onSendMessage={vi.fn()} messages={[]} projectStatus={projectStatus}
             onResolveToolPermission={onResolveToolPermission}
             pendingPermissions={[{ gate_id: 'question', type: 'BEEGAME_PERMISSION', permission_tool_name: 'AskUserQuestion',
-                artifact: { input: { questions: [{ question: 'Style?', options: [{ label: 'Pixel' }, { label: 'Vector' }] }] } },
+                artifact: { designChangeAllowed: authorizeChange, input: { questions: [{ question: 'Style?', options: [{ label: 'Pixel' }, { label: 'Vector' }] }] } },
             }]}
             waitingPermission={getWaitingPermissionState()} />);
         expect(screen.getByTestId('beegame-question-panel')).toBeInTheDocument();
         expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
+        if (authorizeChange) fireEvent.click(screen.getByRole('checkbox', { name: /Authorize the design changes/ }));
         fireEvent.click(screen.getByRole('radio', { name: 'Pixel' }));
         fireEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
-        expect(onResolveToolPermission).toHaveBeenCalledWith({ gate_id: 'question' }, 'allow', 'once', { 'Style?': 'Pixel' });
+        expect(onResolveToolPermission).toHaveBeenCalledWith({ gate_id: 'question', ...(authorizeChange ? { intent: 'change' } : {}) }, 'allow', 'once', { 'Style?': 'Pixel' });
     });
     it.each(['Bash', 'AskUserQuestion'])('shows only the actionable %s card while waiting for permission', (toolName) => {
         const projectStatus = { project_id: 'p', blocked: true, blocked_reason: 'Bash requires permission.' };

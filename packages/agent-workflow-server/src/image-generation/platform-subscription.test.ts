@@ -15,7 +15,7 @@ import { createHostedImageGenerationProvider } from './index'
 import { ImageAttemptStore } from './attempt'
 import { ImageGenerationService } from './service'
 import { openImageGenerationAccess } from './access'
-import { getValidChatGPTAuth } from '../../../../src/services/api/openai/chatgptAuth'
+import { getValidChatGPTAuth } from '../bgs/auth'
 
 const config = imageConfigSchema.parse({ provider: 'chatgpt-subscription', baseUrl: CHATGPT_IMAGE_ENDPOINT,
   subscriptionOwnerId: 'administrator', model: 'fixture-image', responseModel: 'fixture-response',
@@ -26,9 +26,9 @@ const config = imageConfigSchema.parse({ provider: 'chatgpt-subscription', baseU
     fixedCreditsByVariant: { 'medium:1024x1024': 3 } } })
 function login(root: string, owner: string) {
   const directory = join(getUserDashboardDataRoot(root, owner), '.runtime/app')
-  mkdirSync(directory, { recursive: true })
+  mkdirSync(join(directory, 'bgs'), { recursive: true })
   const token = 'fixture.' + Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url') + '.' + owner
-  writeFileSync(join(directory, 'openai-chatgpt-auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: {
+  writeFileSync(join(directory, 'bgs', 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: {
     access_token: token, refresh_token: 'PRIVATE_REFRESH_' + owner, id_token: 'PRIVATE_ID_' + owner, account_id: 'account-' + owner } }))
   return token
 }
@@ -107,56 +107,6 @@ test('local and service-backed platform config require the designated login, nev
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('existing device login writes one administrator credential shared by model and image readers without activation or billing changes', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'admin-shared-login-')), previousFetch = globalThis.fetch
-  const cleanups: Array<() => void> = [], urls: string[] = []
-  const accessToken = 'fixture.' + Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url') + '.signature'
-  globalThis.fetch = (async (input, _init) => {
-    const url = String(input); urls.push(url)
-    if (url.endsWith('/usercode')) return Response.json({ device_auth_id: 'fixture-device', user_code: 'fixture-code', interval: 1 })
-    if (url.endsWith('/deviceauth/token')) return Response.json({ authorization_code: 'fixture-code', code_verifier: 'fixture-verifier' })
-    if (url.endsWith('/oauth/token')) return Response.json({ access_token: accessToken, id_token: 'PRIVATE_ID', refresh_token: 'PRIVATE_REFRESH' })
-    throw new Error('Unexpected network request in local login fixture')
-  }) as typeof fetch
-  try {
-    // Existing unenabled profile: authorization must not select it or modify its prices.
-    saveLocalImageConfig(root, { ...config, provider: 'openai', baseUrl: 'https://api.openai.com/v1/images/generations', apiKey: '', billing: null })
-    const settingsBefore = readFileSync(join(root, 'image-generation.json'), 'utf8')
-    const app = createAgentWorkflowApp({ dashboardDataRoot: root, defaultWorkspacePath: root,
-      modelConfigStore: false, skillsConfig: false, currentUser: { id: 'administrator', role: 'owner' },
-      registerCleanup: cleanup => cleanups.push(cleanup) })
-    const get = (path: string) => app.fetch(new Request('http://local' + path))
-    const before = await (await get('/api/model-catalog')).json() as Array<{ id: string; connection: unknown }>
-    const start = await app.fetch(new Request('http://local/api/model-connections/personal-chatgpt-subscription/login', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method: 'chatgpt-subscription' }) }))
-    expect(start.status).toBe(200)
-    const login = await start.json() as { id: string; userCode: string }
-    expect(login.userCode).toBe('fixture-code')
-    let status = 'pending'
-    for (let i = 0; i < 20 && status === 'pending'; i++) {
-      status = ((await (await get('/api/model-logins/' + login.id)).json()) as { status: string }).status
-      if (status === 'pending') await new Promise(resolve => setTimeout(resolve, 5))
-    }
-    expect(status).toBe('complete')
-    const catalog = await (await get('/api/model-catalog')).json() as Array<{ id: string; connection: Record<string, unknown> }>
-    expect(catalog.find(item => item.id === 'personal-chatgpt-subscription')!.connection.chatgptConnected).toBe(true)
-    const modelChoices = (items: typeof catalog) => items.map(({ id, connection }) => ({ id, method: connection.method, isPreferred: connection.isPreferred }))
-    expect(modelChoices(catalog)).toEqual(modelChoices(before as typeof catalog))
-    const image = await (await get('/api/image-generation/settings?provider=chatgpt-subscription')).json()
-    expect(image).toMatchObject({ subscriptionConnected: true, billing: null })
-    expect(readFileSync(join(root, 'image-generation.json'), 'utf8')).toBe(settingsBefore)
-    const authDirectory = join(getUserDashboardDataRoot(root, 'administrator'), '.runtime/app')
-    expect((await getValidChatGPTAuth(authDirectory)).accessToken).toBe(accessToken)
-    expect(readdirSync(authDirectory).filter(file => file === 'openai-chatgpt-auth.json')).toHaveLength(1)
-    const member = createAgentWorkflowApp({ dashboardDataRoot: root, defaultWorkspacePath: root, modelConfigStore: false,
-      skillsConfig: false, currentUser: { id: 'member', role: 'viewer' }, registerCleanup: cleanup => cleanups.push(cleanup) })
-    const memberCatalog = await (await member.fetch(new Request('http://local/api/model-catalog'))).json() as typeof catalog
-    expect(memberCatalog.find(item => item.id === 'personal-chatgpt-subscription')!.connection.chatgptConnected).toBe(false)
-    expect(JSON.stringify([catalog, image, login])).not.toContain('PRIVATE_')
-    expect(urls).toHaveLength(3) // Only mocked authorization, no inference, image or wallet requests.
-  } finally { cleanups.forEach(cleanup => cleanup()); globalThis.fetch = previousFetch; rmSync(root, { recursive: true, force: true }) }
-})
-
 test('shared login generates once per user, charges each user the frozen fixed price, and retains actual usage', async () => {
   const root = mkdtempSync(join(tmpdir(), 'platform-image-wallet-')), billing = wallet(), png = await bytes()
   const administrator = login(root, 'administrator')
@@ -188,7 +138,7 @@ test('shared login generates once per user, charges each user the frozen fixed p
     await expect(make().generate({ ownerId: 'member', projectId: 'fixture', requestId: 'unpriced', config,
       request: { prompt: 'fixture', quality: 'high' } })).rejects.toMatchObject({ stage: 'price-unavailable' })
     expect(calls).toBe(2)
-    unlinkSync(join(getUserDashboardDataRoot(root, 'administrator'), '.runtime/app/openai-chatgpt-auth.json'))
+    unlinkSync(join(getUserDashboardDataRoot(root, 'administrator'), '.runtime/app/bgs/auth.json'))
     await expect(provider.generate(config, { prompt: 'fixture' }, { ownerId: 'member-one', source: 'platform' }))
       .rejects.toMatchObject({ outcome: 'rejected', code: 'subscription-login-unavailable' })
     expect(calls).toBe(2)

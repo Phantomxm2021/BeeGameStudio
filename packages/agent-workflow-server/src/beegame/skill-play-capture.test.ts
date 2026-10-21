@@ -7,7 +7,7 @@ import { openPreviewTestAccess } from './preview-test-access'
 import { sharedPlaywright } from './shared-playwright'
 import { sharedContentChecker } from './content-checker-runtime'
 
-const source = fileURLToPath(new URL('../../../../.beegame/skills/builtinskills/game-playtest-performance/scripts/capture-play.mjs', import.meta.url))
+const source = fileURLToPath(new URL('../../../../.beegame/skills/bgs-game-skills/game-playtest-performance/scripts/capture-play.mjs', import.meta.url))
 
 test('copied capture helper has a read-only CLI and rejects missing active access', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-play-skill-cli-'))

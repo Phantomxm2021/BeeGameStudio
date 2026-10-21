@@ -22,12 +22,12 @@ import {
   type ChatAttachmentPayload,
 } from '../services/api'
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api'
-import type { ProjectEventMessage } from '../types/message'
+import type { ProjectEventMessage, TokenUsage } from '../types/message'
 import { isProjectExecutionActive } from '../utils/chatActivity'
 import type { ProjectEventPollingState } from './useProjectEventPolling'
 import { normalizeChatHistory } from '../utils/chatHistory'
 import { normalizeProjectEventSemanticType } from '../utils/messageSemantics'
-import { isModelRequestFailure } from '../utils/modelRequestFailure'
+import { canAutomaticallyRetryModelFailure } from '../utils/modelRequestFailure'
 import { getWaitingPermissionState } from '../utils/waitingPermission'
 
 const newClientMessageId = (): string =>
@@ -102,6 +102,7 @@ export interface UseChatReturn {
   resolveToolPermission: (
     permission: {
       gate_id: string
+      intent?: 'change'
     },
     decision?: 'allow' | 'deny',
     scope?: 'once' | 'session',
@@ -121,6 +122,9 @@ export interface UseChatReturn {
 
   /** Current task ID (if any) */
   currentTaskId: string | null
+
+  /** Last acknowledged session usage, including after the turn stops. */
+  sessionTokenUsage: TokenUsage | undefined
 
   /** Whether the task is paused and can be continued */
   canContinue: boolean
@@ -184,9 +188,14 @@ export const useChat = ({
 
   // State management
   const [isLoading, setIsLoading] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const submissionBoundaryAt = useRef(0)
   const [isStopping, setIsStopping] = useState(false)
   const isStoppingRef = useRef(false)
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
+  const [usageSession, setUsageSession] = useState<{ projectId: string; sessionId: string } | null>(null)
+  const sessionTokenUsage = useSystemStore(state => usageSession?.projectId === projectId
+    ? state.taskUsage[usageSession.sessionId] : undefined)
   const [canContinue, setCanContinue] = useState(false)
   const [autoRetryTurnId, setAutoRetryTurnId] = useState<string | null>(null)
   const autoRetryUsed = useRef(false)
@@ -262,6 +271,9 @@ export const useChat = ({
     isStoppingRef.current = false
     setIsStopping(false)
     setIsLoading(false)
+    setIsSubmitting(false)
+    submissionBoundaryAt.current = 0
+    continuing.current = false
     setCurrentTaskId(null)
     setCanContinue(false)
     setAutoRetryTurnId(null)
@@ -510,12 +522,13 @@ export const useChat = ({
           break
 
         case 'status':
+          // Old turn statuses do not describe a newly submitted request.
+          if (message.timestamp && message.timestamp <= submissionBoundaryAt.current) break
           if (['finished', 'stopped', 'idle', 'failed'].includes(message.status || '')) {
+            const completedAt = message.timestamp || Date.now()
             useChatStore.getState().settleActivity(message.task_id, message.turnId || message.turn_id,
               message.status === 'stopped' ? 'stopped' : message.status === 'failed' ? 'failed' : 'incomplete',
-              message.timestamp || Date.now(),
-              message.status === 'idle' && (message.turnId || message.turn_id)
-                ? message.timestamp || Date.now() : undefined)
+              completedAt, completedAt)
           }
           // Task status update
           // Requirements: 6.2
@@ -553,6 +566,9 @@ export const useChat = ({
             message.status === 'failed'
           ) {
             setIsLoading(false)
+            setCurrentTaskId(null)
+            setCurrentSender(null)
+            setIsStreaming(false)
             if (message.content) {
               addMessage({
                 id: `status-${message.status}-${message.task_id || 'na'}-${String(message.content).substring(0, 48)}`,
@@ -692,9 +708,11 @@ export const useChat = ({
           break
 
         case 'error': {
+          if (message.timestamp && message.timestamp <= submissionBoundaryAt.current) break
           if (message.project_id && message.project_id !== refs.projectId) break
+          const completedAt = message.timestamp || Date.now()
           useChatStore.getState().settleActivity(message.task_id, message.turnId || message.turn_id,
-            'failed', message.timestamp || Date.now())
+            'failed', completedAt, completedAt)
           const errContent =
             message.content ||
             message.message ||
@@ -709,7 +727,7 @@ export const useChat = ({
           const failureId = message.message_id || `error-${message.task_id || 'na'}-${failedTurnId || contextualError.substring(0, 32)}`
           if (failureId !== lastFailure.current) {
             lastFailure.current = failureId
-            setAutoRetryTurnId(failedTurnId && isModelRequestFailure(errContent) && !autoRetryUsed.current
+            setAutoRetryTurnId(failedTurnId && canAutomaticallyRetryModelFailure(errContent) && !autoRetryUsed.current
               ? failedTurnId : null)
           }
           addMessage({
@@ -772,6 +790,8 @@ export const useChat = ({
               sequence: message.sequence,
               toolUseId: message.tool_use_id,
               toolStatus: message.tool_status || 'running',
+              toolExitCode: message.tool_exit_code,
+              toolDurationMs: message.tool_duration_ms,
               toolDetail: message.tool_detail,
               toolOutput: message.tool_output,
               toolDiff: message.tool_diff,
@@ -829,6 +849,8 @@ export const useChat = ({
               toolName: message.tool,
               toolUseId: message.tool_use_id,
               toolStatus: message.tool_status || status,
+              toolExitCode: message.tool_exit_code,
+              toolDurationMs: message.tool_duration_ms,
               toolDetail: message.tool_detail,
               toolOutput: message.subagent_output || message.tool_output || toolResult,
               attachments: message.attachments,
@@ -858,6 +880,7 @@ export const useChat = ({
           // Requirements: 4.3
           if (message.usage) {
             updateTokenUsage(message.usage, refs.projectId, message.task_id)
+            setUsageSession({ projectId: refs.projectId, sessionId: message.task_id })
             refs.onTaskEvent?.('usage', message.usage)
           }
 
@@ -935,20 +958,30 @@ export const useChat = ({
 
   useEffect(() => {
     if (!projectStatus || projectStatus.project_id !== projectId) return
-    if (isProjectExecutionActive(projectStatus)) {
+    if (Date.parse(projectStatus.updated_at ?? '') <= submissionBoundaryAt.current) return
+    if (isProjectExecutionActive(projectStatus) || projectStatus.active_subagents?.length) {
       setIsLoading(true)
       setCanContinue(false)
       setCurrentTaskId(current => current || projectId)
       return
     }
+    // Resume preflight precedes native acceptance. Its old idle snapshot is
+    // not evidence that the newly submitted request stopped.
+    if (isSubmitting) return
     // The backend snapshot is authoritative for whether a native turn is
     // alive. In particular, a server restart recovers an unterminated turn as
     // paused/failed. Leaving the previous local loading flag untouched for
     // those phases permanently locks the composer even though no BeeGame
     // worker exists. Approval state has its own explicit UI lock.
+    const observedAt = Date.parse(projectStatus.updated_at ?? '')
+    if (historyReady && Number.isFinite(observedAt) && projectStatus.active_subagents?.length === 0 && !pendingPermissions.length) {
+      useChatStore.getState().settleInactiveActivity(observedAt)
+    }
     setIsLoading(false)
     setCurrentTaskId(null)
-  }, [projectId, projectStatus])
+    setCurrentSender(null)
+    setIsStreaming(false)
+  }, [projectId, projectStatus, isSubmitting, historyReady, pendingPermissions.length, setCurrentSender, setIsStreaming])
 
   // Initialize the reconnect-safe runtime event transport
   const { state: wsState, reconnect } = useProjectEventPolling({
@@ -971,6 +1004,7 @@ export const useChat = ({
       attachments?: ChatAttachmentPayload[],
       supersedesMessageId?: string,
     ) => {
+      if (isSubmitting) return false
       if (waitingPermission.isBlockingChat) {
         emitWaitingPermissionBlock(waitingPermission.message)
         return false
@@ -987,6 +1021,8 @@ export const useChat = ({
       const wasBusy = isLoading || (runtime?.project_id === projectId &&
         (isProjectExecutionActive(runtime) || Boolean(runtime.active_subagents?.length)))
       try {
+        submissionBoundaryAt.current = Date.parse(runtime?.updated_at ?? '') || Date.now()
+        setIsSubmitting(true)
         setIsLoading(true)
         setCanContinue(false)
         if (wsState !== 'connected') {
@@ -1059,6 +1095,8 @@ export const useChat = ({
         showToastError?.(errorMessage)
         onError?.(error instanceof Error ? error : new Error(errorMessage))
         return false
+      } finally {
+        if (isCurrentRequest()) setIsSubmitting(false)
       }
     },
     [
@@ -1074,6 +1112,7 @@ export const useChat = ({
       waitingPermission,
       emitWaitingPermissionBlock,
       isLoading,
+      isSubmitting,
     ],
   )
 
@@ -1085,7 +1124,7 @@ export const useChat = ({
     const generation = lifecycleRef.current.generation
     const isCurrent = () => lifecycleRef.current.mounted &&
       lifecycleRef.current.projectId === projectId && lifecycleRef.current.generation === generation
-    if (!isCurrent() || continuing.current) return
+    if (!isCurrent() || continuing.current || isSubmitting) return
     cancelAutoRetry()
     const runtime = useProjectStore.getState().projectStatus
     if (runtime?.project_id === projectId &&
@@ -1095,6 +1134,8 @@ export const useChat = ({
       return
     }
     try {
+      submissionBoundaryAt.current = Date.parse(runtime?.updated_at ?? '') || Date.now()
+      setIsSubmitting(true)
       setIsLoading(true)
       setCanContinue(false)
       if (wsState !== 'connected') {
@@ -1130,8 +1171,11 @@ export const useChat = ({
 
       showToastError?.(errorMessage)
       onError?.(error instanceof Error ? error : new Error(errorMessage))
-    } finally { continuing.current = false }
+    } finally {
+      if (isCurrent()) { continuing.current = false; setIsSubmitting(false) }
+    }
   }, [
+    isSubmitting,
     cancelAutoRetry,
     projectId,
     currentTaskId,
@@ -1170,6 +1214,7 @@ export const useChat = ({
         setIsLoading(false)
         setCurrentTaskId(null)
         setCurrentSender(null)
+        setIsStreaming(false)
       }
       setCanContinue(false)
       void refreshProjectVisibility().catch(error => console.warn('[useChat] Stop state refresh failed:', error))
@@ -1201,11 +1246,11 @@ export const useChat = ({
       setIsStopping(false)
     }
   }, [
-    cancelAutoRetry, currentTaskId, projectId, addMessage, setCurrentSender, onError, refreshProjectVisibility])
+    cancelAutoRetry, currentTaskId, projectId, addMessage, setCurrentSender, setIsStreaming, onError, refreshProjectVisibility])
 
   const resolveToolPermission = useCallback(
     async (
-      permission: { gate_id: string },
+      permission: { gate_id: string; intent?: 'change' },
       decision: 'allow' | 'deny' = 'allow',
       scope: 'once' | 'session' = 'once',
       answers?: Record<string, string>,
@@ -1231,6 +1276,7 @@ export const useChat = ({
           decision,
           scope,
           ...(answers ? { answers } : {}),
+          ...(permission.intent ? { intent: permission.intent } : {}),
         })
 
         if (!answers) showToastSuccess?.(submittedMessage)
@@ -1292,10 +1338,11 @@ export const useChat = ({
     stopTask,
     resolveToolPermission,
     permissionState,
-    isLoading,
+    isLoading: isLoading || isSubmitting,
     isStopping,
     currentTaskId,
     canContinue,
     wsState,
+    sessionTokenUsage,
   }
 }

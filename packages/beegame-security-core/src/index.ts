@@ -1,5 +1,6 @@
 export {
   createPinnedHttpAgent,
+  createPinnedLookup,
   createPinnedHttpsAgent,
   createPinnedUndiciDispatcher,
   inspectOutboundTarget,

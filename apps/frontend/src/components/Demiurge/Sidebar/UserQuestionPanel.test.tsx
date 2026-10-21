@@ -44,3 +44,20 @@ describe('native user questions with BeUI ApprovalCard', () => {
         expect(onDismiss).toHaveBeenCalledOnce();
     });
 });
+
+
+it('design changes require a separate explicit choice on the current question, with ordinary answers unchanged', () => {
+    const onSubmit=vi.fn().mockResolvedValue(undefined);
+    const props={input:{questions:input.questions.slice(0,1)},lang:'zh' as const,busy:false,onSubmit};
+    const {rerender}=render(<UserQuestionPanel {...props} />);
+    expect(screen.queryByRole('checkbox',{name:/授权/})).not.toBeInTheDocument();
+    rerender(<UserQuestionPanel {...props} allowDesignChange />);
+    const authorization=screen.getByRole('checkbox',{name:/授权本次回答中的设计变更/});
+    expect(authorization).not.toBeChecked();
+    fireEvent.click(screen.getByRole('radio',{name:/Pixel/}));
+    fireEvent.click(screen.getByRole('button',{name:'提交回答'}));
+    expect(onSubmit).toHaveBeenLastCalledWith({'Which style?':'Pixel'});
+    fireEvent.click(authorization);
+    fireEvent.click(screen.getByRole('button',{name:'提交回答'}));
+    expect(onSubmit).toHaveBeenLastCalledWith({'Which style?':'Pixel'},'change');
+});

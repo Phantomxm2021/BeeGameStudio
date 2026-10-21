@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { DESIGN_METHODS } from '@bee-game-studio/agent-workflow/design-review-result'
 import { z } from 'zod/v4'
 import { readSessionTranscriptFromDisk, type BeeGameAttachment, type BeeGameSessionManager, type StartBeeGameSessionInput } from '../session-manager'
 import { pauseRun, digest, isInitialSliceTurn, WorkflowError, type Run, type AgentTurn, type AgentMessage } from './state'
@@ -46,18 +45,18 @@ export const agentMessageSchema = z.object({
 // Business data and authorization contracts only. Execution methods stay in Skills.
 const professionalContextParagraphs = [
   'Consume applicable BGS editable visual nodes and bindings in the actual runtime, without a second hardcoded layout. Unity/Godot use native data; do not migrate source-only projects or duplicate native content into Web JSON. Maintain resources and bindings together.',
-  'Honor explicit resource sources and usage rights; AI is not the default for all core art. New AI production images use purpose: production and existing requirementIds. Use tool help for formats and contracts. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Procedural replacement of required art needs a concrete blocker and authorization; placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
-  'Separate editable sources from publication output. Use registered runtime-file selection: preserve every registered resource file_paths entry and dependency local_path, including on-demand resources and required licenses. Do not copy all production material or auto-delete advisory inventory entries. Keep a single source, not another packaging manifest.',
+  'Honor explicit resource sources and usage rights; AI is not the default for all core art. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Procedural replacement of required art needs a concrete blocker and authorization; placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
+  'Keep editable sources separate from publication output and retain required licenses.',
 ]
 const firstVersionDeliveryContext = 'Deliver the confirmed scope using the design dependencies and professional methods in the project guide; design records live under docs/. Subsequent production revises those same records.'
-const editableWebDeliveryContext = 'This project requires BGS visual editing: deliver applicable content/scenes/*.json and content/ui/*.json through the existing content/index.json. Pure UI games may use a ui-screen/ui-hud entry without an empty Scene. React/Canvas does not waive runtime consumption of these saved sources.'
+const editableWebDeliveryContext = 'This project requires BGS visual editing: content/scenes/*.json and content/ui/*.json are editable data consumed by the confirmed engine, not a separate engine or required game scaffold. Register applicable sources in content/index.json; pure UI games need no empty Scene. The optional browser consumer supports a subset of this data; project code implements the remaining behavior.'
 export const agentProfessionalContext = [PROJECT_WORKING_CONVENTIONS, ...professionalContextParagraphs, firstVersionDeliveryContext].join('\n')
 // Design conventions come from the saved project guide, without a legacy fallback.
 export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation'>>, followup = false) => [
   ...professionalContextParagraphs,
+  'Current BGS contract: the current user assignment determines scope and stopping point. Select Skills and organize/self-check the work yourself. Machine design indexes, task coverage graphs and finalization of plain documents are not required, including when an older BGS-generated project guide says otherwise. Preserve explicit user requirements and Editor data contracts.',
   ...(!followup && run.creation?.initialDelivery === 'design-led-first-version' ? [firstVersionDeliveryContext] : []),
   ...(run.creation?.editableContent ? [editableWebDeliveryContext] : []),
-  ...(run.creation?.webBoot ? ['This new React/Web project uses BGS-maintained startup/storage wiring. The current webBoot facts supply the game factory contract; the existing implementation handoff installs the thin entry after planning, without a game/UI template.'] : []),
 ].join('\n')
 export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run['sourceEdits']> = []): string {
   return [...(message.intent==='discuss' ? ['This request authorizes discussion only, without changes or execution.'] : []),
@@ -79,29 +78,28 @@ function agentGoalDisplayText(run: Run): string {
 
 export function agentGoalPrompt(run: Run): string {
   if (run.creation?.initialDelivery === 'playable-slice') return [
-    'This first assignment delivers one small, complete player experience for user playtesting, not the full game. Reduced content quantity does not waive the required design dependencies. Keep the complete confirmed goal below unchanged for subsequent work.',
+    'This first assignment delivers one small, complete player experience for user playtesting, not the full game. Reduced content quantity does not waive the required design dependencies. Keep the complete confirmed goal unchanged for subsequent work.',
     'Reduce content quantity, not the controls, readability or audiovisual feedback needed to judge the chosen experience. Preserve confirmed core rules; a proposed rule change is not authorization to implement it. Record the experience focus and deferred content in the existing concise design record, implement and run it, and show the actual preview and observations. Identify unresolved experience questions, then end this turn for user feedback. Do not expand the full content set in this assignment or claim game acceptance.',
     ...(run.creation.webStarter ? ['The host supplied a generic React/Canvas connection scaffold: content/ is consumed by src/main.jsx, src/game.js owns simulation and UI state/actions. It is not gameplay or an approved art style. Extend the connected sources; do not replace saved Scene/UI data with a second hardcoded layout.'] : []),
-    'Confirmed full goal (scope retained, not all due in this first assignment):\n'+run.requirements.text,
+    'Use the complete confirmed goal in bgsConfirmedBrief; its full scope is retained, not all due in this first assignment.',
   ].join('\n\n')
-  const initialDesign = run.creation?.initialDelivery === 'design-led-first-version' &&
-    !(run.agentTurns ?? []).some(turn => turn.nativeSessionId)
   return [
-    (initialDesign ? `/bgs-builtins:${DESIGN_METHODS['GDD.md'].skills[0]} ` : '') +
-      'Develop the game from this complete confirmed goal in the current project.',
-    'Confirmed goal:\n'+run.requirements.text,
+    'Complete the current user assignment in this project. Select relevant Skills, organize the work and self-check the requested deliverables. Respect the production dependencies for work in scope; do not infer additional deliverables from the project creation mode. Stop at the requested boundary and report completed work, blockers and unverified outcomes.',
+    'Use the complete confirmed goal supplied in bgsConfirmedBrief.',
   ].join('\n\n')
 }
 
 /** Literal saved inputs, not an LLM summary or replay of prior operations.
  * Assistant-only assumptions are deliberately not claimed as retained. */
 export function focusedExecutionFacts(run: Run, events: Awaited<ReturnType<typeof readSessionTranscriptFromDisk>>) {
+  const {text: _confirmedBrief, ...requirements} = run.requirements
   const questions=new Map(events.filter(e=>e.type==='permission.requested' && e.payload?.toolName==='AskUserQuestion')
     .map(e=>[e.payload?.toolUseID,e.payload?.input as {questions?:unknown}|undefined]))
   const answeredQuestions=events.filter(e=>e.type==='permission.resolved' && e.payload?.toolName==='AskUserQuestion')
     .flatMap(e=>{
       const value=e.payload?.input as {questions?: unknown;answers?: unknown}|undefined
       return [{eventId:e.id,turnId:e.turnId,status:e.payload?.decision,
+        ...(e.payload?.intent === 'change' ? {intent:'change'} : {}),
         questions:value?.questions??questions.get(e.payload?.toolUseID)?.questions,
         ...(e.payload?.decision==='allow'&&value?.answers?{answers:value.answers}:{})}]
     })
@@ -124,7 +122,8 @@ export function focusedExecutionFacts(run: Run, events: Awaited<ReturnType<typeo
   return {mode:'focused',source:'saved-user-inputs-and-current-requirements',
     ...(run.agentTurns?.at(-1) && isInitialSliceTurn(run,run.agentTurns.at(-1)!)
       ? {initialAssignment:agentGoalPrompt(run)} : {}),
-    requirements:run.requirements,
+    // The literal current requirements are supplied once through bgsConfirmedBrief.
+    requirements,
     // Message/change text already belongs to requirements; old work/continue
     // requests are execution history. Discussion may hold otherwise unsaved choices.
     priorUserRequests:run.agentTurns!.slice(0,-1).flatMap(t=>t.message?.intent==='discuss'?[{requestKey:t.requestKey,intent:t.message.intent,text:t.message.text}]:[]),
@@ -145,17 +144,15 @@ export async function agentTurnHandoffReason(run: Run, turn: AgentTurn) {
   // receipt. Inspect the newest actual record, including failed/pending ones.
   const record=run.agentTurns?.flatMap(t=>t.measurements??[]).at(-1)
   let acceptanceNote = ''
-  if (run.creation?.initialDelivery === 'design-led-first-version') {
+  if (record?.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
     const acceptance = await inspectDesignAcceptance(run.workspacePath,true,run.creation?.editableContent,
       {runId:run.id,requirementsRevision:run.requirements.revision})
     const counts = ['passed','failed','unverified'].map(status =>
       status + '=' + acceptance.requirementChecks.filter(check=>check.status===status).length).join(', ')
-    acceptanceNote = ' Itemized acceptance: ' + (acceptance.valid ? 'report coverage/version/evidence validated; ' : acceptance.summary + ' ') + counts +
+    acceptanceNote = ' Runtime report: ' + (acceptance.valid ? 'reported checks/version/evidence validated; ' : acceptance.summary + ' ') + counts +
       '. Observation truth and visual/game quality are not host-certified.'
-    if (record && acceptance.valid && !record.reportPaths.includes(DESIGN_ACCEPTANCE_PATH))
-      acceptanceNote += ' The acceptance report is not attached to this Web measurement; no measured report freshness is established.'
   }
-  if(!record)return 'Native goal turn ended; game delivery and target-runtime evidence remain unverified.' + acceptanceNote
+  if(!record)return 'Native goal turn ended; execution completion is not acceptance. See the Agent report and saved files for the requested deliverables and unresolved work. No target-runtime measurement was recorded.'
   try {
     const freshness=await inspectAgentMeasurementInputs(run,record)
     const invalid=blockingRegisteredContentChecks(record)
@@ -172,7 +169,7 @@ export async function agentTurnHandoffReason(run: Run, turn: AgentTurn) {
 /** Native owns planning/tools/delegation; existing CAS store owns the writer.
  * No automatic model retries or stage advancement. */
 export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions: BeeGameSessionManager; resourceLibraryBaseUrl?: string; exitReceipts?: HostExitReceipts }) {
-  const workerId = randomUUID(), active = new Map<string,{sessionId:string;runId:string;turnId?:string}>(), pending = new Set<Promise<void>>()
+  const workerId = randomUUID(), active = new Map<string,{sessionId:string;runId:string;turnId?:string;work?:Promise<void>}>(), pending = new Set<Promise<void>>()
   // Live original-host observations; never loaded from project files,
   // user claims or process liveness. Lost on host restart intentionally.
   const observedExits=new Map<string,{runId:string;facts:Partial<AgentTurn>}>()
@@ -244,7 +241,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       const previous=run.agentTurns!.filter(t=>t.attemptId!==turn.attemptId).at(-1)
       await assertManagedWebBoot(run)
       if (!turn.message) await installWebStarter(run)
-      const focused=turn.message?.contextMode==='focused'
+      const focused=turn.message?.contextMode==='focused' || Boolean(previous?.nativeSessionId && previous.nativeRuntime !== 'bgs')
       if(focused)executionContext=focusedExecutionFacts(run,await readSessionTranscriptFromDisk(run.chatSessionId,run.workspacePath))
       if(turn.message && input.sessions.get(turn.sessionId)?.status==='running') {
         // A restored idle Chat may lack its runtime snapshot. start() otherwise
@@ -255,14 +252,23 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       const session = input.sessions.start({ workspacePath:run.workspacePath, projectId:run.projectId, userId:run.ownerId,
         transcriptSessionId:run.chatSessionId, modelConfigId:options.modelConfigId, language:options.language,
         userDataRoot:options.userDataRoot,
-        ...(focused ? {freshNativeContext:true} : turn.message && previous?.nativeSessionId ? {resumeNativeSessionId:previous.nativeSessionId}:{}),
-        authToken:options.authToken, getValidAuthToken:options.getValidAuthToken })
+        ...(focused ? {freshNativeContext:true} : turn.message && previous?.nativeRuntime === 'bgs' && previous.nativeSessionId ? {resumeNativeSessionId:previous.nativeSessionId}:{}),
+        authToken:options.authToken, getValidAuthToken:options.getValidAuthToken,
+        workflowQuestionGuard: async (request, decision) => {
+          const current = await read(run)
+          if (!sameWriter(current,turn) || current.paused)
+            throw new WorkflowError('stale-attempt','This question no longer belongs to the active project turn')
+          if (decision?.intent === 'change') {
+            await measurement.authorizeDesignChange(request.toolUseID)
+            input.sessions.setProjectDesignLocked(run.chatSessionId,false)
+          }
+          return {runId:run.id,attemptId:turn.attemptId,designChangeAllowed:Boolean(current.designBaseline)}
+        } })
       if (session.id!==run.chatSessionId) throw new Error('Native goal must use the bound project conversation')
       input.sessions.setProjectDesignLocked(session.id,Boolean(run.designBaseline))
       input.sessions.setProjectManagedWebBoot(session.id,Boolean(run.creation?.webBoot))
       const prompt = turn.message ? agentMessagePrompt(turn.message,
         run.sourceEdits?.filter(e=>e.fence>(run.agentTurns?.at(-2)?.fence??0))) : agentGoalPrompt(run)
-      const entrySkill = !turn.message && prompt.startsWith('/') ? prompt.slice(1, prompt.indexOf(' ')) : undefined
       await input.sessions.sendWithDisplay(session.id, prompt, {
         displayKind:turn.message ? 'workflow_v3_'+turn.message.intent : 'workflow_v3_goal',
         displayText:turn.message?.text ?? agentGoalDisplayText(run),
@@ -285,8 +291,8 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
           const guide=projectGuideContext(savedGuide)
           // A committed change whose native submission never started is not
           // in resumed model history. Carry its literal user data under this
-          // new authorization; metadata-only confirmedBriefContext is not a
-          // model message, and replaying the old request would be incorrect.
+          // new authorization. bgsConfirmedBrief supplies the current aggregate
+          // requirements; these entries preserve which changes were not submitted.
           const preceding=run.agentTurns!.slice(0,-1),lastSubmitted=preceding.findLastIndex(t=>!t.notStarted)
           const pendingChanges=preceding.slice(lastSubmitted+1).filter(t=>t.notStarted===true &&
             (t.message?.intent==='change' || t.message?.intent==='message'))
@@ -318,10 +324,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       if(failure) throw new Error(failure.text || 'Native goal turn failed; partial candidates are not accepted')
       if (!turnId || !events.some(e=>e.type==='turn.completed') || events.some(e=>e.type==='turn.failed'))
         throw new Error('Native goal turn did not complete; partial candidates are not accepted')
-      // A missing/disabled native entry can return a local command message
-      // without querying. Do not record that as successful goal execution.
-      if (entrySkill && !skillEvidence(events).some(use => use.source === 'command' && use.name === entrySkill && use.status === 'loaded'))
-        throw new Error(`Native entry Skill did not load: ${entrySkill}; the goal was not completed`)
       if (input.sessions.runtimeSnapshot(session.id).activeSubagentToolUseIds.length)
         throw new Error('Native background work is unfinished')
     } catch (error) { failed=error instanceof Error?error.message:'Native goal execution failed' }
@@ -337,7 +339,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       else {try {await measurement.close()} finally {try {await preview?.close()} finally {await image?.close()}}}
     }
     const snapshot=input.sessions.runtimeSnapshot(turn.sessionId)
-    observedExits.set(turn.attemptId,{runId:run.id,facts:{turnId,nativeSessionId:snapshot.nativeSessionId,
+    observedExits.set(turn.attemptId,{runId:run.id,facts:{turnId,nativeRuntime:'bgs',nativeSessionId:snapshot.nativeSessionId,
       usage:turnId && snapshot.turnDiagnostics?.turnId===turnId ? snapshot.turnDiagnostics.usage : undefined,
       skillUses:skillEvidence(input.sessions.transcript(turn.sessionId).filter(e=>e.turnId===turnId)),
       designFileChanges:measurement.designFileChanges(),quiescedAt:new Date().toISOString()}})
@@ -434,7 +436,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       // evidence conservatively instead of guessing intent from keywords.
       next.planRevision++;next.deliveryEligible=false
     }
-    const turn:AgentTurn={attemptId:randomUUID(),requestKey,sessionId:run.chatSessionId,
+    const turn:AgentTurn={nativeRuntime:'bgs',attemptId:randomUUID(),requestKey,sessionId:run.chatSessionId,
       workerId,fence:next.fence,status:'running',startedAt:new Date().toISOString(),
       requirementsRevision:next.requirements.revision,...(message?{message}:{})}
     next.agentTurns!.push(turn);next.writer={attemptId:turn.attemptId,fence:turn.fence,workerId}
@@ -462,6 +464,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     }
     active.set(turn.attemptId,{sessionId:turn.sessionId,runId:next.id})
     const work=execute(next,turn,options).finally(()=>{pending.delete(work);active.delete(turn.attemptId)})
+    active.get(turn.attemptId)!.work=work
     pending.add(work);void work.catch(error=>console.error('[BGS V3] Native goal settlement incomplete', {
       attemptId:turn.attemptId,code:error instanceof WorkflowError?error.code:'settlement-error',
     }))
@@ -480,23 +483,36 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     recoveryDiagnostic:recoveryState,
     start:(run: Run, options: AgentExecutionOptions)=>dispatch(run,options),
     message:(run: Run, message: AgentMessage, options: AgentExecutionOptions)=>dispatch(run,options,message),
-    async stop(run: Run) {
+    async stop(run: Run): Promise<Run> {
       for(let i=0;i<2;i++) {
         const current=await read(run),next=pauseRun(current)
         try {
           if(next!==current) await input.store.commit(run.projectId,run.ownerId,current.version,next,'agent.run-paused')
-          if(next.writer && active.has(next.writer.attemptId)) input.sessions.stop(next.chatSessionId,'user_pause')
-          return next
+          const local=next.writer && active.get(next.writer.attemptId)
+          if(local) {
+            input.sessions.stop(next.chatSessionId,'user_pause')
+            // Stop is complete only after native/tools cleanup and writer settlement.
+            // Waiting reuses this attempt's existing work; it never dispatches work.
+            await local.work?.catch(()=>undefined)
+          }
+          const stopped=await read(run)
+          if(stopped.writer && (await recoveryState(stopped)).evidence!=='unavailable')
+            return this.recover(stopped,{expectedVersion:stopped.version,...stopped.writer})
+          return stopped
         } catch(error) {
           if(!(error instanceof WorkflowError) || error.code!=='revision-conflict' || i===1)throw error
         }
       }
       throw new WorkflowError('revision-conflict','Pause could not be recorded')
     },
-    async resume(run: Run) {
-      const current=await read(run)
+    async resume(run: Run): Promise<Run> {
+      let current=await read(run)
       if(current.version!==run.version) throw new WorkflowError('revision-conflict','Read current Run before resuming')
-      if(current.writer) throw new WorkflowError('writer-unresolved','Resume cannot release an unknown writer')
+      if(current.writer && current.paused) {
+        await active.get(current.writer.attemptId)?.work?.catch(()=>undefined)
+        current=await read(run)
+      }
+      if(current.writer)current=await this.recover(current,{expectedVersion:current.version,...current.writer})
       if(!current.paused)return current
       const next=structuredClone(current);next.version++;delete next.paused
       next.blockedReason='Resumed; no automatic retry or dispatch.'

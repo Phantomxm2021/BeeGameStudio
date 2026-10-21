@@ -1,7 +1,9 @@
+import {resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { motion } from 'motion/react';
 import { EASE_OUT } from '../../beui/registry/lib/ease';
 import { ModelConnectionsPanel, type ModelConnectionsHandle, type ModelConnectionsSaveState } from '../../Settings/ModelConnectionsPanel';
+import { BgsSettingsPanel } from '../../Settings/BgsSettingsPanel';
 import { PersonalImageConnectionPanel, type PersonalImageConnectionHandle, type PersonalImageConnectionSaveState } from '../../Settings/PersonalImageConnectionPanel';
 import {
   BookOpenText,
@@ -36,7 +38,6 @@ import {
   type ModelProviderKind,
   type ModelAuthMethod,
 } from '../../../services/modelConfigApi';
-import { getWebToolsConfig, saveWebToolsConfig, type WebSearchAdapter } from '../../../services/webToolsApi';
 import {
   getRuntimeSettings,
   saveRuntimeSettings,
@@ -198,6 +199,7 @@ export function SettingsMenu({
   const [activeModelPopoverId, setActiveModelPopoverId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [provider, setProvider] = useState<ModelProviderKind>('openai-compatible');
+  const [apiProtocol,setApiProtocol]=useState<ModelApiProtocol>('responses');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [fastModel, setFastModel] = useState('');
@@ -221,13 +223,7 @@ export function SettingsMenu({
   const [imageConnectionSaveState, setImageConnectionSaveState] = useState<PersonalImageConnectionSaveState>({ disabled: true, busy: false });
   const [workspacePath, setWorkspacePath] = useState('');
   const [workspaceStatus, setWorkspaceStatus] = useState('');
-  const [webSearchAdapter, setWebSearchAdapter] = useState<WebSearchAdapter>('tavily');
-  const [braveApiKey, setBraveApiKey] = useState('');
-  const [braveApiKeyPreview, setBraveApiKeyPreview] = useState('');
-  const [exaApiKey, setExaApiKey] = useState('');
-  const [exaApiKeyPreview, setExaApiKeyPreview] = useState('');
-  const [webToolsStatus, setWebToolsStatus] = useState('');
-  const [isSavingWebTools, setIsSavingWebTools] = useState(false);
+
   const [runtimeSettings, setRuntimeSettings] = useState<Required<RuntimeSettingsConfig>>(() =>
     normalizeRuntimeSettings({}),
   );
@@ -288,6 +284,7 @@ export function SettingsMenu({
           setSelectedModelConfigId(defaultConfig.id);
           setName(defaultConfig.name);
           setProvider(defaultConfig.provider);
+          setApiProtocol(defaultConfig.apiProtocol ?? resolveModelApiProtocol(defaultConfig.provider));
           setBaseUrl(defaultConfig.baseUrl || '');
           setFastModel(defaultConfig.models.fast || '');
           setBalancedModel(defaultConfig.models.balanced || '');
@@ -320,27 +317,6 @@ export function SettingsMenu({
         .catch(error => {
           if (isCurrent()) {
             setWorkspaceStatus(error instanceof Error ? error.message : text.workspaceReadFailed);
-          }
-        });
-    },
-  });
-  const webToolsLoading = useSettingsSectionLoad({
-    isOpen, allowed: effectiveCanManageSecrets,
-    selected: activeSection === 'platform' && activeTab === 'general', userId: currentUser?.id,
-    load: isCurrent => {
-      return getWebToolsConfig()
-        .then(config => {
-          if (!isCurrent()) return;
-          setWebSearchAdapter(config.webSearchAdapter || 'tavily');
-          setBraveApiKeyPreview(config.braveApiKeyPreview || '');
-          setExaApiKeyPreview(config.exaApiKeyPreview || '');
-          setBraveApiKey('');
-          setExaApiKey('');
-          setWebToolsStatus('');
-        })
-        .catch(error => {
-          if (isCurrent()) {
-            setWebToolsStatus(error instanceof Error ? error.message : text.webToolsReadFailed);
           }
         });
     },
@@ -459,7 +435,7 @@ export function SettingsMenu({
   const isLoadingCurrentSection = activeSection === 'skills' ? skillsLoading
     : activeSection === 'mcp' ? mcpLoading
     : activeSection !== 'platform' ? false
-    : activeTab === 'general' ? workspaceLoading || webToolsLoading
+    : activeTab === 'general' ? workspaceLoading
     : activeTab === 'runtime' ? runtimeLoading
     : activeTab === 'model' ? modelsLoading
     : activeTab === 'invitations' ? invitationsLoading
@@ -476,7 +452,7 @@ export function SettingsMenu({
   }, [isOpen, effectiveCanManageMcp, currentUser?.id]);
 
   const openModelConfig = (action: NonNullable<typeof modelAction>, config?: ModelConfig) => {
-    setSelectedModelConfigId(config?.id ?? ''); setName(config?.name ?? ''); setProvider(config?.provider ?? 'openai-compatible');
+    setSelectedModelConfigId(config?.id ?? ''); setName(config?.name ?? ''); setProvider(config?.provider ?? 'openai-compatible');setApiProtocol(config ? config.apiProtocol ?? resolveModelApiProtocol(config.provider) : 'responses');
     setBaseUrl(config?.baseUrl ?? ''); setApiKey(''); setApiKeyPreview(config?.apiKeyPreview ?? '');
     setFastModel(config?.models.fast ?? ''); setBalancedModel(config?.models.balanced ?? ''); setStrongModel(config?.models.strong ?? '');
     setIsDefault(config?.isDefault ?? existingConfigs.length === 0); setPublished(config?.published ?? true); setAuthMethods(config?.authMethods ?? ['platform']);
@@ -510,6 +486,7 @@ export function SettingsMenu({
         published,
         authMethods,
         provider,
+        apiProtocol,
         baseUrl: baseUrl.trim(),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         models: {
@@ -532,6 +509,7 @@ export function SettingsMenu({
       });
       setName(saved.name);
       setProvider(saved.provider);
+      setApiProtocol(saved.apiProtocol ?? resolveModelApiProtocol(saved.provider));
       setBaseUrl(saved.baseUrl || '');
       setFastModel(saved.models.fast || '');
       setBalancedModel(saved.models.balanced || '');
@@ -544,29 +522,6 @@ export function SettingsMenu({
       return false;
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleSaveWebTools = async () => {
-    setWebToolsStatus('');
-    setIsSavingWebTools(true);
-    try {
-      const saved = await saveWebToolsConfig({
-        webSearchAdapter,
-        ...(braveApiKey.trim() ? { braveApiKey: braveApiKey.trim() } : {}),
-        ...(exaApiKey.trim() ? { exaApiKey: exaApiKey.trim() } : {}),
-      });
-      setWebSearchAdapter(saved.webSearchAdapter || webSearchAdapter);
-      setBraveApiKeyPreview(saved.braveApiKeyPreview || '');
-      setExaApiKeyPreview(saved.exaApiKeyPreview || '');
-      setBraveApiKey('');
-      setExaApiKey('');
-      return true;
-    } catch (error) {
-      showError(error instanceof Error ? error.message : text.webSearchSaveFailed);
-      return false;
-    } finally {
-      setIsSavingWebTools(false);
     }
   };
 
@@ -849,10 +804,6 @@ export function SettingsMenu({
     }
   };
 
-  const webSearchKeyField = getWebSearchKeyField(webSearchAdapter);
-  const webSearchKeyPreview =
-    webSearchKeyField === 'brave' ? braveApiKeyPreview : webSearchKeyField === 'exa' ? exaApiKeyPreview : '';
-  const webSearchKeyValue = webSearchKeyField === 'brave' ? braveApiKey : webSearchKeyField === 'exa' ? exaApiKey : '';
   const savedPrefix = `${text.savedPrefix}${text.savedPrefixSeparator}`;
   const capabilityCopy = settingsObject<RuntimeCapabilityCopy>('runtimeCapabilities');
   const mcpCopy = settingsObject<McpSettingsCopy>('mcp');
@@ -924,7 +875,7 @@ export function SettingsMenu({
   const isSavingCurrentTab =
     activeTab === 'image' ? imageSettingsState.busy :
     activeSection === 'platform' && activeTab === 'general'
-      ? effectiveCanManageSecrets && isSavingWebTools
+      ? false
       : activeTab === 'runtime'
         ? isSavingRuntimeSettings
         : activeTab === 'skills'
@@ -936,13 +887,11 @@ export function SettingsMenu({
                 : activeTab === 'credit'
                   ? false
                   : isSaving;
-  const hasGeneralSaveAction = activeSection === 'platform' && effectiveCanManageSecrets;
+  const hasGeneralSaveAction = false;
   const isSaveDisabled =
     activeTab === 'image' ? imageSettingsState.busy || !imageSettingsState.canSave :
     activeSection === 'platform' && activeTab === 'general'
-      ? !hasGeneralSaveAction ||
-        isSavingCurrentTab ||
-        (effectiveCanManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
+      ? !hasGeneralSaveAction || isSavingCurrentTab
       : activeTab === 'runtime'
         ? isSavingCurrentTab
         : activeTab === 'skills'
@@ -979,8 +928,7 @@ export function SettingsMenu({
     if (activeTab === 'skills') return;
     if (activeTab === 'projects') return;
     if (activeTab === 'credit') return;
-    const webToolsSaved = effectiveCanManageSecrets ? await handleSaveWebTools() : true;
-    if (webToolsSaved) onClose();
+    onClose();
   };
 
   const updateRuntimeSetting = (key: keyof RuntimeSettingsConfig) => {
@@ -1060,6 +1008,8 @@ export function SettingsMenu({
           strongModel: text.strongModel,
         }}
         provider={provider}
+        apiProtocol={apiProtocol}
+        onApiProtocolChange={setApiProtocol}
         baseUrl={baseUrl}
         apiKey={apiKey}
         fastModel={fastModel}
@@ -1089,8 +1039,8 @@ export function SettingsMenu({
         </div>
         <fieldset className="border-t border-border pt-3">
           <legend className="text-sm text-muted-foreground">{lang.startsWith('zh') ? '允许的接入方式' : 'Allowed authentication methods'}</legend>
-          {(['platform', 'byok', ...(goProfile ? [] : provider === 'anthropic-compatible' ? ['claude-subscription'] : provider === 'openai-compatible' ? ['chatgpt-subscription'] : [])] as ModelAuthMethod[]).map(method => {
-            const label = method === 'platform' ? (lang.startsWith('zh') ? '平台凭据' : 'Platform credentials') : method === 'byok' ? 'BYOK' : method === 'claude-subscription' ? 'Claude subscription' : 'ChatGPT subscription';
+          {(['platform', 'byok', ...(goProfile ? [] : provider === 'openai-compatible' ? ['chatgpt-subscription'] : [])] as ModelAuthMethod[]).map(method => {
+            const label = method === 'platform' ? (lang.startsWith('zh') ? '平台凭据' : 'Platform credentials') : method === 'byok' ? 'BYOK' : 'ChatGPT subscription';
             return <div key={method} className="flex min-h-11 items-center justify-between gap-4 text-sm">
               <span>{label}</span>
               <Switch checked={authMethods.includes(method)} onCheckedChange={checked => setAuthMethods(current => checked ? [...current, method] : current.filter(item => item !== method))} ariaLabel={label} size="sm" />
@@ -1343,6 +1293,7 @@ export function SettingsMenu({
                 </div>
               ) : null}
 
+              {activeSection === 'personal' && currentUser ? <BgsSettingsPanel key={currentUser.id} language={lang} /> : null}
               {activeSection === 'connections' && currentUser ? <ModelConnectionsPanel key={currentUser.id} ref={modelConnectionsRef} language={lang} onSaveStateChange={setModelConnectionSaveState} /> : null}
               {activeSection === 'image-connection' && currentUser ? <PersonalImageConnectionPanel key={currentUser.id} ref={imageConnectionRef} language={lang} onSaveStateChange={setImageConnectionSaveState} /> : null}
 
@@ -1367,21 +1318,7 @@ export function SettingsMenu({
                   ) : null}
 
                   {effectiveCanManageSecrets ? (
-                    <WebToolsPanel
-                      label={text.webSearch}
-                      searchBackend={text.searchBackend}
-                      adapter={webSearchAdapter}
-                      keyField={webSearchKeyField}
-                      keyValue={webSearchKeyValue}
-                      keyPreview={webSearchKeyPreview}
-                      savedPrefix={savedPrefix}
-                      status={webToolsStatus}
-                      onAdapterChange={setWebSearchAdapter}
-                      onKeyChange={value => {
-                        if (webSearchKeyField === 'brave') setBraveApiKey(value);
-                        if (webSearchKeyField === 'exa') setExaApiKey(value);
-                      }}
-                    />
+                    <WebToolsPanel label={text.webSearch} language={lang} />
                   ) : null}
 
                 </div>
@@ -1572,11 +1509,6 @@ function formatModelConfigError(error: unknown, text: Record<string, string>): s
   return typeof template === 'string' ? template.replace('{host}', apiError.hostname || '') : error.message;
 }
 
-function getWebSearchKeyField(adapter: WebSearchAdapter): 'brave' | 'exa' | null {
-  if (adapter === 'brave') return 'brave';
-  if (adapter === 'exa') return 'exa';
-  return null;
-}
 
 type SettingsTranslate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -1724,21 +1656,7 @@ function parsePositiveInteger(value: string): number | null {
 }
 
 function normalizeRuntimeSettings(config: RuntimeSettingsConfig): Required<RuntimeSettingsConfig> {
-  return {
-    autoMemoryEnabled: config.autoMemoryEnabled ?? false,
-    autoDreamEnabled: config.autoDreamEnabled ?? false,
-    verificationAgentEnabled: config.verificationAgentEnabled ?? false,
-    agentTeamsEnabled: config.agentTeamsEnabled ?? false,
-    promptSuggestionEnabled: config.promptSuggestionEnabled ?? false,
-    awaySummaryEnabled: config.awaySummaryEnabled ?? false,
-    coordinatorModeEnabled: config.coordinatorModeEnabled ?? false,
-    skillSearchEnabled: config.skillSearchEnabled ?? false,
-    treeSitterBashEnabled: config.treeSitterBashEnabled ?? false,
-    webBrowserToolEnabled: config.webBrowserToolEnabled ?? false,
-    bashClassifierEnabled: config.bashClassifierEnabled ?? false,
-    mcpSkillsEnabled: config.mcpSkillsEnabled ?? false,
-    resourceLibraryEnabled: config.resourceLibraryEnabled ?? true,
-  };
+  return { resourceLibraryEnabled: config.resourceLibraryEnabled ?? true };
 }
 
 function createEmptyMcpForm(): McpServerForm {

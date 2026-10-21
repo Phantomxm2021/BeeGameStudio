@@ -175,6 +175,8 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       return undefined;
     };
     const structuredPatch = record.structured_patch ?? record.structuredPatch ?? metadata.structured_patch ?? metadata.structuredPatch;
+    const exitCode = record.tool_exit_code ?? record.toolExitCode ?? metadata.tool_exit_code ?? metadata.toolExitCode;
+    const durationMs = record.tool_duration_ms ?? record.toolDurationMs ?? metadata.tool_duration_ms ?? metadata.toolDurationMs;
     const toolInput = record.tool_input ?? record.toolInput ?? metadata.tool_input ?? metadata.toolInput;
     const rawToolStatus = readOptionalString('tool_status', 'toolStatus')?.toLowerCase();
     const toolStatus = rawToolStatus === 'running' || rawToolStatus === 'completed' || rawToolStatus === 'failed'
@@ -227,6 +229,8 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       requiresUserAction: typeof requiresUserActionRaw === 'boolean' ? requiresUserActionRaw : undefined,
       toolName: readOptionalString('tool_name', 'toolName', 'tool'),
       toolStatus,
+      toolExitCode: typeof exitCode === 'number' && Number.isInteger(exitCode) ? exitCode : undefined,
+      toolDurationMs: typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined,
       toolDetail: readOptionalString('tool_detail', 'toolDetail'),
       toolOutput: readOptionalString('tool_output', 'toolOutput', 'output'),
       toolDiff: readOptionalString('tool_diff', 'toolDiff', 'diff', 'gitDiff', 'git_diff'),

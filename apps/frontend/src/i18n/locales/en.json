@@ -610,7 +610,7 @@
         "argsHint": "One argument per line",
         "envHint": "One KEY=value per line. Leave saved secrets blank to keep them.",
         "stdio": "stdio",
-        "sse": "SSE",
+        "sse": "Legacy SSE is unsupported; use a Streamable HTTP endpoint.",
         "http": "HTTP",
         "beegame": "BeeGame",
         "global": "Global",
@@ -701,7 +701,17 @@
     "account": "Account"
   },
   "beegame": {
+    "chatActivity": {
+      "details": "Execution details",
+      "working": "Working on your request",
+      "failedWorking": "An operation failed; work is continuing.",
+      "failed": "An operation failed during this task. Check the final response or execution details.",
+      "stopped": "Some work was stopped.",
+      "incomplete": "Some work is incomplete; its result has not been confirmed."
+    },
     "modelRequestError": {
+      "connection": "The service connection failed, so this response could not be completed.",
+      "details": "Error details",
       "capacity": "Selected model is at capacity. Please try a different model.",
       "retry": "Retry",
       "retryNow": "Retry now",
@@ -814,6 +824,7 @@
     "permissionRiskGeneric": "May create files, install dependencies, or access the network",
     "permissionPendingPlaceholder": "Waiting for permission confirmation",
     "userQuestion": {
+      "authorizeDesignChange": "Authorize the design changes in these answers and unlock the implementation baseline for revision.",
       "custom": "Or enter your own answer…",
       "submit": "Submit answers",
       "previous": "Previous question",

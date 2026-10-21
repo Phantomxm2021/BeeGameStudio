@@ -74,7 +74,7 @@ export async function inspectContentBindings(workspace: string, paths: string[])
           components: (node.components ?? []).map((component: Record<string, unknown>) => ({
             componentId: component.id, type: component.type, assetRef: component.assetRef, data: locators(component.data as Record<string, unknown> | undefined),
           })).filter((component: { type: unknown }) =>
-            (BEEGAME_SCENE_ASSET_COMPONENT_TYPES as readonly unknown[]).includes(component.type)),
+            component.type === 'text' || (BEEGAME_SCENE_ASSET_COMPONENT_TYPES as readonly unknown[]).includes(component.type)),
         } : { role: node.role, text: node.text, assetRef: node.assetRef, actions: node.actions, bindings: node.bindings,
           data: locators(node.data), style: locators(node.style) }),
       })).filter(node => !('components' in node) || node.components.length),

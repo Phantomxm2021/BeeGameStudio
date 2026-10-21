@@ -1,6 +1,12 @@
 node_modules
-dist
+vendor/bgs/bgs-rs/target
+dist/*
+!dist/bgs-runtime/
+!dist/bgs-runtime/**
 coverage
+.runtime
+backups
+apps/frontend/output
 release
 tmp
 *.log

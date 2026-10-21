@@ -10,7 +10,7 @@ import { sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
 
-for (const mode of ['consume', 'music', 'legacy-audio', 'loop-true', 'member', 'ignore-volume', 'ignore-loop', 'ignore-stop', 'fetch-only', 'wrong-member',
+for (const mode of ['consume', 'uncapturable', 'invalid-contract', 'music', 'legacy-audio', 'loop-true', 'member', 'ignore-volume', 'ignore-loop', 'ignore-stop', 'fetch-only', 'wrong-member',
   'missing-probe', 'missing-properties', 'stale-audio', 'silent-original', 'muted', 'not-audio', 'unrelated-error', 'decode-error', 'lazy-play', 'legacy-gap'] as const) {
   test('actual HTML audio consumes registered Scene binding: ' + mode, async () => {
     const root = await mkdtemp(join(tmpdir(), 'bgs-v3-audio-'))
@@ -21,6 +21,8 @@ for (const mode of ['consume', 'music', 'legacy-audio', 'loop-true', 'member', '
       resource.root_path = file; resource.file_paths = [file, member]; resource.asset_kind = 'audio-clip'
       if(mode==='music')resource.asset_kind='music'
       if(mode==='legacy-audio')resource.asset_kind='audio'
+      manifest.requirements[0]!.acquisition_profile.asset_kinds = [mode==='legacy-audio'?'audio-clip':resource.asset_kind]
+      if(mode==='invalid-contract')manifest.requirements[0]!.acquisition_profile.asset_kinds=['data']
       await mkdir(join(root, 'assets/runtime/example'), {recursive:true})
       await writeFile(join(root, file), audioProbeWav(mode === 'silent-original'))
       await writeFile(join(root, member), audioProbeWav(false))
@@ -52,7 +54,9 @@ for (const mode of ['consume', 'music', 'legacy-audio', 'loop-true', 'member', '
         document.querySelector('#stop').onclick=()=>{${mode === 'ignore-stop' ? '' : 'a.pause();'}};
         ${mode === 'unrelated-error' ? "console.error('Independent game failure');" : ''}`
       if (mode === 'decode-error') await writeFile(join(root, 'dist/broken.wav'), 'not encoded audio')
-      await writeFile(join(root, 'dist/index.html'), '<button id="start">Play</button><button id="stop">Stop</button><audio id="clip" preload="auto"></audio><canvas></canvas><script type="module">'+script+'</script>')
+      // The real preview has an opaque origin. Decoder capture requires the
+      // game's media to opt into CORS; ordinary playback alone does not.
+      await writeFile(join(root, 'dist/index.html'), '<button id="start">Play</button><button id="stop">Stop</button><audio id="clip" preload="auto"'+(mode==='uncapturable'?'':' crossorigin="anonymous"')+'></audio><canvas></canvas><script type="module">'+script+'</script>')
       const task:TaskSpec = {id:'audio',kind:'game.verify',goal:'Observe saved audio consumption',dependsOn:[],requirementIds:['req.audio'],inputs:[],writablePaths:[],
         expectedOutputs:['dist/index.html'],runtimeArtifact:'dist',checks:[mode === 'legacy-gap' ? 'runtime-smoke' : 'audio-data-consumption'],audioProbes:[
           {document:source,nodeId:'board',componentId:'sound',selector:mode === 'not-audio' ? 'canvas' : '#clip',viewport:[960,540],
@@ -60,9 +64,12 @@ for (const mode of ['consume', 'music', 'legacy-audio', 'loop-true', 'member', '
         ]}
       const original = await readFile(join(root, selected))
       const result = (await runChecks(root, task, [])).checks[0]!
-      const expected = ['consume','music','legacy-audio','loop-true','member','lazy-play','legacy-gap'].includes(mode) ? 'passed'
+      const expected = ['consume','music','loop-true','member','lazy-play','legacy-gap'].includes(mode) ? 'passed'
         : ['ignore-volume','ignore-loop','ignore-stop','fetch-only','muted','unrelated-error','decode-error'].includes(mode) ? 'failed' : 'unverified'
       expect(result.status, result.observation).toBe(expected)
+      // A legacy resource label does not satisfy a canonical audio-clip need.
+      if(mode==='invalid-contract'||mode==='legacy-audio')expect(result.observation).toContain('Saved audio resources invalid:')
+      if(mode==='uncapturable')expect(result.observation).toContain('Media activation/capture unsupported:')
       expect(await readFile(join(root, source), 'utf8')).toBe(body)
       expect(await readFile(join(root, selected))).toEqual(original)
       expect(await readFile(join(root, 'assets/asset-manifest.json'), 'utf8')).toBe(indexBefore)

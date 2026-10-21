@@ -25,7 +25,7 @@ const SKILL_METADATA_FILE = 'skill.json'
 const RUNTIME_SKILLS_DIR = join('.runtime', 'app', 'skills')
 const RUNTIME_BUILTINS_MANIFEST = '.beegame-builtins.json'
 const RUNTIME_BUILTIN_MARKER = '.beegame-builtin'
-const BUILTIN_SKILLS_DIR = 'builtinskills'
+const BUILTIN_SKILLS_DIR = 'bgs-game-skills'
 const MAX_ZIP_BYTES = 10 * 1024 * 1024
 const MAX_FILE_BYTES = 96 * 1024
 const MAX_FILE_COUNT = 128
@@ -74,11 +74,15 @@ export function getDefaultBeeGameSkillsStoreDir(): string {
   return getSkillsStoreRootDir({})
 }
 
-/** Bundled, read-only Skill catalog shared by all BeeGameStudio projects. */
-export function getBuiltinSkillsDirectory(): string {
-  const directory = resolve(process.env.BEEGAME_BUILTIN_SKILLS_DIR ?? fileURLToPath(
-    new URL('../../../.beegame/skills/builtinskills/', import.meta.url),
+/** Resolve host configuration without requiring game Skills for model-only requests. */
+export function resolveBuiltinSkillsDirectory(): string {
+  return resolve(process.env.BEEGAME_BUILTIN_SKILLS_DIR ?? fileURLToPath(
+    new URL('../../../.beegame/skills/bgs-game-skills/', import.meta.url),
   ))
+}
+
+/** Bundled, read-only Skill catalog; validate when starting a game Agent. */
+export function getBuiltinSkillsDirectory(directory = resolveBuiltinSkillsDirectory()): string {
   if (!existsSync(directory) || !readdirSync(directory, { withFileTypes: true })
     .some(entry => entry.isDirectory() && existsSync(join(directory, entry.name, 'SKILL.md')))) {
     throw new Error(`BeeGameStudio built-in Skills are unavailable: ${directory}`)
@@ -544,7 +548,7 @@ function migrateUnscopedSkillDirs(options: LocalBeeGameSkillsStoreOptions): void
     if (!userEntry.isDirectory()) continue
     if (
       userEntry.name === basename(scopedRoot) ||
-      userEntry.name === BUILTIN_SKILLS_DIR
+      userEntry.name === BUILTIN_SKILLS_DIR || userEntry.name === 'builtinskills'
     ) continue
     if (userEntry.name.startsWith('.') || userEntry.name === '.runtime') continue
     const userDir = join(unscopedRoot, userEntry.name)

@@ -3,7 +3,8 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import { getValidChatGPTAuth } from '../../../../src/services/api/openai/chatgptAuth'
+import { getValidChatGPTAuth } from '../bgs/auth'
+import { assertBgsAccountIdle } from '../bgs/account-activity'
 import { CHATGPT_IMAGE_ENDPOINT, imageConfigSchema } from './config'
 import { ChatGPTSubscriptionImageProvider } from './chatgpt-provider'
 import { ImageAttemptStore } from './attempt'
@@ -16,10 +17,10 @@ const config = imageConfigSchema.parse({ baseUrl: CHATGPT_IMAGE_ENDPOINT, model:
 const token = (name: string, exp = Math.floor(Date.now() / 1000) + 3600) =>
   'test.' + Buffer.from(JSON.stringify({ name, exp })).toString('base64url') + '.signature'
 function login(directory: string, name: string, exp?: number) {
-  mkdirSync(directory, { recursive: true })
+  mkdirSync(join(directory, 'bgs'), { recursive: true })
   const value = { auth_mode: 'chatgpt', tokens: { access_token: token(name, exp), refresh_token: 'PRIVATE_REFRESH_' + name,
     id_token: 'PRIVATE_ID_' + name, account_id: 'account-' + name } }
-  writeFileSync(join(directory, 'openai-chatgpt-auth.json'), JSON.stringify(value))
+  writeFileSync(join(directory, 'bgs', 'auth.json'), JSON.stringify(value))
   return value
 }
 const frame = (value: unknown) => 'data: ' + JSON.stringify(value) + '\n\n'
@@ -46,6 +47,7 @@ test('subscription stream reuses the selected local login, keeps final PNG and a
   let calls = 0
   const request = (async (url, init) => {
     calls++
+    expect(() => assertBgsAccountIdle(first)).toThrow('running model requests')
     expect(url).toBe(CHATGPT_IMAGE_ENDPOINT)
     const headers = new Headers(init?.headers)
     expect(headers.get('authorization')).toBe('Bearer ' + one.tokens.access_token)
@@ -67,7 +69,8 @@ test('subscription stream reuses the selected local login, keeps final PNG and a
       limits: { 'x-codex-primary-used-percent': 12.5, 'x-codex-primary-window-minutes': 300 } })
     expect(result.providerRequestId).toBe('request-one')
     expect(calls).toBe(1)
-    expect(JSON.parse(readFileSync(join(second, 'openai-chatgpt-auth.json'), 'utf8'))).toEqual(two)
+    expect(() => assertBgsAccountIdle(first)).not.toThrow()
+    expect(JSON.parse(readFileSync(join(second, 'bgs', 'auth.json'), 'utf8'))).toEqual(two)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -107,41 +110,6 @@ test.each(['eof', 'failed', 'incomplete', 'multiple', 'invalid', 'cancelled'] as
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('explicit account directory never falls back to another account; refresh updates only its own login', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'subscription-login-'))
-  const first = join(root, 'first'), second = join(root, 'second'), missing = join(root, 'missing')
-  const one = login(first, 'one', 1), two = login(second, 'two')
-  const previousFetch = globalThis.fetch
-  const oldCodexHome = process.env.CODEX_HOME, oldScrub = process.env.BGS_SUBPROCESS_ENV_SCRUB
-  // Even a regression must only encounter fake alternate-account credentials.
-  process.env.CODEX_HOME = second
-  delete process.env.BGS_SUBPROCESS_ENV_SCRUB
-  writeFileSync(join(second, 'auth.json'), JSON.stringify(two))
-  let refreshes = 0
-  const fresh = token('renewed')
-  globalThis.fetch = (async (url, init) => {
-    refreshes++
-    expect(url).toBe('https://auth.openai.com/oauth/token')
-    expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe(one.tokens.refresh_token)
-    return Response.json({ access_token: fresh, id_token: 'PRIVATE_NEW_ID' })
-  }) as typeof fetch
-  try {
-    await expect(getValidChatGPTAuth(missing)).rejects.toThrow('not logged in')
-    expect(refreshes).toBe(0)
-    expect((await getValidChatGPTAuth(first)).accessToken).toBe(fresh)
-    expect(refreshes).toBe(1)
-    const saved = JSON.parse(readFileSync(join(first, 'openai-chatgpt-auth.json'), 'utf8'))
-    expect(saved.tokens.refresh_token).toBe(one.tokens.refresh_token)
-    expect(saved.tokens.account_id).toBe('account-one')
-    expect(JSON.parse(readFileSync(join(second, 'openai-chatgpt-auth.json'), 'utf8'))).toEqual(two)
-  } finally {
-    globalThis.fetch = previousFetch
-    if (oldCodexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = oldCodexHome
-    if (oldScrub === undefined) delete process.env.BGS_SUBPROCESS_ENV_SCRUB; else process.env.BGS_SUBPROCESS_ENV_SCRUB = oldScrub
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
 test.each([429, 500])('subscription HTTP %s receipt survives restart without a second submission or wallet debit', async status => {
   const root = mkdtempSync(join(tmpdir(), 'subscription-recovery-'))
   const auth = join(root, 'login'), receipts = join(root, 'receipts')
@@ -163,29 +131,6 @@ test.each([429, 500])('subscription HTTP %s receipt survives restart without a s
     const receipt = readFileSync(join(receipts, readdirSync(receipts)[0]!, 'receipt.json'), 'utf8')
     expect(receipt).not.toContain('PRIVATE_')
   } finally { rmSync(root, { recursive: true, force: true }) }
-})
-
-test('concurrent users of one shared login refresh an expired token once, and a failed refresh is not cached', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'shared-login-refresh-'))
-  login(root, 'shared', 1)
-  const previousFetch = globalThis.fetch
-  let calls = 0, fail = true
-  const fresh = token('shared-new')
-  globalThis.fetch = (async (_url, _init) => {
-    calls++
-    await new Promise(resolve => setTimeout(resolve, 20))
-    if (fail) return new Response('fixture failure', { status: 401 })
-    return Response.json({ access_token: fresh, id_token: 'PRIVATE_NEW_ID' })
-  }) as typeof fetch
-  try {
-    const rejected = await Promise.allSettled([getValidChatGPTAuth(root), getValidChatGPTAuth(root)])
-    expect(rejected.every(result => result.status === 'rejected')).toBe(true)
-    expect(calls).toBe(1)
-    fail = false
-    const renewed = await Promise.all([getValidChatGPTAuth(root), getValidChatGPTAuth(root)])
-    expect(renewed.every(result => result.accessToken === fresh)).toBe(true)
-    expect(calls).toBe(2)
-  } finally { globalThis.fetch = previousFetch; rmSync(root, { recursive: true, force: true }) }
 })
 
 test('capability quote is read-only; subscription delivery/recovery preserves usage and never debits platform Credits', async () => {

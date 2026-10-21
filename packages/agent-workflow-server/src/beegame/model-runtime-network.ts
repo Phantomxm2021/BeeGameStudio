@@ -1,4 +1,3 @@
-import { getMacroDefines } from '../../../../scripts/defines'
 import {
   createPinnedUndiciDispatcher,
   type ApprovedOutboundTarget,
@@ -10,29 +9,6 @@ type RuntimeDispatcher = {
   close?: () => Promise<void> | void
   destroy?: () => Promise<void> | void
 }
-type BeeGameMacroGlobals = {
-  VERSION: string
-  BUILD_TIME: string
-  FEEDBACK_CHANNEL: string
-  ISSUES_EXPLAINER: string
-  NATIVE_PACKAGE_URL: string
-  PACKAGE_URL: string
-  VERSION_CHANGELOG: string
-}
-
-export function ensureBeeGameMacroGlobals(): void {
-  const target = globalThis as typeof globalThis & {
-    MACRO?: BeeGameMacroGlobals
-  }
-  if (target.MACRO) return
-  target.MACRO = Object.fromEntries(
-    Object.entries(getMacroDefines()).map(([key, value]) => [
-      key.replace('MACRO.', ''),
-      JSON.parse(value) as string,
-    ]),
-  ) as BeeGameMacroGlobals
-}
-
 export function createPinnedRuntimeFetch(
   baseFetch: typeof fetch,
   approvedOutboundTargets: Record<string, ApprovedOutboundTarget>,

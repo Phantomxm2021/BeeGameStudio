@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
-import { bundleContentConsumer, CONTENT_CONSUMER_API, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
+import { contentConsumerDistribution, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
 import { digest, WorkflowError, type Run } from './state'
 
 // Only exact host records are ignored. A README, imported source, unknown dot
@@ -23,7 +23,7 @@ async function sourcePaths(root: string): Promise<string[]> {
 export async function observeProjectCreation(root: string, brief: {
   settings: Record<string, unknown>; build_source?: unknown; creation_mode?: unknown
 }): Promise<Run['creation']> {
-  if (brief.build_source != null || brief.creation_mode !== 'creative' ||
+  if (brief.build_source != null || !['creative', 'blueprint'].includes(String(brief.creation_mode)) ||
       (await sourcePaths(await realpath(root))).length) return undefined
   const settings = brief.settings
   const editableContent = settings.platform === 'Web' && settings.bgsVisualEditing !== false
@@ -77,10 +77,9 @@ export default { base: './', publicDir: false, plugins: [{
 }] };
 `,
     'content/index.json':json(index),'content/scenes/main.json':json(scene),'content/ui/hud.json':json(ui),
-    'src/bgs-content-consumer.mjs':await bundleContentConsumer(),
-    'src/bgs-content-api.json':json(CONTENT_CONSUMER_API),
+    ...Object.fromEntries(Object.entries(await contentConsumerDistribution()).map(([name, body]) => ['vendor/bgs-runtime/' + name, body])),
     'src/game.js':`// Connection sample only. Implement the current playable slice here.
-// Read ./bgs-content-api.json for the shared API, not the compiled consumer.
+// Read ../vendor/bgs-runtime/api.json for the shared API, not the compiled consumer.
 // Keep tunable gameplay values in scene.settings (or one imported config),
 // and expose HUD values through this state rather than duplicating constants.
 export function createGame({ canvas, scene }) {
@@ -98,7 +97,7 @@ export function createGame({ canvas, scene }) {
     'src/main.jsx':`import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseBeeGameContentIndex, fetchStartupContentDocuments, readSceneData, readUiData,
-  createProductionUiSurface, renderProductionScene2d, loadProductionResources } from './bgs-content-consumer.mjs';
+  createProductionUiSurface, renderProductionScene2d, loadProductionResources } from '../vendor/bgs-runtime/content-consumer.mjs';
 import { createGame } from './game.js';
 import './style.css';
 
@@ -133,7 +132,7 @@ function App() {
           const viewport = { width: canvas.current.clientWidth, height: canvas.current.clientHeight };
           if (viewport.width > 0 && viewport.height > 0) {
             game.update(previous ? Math.min((now - previous) / 1000, 0.05) : 0);
-            if (scene) renderProductionScene2d(canvas.current, scene, viewport, resources?.assets);
+            if (scene) renderProductionScene2d(canvas.current, scene, viewport, resources?.assets, resources?.fonts);
             game.draw(canvas.current.getContext('2d'), viewport);
             // Avoid replacing interactive DOM every frame when nothing changed.
             const key = JSON.stringify([viewport, game.state]);

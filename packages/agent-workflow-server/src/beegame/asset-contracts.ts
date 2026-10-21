@@ -1,3 +1,6 @@
+import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
+import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
+import { inspectResourceBytes } from '../../../beegame-resource-server/src/resource-inspection'
 import { createHash, randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
@@ -218,7 +221,6 @@ export type BeeGameAuthoredResourceInput = {
   embedded_kinds?: string[]
   content_profile?: Record<string, unknown>
   technical_facts?: Record<string, string | number | boolean>
-  replace_existing_provisional?: boolean
   dependencies?: BeeGameResourceDependency[]
 }
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
@@ -439,7 +441,7 @@ export async function writeBeeGameAssetManifest(
 export async function uploadBeeGameAsset(
   workspacePath: string,
   resourceId: string,
-  file: File,
+  input: File | readonly File[],
   options: BeeGameAssetUploadOptions = {},
 ): Promise<BeeGameAssetUploadResult> {
   const root = normalizeWorkspacePath(workspacePath)
@@ -447,31 +449,43 @@ export async function uploadBeeGameAsset(
   const target = requireProjectTarget(manifest)
   const id = normalizeId(resourceId)
   if (!id) throw new Error('Resource id is required')
-  const filename = sanitizeFilename(file.name)
-  assertFilenameFormatAllowed(filename, target.asset_format_capabilities)
-  const targetPath = resolveInsideDeclaredRoot(
-    root,
-    target.runtime_asset_root,
-    join(target.runtime_asset_root, 'user-provided', id, filename),
-  )
-  const relativePath = normalizeRelativePath(root, targetPath)
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  if (!bytes.byteLength) throw new Error('Uploaded resource must not be empty')
+  if (manifest.resources.some(resource => resource.id === id))
+    throw new Error('Resource id already exists; upload a new resource and select it in the Editor: ' + id)
+  const files = Array.isArray(input) ? input : [input as File]
+  if (files.length < 1 || files.length > 2) throw new Error('Upload one file, or a PNG and its JSON atlas together')
+  const writes = await Promise.all(files.map(async file => {
+    const filename = sanitizeFilename(file.name)
+    assertFilenameFormatAllowed(filename, target.asset_format_capabilities)
+    const targetPath = resolveInsideDeclaredRoot(root, target.runtime_asset_root,
+      join(target.runtime_asset_root, 'user-provided', id, filename))
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (!bytes.byteLength) throw new Error('Uploaded resource must not be empty')
+    return { filename, targetPath, path: normalizeRelativePath(root, targetPath), bytes }
+  }))
+  if (new Set(writes.map(file => file.path)).size !== writes.length) throw new Error('Uploaded filenames must be distinct')
+  const image = writes.find(file => /\.png$/i.test(file.path))
+  if (writes.length === 2) {
+    const metadata = writes.find(file => /\.json$/i.test(file.path))
+    if (!image || !metadata || editorAtlasPath({ root_path: image.path, file_paths: writes.map(file => file.path) }, image.path) !== metadata.path)
+      throw new Error('Atlas upload requires a PNG and matching <name>.json or <name>.atlas.json')
+    const sheet = parseSpriteSheet(JSON.parse(new TextDecoder().decode(metadata.bytes)))
+    if (!sheet) throw new Error('Unsupported atlas metadata')
+    const { width, height } = inspectResourceBytes(image.path, image.bytes)
+    if (typeof width !== 'number' || typeof height !== 'number') throw new Error('Invalid PNG atlas image')
+    validateSpriteSheetBounds(sheet, width, height)
+  }
+  const rootFile = writes.length === 2 ? image! : writes[0]!
   const now = new Date().toISOString()
   const resource: BeeGameProjectResource = {
-    id,
-    fulfills: [],
-    source: { type: 'user-provided', created_at: now, filename },
-    root_path: relativePath,
-    file_paths: [relativePath],
-    local_file_hashes: { [relativePath]: sha256(bytes) },
-    provisional: false,
-    status: 'verified',
-    selected_at: now,
+    id, fulfills: [], source: { type: 'user-provided', created_at: now, filename: files.map(file => file.name).join(', ') },
+    root_path: rootFile.path, file_paths: writes.map(file => file.path),
+    local_file_hashes: Object.fromEntries(writes.map(file => [file.path, sha256(file.bytes)])),
+    ...(writes.length === 2 ? { asset_kind: 'sprite-atlas' } : {}),
+    provisional: false, status: 'verified', selected_at: now,
     selection_reason: ['User provided this project resource.'],
   }
   const updated = replaceResource(manifest, resource)
-  const rollback = await commitResourceWrites([{ targetPath, bytes }])
+  const rollback = await commitResourceWrites(writes)
   try {
     await writeManifestAtomically(root, updated)
     await options.persist?.(updated)
@@ -480,12 +494,7 @@ export async function uploadBeeGameAsset(
     await writeManifestAtomically(root, manifest)
     throw error
   }
-  return {
-    manifest: updated,
-    resource,
-    path: relativePath,
-    message: `Project resource ${id} was added at ${relativePath}.`,
-  }
+  return { manifest: updated, resource, path: rootFile.path, message: `Project resource ${id} was added at ${rootFile.path}.` }
 }
 
 export async function registerBeeGameAuthoredResources(
@@ -572,7 +581,6 @@ export async function registerBeeGameLocalResources(
       })
     : manifest
   const now = new Date().toISOString()
-  const obsoletePaths = new Set<string>()
   for (const input of inputs) {
     const id = normalizeId(input.id)
     if (!id) throw new Error('Authored resource id is required')
@@ -589,19 +597,8 @@ export async function registerBeeGameLocalResources(
           existing.file_paths.length !== filePaths.length ||
           existing.file_paths.some(path => !filePaths.includes(path))),
     )
-    if (changesPaths && !input.replace_existing_provisional)
-      throw new Error(
-        `Authored resource paths are immutable for stable id ${id}; revise the existing files in place or use the explicit replacement operation.`,
-      )
-    if (
-      changesPaths &&
-      (!existing?.provisional ||
-        !input.provisional ||
-        existing.source.type !== 'agent-authored')
-    )
-      throw new Error(
-        `Only an agent-authored provisional resource can be replaced in place: ${id}`,
-      )
+    if (changesPaths)
+      throw new Error(`Resource paths are immutable for stable id ${id}; update its existing files or register a new resource and select it in the Editor.`)
     if (!filePaths.includes(rootPath))
       throw new Error(
         `Authored resource root must be listed in file_paths: ${id}`,
@@ -667,24 +664,12 @@ export async function registerBeeGameLocalResources(
         : {}),
       ...(input.dependencies ? { dependencies: structuredClone(input.dependencies) } : {}),
     }
-    if (changesPaths)
-      existing?.file_paths
-        .filter(path => !filePaths.includes(path))
-        .forEach(path => obsoletePaths.add(path))
     if (existing && isDeepStrictEqual({ ...resource, selected_at: existing.selected_at }, existing))
       resource.selected_at = existing.selected_at
     updated = replaceResource(updated, resource)
   }
   if (!isDeepStrictEqual(await readBeeGameAssetManifest(root), updated))
     await writeManifestAtomically(root, updated)
-  const retainedPaths = new Set(
-    updated.resources.flatMap(resource => resource.file_paths),
-  )
-  await Promise.all(
-    [...obsoletePaths]
-      .filter(path => !retainedPaths.has(path))
-      .map(path => rm(resolveInsideWorkspace(root, path), { force: true })),
-  )
   return updated
 }
 

@@ -104,6 +104,16 @@ export function sceneDesignSource(doc: Extract<BeeGameContentDocument, { kind: '
   return { schema: doc.schema, id: doc.id, kind: doc.kind,
     data: { ...doc.data, nodes: doc.data.nodes.map(node => ({ ...node,
       components: node.components?.map(component => {
+        if (component.type === 'text') {
+          const data = { ...component.data }
+          const font = data.font
+          if (font && typeof font === 'object' && !Array.isArray(font)) {
+            const decision = withoutResourceLocators(font as Record<string, unknown>, ['assetRef', 'member'])
+            if (Object.keys(decision).length) data.font = decision
+            else delete data.font
+          }
+          return { ...component, data: Object.keys(data).length ? data : undefined }
+        }
         if (!types.has(component.type)) return component
         const { assetRef: _assetRef, ...decision } = component
         const data = { ...withoutResourceLocators(component.data),

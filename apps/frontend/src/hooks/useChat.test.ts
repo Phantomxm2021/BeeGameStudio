@@ -26,11 +26,13 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     setCurrentSender: vi.fn(),
     setIsStreaming: vi.fn(),
     settleActivity: vi.fn(),
+    settleInactiveActivity: vi.fn(),
     loadHistory: vi.fn(),
     clearMessages: vi.fn(),
     messages: [] as any[],
   };
   const systemState = {
+    taskUsage: {} as Record<string, any>,
     updateTokenUsage: vi.fn(),
     updateLastP2PRoute: vi.fn(),
     loadTokenUsage: vi.fn().mockResolvedValue(undefined),
@@ -75,7 +77,7 @@ vi.mock('../store/projectStore', () => ({
 }));
 
 vi.mock('../store/systemStore', () => ({
-  useSystemStore: Object.assign(() => systemStoreState, {
+  useSystemStore: Object.assign((select: (state: typeof systemStoreState) => unknown) => select(systemStoreState), {
     getState: () => systemStoreState,
   }),
 }));
@@ -123,6 +125,19 @@ describe('useChat clarification gate handling', () => {
     expect(api.continueTask).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    'API Error: OpenAI stream ended before a terminal finish_reason was received',
+    'API Error: OpenAI stream ended before message_stop',
+    'API Error: OpenCode Go: Connection error.',
+    'API Error: OpenCode Go: 503 Offline unavailable',
+  ])('does not arm an automatic paid replay for an incomplete model response: %s', async content => {
+    const { result } = renderHook(() => useChat({ projectId: 'incomplete-stream' }));
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'incomplete-stream', task_id: 'session',
+      message_id: 'incomplete', turn_id: 'incomplete-turn', content }));
+    expect(result.current.autoRetryTurnId).toBeNull();
+    expect(api.continueTask).not.toHaveBeenCalled();
+  });
+
   it('cancels automatic retry on a stop or project switch, and ignores non-model failures', async () => {
     vi.mocked(api.stopTask).mockResolvedValue({ state: 'stopped' } as any);
     const { result, rerender } = renderHook(({ projectId }) => useChat({ projectId }), { initialProps: { projectId: 'A' } });
@@ -161,7 +176,7 @@ describe('useChat clarification gate handling', () => {
     act(() => latestWebSocketOptions.onMessage?.({ type: 'error', task_id: 'session', turn_id: 'turn',
       content: '上游暂未开放当前模型（model_coming_soon）', timestamp: 200 }));
     expect(result.current.isLoading).toBe(false);
-    expect(chatStoreState.settleActivity).toHaveBeenCalledWith('session', 'turn', 'failed', 200);
+    expect(chatStoreState.settleActivity).toHaveBeenCalledWith('session', 'turn', 'failed', 200, 200);
     expect(chatStoreState.setIsStreaming).toHaveBeenLastCalledWith(false);
     expect(chatStoreState.setCurrentSender).toHaveBeenLastCalledWith(null);
     expect(api.continueTask).not.toHaveBeenCalled();
@@ -211,7 +226,7 @@ describe('useChat clarification gate handling', () => {
     act(() => latestWebSocketOptions.onMessage?.({
       type: 'status', task_id: 'parent', turn_id: 'turn', status, timestamp: 200,
     }));
-    expect(chatStoreState.settleActivity).toHaveBeenLastCalledWith('parent', 'turn', status, 200, undefined);
+    expect(chatStoreState.settleActivity).toHaveBeenLastCalledWith('parent', 'turn', status, 200, 200);
     chatStoreState.messages = settleChatActivity(chatStoreState.messages,
       { taskId: 'parent', turnId: 'turn', reason: status, at: 200 });
     projectStoreState.projectStatus = { project_id: 'p', phase: 'idle', active_subagents: [] };
@@ -344,6 +359,7 @@ describe('useChat clarification gate handling', () => {
     });
 
     expect(result.current.isStopping).toBe(false);
+    expect(chatStoreState.setIsStreaming).toHaveBeenLastCalledWith(false);
   });
 
   it('reports pending stop honestly and refreshes the authoritative state', async () => {
@@ -538,6 +554,19 @@ describe('useChat clarification gate handling', () => {
     expect(onTaskEvent).toHaveBeenCalledWith('usage', { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 });
   });
 
+  it('exposes the received session counter after stopping and clears its scope when switching projects', async () => {
+    const { result, rerender } = renderHook(({ projectId }) => useChat({ projectId }), { initialProps: { projectId: 'proj_1' } });
+    await act(async () => {});
+    const usage = { prompt_tokens: 100, completion_tokens: 30, cached_input_tokens: 400, total_tokens: 530 };
+    systemStoreState.taskUsage.pipe_1 = usage;
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'usage', task_id: 'pipe_1', project_id: 'proj_1', usage }));
+    expect(result.current.sessionTokenUsage).toEqual(usage);
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', task_id: 'pipe_1', project_id: 'proj_1', status: 'finished' }));
+    expect(result.current.sessionTokenUsage).toEqual(usage);
+    rerender({ projectId: 'proj_2' });
+    expect(result.current.sessionTokenUsage).toBeUndefined();
+  });
+
   it('refreshes billing only after a confirmed debit event', () => {
     const onTaskEvent = vi.fn();
     renderHook(() => useChat({ projectId: 'proj_1', onTaskEvent }));
@@ -589,6 +618,42 @@ describe('useChat clarification gate handling', () => {
     projectStoreState.projectStatus = { ...projectStoreState.projectStatus, phase: 'idle' };
     rerender();
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+  });
+
+  it.each(['send', 'retry'] as const)('keeps %s pending while resume preflight receives an idle snapshot', async kind => {
+    projectStoreState.projectStatus = { project_id: 'proj_1', phase: 'paused' };
+    let finish!: (response: unknown) => void;
+    const command = kind === 'send' ? api.sendMessage : api.continueTask;
+    vi.mocked(command).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }) as never);
+    const { result, rerender } = renderHook(() => useChat({ projectId: 'proj_1' }));
+    let pending!: Promise<unknown>;
+    act(() => { pending = kind === 'send' ? result.current.sendMessage('继续') : result.current.continueTask(); });
+    expect(result.current.isLoading).toBe(true);
+    projectStoreState.projectStatus = { project_id: 'proj_1', phase: 'idle' };
+    rerender();
+    expect(result.current.isLoading).toBe(true);
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', project_id: 'proj_1', task_id: 'session', turn_id: 'new', status: 'running' }));
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', project_id: 'proj_1', task_id: 'session', turn_id: 'new', status: 'idle' }));
+    await act(async () => { finish({ task_id: 'new', resume_task_id: 'new', state: 'running' }); await pending; });
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('ignores the interrupted turn snapshot after acknowledgement, but unlocks on current idle', async () => {
+    const oldTime = new Date(Date.now() - 10_000).toISOString();
+    projectStoreState.projectStatus = { project_id: 'proj_1', phase: 'paused', updated_at: oldTime };
+    vi.mocked(api.sendMessage).mockResolvedValueOnce({ task_id: 'next', state: 'running' } as never);
+    const { result, rerender } = renderHook(() => useChat({ projectId: 'proj_1' }));
+    await act(async () => { await result.current.sendMessage('继续处理'); });
+    expect(result.current.isLoading).toBe(true);
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', project_id: 'proj_1', task_id: 'session',
+      status: 'stopped', timestamp: Date.parse(oldTime) }));
+    expect(result.current.isLoading).toBe(true);
+    projectStoreState.projectStatus = { project_id: 'proj_1', phase: 'idle', updated_at: oldTime };
+    rerender();
+    expect(result.current.isLoading).toBe(true);
+    projectStoreState.projectStatus = { project_id: 'proj_1', phase: 'idle', updated_at: new Date(Date.now() + 1000).toISOString() };
+    rerender();
+    expect(result.current.isLoading).toBe(false);
   });
 
   it('does not flash a sent user bubble while a running turn queues input', async () => {
@@ -658,6 +723,8 @@ describe('useChat clarification gate handling', () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.currentTaskId).toBeNull();
+    expect(chatStoreState.setIsStreaming).toHaveBeenLastCalledWith(false);
+    expect(chatStoreState.setCurrentSender).toHaveBeenLastCalledWith(null);
   });
 
   it('keeps the composer locked across intermediate assistant messages and transport reconnects', async () => {
@@ -1071,11 +1138,31 @@ describe('useChat clarification gate handling', () => {
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
     const answers = { 'Which style?': 'Pixel' };
     await act(async () => {
-      await result.current.resolveToolPermission({ gate_id: 'question' }, 'allow', 'once', answers);
+      await result.current.resolveToolPermission({ gate_id: 'question', intent: 'change' }, 'allow', 'once', answers);
     });
     expect(api.resolveToolPermission).toHaveBeenCalledWith({
-      project_id: 'proj_1', gate_id: 'question', decision: 'allow', scope: 'once', answers,
+      project_id: 'proj_1', gate_id: 'question', decision: 'allow', scope: 'once', answers, intent: 'change',
     });
     expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+  it('settles stored activity only after current history and a timestamped inactive snapshot are available', async () => {
+    projectStoreState.projectStatus = { project_id: 'p', phase: 'paused',
+      active_subagents: [], updated_at: new Date(5000).toISOString() };
+    const { result, rerender } = renderHook(() => useChat({ projectId: 'p' }));
+    await waitFor(() => expect(chatStoreState.settleInactiveActivity).toHaveBeenCalledWith(5000));
+    expect(result.current.isLoading).toBe(false);
+    chatStoreState.settleInactiveActivity.mockClear();
+    projectStoreState.projectStatus = { project_id: 'p', phase: 'running', active_subagents: [], updated_at: new Date(6000).toISOString() };
+    rerender();
+    expect(result.current.isLoading).toBe(true);
+    expect(chatStoreState.settleInactiveActivity).not.toHaveBeenCalled();
+  });
+
+  it('does not settle a detached child merely because the parent phase is idle', async () => {
+    projectStoreState.projectStatus = { project_id: 'p', phase: 'idle',
+      active_subagents: ['child'], updated_at: new Date(5000).toISOString() };
+    const { result } = renderHook(() => useChat({ projectId: 'p' }));
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+    expect(chatStoreState.settleInactiveActivity).not.toHaveBeenCalled();
   });
 });

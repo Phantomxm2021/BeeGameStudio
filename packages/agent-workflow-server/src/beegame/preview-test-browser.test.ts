@@ -3,7 +3,7 @@ import { createPreviewTestBrowser, resolveTestBrowserExecutable } from './previe
 import { mkdtemp, realpath, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js'
+import { bgsCommand, toml } from '../bgs/client'
 
 test('invalid browser config fails explicitly instead of selecting a personal browser', async () => {
   await expect(resolveTestBrowserExecutable('relative/chrome')).rejects.toThrow('absolute path')
@@ -60,15 +60,9 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1' || process.platform !=
     const { endpoint } = await browser.start()
     const file = join(root, 'probe.js')
     await writeFile(file, `const ws = new WebSocket(process.argv[2]); const timeout = setTimeout(() => process.exit(2), 5000); ws.onopen = () => ws.send(JSON.stringify({id:1,method:'Target.getTargets'})); ws.onmessage = e => {const m = JSON.parse(e.data); if(m.id===1){clearTimeout(timeout); ws.close(); process.exit(m.result?.targetInfos?.some(t=>t.type==='page')?0:3)}};`)
-    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
-    const command = wrapCommandWithSandboxMacOS({
-      command: [process.execPath, file, endpoint].map(quote).join(' '),
-      binShell: '/bin/bash', needsNetworkRestriction: false,
-      readConfig: { denyOnly: [], allowWithinDeny: [] },
-      writeConfig: { allowOnly: [root], denyWithinAllow: [] },
-    })
-    const child = Bun.spawn(['/bin/bash', '-c', command], { cwd: root,
-      env: { PATH: '/usr/bin:/bin', TMPDIR: root }, stdout: 'pipe', stderr: 'pipe' })
+    const profile = {filesystem:{':minimal':'read',[root]:'write',[process.execPath]:'read'},network:{enabled:true}}
+    const child = Bun.spawn(bgsCommand().concat('sandbox','-C',root,'-P','bgs-browser-test','-c','permissions.bgs-browser-test='+toml(profile),'--',process.execPath,file,endpoint), { cwd: root,
+      env: { PATH: '/usr/bin:/bin', TMPDIR: root, BGS_HOME:root }, stdout: 'pipe', stderr: 'pipe' })
     const [code, error] = await Promise.all([child.exited, new Response(child.stderr).text()])
     expect({ code, error }).toEqual({ code: 0, error: '' })
   } finally { await browser.close(); await rm(root, { recursive: true, force: true }) }

@@ -119,7 +119,7 @@ export async function buildEditableProject(root:string, task:Pick<TaskSpec,'edit
     }
     const {commandCheck}=await import('./checks')
     const observed=await commandCheck(temporary,'build',signal)
-    result.observation='Host executed bun run build in the exportable source copy; exit '+observed.code+'\n'+observed.log
+    result.observation='Host executed the project build script in the exportable source copy; exit '+observed.code+'\n'+observed.log
     if(observed.code!==0) {result.status='failed';return result}
     if(!sameFiles(files,await projectFiles(base,artifact,excludedReports)) || !sameFiles(files,await projectFiles(temporary,artifact,excludedReports)) || dependencySha256!==await projectDependencies(base))
       throw new WorkflowError('project-source-changed','Source/dependencies changed during build; no candidate was installed')

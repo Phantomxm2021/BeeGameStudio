@@ -3,7 +3,6 @@
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { loadEnvFile } from './beegame-migration-cli'
-import { getMacroDefines } from './defines'
 import { createManagedProjectWorkspacePath } from '../packages/agent-workflow-server/src/local-runtime-service'
 import { paidDebugRuntimeConfig } from './workflow-v3-paid-debug-config'
 
@@ -15,8 +14,6 @@ loadEnvFile(args[1]!)
 if (process.env.BEEGAME_HTTPONLY_SESSIONS !== '1' || !process.env.BEEGAME_SUPABASE_URL ||
     !process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY || !process.env.AGENT_WORKFLOW_WORKSPACE_PATH)
   throw Error('Normal HttpOnly auth, real database and configured workspace required')
-Object.assign(globalThis, { MACRO: Object.fromEntries(Object.entries(getMacroDefines())
-  .map(([key, value]) => [key.replace('MACRO.', ''), JSON.parse(value)])) })
 process.env.NODE_ENV = 'development'
 process.env.BEEGAME_ALLOW_DEV_AUTH_TOKENS = '0'
 process.env.BEEGAME_WORKFLOW_V3_DEBUG = '1'

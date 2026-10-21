@@ -13,11 +13,11 @@ export const CHECK_VERSIONS = {
   'rule-tests': 'v3-slice.1',
   'runtime-smoke': 'v3-static-artifact.6',
   'delivery-package': 'v3-static-artifact.3',
-  'ui-data-consumption': 'v3-ui-dom-consumption.11',
+  'ui-data-consumption': 'v3-ui-dom-consumption.12',
   'scene-data-consumption': 'v3-scene-transform-consumption.4',
-  'pixel-data-consumption': 'v3-canvas-image-consumption.5',
-  'font-data-consumption': 'v3-dom-font-consumption.3',
-  'audio-data-consumption': 'v3-html-audio-consumption.5',
+  'pixel-data-consumption': 'v3-canvas-image-consumption.6',
+  'font-data-consumption': 'v3-dom-font-consumption.4',
+  'audio-data-consumption': 'v3-html-audio-consumption.6',
 } as const satisfies Record<(typeof CHECK_IDS)[number], string>
 export const EDITABLE_BUILD_CHECK_VERSION = 'v3-editable-build.1' as const
 

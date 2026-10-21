@@ -75,6 +75,8 @@ interface ChatState {
   setCurrentSender: (sender: string | null) => void;
   setIsStreaming: (isStreaming: boolean) => void;
   settleActivity: (taskId: string, turnId: string | undefined, reason: 'stopped' | 'failed' | 'incomplete', at: number, completedAt?: number) => void;
+  /** Only after an authoritative project snapshot confirms no active work. */
+  settleInactiveActivity: (at: number) => void;
   clearMessages: () => void;
   loadHistory: (messages: Message[]) => void;
   setDocumentExpanded: (messageId: string, expanded: boolean) => void;
@@ -132,8 +134,8 @@ function mergeMessages(existing: Message, incoming: Message): Message {
   const olderStreamCannotReopen = existing.streamStatus === 'complete' && incoming.streamStatus === 'streaming';
   const incomingOlder = incoming.sequence !== undefined && existing.sequence !== undefined
     ? incoming.sequence < existing.sequence : incoming.timestamp < existing.timestamp;
-  const keepSubagentOutcome = existing.isSubagentTool && (incomingOlder ||
-    existing.toolStatus !== undefined && existing.toolStatus !== 'running' && incoming.toolStatus === 'running');
+  const keepToolOutcome = (existing.isSubagentTool && incomingOlder) ||
+    existing.toolStatus !== undefined && existing.toolStatus !== 'running' && incoming.toolStatus === 'running';
   return withDerivedIdentity({
     ...existing,
     ...incoming,
@@ -142,15 +144,15 @@ function mergeMessages(existing: Message, incoming: Message): Message {
     streamStatus: olderStreamCannotReopen ? existing.streamStatus : incoming.streamStatus ?? existing.streamStatus,
     attachments: incoming.attachments || existing.attachments,
     thought: incoming.thought ?? existing.thought,
-    toolStatus: keepSubagentOutcome ? existing.toolStatus : incoming.toolStatus ?? existing.toolStatus,
-    toolOutput: keepSubagentOutcome ? existing.toolOutput : incoming.toolOutput ?? existing.toolOutput,
-    completionReason: keepSubagentOutcome ? existing.completionReason : Object.prototype.hasOwnProperty.call(incoming, 'completionReason') ||
+    toolStatus: keepToolOutcome ? existing.toolStatus : incoming.toolStatus ?? existing.toolStatus,
+    toolOutput: keepToolOutcome ? existing.toolOutput : incoming.toolOutput ?? existing.toolOutput,
+    completionReason: keepToolOutcome || olderStreamCannotReopen ? existing.completionReason : Object.prototype.hasOwnProperty.call(incoming, 'completionReason') ||
       (incoming.toolStatus && incoming.toolStatus !== 'running')
       ? incoming.completionReason : incoming.completionReason ?? existing.completionReason,
     thinkingDurationMs: incoming.thinkingDurationMs ?? existing.thinkingDurationMs,
     turnCompletedAt: incoming.turnCompletedAt ?? existing.turnCompletedAt,
     subagentPrompt: incoming.subagentPrompt ?? existing.subagentPrompt,
-    subagentOutput: keepSubagentOutcome ? existing.subagentOutput : incoming.subagentOutput ?? existing.subagentOutput,
+    subagentOutput: keepToolOutcome ? existing.subagentOutput : incoming.subagentOutput ?? existing.subagentOutput,
     subagentTrace: incoming.subagentTrace ?? existing.subagentTrace,
     subagentActivity: mergeSubagentActivity(existing.subagentActivity, incoming.subagentActivity, incomingOlder),
     timestamp: isCompaction ? Math.min(existing.timestamp, incoming.timestamp) : existing.timestamp || incoming.timestamp,
@@ -213,6 +215,14 @@ function reconcileHistory(current: Message[], incoming: Message[]): Message[] {
     }
     return a.id.localeCompare(b.id);
   });
+}
+
+/** Rebuild streaming indexes after settling activity without touching message identity. */
+function settledActivityState(state: Pick<ChatState, 'lastStreamingIdByTask'>, messages: Message[]) {
+  const streaming = messages.filter(message => message.streamStatus === 'streaming');
+  const ids = new Set(streaming.map(message => message.id));
+  return { messages, streamingMessageId: streaming.at(-1)?.id ?? null, isStreaming: streaming.length > 0,
+    lastStreamingIdByTask: Object.fromEntries(Object.entries(state.lastStreamingIdByTask).filter(([, id]) => ids.has(id))) };
 }
 
 export const useChatStore = create<ChatState>()(
@@ -441,10 +451,20 @@ export const useChatStore = create<ChatState>()(
       setCurrentSender: (sender) => set({ currentSender: sender }),
       settleActivity: (taskId, turnId, reason, at, completedAt) => set(state => {
         const messages = settleChatActivity(state.messages, { taskId, turnId, reason, at, completedAt });
-        const streaming = messages.filter(message => message.streamStatus === 'streaming');
-        const ids = new Set(streaming.map(message => message.id));
-        return { messages, streamingMessageId: streaming.at(-1)?.id ?? null, isStreaming: streaming.length > 0,
-          lastStreamingIdByTask: Object.fromEntries(Object.entries(state.lastStreamingIdByTask).filter(([, id]) => ids.has(id))) };
+        return settledActivityState(state, messages);
+      }),
+      settleInactiveActivity: (at) => set(state => {
+        if (!Number.isFinite(at) || at <= 0) return state;
+        const tasks = new Set(state.messages.filter(message => message.timestamp <= at &&
+          (message.streamStatus === 'streaming' || message.toolStatus === 'running')).map(message => message.taskId));
+        let messages = state.messages;
+        for (const taskId of tasks) {
+          if (!taskId) continue;
+          // This is an observation cutoff, not a known task end time. An
+          // inactive project also proves detached children are no longer live.
+          messages = settleChatActivity(messages, { taskId, at, reason: 'incomplete', includeSubagents: true });
+        }
+        return messages === state.messages ? state : settledActivityState(state, messages);
       }),
       setIsStreaming: (isStreaming) => set({ isStreaming }),
       clearMessages: () => set({

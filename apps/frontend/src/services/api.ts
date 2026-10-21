@@ -289,6 +289,7 @@ export interface PendingToolPermissionItem {
   created_at?: string
   artifact?: {
     content?: string
+    designChangeAllowed?: boolean
     input?: Record<string, unknown>
   }
   summary?: {
@@ -442,6 +443,7 @@ export const normalizeProjectBaselineStatusPayload = (
 }
 
 export interface ResolveToolPermissionPayload {
+  intent?: 'change'
   project_id: string
   gate_id: string
   decision: 'allow' | 'deny'
@@ -488,9 +490,6 @@ export const api = {
    */
   stopTask: (data: { task_id: string; project_id?: string }) =>
     beeGameAdapter.stopTask(data),
-
-  recoverTask: (data: { project_id: string }) => beeGameAdapter.recoverTask(data),
-  getTaskRecovery: (projectId: string, includeActive = false) => beeGameAdapter.getTaskRecovery(projectId, includeActive),
 
   /**
    * 获取项目的聊天历史记录
@@ -630,7 +629,7 @@ export const api = {
   getProjectAssets: (projectId: string) =>
     beeGameAdapter.getProjectAssets(projectId),
 
-  uploadProjectAsset: (projectId: string, resourceId: string, file: File) =>
+  uploadProjectAsset: (projectId: string, resourceId: string, file: File | readonly File[]) =>
     beeGameAdapter.uploadProjectAsset(projectId, resourceId, file),
 
   getResourcePackImpact: (packId: string) =>

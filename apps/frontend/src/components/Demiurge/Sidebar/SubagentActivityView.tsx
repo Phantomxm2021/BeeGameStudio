@@ -1,38 +1,16 @@
 import { memo } from 'react';
 import { FileText } from 'lucide-react';
 import type { SubagentActivitySnapshot } from '@bee-game-studio/agent-workflow/subagent-activity';
-import { AgentCode, type AgentCodeLanguage } from '../../beui/registry/components/agents/agent-code';
+import { AgentCode } from '../../beui/registry/components/agents/agent-code';
 import { ToolResult } from '../../beui/registry/components/agents/tool-result';
 import { MarkdownRenderer } from './ChatMarkdownContent';
+import { SourceCodeBlock } from './SourceCodeBlock';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { filterPathsForDisplay } from '../../../utils/chatPathDisplay';
+import { activityToolKind, toolActivitySummary } from '../../../utils/toolActivitySummary';
 import type { Language } from '../AgentsConfig';
 import { normalizeChatAttachments } from '../../../services/chatAttachments';
 import { ChatAttachmentView } from './ChatAttachmentView';
-
-function fileLanguage(path?: string): AgentCodeLanguage {
-    const extension = path?.split('.').pop()?.toLowerCase();
-    if (extension === 'tsx' || extension === 'jsx') return 'tsx';
-    if (['ts', 'js', 'mjs', 'cjs'].includes(extension ?? '')) return 'typescript';
-    if (extension === 'json') return 'json';
-    if (extension === 'sh' || extension === 'bash') return 'bash';
-    return 'text';
-}
-
-function SourceOutput({ output, path }: { output: string; path?: string }) {
-    const lines = output.replace(/\n$/, '').split('\n');
-    // Only remove the Read tool's explicit line-number gutter, not numbers in code.
-    const numbered = lines.map(line => /^\s*(\d+)(?:→|\t)(.*)$/.exec(line));
-    const hasGutter = numbered.length > 0 && numbered.every(Boolean);
-    const language = fileLanguage(path);
-    return <div className="flex min-w-0 overflow-x-auto" data-language={language}>
-        {hasGutter && <pre aria-hidden="true" className="m-0 shrink-0 select-none border-r border-border pr-3 font-mono text-xs leading-4 text-muted-foreground">
-            {numbered.map(line => line![1]).join('\n')}
-        </pre>}
-        <AgentCode code={hasGutter ? numbered.map(line => line![2]).join('\n') : output} language={language}
-            className={hasGutter ? 'overflow-visible pl-3' : 'overflow-visible'} />
-    </div>;
-}
 
 export const SubagentActivityView = memo(function SubagentActivityView({ activity, legacyTrace, lang, running }: {
     activity?: SubagentActivitySnapshot; legacyTrace?: string; lang: Language; running: boolean;
@@ -60,12 +38,12 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
                 <MarkdownRenderer content={filterPathsForDisplay(entry.text)} messageId={entry.id} lang={lang} />
                 {entry.truncated && <p className="type-caption-1 text-muted-foreground">{labels.truncated}</p>}
             </div>;
-            const isShell = entry.toolName === 'Bash';
+            const isShell = activityToolKind(entry.toolName) === 'bash';
             const isRead = entry.toolName === 'Read' && Boolean(entry.filePath) && entry.status !== 'failed';
             const status = entry.status === 'running' ? (running ? 'running' : 'incomplete')
                 : entry.status === 'cancelled' ? 'cancelled' : entry.status === 'failed' ? 'error' : 'success';
             return <ToolResult key={entry.id} data-tool-id={entry.id} tool={entry.toolName || labels.output}
-                title={entry.filePath ? filterPathsForDisplay(entry.filePath) : filterPathsForDisplay(entry.command?.split('\n')[0].slice(0, 100) || labels.output)}
+                title={toolActivitySummary(entry.toolName, { command: entry.command, file_path: entry.filePath }, '', lang === 'zh')}
                 icon={entry.filePath ? <FileText className="size-4" /> : undefined}
                 kind={isShell ? 'terminal' : 'custom'} status={status} defaultOpen={entry.status === 'failed' || Boolean(entry.attachmentError)}
                 meta={entry.elapsedTimeSeconds !== undefined ? `${labels.elapsed}: ${entry.elapsedTimeSeconds}s` : status === 'incomplete' ? labels.incomplete : undefined}
@@ -78,7 +56,7 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
                 {entry.input && <AgentCode code={filterPathsForDisplay(entry.input)} language="json" />}
                 {entry.output !== undefined && <section aria-label={isRead ? labels.file : labels.output}>
                     <p className="mb-2 type-caption-1 text-muted-foreground">{isRead ? labels.file : labels.output}</p>
-                    {isRead ? <SourceOutput output={filterPathsForDisplay(entry.output)} path={entry.filePath} /> : <AgentCode code={filterPathsForDisplay(entry.output)} language="text" />}
+                    {isRead ? <SourceCodeBlock output={entry.output} path={entry.filePath} /> : <AgentCode code={filterPathsForDisplay(entry.output)} language="text" />}
                 </section>}
                 {normalizeChatAttachments(entry.attachments)?.map((attachment, index) =>
                     <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}

@@ -25,20 +25,23 @@ async function fixture(legacy = true) {
   return {root,run,close:()=>rm(root,{recursive:true,force:true})}
 }
 
-test('creation facts require a blank creative intake; source/import/unknown/explicit exclusion are not silently migrated',async()=>{
+test('creation facts cover blank creative and blueprint intake; source/import/unknown are not silently migrated',async()=>{
   const f=await fixture(false)
   try {
     expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true,webStarter:'react-canvas-2d-v1',webBoot:'react-web-storage-v1'})
     for(const path of ['.beegame','transcripts','logs'])await mkdir(join(f.root,path))
     await writeFile(join(f.root,'logs/index.json'),'{}')
     expect(await observeProjectCreation(f.root,brief)).toEqual(f.run.creation)
+    expect(await observeProjectCreation(f.root,{...brief,creation_mode:'blueprint'})).toEqual(f.run.creation)
     expect(await observeProjectCreation(f.root,{...brief,build_source:{kind:'import'}})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:undefined})).toBeUndefined()
+    expect(await observeProjectCreation(f.root,{...brief,creation_mode:'unknown'})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,settings:{...brief.settings,bgsVisualEditing:false}}))
       .toEqual({initialDelivery:'design-led-first-version',editableContent:false,webBoot:'react-web-storage-v1'})
     expect((await observeProjectCreation(f.root,{...brief,settings:{platform:'Native',engine:'Unity'}}))?.webStarter).toBeUndefined()
     await writeFile(join(f.root,'README.md'),'Existing user source')
     expect(await observeProjectCreation(f.root,brief)).toBeUndefined()
+    expect(await observeProjectCreation(f.root,{...brief,creation_mode:'blueprint'})).toBeUndefined()
     await installWebStarter(f.run)
     expect(await readFile(join(f.root,'README.md'),'utf8')).toBe('Existing user source')
     await expect(readFile(join(f.root,'package.json'))).rejects.toThrow()
@@ -50,8 +53,8 @@ test('starter installs once, recovers exact partial writes, preserves edits and 
   try {
     await installWebStarter(f.run)
     const before=await readFile(join(f.root,'src/game.js'),'utf8')
-    expect(JSON.parse(await readFile(join(f.root,'src/bgs-content-api.json'),'utf8'))).toEqual(CONTENT_CONSUMER_API)
-    expect(before).toContain('./bgs-content-api.json')
+    expect(JSON.parse(await readFile(join(f.root,'vendor/bgs-runtime/api.json'),'utf8'))).toEqual(CONTENT_CONSUMER_API)
+    expect(before).toContain('../vendor/bgs-runtime/api.json')
     await rm(join(f.root,'src/style.css'))
     await installWebStarter(f.run)
     expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe(before)
@@ -59,7 +62,8 @@ test('starter installs once, recovers exact partial writes, preserves edits and 
     await expect(installWebStarter(f.run)).rejects.toThrow('Existing project source preserved')
     expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// user edit')
     expect(agentGoalPrompt(f.run)).toContain('then end this turn for user feedback')
-    expect(agentGoalPrompt(f.run)).toContain(f.run.requirements.text)
+    expect(agentGoalPrompt(f.run)).not.toContain(f.run.requirements.text)
+    expect(agentGoalPrompt(f.run)).toContain('bgsConfirmedBrief')
     const next=structuredClone(f.run); next.version++; delete next.creation
     expect(()=>assertCommit('sample','owner',f.run.version,next,f.run)).toThrow('creation facts')
   }finally{await f.close()}

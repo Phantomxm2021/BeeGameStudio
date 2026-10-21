@@ -121,7 +121,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     return () => { cancelled = true; clearTimeout(timer); };
   }, [projectId, deploymentInProgress, authenticationStatus, showWarning]);
 
-  const { sendMessage, stopTask, continueTask, autoRetryTurnId, cancelAutoRetry, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState } = useChat({
+  const { sendMessage, stopTask, continueTask, autoRetryTurnId, cancelAutoRetry, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState, sessionTokenUsage } = useChat({
     projectId,
     onError: err => console.error(err),
     showToastError: showError,
@@ -153,6 +153,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const permissionDisplayModels = useMemo(() => toPermissionDisplayModels(pendingPermissions), [pendingPermissions]);
   const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
   const liveSessionTokenUsage = useMemo(() => {
+    // Receipt events already update the Chat store; displaying them must not
+    // depend on another runtime/database read or on remote billing finishing.
+    if (sessionTokenUsage) return sessionTokenUsage;
     const live = projectStatus?.project_id === projectId ? projectStatus.context?.token_budget : null;
     if (!live) return null;
     return {
@@ -165,7 +168,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
       output_tokens: Number(live.output_tokens) || 0,
       total_tokens: Number(live.total_tokens) || 0,
     };
-  }, [projectStatus, projectId]);
+  }, [sessionTokenUsage, projectStatus, projectId]);
   const settledProjectTokenUsage = useMemo(() => creditSummary ? {
       prompt_tokens: creditSummary.inputTokens,
       input_tokens: creditSummary.inputTokens,

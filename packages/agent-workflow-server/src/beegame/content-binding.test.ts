@@ -6,11 +6,47 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { bindContent, bindCurrentContent, inspectContentBindings } from './content-binding'
 import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contract'
+import { designSupportingBytesDigest } from './design-handoff'
 import { writeBeeGameAssetManifest } from './asset-contracts'
 import { uiLayoutFixture, sceneLayoutFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 import { materializeSceneUiFormat } from './scene-ui-content-authoring'
 import { sharedContentChecker, CONTENT_BINDING_ENTRY } from './content-checker-runtime'
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+
+test('Text font operands remain readable and bindable without treating font locators as design changes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-scene-font-binding-')), file = 'content/scenes/level.json'
+  try {
+    await mkdir(join(root, 'content/scenes'), { recursive: true })
+    await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
+    const manifest = assetManifestAuthoringExamples().canonical, font = manifest.resources[0]!
+    font.root_path = 'assets/runtime/example/regular.ttf'; font.file_paths = [font.root_path, 'assets/runtime/example/bold.ttf']
+    for (const path of font.file_paths) await writeFile(join(root, path), 'fixture font bytes')
+    await writeBeeGameAssetManifest(root, manifest)
+    const doc = sceneLayoutFixture() as any
+    doc.data.nodes = doc.data.nodes.filter((node: any) => node.id === doc.data.cameraNodeId)
+    const rect = (id: string) => ({ id, type: 'rect-transform', data: { anchorMin: [0,0], anchorMax: [0,0], pivot: [0,0], anchoredPosition: [0,0], sizeDelta: [100,30] } })
+    doc.data.nodes.push({ id: 'canvas', components: [{ id: 'canvas-c', type: 'canvas', data: { renderMode: 'world-space' } }, rect('canvas-r')] },
+      { id: 'label', parentId: 'canvas', components: [rect('label-r'), { id: 'label-cr', type: 'canvas-renderer', data: {} },
+        { id: 'label-t', type: 'text', data: { text: 'Hello', fontSize: 20 } }] })
+    const original = JSON.stringify(doc), digest = designSupportingBytesDigest(file, Buffer.from(original))
+    await writeFile(join(root, file), original)
+    const operands = await inspectContentBindings(root, [file])
+    expect(operands.files[0]!.nodes).toMatchObject([{ id: 'label', components: [{ componentId: 'label-t', type: 'text', data: {} }] }])
+    const result = await bindCurrentContent(root, [{ file, sha256: hash(original), nodes: [{ id: 'label', componentId: 'label-t',
+      set: { data: { font: { assetRef: font.id, member: 'assets/runtime/example/bold.ttf' } } } }] }])
+    expect(result.issues).toEqual([]); expect(result.written).toHaveLength(1)
+    const bound = await readFile(join(root, file), 'utf8')
+    expect(designSupportingBytesDigest(file, Buffer.from(bound))).toBe(digest)
+    const inspection = await inspectContentBindings(root, [file])
+    expect(inspection.files[0]!.nodes).toMatchObject([{ id: 'label', components: [{ componentId: 'label-t', data: {
+      font: { assetRef: font.id, member: 'assets/runtime/example/bold.ttf' } } }] }])
+    for (const data of [{ fontSize: 24 }, { text: 'Changed' }, { other: { assetRef: font.id } }]) {
+      const invalid = await bindCurrentContent(root, [{ file, sha256: hash(bound), nodes: [{ id: 'label', componentId: 'label-t', set: { data } }] }])
+      expect(invalid.valid).toBe(false); expect(invalid.written).toEqual([])
+      expect(await readFile(join(root, file), 'utf8')).toBe(bound)
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 test('autonomous current binding uses real bytes, not eight documents or a Task; stale hashes and design edits do not write',async()=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-current-binding-')),file='content/ui/menu.json'

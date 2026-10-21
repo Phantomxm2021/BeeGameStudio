@@ -12,11 +12,12 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
   const root = await mkdtemp(join(tmpdir(), 'bgs-formal-v3-bootstrap-'))
   const store = createLocalWorkflowStore(join(root, 'workflow-store'))
   const cleanups: Array<() => void | Promise<void>> = []
-  const prompts: string[] = []
+  const prompts: string[] = [], systemContexts: string[] = []
   const app = createAgentWorkflowApp({ currentUser: { id: 'owner', role: 'owner' },
     dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: join(root, 'projects'),
     workflowV3Store: store, modelConfigStore: false, skillsConfig: false,
     sessionRunner: { async start(input) {
+      systemContexts.push(input.systemContext ?? '')
       const nativeId = input.resumeSessionId ?? '11111111-2222-4333-8444-555555555555'
       input.onNativeSessionId?.(nativeId)
       return { stop() {}, async submit(turn) {
@@ -41,8 +42,10 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
     for (let i = 0; i < 100 && prompts.length === 0; i++) await Bun.sleep(5)
     expect(prompts).toHaveLength(1)
     // Bootstrap starts the confirmed goal, not a planning-only first turn.
-    expect(prompts[0]).toContain('Develop the game from this complete confirmed goal')
-    expect(prompts[0]).toContain('no second production authorization or automatic paid retry')
+    expect(prompts[0]).toContain('Stop at the requested boundary')
+    expect(prompts[0]).not.toContain('$game-creative-director-expert')
+    expect(systemContexts.join('\n')).toContain('Machine design indexes, task coverage graphs and finalization of plain documents are not required')
+    expect(systemContexts.join('\n')).toContain('no redundant per-image approval, unknown paid replay or automatic paid retry')
     expect(prompts[0]).not.toContain('first assignment ends at visual-direction handoff')
     expect(prompts[0]).not.toContain('current milestone and its deliverables')
     const run = await store.read('formal-game', 'owner')

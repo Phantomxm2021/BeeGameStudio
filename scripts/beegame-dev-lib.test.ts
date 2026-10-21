@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import { resolve } from 'node:path'
-import { getBuildFeatures } from './defines'
 import {
   buildBeeGameDevPlan,
   waitForBeeGameDevServices,
@@ -69,16 +68,11 @@ describe('BeeGame local dev launcher helpers', () => {
       skills: 'http://127.0.0.1:62176',
       resources: 'http://127.0.0.1:62177',
     })
-    expect(plan.nativeRuntimeBuild).toEqual({
-      command: ['bun', 'run', 'build.ts'],
+    expect(plan.runtimePreflight).toEqual({
+      command: ['bun', 'run', 'scripts/check-bgs.ts'],
       cwd: '/repo',
       env: {},
     })
-    const features = getBuildFeatures(plan.nativeRuntimeBuild.env)
-    for (const capability of ['VERIFICATION_AGENT', 'EXTRACT_MEMORIES', 'AWAY_SUMMARY', 'COORDINATOR_MODE'])
-      expect(features).toContain(capability)
-    for (const retained of ['WORKFLOW_SCRIPTS', 'GOAL', 'BUILTIN_EXPLORE_PLAN_AGENTS', 'TREE_SITTER_BASH'])
-      expect(features).toContain(retained)
     expect(plan.processes.map(process => process.name)).toEqual([
       'billing',
       'skills',

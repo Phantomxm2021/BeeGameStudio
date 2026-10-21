@@ -39,7 +39,17 @@
     "account": "Account"
   },
   "beegame": {
+    "chatActivity": {
+      "details": "Dettagli di esecuzione",
+      "working": "Elaborazione della richiesta",
+      "failedWorking": "Un’operazione non è riuscita; il lavoro prosegue.",
+      "failed": "Un’operazione non è riuscita durante questa attività. Consulta la risposta finale o i dettagli di esecuzione.",
+      "stopped": "Parte del lavoro è stata interrotta.",
+      "incomplete": "Parte del lavoro è incompleta; il risultato non è ancora stato confermato."
+    },
     "modelRequestError": {
+      "connection": "La connessione al servizio non è riuscita, quindi non è stato possibile completare questa risposta.",
+      "details": "Dettagli dell’errore",
       "capacity": "Il modello selezionato è al limite della capacità. Prova un altro modello.",
       "retry": "Riprova",
       "retryNow": "Riprova ora",
@@ -333,7 +343,7 @@
         "argsHint": "One argument per line",
         "envHint": "One KEY=value per line. Leave saved secrets blank to keep them.",
         "stdio": "stdio",
-        "sse": "SSE",
+        "sse": "SSE legacy non supportato. Usa un endpoint Streamable HTTP.",
         "http": "HTTP",
         "beegame": "BeeGame",
         "global": "Global",

@@ -43,17 +43,6 @@ it('retries the selected failed turn in the same conversation with a single cont
   expect(authenticatedFetchMock.mock.calls.some(([url]) => String(url).includes('model-config'))).toBe(false);
 });
 
-it('waits for a failed turn host writer to settle using the existing recovery polling', async () => {
-  authenticatedFetchMock.mockReset();
-  const run = { id: 'run', version: 7, chatSessionId: 'chat', requirements: { revision: 'r' },
-    writer: { attemptId: 'failed', fence: 1 }, agentTurns: [{ attemptId: 'failed', status: 'running' }] };
-  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run, writerLiveness: 'local-active' })))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ run: { ...run, writer: undefined } })));
-  expect(await beeGameAdapter.getTaskRecovery('project', true)).toMatchObject({ state: 'stopping' });
-  expect(await beeGameAdapter.getTaskRecovery('project', true)).toBeNull();
-  expect(authenticatedFetchMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
-});
-
 it('routes ordinary project chat through V3 without asking the user for an intent', async () => {
   authenticatedFetchMock.mockReset()
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
@@ -145,6 +134,52 @@ it('explicit writer recovery does not resume or dispatch a model message', async
   expect(JSON.parse(authenticatedFetchMock.mock.calls[1]![1]!.body as string)).toEqual({expectedVersion:7,attemptId:'first',fence:1})
 })
 
+it('settles a proven leftover writer during an explicit message without a recovery panel', async () => {
+  authenticatedFetchMock.mockReset();
+  const run = { id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1',
+    requirements: { revision: 'r' }, writer: { attemptId: 'first', fence: 1 },
+    agentTurns: [{ attemptId: 'first', status: 'running' }] };
+  const settled = { ...run, version: 8, writer: undefined, paused: { at: 'now' },
+    agentTurns: [{ attemptId: 'first', status: 'interrupted' }] };
+  const unresolved = { run, writerLiveness: 'unknown', recoveryEvidence: 'persisted' };
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat-1' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify(unresolved)))
+    .mockResolvedValueOnce(new Response(JSON.stringify(unresolved)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run: settled })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run: settled })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run: { ...settled, version: 9, paused: undefined } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-1', turn: { attemptId: 'next' } })));
+  await beeGameAdapter.sendMessage({ project_id: 'project', content: 'Continue existing work' });
+  const mutations = authenticatedFetchMock.mock.calls.filter(([, options]) => options?.method === 'POST');
+  expect(mutations.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure', '/api/projects/project/workflow-v3/recover-writer',
+    '/api/projects/project/workflow-v3/resume', '/api/projects/project/workflow-v3/agent/messages',
+  ]);
+  expect(JSON.parse(mutations.at(-1)![1]!.body as string)).toMatchObject({ expectedVersion: 9, text: 'Continue existing work' });
+});
+
+it('lets explicit resume wait for a paused local writer, but automatic retry never clears the pause', async () => {
+  authenticatedFetchMock.mockReset();
+  const run = { id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1', paused: { at: 'now' },
+    requirements: { revision: 'r' }, writer: { attemptId: 'first', fence: 1 },
+    agentTurns: [{ attemptId: 'first', status: 'running' }] };
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat-1' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run, writerLiveness: 'local-active' })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run: { ...run, version: 9, writer: undefined, paused: undefined } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-1', turn: { attemptId: 'next' } })));
+  await beeGameAdapter.sendMessage({ project_id: 'project', content: 'Continue existing work' });
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure', '/api/projects/project/workflow-v3',
+    '/api/projects/project/workflow-v3/resume', '/api/projects/project/workflow-v3/agent/messages',
+  ]);
+  authenticatedFetchMock.mockReset();
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat-1' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run, writerLiveness: 'local-active', recoveryEvidence: 'persisted' })));
+  await expect(beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn', automatic_retry: true }))
+    .rejects.toThrow('任务已被暂停');
+  expect(authenticatedFetchMock.mock.calls.filter(([url]) => String(url).includes('/workflow-v3/')).length).toBe(0);
+});
+
 it('explains a resume race without sending a new model message', async () => {
   authenticatedFetchMock.mockReset()
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({session:{id:'chat-1'}})))
@@ -223,6 +258,9 @@ it('sends answers through the permission endpoint and does not treat stale reque
   const [url, request] = authenticatedFetchMock.mock.calls[0]
   expect(url).toContain('/api/projects/project/permissions/question')
   expect(JSON.parse(request?.body as string)).toEqual({ decision: 'allow', scope: 'once', remember: false, answers })
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: true })))
+  await beeGameAdapter.resolveToolPermission({project_id:'project',gate_id:'design-question',decision:'allow',answers,intent:'change'})
+  expect(JSON.parse(authenticatedFetchMock.mock.calls.at(-1)![1]?.body as string)).toMatchObject({answers,intent:'change'})
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: false, stale: true })))
   await expect(beeGameAdapter.resolveToolPermission({ project_id: 'project', gate_id: 'question', decision: 'allow', answers }))
     .rejects.toMatchObject({ code: 'permission_not_pending', message: expect.stringContaining('no longer pending') })
@@ -1251,3 +1289,25 @@ describe('transcriptEventsToHistory', () => {
     expect(history.every(row => row.type === 'text')).toBe(true)
   })
 })
+
+
+it('preserves the host design-change permission when restoring a pending question from runtime state',async()=>{
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({project_id:'design-approval',pending_permissions:[
+    {id:'design-question',tool_name:'AskUserQuestion',session_id:'session',design_change_allowed:true,
+      input:{questions:[{question:'Approve correction?',options:[{label:'Approve'},{label:'Reject'}]}]}}
+  ]})))
+  const state=await beeGameAdapter.getProjectRuntimeState('design-approval')
+  expect(state.pendingPermissions[0]?.artifact?.designChangeAllowed).toBe(true)
+})
+
+it('submits PNG and atlas JSON together through the existing upload endpoint without starting an Agent', async () => {
+  authenticatedFetchMock.mockReset();
+  authenticatedFetchMock.mockResolvedValue(new Response(JSON.stringify({ resource: {id:'new'}, manifest:{resources:[]} }),{headers:{'content-type':'application/json'}}));
+  const files = [new File(['image'],'icons.png',{type:'image/png'}),new File(['{}'],'icons.json',{type:'application/json'})];
+  await beeGameAdapter.uploadProjectAsset('project','new',files);
+  expect(authenticatedFetchMock).toHaveBeenCalledTimes(1);
+  const [url, options] = authenticatedFetchMock.mock.calls[0];
+  expect(url).toBe('/api/projects/project/assets/resources/new/upload');
+  expect((options?.body as FormData).getAll('file')).toEqual(files);
+});

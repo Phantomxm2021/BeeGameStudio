@@ -1,3 +1,4 @@
+import { ResourceUploadButton } from '../../../../../packages/scene-editor/src/resource-upload';
 import { uiNodeKind, supportsTextNode, supportsImageNode, isVisualNode, isTransformNode, isNineSliceRole, uiNodeText, nodeSize, uiFontSize, nodeAnchor, nodePosition, uiPaintChildren, renderUiNode, uiNodeImageSource, resolveNodeImage, type UiNodeKind } from '../../../../../packages/scene-editor/src/ui-preview/UiContentRenderer';
 import '../../../../../packages/scene-editor/src/ui-preview/UiContentRenderer.css';
 import { loadUiFont, loadUiImage } from '../../../../../packages/scene-editor/src/ui-preview/uiResourceLoading';
@@ -5,7 +6,7 @@ import { uiFontKey } from '../../../../../packages/scene-editor/src/ui-font-refe
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Matrix4 } from 'three';
 import { resolveUiNodesForViewport, initializeUiLayout, createUiTextMeasurer, uiAnchor, uiLocalMatrix } from '@beegame/scene-editor';
-import { uiImageKey } from '../../../../../packages/scene-editor/src/ui-preview/uiAtlas';
+import { uiImageKey, clearImageSelection } from '../../../../../packages/scene-editor/src/ui-preview/uiAtlas';
 import { mapEditorAssets } from './editorAssetLoading';
 import { currentKeyboardLabels, resolveUnityNavigationAction, wheelPixels } from '@beegame/scene-editor/platform';
 import {
@@ -168,6 +169,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
   const selectedImageCardRef = useRef<HTMLButtonElement>(null);
   const [assetSearch, setAssetSearch] = useState('');
   const [pickerLoading, setPickerLoading] = useState(false);
+  const uploadAssetsRef = useRef<((files: File[]) => Promise<void>) | undefined>(undefined);
   const loadMoreAssetsRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const [closeRequested, setCloseRequested] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
@@ -288,16 +290,17 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
       try {
         if (!active) return;
         const resources = manifest.resources.filter(resource => resource.status === 'verified');
-        setAssetOptions(resources.map(resource => ({
-          id: resource.id,
-          label: resource.id,
-          members: resource.file_paths.filter(path => UI_IMAGE.test(path)).map(path =>
-            resource.file_paths.filter(file => UI_IMAGE.test(file) && fileStem(file) === fileStem(path)).length === 1 ? fileStem(path) : path),
-          font: resource.file_paths.some(path => UI_FONT.test(path)) || /font/i.test(resource.asset_kind ?? resource.id),
-        })));
+        const addAssetOptions = (items: typeof resources) => {
+          const options = items.map(resource => ({ id: resource.id, label: resource.id,
+            members: resource.file_paths.filter(path => UI_IMAGE.test(path)).map(path =>
+              resource.file_paths.filter(file => UI_IMAGE.test(file) && fileStem(file) === fileStem(path)).length === 1 ? fileStem(path) : path),
+            font: resource.file_paths.some(path => UI_FONT.test(path)) || /font/i.test(resource.asset_kind ?? resource.id) }));
+          setAssetOptions(previous => [...previous.filter(option => !options.some(next => next.id === option.id)), ...options]);
+        };
+        addAssetOptions(resources);
         const requiredAssets = new Set(uiDocuments.flatMap(item => item.document.assetRefs));
-        const fontWarnings: string[] = [];
         const loadResources = async (resources: typeof manifest.resources, initial: boolean) => {
+        const fontWarnings: string[] = [];
         const loadTargets = resources.flatMap(resource => resource.file_paths
           .filter(path => UI_IMAGE.test(path) || UI_FONT.test(path))
           .map(path => ({ resourceId: resource.id, path })));
@@ -361,7 +364,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
             }, signal), loadFonts()]);
         if (!active) return;
         const entries = loaded.flat();
-        for (const resource of manifest.resources) {
+        for (const resource of resources) {
           if (entries.some(([key]) => key === resource.id)) continue;
           const first = entries.find(([key]) => key.startsWith(`${resource.id}:`));
           if (first) entries.push([resource.id, first[1]]);
@@ -374,6 +377,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
         }) })));
         if (active) setFontFamilies(previous => ({ ...previous, ...Object.fromEntries(fonts.flat()) }));
         if (failedFiles.length) throw new Error(`Failed to load ${failedFiles.length} assets: ${failedFiles.join(', ')}`);
+        if (!initial && (optionalFailures.length || fontWarnings.length)) throw new Error(`Could not load imported assets: ${[...optionalFailures, ...fontWarnings].join(', ')}`);
         if (active) setMessage([
           ...fontWarnings,
           ...(optionalFailures.length ? [`Optional assets unavailable: ${optionalFailures.join(' · ')}`] : []),
@@ -381,6 +385,13 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
         };
         await loadResources(resources.filter(resource => requiredAssets.has(resource.id)), true);
         if (!active || signal.aborted) return;
+        uploadAssetsRef.current = async files => {
+          const result = await beeGameAdapter.uploadProjectAsset(projectId, `user-${crypto.randomUUID()}`, files);
+          if (!active || signal.aborted) throw new DOMException('Editor closed during upload', 'AbortError');
+          const imported = result.manifest.resources.filter(resource => resource.id === result.resource.id);
+          addAssetOptions(imported);
+          await loadResources(imported, false);
+        };
         let pickerRequest: Promise<void> | undefined;
         loadMoreAssetsRef.current = () => {
           if (!pickerRequest) {
@@ -404,6 +415,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
       if (active && !isUiAbortError(error)) setLoadState({ status: 'error', progress: 0, label: 'Could not open UI', detail: error instanceof Error ? error.message : String(error) });
     });
     return () => {
+      uploadAssetsRef.current = undefined;
       loadMoreAssetsRef.current = undefined;
       active = false;
       controller.abort();
@@ -427,7 +439,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
     const context = needsMeasurement ? document.createElement('canvas').getContext('2d') : null;
     const measureText = context ? createUiTextMeasurer(context, node => {
       const key = uiFontKey(node.data?.font);
-      return key && fontFamilies[key] ? `"${fontFamilies[key]}"` : 'sans-serif';
+      return key && fontFamilies[key] ? `"${fontFamilies[key]}"` : typeof node.style?.fontFamily === 'string' ? node.style.fontFamily : 'sans-serif';
     }) : undefined;
     try {
       return { nodes: resolveUiNodesForViewport(current.document.data.nodes, current.document.data.rootId,
@@ -738,9 +750,10 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
         if (resourceId) reference.assetRef = resourceId;
         else delete reference.assetRef;
         node.data.image = reference;
-        for (const key of ['member', 'frame', 'frameParts', 'stateFrames', 'initialFacing']) delete node.data[key];
+        node.data = { ...clearImageSelection(node.data), image: reference };
       }
-      for (const key of ['member', 'frame', 'frameParts', 'stateFrames', 'initialFacing']) delete reference[key];
+      const clean = clearImageSelection(reference);
+      for (const key of Object.keys(reference)) if (!(key in clean)) delete reference[key];
       if (!resourceId) return;
       const [file, frame] = (member ?? option?.members[0] ?? '').split('#');
       if (file) reference.member = file;
@@ -767,9 +780,9 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
       const font = typeof node.data?.font === 'object' && node.data.font !== null ? node.data.font as Record<string, unknown> : {};
       const nextFont = { ...font };
       if (font.assetRef !== resourceId) delete nextFont.member;
-      if (resourceId) nextFont.assetRef = resourceId;
-      else delete nextFont.assetRef;
-      node.data = { ...node.data, font: nextFont };
+      node.data = { ...node.data };
+      if (resourceId) node.data.font = { ...nextFont, assetRef: resourceId };
+      else delete node.data.font;
       if (resourceId && !next.document.assetRefs.includes(resourceId)) next.document.assetRefs.push(resourceId);
     });
   };
@@ -1376,6 +1389,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                 <EditorRange label="Opacity" value={typeof selected.style?.opacity === 'number' ? selected.style.opacity : typeof selected.data?.alpha === 'number' ? selected.data.alpha : 1} onBegin={() => { inspectorEditRef.current = structuredClone(currentRef.current); }} onEnd={finishInspectorEdit} onChange={value => updateStyle('opacity', value)} />
                 {textCapable ? <>
                   <EditorSelect label="Font" ariaLabel="Font asset" value={typeof selectedFont?.assetRef === 'string' ? selectedFont.assetRef : ''} onValueChange={selectFontAsset} options={[["", 'Default'], ...fontAssets.map(asset => [asset.id, asset.label] as const)]} />
+                  <ResourceUploadButton onUpload={async files => { if (!uploadAssetsRef.current) throw new Error("Editor resources are unavailable"); await uploadAssetsRef.current(files); }} />
                   <label>Font size<EditorInput type="number" min="1" value={uiFontSize(selected)} onChange={event => updateStyle('fontSize', Math.max(1, Number(event.target.value)))} /></label>
                   <EditorSelect label="Align" ariaLabel="Text alignment" value={String(selected.style?.align ?? selected.data?.align ?? 'center')} onValueChange={value => updateStyle('align', value)} options={[['left', 'Left'], ['center', 'Center'], ['right', 'Right']]} />
                 </> : null}
@@ -1447,6 +1461,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
             <div><DialogTitle>Select Source Image</DialogTitle><DialogDescription>{imageAssets.reduce((count, asset) => count + asset.members.length, 0)} project images available</DialogDescription></div>
             <Button variant="ghost" size="icon" className="rounded-full" aria-label="Close image picker" onClick={() => setImagePickerOpen(false)}><X size={16} aria-hidden="true" /></Button>
           </div>
+          <ResourceUploadButton onUpload={async files => { if (!uploadAssetsRef.current) throw new Error("Editor resources are unavailable"); await uploadAssetsRef.current(files); }} />
           <Input className="ui-editor-asset-search" classNames={{ field: 'ui-editor-asset-search-field', input: 'text-sm' }} aria-label="Search images" placeholder="Search images…" value={assetSearch} onChange={setAssetSearch} />
           {pickerLoading ? <p role="status">Loading project images…</p> : null}
           <div className="ui-editor-asset-grid">

@@ -70,6 +70,7 @@ type SupabaseModelConfigRow = {
   owner_id: string
   name: string
   provider: string
+  api_protocol?: PublicModelConfig['apiProtocol'] | null
   base_url: string | null
   // Legacy column name. The runtime host treats this as an RLS-protected
   // secret value; it does not perform Supabase server-side encryption.
@@ -407,6 +408,7 @@ export class SupabaseDashboardStore {
       name: input.name,
       provider: input.provider,
       base_url: input.baseUrl ?? null,
+      api_protocol: input.apiProtocol ?? null,
       api_key_ciphertext: encryptSecret(input.apiKey, 'model-config:api-key'),
       models: input.models,
       published: input.published ?? true,
@@ -433,6 +435,7 @@ export class SupabaseDashboardStore {
     }
     if (input.name !== undefined) patch.name = input.name
     if (input.provider !== undefined) patch.provider = input.provider
+    if (input.apiProtocol !== undefined) patch.api_protocol = input.apiProtocol
     if (input.baseUrl !== undefined) patch.base_url = input.baseUrl || null
     if (input.clearSecret) {
       patch.api_key_ciphertext = encryptSecret('', 'model-config:api-key')
@@ -474,6 +477,7 @@ export class SupabaseDashboardStore {
         name: record.name,
         provider: record.provider,
         base_url: record.baseUrl ?? null,
+        api_protocol: record.apiProtocol ?? null,
         api_key_ciphertext: encryptSecret(
           record.apiKey,
           'model-config:api-key',
@@ -1425,6 +1429,7 @@ function rowToPublicModelConfig(
     ownerId: row.owner_id,
     name: row.name,
     provider: row.provider as PublicModelConfig['provider'],
+    ...(row.api_protocol ? {apiProtocol:row.api_protocol} : {}),
     ...(row.base_url ? { baseUrl: row.base_url } : {}),
     apiKeyPreview: maskSecret(apiKey),
     models: toModelMap(row.models),
@@ -1442,6 +1447,7 @@ function modelConfigRowToRuntimeEnv(
     : ''
   return mapStoredModelConfigToRuntime({
     provider: row.provider as Parameters<typeof mapStoredModelConfigToRuntime>[0]['provider'],
+    ...(row.api_protocol ? {apiProtocol:row.api_protocol} : {}),
     ...(row.base_url ? { baseUrl: row.base_url } : {}),
     apiKey,
     models: toModelMap(row.models),
@@ -1455,18 +1461,6 @@ function maskSecret(secret: string): string {
 }
 
 const RUNTIME_BOOLEAN_FIELDS: Array<keyof RuntimeSettingsConfig> = [
-  'autoMemoryEnabled',
-  'verificationAgentEnabled',
-  'agentTeamsEnabled',
-  'promptSuggestionEnabled',
-  'awaySummaryEnabled',
-  'coordinatorModeEnabled',
-  'autoDreamEnabled',
-  'skillSearchEnabled',
-  'treeSitterBashEnabled',
-  'webBrowserToolEnabled',
-  'bashClassifierEnabled',
-  'mcpSkillsEnabled',
   'resourceLibraryEnabled',
 ]
 

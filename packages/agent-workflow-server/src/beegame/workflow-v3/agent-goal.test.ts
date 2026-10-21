@@ -7,7 +7,7 @@ import { BeeGameSessionManager, type BeeGameSessionSubmitInput } from '../sessio
 import { registerV3Routes } from './routes'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, assertCommit, type WorkflowStore } from './store'
 import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProfessionalContext, agentProfessionalContextForRun, focusedExecutionFacts } from './agent-goal'
-import { createRun, type Run } from './state'
+import { createRun, digest, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
 import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS } from './project-guide'
@@ -63,7 +63,10 @@ test('only explicit change releases the implementation baseline; exact visual sa
 
 test('resource obligations retain authorization and provenance without prescribing a sourcing or atlas tour', () => {
   for (const prompt of [agentProfessionalContext, agentProfessionalContextForRun({} as Run)]) {
-    expect(prompt).toContain('purpose: production and existing requirementIds')
+    expect(prompt).not.toContain('purpose: production')
+    expect(prompt).not.toContain('file_paths')
+    expect(prompt).not.toContain('local_path')
+    expect(prompt).toContain('required licenses')
     expect(prompt).toContain('AI is not the default for all core art')
     expect(prompt).toContain('usage rights')
     expect(prompt).toContain('read-only quote')
@@ -201,13 +204,13 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     for(let i=0;i<300;i++){const run=await local.read('goal-project','owner');if(run && check(run))return run;await Bun.sleep(5)}
     throw Error('Synthetic goal did not settle: '+JSON.stringify(await local.read('goal-project','owner')))
   }
-  return {root,store:local,sessions,submissions,starts,events,body,call,wait,setMode:(v:typeof mode)=>{mode=v},setOwner:(v:string)=>{owner=v},setPersistFailure:(v:boolean)=>{persistFails=v},
+  return {root,store:local,sessions,submissions,starts,events,body,call,wait,setMode:(v:typeof mode)=>{mode=v},setOwner:(v:string)=>{owner=v},setPersistFailure:(v:boolean)=>{persistFails=v},setSettlementFailure:(v:boolean)=>{failSettlement=v},
     close:async()=>{await Promise.all(cleanup.map(fn=>fn()));await sessions.dispose();await rm(container,{recursive:true,force:true})}}
 }
 
-test('blank confirmed Web intake uses the design-led first version without creating template content',async()=>{
+for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web ${creationMode} intake uses the design-led first version without creating template content`,async()=>{
   const f=await fixture('normal',false,undefined,undefined,undefined,0,{},undefined,true)
-  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,
+  Object.assign(f.body.brief,{creation_mode:creationMode,build_source:null,
     settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
@@ -218,20 +221,23 @@ test('blank confirmed Web intake uses the design-led first version without creat
     expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
     expect(JSON.parse(String(initialMessage.payload?.confirmedBriefContext))).toEqual(f.body.brief)
     await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
-    expect(String(f.submissions[0]!.prompt)).toContain(JSON.stringify(f.body.brief))
+    expect(String(f.submissions[0]!.prompt)).not.toContain(JSON.stringify(f.body.brief))
+    expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
+    expect(String(f.submissions[0]!.prompt)).toStartWith('Complete the current user assignment')
+    expect(String(f.submissions[0]!.prompt)).not.toContain('$game-creative-director-expert')
     expect(f.starts[0].systemContext).toContain('design records live under docs/')
-    expect(f.starts[0].systemContext).toContain('Preserve confirmed requirements')
-    const guide=await readFile(join(f.root,'CLAUDE.md'),'utf8')
+    expect(f.starts[0].systemContext).toContain('Bgs loads applicable AGENTS.md instructions natively')
+    const guide=await readFile(join(f.root,'AGENTS.md'),'utf8')
     expect(guide).not.toContain('Built-in Skill index')
     expect(guide).not.toContain('Collection navigator:')
     expect(guide).toContain('before related design or implementation decisions')
-    expect(f.starts[0].systemContext).toContain(guide.slice(guide.indexOf('## Professional methods')))
+    expect(f.starts[0].systemContext).not.toContain(guide.slice(guide.indexOf('## Professional methods')))
     expect(run.blockedReason).not.toContain('not full-game completion')
     expect(f.submissions).toHaveLength(1)
     // Identical intake is read-only even after the model has authored new files.
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     expect(f.submissions).toHaveLength(1)
-    expect(await readFile(join(f.root,'CLAUDE.md'),'utf8')).toBe(guide)
+    expect(await readFile(join(f.root,'AGENTS.md'),'utf8')).toBe(guide)
     await mkdir(join(f.root,'src'),{recursive:true})
     await writeFile(join(f.root,'src/game.js'),'// retained user work')
     expect((await f.call('/agent/messages','POST',{requestKey:'feedback',runId:run.id,
@@ -241,7 +247,7 @@ test('blank confirmed Web intake uses the design-led first version without creat
     expect(f.submissions).toHaveLength(2)
     expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// retained user work')
     expect(run.creation?.initialDelivery).toBe('design-led-first-version')
-    const refreshed=await readFile(join(f.root,'CLAUDE.md'),'utf8')
+    const refreshed=await readFile(join(f.root,'AGENTS.md'),'utf8')
     expect(refreshed).toBe(guide)
     expect(refreshed.slice(refreshed.indexOf('## Professional methods'))).toBe(guide.slice(guide.indexOf('## Professional methods')))
   }finally{await f.close()}
@@ -256,14 +262,14 @@ test('existing sources and an already-running goal never receive a backfilled gu
     Object.assign(existing.body.brief,{creation_mode:'creative',build_source:null})
     expect((await existing.call('/agent/goal','POST',existing.body)).status).toBe(202)
     await existing.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    await expect(readFile(join(existing.root,'CLAUDE.md'),'utf8')).rejects.toThrow()
+    await expect(readFile(join(existing.root,'AGENTS.md'),'utf8')).rejects.toThrow()
 
     expect((await running.call('/agent/goal','POST',running.body)).status).toBe(202)
     await running.wait(r=>Boolean(r.writer) && running.submissions.length===1)
-    await rm(join(running.root,'CLAUDE.md'))
+    await rm(join(running.root,'AGENTS.md'))
     expect((await running.call('/agent/goal','POST',running.body)).status).toBe(202)
     expect(running.submissions).toHaveLength(1)
-    await expect(readFile(join(running.root,'CLAUDE.md'),'utf8')).rejects.toThrow()
+    await expect(readFile(join(running.root,'AGENTS.md'),'utf8')).rejects.toThrow()
   }finally{await existing.close();await running.close()}
 },30000)
 
@@ -271,7 +277,7 @@ test('saved guide markers do not trigger host repair or retain an exited writer'
   const f=await fixture()
   try {
     await initializeProjectGuide(f.root)
-    const path=join(f.root,'CLAUDE.md'),damaged=(await readFile(path,'utf8')).replace('<!-- bgs:source-navigation:end -->','')
+    const path=join(f.root,'AGENTS.md'),damaged=(await readFile(path,'utf8')).replace('<!-- bgs:source-navigation:end -->','')
     await writeFile(path,damaged)
     await f.call('/agent/goal','POST',f.body)
     const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
@@ -377,18 +383,21 @@ test('initial goal continues through visual direction without host Tasks or a se
     expect(f.starts[0].systemContext).toContain('No root project guide exists')
     expect(f.starts[0].systemContext).toContain('Current BGS tools directory')
     expect(f.starts[0].systemContext).toContain('node measure.mjs, handoff.mjs')
-    expect(f.starts[0].systemContext).not.toContain('Maintain root CLAUDE.md')
+    expect(f.starts[0].systemContext).toMatch(/Document authoring contract: node \S+\/handoff\.mjs --design help;/)
+    expect(f.starts[0].systemContext).not.toContain('Maintain root AGENTS.md')
     expect(f.starts[0].systemContext).toContain('project-navigation-sources')
     expect(JSON.stringify(submit.prompt)).not.toContain('BGS saved evidence')
     expect(f.starts[0].systemContext.split('Use the relevant entry with --help when its contract is needed:')).toHaveLength(2)
     expect(f.starts[0].systemContext).not.toContain('Optional BGS project tools')
     expect(JSON.stringify(submit.prompt)).not.toContain('Optional BGS project tools')
-    expect(String(submit.prompt)).toContain(JSON.stringify(f.body.brief))
+    expect(String(submit.prompt)).not.toContain(JSON.stringify(f.body.brief))
+    expect(submit.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
     expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false)
     expect(run.agentTurns![0]).toMatchObject({sessionId:f.body.chatSessionId,status:'ended',
       usage:expect.objectContaining({prompt_tokens:40,completion_tokens:8})})
     expect(run.agentTurns![0]!.quiescedAt).toBeDefined();expect(run.writer).toBeUndefined();expect(run.deliveryEligible).toBe(false)
-    expect(run.blockedReason).toContain('target-runtime evidence remain unverified')
+    expect(run.blockedReason).toContain('execution completion is not acceptance')
+    expect(run.blockedReason).not.toContain('Itemized acceptance')
     expect(run.blockedReason).not.toContain('Visual boards')
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202);expect(f.submissions).toHaveLength(1)
     expect((await f.call('/agent/goal','POST',reverseKeys(f.body))).status).toBe(202)
@@ -416,7 +425,7 @@ test('goal and follow-ups leave catalog reads to the Agent and preserve user sou
     expect(calls).toHaveLength(0)
     const initial=f.starts[0].systemContext
     expect(initial).not.toContain('fixture-audio')
-    expect(String(f.submissions[0]!.prompt)).toContain(f.body.brief.idea)
+    expect(f.submissions[0]!.confirmedBriefContext).toContain(f.body.brief.idea)
     expect(initial).toContain('Honor explicit resource sources and usage rights')
     expect(JSON.parse(run.requirements.text)).toEqual(f.body.brief)
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
@@ -558,13 +567,13 @@ test('first follow-up preserves requirements and resumes native history unless f
 test('project guide refreshes at the next turn, including discussion, without repeating user history or changing requirements',async()=>{
   const f=await fixture()
   try {
-    const file=join(f.root,'CLAUDE.md'),first='# Project navigation\nGUIDE_ROUTE_ONE\nRun: existing actual command\n'+PROJECT_WORKING_CONVENTIONS+'\n'
+    const file=join(f.root,'AGENTS.md'),first='# Project navigation\nGUIDE_ROUTE_ONE\nRun: existing actual command\n'+PROJECT_WORKING_CONVENTIONS+'\n'
     await writeFile(file,first)
     await f.call('/agent/goal','POST',f.body);let run=await f.wait(r=>Boolean(r.agentTurns![0]?.finishedAt))
     const requirements=structuredClone(run.requirements)
-    expect(f.starts[0].systemContext.split('GUIDE_ROUTE_ONE')).toHaveLength(2)
-    expect(f.starts[0].systemContext).toContain(PROJECT_WORKING_CONVENTIONS)
-    expect(f.starts[0].systemContext.split('## Required design dependencies')).toHaveLength(2)
+    expect(f.starts[0].systemContext).not.toContain('GUIDE_ROUTE_ONE')
+    expect(f.starts[0].systemContext).not.toContain(PROJECT_WORKING_CONVENTIONS)
+    expect(f.starts[0].systemContext).not.toContain('## Required design dependencies')
     expect(f.starts[0].systemContext).toContain('Follow applicable project working conventions within current user authorization')
     expect(await readFile(file,'utf8')).toBe(first)
     expect(JSON.stringify(f.submissions[0].prompt)).not.toContain('GUIDE_ROUTE_ONE')
@@ -575,13 +584,15 @@ test('project guide refreshes at the next turn, including discussion, without re
     }
     await writeFile(file,first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO'))
     await send('work','guide-refresh')
-    expect(f.starts[1].systemContext).toContain('GUIDE_ROUTE_TWO')
-    expect(f.starts[1].systemContext).toContain(PROJECT_WORKING_CONVENTIONS)
-    expect(f.starts[1].systemContext.split('## Required design dependencies')).toHaveLength(2)
+    expect(f.starts[1].systemContext).not.toContain('GUIDE_ROUTE_TWO')
+    expect(f.starts[1].systemContext).toContain(digest(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO')))
+    expect(f.starts[1].systemContext).not.toContain(PROJECT_WORKING_CONVENTIONS)
+    expect(f.starts[1].systemContext).not.toContain('## Required design dependencies')
     expect(await readFile(file,'utf8')).toBe(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO'))
     expect(f.starts[1].systemContext).not.toContain('GUIDE_ROUTE_ONE')
     await send('discuss','guide-discuss')
-    expect(f.starts[2].systemContext).toContain('GUIDE_ROUTE_TWO')
+    expect(f.starts[2].systemContext).not.toContain('GUIDE_ROUTE_TWO')
+    expect(f.starts[2].systemContext).toContain(digest(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO')))
     expect(f.starts[2].systemContext).not.toContain('Professional coverage:')
     await rm(file);await send('discuss','guide-missing')
     expect(f.starts[3].systemContext).toContain('No root project guide exists')
@@ -610,7 +621,9 @@ test('focused work is explicit and retains Chat/sources but does not resume the 
     expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false)
     expect(f.starts[1].systemContext).toContain('saved-user-inputs-and-current-requirements')
     const facts=JSON.parse(f.starts[1].systemContext.split('BGS saved evidence (not game acceptance): ')[1]!)
-    expect(JSON.parse(facts.executionContext.requirements.text)).toEqual(f.body.brief)
+    expect(facts.executionContext.requirements).toMatchObject({revision:run.requirements.revision})
+    expect(facts.executionContext.requirements).not.toHaveProperty('text')
+    expect(f.submissions[1].confirmedBriefContext).toBe(run.requirements.text)
     expect(f.starts[1].systemContext).toContain('not-transferred')
     expect((await f.call('/agent/messages','POST',request)).status).toBe(202)
     expect(f.submissions).toHaveLength(2)
@@ -708,11 +721,11 @@ test('goal settlement leaves the project guide unchanged after native source wri
   const f=await fixture()
   try {
     await initializeProjectGuide(f.root)
-    const guide=await readFile(join(f.root,'CLAUDE.md'),'utf8')
+    const guide=await readFile(join(f.root,'AGENTS.md'),'utf8')
     await f.call('/agent/goal','POST',f.body)
     await f.wait(run=>Boolean(run.agentTurns?.[0]?.finishedAt))
     expect(await readFile(join(f.root,'candidate.txt'),'utf8')).toBe('Synthetic partial candidate')
-    expect(await readFile(join(f.root,'CLAUDE.md'),'utf8')).toBe(guide)
+    expect(await readFile(join(f.root,'AGENTS.md'),'utf8')).toBe(guide)
   }finally{await f.close()}
 })
 
@@ -738,8 +751,9 @@ test('focused facts retain literal user decisions and answered Questions, never 
   const facts=focusedExecutionFacts(run,events),text=JSON.stringify(facts)
   expect(text).toContain('Use the blue option');expect(text).toContain('Theme?');expect(text).toContain('Blue')
   expect(text).toContain('Literal ordinary Chat user choice')
-  expect(facts.requirements).toEqual(requirements)
-  for(const value of ['Keep the selected theme','Use keyboard controls'])expect(text.split(value)).toHaveLength(2)
+  const {text: _confirmedBrief, ...metadata} = requirements
+  expect(facts.requirements).toEqual(metadata)
+  for(const value of ['Keep the selected theme','Use keyboard controls'])expect(text).not.toContain(value) // Retained in the separate confirmed brief.
   expect(facts.priorUserRequests).toEqual([{requestKey:'prior',intent:'discuss',text:'Use the blue option'}])
   for(const value of ['PRIVATE_OLD_MODEL_HISTORY','PRIVATE_OLD_TOOL_OUTPUT','OLD_PERMISSION','CURRENT_WORK',
     'OLD_EXECUTION_INSTRUCTION','OLD_CONTINUATION_INSTRUCTION'])expect(text).not.toContain(value)
@@ -760,7 +774,7 @@ test('shared guide supplies design methods once without a compatibility fallback
     expect(context.split('## Required design dependencies')).toHaveLength(2)
     for(const step of ['1. Design records:','2. Actual visual designs:','3. Resources:',
       '4. UI/Scene JSON:','5. Implementation and runtime verification:'])expect(context.split(step)).toHaveLength(2)
-    for(const value of ['game-plan-execution','game-implementation-planning','PROJECT_SPECIFIC_ROUTE',
+    for(const value of ['select applicable Skills','game-implementation-planning','PROJECT_SPECIFIC_ROUTE',
       'unknown paid replay or automatic paid retry','respect exclusions and the project budget','required licenses'])expect(context).toContain(value)
   }
 })
@@ -768,7 +782,7 @@ test('shared guide supplies design methods once without a compatibility fallback
 test.each([undefined,'# Custom navigation\nRun the saved command'])('goal dispatch does not supplement a missing or custom guide: %s',async guide=>{
   const f=await fixture()
   try {
-    if(guide!==undefined)await writeFile(join(f.root,'CLAUDE.md'),guide)
+    if(guide!==undefined)await writeFile(join(f.root,'AGENTS.md'),guide)
     await f.call('/agent/goal','POST',f.body)
     await f.wait(run=>Boolean(run.agentTurns?.[0]?.finishedAt))
     const context=f.starts[0].systemContext
@@ -777,11 +791,12 @@ test.each([undefined,'# Custom navigation\nRun the saved command'])('goal dispat
     expect(context).toContain('Current BGS tools directory')
     expect(context).toContain('actual runtime')
     if(guide!==undefined) {
-      expect(context).toContain(guide)
-      expect(await readFile(join(f.root,'CLAUDE.md'),'utf8')).toBe(guide)
+      expect(context).not.toContain(guide)
+      expect(context).toContain(digest(guide))
+      expect(await readFile(join(f.root,'AGENTS.md'),'utf8')).toBe(guide)
     } else {
       expect(context).toContain('No root project guide exists')
-      expect(await readFile(join(f.root,'CLAUDE.md'),'utf8').catch(()=>null)).toBeNull()
+      expect(await readFile(join(f.root,'AGENTS.md'),'utf8').catch(()=>null)).toBeNull()
     }
   }finally{await f.close()}
 })
@@ -801,21 +816,23 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   expect(followup).not.toContain(PROJECT_WORKING_CONVENTIONS)
   expect(followup).not.toContain('Before creating or changing visual implementation')
   expect(agentProfessionalContextForRun({...run,creation:undefined})).not.toContain('eight documents')
-  expect(agentGoalPrompt(run)).toContain('ORIGINAL_CONFIRMED_GOAL')
+  expect(agentGoalPrompt(run)).not.toContain('ORIGINAL_CONFIRMED_GOAL')
+  expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
 })
 
 test('stable system context preserves design authority and evidence boundaries, not implementation recipes', () => {
   const message={intent:'change',text:'Change only movement speed'} as Parameters<typeof agentMessagePrompt>[0]
   for(const prompt of [agentProfessionalContext,PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run,true)]) {
-    expect(prompt).toContain('with the Skill tool')
+    expect(prompt).toContain('with $skill-name')
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
-    expect(prompt).toContain('single source')
+    expect(prompt).toContain('without a second hardcoded layout')
     expect(prompt).toContain('Prose, palettes and JSON geometry do not replace visual design')
     expect(prompt).toContain('do not create UI/Scene JSON here')
     expect(prompt).toContain('Complete technical design in this stage before actual visual design or resource production')
     expect(prompt).not.toContain('Technical/resource plans start as drafts')
     expect(prompt).not.toContain('without waiting for production assets')
-    expect(prompt).toContain('every registered resource file_paths entry and dependency local_path')
+    expect(prompt).not.toContain('file_paths')
+    expect(prompt).not.toContain('local_path')
     expect(prompt).not.toContain('request a separate shared PNG sheet')
     expect(prompt).not.toContain('computed equal-cell grid')
     expect(prompt.length).toBeLessThan(7000)
@@ -849,7 +866,8 @@ for(const contextMode of ['resume','focused'] as const) test(contextMode+' conti
       expect(run.agentTurns![1]!.nativeSessionId).not.toBe(run.agentTurns![0]!.nativeSessionId)
       const facts=JSON.parse(f.starts[1].systemContext.split('BGS saved evidence (not game acceptance): ')[1]!).executionContext
       expect(facts.previousExecution).toMatchObject({attemptId:continuation.continuationOf,status:'interrupted',externalOutcomes:'not-inferred'})
-      expect(JSON.parse(facts.requirements.text)).toEqual(f.body.brief)
+      expect(facts.requirements).not.toHaveProperty('text')
+      expect(f.submissions[1].confirmedBriefContext).toBe(run.requirements.text)
       expect(facts.omitted).toContain('session permissions')
       expect(await readFile(join(f.root,'candidate.txt'),'utf8')).toBe('Synthetic partial candidate')
     }
@@ -960,7 +978,8 @@ test('pause cancels real turn; resume only clears user pause, never restarts wor
   try {
     await f.call('/agent/goal','POST',f.body);await f.wait(()=>f.submissions.length===1)
     expect((await f.call('/stop','POST')).status).toBe(202)
-    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    const run=(await f.store.read('goal-project','owner'))!
+    expect(run.writer).toBeUndefined()
     expect(run.paused).toBeDefined();expect(run.agentTurns![0]!.status).toBe('interrupted')
     expect((await f.call('/resume','POST',{planRevision:0})).status).toBe(200)
     expect((await f.store.read('goal-project','owner'))!.paused).toBeUndefined()
@@ -1003,10 +1022,17 @@ test('Preview is bound by the route; discussion and duplicate intake never open 
     await f.call('/agent/messages','POST',msg('discussion','discuss'))
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt));expect(calls).toHaveLength(1)
     closing=false;f.setMode('wait');await f.call('/agent/messages','POST',msg('change','change'))
-    await f.wait(()=>f.submissions.length===3);await f.call('/stop','POST')
+    await f.wait(()=>f.submissions.length===3)
+    let stopFinished=false
+    const stopping=Promise.resolve(f.call('/stop','POST')).then(response=>{stopFinished=true;return response})
     await f.wait(()=>closing)
-    expect((await f.store.read('goal-project','owner'))!.writer).toBeDefined()
-    release();run=await f.wait(r=>Boolean(r.agentTurns?.[2]?.finishedAt))
+    const paused=(await f.store.read('goal-project','owner'))!
+    expect(paused.writer).toBeDefined();expect(stopFinished).toBe(false)
+    const resuming=f.call('/resume','POST',{planRevision:paused.planRevision})
+    release()
+    expect((await stopping).status).toBe(202)
+    expect((await resuming).status).toBe(200)
+    run=(await f.store.read('goal-project','owner'))!
     expect(run.writer).toBeUndefined();expect(run.agentTurns![2]!.status).toBe('interrupted')
     expect(calls).toHaveLength(2)
   }finally{release();await f.close()}
@@ -1029,6 +1055,25 @@ test('unknown goal writer needs actual exit evidence; reload cannot retry or era
     const before=structuredClone(fixed!);before.agentTurns![0]!.status='ended';before.version++
     expect(()=>assertCommit(run.projectId,run.ownerId,fixed!.version,before,fixed!)).toThrow('history')
   }finally{await recovery.dispose();await f.close()}
+})
+
+for (const action of ['stop','resume'] as const) test(action+' settles proven leftover ownership without manual recovery or native dispatch',async()=>{
+  const f=await fixture('normal',true)
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    await f.wait(r=>Boolean(r.agentTurns?.[0]?.quiescedAt))
+    await Bun.sleep(20)
+    f.setSettlementFailure(false)
+    const response=await f.call('/'+action,'POST',action==='resume'?{planRevision:0}:{})
+    expect(response.status).toBe(action==='stop'?202:200)
+    const run=(await response.json()).run as Run
+    expect(run.writer).toBeUndefined()
+    expect(run.agentTurns![0]!.status).toBe('interrupted')
+    expect(run.agentTurns![0]!.finishedAt).toBeDefined()
+    expect(Boolean(run.paused)).toBe(action==='stop')
+    expect(f.submissions).toHaveLength(1)
+    expect(run.deliveryEligible).toBe(false)
+  }finally{await f.close()}
 })
 
 test('failed Preview cleanup cannot record a quiesced writer or accept another turn',async()=>{
@@ -1199,6 +1244,7 @@ test('a reconstructed worker cannot unlock a goal writer without recorded native
     const run=await f.wait(()=>f.submissions.length===1)
     await expect(recovery.recover(run,{expectedVersion:run.version,attemptId:run.writer!.attemptId,fence:run.writer!.fence}))
       .rejects.toThrow('No durable native exit')
+    await expect(recovery.resume(run)).rejects.toThrow('No durable native exit')
     expect(f.submissions).toHaveLength(1);expect((await f.store.read('goal-project','owner'))!.writer).toEqual(run.writer)
   }finally{await recovery.dispose();await unknownSessions.dispose();await f.close()}
 })
@@ -1256,7 +1302,8 @@ test('pause survives a simultaneous saved exit; rebasing does not execute a mode
     claimed.writer={attemptId:'old',workerId:'old-host',fence:1}
     await base.commit('race','owner',run.version,claimed,'claimed')
     const paused=await executor.stop(claimed)
-    expect(paused!.paused).toBeDefined();expect(paused!.writer).toEqual(claimed.writer)
+    expect(paused!.paused).toBeDefined();expect(paused!.writer).toBeUndefined()
+    expect(paused!.agentTurns![0]!.status).toBe('interrupted')
     expect(paused!.agentTurns![0]!.quiescedAt).toBeDefined()
     expect(paused!.agentTurns).toHaveLength(1)
   }finally{await executor.dispose();await sessions.dispose();await rm(root,{recursive:true,force:true})}
@@ -1270,18 +1317,19 @@ test('first and resumed goals retain professional coverage and design dependenci
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     for (const skill of ['game-creative-director-expert','game-systems-designer-expert','game-level-designer-expert',
       'game-balance-designer-expert','gameplay-programmer','game-implementation-planning','game-art-director-expert',
-      'game-ui-ux-designer','game-audio-designer','game-content-pipeline-engineer','game-plan-execution']) expect(prompt).toContain(skill)
+      'game-ui-ux-designer','game-audio-designer','game-content-pipeline-engineer']) expect(prompt).toContain(skill)
     const steps=['1. Design records:', '2. Actual visual designs:', '3. Resources:', '4. UI/Scene JSON:', '5. Implementation and runtime verification:']
     const positions=steps.map(step=>prompt.indexOf(step))
     expect(positions.every((position,index)=>position>=0 && (!index || position>positions[index-1]!))).toBe(true)
     expect(prompt).toContain('only after selected visual designs and corresponding resources exist')
-    expect(prompt).toContain('do not omit, replace or reverse required dependencies')
+    expect(prompt).toContain('preserve these production dependencies')
     expect(prompt).toContain('Preserve confirmed requirements')
     expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
   }
-  expect(agentGoalPrompt(run)).toContain('Develop the game from this complete confirmed goal')
+  expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
   expect(agentGoalPrompt(run)).not.toContain('Plan and execute autonomously')
-  expect(agentGoalPrompt(run)).toContain('CONFIRMED_GAME')
+  expect(agentGoalPrompt(run)).not.toContain('CONFIRMED_GAME')
+  expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
   const slice={...run,creation:{initialDelivery:'playable-slice'}} as Run
   expect(agentGoalPrompt(slice)).toContain('Reduced content quantity does not waive the required design dependencies')
 })
@@ -1307,27 +1355,88 @@ test('turn-end host evidence lists actual design changes even when the native an
   } finally {await f.close()}
 })
 
-test('only a new complete-design goal enters the native GDD method; follow-ups preserve literal intent', () => {
+
+test('native question design approval unlocks only the active baseline before returning to tools, without another model turn',async()=>{
+  const f=await fixture('wait')
+  let measurement:ReturnType<typeof createAgentMeasurement>|undefined
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(()=>f.submissions.length===1)
+    await writeDesignDocumentsFixture(f.root)
+    measurement=createAgentMeasurement({run,turn:run.agentTurns![0]!,store:f.store,
+      onDesignLocked:()=>f.sessions.setProjectDesignLocked(run.chatSessionId,true)})
+    await measurement.lockDesignBaseline()
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    const original=structuredClone(run.designBaseline),requirements=structuredClone(run.requirements)
+    const question='Approve the UI correction?'
+    const ask=async(id:string,intent?:'change',deny=false)=>{
+      const result=f.submissions[0]!.requestPermission({toolUseID:id,toolName:'AskUserQuestion',message:'Design correction',
+        input:{questions:[{question,options:[{label:'Approve'},{label:'Reject'}]}]}})
+      for(let i=0;i<200&&!f.sessions.pendingPermissionsForProject('owner',run.projectId,f.root).length;i++)await Bun.sleep(5)
+      expect(f.sessions.pendingPermissionsForProject('owner',run.projectId,f.root)[0]?.designChangeAllowed).toBe(true)
+      f.sessions.resolvePermission(run.chatSessionId,id,deny?{behavior:'deny'}:
+        {behavior:'allow',answers:{[question]:'Approve'},...(intent?{intent}:{})})
+      return result
+    }
+    expect((await ask('ordinary-answer')).behavior).toBe('allow')
+    expect((await f.store.read(run.projectId,run.ownerId))?.designBaseline).toEqual(original)
+    expect((await ask('rejected-change',undefined,true)).behavior).toBe('deny')
+    expect((await f.store.read(run.projectId,run.ownerId))?.designBaseline).toEqual(original)
+    const commit=f.store.commit
+    f.store.commit=async(...args)=>{
+      if(args[4].startsWith('agent.design-change-authorized:'))throw Error('Synthetic authorization storage failure')
+      return commit(...args)
+    }
+    const failed=await ask('storage-failed-change','change')
+    expect(failed.behavior).toBe('deny')
+    expect(failed.source).toBe('policy')
+    expect((await f.store.read(run.projectId,run.ownerId))?.designBaseline).toEqual(original)
+    await expect(measurement.assertActive(true)).rejects.toThrow('Planning records are locked')
+    f.store.commit=commit
+    expect((await ask('authorized-change','change')).behavior).toBe('allow')
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    expect(run.designBaseline).toBeUndefined()
+    expect(run.requirements).toEqual(requirements)
+    expect(run.agentTurns).toHaveLength(1)
+    expect(f.submissions).toHaveLength(1)
+    expect(f.events).toContain('agent.design-change-authorized:authorized-change')
+    await measurement.assertActive(true)
+    // Corrected source remains a fixture, never a project artifact or author PASS.
+    const uiPath=join(f.root,'content/ui/menu.json'),ui=JSON.parse(await readFile(uiPath,'utf8'))
+    ui.data.nodes[1].layout.size[0]+=8
+    await writeFile(uiPath,JSON.stringify(ui))
+    await measurement.lockDesignBaseline()
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    expect(run.designBaseline?.revision).not.toBe(original!.revision)
+    expect(designBaselineIssue(run)).toBeUndefined()
+    await expect(measurement.assertActive(true)).rejects.toThrow('Planning records are locked')
+    expect(f.sessions.transcript(run.chatSessionId).find(e=>e.type==='permission.resolved'&&e.payload?.toolUseID==='authorized-change')?.payload?.intent).toBe('change')
+  } finally {await measurement?.close();await f.close()}
+},30000)
+
+test('new and resumed goals retain requested scope while Agent selects Skills; follow-ups preserve literal intent', () => {
   const run={creation:{initialDelivery:'design-led-first-version'},requirements:{text:'BRIEF budget 20000000'}} as Run
-  expect(agentGoalPrompt(run)).toStartWith('/bgs-builtins:game-creative-director-expert ')
-  expect(agentGoalPrompt(run)).toEndWith(run.requirements.text)
+  expect(agentGoalPrompt(run)).not.toStartWith('$')
+  expect(agentGoalPrompt(run)).toContain('Select relevant Skills, organize the work')
+  expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
+  expect(agentGoalPrompt(run)).toContain('Respect the production dependencies for work in scope')
+  expect(agentGoalPrompt(run)).toContain('do not infer additional deliverables from the project creation mode')
+  expect(agentGoalPrompt(run)).not.toContain(run.requirements.text)
+  expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
   for(const other of [{...run,creation:undefined},{...run,creation:{initialDelivery:'playable-slice'}},
-    {...run,agentTurns:[{nativeSessionId:'existing-context'}]}])
+    {...run,agentTurns:[{nativeSessionId:'existing-context'}]}]) {
     expect(agentGoalPrompt(other as Run)).not.toStartWith('/')
+    expect(agentGoalPrompt(other as Run)).not.toContain('$game-creative-director-expert')
+  }
   for(const intent of ['message','work','continue','discuss','change'] as const)
     expect(agentMessagePrompt({intent,text:'继续处理'} as any)).not.toContain('/bgs-builtins:')
 })
 
-test('a native local command completion without the required entry load is a failed goal, not completed design',async()=>{
-  const f=await fixture('normal',false,undefined,undefined,undefined,0,{missingEntrySkill:true},undefined,true)
-  Object.assign(f.body.brief,{creation_mode:'creative',settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
-  try{
-    await f.call('/agent/goal','POST',f.body)
-    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    expect(run.agentTurns![0]!.status).toBe('failed')
-    expect(run.agentTurns![0]!.error).toContain('Native entry Skill did not load')
-    expect(run.agentTurns![0]!.skillUses).toEqual([])
-    expect(run.deliveryEligible).toBe(false)
-    expect(f.submissions).toHaveLength(1)
-  }finally{await f.close()}
+test('editable content describes data consumed by the confirmed engine, not an alternative game scaffold', () => {
+  const run={creation:{initialDelivery:'design-led-first-version',editableContent:true}} as Run
+  const context=agentProfessionalContextForRun(run)
+  expect(context).toContain('editable data consumed by the confirmed engine')
+  expect(context).toContain('optional browser consumer supports a subset')
+  expect(agentProfessionalContextForRun({...run,creation:{...run.creation!,editableContent:false}}))
+    .not.toContain('editable data consumed by the confirmed engine')
 })

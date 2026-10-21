@@ -92,3 +92,25 @@ it('never schedules a model request for a historical failure', async () => {
     expect(retry.onRetry).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '立即重试' })).toHaveTextContent('重试');
 });
+
+it('shows a concise connection problem with the original diagnostic collapsed and no new request', async () => {
+    vi.useFakeTimers();
+    const content = 'unexpected status 502 Bad Gateway: The selected model provider transport failed (UND_ERR_SOCKET), url: http://127.0.0.1:12345/v1/responses';
+    const retry = control({ autoRetry: false });
+    render(<RuntimeErrorNotice content={content} retry={retry} lang="zh" />);
+    expect(screen.getByText('连接服务时发生错误，本次回复未能完成。')).toBeVisible();
+    expect(screen.getByText(content)).not.toBeVisible();
+    fireEvent.click(screen.getByText('错误详情'));
+    expect(screen.getByText(content)).toBeVisible();
+    fireEvent.click(screen.getByText('错误详情'));
+    expect(screen.getByText(content)).not.toBeVisible();
+    await act(async () => vi.advanceTimersByTime(30_000));
+    expect(retry.onRetry).not.toHaveBeenCalled();
+    expect(retry.onCancel).not.toHaveBeenCalled();
+});
+
+it('keeps an actionable application error directly visible without replacing it with a generic connection error', () => {
+    render(<RuntimeErrorNotice content="项目目录不可用，请重新选择目录。" lang="zh" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('项目目录不可用，请重新选择目录。');
+    expect(screen.queryByText('错误详情')).not.toBeInTheDocument();
+});

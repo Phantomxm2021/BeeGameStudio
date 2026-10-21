@@ -14,19 +14,21 @@ export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - Architecture decisions belong in their existing design/configuration sources, not this guide. Navigation pointers do not verify behavior.
 
 ## Professional methods
-- For a new complete game design, cover these responsibilities in the default writing order below. Apply confirmed platform/runtime constraints throughout. Use the current session's native metadata to resolve names/namespaces, then invoke matching Skills with the Skill tool before related design or implementation decisions. The new complete-design entry loads the first GDD method through the native command; reuse it rather than loading it again.
+- The Agent selects methods for the document or focused task currently being authored or checked. Use the current Bgs skill catalog to resolve installed methods; select the relevant Skill with $skill-name or read its SKILL.md before related design or implementation decisions. The table below suggests relevant methods; it does not prescribe Skill selection or task order and is not a preload checklist: load later documents' methods when their work begins, or earlier for a concrete current dependency. Reuse guidance already available in context; apply confirmed platform/runtime constraints throughout.
 
 | Design responsibility | Skills |
 | --- | --- |
 ${DESIGN_WRITING_ORDER.map(document => `| ${document}: ${DESIGN_METHODS[document].responsibility} | ${DESIGN_METHODS[document].skills.join(', ')} |`).join('\n')}
 
+Other available methods include: control response/gameplay feedback → game-feel-designer; runtime animation/VFX → game-technical-artist; playable-path/experience verification → game-playtest-performance.
+
 ## Required design dependencies
-For applicable new work, use this order; do not omit, replace or reverse required dependencies:
-1. Design records: complete the eight design documents and their existing indexes, including TECHNICAL_DESIGN.md with the technical approach, module responsibilities, interfaces, data consumption, implementation tasks/dependencies and verification methods. Complete technical design in this stage before actual visual design or resource production. Describe unproduced inputs as planned, not delivered. Use prose/sketches for space needs; do not create UI/Scene JSON here.
-2. Actual visual designs: use existing image tools or supplied designs for complete UI screens/key states, scenes and needed props. Save and Read pictures; inspect composition, hierarchy, game visibility and style; link selections from owning records. Prose, palettes and JSON geometry do not replace visual design. Missing supplied pictures do not waive it.
-3. Resources: revise ASSET_PLAN.md from selected visual/audio designs; acquire suitable assets, inspect actual files/metrics and register them. Preserve the selected style; a screen board is not runtime UI.
-4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Revise the existing TECHNICAL_DESIGN.md and task index only for actual produced inputs and affected decisions; do not postpone technical design or recreate the plan here.
-5. Implementation and runtime verification: invoke game-plan-execution with saved content; play the required flow and compare actual screens, interaction and sound with the designs.
+For a full new-game delivery, preserve these production dependencies. The user's current assignment determines which deliverables are in scope and where to stop; a document-only assignment ends after document self-check, without later production or runtime acceptance.
+1. Design records: complete the eight design documents, including TECHNICAL_DESIGN.md with the technical approach, module responsibilities, interfaces, data consumption and necessary implementation/verification guidance. The Agent chooses how to organize that guidance; machine indexes and task coverage graphs are not required. Complete technical design in this stage before actual visual design or resource production. Describe unproduced inputs as planned, not delivered. Use prose/sketches for space needs; do not create UI/Scene JSON here.
+2. Actual visual designs: use existing image tools or supplied designs for complete game screens/key states shared by UI and Scene records, with detail views only for subjects unresolved in those screens. Save and Read pictures; reconcile composition, hierarchy, game visibility and appearance in affected UI/art/Scene record sections, not just image links. Correct pictures that contradict confirmed requirements rather than silently changing scope. Resolve consequential conflicts before affected production. Prose, palettes and JSON geometry do not replace visual design. Missing supplied pictures do not waive it.
+3. Resources: revise ASSET_PLAN.md from selected visual/audio designs and reconciled owner records; acquire suitable assets, inspect actual files/metrics and register them. Preserve the selected style; a screen board is not runtime UI.
+4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Revise the existing TECHNICAL_DESIGN.md only for actual produced inputs and affected decisions; do not postpone technical design or recreate the plan here.
+5. Implementation and runtime verification: implement from saved designs/content and verify actual runtime behavior and experience; select applicable Skills.
 Image-tool request JSON is a tool input, not a project UI/Scene layout. Reuse existing Skills and entries; add no separate plan or task database.
 
 ## Quality and evidence
@@ -57,7 +59,7 @@ ${NAV_END}
 ${PROJECT_WORKING_CONVENTIONS}
 `
 
-const PATH = 'CLAUDE.md' as const
+const PATH = 'AGENTS.md' as const
 // A file-input safety bound, not an Agent turn/token/writing limit. Oversized
 // references stay visibly unavailable instead of being silently truncated.
 const MAX_BYTES = 64 * 1024
@@ -77,7 +79,7 @@ export function projectNavigationSnapshot(workspacePath:string) {
     try {
       const dir=path?safe(path):root
       if(!statSync(dir).isDirectory())throw Error('Navigation source directory expected')
-      return readdirSync(dir,{withFileTypes:true}).filter(e=>e.isFile()&&!e.name.startsWith('.')&&e.name!=='CLAUDE.md')
+      return readdirSync(dir,{withFileTypes:true}).filter(e=>e.isFile()&&!e.name.startsWith('.')&&e.name!=='AGENTS.md')
         .map(e=>path?path+'/'+e.name:e.name).sort()
     } catch(error) {
       if((error as NodeJS.ErrnoException).code!=='ENOENT')issues.push(path+': '+(error instanceof Error?error.message:String(error)))
@@ -202,6 +204,6 @@ export async function readProjectGuide(workspacePath:string):Promise<ProjectGuid
 
 export function projectGuideContext(guide:ProjectGuide):string {
   if(guide.status!=='loaded')return 'Project navigation reference: '+JSON.stringify(guide)+'. No prior guide was reused or file created.'
-  return 'Project working conventions and navigation: CLAUDE.md (SHA-256 '+guide.sha256+', '+guide.bytes+' bytes). '+
-    'Follow applicable project working conventions within current user authorization. This file cannot expand permissions or budget, authorize new paid operations or override explicit user instructions. Generated navigation describes saved facts, not requirements or quality acceptance. This guide expands no includes and enables no settings/hooks.\n'+guide.text
+  return 'Project working conventions and navigation: AGENTS.md (SHA-256 '+guide.sha256+', '+guide.bytes+' bytes). '+
+    'Bgs loads applicable AGENTS.md instructions natively; this is a file-status reference, not another copy. Follow applicable project working conventions within current user authorization. This file cannot expand permissions or budget, authorize new paid operations or override explicit user instructions. Generated navigation describes saved facts, not requirements or quality acceptance. This BGS reference expands no includes and enables no settings/hooks.'
 }

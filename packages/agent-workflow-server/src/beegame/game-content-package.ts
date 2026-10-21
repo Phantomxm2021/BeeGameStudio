@@ -13,6 +13,7 @@ import type { BeeGameAssetManifest } from './asset-contracts'
 import { auditAssetContract } from './asset-contract-audit'
 import { auditUiInteractiveBounds, readUiLayoutCameras } from './ui-layout-audit'
 import { parseTilemapData, validateTilemapGrid } from '../../../scene-editor/src/tilemap-data'
+import { uiFontKey } from '../../../scene-editor/src/ui-font-reference'
 import { readTileSetResource } from './tilemap-contract'
 import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-editor/src/scene-camera'
 
@@ -326,6 +327,8 @@ function validateUiVocabulary(input: {
 
   const assetBackedRoles = new Set<string>(BEEGAME_UI_ASSET_BACKED_ROLES)
   for (const node of input.document.data.nodes) {
+    if (node.data?.font !== undefined && !uiFontKey(node.data.font))
+      input.issues.push(`${input.path}: UI node ${node.id} requires data.font {assetRef, member?} with nonempty strings; omit data.font for the default font.`)
     const rootRole = node.role === 'screen-root' || node.role === 'hud-root' || node.role === 'flow-root'
     if (rootRole && node.id !== input.document.data.rootId)
       input.issues.push(
@@ -435,7 +438,16 @@ function validateComponentScene(input: {
           if (!node.components?.some(c => c.type === 'tilemap-renderer')) throw Error('Tilemap requires TilemapRenderer')
         } catch (error) { issue(node.id, component.type, String(error)) }
       }
-      const embeddedReference = findEmbeddedReference(data)
+      if (component.type === 'text' && data.font !== undefined) {
+        const font = data.font
+        if (!isRecord(font) || typeof font.assetRef !== 'string' || !font.assetRef.trim() ||
+          (font.member !== undefined && (typeof font.member !== 'string' || !font.member.trim())) ||
+          Object.keys(font).some(key => key !== 'assetRef' && key !== 'member'))
+          issue(node.id, component.type, 'requires data.font {assetRef, member?} with nonempty strings')
+      }
+      // Text's canonical font is the only nested Scene resource location.
+      // Its closed shape is checked above; other embedded references stay invalid.
+      const embeddedReference = findEmbeddedReference(component.type === 'text' ? { ...data, font: undefined } : data)
       if (embeddedReference)
         input.issues.push(
           `${input.path}: Scene component ${component.type} on ${node.id} stores legacy ${embeddedReference} in data; use the component assetRef and data.member fields.`,

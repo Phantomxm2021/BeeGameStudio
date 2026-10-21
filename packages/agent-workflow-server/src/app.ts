@@ -1,5 +1,8 @@
+import { UsageOutboxPersistenceError } from './beegame/session-usage-outbox'
+import {createBgsRunner} from './bgs/runner'
+import { registerBgsSettingsRoutes } from './bgs/settings-routes'
 import { Hono, type Context } from 'hono'
-import { registerModelConnectionRoutes, validateDynamicGoConfig } from './model-connection-routes'
+import { registerModelConnectionRoutes, validateBgsModelConfig } from './model-connection-routes'
 import { validateModelAccess } from '@bee-game-studio/agent-workflow'
 import { registerV3Routes } from './beegame/workflow-v3/routes'
 import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
@@ -8,7 +11,7 @@ import { createPreviewStorageStore } from './beegame/preview-storage-store'
 import { WorkflowError } from './beegame/workflow-v3/state'
 import { projectExecutionTime } from './beegame/workflow-v3/execution-time'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, type WorkflowStore } from './beegame/workflow-v3/store'
-import { normalizeRuntimeEnvironment } from '../../../src/utils/runtimeEnvironment'
+import { normalizeRuntimeEnvironment } from '@bee-game-studio/agent-workflow/runtime-environment'
 import { UserQuestionValidationError } from './beegame/user-question'
 import { intakeReferenceParts } from './beegame/intake-references'
 import { openPreviewTestAccess } from './beegame/preview-test-access'
@@ -31,6 +34,7 @@ import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   listModelConfigs,
   mapModelConfigToRuntime,
+  getModelConfig,
   type ModelProviderKind,
   type RuntimeModelConfig,
 } from '@bee-game-studio/agent-workflow'
@@ -107,7 +111,6 @@ import {
 } from './model-config-store'
 import { type BeeGameProjectMetadata } from './project-metadata-store'
 import { createR2ProjectAssetStorageFromEnv } from './r2-project-asset-storage'
-import { syncRuntimeSettingsToDedicatedRuntimeConfig } from './runtime-settings-store'
 import { CHATGPT_IMAGE_ENDPOINT, imageConfigPatchSchema, imageProviderSchema, publicImageConfig, updateImageConfig } from './image-generation/config'
 import { ImageAttemptStore } from './image-generation/attempt'
 import { ImageGenerationService } from './image-generation/service'
@@ -225,8 +228,8 @@ function buildResourceSemanticCuratorSystemPrompt(
 ): string {
   return [
     'Classify every inspected resource in one batch for the BeeGame Resource Library.',
-    'Submit exactly one call to the required structured submission tool and do not emit markdown, explanation, or code fence text.',
-    'The tool input top-level key must be exactly decisions and its value must contain exactly one decision per supplied item.',
+    'Submit one JSON object through the required structured function. Do not emit markdown, explanation, or code fences.',
+    'The JSON top-level key must be exactly decisions and its value must contain exactly one decision per supplied item.',
     'Do not add batchId, jobId, curatorRevision, analysis, summary, or any other top-level field.',
     'Each decision object keys must be exactly: element_id, source_content_hash, usageTags, confidence, evidence, curator_revision.',
     'element_id and source_content_hash must be copied from the supplied item projection.',
@@ -240,31 +243,9 @@ function buildResourceSemanticCuratorSystemPrompt(
   ].join('\n')
 }
 
-const RESOURCE_MODEL_RUNTIME_KEYS = new Set([
-  'ANTHROPIC_BASE_URL',
-  'ANTHROPIC_AUTH_TOKEN',
-  'BGS_DEFAULT_FAST_MODEL',
-  'BGS_DEFAULT_BALANCED_MODEL',
-  'BGS_DEFAULT_STRONG_MODEL',
-  'BGS_USE_OPENAI',
-  'OPENAI_BASE_URL',
-  'OPENAI_API_KEY',
-  'OPENAI_DEFAULT_HAIKU_MODEL',
-  'OPENAI_DEFAULT_SONNET_MODEL',
-  'OPENAI_DEFAULT_OPUS_MODEL',
-  'BGS_USE_GEMINI',
-  'GEMINI_BASE_URL',
-  'GEMINI_API_KEY',
-  'GEMINI_DEFAULT_HAIKU_MODEL',
-  'GEMINI_DEFAULT_SONNET_MODEL',
-  'GEMINI_DEFAULT_OPUS_MODEL',
-  'BGS_USE_GROK',
-  'GROK_BASE_URL',
-  'GROK_API_KEY',
-  'GROK_DEFAULT_HAIKU_MODEL',
-  'GROK_DEFAULT_SONNET_MODEL',
-  'GROK_DEFAULT_OPUS_MODEL',
-])
+const RESOURCE_MODEL_RUNTIME_KEYS=new Set(['OPENAI_BASE_URL','OPENAI_API_KEY','ANTHROPIC_BASE_URL','ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN',
+  'GEMINI_BASE_URL','GEMINI_API_KEY','GROK_BASE_URL','GROK_API_KEY','BEEGAME_MODEL','BEEGAME_API_PROTOCOL',
+  'BGS_DEFAULT_FAST_MODEL','BGS_DEFAULT_BALANCED_MODEL','BGS_DEFAULT_STRONG_MODEL'])
 
 type BeeGameArtifactIndexItem = {
   path: string
@@ -418,6 +399,22 @@ export function createAgentWorkflowApp(
 ): Hono {
   validateSecretStorageAtStartup()
   const app = new Hono()
+  let closing = false
+  const activeRequests = new Set<Promise<unknown>>()
+  const trackRequest = <T>(request: Promise<T>): Promise<T> => {
+    activeRequests.add(request)
+    return request.finally(() => { activeRequests.delete(request) })
+  }
+  // Registered first: reject new work while draining requests and detached
+  // intake jobs, before sessions and their durable billing outbox are closed.
+  options.registerCleanup?.(async () => {
+    closing = true
+    while (activeRequests.size) await Promise.allSettled([...activeRequests])
+  })
+  app.use('*', async (c, next) => {
+    if (closing) return c.json({ error: 'BeeGame runtime is shutting down' }, 503, { 'Retry-After': '1' })
+    await trackRequest(next())
+  })
   let measuredPreview: MeasuredPreviewManager | undefined
   // Before auth and every API route: preview hosts can only serve measured files.
   app.use('*', async (c, next) => {
@@ -504,16 +501,8 @@ export function createAgentWorkflowApp(
   const assertPermittedModelConfigRuntime = async (
     modelConfigId: string,
   ): Promise<void> => {
-    const runtime = mapModelConfigToRuntime(modelConfigId)
-    for (const key of [
-      'ANTHROPIC_BASE_URL',
-      'OPENAI_BASE_URL',
-      'GEMINI_BASE_URL',
-      'GROK_BASE_URL',
-    ] as const) {
-      const baseUrl = runtime?.env[key]
-      if (baseUrl) await assertPermittedOutboundUrl(baseUrl)
-    }
+    const config=getModelConfig(modelConfigId)
+    if(config?.baseUrl)await assertPermittedOutboundUrl(config.baseUrl)
   }
   const dashboardDataRoot = getDashboardDataRoot(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
@@ -607,6 +596,13 @@ export function createAgentWorkflowApp(
     skillsConfig: options.skillsConfig,
     getUserDataRoot: getCurrentUserDataRoot,
     getAuthToken: getRequestAuthToken,
+    resolveRuntimeUser: async (userId, token) => {
+      const request = new Request('http://beegame.runtime/api/mcp-servers', {
+        headers: token ? { authorization: 'Bearer ' + token } : {},
+      })
+      const user = await authContext.resolveRequestUser(request)
+      return user?.id === userId ? user : undefined
+    },
     modelConfigStore,
     ...(projectAssetStorage ? { projectAssetStorage } : {}),
   })
@@ -628,7 +624,7 @@ export function createAgentWorkflowApp(
     }
   }
   const beeGameSessions = new BeeGameSessionManager(
-    options.sessionRunner,
+    options.sessionRunner ?? createBgsRunner({outboundTargetPolicyOptions,resolveOutboundTarget}),
     dashboardDataRoot,
     (userDataRoot, userId, authToken, modelConfigId) =>
       dashboardRepository.getRuntimeEnv(
@@ -975,10 +971,7 @@ export function createAgentWorkflowApp(
         billingConfig.mode === 'remote'
           ? createUsageRecorder({
               sessionId: jobId,
-              record: input =>
-                dashboardRepository.recordUsageForUser(ownerId, input),
-              debit: input =>
-                dashboardRepository.debitRealTimeUsageForUser(ownerId, input),
+              submit: input => beeGameSessions.recordExternalUsage(ownerId, input),
               onSettled: result => {
                 creditsMicro = result.creditsMicro
               },
@@ -1025,6 +1018,7 @@ export function createAgentWorkflowApp(
           if (usageRecorder) await usageRecorder(usage, source)
         },
         billingConfig.mode === 'remote',
+        () => beeGameSessions.assertModelRequestAllowed(ownerId),
       )
       return c.json({
         content,
@@ -1327,8 +1321,16 @@ export function createAgentWorkflowApp(
   registerModelConnectionRoutes(app, {
     repository: dashboardRepository, getUser: getCurrentUser, getRoot: getCurrentUserDataRoot,
     changed: ownerId => { beeGameSessions.refreshIdleRunners(ownerId) }, registerCleanup: options.registerCleanup,
-    isBusy: ownerId => beeGameSessions.list(ownerId).some(session => session.turnStatus !== 'idle'),
+    isBusy: ownerId => beeGameSessions.hasActiveOwnerRuntime(ownerId),
     assertPermittedUrl: assertPermittedOutboundUrl,
+  })
+
+  registerBgsSettingsRoutes(app, {
+    environment: async request => {
+      const user = getCurrentUser(request)
+      return dashboardRepository.getRuntimeEnv(getCurrentUserDataRoot(request), user.id, getRequestAuthToken(request))
+    },
+    changed: request => { beeGameSessions.refreshIdleRunners(getCurrentUser(request).id) },
   })
 
   app.get('/api/model-configs', async c => {
@@ -1362,8 +1364,9 @@ export function createAgentWorkflowApp(
     if (outboundInspection && !outboundInspection.approved) {
       return c.json(toOutboundTargetError(outboundInspection), 400)
     }
+    let apiProtocol
     try {
-      await validateDynamicGoConfig({ provider: String(body.provider), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : undefined,
+      apiProtocol = await validateBgsModelConfig({ provider: String(body.provider),apiProtocol:body.apiProtocol, baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : undefined,
         models: toModelMap(body.models), authMethods }, assertPermittedOutboundUrl)
     } catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
 
@@ -1373,6 +1376,7 @@ export function createAgentWorkflowApp(
       {
         name: String(body.name),
         provider: body.provider as ModelProviderKind,
+        apiProtocol,
         ...(typeof body.baseUrl === 'string' && body.baseUrl
           ? { baseUrl: body.baseUrl }
           : {}),
@@ -1413,8 +1417,9 @@ export function createAgentWorkflowApp(
       if (outboundInspection && !outboundInspection.approved) {
         return c.json(toOutboundTargetError(outboundInspection), 400)
       }
+      let apiProtocol
       try {
-        await validateDynamicGoConfig({ provider: String(body.provider ?? existing.provider), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : existing.baseUrl,
+        apiProtocol = await validateBgsModelConfig({ provider: String(body.provider ?? existing.provider),apiProtocol:body.apiProtocol ?? (body.provider && body.provider!==existing.provider?undefined:existing.apiProtocol), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : existing.baseUrl,
           models: isObject(body.models) ? toModelMap(body.models) : existing.models, authMethods }, assertPermittedOutboundUrl)
       } catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
       const updated = await dashboardRepository.updateModelConfig(
@@ -1424,6 +1429,7 @@ export function createAgentWorkflowApp(
         {
           authMethods,
           ...(typeof body.published === 'boolean' ? { published: body.published } : {}),
+          apiProtocol,
           ...(typeof body.name === 'string' ? { name: body.name } : {}),
           ...(typeof body.provider === 'string'
             ? { provider: body.provider as ModelProviderKind }
@@ -1618,46 +1624,12 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, ROUTE_PERMISSION.runtimeSettings)
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const input = {
-      ...Object.fromEntries(
-        ['verificationAgentEnabled', 'agentTeamsEnabled', 'promptSuggestionEnabled',
-          'awaySummaryEnabled', 'coordinatorModeEnabled']
-          .filter(key => typeof body[key] === 'boolean')
-          .map(key => [key, body[key]]),
-      ),
-      ...(typeof body.autoMemoryEnabled === 'boolean'
-        ? { autoMemoryEnabled: body.autoMemoryEnabled }
-        : {}),
-      ...(typeof body.autoDreamEnabled === 'boolean'
-        ? { autoDreamEnabled: body.autoDreamEnabled }
-        : {}),
-      ...(typeof body.skillSearchEnabled === 'boolean'
-        ? { skillSearchEnabled: body.skillSearchEnabled }
-        : {}),
-      ...(typeof body.treeSitterBashEnabled === 'boolean'
-        ? { treeSitterBashEnabled: body.treeSitterBashEnabled }
-        : {}),
-      ...(typeof body.webBrowserToolEnabled === 'boolean'
-        ? { webBrowserToolEnabled: body.webBrowserToolEnabled }
-        : {}),
-      ...(typeof body.bashClassifierEnabled === 'boolean'
-        ? { bashClassifierEnabled: body.bashClassifierEnabled }
-        : {}),
-      ...(typeof body.mcpSkillsEnabled === 'boolean'
-        ? { mcpSkillsEnabled: body.mcpSkillsEnabled }
-        : {}),
-      ...(typeof body.resourceLibraryEnabled === 'boolean'
-        ? { resourceLibraryEnabled: body.resourceLibraryEnabled }
-        : {}),
-    }
+    const input = typeof body.resourceLibraryEnabled === 'boolean' ? { resourceLibraryEnabled: body.resourceLibraryEnabled } : {}
     const saved = await dashboardRepository.saveRuntimeSettings(
       c.req.raw,
       user,
       input,
     )
-    syncRuntimeSettingsToDedicatedRuntimeConfig(saved, {
-      dataDir: dashboardDataRoot,
-    })
     const refreshedIdleRunners = beeGameSessions.refreshIdleRunners()
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
@@ -1712,7 +1684,7 @@ export function createAgentWorkflowApp(
     const body = await readJson(c.req.raw)
     // A dashboard stdio test starts a process on the host, unlike owner-scoped
     // configuration storage and sandboxed project execution.
-    if (body.transport === 'stdio' || body.transport === undefined) {
+    if (typeof body.transport !== 'string' || body.transport === 'stdio') {
       const hostForbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
       if (hostForbidden) return c.json(hostForbidden, 403)
     }
@@ -1743,6 +1715,10 @@ export function createAgentWorkflowApp(
       if (!discovered) return c.json({ error: 'Discovered MCP configuration not found; discover again' }, 404)
       input = discovered
     }
+    if (typeof input.transport !== 'string' || input.transport === 'stdio') {
+      const hostForbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
+      if (hostForbidden) return c.json(hostForbidden, 403)
+    }
     const error = await validateMcpServerBody(input, hasPermittedOutboundUrl)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
@@ -1769,6 +1745,10 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
+    if (typeof body.transport !== 'string' || body.transport === 'stdio') {
+      const hostForbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
+      if (hostForbidden) return c.json(hostForbidden, 403)
+    }
     const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
@@ -2552,7 +2532,20 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       const run = await v3Store?.read(projectId, user.id)
-      state.execution_time = run?.workspacePath === project.root_path
+      // Native events still describe the interrupted turn while the accepted
+      // writer rebuilds its session/tools. Do not report that live work as idle.
+      if (run && run.workspacePath === project.root_path && !run.paused && v3Routes.hasLiveAgentWriter(run) &&
+          !['starting', 'queued', 'running', 'resuming', 'waiting_approval'].includes(String(state.phase))) {
+        state.phase = 'starting'
+        state.blocked = false
+        state.blocked_reason = null
+        delete state.blocked_reason_code
+        delete state.blocked_reason_diagnostic_id
+        state.active_agents = ['beegame-agent']
+        state.next_action = 'BeeGame Studio is preparing the current request'
+        state.updated_at = run.agentTurns?.at(-1)?.startedAt ?? state.updated_at
+      }
+      state.execution_time = run && run.workspacePath === project.root_path
         ? projectExecutionTime(run, beeGameSessions.hasActiveProjectTurn(user.id, projectId, run.workspacePath)) ?? null
         : null
       const candidatePreview = (await measuredPreview?.candidateStatus(projectId, user.id))?.preview
@@ -2628,6 +2621,8 @@ export function createAgentWorkflowApp(
       )
     }
     const permissionScope = body.scope === 'session' ? 'session' : 'once'
+    const intent = body.intent
+    if (intent !== undefined && intent !== 'change') return c.json({ error: 'Invalid permission intent' }, 400)
     try {
       const project = await getOwnedProjectMetadata(
         c.req.raw,
@@ -2657,6 +2652,7 @@ export function createAgentWorkflowApp(
             scope: permissionScope,
             remember: false,
             answers: body.answers,
+            ...(intent ? {intent} : {}),
             ...(typeof body.message === 'string'
               ? { message: body.message }
               : {}),
@@ -3063,7 +3059,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
-      const file = await readProjectAssetUpload(c.req.raw)
+      const files = await readProjectAssetUpload(c.req.raw)
       const ensured = await ensureBeeGameProjectSession({
         request: c.req.raw,
         user,
@@ -3081,16 +3077,15 @@ export function createAgentWorkflowApp(
       const result = await uploadBeeGameAsset(
         ensured.binding.workspacePath,
         c.req.param('resourceId'),
-        file,
+        files,
         {
           persist: async manifest => {
-            const storageUri = await dashboardRepository.uploadAssetFile(
-              c.req.raw,
-              user,
-              sessionMetadata,
-              file,
-            )
+            const stored: string[] = []
             try {
+              for (const file of files) {
+                const storageUri = await dashboardRepository.uploadAssetFile(c.req.raw, user, sessionMetadata, file)
+                if (storageUri) stored.push(storageUri)
+              }
               await dashboardRepository.upsertAssetManifest(
                 c.req.raw,
                 user,
@@ -3099,12 +3094,8 @@ export function createAgentWorkflowApp(
               )
             } catch (error) {
               try {
-                await dashboardRepository.deleteAssetFile(
-                  c.req.raw,
-                  user,
-                  sessionMetadata,
-                  storageUri,
-                )
+                const cleanup = await Promise.allSettled(stored.map(storageUri => dashboardRepository.deleteAssetFile(c.req.raw, user, sessionMetadata, storageUri)))
+                if (cleanup.some(result => result.status === 'rejected')) throw new Error('Some uncommitted asset uploads could not be cleaned up')
               } catch (cleanupError) {
                 console.warn(
                   '[BeeGame] Failed to clean up an uncommitted asset upload:',
@@ -3231,9 +3222,7 @@ export function createAgentWorkflowApp(
     )
     const recordModelUsage = createUsageRecorder({
       sessionId: `attachment-analysis:${clientRequestId ?? randomUUID()}`,
-      record: input => dashboardRepository.recordUsage(request, user, input),
-      debit: input =>
-        dashboardRepository.debitRealTimeUsage(request, user, input),
+      submit: input => beeGameSessions.recordExternalUsage(user.id, input),
     })
     try {
       const runtimeEnv = await dashboardRepository.getRuntimeEnv(
@@ -3253,6 +3242,7 @@ export function createAgentWorkflowApp(
         modelRuntimeHost,
         recordModelUsage,
         requireUsage: true,
+        beforeModelRequest: () => beeGameSessions.assertModelRequestAllowed(user.id),
       })
       return analysis
     } finally {
@@ -3277,9 +3267,7 @@ export function createAgentWorkflowApp(
     const clientRequestId = getBeeGameClientRequestId(body)
     const recordModelUsage = createUsageRecorder({
       sessionId: `idea-intake:${clientRequestId ?? randomUUID()}`,
-      record: input => dashboardRepository.recordUsage(request, user, input),
-      debit: input =>
-        dashboardRepository.debitRealTimeUsage(request, user, input),
+      submit: input => beeGameSessions.recordExternalUsage(user.id, input),
     })
     const intake = await generateBeeGameIntakeOptions({
       idea: String(body.idea),
@@ -3298,6 +3286,7 @@ export function createAgentWorkflowApp(
       modelRuntimeHost,
       recordModelUsage,
       requireUsage: true,
+      beforeModelRequest: () => beeGameSessions.assertModelRequestAllowed(user.id),
     })
     return intake
   }
@@ -3358,7 +3347,7 @@ export function createAgentWorkflowApp(
       30 * 60 * 1000,
     )
 
-    void (async () => {
+    void trackRequest((async () => {
       try {
         const result = await runBeeGameIntake(request, user, body)
         const job = intakeJobs.get(jobId)
@@ -3385,7 +3374,7 @@ export function createAgentWorkflowApp(
         })
         await persistIntakeJobSafely(jobDataRoot, jobId, intakeJobs.get(jobId)!)
       }
-    })()
+    })())
 
     return c.json({ jobId, status: 'running' }, 202)
   })
@@ -3492,7 +3481,7 @@ export function createAgentWorkflowApp(
   return app
 }
 
-async function readProjectAssetUpload(request: Request): Promise<File> {
+async function readProjectAssetUpload(request: Request): Promise<File[]> {
   const bytes = await readRequestBytes(
     request,
     MAX_BEEGAME_PROJECT_ASSET_REQUEST_BYTES,
@@ -3503,13 +3492,14 @@ async function readProjectAssetUpload(request: Request): Promise<File> {
     body: bytes,
   })
   const form = await boundedRequest.formData()
-  const file = form.get('file')
-  if (!(file instanceof File)) throw new Error('Missing form file')
-  if (file.size === 0) throw new Error('Asset file is empty')
-  if (file.size > MAX_BEEGAME_PROJECT_ASSET_BYTES) {
+  const files = form.getAll('file')
+  if (!files.length || files.length > 2 || files.some(file => !(file instanceof File)))
+    throw new Error('Upload one file, or a PNG and its JSON atlas together')
+  const uploads = files as File[]
+  if (uploads.some(file => file.size === 0)) throw new Error('Asset file is empty')
+  if (uploads.reduce((sum, file) => sum + file.size, 0) > MAX_BEEGAME_PROJECT_ASSET_BYTES)
     throw new RequestBodyLimitError(MAX_BEEGAME_PROJECT_ASSET_BYTES)
-  }
-  return file
+  return uploads
 }
 
 async function discoverBeeGameProjectArtifacts(
@@ -3924,7 +3914,7 @@ async function requireOwnedModelConfigId(
   return modelConfigId
 }
 
-async function generateBeeGameModelWithUsage(
+export async function generateBeeGameModelWithUsage(
   host: BeeGameModelRuntimeHost,
   input: BeeGameModelGenerateInput,
   recordModelUsage?: (
@@ -3932,15 +3922,24 @@ async function generateBeeGameModelWithUsage(
     querySource: string,
   ) => Promise<void>,
   requireUsage = false,
+  beforeModelRequest?: () => Promise<void>,
 ): Promise<string> {
-  const result = host.generateWithUsage
-    ? await host.generateWithUsage(input)
-    : { content: await host.generate(input) }
-  if (requireUsage && !result.usage) {
-    throw new Error('Realtime usage billing requires provider token usage')
+  await beforeModelRequest?.()
+  let result: import('./beegame/model-runtime-host').BeeGameModelGeneration
+  try {
+    result = host.generateWithUsage
+      ? await host.generateWithUsage(input)
+      : { content: await host.generate(input) }
+  } catch (error) {
+    if (error instanceof BeeGameModelRuntimeError && error.usage && recordModelUsage)
+      await recordModelUsage(error.usage, input.querySource)
+    throw error
   }
   if (result.usage && recordModelUsage) {
     await recordModelUsage(result.usage, input.querySource)
+  }
+  if (requireUsage && (!result.usage || result.usage.incomplete)) {
+    throw new Error('Realtime usage billing requires provider token usage')
   }
   return result.content
 }
@@ -3948,99 +3947,42 @@ async function generateBeeGameModelWithUsage(
 export function createUsageRecorder(input: {
   sessionId: string
   projectId?: string
-  record: (input: {
-    sessionId: string
-    projectId?: string
-    usage: {
-      prompt_tokens: number
-      completion_tokens: number
-      cache_read_tokens: number
-      cache_creation_tokens: number
-      total_tokens: number
-    }
-    idempotencyKey: string
-    metadata?: Record<string, unknown>
-    usageSource?: 'runtime_snapshot' | 'model_runtime_host'
-  }) => Promise<{ creditsMicro: number }>
-  debit: (input: {
-    sessionId: string
-    projectId?: string
-    usage: {
-      prompt_tokens: number
-      completion_tokens: number
-      cache_read_tokens: number
-      cache_creation_tokens: number
-      total_tokens: number
-    }
-    idempotencyKey: string
-    metadata?: Record<string, unknown>
-    usageSource?: 'runtime_snapshot' | 'model_runtime_host'
-  }) => Promise<{ creditsMicro: number }>
+  submit: (input: import('@bee-game-studio/beegame-billing-core/usage-control-client').BeeGameUsageBillingRecordInput) => Promise<{ creditsMicro: number; event?: { creditsMicro: number } }>
   onSettled?: (result: { creditsMicro: number }) => void | Promise<void>
   onDebitFailed?: (failure: {
-    diagnosticId: string
-    sessionId: string
-    querySource: string
-    idempotencyKey: string
-    retryable: boolean
-    message: string
+    diagnosticId: string; sessionId: string; querySource: string; idempotencyKey: string; retryable: boolean; message: string
   }) => void | Promise<void>
 }): (usage: BeeGameModelUsage, querySource: string) => Promise<void> {
-  const settledKeys = new Set<string>()
   return async (usage, querySource) => {
-    const normalizedUsage = {
-      prompt_tokens: usage.input_tokens,
-      completion_tokens: usage.output_tokens,
-      cache_read_tokens: usage.cache_read_tokens,
-      cache_creation_tokens: usage.cache_creation_tokens,
-      total_tokens: usage.total_tokens,
-    }
-    const idempotencyKey = `usage:${input.sessionId}:${createHash('sha256')
-      .update(JSON.stringify({ querySource, usage: normalizedUsage }))
-      .digest('hex')}`
-    if (settledKeys.has(idempotencyKey)) return
+    // Each invocation represents a physical model request, not a token snapshot.
+    // Persist this identity before remote billing; recovery never reruns the model.
+    const idempotencyKey = 'model-usage:' + randomUUID()
     const recordInput = {
       sessionId: input.sessionId,
       ...(input.projectId ? { projectId: input.projectId } : {}),
-      usage: normalizedUsage,
+      usage: { prompt_tokens: usage.input_tokens, completion_tokens: usage.output_tokens,
+        cache_read_tokens: usage.cache_read_tokens, cache_creation_tokens: usage.cache_creation_tokens, total_tokens: usage.total_tokens },
       idempotencyKey,
-      metadata: {
-        querySource,
-        usageSource: 'model_runtime_host',
-      },
+      metadata: { querySource, usageSource: 'model_runtime_host',
+        usageBasis: 'request-delta-v1', ...(usage.incomplete ? { providerUsageIncomplete: true } : {}) },
       usageSource: 'model_runtime_host' as const,
     }
-    const recordResult = await input.record(recordInput)
+    let result: Awaited<ReturnType<typeof input.submit>>
     try {
-      const debitResult = await input.debit(recordInput)
-      settledKeys.add(idempotencyKey)
-      await input.onSettled?.(debitResult)
+      result = await input.submit(recordInput)
     } catch (error) {
-      settledKeys.add(idempotencyKey)
-      await input.onSettled?.(recordResult)
-      const message = error instanceof Error ? error.message : String(error)
-      const diagnosticId = `billing_${createHash('sha256')
-        .update(`${idempotencyKey}:${message}`)
-        .digest('hex')
-        .slice(0, 16)}`
-      const failure = {
-        diagnosticId,
-        sessionId: input.sessionId,
-        querySource,
-        idempotencyKey,
-        retryable:
-          typeof error === 'object' &&
-          error !== null &&
-          'retryable' in error &&
-          error.retryable === true,
-        message,
-      }
-      if (input.onDebitFailed) {
-        await input.onDebitFailed(failure)
-      } else {
-        console.error('[BeeGame] realtime usage debit failed', failure)
-      }
+      if (error instanceof UsageOutboxPersistenceError) throw error
+      // The durable outbox retains failures, including uncertain debit responses.
+      // Do not claim settlement or replay a paid model request to recover a debit.
+      const failure = { diagnosticId: 'billing_' + createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 16),
+        sessionId: input.sessionId, querySource, idempotencyKey,
+        retryable: error instanceof BeeGameUsageBillingError ? error.retryable : true,
+        message: 'Usage settlement is pending; retained for retry' }
+      if (input.onDebitFailed) await input.onDebitFailed(failure)
+      else console.error('[BeeGame] auxiliary usage settlement pending', failure)
+      return
     }
+    await input.onSettled?.({ creditsMicro: result.event?.creditsMicro ?? result.creditsMicro })
   }
 }
 
@@ -4058,6 +4000,7 @@ async function generateBeeGameAttachmentAnalysis(input: {
     querySource: string,
   ) => Promise<void>
   requireUsage?: boolean
+  beforeModelRequest?: () => Promise<void>
 }): Promise<AttachmentBuildAnalysis> {
   const configId =
     input.modelConfigId ??
@@ -4097,12 +4040,12 @@ async function generateBeeGameAttachmentAnalysis(input: {
           content: [{ type: 'text', text }, ...referenceParts],
         },
       ],
-      temperature: 0.2,
       maxTokens: 8_192,
       querySource: 'beegame_attachment_analysis',
     },
     input.recordModelUsage,
     input.requireUsage,
+    input.beforeModelRequest,
   )
   if (!rawContent)
     throw new Error('Attachment analysis model returned empty content')
@@ -4137,6 +4080,7 @@ async function generateBeeGameIntakeOptions(input: {
     querySource: string,
   ) => Promise<void>
   requireUsage?: boolean
+  beforeModelRequest?: () => Promise<void>
 }): Promise<BeeGameIntakeAnalysis> {
   const configId =
     input.modelConfigId ??
@@ -4204,12 +4148,12 @@ async function generateBeeGameIntakeOptions(input: {
       runtimeEnv: env,
       systemPrompt,
       messages: requestMessages,
-      temperature: 0.4,
       maxTokens: 8_192,
       querySource: 'beegame_idea_intake',
     },
     input.recordModelUsage,
     input.requireUsage,
+    input.beforeModelRequest,
   )
   try {
     return parseBeeGameIntakeContent(firstContent)
@@ -4222,7 +4166,6 @@ async function generateBeeGameIntakeOptions(input: {
         cwd: input.cwd,
         runtimeEnv: env,
         systemPrompt,
-        temperature: 0.2,
         messages: [
           ...requestMessages,
           { role: 'assistant', content: firstContent },
@@ -4241,6 +4184,7 @@ async function generateBeeGameIntakeOptions(input: {
       },
       input.recordModelUsage,
       input.requireUsage,
+      input.beforeModelRequest,
     )
     try {
       return parseBeeGameIntakeContent(repairedContent)
@@ -4365,6 +4309,7 @@ function normalizeBeeGameIntakeOption(
     'selected_inputs',
   )
   const selectedInputs = pickAllowedProductionInputs(rawInputs)
+  const invalidInputs = selectedInputs.length === 0 || selectedInputs.length !== rawInputs.length
   const gameplay = String(value.gameplay || '').trim()
   const pitch = String(value.pitch || '').trim() || gameplay
   const option = {
@@ -4501,7 +4446,7 @@ function normalizeBeeGameIntakeOption(
       ),
       BEEGAME_INTAKE_SETTING_VALUES.styles,
     ),
-    recommendedInputs: selectedInputs,
+    recommendedInputs: [...new Set(selectedInputs)],
     scope: getStringishField(value, 'scope'),
   }
   if (
@@ -4512,11 +4457,10 @@ function normalizeBeeGameIntakeOption(
     !option.recommendedDimension ||
     !option.recommendedGenre ||
     !option.recommendedStyle ||
-    option.recommendedInputs.length === 0 ||
-    option.recommendedInputs.length !== rawInputs.length
+    invalidInputs
   ) {
     rejectedReasons?.push(
-      [
+      `options[${optionIndex}].` + [
         !option.title ? 'title' : '',
         !option.gameplay ? 'gameplay' : '',
         !option.recommendedPlatform ? 'recommendedPlatform' : '',
@@ -4524,9 +4468,8 @@ function normalizeBeeGameIntakeOption(
         !option.recommendedDimension ? 'recommendedDimension' : '',
         !option.recommendedGenre ? 'recommendedGenre' : '',
         !option.recommendedStyle ? 'recommendedStyle' : '',
-        option.recommendedInputs.length === 0 ||
-        option.recommendedInputs.length !== rawInputs.length
-          ? 'recommendedInputs'
+        invalidInputs
+          ? `recommendedInputs received ${JSON.stringify(rawInputs.map(value => value.slice(0, 128)))}; allowed: ${BEEGAME_INTAKE_SETTING_VALUES.inputs.join(', ')}`
           : '',
       ]
         .filter(Boolean)
@@ -4602,9 +4545,15 @@ function pickAllowedProductionSetting<T extends string>(
 
 function pickAllowedProductionInputs(values: string[]): string[] {
   const allowed = BEEGAME_INTAKE_SETTING_VALUES.inputs
-  return values.filter((value): value is (typeof allowed)[number] =>
-    allowed.includes(value as (typeof allowed)[number]),
-  )
+  const keyOf = (value: string) => value.toLowerCase().replace(/[\s/_+&-]+/g, '')
+  return values.flatMap(value => {
+    const key = keyOf(value)
+    // These are narrower names for the existing combined input category.
+    if (key === 'keyboard' || key === 'mouse' || key === 'keyboardandmouse') return ['Keyboard/mouse']
+    if (key === 'touchscreen') return ['Touch']
+    const selected = allowed.find(input => keyOf(input) === key)
+    return selected ? [selected] : []
+  })
 }
 
 function getStringArrayField(
@@ -4768,19 +4717,15 @@ async function ensureBeeGameProjectSession(input: {
   if (live && normalizeResolvedPath(live.cwd) === normalizeResolvedPath(workspacePath))
     await input.beeGameSessions.waitForSessionIdle(live.id)
 
-  const readableConfigs = await input.dashboardRepository.listModelConfigs(
-    input.request,
-    input.user,
+  // Restore the owned session's selected model first. A valid personal
+  // connection does not depend on loading the remote platform catalog.
+  const previousModelConfigId = live?.modelConfigId ?? latest?.modelConfigId
+  const restoredModelConfigId = previousModelConfigId &&
+    await input.dashboardRepository.modelConfigExists(input.request, input.user, previousModelConfigId)
+      ? previousModelConfigId : undefined
+  const readableConfigs = restoredModelConfigId ? [] : await input.dashboardRepository.listModelConfigs(
+    input.request, input.user,
   )
-  const restoredModelConfigId =
-    latest?.modelConfigId &&
-    (await input.dashboardRepository.modelConfigExists(
-      input.request,
-      input.user,
-      latest.modelConfigId,
-    ))
-      ? latest.modelConfigId
-      : undefined
   const modelConfigId =
     restoredModelConfigId ??
     readableConfigs.find(config => config.isDefault)?.id ??
@@ -5473,6 +5418,7 @@ function pendingBeeGamePermissionRequestToJson(
     message: permission.message,
     created_at: normalizeBeeGameCreatedAt(permission.requestedAt),
     input: permission.input,
+    ...(permission.designChangeAllowed ? {design_change_allowed:true} : {}),
   }
 }
 
@@ -6625,7 +6571,7 @@ function buildConfirmedBriefPrompt(
     2,
   )
   return [
-    'Start the confirmed game project below. The current milestone and its deliverables are supplied in the project state for this turn. When that milestone is ready, finish the turn; the next milestone will be handed to this same session.',
+    'Work on the confirmed project below within the current user assignment. Complete and self-check the requested deliverables, then report results and unresolved work. A document-only assignment does not authorize subsequent production. Continue only within the authorized workflow.',
     '',
     `Write all human-readable project documentation in ${getDocumentLanguageName(documentLanguage)}.`,
     `Write all player-visible game text in ${getDocumentLanguageName(gameUserVisibleLanguage)}.`,
@@ -6634,7 +6580,7 @@ function buildConfirmedBriefPrompt(
     '',
     'Use the confirmed brief as the source of truth. Keep the project documents and resulting game consistent with its explicit choices and constraints.',
     'Screen games support the confirmed Landscape or Portrait direction only. Preserve any user-confirmed dimensions; otherwise UI_UX_SPEC owns reference resolution, minimum usable host dimensions and layout/adaptation, coordinated with LEVEL_SCENE_DESIGN world/framing requirements. GDD records the confirmed orientation and core gameplay, not invented host dimensions or an adaptation method. Other directions or insufficient space show a rotation/size message instead of another composition or unusable whole-screen shrinking. Input methods are independent: Touch does not imply Portrait and Landscape does not imply mouse-only. VR/AR world-space interfaces use their confirmed spatial requirements.',
-    'Use default_first_release_scope for content breadth the user did not specify. Preserve explicit user requirements; a model-suggested option or scope does not by itself authorize an expansive first release.',
+    'Use default_first_release_scope only for unspecified content breadth when a playable release is requested; it does not expand a scoped document or design assignment. Preserve explicit user requirements; a model-suggested option or scope does not by itself authorize an expansive first release.',
     '',
     'Confirmed brief:',
     confirmedBrief,
@@ -6954,6 +6900,7 @@ async function validateMcpServerBody(
   if (!isMcpServerTransportValue(transport)) {
     return 'Invalid MCP transport'
   }
+  if (transport === 'sse') return 'Legacy SSE MCP is not supported by the BGS runtime; use a Streamable HTTP endpoint'
   if (transport === 'stdio') {
     if (typeof body.command !== 'string' || !body.command.trim()) {
       return 'Missing field: command'

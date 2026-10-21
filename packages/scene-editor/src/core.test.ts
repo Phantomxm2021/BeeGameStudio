@@ -54,3 +54,15 @@ describe('GameObject component scene core', () => {
     const reopened = importPackage(exportPackage(result.document)); expect(reopened.schemaVersion).toBe('scene-game-object.v2'); expect(reopened.nodes.hive.components[0].type).toBe('box-collider-2d')
   })
 })
+
+it.each(['sprite-renderer', 'image'] as const)('replaces %s without retaining old atlas selectors or changing its appearance', type => {
+  const previous = { id: 'visual', type, enabled: true, assetId: 'OLD', member: 'old.png',
+    material: { mode: 'unlit' as const, color: '#aabbcc', metalness: 0, roughness: 1, opacity: .4, alphaMode: 'opaque' as const, textureRegion: { x: 5, y: 5, width: 10, height: 10 } },
+    properties: { member: 'old.png', atlasMember: 'old.json', frame: 'old', frameTable: {}, frameParts: {}, stateFrames: {}, initialFacing: 'left', frameSize: [10,10], marker: 'keep' } }
+  const next = withAsset(previous, 'NEW', { id: 'NEW', name: 'new.png', path: 'new.png', mimeType: 'image/png' })
+  if (next.type !== 'sprite-renderer' && next.type !== 'image') throw new Error('Unexpected component type')
+  expect(next.properties).toEqual({ marker: 'keep' })
+  expect(next.material).toMatchObject({ color: '#aabbcc', opacity: .4 })
+  expect(next.material).not.toHaveProperty('textureRegion')
+  expect(previous.properties.atlasMember).toBe('old.json')
+})

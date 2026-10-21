@@ -101,7 +101,9 @@ test('bills arriving during an in-flight request are persisted immediately and n
     const names = await files()
     expect(JSON.parse(await readFile(join(root, 'session-usage-outbox', names[0]!), 'utf8'))).toEqual([bill(100), bill(150)])
   } finally { release() }
-  await Promise.all([first, second])
+  const receipts = await Promise.all([first, second])
+  expect(receipts.map(receipt => receipt.event.idempotencyKey)).toEqual(['bill-100', 'bill-150'])
+  expect(receipts.map(receipt => receipt.event.creditsMicro)).toEqual([100, 50])
   expect(state.charged).toBe(150)
   expect(await files()).toEqual([])
 })

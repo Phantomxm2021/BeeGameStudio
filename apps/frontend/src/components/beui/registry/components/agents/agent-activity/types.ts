@@ -56,6 +56,8 @@ export interface AgentActivityTrace {
   kind: AgentTraceKind;
   label: ReactNode;
   detail?: ReactNode;
+  /** Fixed trailing status/duration, separate from the truncated title. */
+  meta?: ReactNode;
   icon?: ReactNode;
   /** Inline disclosure content, or open an existing detail panel. */
   content?: ReactNode;

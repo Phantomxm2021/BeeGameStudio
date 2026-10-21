@@ -9,7 +9,6 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { decryptSecret, encryptSecret, isSecretEnvelope } from './security/secret-crypto'
 import { appendAuditEvent } from './audit-events-store'
-import { mapRuntimeSettingsToEnv } from './runtime-settings-store'
 
 const STORE_FILE = 'web-tools.json'
 
@@ -134,42 +133,6 @@ export function toPublicWebToolsConfig(
     exaApiKeyPreview: previewSecret(config.exaApiKey),
     exaApiKey: undefined,
   }
-}
-
-export function mapWebToolsConfigToRuntimeEnv(
-  config: WebToolsConfig,
-): Record<string, string> {
-  const env: Record<string, string> = {}
-  if (config.webSearchAdapter) env.WEB_SEARCH_ADAPTER = config.webSearchAdapter
-  if (config.braveApiKey) env.BRAVE_SEARCH_API_KEY = config.braveApiKey
-  if (config.exaApiKey) env.EXA_API_KEY = config.exaApiKey
-  return env
-}
-
-// Native search/fetch adapters read settings as well as environment variables.
-// Materialize only web-owned fields in the host's private, per-user config.
-export function syncWebToolsToRuntimeConfig(
-  config: WebToolsConfig,
-  options: WebToolsStoreOptions = {},
-): void {
-  const root = mapRuntimeSettingsToEnv({}, options).BEEGAME_CONFIG_DIR!
-  const filePath = join(root, 'settings.json')
-  mkdirSync(root, { recursive: true })
-  const previous = existsSync(filePath)
-    ? JSON.parse(readFileSync(filePath, 'utf8'))
-    : {}
-  if (!isObject(previous)) throw new Error('Invalid native runtime settings')
-  for (const key of [
-    'webSearchAdapter', 'webFetchAdapter', 'tavilyEndpointUrl',
-    'braveApiKey', 'exaApiKey', 'exaEndpointUrl', 'webFetchHttpTimeoutMs',
-  ]) delete previous[key]
-  const { braveApiKey: _braveApiKey, exaApiKey: _exaApiKey, ...publicSettings } = normalizeWebToolsConfig(config)
-  // Search credentials belong to the native process environment, not an
-  // agent-readable settings file. Existing plaintext fields were removed above.
-  const next = { ...previous, ...publicSettings }
-  const tempPath = `${filePath}.web-${crypto.randomUUID()}.tmp`
-  writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
-  renameSync(tempPath, filePath)
 }
 
 function normalizeWebToolsConfig(config: WebToolsConfig): WebToolsConfig {

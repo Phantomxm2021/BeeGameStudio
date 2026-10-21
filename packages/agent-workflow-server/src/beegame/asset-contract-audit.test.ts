@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, readFile, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { auditAssetContract } from './asset-contract-audit'
+import { validateResourceSelections } from './tilemap-contract'
+import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
 import sharp from 'sharp'
 import { audioProbeWav } from './workflow-v3/audio-consumption'
 import { registerBeeGameAuthoredResources, readBeeGameAssetManifest, readBeeGameAssetManifestSync, toCanonicalBeeGameAssetManifest } from './asset-contracts'
@@ -100,6 +103,110 @@ test('rejects a PNG with a valid header but broken pixel stream', async () => {
   const audit = auditAssetContract(workspace)
   expect(audit.valid).toBe(false)
   expect(audit.issues.join('\n')).toContain('PNG pixel stream cannot be decoded')
+})
+
+async function spriteAtlasFixture(metadata: unknown = { frames: { orb: { frame: { x: 0, y: 0, w: 8, h: 8 } } } },
+  configure?: (value: BeeGameAssetManifest) => void, metadataSuffix = ".json") {
+  const value = manifest(), resource = value.resources[0]!
+  value.project_target!.asset_format_capabilities = ['png', 'json']
+  value.requirements[0]!.acquisition_profile.asset_kinds = ['sprite']
+  resource.asset_kind = 'sprite-atlas'
+  resource.root_path = 'assets/runtime/model.png'
+  const metadataPath = 'assets/runtime/model' + metadataSuffix
+  resource.file_paths = [resource.root_path, metadataPath]
+  const png = await sharp({ create: { width: 16, height: 16, channels: 4, background: '#fff0' } }).png().toBuffer()
+  const json = JSON.stringify(metadata)
+  resource.local_file_hashes = {
+    [resource.root_path]: createHash('sha256').update(png).digest('hex'),
+    [metadataPath]: createHash('sha256').update(json).digest('hex'),
+  }
+  configure?.(value)
+  const workspace = await writeFixture(value)
+  await writeFile(join(workspace, 'assets/runtime/model.png'), png)
+  await writeFile(join(workspace, metadataPath), json)
+  return workspace
+}
+
+test.each(['.json', '.atlas.json'])('atlas %s resolves consistently while retaining frame, registration, bounds and hash checks', async suffix => {
+  const workspace = await spriteAtlasFixture(undefined, undefined, suffix)
+  const value = readBeeGameAssetManifestSync(workspace), resource = value.resources[0]!
+  const metadataPath = 'assets/runtime/model' + suffix
+  expect(editorAtlasPath(resource, resource.root_path)).toBe(metadataPath)
+  const selection = { assetRef: resource.id, data: { frame: 'orb' } }
+  const check = (input = selection, manifest = value) => {
+    const issues: string[] = []
+    validateResourceSelections(workspace, manifest, input, issues)
+    return issues
+  }
+  expect(check()).toEqual([])
+  const audit = auditAssetContract(workspace)
+  expect(audit.valid, audit.issues.join(' ')).toBe(true)
+  expect(audit.resources[0]!.fileEvidence.find(file => file.path === metadataPath)!.facts)
+    .toMatchObject({ atlasImage: resource.root_path, namedFrameCount: 1 })
+  expect(check({ assetRef: resource.id, data: { frame: 'missing' } }).join(' ')).toContain('Sprite atlas has no frame "missing"')
+
+  const unregistered = structuredClone(value)
+  unregistered.resources[0]!.file_paths = [resource.root_path]
+  const missing = check(selection, unregistered).join(' ')
+  expect(missing).toContain('expected assets/runtime/model.json or assets/runtime/model.atlas.json')
+  expect(missing).toContain('Registered JSON files: (none)')
+  const explicitIssues: string[] = []
+  validateResourceSelections(workspace, unregistered, { assetRef: resource.id, data: { frame: 'orb', atlasMember: metadataPath } }, explicitIssues)
+  expect(explicitIssues.join(' ')).toContain('Missing or ambiguous member')
+
+  await writeFile(join(workspace, metadataPath), JSON.stringify({ frames: { orb: { frame: { x: 15, y: 0, w: 8, h: 8 } } } }))
+  const invalid = auditAssetContract(workspace)
+  expect(invalid.valid).toBe(false)
+  expect(invalid.issues.join(' ')).toContain('Atlas frame outside image: orb')
+  expect(invalid.issues.join(' ')).toContain('File hash does not match manifest: ' + metadataPath)
+})
+
+test('a verified named atlas supplies sprite structure without changing its registered kind', async () => {
+  const workspace = await spriteAtlasFixture()
+  const audit = auditAssetContract(workspace)
+  expect(audit.valid).toBe(true)
+  expect(audit.requirements[0]!.structure).toMatchObject({ status: 'passed' })
+  expect(audit.requirements[0]!.structure!.observations[0]).toContain('1 named sprite frames verified')
+  expect(readBeeGameAssetManifestSync(workspace).resources[0]!.asset_kind).toBe('sprite-atlas')
+  expect(readBeeGameAssetManifestSync(workspace).requirements[0]!.acquisition_profile.asset_kinds).toEqual(['sprite'])
+})
+
+test.each([
+  ['empty atlas', { frames: {} }],
+  ['unrecognized metadata', {}],
+  ['unsupported rectangles', { frames: { orb: { x: 0, y: 0, w: 8, h: 8 } } }],
+  ['overflow', { frames: { orb: { frame: { x: 15, y: 0, w: 8, h: 8 } } } }],
+  ['rotated frame', { frames: { orb: { frame: { x: 0, y: 0, w: 8, h: 8 }, rotated: true } } }],
+])('sprite compatibility rejects %s even with matching recorded hashes', async (_, metadata) => {
+  const audit = auditAssetContract(await spriteAtlasFixture(metadata))
+  expect(audit.valid).toBe(false)
+  expect(audit.requirements[0]!.structure!.status).toBe('failed')
+  expect(audit.issues.join(' ')).toContain('expected kinds [sprite]')
+  expect(audit.issues.join(' ')).toContain('res-model (sprite-atlas)')
+})
+
+test('atlas sprite compatibility retains metadata, hash and additional-capability checks', async () => {
+  const noMetadata = await spriteAtlasFixture(undefined, value => {
+    value.resources[0]!.file_paths.pop()
+    delete value.resources[0]!.local_file_hashes!['assets/runtime/model.json']
+  })
+  expect(auditAssetContract(noMetadata).requirements[0]!.structure!.status).toBe('failed')
+  const missingHash = await spriteAtlasFixture(undefined, value => { delete value.resources[0]!.local_file_hashes })
+  const missing = auditAssetContract(missingHash).requirements[0]!
+  expect(missing.structure!.status).toBe('unverified')
+  expect(missing.structure!.observations[0]).toContain('recorded hashes are missing')
+  const badHash = await spriteAtlasFixture(undefined, value => { value.resources[0]!.local_file_hashes!['assets/runtime/model.json'] = '0'.repeat(64) })
+  expect(auditAssetContract(badHash).requirements[0]!.structure!.status).toBe('failed')
+  const alpha = await spriteAtlasFixture(undefined, value => {
+    value.requirements[0]!.acquisition_profile.capabilities = ['alpha']
+    value.resources[0]!.capabilities = ['alpha']
+  })
+  expect(auditAssetContract(alpha).requirements[0]!.structure!.status).toBe('unverified')
+  const reverse = await spriteAtlasFixture(undefined, value => {
+    value.requirements[0]!.acquisition_profile.asset_kinds = ['sprite-atlas']
+    value.resources[0]!.asset_kind = 'sprite'
+  })
+  expect(auditAssetContract(reverse).requirements[0]!.structure!.status).toBe('failed')
 })
 import {
   parseCanonicalBeeGameAssetManifest,

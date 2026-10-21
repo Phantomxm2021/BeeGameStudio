@@ -133,7 +133,7 @@ export function McpSettingsPanel({
               >
                 <span className="max-w-full truncate text-[15px] font-medium text-foreground" title={server.name}>{server.name}</span>
                 <span className="min-w-0 truncate text-sm text-muted-foreground">
-                  {server.transport} · {copy.form[server.scope]}
+                  {server.transport === 'sse' ? copy.form.sse : server.transport} · {copy.form[server.scope]}
                 </span>
               </div>
               <span className={`shrink-0 whitespace-nowrap text-sm ${getMcpHealthClass(healthById[server.id], testingServerId === server.id)}`}>
@@ -240,13 +240,13 @@ export function McpSettingsPanel({
                   <span className="type-footnote text-foreground">{copy.form.available}</span>
                 </div>
                 <div className="type-footnote mt-1 truncate pl-4 text-muted-foreground">
-                  {server.transport} · {server.endpoint}
+                  {server.transport === 'sse' ? copy.form.sse : server.transport} · {server.endpoint}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => onImportActive(server)}
-                disabled={isSaving || server.exists}
+                disabled={isSaving || server.exists || server.transport === 'sse'}
                 className="type-button h-8 shrink-0 rounded-full border border-border px-3 text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {server.exists ? copy.form.existing : copy.form.importServer}
@@ -269,13 +269,13 @@ export function McpSettingsPanel({
                   <span className="type-footnote truncate text-foreground">{server.name}</span>
                 </div>
                 <div className="type-footnote mt-1 truncate pl-4 text-muted-foreground">
-                  {server.transport} · {copy.form.source}: {server.sourcePath}
+                  {server.transport === 'sse' ? copy.form.sse : server.transport} · {copy.form.source}: {server.sourcePath}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => onImport(server)}
-                disabled={isSaving || server.exists}
+                disabled={isSaving || server.exists || server.transport === 'sse'}
                 className="type-button h-8 shrink-0 rounded-full border border-border px-3 text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {server.exists ? copy.form.existing : copy.form.importServer}
@@ -352,7 +352,8 @@ export function McpServerFormPopover({
 
               <div className="grid gap-2 py-3">
                 <span className="type-caption-1 text-muted-foreground">{copy.form.transport}</span>
-                <ProjectSelect portal ariaLabel={copy.form.transport} value={form.transport} onValueChange={value => update({ transport: value as McpServerTransport })} options={[{ value: 'stdio', label: copy.form.stdio }, { value: 'sse', label: copy.form.sse }, { value: 'http', label: copy.form.http }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" contentClassName="z-[370]" />
+                <ProjectSelect portal ariaLabel={copy.form.transport} value={form.transport} onValueChange={value => update({ transport: value as McpServerTransport })} options={[{ value: 'stdio', label: copy.form.stdio }, { value: 'http', label: copy.form.http }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" contentClassName="z-[370]" />
+                {form.transport === 'sse' ? <p role="alert" className="text-sm text-muted-foreground">{copy.form.sse}</p> : null}
               </div>
 
               {form.transport !== 'stdio' ? (

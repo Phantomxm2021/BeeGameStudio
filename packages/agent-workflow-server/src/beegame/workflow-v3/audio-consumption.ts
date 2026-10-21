@@ -50,7 +50,9 @@ export async function prepareAudioProbes(root: string, task: Pick<TaskSpec, 'aud
   }
   const resources = await runContentCheck(root, 'content-resources', { ...task, expectedOutputs: [...documents.keys()] }, [], {})
   result.inputs.push(...resources.inputs)
-  if (resources.status !== 'passed') throw Error('Saved audio resources unverified: ' + resources.observation)
+  // Incomplete structural inspection must not prevent independent runtime evidence.
+  // Keep its verdict separate; invalid contracts still block these probes.
+  if (resources.status !== 'passed' && resources.status !== 'unverified') throw Error('Saved audio resources invalid: ' + resources.observation)
   const manifest = readBeeGameAssetManifestSync(root), prepared: PreparedAudioProbe[] = []
   for (const probe of task.audioProbes) {
     const doc = documents.get(probe.document)

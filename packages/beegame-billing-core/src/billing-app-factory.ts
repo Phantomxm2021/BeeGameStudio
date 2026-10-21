@@ -31,6 +31,9 @@ export function createBeeGameBillingRouteApp(
     const reasonCode = c.req.path.startsWith('/api/internal/usage/')
       ? 'usage_billing'
       : 'billing_request'
+    // This is the existing billing RPC's explicit refusal, not an outage.
+    if (reasonCode === 'usage_billing' && toErrorMessage(error).includes('Insufficient realtime usage credits'))
+      return c.json({ error: 'Insufficient realtime usage credits', stage: 'usage_billing', code: 'insufficient_usage_credits' }, 402)
     const failureKey = JSON.stringify({
       method: c.req.method,
       path: c.req.path,

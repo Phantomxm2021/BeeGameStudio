@@ -4,6 +4,42 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BeeGameSessionManager, type BeeGameSessionUsageBillingBackend } from './session-manager'
 
+test('incomplete provider usage persists known tokens and retains unknown zero receipts for reconciliation', async () => {
+  for (const knownTokens of [100, 0]) {
+    const root = await mkdtemp(join(tmpdir(), 'bgs-partial-provider-bill-'))
+    const writes: Array<Parameters<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>[1]> = []
+    const manager = new BeeGameSessionManager({ async start(input) { return { stop() {}, async submit() {
+      input.onNativeUsage?.({ prompt_tokens: knownTokens, completion_tokens: 0, cache_read_tokens: 0,
+        cache_creation_tokens: 0, total_tokens: knownTokens }, 'synthetic-provider', { incomplete: true })
+      throw Error('Synthetic provider disconnected')
+    } } } }, root, () => ({}), {
+      recordUsage(owner, input) {
+        writes.push(input)
+        return { duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: knownTokens, creditsMicro: knownTokens,
+          event: { id: input.idempotencyKey, idempotencyKey: input.idempotencyKey, userId: owner, sessionId: input.sessionId,
+            pricingVersion: 'fixture', usageSource: 'runtime_snapshot', usage: input.usage, delta: input.usage,
+            weightedTokens: knownTokens, weightedTokensDelta: knownTokens, creditsMicro: knownTokens,
+            createdAt: new Date().toISOString(), metadata: input.metadata ?? {} } }
+      },
+    })
+    try {
+      const session = manager.start({ workspacePath: root, userId: 'fixture' })
+      await manager.sendWithDisplay(session.id, 'Offline failure fixture')
+      await manager.waitForSessionIdle(session.id)
+      await manager.dispose()
+      expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(knownTokens)
+      expect(writes).toHaveLength(2) // Receipt checkpoint and terminal reconciliation.
+      for (const write of writes) {
+        expect(write.usage.total_tokens).toBe(knownTokens)
+        expect(write.metadata?.providerUsageIncomplete).toBe(true)
+        expect(write.metadata?.billableFinalUsage).toBeUndefined()
+      }
+      expect(manager.transcriptFacts(session.id).some(event => event.type === 'usage' &&
+        event.payload?.providerUsageIncomplete === true)).toBe(true)
+    } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+  }
+})
+
 test('failed terminal debit is retained and settled before the next turn bill', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-pending-session-bill-'))
   type Receipt = Awaited<ReturnType<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>>
@@ -51,30 +87,43 @@ test('failed terminal debit is retained and settled before the next turn bill', 
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test('completed model messages debit observed usage before a long native turn ends without charging it twice', async () => {
+test('native receipts debit during a tool-only turn and settle a later failure without double charging', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-live-session-bill-'))
   let release!: () => void, checkpoint!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
   const observed = new Promise<void>(resolve => { checkpoint = resolve })
   let charged = 0, previous = 0
+  const deltas: number[] = []
+  const receipts = new Map<string, any>(), debited = new Set<string>()
   const manager = new BeeGameSessionManager({ async start(input) { return { stop() {}, async submit(turn) {
-    input.onNativeUsage?.({ prompt_tokens: 100, completion_tokens: 20, cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 120 })
-    await turn.onMessage({ type: 'assistant', message: { id: 'first-message', content: [{ type: 'text', text: 'Working' }] } })
+    const receipt = { prompt_tokens: 100, completion_tokens: 20, cache_read_tokens: 400, cache_creation_tokens: 0, total_tokens: 520 }
+    input.onNativeUsage?.(receipt, 'fixture-provider')
+    input.onNativeUsage?.(receipt, 'fixture-provider') // Duplicate receipt.
+    input.onNativeUsage?.({ ...receipt, prompt_tokens: 90, total_tokens: 510 }, 'fixture-provider') // Older receipt.
+    await turn.onMessage({ type: 'runtime_event', eventType: 'tool.completed', text: 'Working' })
     checkpoint()
     await gate
-    input.onNativeUsage?.({ prompt_tokens: 150, completion_tokens: 30, cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 180 })
-    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+    input.onNativeUsage?.({ prompt_tokens: 150, completion_tokens: 30, cache_read_tokens: 500, cache_creation_tokens: 0, total_tokens: 680 }, 'fixture-provider')
+    throw new Error('Synthetic transport failure after acknowledged usage')
   } } } }, root, () => ({}), { recordUsage(owner, input) {
+    const existing = receipts.get(input.idempotencyKey)
+    if (existing) return { ...existing, duplicate: true }
     const delta = input.usage.total_tokens - previous
     previous = input.usage.total_tokens
-    return { duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: previous, creditsMicro: previous,
+    const receipt = { duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: previous, creditsMicro: previous,
       event: { id: input.idempotencyKey, idempotencyKey: input.idempotencyKey, userId: owner, sessionId: input.sessionId,
         pricingVersion: 'fixture', usageSource: 'runtime_snapshot', usage: input.usage,
         delta: { ...input.usage, total_tokens: delta }, weightedTokens: previous, weightedTokensDelta: delta,
         creditsMicro: delta, createdAt: new Date().toISOString(), metadata: {} } }
+    receipts.set(input.idempotencyKey, receipt)
+    return receipt
   }, debitRealtimeUsage(owner, input) {
-    const delta = input.usage.total_tokens - charged
+    const receipt = receipts.get(input.idempotencyKey)
+    if (debited.has(input.idempotencyKey)) return { ...receipt, duplicate: true }
+    debited.add(input.idempotencyKey)
+    const delta = receipt.event.weightedTokensDelta
     charged += delta
+    if (delta) deltas.push(delta)
     return { duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: charged, creditsMicro: charged,
       event: { id: input.idempotencyKey, idempotencyKey: input.idempotencyKey, userId: owner, sessionId: input.sessionId,
         pricingVersion: 'fixture', usageSource: 'runtime_snapshot', usage: input.usage,
@@ -85,12 +134,16 @@ test('completed model messages debit observed usage before a long native turn en
     const session = manager.start({ workspacePath: root, userId: 'owner' })
     await manager.sendWithDisplay(session.id, 'Work')
     await observed
-    for (let i = 0; i < 100 && charged < 120; i++) await Bun.sleep(5)
-    expect(charged).toBe(120)
+    for (let i = 0; i < 100 && charged < 520; i++) await Bun.sleep(5)
+    expect(charged).toBe(520)
+    expect(manager.get(session.id)?.status).toBe('running')
+    expect(manager.runtimeSnapshot(session.id).usage.cache_read_tokens).toBe(400)
     release()
     await manager.waitForSessionIdle(session.id)
     await manager.dispose()
-    expect(charged).toBe(180)
+    expect(charged).toBe(680)
+    expect(deltas).toEqual([520, 160])
+    expect(manager.transcriptFacts(session.id).some(event => event.type === 'turn.failed')).toBe(true)
   } finally { release(); await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -171,8 +224,12 @@ test('completed child usage survives interruption, larger fresh counters and lat
     }
     await manager.dispose()
     expect(starts).toBe(2)
-    expect(recorded).toEqual([112, 446, 1003, 1114])
+    expect(recorded.filter((total, index) => index === 0 || total !== recorded[index - 1])).toEqual([112, 335, 446, 1003, 1114])
     expect(manager.runtimeSnapshot(session.id, root).usage).toEqual(usage(100, 14, 1000))
+    const receipt = manager.transcriptFacts(session.id).findLast(event =>
+      event.type === 'usage' && event.payload?.subtype === 'native_accounting')
+    expect(receipt?.payload?.usage).toEqual(usage(60, 8, 600))
+    expect(receipt?.payload?.sessionUsage).toEqual(usage(100, 14, 1000))
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 

@@ -29,6 +29,35 @@ function scene(): BeeGameSceneContentDocument {
 }
 
 describe('Unity-style scene adapter', () => {
+  it.each(['sprite-renderer', 'image', 'mesh-renderer', 'skinned-mesh-renderer', 'particle-system-renderer'] as const)(
+    'persists edited %s color and opacity without rewriting unchanged material data', type => {
+      for (const data of [
+        { color: '#ffffff', opacity: .8, marker: 'keep' },
+        { color: '#ffffff', alpha: .8, marker: 'keep' },
+        { color: '#00ff00', opacity: .9, material: { color: '#ffffff', opacity: .8, alphaMode: 'opaque', roughness: .6, marker: 'keep' } },
+      ]) {
+        const input: BeeGameSceneContentDocument = { schema: 'beegame-content.v1', id: 'material-edit', kind: 'scene-3d', assetRefs: ['RES-FOX'], data: {
+          nodes: [{ id: 'visual', components: [{ id: 'visual-r', type, assetRef: 'RES-FOX', data }] }],
+        } };
+        const before = structuredClone(input);
+        const editor = sceneContentToEditorDocument({ document: input, documentRevision: HASH });
+        expect(editorDocumentToSceneContent(editor, input).data.nodes[0].components).toEqual(input.data.nodes[0].components);
+        const component = editor.nodes.visual.components[0];
+        if (!('material' in component)) throw Error('Expected renderer');
+        for (const opacity of [.25, 0, 1]) {
+          component.material = { ...component.material, color: '#ff0000', opacity, alphaMode: opacity < 1 ? 'blend' : 'opaque' };
+          const saved = editorDocumentToSceneContent(editor, input);
+          const reopened = sceneContentToEditorDocument({ document: saved, documentRevision: HASH });
+          expect(reopened.nodes.visual.components[0]).toMatchObject({ material: { color: '#ff0000', opacity, alphaMode: component.material.alphaMode } });
+          const savedData = saved.data.nodes[0].components![0].data!;
+          if (data.material) expect(savedData).toMatchObject({ color: '#00ff00', opacity: .9, material: { roughness: .6, marker: 'keep' } });
+          else expect(savedData.marker).toBe('keep');
+        }
+        expect(input).toEqual(before);
+      }
+    },
+  );
+
   it('opens current source without fabricating legacy authority hashes; published IR remains strict', () => {
     const input = scene(); input.assetRefs = []; input.data.nodes = [{ id: 'root', components: [] }];
     const document = sceneContentToEditorDocument({ document: input, documentRevision: HASH });
@@ -297,5 +326,24 @@ describe('Unity-style scene adapter', () => {
     const saved = editorDocumentToSceneContent(editor, input);
     expect(saved.data.nodes.find(node => node.id === 'text')?.components?.find(component => component.type === 'text')?.data).toMatchObject({ font: { assetRef: 'FONT-CN-01', member: 'fonts/lxgw.woff2' }, text: '你好' });
     expect(saved.data.nodes.find(node => node.id === 'text')?.components?.find(component => component.type === 'text')?.data).not.toHaveProperty('member');
+    expect(saved.assetRefs.filter(id => id === 'FONT-CN-01')).toEqual(['FONT-CN-01']);
+  });
+
+  it.each(['scene-2d', 'scene-3d'] as const)('keeps nested font declarations on %s save/reopen without loaded editor assets', kind => {
+    const input = scene();
+    input.kind = kind;
+    input.assetRefs.push('FONT', 'STALE-FONT');
+    input.data.nodes.push({ id: 'label', components: [
+      { id: 'label-text', type: 'text', data: { text: 'Hello', font: { assetRef: 'FONT', member: 'regular.woff2' } } },
+      { id: 'second-text', type: 'text', data: { text: 'Again', font: { assetRef: 'FONT' } } },
+    ] });
+    const before = structuredClone(input);
+    const editor = sceneContentToEditorDocument({ document: input, documentRevision: HASH });
+    const saved = editorDocumentToSceneContent(editor, input);
+    expect(saved.assetRefs).toEqual([...before.assetRefs.filter(id => id !== 'STALE-FONT')]);
+    expect(saved.data.nodes.at(-1)!.components).toEqual(input.data.nodes.at(-1)!.components);
+    const reopened = sceneContentToEditorDocument({ document: saved, documentRevision: HASH });
+    expect(reopened.nodes.label.components).toEqual(editor.nodes.label.components);
+    expect(input).toEqual(before);
   });
 });

@@ -55,6 +55,12 @@ Do not put Supabase service-role keys or Stripe secrets in
 and calls the billing backend through the internal Compose URL
 `http://beegame-billing:62175`.
 
+Upgrade the billing service before the runtime host: new model work requires
+the internal `/api/internal/usage/authorize` endpoint. The runtime fails closed
+if authorization or settlement of pending usage cannot be confirmed. This
+endpoint adds no database migration; apply the existing usage migrations
+described in the root README before deployment.
+
 `http://127.0.0.1:62175/health` is public. Billing API routes under
 `/api/payments/*` require the same signed-in user Authorization header that the
 frontend sends to the runtime host; direct browser visits to those API routes
@@ -311,7 +317,7 @@ Runtime config is stored in the `beegame-config` Docker volume at
 `/home/bun/.beegame`.
 
 The runtime image includes the read-only built-in Skill catalog at
-`/app/.beegame/skills/builtinskills`. The native Agent discovers it separately
+`/app/.beegame/skills/bgs-game-skills`. The native Agent discovers it separately
 from uploaded user Skills, which remain explicit per-user configuration managed
 by the skills service under `.beegame/skills/<user_id>`.
 

@@ -15,7 +15,8 @@ describe('SupabaseRuntimeEnvClient', () => {
     SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
     VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
     BEEGAME_CONFIG_ENCRYPTION_KEY: process.env.BEEGAME_CONFIG_ENCRYPTION_KEY,
-    BEEGAME_ALLOW_PLAINTEXT_SECRETS: process.env.BEEGAME_ALLOW_PLAINTEXT_SECRETS,
+    BEEGAME_ALLOW_PLAINTEXT_SECRETS:
+      process.env.BEEGAME_ALLOW_PLAINTEXT_SECRETS,
   }
 
   afterEach(() => {
@@ -46,19 +47,21 @@ describe('SupabaseRuntimeEnvClient', () => {
       })
       return Response.json({
         OPENAI_API_KEY: 'sk-secret',
-        OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+        BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
       })
     }) as typeof fetch
 
     const client = createSupabaseRuntimeEnvClientFromEnv()
     expect(client).toBeDefined()
-    await expect(client?.loadRuntimeEnv({
-      userId: '00000000-0000-0000-0000-000000000001',
-      dataDir: '/workspace',
-      authToken: 'user-token',
-    })).resolves.toEqual({
+    await expect(
+      client?.loadRuntimeEnv({
+        userId: '00000000-0000-0000-0000-000000000001',
+        dataDir: '/workspace',
+        authToken: 'user-token',
+      }),
+    ).resolves.toEqual({
       OPENAI_API_KEY: 'sk-secret',
-      OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+      BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
     })
 
     expect(calls).toHaveLength(1)
@@ -74,28 +77,60 @@ describe('SupabaseRuntimeEnvClient', () => {
   })
 
   test('decrypts model credentials returned by the runtime env RPC', async () => {
-    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64')
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString(
+      'base64',
+    )
     delete process.env.BEEGAME_ALLOW_PLAINTEXT_SECRETS
     process.env.VITE_SUPABASE_URL = 'https://vite-project.supabase.co'
     process.env.VITE_SUPABASE_ANON_KEY = 'vite-anon-key'
     const encrypted = encryptSecret('sk-runtime-secret', 'model-config:api-key')
 
-    globalThis.fetch = (async () => Response.json({
-      OPENAI_API_KEY: encrypted,
-      OPENAI_BASE_URL: 'https://llm.example/v1',
-      OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
-    })) as unknown as typeof fetch
+    globalThis.fetch = (async () =>
+      Response.json({
+        OPENAI_API_KEY: encrypted,
+        OPENAI_BASE_URL: 'https://llm.example/v1',
+        BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
+      })) as unknown as typeof fetch
 
     const client = createSupabaseRuntimeEnvClientFromEnv()
-    await expect(client?.loadRuntimeEnv({
-      userId: '00000000-0000-0000-0000-000000000001',
-      dataDir: '/workspace',
-      authToken: 'user-token',
-    })).resolves.toEqual({
+    await expect(
+      client?.loadRuntimeEnv({
+        userId: '00000000-0000-0000-0000-000000000001',
+        dataDir: '/workspace',
+        authToken: 'user-token',
+      }),
+    ).resolves.toEqual({
       OPENAI_API_KEY: 'sk-runtime-secret',
       OPENAI_BASE_URL: 'https://llm.example/v1',
-      OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+      BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
     })
+  })
+
+  test('decrypts the selected Anthropic API key while preserving the explicit protocol', async () => {
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString(
+      'base64',
+    )
+    process.env.VITE_SUPABASE_URL = 'https://vite-project.supabase.co'
+    process.env.VITE_SUPABASE_ANON_KEY = 'fixture-anon'
+    const env = {
+      BEEGAME_MODEL_TYPE: 'anthropic',
+      BEEGAME_API_PROTOCOL: 'anthropic-messages',
+      BEEGAME_MODEL: 'fixture-model',
+      ANTHROPIC_API_KEY: encryptSecret(
+        'fixture-native-key',
+        'model-config:api-key',
+      ),
+    }
+    globalThis.fetch = (async () =>
+      Response.json(env)) as unknown as typeof fetch
+    const client = createSupabaseRuntimeEnvClientFromEnv()
+    await expect(
+      client?.loadRuntimeEnv({
+        userId: 'fixture-user',
+        dataDir: '/workspace',
+        authToken: 'fixture-token',
+      }),
+    ).resolves.toEqual({ ...env, ANTHROPIC_API_KEY: 'fixture-native-key' })
   })
 
   test('preserves structured auth status for refresh decisions', async () => {

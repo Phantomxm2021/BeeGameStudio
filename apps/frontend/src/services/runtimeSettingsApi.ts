@@ -1,20 +1,6 @@
 import apiClient from './apiClient';
 
-export type RuntimeSettingsConfig = {
-  verificationAgentEnabled?: boolean;
-  agentTeamsEnabled?: boolean;
-  promptSuggestionEnabled?: boolean;
-  awaySummaryEnabled?: boolean;
-  coordinatorModeEnabled?: boolean;
-  autoMemoryEnabled?: boolean;
-  autoDreamEnabled?: boolean;
-  skillSearchEnabled?: boolean;
-  treeSitterBashEnabled?: boolean;
-  webBrowserToolEnabled?: boolean;
-  bashClassifierEnabled?: boolean;
-  mcpSkillsEnabled?: boolean;
-  resourceLibraryEnabled?: boolean;
-};
+export type RuntimeSettingsConfig = { resourceLibraryEnabled?: boolean };
 
 export const getRuntimeSettings = (): Promise<RuntimeSettingsConfig> => (
   apiClient.get('/api/runtime-settings')

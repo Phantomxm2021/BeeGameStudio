@@ -140,6 +140,7 @@ export function AgentActivity({
   const contentId = `${baseId}-content`;
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
   const previousStatus = useRef(status);
   const [contentHeight, setContentHeight] = useState(0);
   const [currentOpen, setOpen] = useControllableOpen({
@@ -163,7 +164,6 @@ export function AgentActivity({
     : 0;
 
   useLayoutEffect(() => {
-    if (timeline) return;
     const node = contentRef.current;
     if (!node) return;
 
@@ -176,9 +176,15 @@ export function AgentActivity({
     return () => observer.disconnect();
   }, [timeline]);
 
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!timeline || !working || !currentOpen || !following.current || !viewport) return;
+    viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+  }, [timeline, working, currentOpen, contentHeight]);
+
   useEffect(() => {
     if (previousStatus.current === "working" && status === "complete" && (!timeline || collapseOnComplete)) {
-      setOpen(!collapseOnComplete);
+      setOpen(!collapseOnComplete || (timeline && !following.current));
     }
     previousStatus.current = status;
   }, [collapseOnComplete, setOpen, status, timeline]);
@@ -249,6 +255,9 @@ export function AgentActivity({
       >
         <div
           ref={viewportRef}
+          onWheel={event => { if (timeline && event.deltaY < 0) following.current = false; }}
+          onFocusCapture={() => { if (timeline) following.current = false; }}
+          onScroll={event => { if (timeline) { const node = event.currentTarget; following.current = node.scrollHeight - node.clientHeight - node.scrollTop <= 2; } }}
           tabIndex={timeline && expanded ? 0 : undefined}
           className={cn(
             "pr-1",

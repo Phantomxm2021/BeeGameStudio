@@ -413,3 +413,55 @@ describe('chatStore Performance & Cap', () => {
     expect(Object.keys(state.lastStreamingIdByTask).length).toBe(0);
   });
 });
+
+it('does not reopen a settled ordinary tool when older history is replayed before the next turn', () => {
+  useChatStore.getState().clearMessages();
+  const { addMessage, settleActivity, loadHistory, updateMessage } = useChatStore.getState();
+  const old = { id: 'old-tool', messageId: 'old-tool', taskId: 'session', turnId: 'old-turn',
+    sender: 'beegame', content: '', timestamp: 100, type: 'tool' as const,
+    toolName: 'Shell', toolStatus: 'running' as const, toolOutput: 'Partial output', sequence: 1 };
+  addMessage(old);
+  settleActivity('session', 'old-turn', 'incomplete', 200);
+  loadHistory([{ ...old, completionReason: undefined }]);
+  updateMessage('session', 'New turn', 'beegame', 'text', false, undefined, undefined,
+    { turnId: 'new-turn' }, 300, 'new-text');
+  expect(useChatStore.getState().messages.find(message => message.id === 'old-tool')).toMatchObject({
+    toolStatus: 'failed', completionReason: 'incomplete', toolOutput: 'Partial output',
+  });
+  expect(useChatStore.getState().isStreaming).toBe(true);
+  expect(useChatStore.getState().streamingMessageId).toBe('new-text');
+  useChatStore.getState().clearMessages();
+});
+
+it('settles inactive project activity without inventing an end time or touching newer work', () => {
+  useChatStore.getState().clearMessages();
+  const { addMessage, updateMessage, settleInactiveActivity } = useChatStore.getState();
+  updateMessage('session', 'Partial reply', 'beegame', 'text', false, undefined, undefined, {}, 100, 'old-text');
+  addMessage({ id: 'old-child', taskId: 'session', sender: 'beegame', type: 'tool', content: '',
+    timestamp: 100, toolName: 'Agent', toolStatus: 'running', isSubagentTool: true });
+  updateMessage('other-session', 'New work', 'beegame', 'text', false, undefined, undefined, {}, 300, 'new-work');
+  settleInactiveActivity(200);
+  const state = useChatStore.getState();
+  expect(state.messages.find(message => message.id === 'old-text')).toMatchObject({
+    streamStatus: 'complete', completionReason: 'incomplete', content: 'Partial reply' });
+  expect(state.messages.find(message => message.id === 'old-child')).toMatchObject({
+    toolStatus: 'failed', completionReason: 'incomplete' });
+  expect(state.messages.every(message => message.turnCompletedAt === undefined)).toBe(true);
+  expect(state.messages.find(message => message.id === 'new-work')?.streamStatus).toBe('streaming');
+  expect(state.streamingMessageId).toBe('new-work');
+  expect(state.lastStreamingIdByTask).toEqual({ 'other-session_beegame': 'new-work' });
+  useChatStore.getState().clearMessages();
+});
+
+it('accepts a real late result after an incomplete tool without dropping its output', () => {
+  useChatStore.getState().clearMessages();
+  const { addMessage, settleInactiveActivity } = useChatStore.getState();
+  const tool = { id: 'receipt-tool', taskId: 's', sender: 'beegame', content: '', timestamp: 100,
+    type: 'tool' as const, toolName: 'Shell' };
+  addMessage({ ...tool, toolStatus: 'running' });
+  settleInactiveActivity(200);
+  addMessage({ ...tool, timestamp: 150, toolStatus: 'completed', toolOutput: 'Real result' });
+  expect(useChatStore.getState().messages[0]).toMatchObject({ toolStatus: 'completed',
+    completionReason: undefined, toolOutput: 'Real result' });
+  useChatStore.getState().clearMessages();
+});

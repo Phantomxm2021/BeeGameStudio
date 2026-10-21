@@ -82,7 +82,7 @@ test('design-led acceptance still checks document coverage and revision without 
     await save({...report,verification:{...report.verification,designRevision:undefined}})
     expect((await inspectDesignAcceptance(root,true)).summary).toContain('revision is missing')
     await save({...report,verification:{...report.verification,requirementChecks:report.verification.requirementChecks.slice(1)}})
-    expect((await inspectDesignAcceptance(root,true)).summary).toContain('unverified')
+    expect(await inspectDesignAcceptance(root,true)).toMatchObject({ valid: true, quality: 'unverified' })
     await save({...report,verification:{...report.verification,requirementChecks:[...report.verification.requirementChecks,report.verification.requirementChecks[0]]}})
     expect((await inspectDesignAcceptance(root,true)).summary).toContain('Duplicate')
     await save(report)
@@ -213,7 +213,7 @@ test.each(['missing', 'failed', 'false-contract'] as const)('runtime acceptance 
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
-test('delivery binds every declared expectation to actual result evidence and its current owned source', async () => {
+test('reported indexed checks bind actual evidence and sources without requiring an exhaustive coverage map', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'bgs-owned-acceptance-'))
   try {
     await writeDesignDocumentsFixture(workspace, ['GDD.md', 'AUDIO_DESIGN.md'])
@@ -233,8 +233,8 @@ test('delivery binds every declared expectation to actual result evidence and it
       return (await readRuntimeAcceptanceReport(workspace, 'acceptance.json'))!
     }
     const originalGdd = await readFile(join(workspace, 'docs/GDD.md'), 'utf8')
-    expect((await read([])).summary).toContain('Design requirements are unverified')
-    expect((await read([checks[0]!])).summary).toContain('AUDIO_DESIGN.md#ready')
+    expect((await read([])).status).toBe('passed') // Author report/evidence integrity, not full requirement coverage.
+    expect((await read([checks[0]!])).status).toBe('passed')
     expect((await read([{ ...checks[0]!, id: 'invented' }, checks[1]!])).diagnostic?.category).toBe('report-invalid')
     expect((await read([{ ...checks[0]!, documentSha256: 'a'.repeat(64) }, checks[1]!])).summary).toContain('Requirement source changed')
     expect((await read([{ ...checks[0]!, handoffSha256: 'a'.repeat(64) }, checks[1]!])).summary).toContain('Requirement source changed')
@@ -260,7 +260,7 @@ test('delivery binds every declared expectation to actual result evidence and it
     expect(checkReport().exitCode).toBe(0)
     expect(await runtimeEvidenceIsCurrent(workspace, [{ ...accepted, verification: {
       ...accepted.verification!, requirementChecks: [],
-    } }])).toBe(false)
+    } }])).toBe(true)
     await writeFile(join(workspace, 'docs/GDD.md'), originalGdd.replace('Fixture decision.', 'Changed decision.'))
     const staleReport = checkReport()
     expect(staleReport.exitCode).toBe(1)
@@ -271,12 +271,12 @@ test('delivery binds every declared expectation to actual result evidence and it
     updated.outputs.push({ ...updated.outputs[0]!, id: 'outcome' })
     await writeDesignDocumentFixture(workspace, 'GDD.md', updated)
     const fresh = designRequirementChecksFixture(workspace, ['observations.txt'])
-    expect((await read(fresh.filter(check => check.id !== 'outcome'))).summary).toContain('GDD.md#outcome')
+    expect((await read(fresh.filter(check => check.id !== 'outcome'))).status).toBe('passed')
     expect((await read(fresh)).status).toBe('passed')
     const missingCriteria = designHandoffFixture('GDD.md')
     delete missingCriteria.outputs[0]!.acceptance
     await writeDesignDocumentFixture(workspace, 'GDD.md', missingCriteria)
-    expect((await read()).summary).toContain('core gameplay delivery expectations must be declared')
+    expect((await read()).summary).toContain('no declared acceptance source')
     // Structural validation itself never repairs the source or authenticates observations.
     expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe(designDocumentFixture('GDD.md', missingCriteria))
   } finally { await rm(workspace, { recursive: true, force: true }) }

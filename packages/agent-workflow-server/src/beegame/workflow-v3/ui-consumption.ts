@@ -5,6 +5,7 @@ import { initializeUiLayout } from '../../../../scene-editor/src/ui-container-la
 import { resolveUiNodesForViewport, uiCompactMaxWidth } from '../../../../scene-editor/src/ui-responsive'
 import { resolveUiNodeBindings } from '../../../../scene-editor/src/production-surface'
 import { contentIndexSchema, contentDocumentSchema, type BeeGameContentDocument } from '../game-content-schema'
+import { readUiLayoutCamera } from '../ui-layout-audit'
 import { readVersion } from './checks'
 import { digest, type CheckResult, type TaskSpec } from './state'
 
@@ -71,6 +72,16 @@ export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProb
       // Schema discrimination via the existing UI family, not a second schema.
       if (!('rootId' in doc.data)) throw new Error('Unsupported UI document')
       const data = doc.data as Extract<BeeGameContentDocument, { kind: 'ui-screen' | 'ui-hud' | 'ui-flow' }>['data']
+      // Use the same saved camera connection as design inspection and runtime.
+      // Its Scene is part of this measurement, including packed-byte identity.
+      property = 'layoutCamera'
+      const layoutOptions = readUiLayoutCamera(root, { data })
+      if (layoutOptions.scenePath) {
+        const scene = await readVersion(root, layoutOptions.scenePath)
+        const packedScene = await readVersion(root, task.runtimeArtifact+'/'+layoutOptions.scenePath)
+        result.inputs.push(scene, packedScene)
+        if (scene.sha256 !== packedScene.sha256) throw new Error('Packed Scene differs from current source: '+layoutOptions.scenePath)
+      }
       for(const key of Object.keys(probe.bindingValues ?? {}))
         if(!data.nodes.some(node=>Object.values(node.bindings ?? {}).includes(key)))
           throw Error('bindingValues references no authored UI binding: '+key)
@@ -113,13 +124,13 @@ export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProb
         if (rootNode.layout?.size && rootNode.layout.size.some((v,i)=>v!==size[i]))
           throw new Error('Saved root layout.size differs from referenceResolution; coordinateRoot is unverified')
         layoutViewport = [size[0] as number,size[1] as number]
-        const rootRect = inspectUiLayout(data.nodes,data.rootId,{width:layoutViewport[0],height:layoutViewport[1]}).find(rect=>rect.id===data.rootId)
+        const rootRect = inspectUiLayout(data.nodes,data.rootId,{width:layoutViewport[0],height:layoutViewport[1]},layoutOptions).find(rect=>rect.id===data.rootId)
         if (!rootRect?.active || Math.abs(rootRect.bounds.left)>0.01 || Math.abs(rootRect.bounds.top)>0.01 ||
             Math.abs(rootRect.bounds.right-layoutViewport[0])>0.01 || Math.abs(rootRect.bounds.bottom-layoutViewport[1])>0.01)
           throw new Error('Saved logical root must have origin 0,0 and the declared reference dimensions')
       }
       const viewport = { width: layoutViewport?.[0] ?? probe.viewport[0], height: layoutViewport?.[1] ?? probe.viewport[1] }
-      const measure = (value: typeof data) => inspectUiLayout(resolvedNodes(value), value.rootId, viewport).find(rect => rect.id === probe.nodeId)
+      const measure = (value: typeof data) => inspectUiLayout(resolvedNodes(value), value.rootId, viewport, layoutOptions).find(rect => rect.id === probe.nodeId)
       property = 'layout'
       const before = measure(data)
       if (!before?.active || before.bounds.right <= before.bounds.left || before.bounds.bottom <= before.bounds.top)
@@ -190,7 +201,7 @@ export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProb
           parent = parent.parentId ? byId.get(parent.parentId) : undefined
         }
       }
-      for (const rect of inspectUiLayout(resolved, data.rootId, viewport)) {
+      for (const rect of inspectUiLayout(resolved, data.rootId, viewport, layoutOptions)) {
         if (rect.id === data.rootId) continue
         const candidate = byId.get(rect.id)!
         let current: typeof candidate | undefined = candidate, dynamic = false

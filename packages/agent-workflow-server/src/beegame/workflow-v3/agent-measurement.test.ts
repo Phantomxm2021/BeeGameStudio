@@ -7,7 +7,6 @@ import {Hono} from 'hono'
 import {createRun,digest,type AgentTurn,type SkillUse} from './state'
 import {createLocalWorkflowStore,previewRunState} from './store'
 import {createAgentMeasurement,measurementSummary,measurementRequest} from './agent-measurement'
-import {formatError} from '../../../../../src/utils/toolErrors'
 import {openAgentTools} from './agent-tools'
 import {selectAgentMeasuredBuild,exportAgentMeasuredBuild,inspectAgentMeasurementInputs,discussionMessagesSinceMeasurement} from './measured-build'
 import {buildEditableProject} from './editable-project'
@@ -93,7 +92,7 @@ test.each(['shape','json','evidence','missing'] as const)('invalid attached acce
   } finally {await tools?.close();await f.close()}
 },30000)
 
-test.each(['missing-coverage','failed','timeout','source','run','requirements'] as const)(
+test.each(['failed','timeout','source','run','requirements'] as const)(
   'unsupported acceptance PASS (%s) is rejected consistently by handoff and measurement without building',async kind=>{
   const f=await fixture("throw Error('BUILD MUST NOT RUN')")
   let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
@@ -146,7 +145,6 @@ test.each(['missing-coverage','failed','timeout','source','run','requirements'] 
     if(kind==='requirements') {
       receipt.before.inputs.requirementsRevision='old-requirements';receipt.after.inputs.requirementsRevision='old-requirements'
     }
-    if(kind==='missing-coverage') report.verification.requirementChecks=[]
     await save()
     const checked=await command('handoff.mjs','--design','acceptance')
     expect(checked).toMatchObject({code:1,result:{valid:false,declaredStatus:'passed',status:'blocked',quality:'unverified'}})
@@ -252,14 +250,15 @@ test.each(['blocked','failed'] as const)('existing handoff exposes %s acceptance
     expect(handoff.acceptance).toMatchObject({valid:false,status,quality:'unverified'})
     expect(handoff.deliveryEligible).toBe(false)
     tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:f.measurement})
-    const read=async(action:string)=>{
-      const child=Bun.spawn([process.execPath,join(f.workspace,tools!.directory,'handoff.mjs'),'--design',action],{
+    const read=async(...args:string[])=>{
+      const child=Bun.spawn([process.execPath,join(f.workspace,tools!.directory,'handoff.mjs'),'--design',...args],{
         cwd:f.workspace,env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'chat','measurement')},
         stdout:'pipe',stderr:'pipe'})
       const result=JSON.parse(await new Response(child.stdout).text())
       return {code:await child.exited,result}
     }
-    expect((await read('help')).result.acceptanceInstruction).toContain('designRevision')
+    expect((await read('help')).result).not.toHaveProperty('acceptanceInstruction')
+    expect((await read('acceptance','--help')).result.acceptanceInstruction).toContain('designRevision')
     expect(await read('acceptance')).toMatchObject({code:1,result:{valid:false,status}})
     const before=await f.current()
     await writeFile(join(f.workspace,'reports/observation.txt'),'Changed observation, unchanged report')
@@ -739,7 +738,7 @@ test('inspection separates the active user task and live Skill facts from a hist
   }finally{await tools?.close();await active?.close();await f.close()}
 },30000)
 
-test('native failed-command formatting retains front-loaded UI identities and causes; full geometry stays on demand',()=>{
+test('compact measurement diagnostics retain UI identities and causes; full geometry stays on demand',()=>{
   const observation=JSON.stringify({driver:'synthetic host observation',probes:[{document:'content/ui/menu.json',nodeId:'hidden',viewport:[1024,576],
     status:'unverified',reason:'Target UI ancestor is hidden',changed:[{geometry:'X'.repeat(15000)}]},
     {document:'content/ui/menu.json',nodeId:'clipped',viewport:[1024,576],status:'unverified',reason:'Complete visible text fit could not be established',
@@ -753,14 +752,6 @@ test('native failed-command formatting retains front-loaded UI identities and ca
   expect(compact.diagnostics?.[1]?.textFit.before.clippedCount).toBe(1)
   expect('observation' in compact.checks[0]! ? compact.checks[0].observation : undefined).not.toContain('X'.repeat(100))
   expect('observation' in details.checks[0]! ? details.checks[0].observation : undefined).toBe(observation)
-  const output=formatError(Object.assign(new Error('Exit code 1'),{stdout:JSON.stringify({...details,
-    task:{scope:'active-user-turn',text:'CURRENT_FULL_ACCEPTANCE_REQUEST'},
-    skills:{currentTurnUses:[],currentTurnEvidence:'live-native-load-events',application:'unverified'}},null,2)}))
-  expect(output).toContain('characters truncated')
-  expect(output).toContain('Target UI ancestor is hidden');expect(output).toContain('clippedCount')
-  expect(output.indexOf('Target UI ancestor is hidden')).toBeLessThan(output.indexOf('characters truncated'))
-  expect(output).toContain('CURRENT_FULL_ACCEPTANCE_REQUEST')
-  expect(output).toContain('currentTurnUses')
   expect(JSON.stringify(record)).toBe(before)
   const error:any={...record,checks:[{id:'ui-data-consumption',status:'unverified',observation:'UI probe file#node [source]: source unavailable'}]}
   const plain=measurementSummary(error,false).checks[0]!
@@ -907,14 +898,14 @@ test('owned HTTP history survives unreadable current inputs; export and other ow
 test('project navigation remains a measured source; guide edits do not silently reuse an old build receipt',async()=>{
   const f=await fixture()
   try {
-    const file=join(f.workspace,'CLAUDE.md')
+    const file=join(f.workspace,'AGENTS.md')
     await writeFile(file,'# Project navigation\nEntry: src/index.html\n')
     const measured=await f.measurement.measure(request),before=await f.current()
-    expect(measured.checks.find(c=>c.id==='build')!.projectBuild!.files.some(p=>p.path==='CLAUDE.md')).toBe(true)
+    expect(measured.checks.find(c=>c.id==='build')!.projectBuild!.files.some(p=>p.path==='AGENTS.md')).toBe(true)
     expect((await f.measurement.context()).measurement?.freshness?.current).toBe(true)
     await writeFile(file,'# Project navigation\nEntry: src/index.html\nRun: actual existing command\n')
     expect((await f.measurement.context()).measurement?.freshness).toMatchObject({current:false,
-      changes:{requirements:false,sources:['CLAUDE.md']}})
+      changes:{requirements:false,sources:['AGENTS.md']}})
     expect(await f.current()).toEqual(before)
     expect(await readFile(join(f.workspace,'dist/index.html'),'utf8')).toContain('Actual fixture')
   }finally{await f.close()}
@@ -924,12 +915,12 @@ test('measurement preserves the saved guide and reads current navigation without
   const f=await fixture()
   try {
     await initializeProjectGuide(f.workspace)
-    const guide=await readFile(join(f.workspace,'CLAUDE.md'),'utf8')
+    const guide=await readFile(join(f.workspace,'AGENTS.md'),'utf8')
     await mkdir(join(f.workspace,'docs'))
     await writeFile(join(f.workspace,'docs/new-design.md'),'New saved design')
     const measured=await f.measurement.measure(request)
     expect(measured.checks.find(c=>c.id==='build')!.status).toBe('passed')
-    expect(await readFile(join(f.workspace,'CLAUDE.md'),'utf8')).toBe(guide)
+    expect(await readFile(join(f.workspace,'AGENTS.md'),'utf8')).toBe(guide)
     expect((await f.measurement.context()).project.designFiles).toContain('docs/new-design.md')
     expect((await f.measurement.context()).measurement?.freshness?.current).toBe(true)
   }finally{await f.close()}
@@ -1021,11 +1012,11 @@ test('handoff is read-only and returns current source bytes and newest interrupt
     const help=await command(f.workspace,'--help')
     expect(help.code).toBe(0)
     expect(help.stdout).toContain('--design help')
-    expect(help.stdout).toContain('index format and minimal JSON example')
+    expect(help.stdout).toContain('describes document authoring')
     const designHelp=await command(f.workspace,'--design','help')
     expect(designHelp.code).toBe(0)
-    expect(JSON.parse(designHelp.stdout).instruction).toContain('Minimal new index envelope:')
-    expect(JSON.parse(designHelp.stdout).instruction).toContain('.beegame/design-handoffs/')
+    expect(JSON.parse(designHelp.stdout).instruction).toContain('BGS does not require output indexes')
+    expect(JSON.parse(designHelp.stdout).instruction).toContain('Existing indexes remain readable')
     const compact=await command(f.workspace,'README.md')
     expect(compact.code).toBe(0)
     const saved=JSON.parse(compact.stdout)
@@ -1397,7 +1388,7 @@ test('missing reports, failed builds, unknown reservations and new failures stay
     await writeFile(join(f.workspace,'build.mjs'),builder)
     const run=await f.settle()
     await expect(selectAgentMeasuredBuild(run,good.id)).rejects.toThrow('newer measurement')
-    await expect(selectAgentMeasuredBuild(run,failed.id)).rejects.toThrow('build: Host executed bun run build')
+    await expect(selectAgentMeasuredBuild(run,failed.id)).rejects.toThrow('build: Host executed the project build script')
   }finally{await f.close()}
 },30000)
 

@@ -39,7 +39,17 @@
     "account": "アカウント"
   },
   "beegame": {
+    "chatActivity": {
+      "details": "実行の詳細",
+      "working": "リクエストを処理しています",
+      "failedWorking": "一部の操作に失敗しました。処理は継続しています。",
+      "failed": "処理中に一部の操作に失敗しました。最終回答または実行の詳細をご確認ください。",
+      "stopped": "一部の作業が停止されました。",
+      "incomplete": "一部の作業が未完了で、結果はまだ確認されていません。"
+    },
     "modelRequestError": {
+      "connection": "サービスへの接続に失敗したため、この回答を完了できませんでした。",
+      "details": "エラーの詳細",
       "capacity": "選択したモデルは処理能力の上限に達しています。別のモデルをお試しください。",
       "retry": "再試行",
       "retryNow": "今すぐ再試行",
@@ -333,7 +343,7 @@
         "argsHint": "One argument per line",
         "envHint": "One KEY=value per line. Leave saved secrets blank to keep them.",
         "stdio": "stdio",
-        "sse": "SSE",
+        "sse": "従来の SSE は非対応です。Streamable HTTP のエンドポイントを使用してください。",
         "http": "HTTP",
         "beegame": "BeeGame",
         "global": "Global",

@@ -24,17 +24,18 @@ export function hasActiveSubagents(messages: ReadonlyArray<Pick<Activity, 'isSub
 export function settleChatActivity<T extends Activity>(messages: T[], scope: {
   taskId: string; turnId?: string; at: number; reason: NonNullable<Activity['completionReason']>;
   completedAt?: number;
+  includeSubagents?: boolean;
 }): T[] {
   return messages.map(message => {
     if ((message.taskId ?? message.task_id) !== scope.taskId ||
       (scope.turnId && message.turnId !== scope.turnId) || message.timestamp > scope.at ||
-      (scope.reason === 'incomplete' && message.isSubagentTool)) return message;
+      (scope.reason === 'incomplete' && message.isSubagentTool && !scope.includeSubagents)) return message;
     const streaming = message.streamStatus === 'streaming';
     const runningTool = message.toolStatus === 'running';
     if (!streaming && !runningTool && scope.completedAt === undefined) return message;
     return { ...message,
       ...(streaming || runningTool ? { completionReason: scope.reason } : {}),
-      ...(scope.completedAt !== undefined ? { turnCompletedAt: scope.completedAt } : {}),
+      ...(scope.completedAt !== undefined && message.turnCompletedAt === undefined ? { turnCompletedAt: scope.completedAt } : {}),
       ...(streaming ? { streamStatus: 'complete' } : {}),
       ...(runningTool ? { toolStatus: 'failed' } : {}) };
   });

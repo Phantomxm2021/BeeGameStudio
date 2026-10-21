@@ -1,9 +1,21 @@
-import { useMemo, memo } from 'react';
+import { useMemo, memo, isValidElement, createContext, useContext } from 'react';
+import { CodeBlock } from '../../beui/registry/components/agents/code-block';
+import { agentCodeLanguage } from '../../beui/registry/components/agents/agent-code';
+import type { AgentCodeLanguage } from '../../beui/registry/components/agents/agent-code';
 import { ChatImage } from './ChatImage';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import type { Language } from '../AgentsConfig';
+
+const CodeStreaming = createContext(false);
+// Keep the Markdown component identity stable when a stream completes so a
+// reader's code selection and scroll position survive that status change.
+function ResponseCodeBlock({ code, language }: { code: string; language: AgentCodeLanguage }) {
+    const streaming = useContext(CodeStreaming);
+    return <CodeBlock code={code} language={language} status={streaming ? 'streaming' : 'complete'}
+        showLineNumbers={language !== 'text'} className="my-3 max-w-full" />;
+}
 
 const normalizeEscapedNewlines = (input: string): string => {
     if (!input) return '';
@@ -85,7 +97,7 @@ const tryParseStructuredJson = (input: string): unknown | null => {
 
 import MarkdownErrorBoundary from '../../Common/MarkdownErrorBoundary';
 
-export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble = false, lang = 'en' }: { content: string, messageId?: string; lang?: Language; bubble?: boolean }) => {
+export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble = false, lang = 'en', streaming = false }: { content: string, messageId?: string; lang?: Language; bubble?: boolean; streaming?: boolean }) => {
     const bodyTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-secondary)]';
     const headingTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-primary)]';
     // Stable renderers preserve image load state while subsequent text streams in.
@@ -154,11 +166,14 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                 </td>
             );
         },
-        pre: (props) => (
-            <pre className={`type-code my-3 max-w-full overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-3)] p-3 ${bodyTextClass}`}>
-                {props.children}
-            </pre>
-        ),
+        pre: ({ children }) => {
+            if (!bubble && isValidElement<{ children?: unknown; className?: string }>(children)) {
+                const code = String(children.props.children ?? '');
+                const language = agentCodeLanguage(/language-(\S+)/.exec(children.props.className || '')?.[1]);
+                return <ResponseCodeBlock code={code} language={language} />;
+            }
+            return <pre className={`type-code my-3 max-w-full overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-3)] p-3 ${bodyTextClass}`}>{children}</pre>;
+        },
         code: ({ className, children, ...props }) => {
             const match = /language-(\w+)/.exec(className || '');
             // Detect inline if no language match and no newlines (languageless blocks have newlines)
@@ -198,10 +213,10 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
     if (!formattedMainContent) return null;
 
     return (
-        <MarkdownErrorBoundary messageId={messageId} rawContent={content}>
+        <CodeStreaming.Provider value={streaming}><MarkdownErrorBoundary messageId={messageId} rawContent={content}>
             <div className={`min-w-0 max-w-full select-text break-words ${bubble ? 'text-background' : 'text-[var(--text-primary)]'} [overflow-wrap:anywhere]`}>
                 <div className={`mt-1`}>
-                    {renderAsJson ? (
+                    {renderAsJson ? (!bubble ? <CodeBlock code={content} language="json" showLineNumbers={false} status={streaming ? 'streaming' : 'complete'} /> :
                         <pre className={`type-code max-w-full rounded-lg p-3 ${bubble
                             ? 'whitespace-pre-wrap break-all !bg-transparent text-[currentColor]'
                             : 'overflow-x-auto bg-[var(--surface-3)]'}`}><code className={bubble ? '!bg-transparent !text-[currentColor]' : undefined}>{content}</code></pre>
@@ -244,7 +259,7 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                     )}
                 </div>
             </div>
-        </MarkdownErrorBoundary>
+        </MarkdownErrorBoundary></CodeStreaming.Provider>
     );
 });
 MarkdownRenderer.displayName = 'MarkdownRenderer';

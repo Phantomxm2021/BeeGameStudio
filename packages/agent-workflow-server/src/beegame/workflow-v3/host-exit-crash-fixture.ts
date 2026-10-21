@@ -3,7 +3,6 @@
 import { readFile, realpath, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { getMacroDefines } from '../../../../../scripts/defines'
 import { createLocalWorkflowStore, type WorkflowStore } from './store'
 import { createHostExitReceipts } from './host-exit-receipt'
 import { createAgentGoalExecutor } from './agent-goal'
@@ -18,8 +17,6 @@ const root = await realpath(job.root)
 if (dirname(root) !== await realpath(tmpdir()) || !basename(root).startsWith('bgs-v3-exit-crash-') ||
     job.run.workspacePath !== join(root, 'workspace') || job.run.projectId !== 'synthetic-exit-project')
   throw Error('Only the dedicated synthetic crash fixture is allowed')
-Object.assign(globalThis, { MACRO: Object.fromEntries(Object.entries(getMacroDefines())
-  .map(([key,value]) => [key.replace('MACRO.',''), JSON.parse(value)])) })
 const base = createLocalWorkflowStore(join(root, 'store'))
 async function checkpoint(event: string) {
   console.log(JSON.stringify({ checkpoint: event, pid: process.pid }))

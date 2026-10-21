@@ -22,7 +22,7 @@ export function useCredits(projectId: string | undefined, enabled: boolean, user
     if (scope.pending) return scope.pending;
     const request = (async () => {
       const [summary, balance] = await Promise.allSettled([
-        scope.projectId ? getCreditSummary(scope.projectId) : Promise.resolve(null), getCreditBalance(),
+        scope.projectId ? getCreditSummary(scope.projectId, true) : Promise.resolve(null), getCreditBalance(true),
       ]);
       if (current.current !== scope) return;
       const failures = [summary, balance].filter(result => result.status === 'rejected');

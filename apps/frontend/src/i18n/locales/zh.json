@@ -610,7 +610,7 @@
         "argsHint": "每行一个参数",
         "envHint": "每行一个 KEY=value；已保存的密钥留空会继续保留",
         "stdio": "stdio",
-        "sse": "SSE",
+        "sse": "不支持旧版 SSE，请改用 Streamable HTTP 端点。",
         "http": "HTTP",
         "beegame": "BeeGame",
         "global": "全局",
@@ -701,7 +701,17 @@
     "account": "账号"
   },
   "beegame": {
+    "chatActivity": {
+      "details": "执行详情",
+      "working": "正在处理你的请求",
+      "failedWorking": "有操作未成功，仍在继续处理。",
+      "failed": "过程中有操作未成功，请查看最终说明或执行详情。",
+      "stopped": "部分工作已停止。",
+      "incomplete": "部分工作未完成，结果尚未确认。"
+    },
     "modelRequestError": {
+      "connection": "连接服务时发生错误，本次回复未能完成。",
+      "details": "错误详情",
       "capacity": "所选模型当前已满负荷，请尝试其他模型。",
       "retry": "重试",
       "retryNow": "立即重试",
@@ -814,6 +824,7 @@
     "permissionRiskGeneric": "可能创建文件、安装依赖或访问网络",
     "permissionPendingPlaceholder": "等待权限确认",
     "userQuestion": {
+      "authorizeDesignChange": "授权本次回答中的设计变更，解除实现基线锁以便修订。",
       "custom": "或输入你自己的回答…",
       "submit": "提交回答",
       "previous": "上一题",

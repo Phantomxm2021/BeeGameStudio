@@ -52,7 +52,8 @@ export function readImplementationTask(workspace: string, input: unknown) {
   const directory = items.map(item => ({ id: item.id, dependsOn: item.dependsOn,
     dependencyStatus: item.dependsOn === undefined ? 'unspecified' : 'not-verified', section: item.section }))
   const result = { scope: 'saved-implementation-task', directory, issues,
-    note: 'Read-only task/source view. Structural issues do not hide independently readable tasks. Dependencies are IDs, not completion evidence. Reading does not lock or authorize implementation.' }
+    documents: designSourceLocations(workspace, ['TECHNICAL_DESIGN.md']),
+    note: 'Read-only technical source and optional existing task index. No index is required; an empty directory does not mean implementation is complete. Read the technical document and choose the work organization. Reading does not lock or authorize implementation.' }
   if (id === undefined) return { ...result, valid: !issues.length }
   const matches = items.filter(item => item.id === id)
   if (matches.length !== 1) return { ...result, valid: false,

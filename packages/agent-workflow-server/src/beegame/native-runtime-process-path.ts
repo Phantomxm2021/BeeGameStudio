@@ -1,5 +1,3 @@
-import { accessSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { resolve, relative, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -20,18 +18,4 @@ export function nativeSessionOutputPath(cwd: string, sessionId: string, temporar
   return path
 }
 
-export function resolveNativeRuntimeCommand(input?: {
-  executablePath?: string
-}): string[] {
-  if (input?.executablePath) {
-    const path = resolve(input.executablePath)
-    accessSync(path)
-    return [process.execPath, path]
-  }
-  const workspaceRoot = fileURLToPath(
-    new URL('../../../../', import.meta.url),
-  )
-  const executable = resolve(workspaceRoot, 'dist', 'cli-bun.js')
-  accessSync(executable)
-  return [process.execPath, executable]
-}
+export { bgsCommand as resolveNativeRuntimeCommand } from '../bgs/client'

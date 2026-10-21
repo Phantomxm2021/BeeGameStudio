@@ -1,78 +1,141 @@
 import { describe, expect, test } from 'bun:test'
-import { createUsageRecorder } from '../app'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { createUsageRecorder, generateBeeGameModelWithUsage } from '../app'
+import { BeeGameModelRuntimeError } from '../beegame/model-runtime-host'
+import { BeeGameSessionManager, type BeeGameSessionUsageBillingBackend } from '../beegame/session-manager'
+import { UsageOutboxPersistenceError } from '../beegame/session-usage-outbox'
+import { BeeGameUsageBillingError } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 
-const usage = {
-  input_tokens: 100,
-  output_tokens: 40,
-  cache_read_tokens: 20,
-  cache_creation_tokens: 10,
-  total_tokens: 170,
+const usage = (tokens: number) => ({ input_tokens: tokens, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: tokens })
+type Receipt = Awaited<ReturnType<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>>
+async function fixture(admission = false) {
+  const root = await mkdtemp('/private/tmp/bgs-auxiliary-usage-')
+  const rows = new Map<string, Receipt>(), debits = new Set<string>()
+  const state = { failRecord: false, failDebit: false, loseDebitResponse: false, rejectCredits: false, available: true, charged: 0,
+    keys: [] as string[], settled: [] as number[], failures: [] as unknown[] }
+  const backend: BeeGameSessionUsageBillingBackend = {
+    ...(admission ? { assertUsageAvailable: async () => {
+      if (!state.available) throw new BeeGameUsageBillingError('Insufficient realtime usage credits', false)
+    } } : {}),
+    recordUsage(owner, input) {
+      state.keys.push(input.idempotencyKey)
+      if (state.failRecord) throw Error('Synthetic record unavailable')
+      if (rows.has(input.idempotencyKey)) return { ...rows.get(input.idempotencyKey)!, duplicate: true }
+      expect(input.usageSource).toBe('model_runtime_host')
+      const total = [...rows.values()].reduce((sum, row) => sum + row.event.usage.total_tokens, 0) + input.usage.total_tokens
+      const row: Receipt = { duplicate: false, cumulativeUsage: { ...input.usage, total_tokens: total }, cumulativeWeightedTokens: total, creditsMicro: total,
+        event: { id: input.idempotencyKey, idempotencyKey: input.idempotencyKey, userId: owner, sessionId: input.sessionId,
+          pricingVersion: 'fixture', usageSource: 'model_runtime_host', usage: input.usage, delta: input.usage,
+          weightedTokens: input.usage.total_tokens, weightedTokensDelta: input.usage.total_tokens,
+          creditsMicro: input.usage.total_tokens, createdAt: new Date().toISOString(), metadata: input.metadata ?? {} } }
+      rows.set(input.idempotencyKey, row)
+      return row
+    },
+    debitRealtimeUsage(_owner, input) {
+      if (state.rejectCredits) throw new BeeGameUsageBillingError('Insufficient realtime usage credits', false)
+      if (state.failDebit) throw Error('Synthetic debit unavailable')
+      const receipt = rows.get(input.idempotencyKey)!
+      if (debits.has(input.idempotencyKey)) return { ...receipt, duplicate: true }
+      debits.add(input.idempotencyKey); state.charged += receipt.event.creditsMicro
+      if (state.loseDebitResponse) throw Error('Synthetic lost debit response')
+      return receipt
+    },
+  }
+  const create = () => new BeeGameSessionManager({ async start() { throw Error('No model should run') } }, root, () => ({}), backend)
+  const manager = create()
+  const recorder = createUsageRecorder({ sessionId: 'logical-job', submit: input => manager.recordExternalUsage('owner', input),
+    onSettled: result => { state.settled.push(result.creditsMicro) }, onDebitFailed: failure => { state.failures.push(failure) } })
+  return { root, manager, recorder, create, state, rows,
+    files: () => readdir(join(root, 'session-usage-outbox')),
+    async close() { await manager.dispose(); await rm(root, { recursive: true, force: true }) } }
 }
 
 describe('model runtime usage recorder', () => {
-  test('keeps a completed model result when the single terminal debit fails', async () => {
-    const recorded: Array<{ idempotencyKey: string; usage: unknown }> = []
-    const debited: string[] = []
-    const failures: Array<{
-      diagnosticId: string
-      idempotencyKey: string
-      retryable: boolean
-    }> = []
-    const recorder = createUsageRecorder({
-      sessionId: 'idea-intake:test',
-      record: async input => {
-        recorded.push(input)
-        return { creditsMicro: 125 }
-      },
-      debit: async input => {
-        debited.push(input.idempotencyKey)
-        throw Object.assign(new Error('Insufficient realtime usage credits'), {
-          retryable: false,
-        })
-      },
-      onDebitFailed: failure => {
-        failures.push(failure)
-      },
-    })
-
-    await expect(recorder(usage, 'beegame_idea_intake')).resolves.toBeUndefined()
-    await expect(recorder(usage, 'beegame_idea_intake')).resolves.toBeUndefined()
-
-    expect(recorded).toHaveLength(1)
-    expect(debited).toHaveLength(1)
-    expect(recorded[0]?.usage).toEqual({
-      prompt_tokens: 100,
-      completion_tokens: 40,
-      cache_read_tokens: 20,
-      cache_creation_tokens: 10,
-      total_tokens: 170,
-    })
-    expect(failures).toEqual([
-      expect.objectContaining({
-        diagnosticId: expect.stringMatching(/^billing_[a-f0-9]{16}$/),
-        idempotencyKey: recorded[0]?.idempotencyKey,
-        retryable: false,
-      }),
-    ])
+  test('zero balance and unsettled owner debt block new physical calls, including after restart; top-up recovers billing only', async () => {
+    const f = await fixture(true)
+    let modelCalls = 0
+    const host = { async generate() { throw Error('Unexpected legacy call') }, async generateWithUsage() { modelCalls++; return { content: 'Offline result', usage: usage(100) } } }
+    const input = { cwd: f.root, runtimeEnv: {}, systemPrompt: 'Offline', messages: [], querySource: 'intake' }
+    try {
+      f.state.available = false
+      await expect(generateBeeGameModelWithUsage(host, input, f.recorder, true, () => f.manager.assertModelRequestAllowed('owner'))).rejects.toThrow('Insufficient')
+      expect(modelCalls).toBe(0)
+      f.state.available = true; f.state.rejectCredits = true
+      expect(await generateBeeGameModelWithUsage(host, input, f.recorder, true, () => f.manager.assertModelRequestAllowed('owner'))).toBe('Offline result')
+      expect(f.state.failures[0]).toMatchObject({ retryable: false })
+      await f.manager.dispose()
+      const restarted = f.create()
+      try {
+        await expect(generateBeeGameModelWithUsage(host, { ...input, querySource: 'another-job' }, f.recorder, true,
+          () => restarted.assertModelRequestAllowed('owner'))).rejects.toThrow('Insufficient')
+        expect(modelCalls).toBe(1)
+        await restarted.assertModelRequestAllowed('another-owner')
+        f.state.rejectCredits = false
+        await restarted.assertModelRequestAllowed('owner')
+        expect(f.state.charged).toBe(100)
+        expect(modelCalls).toBe(1)
+        expect(await f.files()).toEqual([])
+      } finally { await restarted.dispose() }
+    } finally { await f.close() }
+  })
+  test('each physical request is charged in full, including equal usage in the same logical job', async () => {
+    const f = await fixture()
+    try {
+      await f.recorder(usage(100), 'intake')
+      await f.recorder(usage(150), 'intake-repair')
+      await f.recorder(usage(150), 'intake-repair')
+      expect(f.state.charged).toBe(400)
+      expect(f.rows.size).toBe(3)
+      expect(new Set(f.state.keys).size).toBe(3)
+      expect(f.state.settled).toEqual([100, 150, 150])
+      expect(await f.files()).toEqual([])
+    } finally { await f.close() }
   })
 
-  test('does not hide a usage persistence failure', async () => {
-    let attempts = 0
-    const recorder = createUsageRecorder({
-      sessionId: 'idea-intake:record-failure',
-      record: async () => {
-        attempts += 1
-        throw new Error('usage ledger unavailable')
-      },
-      debit: async () => ({ creditsMicro: 0 }),
-    })
+  test.each(['failRecord', 'failDebit', 'loseDebitResponse'] as const)('restart settles %s with the original request identity and no model replay', async failure => {
+    const f = await fixture()
+    try {
+      f.state[failure] = true
+      await f.recorder(usage(100), 'intake')
+      expect(f.state.settled).toEqual([])
+      const files = await f.files()
+      expect(files).toHaveLength(1)
+      const [pending] = JSON.parse(await readFile(join(f.root, 'session-usage-outbox', files[0]!), 'utf8'))
+      expect(pending.input.usageSource).toBe('model_runtime_host')
+      await f.manager.dispose()
+      f.state[failure] = false
+      const restarted = f.create()
+      await restarted.dispose()
+      expect(f.state.charged).toBe(100)
+      expect(new Set(f.state.keys)).toEqual(new Set([pending.input.idempotencyKey]))
+      expect(await f.files()).toEqual([])
+    } finally { await f.close() }
+  })
 
-    await expect(recorder(usage, 'beegame_idea_intake')).rejects.toThrow(
-      'usage ledger unavailable',
-    )
-    await expect(recorder(usage, 'beegame_idea_intake')).rejects.toThrow(
-      'usage ledger unavailable',
-    )
-    expect(attempts).toBe(2)
+  test('failed model calls retain acknowledged tokens and unknown receipts before returning the original failure', async () => {
+    const f = await fixture()
+    try {
+      for (const total of [100, 0]) {
+        const error = new BeeGameModelRuntimeError('Synthetic disconnect', 'model_request', { usage: { ...usage(total), incomplete: true } })
+        await expect(generateBeeGameModelWithUsage({ async generate() { throw error }, async generateWithUsage() { throw error } }, {
+          cwd: f.root, runtimeEnv: {}, systemPrompt: 'Offline', messages: [], querySource: 'intake',
+        }, f.recorder, true)).rejects.toBe(error)
+      }
+      expect(f.rows.size).toBe(2)
+      expect([...f.rows.values()].every(row => row.event.metadata.providerUsageIncomplete === true)).toBe(true)
+      expect(f.state.charged).toBe(100)
+    } finally { await f.close() }
+  })
+
+  test('failure to persist a bill is visible and never described as retained', async () => {
+    const f = await fixture()
+    try {
+      const path = join(f.root, 'session-usage-outbox')
+      await rm(path, { recursive: true }); await writeFile(path, 'Synthetic unavailable storage')
+      await expect(f.recorder(usage(100), 'intake')).rejects.toBeInstanceOf(UsageOutboxPersistenceError)
+      expect(f.state.keys).toEqual([])
+      expect(f.state.failures).toEqual([])
+    } finally { await f.close() }
   })
 })

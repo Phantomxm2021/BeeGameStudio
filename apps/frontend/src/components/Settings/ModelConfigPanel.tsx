@@ -1,3 +1,4 @@
+import {resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
 import { useEffect } from 'react';
 import { useOpenCodeGoModels, OpenCodeGoCatalogStatus } from './useOpenCodeGoModels';
 import type { ModelProviderKind } from '../../services/modelConfigApi';
@@ -21,6 +22,8 @@ export type ModelConfigPanelLabels = {
 export function ModelConfigPanel({
   labels,
   provider,
+  apiProtocol,
+  onApiProtocolChange,
   baseUrl,
   apiKey,
   fastModel,
@@ -41,6 +44,8 @@ export function ModelConfigPanel({
 }: {
   labels: ModelConfigPanelLabels;
   provider: ModelProviderKind;
+  apiProtocol?:ModelApiProtocol;
+  onApiProtocolChange?:(value:ModelApiProtocol)=>void;
   baseUrl: string;
   apiKey: string;
   fastModel: string;
@@ -66,7 +71,7 @@ export function ModelConfigPanel({
   useEffect(() => { onGoModelsReady?.(!goProfile || ready); }, [onGoModelsReady, goProfile, ready]);
   const selectGoProtocol = (next: OpenCodeGoProvider) => {
     const profile = OPENCODE_GO_PROFILES[next];
-    onProviderChange(next); onBaseUrlChange(profile.baseUrl);
+    onProviderChange(next); onApiProtocolChange?.(resolveModelApiProtocol(next)); onBaseUrlChange(profile.baseUrl);
     onFastModelChange(profile.defaults.fast); onBalancedModelChange(profile.defaults.balanced); onStrongModelChange(profile.defaults.strong);
   };
   const inputClass = 'h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring/30';
@@ -78,9 +83,14 @@ export function ModelConfigPanel({
         <ProjectSelect ariaLabel={labels.provider} value={goProfile ? 'opencode-go' : provider} onValueChange={value => {
           if (value === 'opencode-go') { selectGoProtocol('anthropic-compatible'); return; }
           onProviderChange(value as ModelProviderKind);
+          onApiProtocolChange?.(resolveModelApiProtocol(value as ModelProviderKind));
           if (goProfile) onBaseUrlChange('');
         }} options={[{ value: 'openai-compatible', label: 'OpenAI Compatible' }, { value: 'anthropic-compatible', label: 'Anthropic API Compatible' }, { value: 'gemini', label: 'Gemini' }, { value: 'grok', label: 'Grok' }, ...(enableOpenCodeGo ? [{ value: 'opencode-go', label: 'OpenCode Go' }] : [])]} className="w-full" triggerClassName={inputClass} />
       </label>
+      {!goProfile && (provider==='openai-compatible'||provider==='grok') && onApiProtocolChange && <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
+        <span className="text-sm font-medium text-foreground">{labels.protocol ?? 'API Protocol'}</span>
+        <ProjectSelect ariaLabel={labels.protocol ?? 'API Protocol'} value={apiProtocol ?? resolveModelApiProtocol(provider)} onValueChange={value=>onApiProtocolChange(value as ModelApiProtocol)} options={[{value:'responses',label:'Responses'},{value:'chat-completions',label:'Chat Completions'}]} className="w-full" triggerClassName={inputClass}/>
+      </label>}
       {goProfile && <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
         <span className="text-sm font-medium text-foreground">{labels.protocol ?? 'Protocol'}</span>
         <ProjectSelect ariaLabel={labels.protocol ?? 'Protocol'} value={goProvider!} onValueChange={value => selectGoProtocol(value as OpenCodeGoProvider)} options={Object.entries(OPENCODE_GO_PROFILES).map(([value, profile]) => ({ value, label: profile.label }))} className="w-full" triggerClassName={inputClass} />
@@ -91,9 +101,9 @@ export function ModelConfigPanel({
         <span className="text-sm font-medium text-foreground sm:mt-2.5">{labels.models}</span>
         <div className="grid gap-2">
           {goProfile && <OpenCodeGoCatalogStatus {...catalog} language={language} />}
-          <ModelField label={labels.fast} ariaLabel={labels.fastModel} value={fastModel} placeholder="qwen3.5-flash" options={goProfile ? catalog.models ?? [] : undefined} onChange={onFastModelChange} inputClass={inputClass} labelClass={labelClass} />
-          <ModelField label={labels.balanced} ariaLabel={labels.balancedModel} value={balancedModel} placeholder="qwen3.7-plus" options={goProfile ? catalog.models ?? [] : undefined} onChange={onBalancedModelChange} inputClass={inputClass} labelClass={labelClass} />
-          <ModelField label={labels.strong} ariaLabel={labels.strongModel} value={strongModel} placeholder="qwen3.7-max" options={goProfile ? catalog.models ?? [] : undefined} onChange={onStrongModelChange} inputClass={inputClass} labelClass={labelClass} />
+          <ModelField label={labels.fast} ariaLabel={labels.fastModel} value={fastModel} placeholder="model-fast" options={goProfile ? catalog.models ?? [] : undefined} onChange={onFastModelChange} inputClass={inputClass} labelClass={labelClass} />
+          <ModelField label={labels.balanced} ariaLabel={labels.balancedModel} value={balancedModel} placeholder="model-balanced" options={goProfile ? catalog.models ?? [] : undefined} onChange={onBalancedModelChange} inputClass={inputClass} labelClass={labelClass} />
+          <ModelField label={labels.strong} ariaLabel={labels.strongModel} value={strongModel} placeholder="model-strong" options={goProfile ? catalog.models ?? [] : undefined} onChange={onStrongModelChange} inputClass={inputClass} labelClass={labelClass} />
         </div>
       </div>
     </form>

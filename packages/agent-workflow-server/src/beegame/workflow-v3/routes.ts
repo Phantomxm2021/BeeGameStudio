@@ -423,7 +423,9 @@ export function registerV3Routes(app: Hono, input: {
       return c.json({ run, dispatched: false, partialOutputsAccepted: false })
     } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
   })
-  return { startAgentGoal, async contentView(request: Request, projectId: string, metadata: boolean) {
+  return { startAgentGoal,
+    hasLiveAgentWriter: (run: Run) => agentExecutor?.writerLiveness(run) === 'local-active',
+    async contentView(request: Request, projectId: string, metadata: boolean) {
     const user = input.getUser(request)
     if (!hasBeeGamePermission(user, 'project.read')) throw new WorkflowError('permission-denied', 'Project permission denied', 403)
     const project = await input.getProject(request, user, projectId)

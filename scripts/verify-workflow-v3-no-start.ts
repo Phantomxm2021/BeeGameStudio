@@ -4,7 +4,6 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {randomUUID} from 'node:crypto'
 import {loadEnvFile} from './beegame-migration-cli'
-import {getMacroDefines} from './defines'
 import {createRemoteWorkflowStore,type WorkflowStore} from '../packages/agent-workflow-server/src/beegame/workflow-v3/store'
 import {createRun} from '../packages/agent-workflow-server/src/beegame/workflow-v3/state'
 import {createAgentGoalExecutor} from '../packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal'
@@ -17,7 +16,6 @@ const args=process.argv.slice(2)
 if(args.length!==5 || args[0]!=='--apply' || args[1]!=='--env-file' || args[3]!=='--source-project')
   throw Error('Usage: bun scripts/verify-workflow-v3-no-start.ts --apply --env-file PATH --source-project OWNED_ID')
 loadEnvFile(args[2]!)
-Object.assign(globalThis,{MACRO:Object.fromEntries(Object.entries(getMacroDefines()).map(([key,value])=>[key.replace('MACRO.',''),JSON.parse(value)]))})
 const config={url:process.env.BEEGAME_SUPABASE_URL!,serviceKey:process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY!}
 if(!config.url || !config.serviceKey)throw Error('Normal database configuration required')
 const rest=async(path:string,init:RequestInit={})=>{

@@ -83,8 +83,8 @@ export const clone = <T>(value: T): T => structuredClone(value)
 export const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 export const identityTransform = (): Transform => ({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] })
 export const newId = (prefix = 'game-object') => `${prefix}-${crypto.randomUUID()}`
-export const componentOf = <T extends SceneComponent['type']>(node: SceneGameObject, type: T): Extract<SceneComponent, { type: T }> | undefined => node.components.find(component => component.type === type) as Extract<SceneComponent, { type: T }> | undefined
-export function rendererOrder(node: SceneNode): number {
+export const componentOf = <T extends SceneComponent['type']>(node: Pick<SceneGameObject, 'components'>, type: T): Extract<SceneComponent, { type: T }> | undefined => node.components.find(component => component.type === type) as Extract<SceneComponent, { type: T }> | undefined
+export function rendererOrder(node: Pick<SceneNode, 'components' | 'order' | 'renderLayerRank'>): number {
   const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
     ?? componentOf(node, 'tilemap-renderer') ?? componentOf(node, 'particle-system-renderer')
   const value = renderer?.properties.sortingOrder ?? node.order ?? 0

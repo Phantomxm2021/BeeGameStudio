@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test, spyOn } from 'bun:test'
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +6,8 @@ import { createAgentWorkflowApp, type AgentWorkflowAppOptions } from '../app'
 import { createRun, type Run } from '../beegame/workflow-v3/state'
 import { assertCommit } from '../beegame/workflow-v3/store'
 import { projectPreviewCapabilityPath } from '../beegame/project-preview-capability'
+import { DashboardRepository } from '../dashboard-repository'
+import { BeeGameSessionManager } from '../beegame/session-manager'
 import { sharedPlaywright } from '../beegame/shared-playwright'
 
 async function fixture(options: Partial<AgentWorkflowAppOptions> = {}) {
@@ -175,3 +177,82 @@ test('ordinary Preview is interactive in an opaque browser frame; changed build 
     expect((await f.app.request(previewUrl)).status).toBe(404)
   }finally{await browser?.close();server.stop(true);await f?.close()}
 },30000)
+
+
+test('accepted resume stays busy while its native session is being rebuilt', async () => {
+  let current: Run | undefined, starts = 0
+  let release!: () => void, entered!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const held = new Promise<void>(resolve => { entered = resolve })
+  let spy: { mockRestore(): void } | undefined
+  let catalogSpy: { mockRestore(): void } | undefined
+  const f = await fixture({ workflowV3Store: {
+    async read() { return current ? structuredClone(current) : undefined },
+    async commit(project, owner, version, next) {
+      assertCommit(project, owner, version, next, current); current = structuredClone(next)
+    },
+  }, sessionRunner: { async start(input) {
+    starts++; const nativeId = input.resumeSessionId ?? crypto.randomUUID()
+    input.onNativeSessionId?.(nativeId)
+    const interrupted = starts === 1
+    return { stop() {}, async submit(turn) {
+      if (interrupted) {
+        await new Promise<void>(resolve => {
+          if (turn.signal.aborted) resolve()
+          else turn.signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+      } else await turn.onMessage({ type: 'result', subtype: 'success', session_id: nativeId,
+        total_cost_usd: 0, result: 'Offline completion' } as any)
+    } }
+  } } })
+  const waitForEnd = async (index: number) => {
+    for (let i = 0; i < 500 && !current?.agentTurns?.[index]?.finishedAt; i++) await Bun.sleep(5)
+    expect(current?.agentTurns?.[index]?.finishedAt).toBeDefined()
+  }
+  try {
+    const configured = await f.request('/api/model-configs', 'POST', { name: 'Offline resume', provider: 'openai-compatible',
+      apiKey: 'offline-only', models: { balanced: 'offline-model' }, isDefault: true })
+    expect(configured.status).toBe(200)
+    const modelConfigId = (await configured.json()).id
+    const ensured = await f.request('/api/projects/fixture/session/ensure', 'POST', {})
+    const sessionId = (await ensured.json()).session.id
+    const accepted = await f.request('/api/projects/fixture/workflow-v3/agent/goal', 'POST', {
+      requestKey: 'offline-start', chatSessionId: sessionId,
+      brief: { kind: 'confirmed_build_brief', idea: 'Offline state fixture', selected_option: { title: 'Fixture', loop: 'play' },
+        settings: { engine: 'React', platform: 'Web', dimension: '2D', orientation: 'Landscape' }, resource_library_usage: 'optional',
+        document_language: 'en', game_user_visible_language: 'en', agent_response_language: 'en' },
+    })
+    expect(accepted.status, await accepted.clone().text()).toBe(202)
+    for (let i = 0; i < 500 && starts === 0; i++) await Bun.sleep(5)
+    expect(starts, current?.agentTurns?.[0]?.error).toBe(1)
+    expect((await f.request('/api/projects/fixture/workflow-v3/stop', 'POST', {})).status).toBe(202)
+    await waitForEnd(0)
+    expect(current!.agentTurns![0]!.status).toBe('interrupted')
+    catalogSpy = spyOn(DashboardRepository.prototype, 'listModelConfigs').mockRejectedValue(new Error('Offline unavailable platform catalog'))
+    const restored = await f.request('/api/projects/fixture/session/ensure', 'POST', {})
+    expect(restored.status, await restored.clone().text()).toBe(200)
+    expect((await restored.json()).session.modelConfigId).toBe(modelConfigId)
+    expect(DashboardRepository.prototype.listModelConfigs).not.toHaveBeenCalled()
+    catalogSpy.mockRestore(); catalogSpy = undefined
+    expect((await f.request('/api/projects/fixture/workflow-v3/resume', 'POST', { planRevision: current!.planRevision })).status).toBe(200)
+    const original = BeeGameSessionManager.prototype.sendWithDisplay
+    spy = spyOn(BeeGameSessionManager.prototype, 'sendWithDisplay').mockImplementation(async function (this: BeeGameSessionManager, ...args) {
+      entered(); await gate
+      return original.apply(this, args)
+    })
+    const previous = current!.agentTurns!.at(-1)!
+    const response = await f.request('/api/projects/fixture/workflow-v3/agent/messages', 'POST', {
+      requestKey: 'offline-continue', runId: current!.id, chatSessionId: sessionId,
+      expectedVersion: current!.version, requirementsRevision: current!.requirements.revision,
+      text: '继续', intent: 'continue', continuationOf: previous.attemptId,
+    })
+    expect(response.status, await response.clone().text()).toBe(202)
+    await Promise.race([held, Bun.sleep(2500).then(() => { throw Error('Resume did not reach held preparation') })])
+    expect(starts).toBe(1)
+    const preparing = await (await f.request('/api/projects/fixture/runtime-state')).json()
+    expect(preparing).toMatchObject({ phase: 'starting', blocked: false, active_agents: ['beegame-agent'] })
+    release(); await waitForEnd(1)
+    expect(starts).toBe(2)
+    expect((await (await f.request('/api/projects/fixture/runtime-state')).json()).phase).toBe('idle')
+  } finally { release(); spy?.mockRestore(); catalogSpy?.mockRestore(); await f.close() }
+}, 15000)

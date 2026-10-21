@@ -17,14 +17,14 @@ describe('agent workflow model configs', () => {
     resetAgentWorkflow()
   })
 
-  test('uses SDK API-key auth only for the exact Go Anthropic endpoint', () => {
-    const go = OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl
-    for (const baseUrl of [go, `${go}/`, 'https://compatible.example', `${go}/other`, 'https://opencode.ai.evil.test/zen/go']) {
-      const env = mapStoredModelConfigToRuntime({ provider: 'anthropic-compatible', baseUrl, apiKey: 'fixture-secret', models: {} }).env
-      const isGo = baseUrl === go || baseUrl === `${go}/`
-      expect(env[isGo ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN']).toBe('fixture-secret')
-      expect(env).not.toHaveProperty(isGo ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY')
+  test('preserves each provider protocol and supports explicit Responses without guessing from model names', () => {
+    for (const [provider,modelType,protocol] of [['anthropic-compatible','anthropic','anthropic-messages'],['gemini','gemini','gemini'],['grok','grok','chat-completions'],['openai-compatible','openai','chat-completions']] as const) {
+      expect(mapStoredModelConfigToRuntime({provider,apiKey:'fixture',models:{balanced:'selected'}})).toMatchObject({modelType,env:{BEEGAME_API_PROTOCOL:protocol,BEEGAME_MODEL:'selected'}})
     }
+    expect(mapStoredModelConfigToRuntime({provider:'openai-compatible',apiProtocol:'responses',apiKey:'fixture',models:{}}).env.BEEGAME_API_PROTOCOL).toBe('responses')
+    for (const [provider,profile] of Object.entries(OPENCODE_GO_PROFILES))
+      expect(mapStoredModelConfigToRuntime({provider:provider as any,baseUrl:profile.baseUrl,apiKey:'fixture',models:profile.defaults}).env.BEEGAME_MODEL).toBe(profile.defaults.balanced)
+    expect(()=>mapStoredModelConfigToRuntime({provider:'gemini',apiProtocol:'responses',apiKey:'fixture',models:{}})).toThrow('Unsupported')
   })
 
   test('masks API keys while preserving runtime mapping internally', () => {
@@ -45,11 +45,12 @@ describe('agent workflow model configs', () => {
     expect(runtime).toEqual({
       modelType: 'openai',
       env: {
-        BGS_USE_OPENAI: '1',
         OPENAI_BASE_URL: 'https://llm.example.invalid/v1',
         OPENAI_API_KEY: 'sk-dashboard-secret',
-        OPENAI_DEFAULT_HAIKU_MODEL: 'fast-model',
-        OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+        BEEGAME_API_PROTOCOL:'chat-completions',
+        BGS_DEFAULT_FAST_MODEL: 'fast-model',
+        BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
+        BEEGAME_MODEL: 'balanced-model',
       },
     })
     expect(runtime?.env).not.toHaveProperty('BEEGAME_RUNTIME_MODEL_TYPE')

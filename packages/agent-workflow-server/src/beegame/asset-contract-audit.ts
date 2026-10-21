@@ -5,6 +5,7 @@ import { inflateSync } from 'node:zlib'
 import { candidateCoversObligation, type ResourceCoverageObligation } from '@bee-game-studio/beegame-resource-core'
 import { inspectResourceBytes } from '../../../beegame-resource-server/src/resource-inspection'
 import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
+import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
 import { readTileSetResource } from './tilemap-contract'
 import {
   BeeGameAssetManifestError,
@@ -115,6 +116,7 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
         'Game Content Package definitions must not be declared as resources; remove the content-definition from the Manifest.',
       )
     for (const filePath of resource.file_paths) {
+      const atlasFacts: Record<string, string | number | boolean> = {}
       const absolute = projectFile(workspace, filePath)
       if (!absolute) {
         issues.push(`File escapes the project: ${filePath}`)
@@ -136,7 +138,7 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
           try {
             const value = JSON.parse(readFileSync(absolute, 'utf8'))
             if (value?.schema === 'beegame-tileset.v1') readTileSetResource(workspace, manifest, resource.id, filePath)
-            const image = resource.file_paths.find(path => path === filePath.replace(/\.json$/i, '.png'))
+            const image = resource.file_paths.find(path => /\.png$/i.test(path) && editorAtlasPath(resource, path) === filePath)
             const imagePath = image && projectFile(workspace, image)
             if (imagePath && existsSync(imagePath)) {
               const sheet = parseSpriteSheet(value)
@@ -145,6 +147,10 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
                 if (bytes.length < 24 || !bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
                   throw new Error('Invalid PNG atlas')
                 validateSpriteSheetBounds(sheet, bytes.readUInt32BE(16), bytes.readUInt32BE(20))
+                if ('frames' in sheet) {
+                  atlasFacts.atlasImage = image!
+                  atlasFacts.namedFrameCount = Object.keys(sheet.frames).length
+                }
               }
             }
           } catch (error) { issues.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`) }
@@ -153,7 +159,7 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
         if (stats.isFile() && stats.size) {
           const bytes = readFileSync(absolute)
           fileEvidence.push({ path: filePath, sha256: createHash('sha256').update(bytes).digest('hex'),
-            facts: inspectResourceBytes(filePath, bytes) })
+            facts: { ...inspectResourceBytes(filePath, bytes), ...atlasFacts } })
         }
         if (expected && stats.isFile()) {
           const actual = createHash('sha256')
@@ -234,9 +240,14 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
     let unknown = !bound.length
     for (const [index, obligation] of obligations.entries()) {
       const candidates = bound.filter(resource => !obligation.assetKinds?.length || !resource.asset_kind ||
-        obligation.assetKinds.some(kind => kind === resource.asset_kind))
-      const declarations = candidates.map(resource => candidateCoversObligation({
-        assetKind: resource.asset_kind, usageTags: resource.usage_tags ?? [], capabilities: resource.capabilities ?? [],
+        obligation.assetKinds.some(kind => kind === resource.asset_kind) ||
+        (resource.asset_kind === 'sprite-atlas' && obligation.assetKinds.includes('sprite')))
+      const atlasSprites = candidates.map(resource => resource.asset_kind === 'sprite-atlas' &&
+        !obligation.assetKinds?.includes('sprite-atlas') && obligation.assetKinds?.includes('sprite')
+        ? inspectAtlasSprites(resource, resources.find(row => row.id === resource.id)!) : undefined)
+      const declarations = candidates.map((resource, index) => candidateCoversObligation({
+        assetKind: atlasSprites[index]?.status === 'passed' ? 'sprite' : resource.asset_kind,
+        usageTags: resource.usage_tags ?? [], capabilities: resource.capabilities ?? [],
         relations: (resource.relation_kinds ?? []).map(kind => ({kind})),
         contentProfile: { components: [
           ...(resource.embedded_kinds ?? []).map(kind => ({kind})),
@@ -247,14 +258,18 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
       // Declared coverage and file evidence are separate. Missing labels alone
       // are not proof a format lacks the requested structure.
       const evidence = candidates.map((resource, index) => {
-        const item = inspectObligation(resource, resources.find(row => row.id === resource.id)!, obligation)
+        const item = inspectObligation(resource, resources.find(row => row.id === resource.id)!, obligation, atlasSprites[index])
         return !declarations[index] && item.status === 'passed'
-          ? { status: 'unverified', reason: resource.id+': declared coverage incomplete' } : item
+          ? { status: 'unverified', reason: item.reason+'; declared coverage incomplete' } : item
       })
       const status = evidence.some(item => item.status === 'passed') ? 'passed' :
         (evidence.length && evidence.every(item => item.status === 'failed')) || (bound.length && !candidates.length) ? 'failed' : 'unverified'
-      observations.push('Part '+(index+1)+': '+status+(evidence.length ? '; '+evidence.map(item => item.reason).join('; ') : '; no declared binding covers this obligation'))
-      if (status === 'failed') row.issues.push('Required structure has incompatible declared kinds or contradicts local file evidence for part '+(index+1)+'.')
+      const observation = 'Part '+(index+1)+': '+status+'; expected kinds ['+(obligation.assetKinds ?? []).join(', ')+
+        ']; required capabilities ['+(obligation.capabilities ?? []).join(', ')+
+        ']; bound resources ['+bound.map(resource => resource.id+' ('+(resource.asset_kind ?? 'undeclared')+')').join(', ')+']'+
+        (evidence.length ? '; '+evidence.map(item => item.reason).join('; ') : '; no declared binding covers this obligation')
+      observations.push(observation)
+      if (status === 'failed') row.issues.push(observation)
       if (status === 'unverified') unknown = true
     }
     row.structure = { status: row.issues.length ? 'failed' : unknown ? 'unverified' : 'passed', observations }
@@ -279,13 +294,30 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
   }
 }
 
-function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourceAudit, obligation: ResourceCoverageObligation) {
+/** A container can supply sprites only through inspected, registered named frames.
+ * This local evidence does not change the resource kind or catalog matching. */
+function inspectAtlasSprites(resource: BeeGameProjectResource, audit: AssetResourceAudit) {
+  if (audit.issues.length) return { status: 'failed', reason: resource.id+': invalid local files: '+audit.issues.join('; ') } as const
+  if (resource.provisional || resource.status !== 'verified')
+    return { status: 'unverified', reason: resource.id+': provisional or unavailable atlas evidence' } as const
+  const image = audit.fileEvidence.find(file => file.path === resource.root_path && file.path.toLowerCase().endsWith('.png'))
+  const atlas = audit.fileEvidence.find(file => file.facts.atlasImage === image?.path && Number(file.facts.namedFrameCount) > 0)
+  if (!image || !atlas)
+    return { status: 'failed', reason: resource.id+': sprite requires a registered PNG and sibling .json or .atlas.json metadata with nonempty named frames inside the image' } as const
+  if (!resource.local_file_hashes?.[image.path] || !resource.local_file_hashes?.[atlas.path])
+    return { status: 'unverified', reason: resource.id+': recorded hashes are missing for the atlas image or metadata' } as const
+  return { status: 'passed', reason: resource.id+': '+atlas.facts.namedFrameCount+' named sprite frames verified in '+atlas.path+' against '+image.path } as const
+}
+
+function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourceAudit, obligation: ResourceCoverageObligation,
+  atlasSprites?: ReturnType<typeof inspectAtlasSprites>) {
+  if (atlasSprites && atlasSprites.status !== 'passed') return atlasSprites
   if (audit.issues.length) return { status: 'failed', reason: resource.id+': invalid local files' } as const
   if (resource.provisional || resource.status !== 'verified' || !audit.fileEvidence.length)
     return { status: 'unverified', reason: resource.id+': provisional or unavailable file evidence' } as const
   const root = audit.fileEvidence.find(file => file.path === resource.root_path)
   const facts = root?.facts ?? {}
-  const kind = resource.asset_kind ?? ''
+  const kind = atlasSprites ? 'sprite' : resource.asset_kind ?? ''
   if (obligation.assetKinds?.length && !obligation.assetKinds.some(value => value === kind))
     return { status: 'unverified', reason: resource.id+': no compatible declared resource kind' } as const
   const png = !!facts.width && !!facts.height && root?.path.toLowerCase().endsWith('.png')
@@ -318,7 +350,7 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
   // An atlas's named rectangles establish addressing, never a timed sequence.
   // Unsupported facts stay unknown, including animation timing/rig compatibility.
   return { status: contradiction ? 'failed' : unknown ? 'unverified' : 'passed',
-    reason: resource.id+': '+(contradiction ? 'required components absent from inspected root' :
+    reason: (atlasSprites ? atlasSprites.reason+'; ' : resource.id+': ')+(contradiction ? 'required components absent from inspected root' :
       unknown ? 'required facts are not established by supported file inspection' : 'structural file/header facts only; runtime use/quality unverified') } as const
 }
 

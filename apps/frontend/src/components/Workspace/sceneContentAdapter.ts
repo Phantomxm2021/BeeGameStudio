@@ -197,6 +197,19 @@ function toCanonicalComponent(component: SceneComponent, metrics: CanvasMetrics,
   const unit = dimension === '2d' ? metrics.pixelsPerUnit : 1;
   const point = (value: [number, number]) => [value[0] * unit, value[1] * unit * (dimension === '2d' ? -1 : 1)];
   const enabled = component.enabled ? {} : { enabled: false }; const props = 'properties' in component ? structuredClone(component.properties) : {};
+  if ('material' in component) {
+    const previous = material(props);
+    // Keep unchanged source fields intact; write edits at their existing location.
+    for (const key of ['color', 'opacity'] as const) {
+      if (component.material[key] === previous[key]) continue;
+      const nested = record(props.material);
+      if (nested && Object.hasOwn(nested, key)) nested[key] = component.material[key];
+      else if (key === 'opacity' && props.opacity === undefined && props.alpha !== undefined) props.alpha = component.material.opacity;
+      else props[key] = component.material[key];
+    }
+    if (component.material.alphaMode !== previous.alphaMode)
+      props.material = { ...record(props.material), alphaMode: component.material.alphaMode };
+  }
   if (component.type === 'sprite-renderer') return { id: component.id, type: component.type, assetRef: sourceAssetId(component.assetId), data: { ...props, ...(component.member ? { member: component.member } : {}), ...enabled } };
   if (component.type === 'image') return { id: component.id, type: component.type, ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...props, ...(component.member ? { member: component.member } : {}), ...enabled } };
   if (component.type === 'mesh-filter' || component.type === 'tilemap' || component.type === 'skinned-mesh-renderer') return { id: component.id, type: component.type, assetRef: sourceAssetId(component.assetId), data: { ...props, ...(component.member ? { member: component.member } : {}), ...enabled } };
@@ -250,5 +263,9 @@ export function editorDocumentToSceneContent(editorDocument: SceneDocument, orig
     return base;
   });
   const data = { ...structuredClone(original.data), nodes }; if (data.cameraNodeId && !editorDocument.nodes[data.cameraNodeId]) delete data.cameraNodeId;
-  return { ...structuredClone(original), kind: editorDocument.dimension === '3d' ? 'scene-3d' : 'scene-2d', assetRefs: [...new Set(nodes.flatMap(node => node.components?.flatMap(component => component.assetRef ? [component.assetRef] : []) ?? []))], data };
+  const assetRefs = [...new Set(nodes.flatMap(node => node.components?.flatMap(component => {
+    const font = record(component.data?.font);
+    return [...(component.assetRef ? [component.assetRef] : []), ...(typeof font?.assetRef === 'string' ? [font.assetRef] : [])];
+  }) ?? []))];
+  return { ...structuredClone(original), kind: editorDocument.dimension === '3d' ? 'scene-3d' : 'scene-2d', assetRefs, data };
 }

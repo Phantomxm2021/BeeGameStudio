@@ -28,6 +28,80 @@ const message = (type: ProjectEventMessage['type'], overrides: Partial<ProjectEv
 })
 
 describe('standalone chat projection', () => {
+  it.each(['tool.progress', 'tool.completed', 'tool.failed'])('preserves structured %s results in live and restored Chat', type => {
+    for (const output of [[{ type: 'inputText', text: 'Design remains locked' }], { answers: ['A'], tasks: [{ status: 'unverified' }] }]) {
+      const [live] = projectEventMessages('project-a', frozen(event({ type: type as BeeGameEvent['type'], text: 'FixtureTool',
+        payload: { toolName: 'FixtureTool', toolUseID: 'result-1', input: {}, output } })))
+      expect(JSON.parse(live.tool_output!)).toEqual(output)
+      expect(projectHistoryMessages([live], new Map())[0].toolOutput).toBe(live.tool_output)
+    }
+  })
+  it('uses the server session total across native epochs and preserves legacy usage projection', () => {
+    const usage = { prompt_tokens: 10, completion_tokens: 2, cache_read_tokens: 100, cache_creation_tokens: 0, total_tokens: 112 };
+    const sessionUsage = { ...usage, prompt_tokens: 30, cache_read_tokens: 300, total_tokens: 332 };
+    expect(projectEventMessages('project-a', event({ type: 'usage', payload: { usage, sessionUsage } }))[0]).toMatchObject({ type: 'usage', usage: sessionUsage });
+    expect(projectEventMessages('project-a', event({ type: 'usage', payload: { usage } }))[0]).toMatchObject({ type: 'usage', usage });
+  });
+  it('shows a parameterless tool from its original start time through completion', () => {
+    const start = event({ type: 'tool.started', payload: { toolName: 'ReadImplementationTask', toolUseID: 'read-task', input: {} } })
+    const end = event({ id: 2, type: 'tool.completed', createdAt: '2026-10-15T00:00:03.000Z', payload: { ...start.payload, output: 'Done' } })
+    const [live] = projectEventMessages('project-a', start)
+    expect(live).toMatchObject({ type: 'tool_start', tool_status: 'running', tool_input: {}, timestamp: Date.parse(start.createdAt) })
+    const history = projectHistoryMessages([...projectEventMessages('project-a', start), ...projectEventMessages('project-a', end)], new Map())
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolStatus: 'completed', timestamp: Date.parse(start.createdAt) })
+  })
+  it.each(['bgs', 'codex'])('projects %s compaction status in live and restored Chat', runtime => {
+    const start = event({ type: 'system.status', payload: { runtime, status: 'compacting' } })
+    const end = event({ id: 2, type: 'system.status', createdAt: '2026-10-15T00:00:32.000Z', payload: { runtime, status: 'compacted' } })
+    const [live] = projectEventMessages('project-a', start), [done] = projectEventMessages('project-a', end)
+    expect(live).toMatchObject({ type: 'context_compaction', status: 'running' })
+    expect(done).toMatchObject({ type: 'context_compaction', status: 'finished', message_id: live.message_id })
+    const history = projectHistoryMessages([live, done], new Map())
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ taskKind: 'context_compaction', streamStatus: 'complete', timestamp: Date.parse(start.createdAt) })
+  })
+  it.each(['tool.progress', 'tool.completed'])('keeps the full %s output for inline expansion, copying and history', type => {
+    const output = 'Long fixture output\n'.repeat(30) + 'ORIGINAL_OUTPUT_END';
+    const [live] = projectEventMessages('project-a', event({ type: type as BeeGameEvent['type'], payload: {
+      toolName: 'Shell', toolUseID: 'long-output', input: { command: 'bun run build' }, output,
+    } }));
+    expect(live.tool_output).toBe(output);
+    expect(live.content).not.toContain('ORIGINAL_OUTPUT_END');
+    expect(projectHistoryMessages([live], new Map())[0].toolOutput).toBe(output);
+  });
+  it('restores explicit and legacy native file diffs without classifying shell output as a file edit', () => {
+    const diff = '--- a/src/Example.ts\n+++ b/src/Example.ts\n@@ -11 +11 @@\n-old\n+new\n';
+    for (const payload of [
+      { toolName: 'Edit', diff, output: diff },
+      { runtime: 'bgs', toolName: 'Edit', output: diff },
+      { runtime: 'codex', toolName: 'Edit', output: diff },
+    ]) {
+      const [live] = projectEventMessages('project-a', event({ type: 'tool.completed', payload: {
+        type: 'runtime_event', toolUseID: 'edit-one', input: { file_path: 'src/Example.ts' }, ...payload,
+      } }));
+      expect(live).toMatchObject({ tool_diff: diff });
+      expect(projectHistoryMessages([live], new Map())[0]).toMatchObject({ toolDiff: diff });
+    }
+    const [shell] = projectEventMessages('project-a', event({ type: 'tool.completed', payload: {
+      runtime: 'bgs', toolName: 'Shell', input: { command: 'git diff' }, output: diff,
+    } }));
+    expect(shell.tool_diff).toBeUndefined();
+  });
+  it('preserves native command metrics and errors through both live messages and restored display history', async () => {
+    const { normalizeChatHistory } = await import('../utils/chatHistory');
+    const { toChatDisplayMessages } = await import('../viewModels/displayModels');
+    for (const exitCode of [0, 2]) {
+      const [live] = projectEventMessages('project-a', event({ type: 'tool.completed', text: 'Shell', payload: {
+        type: 'runtime_event', toolName: 'Shell', toolUseID: 'native-command', input: { command: 'bun run build' },
+        output: 'Synthetic output', exitCode, durationMs: 1200,
+      } }));
+      expect(live).toMatchObject({ tool_status: exitCode ? 'failed' : 'completed', tool_exit_code: exitCode, tool_duration_ms: 1200 });
+      const [display] = toChatDisplayMessages(normalizeChatHistory(projectHistoryMessages([live], new Map())));
+      expect(display).toMatchObject({ toolStatus: live.tool_status, toolExitCode: exitCode, toolDurationMs: 1200,
+        toolInput: { command: 'bun run build' } });
+    }
+  });
   it.each(['agent_goal_settled', 'agent_message_resume'])('does not present internal %s cleanup as a task stop', reason => {
     const stopped = frozen(event({ type: 'session.stopped', payload: { type: 'session.stopped', reason } }));
     expect(projectEventMessages('project-a', stopped)).toEqual([]);
@@ -185,3 +259,12 @@ describe('standalone chat projection', () => {
     expect(decodeArtifactId('not-an-artifact')).toBeNull()
   })
 })
+
+ it.each(['turn.failed', 'session.stopped'] as const)('retains the %s terminal time for restored partial activity', type => {
+  const partial = message('tool_start', { tool: 'Shell', tool_use_id: 'partial-tool', tool_status: 'running', timestamp: 100 });
+  const terminal = projectEventMessages('project-a', event({ type, createdAt: new Date(5000).toISOString() }));
+  const history = projectHistoryMessages([partial, ...terminal], new Map());
+  expect(history.find(item => item.toolUseId === 'partial-tool')).toMatchObject({
+    turnCompletedAt: 5000, toolStatus: 'failed', completionReason: type === 'turn.failed' ? 'failed' : 'stopped',
+  });
+});

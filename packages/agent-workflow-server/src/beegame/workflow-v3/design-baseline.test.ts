@@ -38,6 +38,14 @@ test('implementation baseline persists once, rejects overwrite/finalize and bloc
     await expect(measurement.assertActive(true)).rejects.toThrow('Planning records are locked')
     const forged=structuredClone(locked);forged.version++;forged.designBaseline!.revision='0'.repeat(64)
     expect(()=>assertCommit('project','owner',locked.version,forged,locked)).toThrow('cannot be replaced')
+    const released=structuredClone(locked);released.version++;delete released.designBaseline;released.deliveryEligible=false
+    expect(()=>assertCommit('project','owner',locked.version,released,locked)).toThrow('cannot be replaced')
+    expect(()=>assertCommit('project','owner',locked.version,released,locked,'agent.design-change-authorized:question')).not.toThrow()
+    const expanded=structuredClone(released);expanded.requirements.text='Unrelated overwrite'
+    expect(()=>assertCommit('project','owner',locked.version,expanded,locked,'agent.design-change-authorized:question')).toThrow('cannot be replaced')
+    const paused=structuredClone(locked);paused.paused={at:new Date().toISOString()}
+    expect(()=>assertCommit('project','owner',locked.version,{...paused,version:paused.version+1,designBaseline:undefined},paused,'agent.design-change-authorized:question')).toThrow('cannot be replaced')
+
     await writeFile(join(root,'docs/GDD.md'),(await readFile(join(root,'docs/GDD.md'),'utf8'))+'\nUnauthorized new expectation.\n')
     await expect(measurement.lockDesignBaseline()).rejects.toThrow('locked implementation baseline')
     const result=await measurement.measure({requestKey:'must-not-build',runtimeArtifact:'dist',reportPaths:[]})

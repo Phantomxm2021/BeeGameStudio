@@ -10,7 +10,7 @@ import {
 } from '@bee-game-studio/agent-workflow'
 import { realpath } from 'node:fs/promises'
 import { OPENCODE_GO_ID } from '@bee-game-studio/agent-workflow/opencode-go'
-import { PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, PERSONAL_CLAUDE_ID, isPersonalModelId, personalModelAvailable, personalModelConfig, preferredModelId, resolveModelConnection } from './model-connections'
+import { PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, isPersonalModelId, personalModelAvailable, personalModelConfig, preferredModelId, resolveModelConnection } from './model-connections'
 import { loadLocalImageSettings, saveLocalImageSettings, selectImageConfig, updateImageSettings } from './image-generation/config-store'
 import type { ImageProviderKind } from './image-generation/config'
 import { resolve } from 'node:path'
@@ -36,7 +36,7 @@ import {
 } from '@bee-game-studio/beegame-skills-core/config'
 import {
   clearRuntimeBuiltinSkills,
-  getBuiltinSkillsDirectory,
+  resolveBuiltinSkillsDirectory,
   materializeUserSkills,
 } from '@bee-game-studio/beegame-skills-core/store'
 import {
@@ -56,11 +56,11 @@ import {
   resolveRuntimeFeatureSettings,
   mapRuntimeSettingsToEnv,
   saveRuntimeSettingsConfig,
-  syncRuntimeSettingsToDedicatedRuntimeConfig,
   type RuntimeSettingsConfig,
 } from './runtime-settings-store'
 import {
   getBearerToken,
+  hasBeeGamePermission,
   type BeeGameUserContext,
 } from './auth/user-context'
 import {
@@ -74,8 +74,6 @@ import type {
 import type { SupabaseRuntimeEnvClient } from './supabase-runtime-env-client'
 import {
   loadWebToolsConfig,
-  mapWebToolsConfigToRuntimeEnv,
-  syncWebToolsToRuntimeConfig,
   saveWebToolsConfig,
   toPublicWebToolsConfig,
   type WebToolsConfig,
@@ -108,6 +106,8 @@ export type DashboardRepositoryOptions = {
   getAuthToken?: (request: Request) => string | undefined
   modelConfigStore?: ModelConfigStoreOptions | false
   projectAssetStorage?: ProjectAssetStorage
+  /** Resolve current host permissions, including for previously saved MCP entries. */
+  resolveRuntimeUser?: (userId: string, authToken?: string) => Promise<BeeGameUserContext | undefined>
 }
 
 export type BeeGameProjectLifecycleOverview = {
@@ -170,6 +170,7 @@ type CreateModelConfigInput = {
   published?: boolean
   name: string
   provider: ModelProviderKind
+  apiProtocol?: import('@bee-game-studio/agent-workflow').ModelApiProtocol
   baseUrl?: string
   apiKey: string
   models: {
@@ -184,18 +185,6 @@ type UpdateModelConfigInput = Partial<CreateModelConfigInput>
 const DEFAULT_MAX_PROJECTS_PER_USER = 100
 const RUNTIME_SETTINGS_ENV_KEY = 'BEEGAME_RUNTIME_SETTINGS_JSON'
 const RUNTIME_SETTING_FIELDS: Array<keyof RuntimeSettingsConfig> = [
-  'autoMemoryEnabled',
-  'verificationAgentEnabled',
-  'agentTeamsEnabled',
-  'promptSuggestionEnabled',
-  'awaySummaryEnabled',
-  'coordinatorModeEnabled',
-  'autoDreamEnabled',
-  'skillSearchEnabled',
-  'treeSitterBashEnabled',
-  'webBrowserToolEnabled',
-  'bashClassifierEnabled',
-  'mcpSkillsEnabled',
   'resourceLibraryEnabled',
 ]
 
@@ -492,6 +481,8 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     input: McpServerInput,
   ): Promise<McpServerConfig> {
+    if ((input.transport ?? 'stdio') === 'stdio' && !hasBeeGamePermission(user, 'workspace.manage'))
+      throw new Error('Host MCP processes require workspace.manage')
     const supabase = this.supabaseForRequest(request)
     return supabase
       ? supabase.upsertMcpServer(user.id, input)
@@ -591,7 +582,7 @@ export class DashboardRepository {
     if (management) return configs
     const root = this.options.getUserDataRoot(request)
     const preferred = preferredModelId(root)
-    const personal = [PERSONAL_BYOK_ID, PERSONAL_CLAUDE_ID, PERSONAL_CHATGPT_ID, OPENCODE_GO_ID]
+    const personal = [PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, OPENCODE_GO_ID]
       .filter(id => personalModelAvailable(root, user.id, id))
       .map(id => personalModelConfig(root, user.id, id)!)
     const published = [...configs.filter(config => config.published !== false), ...personal]
@@ -744,6 +735,11 @@ export class DashboardRepository {
 
   createSessionUsageBillingBackend(): BeeGameSessionUsageBillingBackend {
     return {
+        ...(this.options.remoteUsageBilling ? { assertUsageAvailable: (userId: string) => {
+          const client = this.requireRemoteUsageBilling()
+          if (!client.assertUsageAvailable) throw new Error('Usage billing authorization is unavailable')
+          return client.assertUsageAvailable(userId)
+        } } : {}),
         recordUsage: (userId, input) =>
           this.requireRemoteUsageBilling().recordUsage(userId, {
             sessionId: input.sessionId,
@@ -753,7 +749,7 @@ export class DashboardRepository {
             idempotencyKey: input.idempotencyKey,
             metadata: input.metadata,
             pricingVersion: 'weighted-v1',
-            usageSource: 'runtime_snapshot',
+            usageSource: input.usageSource ?? 'runtime_snapshot',
           }),
         debitRealtimeUsage: (userId, input) =>
           this.requireRemoteUsageBilling().debitRealTimeUsage(userId, {
@@ -764,7 +760,7 @@ export class DashboardRepository {
             idempotencyKey: input.idempotencyKey,
             metadata: input.metadata,
             pricingVersion: 'weighted-v1',
-            usageSource: 'runtime_snapshot',
+            usageSource: input.usageSource ?? 'runtime_snapshot',
           }),
     }
   }
@@ -835,7 +831,7 @@ export class DashboardRepository {
         .flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []),
     )
     clearRuntimeBuiltinSkills({ dataDir })
-    const builtinSkillsDir = getBuiltinSkillsDirectory()
+    const builtinSkillsDir = resolveBuiltinSkillsDirectory()
     if (this.supabaseStore && userId) {
       const client = this.options.supabaseRuntimeEnvClient
       if (!client) {
@@ -868,14 +864,8 @@ export class DashboardRepository {
       if (selectedId && !selectedModel) throw new Error('Selected model is no longer available')
       const selectedModelEnv = selectedModel ? resolveModelConnection(dataDir, selectedModel.config, selectedModel.env) : {}
       const runtimeSettings = this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
-      const webTools = await this.supabaseForAuthToken(authToken).loadWebTools(userId).catch(error => {
-        console.error('[BeeGame runtime dependency]', JSON.stringify({
-          timestamp: new Date().toISOString(), step: 'web_tools_config', ...safeErrorFacts(error),
-        }))
-        throw error
-      })
-      syncWebToolsToRuntimeConfig(webTools, { dataDir })
-      const mcpServers = await this.supabaseForAuthToken(authToken).runtimeMcpServers(userId)
+      const mcpServers = await this.authorizeRuntimeMcpServers(
+        await this.supabaseForAuthToken(authToken).runtimeMcpServers(userId), userId, authToken)
       await this.materializeRemoteUserSkillsSafely(userId, dataDir)
       // Supabase owns logical runtime configuration (provider credentials and
       // platform feature flags). The runtime host owns physical isolation. Do
@@ -884,12 +874,9 @@ export class DashboardRepository {
       return {
         ...env,
         ...selectedModelEnv,
-        ...mapWebToolsConfigToRuntimeEnv(webTools),
         ...hostToolEnv,
         ...hostIsolationEnv,
         BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(mcpServers),
-        ...(runtimeSettings.skillSearchEnabled !== undefined
-          ? { SKILL_SEARCH_ENABLED: runtimeSettings.skillSearchEnabled ? '1' : '0' } : {}),
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
         BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
         NPM_CONFIG_CACHE: hostIsolationEnv.NPM_CONFIG_CACHE,
@@ -899,7 +886,6 @@ export class DashboardRepository {
       }
     }
     if (userId) await this.materializeRemoteUserSkillsSafely(userId, dataDir)
-    const webTools = loadWebToolsConfig({ dataDir })
     const platformEnv = this.mapLocalPlatformRuntimeSettingsToEnv(dataDir)
     const selectedId = modelConfigId ?? preferredModelId(dataDir)
     // Explicit model IDs are authorized at the request boundary. Defaults stay owner-scoped.
@@ -908,15 +894,25 @@ export class DashboardRepository {
     const selected = personal ?? (selectedId ? getModelConfig(selectedId) : userId ? listModelConfigs(userId).find(config => config.isDefault) : undefined)
     if (selectedId && !selected) throw new Error('Selected model is no longer available')
     const selectedModelEnv = selected ? resolveModelConnection(dataDir, selected, mapModelConfigToRuntime(selected.id)?.env ?? {}) : {}
-    syncWebToolsToRuntimeConfig(webTools, { dataDir })
     return {
-      ...mapWebToolsConfigToRuntimeEnv(webTools),
       ...hostToolEnv,
       ...platformEnv,
       ...selectedModelEnv,
-      BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(exportMcpServersSnapshot({ dataDir })),
+      BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(await this.authorizeRuntimeMcpServers(
+        exportMcpServersSnapshot({ dataDir }), userId, authToken)),
       BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
     }
+  }
+
+  private async authorizeRuntimeMcpServers(
+    servers: McpServerConfig[], userId?: string, authToken?: string,
+  ): Promise<McpServerConfig[]> {
+    if (servers.some(server => server.enabled && server.autoStart === true && server.transport === 'stdio')) {
+      const user = userId ? await this.options.resolveRuntimeUser?.(userId, authToken) : undefined
+      if (!user || user.id !== userId || !hasBeeGamePermission(user, 'workspace.manage'))
+        throw new Error('Host MCP processes require workspace.manage; remove the stdio entry or contact the workspace owner')
+    }
+    return servers
   }
 
   private async materializeRemoteUserSkillsSafely(
@@ -963,7 +959,6 @@ export class DashboardRepository {
     const settings = loadRuntimeSettingsConfig({
       dataDir: this.options.dashboardDataRoot,
     })
-    syncRuntimeSettingsToDedicatedRuntimeConfig(settings, { dataDir })
     return mapRuntimeSettingsToEnv(settings, {
       dataDir,
     })
@@ -984,7 +979,6 @@ export class DashboardRepository {
     }
     // Host-owned isolation must be materialized even when Supabase has no
     // optional runtime feature row for this user.
-    syncRuntimeSettingsToDedicatedRuntimeConfig(settings, { dataDir })
     return settings
   }
 

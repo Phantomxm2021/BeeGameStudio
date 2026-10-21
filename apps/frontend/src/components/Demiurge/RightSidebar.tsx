@@ -1,9 +1,8 @@
-import { isModelRequestFailure } from '../../utils/modelRequestFailure';
+import { isModelRequestFailure, canAutomaticallyRetryModelFailure } from '../../utils/modelRequestFailure';
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload } from '../../services/api';
-import { WorkflowRecoveryNotice } from './Sidebar/WorkflowRecoveryNotice';
 import type { ChatAttachmentPayload } from '../../services/api';
 import { beeGameAdapter, isBeeGameProjectPackageArtifactId, type BeeGameQueuedMessage } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
@@ -63,7 +62,7 @@ interface RightSidebarProps {
     isStopping?: boolean;
     isRuntimeBusy?: boolean;
     onResolveToolPermission?: (
-        permission: { gate_id: string },
+        permission: { gate_id: string; intent?: 'change' },
         decision?: 'allow' | 'deny',
         scope?: 'once' | 'session',
         answers?: Record<string, string>
@@ -572,7 +571,7 @@ export function RightSidebar({
         openProjectEditorFileRoute(projectId, kind, path);
     };
 
-    const handleUploadAsset = async (file: File) => {
+    const handleUploadAsset = async (file: File | readonly File[]) => {
         if (!canMutateAssets) return;
     const requestProjectId = projectId;
     const requestId = ++assetUploadRequestRef.current;
@@ -691,15 +690,14 @@ export function RightSidebar({
         return 'Artifacts';
     };
     const sidebarTabs = ['chat', 'todo', 'artifacts'] as const;
-    const [writerBlocked, setWriterBlocked] = useState(false);
     const lastError = [...messages].reverse().find(message => message.type === 'error');
     const retryTurnId = lastError?.turnId || lastError?.turn_id;
     const canRetryModel = Boolean(lastError && retryTurnId && isModelRequestFailure(lastError.content) &&
         projectStatus?.phase === 'paused' && projectStatus.blocked && !isAgentWorking && onContinueTask);
     const retry = canRetryModel && lastError && retryTurnId ? {
         messageId: lastError.id,
-        autoRetry: autoRetryTurnId === retryTurnId,
-        disabled: !canSendMessage || writerBlocked || isStopping || isComposerLocked || waitingPermission.isBlockingChat,
+        autoRetry: autoRetryTurnId === retryTurnId && canAutomaticallyRetryModelFailure(lastError.content),
+        disabled: !canSendMessage || isStopping || isComposerLocked || waitingPermission.isBlockingChat,
         onRetry: (automatic: boolean) => onContinueTask?.(retryTurnId, automatic),
         onCancel: () => onCancelRetry?.(),
     } : undefined;
@@ -730,8 +728,6 @@ export function RightSidebar({
                         </TabsList>
                     </div>
 
-                    <WorkflowRecoveryNotice key={`workflow-recovery:${projectId}`} projectId={projectId} lang={lang}
-                        refreshKey={`${isLoading}:${isStopping}:${isRuntimeBusy}`} failed={projectStatus?.phase === 'paused' && projectStatus.blocked} onBlockedChange={setWriterBlocked} />
                     {/* Content Area */}
                     <TabsContent key={projectId} value="chat" keepMounted className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto data-[hidden]:hidden">
                             <ChatPanel 
@@ -741,7 +737,7 @@ export function RightSidebar({
                                 streamingMessageId={streamingMessageId}
                                 onStop={onStopTask}
                                 isStopping={isStopping}
-                                isComposerLocked={isComposerLocked || writerBlocked}
+                                isComposerLocked={isComposerLocked}
                                 queuedMessages={queuedMessages}
                                 queueActionId={queueActionId}
                                 queueError={queueError}
@@ -773,7 +769,7 @@ export function RightSidebar({
                 actionPermission={beeGamePermissionReview}
                             pendingPermissions={pendingPermissions}
                                 waitingPermission={waitingPermission}
-                                canSendMessage={canSendMessage && !writerBlocked}
+                                canSendMessage={canSendMessage}
                                 lang={lang}
                                 currentUserDisplayName={currentUserDisplayName}
                                 currentUserEmail={currentUserEmail}

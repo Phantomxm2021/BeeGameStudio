@@ -229,7 +229,7 @@ test('native tools discover all six; result reads use fixed read requests, prese
     stdoutPath: '.beegame/tmp/preview-test-fixture/stdout.txt', after: { status: 'observed', scriptSha256: 'old',
       inputs: { files: [], requirementsRevision: 'r1', runId: 'run', attemptId: 'old-turn' } } })
   const prepared = await prepareNativeMcpConfig({}, root, { dimension: '2D' }, sessionId)
-  const config = JSON.parse(readFileSync(prepared.flags[1]!, 'utf8'))
+  const config = prepared.config as { mcp_servers: Record<string, { command: string; args: string[] }> }
   const client = new Client({ name: 'offline-reader-test', version: '1' })
   const before = snapshot(root)
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -238,7 +238,7 @@ test('native tools discover all six; result reads use fixed read requests, prese
     return { response, text, json: () => JSON.parse(text) }
   }
   try {
-    await client.connect(new StdioClientTransport({ ...config.mcpServers['bgs-ui-layout'], cwd: root }))
+    await client.connect(new StdioClientTransport({ ...config.mcp_servers['bgs-ui-layout']!, cwd: root }))
     const tools = (await client.listTools()).tools
     expect(tools.map(tool => tool.name).sort()).toEqual([...NATIVE_READ_TOOLS].sort())
     expect(tools.every(tool => tool.annotations?.readOnlyHint && tool._meta?.['anthropic/alwaysLoad'])).toBe(true)

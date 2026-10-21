@@ -18,7 +18,15 @@ function registryRevision(workspace: string) {
 export async function captureDesignBaseline(run: Run): Promise<NonNullable<Run['designBaseline']>> {
   const check = checkDesignHandoff(run.workspacePath, PROJECT_DOCUMENTS)
   if (!check.valid) throw new WorkflowError('design-handoff-invalid', check.issues.join('; '))
-  const protectedFiles = await Promise.all(PROJECT_DESIGN_PATHS.map(path => readVersion(run.workspacePath, path)))
+  const protectedFiles = (await Promise.all(PROJECT_DESIGN_PATHS.map(async path => {
+    try { return [await readVersion(run.workspacePath, path)] }
+    catch (error) {
+      // Plain design records have no sidecar. The before/after revision still
+      // detects a sidecar added or removed during capture. Documents are required.
+      if (path.startsWith('.beegame/design-handoffs/') && (error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    }
+  }))).flat()
   const after = checkDesignHandoff(run.workspacePath, PROJECT_DOCUMENTS)
   if (!after.valid || after.revision !== check.revision || !await versionsMatch(run.workspacePath, protectedFiles))
     throw new WorkflowError('design-baseline-changed', 'Design changed while recording its implementation baseline')

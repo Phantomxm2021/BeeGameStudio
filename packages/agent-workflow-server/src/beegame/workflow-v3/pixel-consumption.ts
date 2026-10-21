@@ -5,6 +5,7 @@ import { contentIndexSchema, contentDocumentSchema, type BeeGameContentDocument 
 import { readBeeGameAssetManifestSync, readBeeGameAssetManifestModulePathsSync, type BeeGameAssetManifest } from '../asset-contracts'
 import { readRegisteredResourceFile, readTileSetResource } from '../tilemap-contract'
 import { parseSpriteSheet, spriteSheetSelection, validateSpriteSheetBounds } from '../../../../scene-editor/src/sprite-sheet'
+import { editorAtlasPath } from '../../../../scene-editor/src/ui-preview/uiAtlas'
 import { inspectSceneLayout2d, sceneWorldTransforms2d } from '../../../../scene-editor/src/scene-layout-inspection'
 import { compose2d, point2d } from '../../../../scene-editor/src/content-coordinates'
 import { parseGridData, parseTilemapData, tileRect, type TileSetData } from '../../../../scene-editor/src/tilemap-data'
@@ -102,7 +103,9 @@ export async function preparePixelProbes(root: string, task: Pick<TaskSpec, 'pix
   }
   const resourceCheck=await runContentCheck(root,'content-resources',{...task,expectedOutputs:[...docs.keys()]},[],{})
   result.inputs.push(...resourceCheck.inputs)
-  if(resourceCheck.status!=='passed')throw Error('Saved resource bindings unverified: '+resourceCheck.observation)
+  // Incomplete structural inspection must not prevent independent runtime evidence.
+  // Keep its verdict separate; invalid contracts still block these probes.
+  if(resourceCheck.status!=='passed' && resourceCheck.status!=='unverified')throw Error('Saved resource bindings invalid: '+resourceCheck.observation)
   result.inputs.push(await readVersion(root,'assets/asset-manifest.json'))
   for(const path of readBeeGameAssetManifestModulePathsSync(root))result.inputs.push(await readVersion(root,path))
   const manifest=readBeeGameAssetManifestSync(root), prepared: PreparedPixelProbe[]=[]
@@ -144,7 +147,7 @@ export async function preparePixelProbes(root: string, task: Pick<TaskSpec, 'pix
     const metadata=await sharp(image.bytes).metadata(), width=metadata.width!,height=metadata.height!
     if(!width || !height || (metadata.pages ?? 1)>1)throw Error('Static image dimensions required')
     let frame={x:0,y:0,width,height}
-    const tablePath=binding.atlasMember ? select(binding.atlasMember) : resource.file_paths.find(path=>path===image.path.replace(/\.[^.]+$/,'.json'))
+    const tablePath=binding.atlasMember ? select(binding.atlasMember) : editorAtlasPath(resource,image.path)
     if(tablePath){
       const table=readRegisteredResourceFile(root,manifest,binding.assetRef,tablePath), v=await readVersion(root,table.path), copy=await readVersion(root,task.runtimeArtifact+'/'+table.path)
       result.inputs.push(v,copy)
@@ -160,7 +163,7 @@ export async function preparePixelProbes(root: string, task: Pick<TaskSpec, 'pix
       const r=manifest.resources.find(r=>r.id===other.assetRef)!
       if(registeredMember(r,other.member)!==image.path)continue
       let region={x:0,y:0,width,height}
-      const tablePath=other.atlasMember ? registeredMember(r,other.atlasMember) : r.file_paths.find(p=>p===image.path.replace(/\.[^.]+$/,'.json'))
+      const tablePath=other.atlasMember ? registeredMember(r,other.atlasMember) : editorAtlasPath(r,image.path)
       if(tablePath){
         const sheet=parseSpriteSheet(JSON.parse(readRegisteredResourceFile(root,manifest,r.id,tablePath).bytes.toString()))
         if(!sheet || !('frames' in sheet) || !other.frame)throw Error('Shared image has an unresolved frame')

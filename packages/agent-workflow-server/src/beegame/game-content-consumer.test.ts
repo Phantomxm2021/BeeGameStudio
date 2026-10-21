@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test'
 import { readSceneData, readUiData, contentDocumentsForLoad, contentDocumentPath, fetchContentDocument, fetchStartupContentDocuments, parseSpriteSheet, spriteSheetSelection, compose2d, affine2d, point2d, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE, parseGridData, parseTilemapData, parseTileSet, tileRect, resolveUiNodesForViewport } from './game-content-consumer'
 import { parseBeeGameContentDocument } from './game-content-package'
-import { bundleContentConsumer, CONTENT_CONSUMER_API } from './game-content-consumer-cli'
+import { bundleContentConsumer, CONTENT_CONSUMER_API, contentConsumerCommand } from './game-content-consumer-cli'
 import { uiAnchor, uiLocalMatrix } from './game-content-consumer'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { productionUiStyle, inspectProductionUiSupport, resolveSurfaceImage, bindProductionUiNode } from '../../../scene-editor/src/production-surface'
@@ -270,6 +270,8 @@ test('portable ESM runs without BGS filesystem, Three.js or package dependencies
     const file = join(directory, 'consumer.mjs')
     await writeFile(file, source)
     const module = await import(file)
+    expect(CONTENT_CONSUMER_API.capabilities).toEqual(module.PRODUCTION_SURFACE_CAPABILITIES)
+    expect(CONTENT_CONSUMER_API.capabilities.sceneComponents).not.toContain('tilemap')
     for (const name of Object.keys(CONTENT_CONSUMER_API.layout).filter(name => name !== 'notes'))
       expect(typeof module[name], `Documented layout export: ${name}`).toBe('function')
     await module.initializeUiLayout()
@@ -325,4 +327,55 @@ test('portable ESM runs without BGS filesystem, Three.js or package dependencies
       { x: 1, y: 0, tileId: 'ground' },
       { sprite: { assetRef: 'ground', member: 'ground.png' }, size: [32, 32] }).x).toBe(32)
   } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('documented UI background opacity and radius normalize without fading children or changing input', () => {
+  const source = {background:{color:'#204060',opacity:.25,radius:12},opacity:.8}
+  expect(productionUiStyle(source,'panel')).toEqual({
+    background:'color-mix(in srgb, #204060 25%, transparent)',borderRadius:12,opacity:.8,
+  })
+  expect(source.background).toEqual({color:'#204060',opacity:.25,radius:12})
+  expect(productionUiStyle({...source,border:{width:2,color:'white',radius:8}},'panel').borderRadius).toBe(8)
+  expect(productionUiStyle({...source,borderRadius:4},'panel').borderRadius).toBe(4)
+  for(const background of [{color:'red',opacity:2},{color:'red',opacity:NaN},{color:'red',radius:-1},{color:'red',other:true}])
+    expect(inspectProductionUiSupport({rootId:'root',nodes:[{id:'root',role:'screen-root',style:{background}}]}).supported).toBe(false)
+})
+
+
+test('consumer --api exposes renderer capabilities without an installed bundle or project inputs', async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'beegame-api-')))
+  try {
+    const entry=join(directory,'consumer.mjs')
+    await writeFile(entry,contentConsumerCommand(directory,'content-consumer.mjs'))
+    const proc=Bun.spawn([process.execPath,entry,'--api'],{cwd:directory,stdout:'pipe',stderr:'pipe'})
+    const [code,stdout,stderr]=await Promise.all([proc.exited,new Response(proc.stdout).text(),new Response(proc.stderr).text()])
+    expect(code,stderr).toBe(0)
+    const api=JSON.parse(stdout)
+    expect(api.capabilities).toEqual(CONTENT_CONSUMER_API.capabilities)
+    expect(api.capabilities.sceneComponents).toContain('sprite-renderer')
+    expect(api.capabilities.sceneComponents).not.toContain('tilemap')
+    expect(api.limitations).toContain('project code owns other rendering and gameplay')
+  } finally { await rm(directory,{recursive:true,force:true}) }
+})
+
+test('existing consumer --inspect reports actual Scene field support without rendering', async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'beegame-support-')))
+  try {
+    const sceneSource = {schema:'beegame-content.v1',id:'scene',kind:'scene-2d',assetRefs:[],data:{nodes:[
+      {id:'sprite',components:[{id:'renderer',type:'sprite-renderer',data:{size:[10,10],color:'#ffffff',opacity:.5}}]},
+    ]}}
+    await writeFile(join(directory,'content-consumer.mjs'),await bundleContentConsumer())
+    await writeFile(join(directory,'consumer.mjs'),contentConsumerCommand(directory,'content-consumer.mjs'))
+    await writeFile(join(directory,'scene.json'),JSON.stringify(sceneSource))
+    const inspect=async()=>{
+      const proc=Bun.spawn([process.execPath,join(directory,'consumer.mjs'),'--inspect','scene.json'],{cwd:directory,stdout:'pipe',stderr:'pipe'})
+      const output=await new Response(proc.stdout).text()
+      expect(await proc.exited,await new Response(proc.stderr).text()).toBe(0)
+      return JSON.parse(output).results[0].support
+    }
+    expect(await inspect()).toMatchObject({supported:true,nodeCount:1,geometryAvailable:true,runtimeVerified:false})
+    sceneSource.data.nodes[0].components[0].data.opacity=2
+    await writeFile(join(directory,'scene.json'),JSON.stringify(sceneSource))
+    expect(await inspect()).toMatchObject({supported:false,issues:[{nodeId:'sprite',property:'appearance'}]})
+  } finally { await rm(directory,{recursive:true,force:true}) }
 })

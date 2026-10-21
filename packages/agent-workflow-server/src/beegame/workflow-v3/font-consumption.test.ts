@@ -19,6 +19,7 @@ for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-
       const defaultFont = 'assets/runtime/example/default.ttf', memberFont = 'assets/runtime/example/member.ttf'
       const explicit = ['explicit-member','wrong-member'].includes(mode)
       resource.root_path = defaultFont; resource.file_paths = [defaultFont,memberFont];resource.asset_kind = 'font'
+      manifest.requirements[0]!.acquisition_profile.asset_kinds = ['font']
       await mkdir(join(root, 'assets/runtime/example'), {recursive:true})
       const file = process.platform === 'darwin' ? '/System/Library/Fonts/Supplemental/Arial.ttf' : '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
       const other = process.platform === 'darwin' ? '/System/Library/Fonts/Supplemental/Times New Roman.ttf' : '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf'

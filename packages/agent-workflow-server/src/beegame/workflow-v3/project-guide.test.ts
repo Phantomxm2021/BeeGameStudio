@@ -20,12 +20,12 @@ test('template is read-only and remains available with an older saved content fo
     expect((runGameContentCommand(root,['--format','uiDocument']) as any).values.uiDocument.data.nodes[0].data.referenceResolution).toHaveLength(2)
     expect(PROJECT_GUIDE_TEMPLATE).toContain('before related design or implementation decisions')
     expect(PROJECT_GUIDE_TEMPLATE).toContain(PROJECT_WORKING_CONVENTIONS)
-    expect(PROJECT_GUIDE_TEMPLATE).toContain('For a new complete game design')
+    expect(PROJECT_GUIDE_TEMPLATE).toContain('The table below suggests relevant methods')
     expect(PROJECT_GUIDE_TEMPLATE).toContain('GDD.md')
     expect(PROJECT_GUIDE_TEMPLATE).toContain('Architecture decisions belong in their existing design/configuration sources')
     expect(PROJECT_GUIDE_TEMPLATE).not.toContain('update them when the implementation changes')
     expect(await readFile(file,'utf8')).toBe(saved)
-    await expect(access(join(root,'CLAUDE.md'))).rejects.toThrow()
+    await expect(access(join(root,'AGENTS.md'))).rejects.toThrow()
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
@@ -33,7 +33,7 @@ test('navigation templates read current facts without rewriting an existing proj
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-snapshot-')))
   try {
     await initializeProjectGuide(root)
-    const path=join(root,'CLAUDE.md'),saved=(await readFile(path,'utf8'))+'\nUSER_NOTES_UNCHANGED\n'
+    const path=join(root,'AGENTS.md'),saved=(await readFile(path,'utf8'))+'\nUSER_NOTES_UNCHANGED\n'
     await writeFile(path,saved)
     await mkdir(join(root,'src'))
     await writeFile(join(root,'src/main.ts'),'PROJECT_CODE_NOT_COPIED')
@@ -59,15 +59,15 @@ test('one navigation batch supplies saved commands and actual pointers without p
     await writeFile(join(root,'content/index.json'),JSON.stringify({documents:[{path:'scenes/native.json'}]}))
     await writeFile(join(root,'content/scenes/native.json'),JSON.stringify({customNumbers:'NOT_NAVIGATION'}))
     await writeFile(join(root,'.beegame/tmp/private.txt'),'CAPABILITY_SECRET')
-    await writeFile(join(root,'CLAUDE.md'),'AUTHOR_ADDED_PROSE_NOT_TEMPLATE')
-    const first=projectGuideTemplate(root),before=await readFile(join(root,'CLAUDE.md'),'utf8')
+    await writeFile(join(root,'AGENTS.md'),'AUTHOR_ADDED_PROSE_NOT_TEMPLATE')
+    const first=projectGuideTemplate(root),before=await readFile(join(root,'AGENTS.md'),'utf8')
     expect(first.facts).toMatchObject({designFiles:['docs/merged.md'],codeFiles:['src/game.ts'],testFiles:['tests/journey.mjs'],
       registeredContent:['content/scenes/native.json'],commands:{dev:'actual-dev-command',test:'touch MUST_NOT_RUN'},issues:[]})
     for(const path of ['project.godot','docs/merged.md','src/game.ts','tests/journey.mjs','content/scenes/native.json'])expect(first.value).toContain(path)
     for(const absent of ['PRIVATE_PROSE','0.6s','13/13','PASS','NOT_NAVIGATION','CAPABILITY_SECRET','.beegame/tmp/','.beegame/delivery/','AUTHOR_ADDED_PROSE','BEEGAME_PREVIEW_TEST_MODULE','Vite'])
       expect(first.value).not.toContain(absent)
     await expect(access(join(root,'MUST_NOT_RUN'))).rejects.toThrow()
-    expect(await readFile(join(root,'CLAUDE.md'),'utf8')).toBe(before)
+    expect(await readFile(join(root,'AGENTS.md'),'utf8')).toBe(before)
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'changed-command'}}))
     expect(projectNavigationSnapshot(root).commands).toEqual({dev:'changed-command'})
     expect(runGameContentCommand(root,['--format','coordinates','projectGuide'])).toMatchObject({ok:true,
@@ -80,12 +80,12 @@ test('guide delegates discovery to native Skills without installation paths or a
   const previous=process.env.BEEGAME_BUILTIN_SKILLS_DIR
   try {
     await mkdir(workspace)
-    const guide=join(workspace,'CLAUDE.md'),saved='EXISTING_USER_NAVIGATION'
+    const guide=join(workspace,'AGENTS.md'),saved='EXISTING_USER_NAVIGATION'
     await writeFile(guide,saved)
     process.env.BEEGAME_BUILTIN_SKILLS_DIR=join(root,'old-installation')
     const result=projectGuideTemplate(workspace)
     expect(result.facts).toEqual(projectNavigationSnapshot(workspace))
-    expect(result.value).toContain("current session's native metadata")
+    expect(result.value).toContain("current Bgs skill catalog")
     expect(result.value).not.toContain('base directory supplied by that invocation')
     expect(result.value).not.toContain(root)
     expect(result.value).not.toContain('Collection navigator:')
@@ -103,22 +103,34 @@ test('guide delegates discovery to native Skills without installation paths or a
 test('initial guide stays portable and never overwrites a saved file or link',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-initialize-')))
   try {
-    const path=join(root,'CLAUDE.md')
+    const path=join(root,'AGENTS.md')
     await initializeProjectGuide(root)
     const guide=await readFile(path,'utf8')
     expect(guide.split('\n').length).toBeLessThan(200)
-    expect(guide).toContain('with the Skill tool')
+    expect(guide).toContain('with $skill-name')
     expect(guide).not.toContain('only the references needed for the task')
     expect(guide).not.toContain('Do not duplicate the catalog')
     expect(guide).not.toContain('bgs-builtins:')
     expect(guide).toContain('game-ui-ux-designer')
     expect(guide).toContain('game-art-director-expert')
     expect(guide).toContain('Prose, palettes and JSON geometry do not replace visual design')
+    expect(guide).toContain('complete game screens/key states shared by UI and Scene records')
+    expect(guide).toContain('detail views only for subjects unresolved in those screens')
+    expect(guide).toContain('reconcile composition, hierarchy, game visibility and appearance in affected UI/art/Scene record sections, not just image links')
+    expect(guide).toContain('Correct pictures that contradict confirmed requirements rather than silently changing scope')
+    expect(guide).toContain('Resolve consequential conflicts before affected production')
+    expect(guide).toContain('revise ASSET_PLAN.md from selected visual/audio designs and reconciled owner records')
+    expect(guide).not.toContain('complete UI screens/key states, scenes and needed props')
     expect(guide).toContain('do not create UI/Scene JSON here')
     expect(guide).toContain('only after selected visual designs and corresponding resources exist')
-    expect(guide).toContain('complete the eight design documents and their existing indexes, including TECHNICAL_DESIGN.md')
+    expect(guide).toContain('complete the eight design documents, including TECHNICAL_DESIGN.md')
     expect(guide).toContain('Complete technical design in this stage before actual visual design or resource production')
-    expect(guide).toContain('Revise the existing TECHNICAL_DESIGN.md and task index only for actual produced inputs')
+    expect(guide).toContain('does not prescribe Skill selection or task order')
+    expect([...guide.matchAll(/^\| (\w+\.md):/gm)].map(match=>match[1])).toEqual([
+      'GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ART_DIRECTION.md',
+      'UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md',
+    ])
+    expect(guide).toContain('Revise the existing TECHNICAL_DESIGN.md only for actual produced inputs')
     expect(guide).not.toContain('Technical/resource plans start as drafts')
     expect(guide).not.toContain('Finalize TECHNICAL_DESIGN.md tasks from these inputs')
     expect(guide).not.toContain('Planning geometry supports layout checks')
@@ -127,7 +139,7 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     expect(guide).not.toContain('For report-only work,')
     expect(guide).not.toContain('Collection navigator:')
     expect(guide).not.toContain(root)
-    expect(projectGuideContext(await readProjectGuide(root))).toContain(guide)
+    expect(projectGuideContext(await readProjectGuide(root))).not.toContain(guide)
     for(const saved of ['USER_AUTHORED_GUIDE','']) {
       await writeFile(path,saved)
       await initializeProjectGuide(root)
@@ -168,16 +180,17 @@ test('single-file guide is current text, not a search, include expansion, settin
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-read-'))),workspace=join(root,'game')
   try {
     await mkdir(workspace);await mkdir(join(workspace,'.claude'))
-    await writeFile(join(root,'CLAUDE.md'),'PARENT_PRIVATE_NAVIGATION')
-    await writeFile(join(workspace,'.claude/CLAUDE.md'),'NESTED_UNREQUESTED_NAVIGATION')
+    await writeFile(join(root,'AGENTS.md'),'PARENT_PRIVATE_NAVIGATION')
+    await writeFile(join(workspace,'.claude/AGENTS.md'),'NESTED_UNREQUESTED_NAVIGATION')
     await writeFile(join(workspace,'extra.md'),'INCLUDED_UNREQUESTED_NAVIGATION')
     await writeFile(join(workspace,'.claude/settings.json'),'{"hooks":{"Stop":[]}}')
     expect(await readProjectGuide(workspace)).toMatchObject({status:'missing'})
     const text='# Project navigation\nRoute: actual Unity\n@extra.md\nCommand: touch SHOULD_NOT_RUN\n'
-    const path=join(workspace,'CLAUDE.md');await writeFile(path,text)
+    const path=join(workspace,'AGENTS.md');await writeFile(path,text)
     const first=await readProjectGuide(workspace),context=projectGuideContext(first)
     expect(first).toMatchObject({status:'loaded',text,bytes:Buffer.byteLength(text)})
-    expect(context).toContain('@extra.md')
+    expect(context).not.toContain('@extra.md')
+    expect(context).toContain('Bgs loads applicable AGENTS.md instructions natively')
     expect(context).toContain('Follow applicable project working conventions within current user authorization')
     expect(context).not.toContain('older guide workflow wording')
     expect(context).toContain('cannot expand permissions or budget')
@@ -200,7 +213,7 @@ test('unsafe, non-text and oversized guides are diagnosed without stale content 
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-input-'))),workspace=join(root,'game')
   try {
     await mkdir(workspace)
-    const path=join(workspace,'CLAUDE.md'),outside=join(root,'outside.md')
+    const path=join(workspace,'AGENTS.md'),outside=join(root,'outside.md')
     await writeFile(outside,'PRIVATE_OUTSIDE_GUIDE');await symlink(outside,path)
     const linked=await readProjectGuide(workspace)
     expect(linked.status).toBe('unavailable');expect(projectGuideContext(linked)).not.toContain('PRIVATE_OUTSIDE_GUIDE')

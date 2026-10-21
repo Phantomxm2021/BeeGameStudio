@@ -38,7 +38,7 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
   const availableRequirements: Array<{ document: DesignDocument; id: string; section: string }> = []
   const pendingDocuments = new Set<DesignDocument>()
   const allowPending = options.finalTechnical === 'when-ready'
-  let taskCoverageChecked = false
+  let taskReferencesChecked = false
   try {
     // This public command takes either the logical name or its exact workspace
     // docs path. Do not use basename(), which would accept arbitrary/traversing paths.
@@ -50,11 +50,12 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
     const document = name as DesignDocument
     const { headings, headingNames, blocks } = documentStructure(readRetained(workspace, `docs/${name}`).toString('utf8'))
     if (blocks.length) throw new Error('Move inline bgs-handoff to ' + designHandoffPath(name))
-    const handoff = canonicalHeadingPointers(diagnosticHandoff(document,
-      JSON.parse(readRetained(workspace, designHandoffPath(name)).toString('utf8')), issues), headingNames)
+    const sidecar = optionalDesignFile(workspace, designHandoffPath(name))
+    const handoff = canonicalHeadingPointers(sidecar ? diagnosticHandoff(document,
+      JSON.parse(sidecar.toString('utf8')), issues) : { outputs: [], evidence: [] }, headingNames)
     issues.push(...outputIssues(document, handoff.outputs ?? [], headings))
     const indexes: Partial<Record<DesignDocument, IndexedDesign>> = { [document]: { handoff, headings } }
-    const inspectTechnical = document === 'TECHNICAL_DESIGN.md' && Boolean(options.finalTechnical)
+    const inspectTechnical = Boolean(sidecar) && document === 'TECHNICAL_DESIGN.md' && Boolean(options.finalTechnical)
     // Public draft reads available owners during writing. Explicit final checks
     // remain strict; missing draft inputs never become a completed task check.
     const readSibling = (sibling: DesignDocument, path: string) => {
@@ -71,7 +72,7 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
       if (sibling === document) continue
       try {
         const body = readSibling(sibling, `docs/${sibling}`)
-        const index = readSibling(sibling, designHandoffPath(sibling))
+        const index = optionalDesignFile(workspace, designHandoffPath(sibling))
         const source = body ? documentStructure(body.toString('utf8')) : undefined
         const owner = index ? diagnosticHandoff(sibling, JSON.parse(index.toString('utf8')), issues) : undefined
         if (!source || !owner) continue
@@ -79,13 +80,10 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
         const handoff = canonicalHeadingPointers(owner, source.headingNames)
         indexes[sibling] = { headings: source.headings, handoff }
         issues.push(...outputIssues(sibling, handoff.outputs ?? [], source.headings))
-      } catch (error) { issues.push(`Cannot check task coverage against ${sibling}: ${error instanceof Error ? error.message : String(error)}`) }
+      } catch (error) { issues.push(`Cannot check existing task references against ${sibling}: ${error instanceof Error ? error.message : String(error)}`) }
     }
-    taskCoverageChecked = inspectTechnical && !pendingDocuments.size
-    issues.push(...implementationIssues(indexes, taskCoverageChecked))
-    if (!handoff.outputs?.length) issues.push('required owned delivery outcomes are missing')
-    for (const output of handoff.outputs ?? []) if (!output.acceptance)
-      issues.push(`output ${output.id} needs an acceptance section for its owned delivery`)
+    taskReferencesChecked = inspectTechnical && !pendingDocuments.size
+    issues.push(...implementationIssues(indexes, taskReferencesChecked))
     const ids = new Set<string>()
     for (const evidence of handoff.evidence ?? []) {
       if (ids.has(evidence.id)) issues.push(`duplicate evidence ID ${evidence.id}`)
@@ -104,20 +102,16 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
       ({ document, id, section: outputSection })))
   }
   return { valid: !issues.length, issues: issues.map(issue => issue.startsWith(name + ':') ? issue : `${name}: ${issue}`),
-    ...(allowPending && name === 'TECHNICAL_DESIGN.md' ? { pendingDocuments: [...pendingDocuments], taskCoverageChecked } : {}),
+    ...(allowPending && name === 'TECHNICAL_DESIGN.md' ? { pendingDocuments: [...pendingDocuments], taskReferencesChecked } : {}),
     ...(availableRequirements.length ? { availableRequirements } : {}) }
 }
 
-export const DESIGN_INDEX_INSTRUCTION = `Keep decisions, dependencies, open questions, limits and human-readable tables in docs/<NAME>.md. Save only the downstream index at .beegame/design-handoffs/<NAME without .md>.json; do not embed bgs-handoff JSON in prose.
-Minimal new index envelope: {"outputs":[{"id":"owned-outcome","section":"Exact saved heading","acceptance":{"section":"Exact saved acceptance heading","method":"test"}}],"evidence":[]}. Replace example IDs/headings with actual owned outcomes. Do not add a top-level document/path field; the sidecar filename identifies its document. Only TECHNICAL_DESIGN owns implementationItems; other authors do not add them. Preserve existing valid fields when editing. Only version 2 is accepted; an absent version means a current draft. A section uses its full saved heading, including numbering. The host canonicalizes a uniquely matching title differing only by leading chapter numbering; missing or ambiguous titles remain invalid. The host adds metadata only after validation; it does not discard invalid fields or repair malformed indexes.
-Write outputs:[{id,section,acceptance?:{section,method:"test"|"target-runtime"|"inspection"}}] and, where retained evidence is needed, evidence:[{id,kind:"contract"|"documentation"|"capability",path:workspace-relative retained file,source,section?:actual prose heading,pointer?:JSON pointer,expected?:value}]. IDs are local to their document. Headings point to the authoritative decisions and expectations; do not copy their rules into JSON. Do not mirror states, events, parameters, resources, inputs, consumes, pending, limits, platformFacts or readiness in the index. After saving a document and its index, explicitly call handoff.mjs --design finalize DOCUMENT.md. Only that command sets format version 2, document header/documentVersion and evidence sha256; ordinary Write/Edit and read-only baseline/draft do not finalize metadata. It advances versions on material changes to prose, the index or referenced retained evidence; unchanged documents keep their version. Authors do not calculate or synchronize versions/hashes.
-Register every necessary owned release outcome in outputs with acceptance pointing to an actual prose heading explaining conditions/actions, observable expected results and necessary boundaries/recovery. Keep explanatory prose out of the required checklist. Use an independently checkable behavior, page/state interaction, professional treatment or technical integration, not "implement all gameplay/UI" or one item per function, constant or sentence. Existing version 2 indexes remain readable but their coarse or unindexed expectations are not certified as a new complete checklist. Use test for deterministic rules/calculations, target-runtime for actual presentation/input/audio and end-to-end play, inspection for directly examinable resources or retained provenance. Prose review is not runtime evidence; no completed runtime check is required while authoring.`
+export const DESIGN_INDEX_INSTRUCTION = `Author decisions in docs/<NAME>.md. The eight-document deliverable is the prose itself, including the technical approach and necessary implementation guidance in TECHNICAL_DESIGN.md. Select Skills and organize work to suit the current task; self-check original requirements, contradictions and unresolved decisions. BGS does not require output indexes, task graphs or coverage mappings. Stop at the user's requested scope. Existing indexes remain readable; do not create them merely to satisfy a tool.`
 
 export const DESIGN_HANDOFF_INSTRUCTION = DESIGN_INDEX_INSTRUCTION + `
-Read reference pictures with the native Read tool at their actual saved paths, just as you read the linked design documents. A document link, filename, hash or generation record is not an image read. If a picture is missing, unreadable or unsupported, report the exact path and read error; do not claim to have inspected it or silently substitute another image. Existing and user-supplied references do not need AI source certification. Use the available AI image tools when generation is needed within the authorized scope and budget. UI/Scene source and runtime consumption checks remain separate from reading reference pictures.
-Use gameplay-programmer and game-implementation-planning to complete TECHNICAL_DESIGN.md and its implementation tasks/index during the eight-document design-record stage, before actual visual design, resource production or UI/Scene JSON. Define the technical approach, module responsibilities, interfaces, data consumption and verification methods. Compare the original confirmed scope and all applicable professional records, not just output IDs; do not silently omit or defer necessary work. The technical author adds implementationItems:[{id,section,dependsOn:[existing task IDs],requirementRefs:[{document:actual design filename,id:owned output ID}]}] to its existing index. New tasks state dependsOn explicitly (empty when independent); legacy absence is not independence. Each task points to a concise technical section using the planning Skill's six-part task description. Reference exact owner sections; describe unproduced content/resources as planned inputs and their consumption contracts, not existing files or evidence. As selected pictures, resources and UI/Scene sources become available, revise affected sections and task references in this same plan from their actual paths/IDs/metrics; preserve unaffected decisions and task IDs. Keep shared cross-task interfaces once in their existing source, including names, producer/consumer and consequential types/units. Do not duplicate rules, numeric tables or layouts in the index. Foundations and player-visible behavior are both valid tasks; do not split functions/fields or force every task to launch a full game. Cover every registered required output, including technical ones; program checks declared coverage/references/dependencies, not original completeness or semantic adequacy.
-Implementation uses game-plan-execution. ReadDesignHandoff reads current inputs and selected original sections; ReadImplementationTask lists the existing IDs/dependencies or reads one task and referenced owner section locations. These reads neither lock nor enter implementation. Use the supplied --design implementation only for the authorized implementation handoff; keep the existing technical plan and task list, with no copied delivery plan or task database. Confirm dependency outputs actually work before consuming them; task ticks and file existence are not proof. Preserve confirmed design and consume its actual content/resources. Use the same task IDs in the existing execution list with concise progress and retained result paths; do not write execution logs into finalized design records. Resume from actual partial code and current evidence, checking unknown gaps rather than replaying completed work. Reuse current results across applicable tasks; keep pending integration unverified. Final checks compare the whole confirmed scope with original designs and actual runtime results; one successful player route cannot replace other promised outcomes.
-Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui and content/scenes JSON are design sources, not immutable evidence: create them only after selected actual visual designs and corresponding resources exist, then link them from their owning UI_UX_SPEC.md or LEVEL_SCENE_DESIGN.md sections. During document authoring use prose/sketches for space requirements, not early UI/Scene JSON. Author layout and bindings from the selected designs and delivered visual resources, preserving live text/actions and runtime-driven objects separately. Check the saved sources and replace planned inputs in affected technical task prose with actual picture/resource/frame/content references before implementation handoff; index coverage alone is not that revision. Missing production inputs do not postpone completion of TECHNICAL_DESIGN.md in the eight-document stage or justify restarting valid professional documents. Todo ticks are navigation, never proof that the files or prerequisite outputs exist. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose; do not silently substitute a fallback. User decisions must trace to actual user authorization. Version 1 sidecars are rejected instead of silently converted.`
+Use --design baseline or ReadDesignHandoff to locate saved sources. These reads check file/index integrity, not design quality. Plain documents need no finalize command or version header. Existing versioned indexes can use --design finalize after an authorized revision; this updates metadata, not approval. Read selected reference pictures and reconcile actual resources and Editor data in their owning documents before implementation. Unproduced inputs remain planned; links, task ticks and hashes are not proof of delivery.`
+
+export const DESIGN_IMPLEMENTATION_INSTRUCTION = `Read the saved technical plan and relevant original documents; choose Skills and task organization for the work. ReadDesignHandoff locates documents/sections. ReadImplementationTask exposes existing indexed tasks when available, otherwise the technical source; no index is required. Use --design implementation only when entering authorized implementation: it records the current design baseline, not user approval or game acceptance. Consume actual selected designs, resources and Editor data. Resume from saved work and evidence, not task ticks. Compare actual results with the confirmed scope and original designs; report unresolved and unverified outcomes. Do not create another plan, index or task database to satisfy BGS.`
 
 function hash(body: string | Buffer) { return createHash('sha256').update(body).digest('hex') }
 function readRetained(workspace: string, path: string) {
@@ -342,7 +336,9 @@ export function designSupportingBytesDigest(path: string, bytes: Buffer, digestV
 function documentHandoff(workspace: string, name: DesignDocument, body: string, diagnostic = false) {
   const { blocks, headings, headingNames } = documentStructure(body)
   if (blocks.length) throw new Error('Move inline bgs-handoff to ' + designHandoffPath(name) + '; preserve prose decisions')
-  const documentVersion = designDocumentVersion(body), sidecar = readFileSync(designFilePath(realpathSync(workspace), designHandoffPath(name)))
+  const sidecar = optionalDesignFile(workspace, designHandoffPath(name))
+  if (!sidecar) return { handoff: { version: 2, outputs: [], evidence: [] } as DesignHandoff, headings, sidecar: Buffer.alloc(0), issues: [] as string[] }
+  const documentVersion = designDocumentVersion(body)
   const raw = JSON.parse(sidecar.toString('utf8'))
   if (raw?.documentVersion !== undefined && raw.documentVersion !== documentVersion)
     throw new Error(`Handoff documentVersion must match document header ${documentVersion}. Run handoff.mjs --design finalize ${name}; do not synchronize host metadata manually.`)
@@ -409,8 +405,6 @@ function outputIssues(name: DesignDocument, outputs: DesignHandoff['outputs'], h
     if (output.acceptance && !headings.has(output.acceptance.section))
       issues.push(`${name}: acceptance ${output.id} references an absent section ${JSON.stringify(output.acceptance.section)}`)
   }
-  if (name === 'GDD.md' && !outputs.some(output => output.acceptance))
-    issues.push(`${name}: core gameplay delivery expectations must be declared on an owned output`)
   return issues
 }
 type IndexedDesign = { handoff: Partial<DesignHandoff>; headings: Set<string> }
@@ -420,18 +414,11 @@ function implementationIssues(indexes: Partial<Record<DesignDocument, IndexedDes
   for (const name of PROJECT_DOCUMENTS) {
     const index = indexes[name]
     if (!index) continue
-    if (required) {
-      if (!index.handoff.outputs?.length) issues.push(`${name}: required delivery outcomes are missing`)
-      for (const output of index.handoff.outputs ?? []) if (!output.acceptance)
-        issues.push(`${name}: output ${output.id} needs an acceptance section before implementation`)
-    }
     if (name !== 'TECHNICAL_DESIGN.md' && index.handoff.implementationItems !== undefined)
       issues.push(`${name}: implementationItems belongs only to the final TECHNICAL_DESIGN.md index`)
   }
   const tech = indexes['TECHNICAL_DESIGN.md'], items = tech?.handoff.implementationItems
-  if (required && !items?.length)
-    issues.push('TECHNICAL_DESIGN.md: implementationItems is missing or empty; prepare the cross-document task checklist through authorized design revision, not an implementation Todo')
-  const ids = new Set<string>(), covered = new Set<string>()
+  const ids = new Set<string>()
   const byId = new Map((items ?? []).map(item => [item.id, item]))
   for (const item of items ?? []) {
     if (ids.has(item.id)) issues.push(`TECHNICAL_DESIGN.md: duplicate implementation item ID ${item.id}`)
@@ -455,7 +442,6 @@ function implementationIssues(indexes: Partial<Record<DesignDocument, IndexedDes
       const output = source?.handoff.outputs?.find(output => output.id === ref.id)
       if (!output) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} references missing requirement ${key}`)
       else if (!output.acceptance) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} requirement ${key} has no acceptance section`)
-      else covered.add(key)
     }
   }
   const visited = new Set<string>(), active = new Set<string>()
@@ -467,8 +453,6 @@ function implementationIssues(indexes: Partial<Record<DesignDocument, IndexedDes
     active.delete(id)
   }
   for (const id of byId.keys()) visit(id)
-  if (required) for (const name of PROJECT_DOCUMENTS) for (const output of indexes[name]?.handoff.outputs ?? [])
-    if (!covered.has(`${name}#${output.id}`)) issues.push(`TECHNICAL_DESIGN.md: required output ${name}#${output.id} has no implementation item`)
   return issues
 }
 function readImmutableEvidence(workspace: string, path: string) {
@@ -514,14 +498,16 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
     try {
       const root = realpathSync(workspace)
       const bytes = readFileSync(designFilePath(root, `docs/${name}`))
+      if (!bytes.toString('utf8').trim()) throw Error('Design document is empty')
       snapshots[name] = hash(bytes)
-      try { documentVersions[name] = designDocumentVersion(bytes.toString('utf8')) }
-      catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message.replace('DOCUMENT.md', name) : String(error)}`) }
       const path = designHandoffPath(name)
-      designFilePath(root, path)
-      try { snapshots[name] = hash(JSON.stringify([hash(bytes), hash(readRetained(workspace, path))])) }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-      const { blocks, headings } = documentStructure(bytes.toString('utf8'))
+      const sidecar = optionalDesignFile(root, path)
+      if (sidecar) {
+        try { documentVersions[name] = designDocumentVersion(bytes.toString('utf8')) }
+        catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message.replace('DOCUMENT.md', name) : String(error)}`) }
+        snapshots[name] = hash(JSON.stringify([hash(bytes), hash(sidecar)]))
+      }
+      const { blocks, headings, headingNames } = documentStructure(bytes.toString('utf8'))
       if (blocks.length) issues.push(`${name}: Move inline bgs-handoff to ${path}; preserve prose decisions`)
       try {
         const supporting = designSupportingFiles(workspace, [name]).map(file => {
@@ -539,10 +525,11 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
         })
         if (supporting.length) snapshots[name] = hash(JSON.stringify([snapshots[name], supporting]))
       } catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`) }
-      const raw = JSON.parse(readRetained(workspace, path).toString('utf8'))
+      if (!sidecar) continue
+      const raw = JSON.parse(sidecar.toString('utf8'))
       if (documentVersions[name] && raw?.documentVersion !== undefined && raw.documentVersion !== documentVersions[name])
         issues.push(`${name}: Handoff documentVersion must match document header ${documentVersions[name]}. Run handoff.mjs --design finalize ${name}; do not synchronize host metadata manually.`)
-      const h = diagnosticHandoff(name, raw, issues)
+      const h = canonicalHeadingPointers(diagnosticHandoff(name, raw, issues), headingNames)
       indexes[name] = { handoff: h, headings }
       if (h.outputs) issues.push(...outputIssues(name, h.outputs, headings))
       // Keep independently addressable inputs even when a sibling or host
@@ -574,7 +561,7 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
   issues.push(...implementationIssues(indexes, completeDesign))
   return { valid: !issues.length, issues, ...(_options.planningInputs ? { availableRequirements } : {}), snapshots, evidenceHashes, documentVersions, digestVersion: _options.digestVersion ?? DESIGN_DIGEST_VERSION,
     revision: hash(JSON.stringify([snapshots, evidenceHashes])),
-    note: 'Checks output/acceptance pointers, local IDs and retained evidence bytes/declared observations. Version 1 and retired business mirrors are rejected. Prose completeness, dependencies, source authority, observation authenticity, semantic adequacy and experience quality remain review/owner judgments.' }
+    note: 'Checks saved documents, supporting files and any existing index integrity. Indexes and task coverage are not required. File presence and structural validity do not establish design completeness, semantic quality or acceptance.' }
 }
 
 // Version lines are host metadata, excluded only from material-change detection.
@@ -615,7 +602,10 @@ function materialHandoff(raw: unknown) {
 function optionalDesignFile(workspace: string, path: string) {
   // Snapshots must preserve malformed/empty drafts for an authorized repair;
   // they are not evidence validation or a release verdict.
-  try { return readFileSync(designFilePath(realpathSync(workspace), path)) }
+  try {
+    if (lstatSync(resolve(workspace, path)).isSymbolicLink()) throw Error('Design input must not be a symlink: ' + path)
+    return readFileSync(designFilePath(realpathSync(workspace), path))
+  }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
 }
 function materialDocument(workspace: string, name: DesignDocument) {
@@ -722,7 +712,9 @@ export function finalizeDesignDocuments(workspace: string, documents: readonly D
     try {
       const before = snapshot.documents[name]
       if (!before) throw new Error('Document was not captured in the authorized write scope')
-      const sourcePath = designFilePath(root, `docs/${name}`), indexPath = designFilePath(root, designHandoffPath(name))
+      const sourcePath = designFilePath(root, `docs/${name}`)
+      if (!optionalDesignFile(root, designHandoffPath(name))) continue
+      const indexPath = designFilePath(root, designHandoffPath(name))
       const body = readFileSync(sourcePath, 'utf8'), originalIndex = readFileSync(indexPath, 'utf8')
       safeTargets = true
       const { blocks, headings, headingNames } = documentStructure(body)
@@ -816,10 +808,10 @@ export function readDesignImplementationChecklist(workspace: string) {
   }
   const requirements = readDesignAcceptanceRequirements(workspace)
   const { handoff } = documentHandoff(workspace, 'TECHNICAL_DESIGN.md', readRetained(workspace, 'docs/TECHNICAL_DESIGN.md').toString('utf8'))
-  return { source: designHandoffPath('TECHNICAL_DESIGN.md'), designRevision: check.revision,
+  return { source: 'docs/TECHNICAL_DESIGN.md', designRevision: check.revision,
     globalSources: PROJECT_DOCUMENTS.map(document => `docs/${document}`),
     resultPath: DESIGN_ACCEPTANCE_PATH,
-    items: handoff.implementationItems!.map(item => ({ id: item.id,
+    items: (handoff.implementationItems ?? []).map(item => ({ id: item.id,
       ...(item.dependsOn !== undefined ? { dependsOn: item.dependsOn } : {}),
       taskSource: { document: 'docs/TECHNICAL_DESIGN.md', section: item.section },
       requirements: item.requirementRefs.map(ref => {
@@ -827,7 +819,7 @@ export function readDesignImplementationChecklist(workspace: string) {
         return { document: source.document, id: source.id, sourceSection: source.outputSection, acceptanceSection: source.section, method: source.method }
       }),
     })),
-    limitation: 'This is a required task/source checklist, not proof of original completeness, semantic grouping, implementation or truthful observation. Read task paragraphs, original owner clauses, global constraints and actual data. Reuse still-valid evidence; report unverified outcomes honestly.' }
+    limitation: 'Saved sources and optional existing task pointers only. An empty task index does not mean work is complete. Plan from the original documents; completeness, implementation and quality remain unverified without actual checks.' }
 }
 /** An explicitly revised owner may affect its existing task consumer. The
  * exact technical document/index enter the same revision scope, not all docs. */

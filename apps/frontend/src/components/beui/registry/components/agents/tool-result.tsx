@@ -44,6 +44,7 @@ export interface ToolResultProps {
   title: ReactNode;
   children: ReactNode;
   status?: ToolResultStatus;
+  statusLabel?: string;
   kind?: ToolResultKind;
   meta?: ReactNode;
   icon?: ReactNode;
@@ -164,6 +165,7 @@ export function ToolResult({
   title,
   children,
   status = "running",
+  statusLabel: suppliedStatusLabel,
   kind = "custom",
   meta,
   icon,
@@ -186,6 +188,7 @@ export function ToolResult({
   const triggerId = `${baseId}-trigger`;
   const contentId = `${baseId}-content`;
   const viewportRef = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
   const previousStatus = useRef(status);
   const copyTimer = useRef<number | undefined>(undefined);
   const [copied, setCopied] = useState(false);
@@ -196,7 +199,7 @@ export function ToolResult({
   const titleKey = getSwapKey(title, status);
   const metaKey = getSwapKey(meta, `${status}-meta`);
   const toolKey = getSwapKey(tool, `${status}-tool`);
-  const statusLabel = getStatusLabel(status);
+  const statusLabel = suppliedStatusLabel ?? getStatusLabel(status);
 
   const setOpen = useCallback(
     (next: boolean) => {
@@ -229,7 +232,7 @@ export function ToolResult({
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport || !currentOpen || !running) return;
+    if (!viewport || !currentOpen || !running || !following.current) return;
 
     const frame = requestAnimationFrame(() => {
       if (typeof viewport.scrollTo === "function") {
@@ -264,6 +267,8 @@ export function ToolResult({
       <button
         id={triggerId}
         type="button"
+        aria-label={typeof title === 'string' ? title : undefined}
+        aria-describedby={`${baseId}-status`}
         aria-expanded={currentOpen}
         aria-controls={contentId}
         onClick={() => setOpen(!currentOpen)}
@@ -296,6 +301,7 @@ export function ToolResult({
             </span> : null}
         </span>
         <span
+          id={`${baseId}-status`}
           className={cn(
             "inline-flex shrink-0 items-center gap-1 text-xs font-medium",
             getStatusClass(status),
@@ -324,6 +330,8 @@ export function ToolResult({
           <div className="overflow-hidden rounded-xl bg-muted/80">
           <div
             ref={viewportRef}
+            onWheel={event => { if (event.deltaY < 0) following.current = false; }}
+            onScroll={event => { const node = event.currentTarget; following.current = node.scrollHeight - node.clientHeight - node.scrollTop <= 2; }}
             role="log"
             aria-live="polite"
             className="scrollbar-hide overflow-y-auto"

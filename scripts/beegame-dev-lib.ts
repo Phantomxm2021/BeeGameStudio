@@ -67,7 +67,7 @@ export type BeeGameDevProcessPlan = {
 export type BeeGameDevPlan = {
   workspacePath: string
   frontendDir: string
-  nativeRuntimeBuild: {
+  runtimePreflight: {
     command: string[]
     cwd: string
     env: Record<string, string>
@@ -134,8 +134,8 @@ export function buildBeeGameDevPlan(
   return {
     workspacePath,
     frontendDir,
-    nativeRuntimeBuild: {
-      command: [bunExecutable, 'run', 'build.ts'],
+    runtimePreflight: {
+      command: [bunExecutable, 'run', 'scripts/check-bgs.ts'],
       cwd: input.cwd,
       // Capabilities stay in the binary; the runtime settings panel selects usage.
       env: {},

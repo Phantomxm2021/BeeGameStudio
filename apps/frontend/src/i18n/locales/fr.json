@@ -39,7 +39,17 @@
     "account": "Compte"
   },
   "beegame": {
+    "chatActivity": {
+      "details": "Détails d’exécution",
+      "working": "Traitement de votre demande",
+      "failedWorking": "Une opération a échoué ; le travail continue.",
+      "failed": "Une opération a échoué pendant cette tâche. Consultez la réponse finale ou les détails d’exécution.",
+      "stopped": "Une partie du travail a été arrêtée.",
+      "incomplete": "Une partie du travail est inachevée ; son résultat n’a pas été confirmé."
+    },
     "modelRequestError": {
+      "connection": "La connexion au service a échoué ; cette réponse n’a pas pu être terminée.",
+      "details": "Détails de l’erreur",
       "capacity": "Le modèle sélectionné est saturé. Veuillez essayer un autre modèle.",
       "retry": "Réessayer",
       "retryNow": "Réessayer maintenant",
@@ -333,7 +343,7 @@
         "argsHint": "One argument per line",
         "envHint": "One KEY=value per line. Leave saved secrets blank to keep them.",
         "stdio": "stdio",
-        "sse": "SSE",
+        "sse": "SSE historique non pris en charge. Utilisez un point de terminaison Streamable HTTP.",
         "http": "HTTP",
         "beegame": "BeeGame",
         "global": "Global",

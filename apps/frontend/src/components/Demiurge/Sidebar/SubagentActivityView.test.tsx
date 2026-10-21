@@ -50,7 +50,8 @@ describe('subagent activity presentation', () => {
         expect(container).not.toHaveTextContent('src/Game.tsx');
         fireEvent.click(screen.getAllByRole('button', { name: /Game.tsx/ })[0]);
         expect(container.querySelector('[data-language="tsx"]')).toHaveTextContent('const value = <div />;');
-        expect(container.querySelector('[aria-hidden="true"].font-mono')).toHaveTextContent('237');
+        expect(screen.getByText('237')).toHaveAttribute('aria-hidden', 'true');
+        expect(screen.getByText('238')).toHaveAttribute('aria-hidden', 'true');
         expect(screen.getByLabelText('命令')).toHaveTextContent('bun test');
         expect(screen.getByLabelText('工具输出')).toHaveTextContent('<script>not executable</script>');
         expect(container.querySelector('script')).toBeNull();

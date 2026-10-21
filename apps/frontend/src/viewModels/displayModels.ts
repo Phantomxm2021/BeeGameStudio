@@ -23,7 +23,7 @@ export type ChatDisplayMessage = Pick<
   | 'turnId' | 'turn_id' | 'artifactId' | 'artifactPath' | 'renderHint'
   | 'artifactType' | 'taskKind' | 'nextAction' | 'requiresUserAction'
   | 'errorDetails' | 'toolName' | 'toolUseId' | 'toolStatus' | 'toolDetail'
-  | 'toolOutput' | 'toolDiff' | 'toolPatch' | 'toolBefore' | 'toolAfter'
+  | 'toolExitCode' | 'toolDurationMs' | 'toolOutput' | 'toolDiff' | 'toolPatch' | 'toolBefore' | 'toolAfter'
   | 'toolStructuredPatch' | 'toolInput' | 'isSubagentTool' | 'subagentPrompt'
   | 'subagentOutput' | 'subagentTrace' | 'subagentActivity'
 > & {
@@ -171,6 +171,8 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   toolName: message.toolName,
   toolUseId: message.toolUseId,
   toolStatus: message.toolStatus,
+  toolExitCode: message.toolExitCode,
+  toolDurationMs: message.toolDurationMs,
   toolDetail: message.toolDetail,
   toolOutput: message.toolOutput,
   toolDiff: message.toolDiff,

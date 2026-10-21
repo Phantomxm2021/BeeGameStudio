@@ -1,6 +1,7 @@
+import {inferRuntimeModelType} from '@bee-game-studio/agent-workflow/runtime-environment'
 import type { RuntimeModelConfig } from '@bee-game-studio/agent-workflow'
-import { normalizeRuntimeEnvironment } from '../../../../src/utils/runtimeEnvironment'
-import { isEnvTruthy } from '../../../../src/utils/envUtils'
+import { normalizeRuntimeEnvironment } from '@bee-game-studio/agent-workflow/runtime-environment'
+import { isEnvTruthy } from '@bee-game-studio/agent-workflow/runtime-environment'
 import { randomUUID } from 'node:crypto'
 import { safeErrorFacts } from '../security/safe-error-facts'
 import type { DashboardRepository } from '../dashboard-repository'
@@ -172,50 +173,15 @@ function mergeRuntimeEnvironment(
     ...normalizeRuntimeEnvironment(runtime?.env ?? {}),
     ...(additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? normalizeRuntimeEnvironment(additionalEnv) : {}),
   }
-  const modelType = additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? additionalEnv.BEEGAME_MODEL_TYPE : runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
+  const selectedType = additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? additionalEnv.BEEGAME_MODEL_TYPE : runtime?.modelType
+  const modelType = inferSelectedRuntimeModelType({ ...selectedEnvironment, ...(selectedType ? { BEEGAME_MODEL_TYPE: selectedType } : {}) })
   return {
     ...selectedEnvironment,
     ...(modelType ? { BEEGAME_MODEL_TYPE: modelType } : {}),
   }
 }
 
-function inferSelectedRuntimeModelType(
-  environment: Record<string, string>,
-): RuntimeModelConfig['modelType'] | undefined {
-  const candidates = new Set<RuntimeModelConfig['modelType']>()
-  if (
-    environment.ANTHROPIC_BASE_URL ||
-    environment.ANTHROPIC_AUTH_TOKEN ||
-    environment.BGS_DEFAULT_BALANCED_MODEL
-  ) {
-    candidates.add('anthropic')
-  }
-  if (
-    environment.OPENAI_BASE_URL ||
-    environment.OPENAI_API_KEY ||
-    isEnvTruthy(environment.BGS_USE_OPENAI)
-  ) {
-    candidates.add('openai')
-  }
-  if (
-    environment.GEMINI_BASE_URL ||
-    environment.GEMINI_API_KEY ||
-    isEnvTruthy(environment.BGS_USE_GEMINI)
-  ) {
-    candidates.add('gemini')
-  }
-  if (
-    environment.GROK_BASE_URL ||
-    environment.GROK_API_KEY ||
-    isEnvTruthy(environment.BGS_USE_GROK)
-  ) {
-    candidates.add('grok')
-  }
-  if (candidates.size > 1) {
-    throw new Error('Selected model environment contains multiple providers')
-  }
-  return candidates.values().next().value
-}
+function inferSelectedRuntimeModelType(environment:Record<string,string>) { return inferRuntimeModelType(environment) }
 
 const FACTORY_OPTION_KEYS = new Set([
   'ownerId',

@@ -1,0 +1,3 @@
+[submodule "vendor/bgs"]
+	path = vendor/bgs
+	url = https://github.com/Phantomxm2021/codex.git

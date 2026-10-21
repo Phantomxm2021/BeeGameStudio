@@ -90,14 +90,12 @@ async function currentV3Run(projectId: string): Promise<V3Run> {
   return run
 }
 
-export type TaskRecoveryStatus = { state: 'stopping' | 'recoverable' | 'blocked'; message: string; code: string }
-
 function assertWriterReleased(run: V3Run): void {
   if (!run.writer) return
   if (run.writerLiveness === 'local-active')
     throw new Error('原任务仍在执行或清理中，尚未确认停止；不能继续或发送新任务。')
   if (['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? ''))
-    throw new Error('已有旧执行退出证据，但占用尚未结算。请先清理执行占用；清理不会自动继续任务。')
+    throw new Error('旧执行仍在结算，请稍后再试。')
   const reason = ({
     'exit-receipts-not-configured': '宿主未配置退出回执',
     'exit-receipt-invalid': '退出证据无法校验',
@@ -121,7 +119,12 @@ async function sendV3Message(projectId: string, sessionId: string, input: {
   let run = await currentV3Run(projectId)
   if (run.chatSessionId !== sessionId)
     throw new Error('项目会话与 V3 任务不一致，请重新打开项目。')
-  assertWriterReleased(run)
+  if (input.allowResume !== false && run.writer && run.writerLiveness !== 'local-active' &&
+      ['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? '')) {
+    await beeGameAdapter.recoverTask({ project_id: projectId })
+    run = await currentV3Run(projectId)
+  }
+  if (!run.paused || run.writer && run.writerLiveness !== 'local-active') assertWriterReleased(run)
   if (run.paused) {
     if (input.allowResume === false) throw new Error('任务已被暂停，已取消自动重试。')
     const resumed = await postJson<{ run: V3Run }>(
@@ -130,6 +133,7 @@ async function sendV3Message(projectId: string, sessionId: string, input: {
     )
     run = resumed.run
   }
+  assertWriterReleased(run)
   return postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow-v3/agent/messages`, {
     requestKey: input.requestKey,
     runId: run.id,
@@ -151,6 +155,7 @@ type BeeGamePendingPermissionPayload = {
   message?: string
   created_at?: string
   input?: unknown
+  design_change_allowed?: boolean
 }
 
 type ProjectRuntimeStateWithPermissions = ProjectBaselineStatusPayload & {
@@ -666,17 +671,23 @@ export const beeGameAdapter = {
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
     let run = await currentV3Run(data.project_id)
-    assertWriterReleased(run)
-    if (data.failed_turn_id && run.agentTurns?.at(-1)?.turnId !== data.failed_turn_id)
-      throw new Error('任务回合已改变，已取消旧错误的重试。')
     if (data.automatic_retry && run.paused)
       throw new Error('任务已被暂停，已取消自动重试；请明确继续任务。')
+    if (!data.automatic_retry && run.writer && run.writerLiveness !== 'local-active' &&
+        ['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? '')) {
+      await this.recoverTask({ project_id: data.project_id })
+      run = await currentV3Run(data.project_id)
+    }
+    if (!run.paused || run.writer && run.writerLiveness !== 'local-active') assertWriterReleased(run)
+    if (data.failed_turn_id && run.agentTurns?.at(-1)?.turnId !== data.failed_turn_id)
+      throw new Error('任务回合已改变，已取消旧错误的重试。')
     if (run.paused) {
       await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/workflow-v3/resume`, {
         planRevision: run.planRevision,
       })
       run = await currentV3Run(data.project_id)
     }
+    assertWriterReleased(run)
     const last = run.agentTurns?.at(-1)
     if (data.failed_turn_id && last?.turnId !== data.failed_turn_id)
       throw new Error('任务回合已改变，已取消旧错误的重试。')
@@ -724,18 +735,6 @@ export const beeGameAdapter = {
       state: stopped.stopping ? 'stop_requested' : 'stopped',
       trace_id: stopped.run.id,
     }
-  },
-
-  /** Explicit recovery only: never calls resume or sends a model message. */
-  async getTaskRecovery(projectId: string, includeActive = false): Promise<TaskRecoveryStatus | null> {
-    const run = await readV3Run(projectId)
-    if (!run?.writer) return null
-    if (run.writerLiveness === 'local-active' && !run.paused && !includeActive) return null
-    let message = ''
-    try { assertWriterReleased(run) } catch (error) { message = (error as Error).message }
-    return { state: run.writerLiveness === 'local-active' ? 'stopping' :
-      ['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? '') ? 'recoverable' : 'blocked',
-      message, code: run.recoveryDiagnostic ?? 'exit-unconfirmed' }
   },
 
   async recoverTask(data: { project_id: string }): Promise<{ recovered: boolean; paused: boolean }> {
@@ -942,6 +941,7 @@ export const beeGameAdapter = {
     message?: string
     scope?: 'once' | 'session'
     answers?: Record<string, string>
+    intent?: 'change'
   }): Promise<{ ok: boolean }> {
     const result = await postJson<{ resolved?: boolean }>(
       `/api/projects/${encodeURIComponent(data.project_id)}/permissions/${encodeURIComponent(data.gate_id)}`,
@@ -950,6 +950,7 @@ export const beeGameAdapter = {
         remember: false,
         scope: data.scope ?? 'once',
         ...(data.answers ? { answers: data.answers } : {}),
+        ...(data.intent ? { intent: data.intent } : {}),
         ...(data.message ? { message: data.message } : {}),
       },
     )
@@ -1158,10 +1159,10 @@ export const beeGameAdapter = {
   async uploadProjectAsset(
     projectId: string,
     resourceId: string,
-    file: File,
+    file: File | readonly File[],
   ): Promise<BeeGameAssetUploadPayload> {
     const form = new FormData()
-    form.set('file', file)
+    for (const item of Array.isArray(file) ? file : [file as File]) form.append('file', item)
     return postForm<BeeGameAssetUploadPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets/resources/${encodeURIComponent(resourceId)}/upload`,
       form,
@@ -2335,6 +2336,7 @@ function permissionEventToReview(
     artifact: {
       content: summary.description,
       input,
+      designChangeAllowed: (event.payload?.workflowQuestion as {designChangeAllowed?: boolean} | undefined)?.designChangeAllowed === true,
     },
     summary: {
       block_reason: summary.blockReason,
@@ -2359,6 +2361,7 @@ function pendingPermissionToReview(
       type: 'permission.requested',
       toolUseID,
       toolName,
+      workflowQuestion: {designChangeAllowed:permission.design_change_allowed === true},
       input:
         permission.input &&
         typeof permission.input === 'object' &&

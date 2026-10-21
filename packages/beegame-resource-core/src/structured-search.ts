@@ -10,7 +10,7 @@ export type ResourcePackStructuredQuery = {
 
 /**
  * Structured metadata is an exact filter for administrative library browsing.
- * It never infers intent, scores Packs, or chooses one for Claude Code.
+ * It never infers intent, scores Packs, or chooses one for Bgs.
  */
 export function searchResourcePacks(
   packs: readonly PackSummary[],

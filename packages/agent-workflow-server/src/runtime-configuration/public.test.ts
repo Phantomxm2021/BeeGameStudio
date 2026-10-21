@@ -34,7 +34,7 @@ function options(overrides: Partial<RuntimeConfigurationClientFactoryOptions> = 
     repository: {
       async getRuntimeEnv(dataDir, ownerId, token, modelConfigId) {
         calls.push([dataDir, ownerId, token, modelConfigId])
-        return { ANTHROPIC_BASE_URL: 'https://anthropic.example' }
+        return { OPENAI_BASE_URL: 'https://openai.example' }
       },
     },
     command: ['native-model', '--protocol'],
@@ -49,35 +49,13 @@ function options(overrides: Partial<RuntimeConfigurationClientFactoryOptions> = 
 }
 
 describe('public runtime configuration client', () => {
-  test.each(['0', 'false', 'off', 'no', ''])('disabled provider flags %j do not select a provider', async value => {
-    for (const prefix of ['BGS_USE_', 'CLAUDE_CODE_USE_']) {
-      const flags = Object.fromEntries(['OPENAI', 'GEMINI', 'GROK'].map(provider => [prefix + provider, value]))
-      const fixture = options({
-        repository: { async getRuntimeEnv() { return { ANTHROPIC_BASE_URL: 'https://fixture.example', ...flags } } },
-      })
-      const result = await createRuntimeConfigurationClient(fixture).resolve({ ownerId: 'owner-1' })
-      expect(result.env.BEEGAME_MODEL_TYPE).toBe('anthropic')
+  test('preserves supported explicit provider selection and rejects unknown providers', async () => {
+    for (const modelType of ['openai','anthropic','gemini','grok'] as const) {
+      const client=createRuntimeConfigurationClient(options({runtime:{modelType,env:{}}}))
+      expect((await client.resolve({ownerId:'owner-1'})).env.BEEGAME_MODEL_TYPE).toBe(modelType)
     }
-  })
-
-  test.each(['openai', 'gemini', 'grok'])('enabled %s flag selects its provider', async provider => {
-    for (const prefix of ['BGS_USE_', 'CLAUDE_CODE_USE_']) {
-      const fixture = options({
-        repository: { async getRuntimeEnv() { return { [prefix + provider.toUpperCase()]: ' true ' } } },
-      })
-      const result = await createRuntimeConfigurationClient(fixture).resolve({ ownerId: 'owner-1' })
-      expect(result.env.BEEGAME_MODEL_TYPE).toBe(provider)
-    }
-  })
-
-  test('normalizes legacy keys per source without reversing explicit runtime precedence', async () => {
-    const fixture = options({
-      repository: { async getRuntimeEnv() { return { BGS_DEFAULT_BALANCED_MODEL: 'repository-model' } } },
-      runtime: { modelType: 'anthropic', env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'explicit-model' } },
-    })
-    const result = await createRuntimeConfigurationClient(fixture).resolve({ ownerId: 'owner-1' })
-    expect(result.env.BGS_DEFAULT_BALANCED_MODEL).toBe('explicit-model')
-    expect(result.env).not.toHaveProperty('ANTHROPIC_DEFAULT_SONNET_MODEL')
+    const client=createRuntimeConfigurationClient(options({repository:{async getRuntimeEnv(){return {BEEGAME_MODEL_TYPE:'unknown'}}}}))
+    await expect(client.resolve({ownerId:'owner-1'})).rejects.toThrow()
   })
 
   test('diagnostics distinguish auth, refresh, HTTP, network and validation failures without secrets', async () => {
@@ -94,7 +72,7 @@ describe('public runtime configuration client', () => {
           expected: { step: 'runtime_environment', code: 'repository_unavailable', httpStatus: 503 } },
         { tokens: ['secret-token'], repository: async () => { throw new Error('https://secret-host', { cause: { code: 'ECONNRESET' } }) },
           expected: { step: 'runtime_environment', code: 'repository_unavailable', networkCode: 'ECONNRESET' } },
-        { tokens: ['secret-token'], repository: async () => ({ OPENAI_API_KEY: 'secret-openai', GEMINI_API_KEY: 'secret-gemini' }),
+        { tokens: ['secret-token'], repository: async () => ({ BEEGAME_MODEL_TYPE: 'unknown', OPENAI_API_KEY: 'secret-openai' }),
           expected: { step: 'environment_validation', code: 'invalid_environment' } },
       ]
       for (const item of cases) {
@@ -125,28 +103,19 @@ describe('public runtime configuration client', () => {
     expect(result).toEqual({
       command: ['native-model', '--protocol'],
       env: {
-        ANTHROPIC_BASE_URL: 'https://anthropic.example',
-        BEEGAME_MODEL_TYPE: 'anthropic',
+        OPENAI_BASE_URL: 'https://openai.example',
+        BEEGAME_MODEL_TYPE: 'openai',
       },
     })
     expect(fixture.calls).toEqual([['/tmp/beegame-owner-1', 'owner-1', 'token-1', 'model-1']])
   })
 
-  test('lets explicit runtime env override repository env and modelType win over inference', async () => {
-    const fixture = options({
-      repository: { async getRuntimeEnv() { return { OPENAI_API_KEY: 'repo-key', SHARED: 'repo' } } },
-      runtime: {
-        modelType: 'gemini',
-        env: { GEMINI_API_KEY: 'runtime-key', SHARED: 'runtime' },
-      } satisfies RuntimeModelConfig,
-    })
-    const result = await createRuntimeConfigurationClient(fixture).resolve({ ownerId: 'owner-1' })
-    expect(result.env).toEqual({
-      OPENAI_API_KEY: 'repo-key',
-      GEMINI_API_KEY: 'runtime-key',
-      SHARED: 'runtime',
-      BEEGAME_MODEL_TYPE: 'gemini',
-    })
+  test('lets explicit Responses model settings override repository settings', async () => {
+    const client = createRuntimeConfigurationClient(options({
+      repository:{async getRuntimeEnv(){return {OPENAI_API_KEY:'repo',BEEGAME_MODEL:'repo-model'}}},
+      runtime:{modelType:'openai',env:{OPENAI_API_KEY:'selected',BEEGAME_MODEL:'selected-model'}}
+    }))
+    expect((await client.resolve({ownerId:'owner-1'})).env).toMatchObject({OPENAI_API_KEY:'selected',BEEGAME_MODEL:'selected-model',BEEGAME_MODEL_TYPE:'openai'})
   })
 
   test('refreshes once on a repository auth failure and retries with the refreshed token', async () => {
@@ -253,7 +222,7 @@ describe('public runtime configuration client', () => {
   test('returns fresh snapshots and exposes no repository or runtime state', async () => {
     const auth = authFixture(['token-1', 'token-2'])
     const fixture = options({ authentication: auth.authentication })
-    const runtime: RuntimeModelConfig = { modelType: 'anthropic', env: { SECRET: 'value' } }
+    const runtime: RuntimeModelConfig = { modelType: 'openai', env: { SECRET: 'value' } }
     const command = ['native-model', '--protocol']
     const client = createRuntimeConfigurationClient({ ...fixture, command, runtime })
     command.push('caller-mutation')

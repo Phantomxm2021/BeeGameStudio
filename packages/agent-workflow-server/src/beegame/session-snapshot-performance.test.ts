@@ -2,9 +2,7 @@ import {expect,test} from 'bun:test'
 import {mkdtemp,rm} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
-import {fileURLToPath} from 'node:url'
 import {BeeGameSessionManager,type BeeGameEvent} from './session-manager'
-import {createNativeCliProcessRunner} from './native-cli-process-runner'
 
 async function fixture() {
   const root=await mkdtemp(join(tmpdir(),'bgs-snapshot-replay-'))
@@ -104,53 +102,3 @@ test('indexed snapshots equal full-event calculation after mixed lifecycle, usag
     }
   }finally{await f.close()}
 })
-
-test('HTTP health and explicit interruption can run before a queued native stdout burst drains',async()=>{
-  const root=await mkdtemp(join(tmpdir(),'bgs-native-host-responsive-'))
-  const manager=new BeeGameSessionManager(createNativeCliProcessRunner({command:[process.execPath,
-    fileURLToPath(new URL('./fixtures/native-runtime-fixture.ts',import.meta.url))]}),root)
-  let server:ReturnType<typeof Bun.serve>|undefined,frames=0,probe:Promise<{health:number;stopped:number}>|undefined
-  let unsubscribe=()=>{}
-  try {
-    const session=manager.start({workspacePath:join(root,'workspace'),userId:'synthetic-fixture'})
-    const record=(manager as any).sessions.get(session.id)
-    const date=new Date(0)
-    record.events=[{id:1,sessionId:session.id,type:'turn.started',turnId:'previous',text:'',createdAt:date},
-      {id:2,sessionId:session.id,type:'turn.completed',turnId:'previous',text:'',createdAt:date},
-      ...Array.from({length:50000},(_,i)=>({id:i+3,sessionId:session.id,type:'assistant.partial',turnId:'previous',text:'synthetic old text',createdAt:date}))]
-    record.nextEventId=record.events.length+1
-    // Thin loopback probe only; no production API/auth/UI replacement. It uses
-    // the real host manager and native process adapter, not a paid model.
-    server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
-      if(new URL(request.url).pathname==='/interrupt') {
-        const stopped=frames;manager.interruptTurn(session.id,'offline-explicit-pause')
-        return Response.json({frames:stopped})
-      }
-      return Response.json({frames})
-    }})
-    const origin=server.url.toString().replace(/\/$/,'')
-    unsubscribe=manager.subscribeEvents(session.id,event=>{
-      if(event.type!=='assistant.partial')return
-      frames++
-      if(probe)return
-      probe=(async()=>{
-        const health=await (await fetch(origin+'/health',{signal:AbortSignal.timeout(3000)})).json() as {frames:number}
-        const stopped=await (await fetch(origin+'/interrupt',{method:'POST',signal:AbortSignal.timeout(3000)})).json() as {frames:number}
-        return {health:health.frames,stopped:stopped.frames}
-      })()
-    })
-    await manager.sendWithDisplay(session.id,'native-snapshot-stream-burst')
-    for(let i=0;i<100 && !probe;i++)await Bun.sleep(5)
-    expect(probe).toBeDefined()
-    const observed=await probe!
-    await manager.waitForSessionIdle(session.id)
-    expect(observed.health).toBeGreaterThan(0);expect(observed.health).toBeLessThan(500)
-    expect(observed.stopped).toBeLessThan(500)
-    expect(manager.get(session.id)?.turnStatus).toBe('idle')
-    expect(manager.transcriptFacts(session.id).some(e=>e.type==='turn.failed')).toBe(true)
-    expect(manager.transcriptFacts(session.id).some(e=>e.type==='result')).toBe(false)
-    expect(record.events.slice(0,50002).every((e:BeeGameEvent)=>e.turnId==='previous')).toBe(true)
-    console.info(JSON.stringify({offlineHostResponsiveness:true,totalQueuedFrames:500,
-      framesAtHealth:observed.health,framesAtExplicitPause:observed.stopped,priorRawEventsPreserved:50002,paidCalls:0}))
-  }finally{unsubscribe();await manager.dispose();server?.stop(true);await rm(root,{recursive:true,force:true})}
-},10000)

@@ -392,8 +392,8 @@ describe('SettingsMenu model settings', () => {
         await openPlatformSettings();
         await screen.findByText('/tmp/beegame-projects');
         expect(getBeeGameWorkspaceSettings).toHaveBeenCalledTimes(1);
-        expect(getWebToolsConfig).toHaveBeenCalledTimes(1);
-        reads.filter(read => read !== getBeeGameWorkspaceSettings && read !== getWebToolsConfig)
+        expect(getWebToolsConfig).not.toHaveBeenCalled();
+        reads.filter(read => read !== getBeeGameWorkspaceSettings)
             .forEach(read => expect(read).not.toHaveBeenCalled());
 
         await userEvent.click(screen.getByRole('tab', { name: '能力' }));
@@ -402,34 +402,18 @@ describe('SettingsMenu model settings', () => {
         expect(listMcpServers).not.toHaveBeenCalled();
     });
 
-    it('preserves web settings drafts across language and section changes without reloading', async () => {
-        getWebToolsConfig.mockResolvedValue({ webSearchAdapter: 'brave' });
-        getWebToolsConfig.mockClear();
-        const { rerender } = renderSettings();
-        await openPlatformSettings();
-        await userEvent.type(await screen.findByLabelText('BRAVE_SEARCH_API_KEY'), 'unsaved-search-key');
 
-        rerender(settingsElement({ lang: 'en' }));
-        expect(screen.getByLabelText('BRAVE_SEARCH_API_KEY')).toHaveValue('unsaved-search-key');
-        expect(getWebToolsConfig).toHaveBeenCalledTimes(1);
-
-        rerender(settingsElement());
-        await userEvent.click(screen.getByRole('tab', { name: 'MCP' }));
-        await openPlatformSettings();
-        expect(screen.getByLabelText('BRAVE_SEARCH_API_KEY')).toHaveValue('unsaved-search-key');
-        expect(getWebToolsConfig).toHaveBeenCalledTimes(1);
-    });
 
     it('waits for the initial capability settings before allowing edits or save', async () => {
-        let resolveSettings!: (value: { autoMemoryEnabled: boolean }) => void;
+        let resolveSettings!: (value: { resourceLibraryEnabled: boolean }) => void;
         getRuntimeSettings.mockImplementationOnce(() => new Promise(resolve => { resolveSettings = resolve; }));
         renderSettings();
         await openPlatformSettingsTab('能力');
-        expect(screen.getByRole('switch', { name: '自动记忆' })).toBeDisabled();
+        expect(screen.getByRole('switch', { name: '资源库' })).toBeDisabled();
         expect(screen.getByRole('button', { name: '保存设置' })).toBeDisabled();
-        await act(async () => { resolveSettings({ autoMemoryEnabled: true }); });
-        expect(screen.getByRole('switch', { name: '自动记忆' })).toBeEnabled();
-        expect(screen.getByRole('switch', { name: '自动记忆' })).toBeChecked();
+        await act(async () => { resolveSettings({ resourceLibraryEnabled: true }); });
+        expect(screen.getByRole('switch', { name: '资源库' })).toBeEnabled();
+        expect(screen.getByRole('switch', { name: '资源库' })).toBeChecked();
     });
 
     it('keeps an open model form and its secret draft when the language changes', async () => {
@@ -446,19 +430,7 @@ describe('SettingsMenu model settings', () => {
         expect(listModelConfigs).toHaveBeenCalledTimes(1);
     });
 
-    it('does not let a response from a closed dialog overwrite the reopened draft', async () => {
-        let resolveOld!: (value: { webSearchAdapter: 'brave' }) => void;
-        getWebToolsConfig.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
-        getWebToolsConfig.mockResolvedValueOnce({ webSearchAdapter: 'exa' });
-        const { rerender } = renderSettings();
-        await openPlatformSettings();
-        rerender(settingsElement({ isOpen: false }));
-        rerender(settingsElement());
-        await userEvent.type(await screen.findByLabelText('EXA_API_KEY'), 'new-dialog-draft');
-        await act(async () => { resolveOld({ webSearchAdapter: 'brave' }); });
-        expect(screen.getByLabelText('EXA_API_KEY')).toHaveValue('new-dialog-draft');
-        expect(screen.queryByLabelText('BRAVE_SEARCH_API_KEY')).not.toBeInTheDocument();
-    });
+
 
     it('preserves queued MCP autosave across language changes and cancels it on close', async () => {
         const server = { id: 'mcp_queued', name: 'Queued MCP', enabled: true, transport: 'http',
@@ -536,7 +508,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '网页' })).not.toBeInTheDocument();
         expect(screen.getByText(/深色模式|浅色模式/)).toBeInTheDocument();
         expect(screen.queryByLabelText('Subagents')).not.toBeInTheDocument();
-        expect(screen.queryByRole('switch', { name: '自动记忆' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('switch', { name: '资源库' })).not.toBeInTheDocument();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
         expect(screen.queryByText('BeeGame 会把 Brave key 注入新启动的 runtime session。已有会话不会自动重启。')).not.toBeInTheDocument();
         expect(screen.getByLabelText('语言选择')).toBeInTheDocument();
@@ -553,8 +525,8 @@ describe('SettingsMenu model settings', () => {
     it('saves BYOK from the shared bottom-right footer, not inside the scroll area', async () => {
         useSystemStore.setState({ currentUser: { id: 'fixture-user', role: 'viewer', permissions: [] } });
         listModelCatalog.mockResolvedValue([
-            { id: 'official', name: 'Bee Game Studio LLM', provider: 'anthropic-compatible', models: { balanced: 'official' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: { method: 'platform', hasKey: false, isPreferred: false, claudeConnected: false, chatgptConnected: false } },
-            { id: 'personal-byok', name: 'BYOK', provider: 'anthropic-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: { method: 'platform', hasKey: false, isPreferred: false, claudeConnected: false, chatgptConnected: false } },
+            { id: 'official', name: 'Bee Game Studio LLM', provider: 'openai-compatible', models: { balanced: 'official' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: { method: 'platform', hasKey: false, isPreferred: false, claudeConnected: false, chatgptConnected: false } },
+            { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: { method: 'platform', hasKey: false, isPreferred: false, claudeConnected: false, chatgptConnected: false } },
         ]);
         saveModelConnection.mockResolvedValue({ method: 'byok', hasKey: true, isPreferred: true, claudeConnected: false, chatgptConnected: false });
         try {
@@ -572,7 +544,7 @@ describe('SettingsMenu model settings', () => {
             expect(save.parentElement).toHaveClass('justify-end');
             expect(save).toHaveClass('rounded-full');
             await userEvent.click(save);
-            await waitFor(() => expect(saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'fixture-secret', true, { provider: 'anthropic-compatible', baseUrl: 'https://example.com/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong' } }));
+            await waitFor(() => expect(saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://example.com/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong' } }));
         } finally {
             useSystemStore.setState({ currentUser: null });
         }
@@ -678,8 +650,8 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('tab', { name: '生图服务' })).toBeInTheDocument();
         await expect(screen.findByText('/tmp/beegame-projects')).resolves.toBeInTheDocument();
         expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
-        expect(screen.getByLabelText('搜索后端')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
+        expect(screen.getByRole('status')).toHaveTextContent('旧搜索适配器已停用');
+        expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
     });
 
     it('saves image settings from the shared window footer and closes only after success', async () => {
@@ -1088,7 +1060,7 @@ describe('SettingsMenu model settings', () => {
         const onClose = vi.fn();
         const { container } = renderSettings({ onClose });
 
-        await openPlatformSettings();
+        await openPlatformSettingsTab('能力');
         const saveButton = screen.getByRole('button', { name: '保存设置' });
         expect(saveButton.querySelector('svg')).toBeNull();
         expect(container.querySelector('.bg-black')).toBeNull();
@@ -1112,7 +1084,7 @@ describe('SettingsMenu model settings', () => {
             webSearchAdapter: 'tavily',
         });
         saveRuntimeSettings.mockResolvedValue({
-            autoMemoryEnabled: true,
+            resourceLibraryEnabled: true,
             autoDreamEnabled: true,
             skillSearchEnabled: false,
             treeSitterBashEnabled: false,
@@ -1130,24 +1102,11 @@ describe('SettingsMenu model settings', () => {
         await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     });
 
-    it('renders capabilities as a dedicated settings tab', async () => {
-        renderSettings();
-
-        await openPlatformSettingsTab('能力');
-
-        expect(screen.getByRole('tab', { name: '能力' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.queryByRole('switch', { name: 'Subagents' })).not.toBeInTheDocument();
-        expect(screen.getByRole('switch', { name: '自动记忆' })).not.toBeChecked();
-        expect(screen.getByRole('switch', { name: '自动整理' })).not.toBeChecked();
-        for (const name of ['独立 Verification', 'Agent Teams', '输入建议', '离开摘要（CLI）', 'Coordinator 模式']) {
-            expect(screen.getByRole('switch', { name })).not.toBeChecked();
-        }
-        expect(screen.getByRole('switch', { name: 'Skill Search' })).not.toBeChecked();
-        expect(screen.getByText('记住偏好、项目决策和常用上下文。')).toBeInTheDocument();
-        expect(screen.queryByText('好处: 跨会话保留偏好、项目决策和常用上下文。')).not.toBeInTheDocument();
-        expect(screen.queryByText('需重启运行时')).not.toBeInTheDocument();
-        expect(screen.queryByText('新会话生效')).not.toBeInTheDocument();
-    });
+    it('renders the retained resource capability without legacy agent switches', async () => {
+ renderSettings(); await openPlatformSettingsTab('能力');
+ expect(screen.getByRole('switch',{name:'资源库'})).toBeChecked();
+ expect(screen.getAllByRole('switch')).toHaveLength(1);
+});
 
     it('configures MCP servers from the settings tab', async () => {
         createMcpServer.mockResolvedValue({
@@ -1186,6 +1145,7 @@ describe('SettingsMenu model settings', () => {
         expect(transportOptions.parentElement).toBe(document.body);
         expect(transportOptions).toHaveClass('z-[370]');
         expect(transportOptions.style.zIndex).toBe('');
+        expect(screen.queryByRole('option', { name: /SSE/ })).not.toBeInTheDocument();
         await userEvent.click(screen.getByRole('option', { name: 'stdio' }));
         expect(screen.getByLabelText('名称')).toBeInTheDocument();
         expect(screen.queryByLabelText('命令')).not.toBeInTheDocument();
@@ -1357,7 +1317,7 @@ describe('SettingsMenu model settings', () => {
         useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: ['workspace.manage', 'mcp.manage'] } });
         const discovered = {
             name: 'Blender', enabled: true, transport: 'stdio', scope: 'beegame',
-            command: '/local/bin/blender-mcp', sourcePath: '/home/test/.codex/config.toml', exists: false,
+            command: '/local/bin/blender-mcp', sourcePath: '/home/test/.bgs/config.toml', exists: false,
             env: [{ key: 'TOKEN', valuePreview: '••••' }],
         };
         discoverMcpServers.mockResolvedValueOnce([discovered]);
@@ -1440,84 +1400,23 @@ describe('SettingsMenu model settings', () => {
         }));
     });
 
-    it('saves capability toggles from the capabilities settings footer', async () => {
-        getRuntimeSettings.mockResolvedValueOnce({
-            autoMemoryEnabled: true,
-            autoDreamEnabled: true,
-            skillSearchEnabled: false,
-            treeSitterBashEnabled: false,
-            webBrowserToolEnabled: false,
-            bashClassifierEnabled: false,
-            mcpSkillsEnabled: false,
-            resourceLibraryEnabled: true,
-        });
-        saveWebToolsConfig.mockResolvedValue({
-            webSearchAdapter: 'tavily',
-        });
-        saveRuntimeSettings.mockResolvedValue({
-            autoMemoryEnabled: true,
-            autoDreamEnabled: true,
-            skillSearchEnabled: true,
-            treeSitterBashEnabled: true,
-            webBrowserToolEnabled: false,
-            bashClassifierEnabled: false,
-            mcpSkillsEnabled: false,
-        });
+    it('saves the resource capability from the settings footer', async () => {
+ getRuntimeSettings.mockResolvedValueOnce({resourceLibraryEnabled:true});
+ saveRuntimeSettings.mockResolvedValue({resourceLibraryEnabled:false});
+ renderSettings(); await openPlatformSettingsTab('能力');
+ await userEvent.click(await screen.findByRole('switch',{name:'资源库'}));
+ await userEvent.click(screen.getByRole('button',{name:'保存设置'}));
+ await waitFor(()=>expect(saveRuntimeSettings).toHaveBeenCalledWith({resourceLibraryEnabled:false}));
+});
 
-        renderSettings();
-        await openPlatformSettingsTab('能力');
-
-        await userEvent.click(await screen.findByRole('switch', { name: 'Skill Search' }));
-        await userEvent.click(screen.getByRole('switch', { name: 'Bash AST 解析' }));
-        await userEvent.click(screen.getByRole('switch', { name: '独立 Verification' }));
-        await userEvent.click(screen.getByRole('switch', { name: 'Agent Teams' }));
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-
-        await waitFor(() => expect(saveRuntimeSettings).toHaveBeenCalledWith({
-            verificationAgentEnabled: true,
-            agentTeamsEnabled: true,
-            promptSuggestionEnabled: false,
-            awaySummaryEnabled: false,
-            coordinatorModeEnabled: false,
-            autoMemoryEnabled: true,
-            autoDreamEnabled: true,
-            skillSearchEnabled: true,
-            treeSitterBashEnabled: true,
-            webBrowserToolEnabled: false,
-            bashClassifierEnabled: false,
-            mcpSkillsEnabled: false,
-            resourceLibraryEnabled: true,
-        }));
-        expect(screen.queryByRole('switch', { name: 'Subagents' })).not.toBeInTheDocument();
-    });
-
-    it('keeps deployment workspace root read-only and saves web search settings from the footer', async () => {
-        getBeeGameWorkspaceSettings.mockResolvedValueOnce({
-            workspacePath: '/tmp/beegame-projects',
-            isDefault: true,
-        });
-        getWebToolsConfig.mockResolvedValueOnce({
-            webSearchAdapter: 'tavily',
-        });
-
-        renderSettings();
-        await openPlatformSettings();
-
-        expect(await screen.findByText('/tmp/beegame-projects')).toBeInTheDocument();
-        expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: '恢复默认' })).not.toBeInTheDocument();
-        await userEvent.click(screen.getByLabelText('搜索后端'));
-        await userEvent.click(screen.getByRole('option', { name: 'Brave' }));
-        await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-
-        await waitFor(() => expect(saveWebToolsConfig).toHaveBeenCalledWith({
-            webSearchAdapter: 'brave',
-            braveApiKey: 'bsa-dashboard-secret',
-        }));
-        expect(saveRuntimeSettings).not.toHaveBeenCalled();
-        expect(screen.queryByText('工作路径已保存')).not.toBeInTheDocument();
-    });
+    it('keeps the deployment root read-only and explains the retired search adapters', async () => {
+ renderSettings(); await openPlatformSettings();
+ expect(await screen.findByText('/tmp/beegame-projects')).toBeInTheDocument();
+ expect(screen.getByRole('status')).toHaveTextContent('旧搜索适配器已停用');
+ expect(screen.queryByLabelText('BRAVE_SEARCH_API_KEY')).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'保存设置'})).not.toBeInTheDocument();
+ expect(saveWebToolsConfig).not.toHaveBeenCalled();
+});
 
     it('shows compact tiered model fields and saves a new default model config', async () => {
         createModelConfig.mockResolvedValue({
@@ -1572,6 +1471,7 @@ describe('SettingsMenu model settings', () => {
             authMethods: ['platform'],
             name: 'BeeGame LLM',
             provider: 'openai-compatible',
+            apiProtocol: 'responses',
             baseUrl: 'https://api.example.com/v1',
             apiKey: 'sk-secret',
             models: {
@@ -1584,58 +1484,19 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByText('模型配置已保存')).not.toBeInTheDocument();
     });
 
-    it.each(['anthropic-compatible', 'openai-compatible'] as const)('adds a platform OpenCode Go model with %s', async provider => {
-        const profile = OPENCODE_GO_PROFILES[provider];
-        createModelConfig.mockResolvedValue({ id: 'platform-go', name: 'OpenCode Go', provider, baseUrl: profile.baseUrl, models: profile.defaults, apiKeyPreview: 'go-...key', isDefault: true });
-        renderSettings();
-        await openPlatformSettingsTab('模型');
-        await userEvent.click(screen.getByRole('button', { name: '添加模型配置' }));
-        await userEvent.click(screen.getByLabelText('Provider'));
-        await userEvent.click(screen.getByRole('option', { name: 'OpenCode Go', exact: true }));
-        if (provider === 'openai-compatible') {
-            await userEvent.click(screen.getByLabelText('协议'));
-            await userEvent.click(screen.getByRole('option', { name: 'Chat Completions', exact: true }));
-        }
-        expect(screen.getByLabelText('Base URL')).toHaveValue(profile.baseUrl);
-        expect(screen.getByLabelText('Base URL')).toHaveAttribute('readonly');
-        expect(screen.getByLabelText('Balanced 模型')).toHaveTextContent(profile.defaults.balanced);
-        expect(screen.queryByRole('switch', { name: 'Claude subscription' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('switch', { name: 'ChatGPT subscription' })).not.toBeInTheDocument();
-        await userEvent.click(screen.getByLabelText('Fast 模型'));
-        expect(screen.queryByRole('option', { name: provider === 'openai-compatible' ? 'minimax-m3' : 'kimi-k3', exact: true })).not.toBeInTheDocument();
-        const newModel = provider === 'openai-compatible' ? 'new-chat-model' : 'new-anthropic-model';
-        await userEvent.click(screen.getByRole('option', { name: newModel, exact: true }));
-        await userEvent.type(screen.getByLabelText('API Key'), 'go-platform-key');
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-        await waitFor(() => expect(createModelConfig).toHaveBeenCalledWith({
-            name: 'OpenCode Go', provider, baseUrl: profile.baseUrl, apiKey: 'go-platform-key', models: { ...profile.defaults, fast: newModel },
-            authMethods: ['platform'], published: true, isDefault: true,
-        }));
-    });
 
-    it('restores a saved platform Go model and switches protocol without creating a new configuration', async () => {
-        const first = OPENCODE_GO_PROFILES['openai-compatible'];
-        const next = OPENCODE_GO_PROFILES['anthropic-compatible'];
-        const saved = { id: 'platform-go', name: 'Saved Go', provider: 'openai-compatible', baseUrl: first.baseUrl, models: first.defaults, apiKeyPreview: 'go-...key', isDefault: true, authMethods: ['platform'] };
-        listModelConfigs.mockResolvedValue([saved]);
-        updateModelConfig.mockResolvedValue({ ...saved, provider: 'anthropic-compatible', baseUrl: next.baseUrl, models: next.defaults });
-        renderSettings();
-        await openPlatformSettingsTab('模型');
-        fireEvent.keyDown(await screen.findByRole('button', { name: 'Saved Go 操作' }), { key: 'ArrowDown' });
-        await userEvent.click(await screen.findByRole('menuitem', { name: '详情' }));
-        expect(screen.getByLabelText('Provider')).toHaveTextContent('OpenCode Go');
-        expect(screen.getByLabelText('协议')).toHaveTextContent('Chat Completions');
-        expect(screen.getByLabelText('API Key')).toHaveAttribute('placeholder', '已保存：go-...key');
-        await userEvent.click(screen.getByLabelText('协议'));
-        await userEvent.click(screen.getByRole('option', { name: 'Anthropic', exact: true }));
-        expect(screen.getByLabelText('Base URL')).toHaveValue(next.baseUrl);
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-        await waitFor(() => expect(updateModelConfig).toHaveBeenCalledWith('platform-go', {
-            name: 'Saved Go', provider: 'anthropic-compatible', baseUrl: next.baseUrl, models: next.defaults,
-            authMethods: ['platform'], published: true, isDefault: true,
-        }));
-        expect(createModelConfig).not.toHaveBeenCalled();
-    });
+
+    it('loads a legacy OpenAI connection as Chat Completions and lets the user choose Responses', async () => {
+ listModelConfigs.mockResolvedValue([{id:'legacy',name:'Saved Gateway',provider:'openai-compatible',baseUrl:'https://gateway.example/v1',models:{balanced:'fixture-model'},apiKeyPreview:'',isDefault:true,authMethods:['platform']}]);
+ renderSettings(); await openPlatformSettingsTab('模型');
+ fireEvent.keyDown(await screen.findByRole('button',{name:'Saved Gateway 操作'}),{key:'ArrowDown'});
+ await userEvent.click(await screen.findByRole('menuitem',{name:'详情'}));
+ expect(screen.getByLabelText('协议')).toHaveTextContent('Chat Completions');
+ await userEvent.click(screen.getByLabelText('协议'));
+ await userEvent.click(await screen.findByRole('option',{name:'Responses'}));
+ await userEvent.click(screen.getByRole('button',{name:'保存设置'}));
+ await waitFor(()=>expect(updateModelConfig).toHaveBeenCalledWith('legacy',expect.objectContaining({apiProtocol:'responses'})));
+});
 
     it('shows the specific outbound policy reason when a model provider cannot be saved', async () => {
         const error = Object.assign(new Error('Outbound URL is not permitted'), {
@@ -1707,6 +1568,7 @@ describe('SettingsMenu model settings', () => {
             authMethods: ['platform'],
             name: 'Existing LLM',
             provider: 'openai-compatible',
+            apiProtocol: 'chat-completions',
             baseUrl: 'https://api.saved.test/v1',
             models: {
                 fast: 'qwen3.5-flash',
@@ -1784,32 +1646,5 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('button', { name: 'Model A 操作' })).toBeInTheDocument();
     });
 
-    it('shows API key only for search providers that need one and saves them from the footer', async () => {
-        getWebToolsConfig.mockResolvedValueOnce({
-            webSearchAdapter: 'tavily',
-        });
-        saveWebToolsConfig.mockResolvedValue({
-            webSearchAdapter: 'brave',
-            braveApiKeyPreview: 'bsa-…cret',
-        });
 
-        renderSettings();
-
-        expect(screen.queryByLabelText('BRAVE_SEARCH_API_KEY')).not.toBeInTheDocument();
-        await openPlatformSettings();
-        await userEvent.click(screen.getByLabelText('搜索后端'));
-        await userEvent.click(screen.getByRole('option', { name: 'Brave' }));
-        await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-
-        await waitFor(() => expect(saveWebToolsConfig).toHaveBeenCalledWith({
-            webSearchAdapter: 'brave',
-            braveApiKey: 'bsa-dashboard-secret',
-        }));
-        expect(screen.queryByText('网页搜索配置已保存；新会话生效。')).not.toBeInTheDocument();
-
-        await userEvent.click(screen.getByLabelText('搜索后端'));
-        await userEvent.click(screen.getByRole('option', { name: 'Exa' }));
-        expect(screen.getByLabelText('EXA_API_KEY')).toBeInTheDocument();
-    });
 });

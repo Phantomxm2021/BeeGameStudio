@@ -47,7 +47,8 @@ function eventToProjectEventMessagesBase(
   const taskId = event.sessionId
   switch (event.type) {
     case 'usage': {
-      const usage = getUsageFromEventPayload(event.payload)
+      const usage = getUsageFromEventPayload(event.payload?.sessionUsage
+        ? { usage: event.payload.sessionUsage } : event.payload)
       return usage ? [{
         type: 'usage',
         task_id: taskId,
@@ -106,8 +107,9 @@ function eventToProjectEventMessagesBase(
           content: phase, task_kind: 'delivery_phase', timestamp: Date.parse(event.createdAt) || now(),
         }]
       }
-      const compacting = subtype === 'status' && status === 'compacting'
-      const compacted = subtype === 'compact_boundary'
+      const nativeCompaction = ['bgs', 'codex'].includes(getPayloadString(event, 'runtime') ?? '')
+      const compacting = (subtype === 'status' || nativeCompaction) && status === 'compacting'
+      const compacted = subtype === 'compact_boundary' || (nativeCompaction && status === 'compacted')
       if (compacting || compacted) {
         const parentToolUseId = getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')
         return [{
@@ -290,7 +292,6 @@ function eventToProjectEventMessagesBase(
         : []
     }
     case 'tool.started': {
-      if (Object.keys(getPayloadRecord(event, 'input')).length === 0) return []
       const startedInput = getPayloadRecord(event, 'input')
       const startedTool = getPayloadString(event, 'toolName') || event.text
       const startedInfo = getToolDisplayInfo(
@@ -333,10 +334,7 @@ function eventToProjectEventMessagesBase(
     case 'tool.progress': {
       const progressInput = getPayloadRecord(event, 'input')
       const progressTool = getPayloadString(event, 'toolName') || event.text
-      const output =
-        typeof event.payload?.output === 'string'
-          ? event.payload.output
-          : event.text
+      const output = getToolOutput(event)
       const progressInfo = getToolDisplayInfo(
         progressTool,
         'running',
@@ -358,7 +356,7 @@ function eventToProjectEventMessagesBase(
           content: formatToolContent(progressInfo),
           tool_status: progressInfo.status,
           tool_detail: progressInfo.detail,
-          tool_output: progressInfo.output,
+          tool_output: output,
           tool_input: progressInput,
           ...getToolDiffFields(event, progressInput),
           artifact_id: progressArtifactPath
@@ -394,10 +392,7 @@ function eventToProjectEventMessagesBase(
           },
         }, workspacePath, userDisplayText, now)
       }
-      const output =
-        typeof event.payload?.output === 'string'
-          ? event.payload.output
-          : event.text
+      const output = getToolOutput(event)
       // The tool has returned a launch receipt, not a subagent result.
       if (event.type === 'tool.completed' && ['agent', 'task'].includes(finishedTool.toLowerCase()) &&
         (event.payload?.nativeBackgroundTask || (/^agentId:\s*\S+/m.test(output) && /^output_file:\s*\S+/m.test(output)))) {
@@ -406,7 +401,8 @@ function eventToProjectEventMessagesBase(
       }
       const finishedInfo = getToolDisplayInfo(
         finishedTool,
-        event.type === 'tool.failed' ? 'failed' : 'completed',
+        event.type === 'tool.failed' || event.payload?.is_error === true ||
+          (Number.isInteger(event.payload?.exitCode) && event.payload?.exitCode !== 0) ? 'failed' : 'completed',
         finishedInput,
         workspacePath,
         output,
@@ -425,8 +421,11 @@ function eventToProjectEventMessagesBase(
           output,
           content: formatToolContent(finishedInfo),
           tool_status: finishedInfo.status,
+          tool_exit_code: Number.isInteger(event.payload?.exitCode) ? event.payload!.exitCode as number : undefined,
+          tool_duration_ms: typeof event.payload?.durationMs === 'number' && Number.isFinite(event.payload.durationMs) && event.payload.durationMs >= 0
+            ? event.payload.durationMs : undefined,
           tool_detail: finishedInfo.detail,
-          tool_output: finishedInfo.output,
+          tool_output: output,
           attachments: normalizeChatAttachments(Array.isArray(event.payload?.attachments)
             ? event.payload.attachments.map(item => item && typeof item === 'object' ? { ...item, projectId } : item) : undefined),
           tool_input: finishedInput,
@@ -635,6 +634,12 @@ function getPermissionRequestMessageId(event: BeeGameEvent): string {
   return `beegame-permission-${event.sessionId}-${event.id}`
 }
 
+function getToolOutput(event: BeeGameEvent): string {
+  const output = event.payload?.output
+  if (typeof output === 'string') return output
+  return output === undefined ? event.text : JSON.stringify(output, null, 2)
+}
+
 function getToolMessageId(event: BeeGameEvent): string {
   const toolUseId = getPayloadString(event, 'toolUseID')
   if (toolUseId) return `beegame-tool-${event.sessionId}-${toolUseId}`
@@ -670,7 +675,11 @@ function getToolDiffFields(
     }
     return undefined
   }
-  const diff = readString('diff') || readString('gitDiff') || readString('git_diff')
+  // Earlier native file-change receipts stored the official diff in output.
+  // This fallback is specific to that producer; shell logs are never guessed.
+  const nativeDiff = ['bgs', 'codex'].includes(String(payload.runtime)) && payload.toolName === 'Edit' && typeof payload.output === 'string' &&
+    /^(?:@@ |diff --git |--- )/m.test(payload.output) ? payload.output : undefined
+  const diff = readString('diff') || readString('gitDiff') || readString('git_diff') || nativeDiff
   const patch = readString('patch')
   const before = readString('before') || readString('oldContent') || readString('old_content') || readString('originalFile') || readString('original_file')
   const after = readString('after') || readString('newContent') || readString('new_content')
@@ -960,6 +969,8 @@ export function projectHistoryMessages(
     toolName: message.tool,
     toolUseId: message.tool_use_id,
     toolStatus: message.tool_status,
+    toolExitCode: message.tool_exit_code,
+    toolDurationMs: message.tool_duration_ms,
     toolDetail: message.tool_detail,
     toolOutput: message.tool_output,
     toolInput: message.tool_input,
@@ -982,8 +993,9 @@ export function projectHistoryMessages(
   for (const message of projectedMessages) {
     const status = message.status
     if (message.type !== 'error' && !(message.type === 'status' && ['idle', 'finished', 'stopped', 'failed'].includes(status || ''))) continue
+    const completedAt = message.timestamp || now()
     history = settleChatActivity(history, { taskId: message.task_id, turnId: message.turnId || message.turn_id,
-      at: message.timestamp || now(), reason: message.type === 'error' || status === 'failed' ? 'failed' : status === 'stopped' ? 'stopped' : 'incomplete' })
+      at: completedAt, completedAt, reason: message.type === 'error' || status === 'failed' ? 'failed' : status === 'stopped' ? 'stopped' : 'incomplete' })
   }
   return history
 }

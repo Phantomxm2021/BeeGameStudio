@@ -160,6 +160,8 @@ export interface Message {
   toolName?: string
   toolUseId?: string
   toolStatus?: 'running' | 'completed' | 'failed'
+  toolExitCode?: number
+  toolDurationMs?: number
   toolDetail?: string
   toolOutput?: string
   /** Explicit file patch supplied by a write/edit tool result. */
@@ -281,6 +283,8 @@ export interface ProjectEventMessage {
 
   /** Structured tool card status */
   tool_status?: 'running' | 'completed' | 'failed'
+  tool_exit_code?: number
+  tool_duration_ms?: number
 
   /** Structured tool card detail, such as command or target path */
   tool_detail?: string

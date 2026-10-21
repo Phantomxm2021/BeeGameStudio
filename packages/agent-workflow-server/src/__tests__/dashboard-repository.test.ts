@@ -24,10 +24,55 @@ afterAll(() => {
 })
 
 describe('DashboardRepository Supabase boundaries', () => {
+  test('model configuration does not require the game Skill catalog to be installed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bgs-intake-without-skills-'))
+    const previous = process.env.BEEGAME_BUILTIN_SKILLS_DIR
+    const missingCatalog = join(root, 'missing-game-skills')
+    const repository = new DashboardRepository({
+      dashboardDataRoot: root, getUserDataRoot: () => root, skillsConfig: false,
+    })
+    try {
+      process.env.BEEGAME_BUILTIN_SKILLS_DIR = missingCatalog
+      const env = await repository.getRuntimeEnv(root)
+      expect(env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR).toBe(missingCatalog)
+      expect(existsSync(missingCatalog)).toBe(false)
+    } finally {
+      if (previous === undefined) delete process.env.BEEGAME_BUILTIN_SKILLS_DIR
+      else process.env.BEEGAME_BUILTIN_SKILLS_DIR = previous
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('stored stdio auto-start checks current owner permissions, including revocation and identity mismatch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bgs-mcp-host-permission-'))
+    let user = { id: 'alice', role: 'owner' as 'owner' | 'developer' }
+    const repository = new DashboardRepository({ dashboardDataRoot: root, getUserDataRoot: () => root,
+      skillsConfig: false, resolveRuntimeUser: async (_id, token) => {
+        expect(token).toBe('synthetic-owner-token')
+        return user
+      } })
+    try {
+      // Simulates a previously saved entry. It must not gain trust merely by existing in storage.
+      upsertMcpServer({ name: 'Stored host command', enabled: true, autoStart: true, scope: 'global',
+        transport: 'stdio', command: 'never-executed' }, { dataDir: root })
+      expect(JSON.parse((await repository.getRuntimeEnv(root, 'alice', 'synthetic-owner-token'))
+        .BEEGAME_NATIVE_MCP_SERVERS_JSON)).toHaveLength(1)
+      user = { id: 'alice', role: 'developer' }
+      await expect(repository.getRuntimeEnv(root, 'alice', 'synthetic-owner-token')).rejects.toThrow('workspace.manage')
+      user = { id: 'bob', role: 'owner' }
+      await expect(repository.getRuntimeEnv(root, 'alice', 'synthetic-owner-token')).rejects.toThrow('workspace.manage')
+      const unbound = new DashboardRepository({ dashboardDataRoot: root, getUserDataRoot: () => root, skillsConfig: false })
+      await expect(unbound.getRuntimeEnv(root, 'alice')).rejects.toThrow('workspace.manage')
+      await expect(repository.upsertMcpServer(new Request('http://fixture'), { id: 'alice', role: 'developer' }, {
+        name: 'Host', transport: 'stdio', command: 'never-executed', enabled: true, scope: 'global',
+      })).rejects.toThrow('workspace.manage')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
   test('runtime MCP configuration remains owner-scoped and public listings redact credentials', async()=>{
     const root = await mkdtemp(join(tmpdir(),'bgs-runtime-mcp-owner-'))
     const a = join(root,'owner-a'), b = join(root,'owner-b')
-    const repository = new DashboardRepository({dashboardDataRoot:root,getUserDataRoot:()=>a,skillsConfig:false})
+    const repository = new DashboardRepository({dashboardDataRoot:root,getUserDataRoot:()=>a,skillsConfig:false,
+      resolveRuntimeUser:async id=>({id,role:'owner'})})
     try {
       upsertMcpServer({name:'Fixture',enabled:true,transport:'stdio',scope:'beegame',command:'fixture',
         autoStart:true,env:[{key:'TOKEN',value:'synthetic-private-token'}]}, {dataDir:a})
@@ -100,8 +145,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     try {
       saveRuntimeSettingsConfig(
         {
-          skillSearchEnabled: true,
-          mcpSkillsEnabled: false,
+            mcpSkillsEnabled: false,
         },
         { dataDir: dataRoot },
       )
@@ -109,10 +153,8 @@ describe('DashboardRepository Supabase boundaries', () => {
       const ownerAEnv = await repository.getRuntimeEnv(userARoot, 'owner-a')
       const ownerBEnv = await repository.getRuntimeEnv(userBRoot, 'owner-b')
 
-      expect(ownerAEnv.SKILL_SEARCH_ENABLED).toBe('1')
-      expect(ownerBEnv.SKILL_SEARCH_ENABLED).toBe('1')
-      expect(ownerAEnv.FEATURE_MCP_SKILLS).toBe('0')
-      expect(ownerBEnv.FEATURE_MCP_SKILLS).toBe('0')
+      expect(ownerAEnv.BGS_HOME).toBe(join(userARoot,'.runtime','app','bgs'))
+      expect(ownerBEnv.BGS_HOME).toBe(join(userBRoot,'.runtime','app','bgs'))
       expect(ownerAEnv.BEEGAME_CONFIG_DIR).not.toBe(ownerBEnv.BEEGAME_CONFIG_DIR)
       expect(ownerAEnv.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR)
         .toBe(ownerBEnv.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR)
@@ -120,15 +162,8 @@ describe('DashboardRepository Supabase boundaries', () => {
         'game-art-director-expert', 'SKILL.md'))).toBe(true)
       expect(existsSync(join(ownerBEnv.BEEGAME_CONFIG_DIR,
         'skills', 'game-art-director-expert'))).toBe(false)
-      await expect(
-        readFile(join(ownerAEnv.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
-      ).resolves.toContain('"skillSearchEnabled": true')
-      await expect(
-        readFile(join(ownerBEnv.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
-      ).resolves.toContain('"skillSearchEnabled": true')
-      await expect(
-        readFile(join(ownerBEnv.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
-      ).resolves.toContain('"mcpSkillsEnabled": false')
+      expect(existsSync(join(ownerAEnv.BEEGAME_CONFIG_DIR,'settings.json'))).toBe(false)
+      expect(existsSync(join(ownerBEnv.BEEGAME_CONFIG_DIR,'settings.json'))).toBe(false)
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -192,16 +227,8 @@ describe('DashboardRepository Supabase boundaries', () => {
         p_data_dir: userRoot,
       })
       expect(env.OPENAI_BASE_URL).toBe('https://provider.test/v1')
-      expect(env.WEB_SEARCH_ADAPTER).toBe('exa')
-      expect(JSON.parse(await readFile(join(env.BEEGAME_CONFIG_DIR!, 'settings.json'), 'utf8'))).toMatchObject({
-        webSearchAdapter: 'exa', webFetchAdapter: 'http',
-        exaEndpointUrl: 'https://search.test/mcp', webFetchHttpTimeoutMs: 12000,
-      })
-      expect(env.FEATURE_MCP_SKILLS).toBe('0')
-      expect(env.SKILL_SEARCH_ENABLED).toBe('1')
-      expect(JSON.parse(env.BEEGAME_RUNTIME_SETTINGS_JSON!)).toMatchObject({
-        verificationAgentEnabled: true, agentTeamsEnabled: false,
-      })
+      expect(env).not.toHaveProperty('WEB_SEARCH_ADAPTER')
+      expect(existsSync(join(env.BEEGAME_CONFIG_DIR!, 'settings.json'))).toBe(false)
       expect(env.BEEGAME_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
       expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR')
       expect(env).not.toHaveProperty('BEEGAME_PROJECT_CONFIG_DIR_NAME')
@@ -211,9 +238,6 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(env.NPM_CONFIG_USERCONFIG).toBe(
         join(userRoot, '.runtime', 'tooling', 'npmrc'),
       )
-      await expect(
-        readFile(join(env.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
-      ).resolves.toContain('"autoAllowBashIfSandboxed": true')
     } finally {
       await rm(dataRoot, { recursive: true, force: true })
     }
@@ -452,17 +476,13 @@ describe('DashboardRepository Supabase boundaries', () => {
         repository.loadRuntimeSettings(request, user),
       ).resolves.toEqual({
         ...resolveRuntimeFeatureSettings({}),
-        skillSearchEnabled: true,
       })
       await expect(
         repository.saveRuntimeSettings(request, user, {
-          webBrowserToolEnabled: true,
-          verificationAgentEnabled: true,
+          resourceLibraryEnabled: false,
         }),
       ).resolves.toEqual({
-        ...resolveRuntimeFeatureSettings({ verificationAgentEnabled: true }),
-        skillSearchEnabled: true,
-        webBrowserToolEnabled: true,
+        resourceLibraryEnabled: false,
       })
 
       expect(
@@ -636,6 +656,7 @@ describe('DashboardRepository Supabase boundaries', () => {
                 owner_id: 'platform-owner',
                 name: 'Platform Default',
                 provider: 'openai-compatible',
+                api_protocol: 'responses',
                 base_url: 'https://llm.example/v1',
                 api_key_ciphertext: 'sk-new-secret',
                 models: { balanced: 'balanced-model' },
@@ -665,16 +686,18 @@ describe('DashboardRepository Supabase boundaries', () => {
           modelConfigOwnerId: 'platform-owner',
         },
         'llm_platform_default',
-        { apiKey: 'sk-new-secret' },
+        { apiKey: 'sk-new-secret', apiProtocol: 'responses' },
       )
 
       expect(updated?.apiKeyPreview).toBe('sk-n...cret')
+      expect(updated?.apiProtocol).toBe('responses')
       expect(calls[0]?.method).toBe('PATCH')
       expect(calls[0]?.url).toContain('owner_id=eq.platform-owner')
       expect(calls[0]?.url).not.toContain('owner_id=eq.owner-auth-user')
       expect(calls[0]?.body).toEqual(
         expect.objectContaining({
           api_key_ciphertext: expect.stringMatching(/^v1\./u),
+          api_protocol: 'responses',
         }),
       )
     } finally {

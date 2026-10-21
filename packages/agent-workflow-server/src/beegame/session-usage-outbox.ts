@@ -7,10 +7,17 @@ type BillingInput = Parameters<NonNullable<BeeGameSessionUsageBillingBackend['re
 type BillingResult = Awaited<ReturnType<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>>
 export type PendingSessionUsage = { userId: string; input: Omit<BillingInput, 'authToken'> }
 
+export class UsageOutboxPersistenceError extends Error {
+  constructor(cause: unknown) {
+    super('Usage could not be retained for settlement', { cause })
+    this.name = 'UsageOutboxPersistenceError'
+  }
+}
+
 /** Durable usage snapshots; never stores credentials or schedules model work. */
 export class SessionUsageOutbox {
   private readonly pending = new Map<string, PendingSessionUsage[]>()
-  private readonly active = new Map<string, Promise<void>>()
+  private readonly active = new Map<string, Promise<Map<string, BillingResult>>>()
   private readonly root: string
   private readonly timer: ReturnType<typeof setInterval>
 
@@ -33,20 +40,29 @@ export class SessionUsageOutbox {
     void this.flushAll()
   }
 
-  submit(entry: PendingSessionUsage): Promise<void> {
+  async submit(entry: PendingSessionUsage): Promise<BillingResult> {
     const key = this.key(entry)
     const entries = this.pending.get(key) ?? []
     if (!entries.some(item => item.input.idempotencyKey === entry.input.idempotencyKey)) {
       // Save before either remote operation. A lost response is safely replayed
       // with the same idempotency key after restart.
-      this.save(key, [...entries, entry])
+      try { this.save(key, [...entries, entry]) } catch (error) { throw new UsageOutboxPersistenceError(error) }
     }
-    return this.flush(key)
+    const receipts = await this.flush(key)
+    const receipt = receipts.get(entry.input.idempotencyKey)
+    if (!receipt) throw new Error('Billing did not return the submitted usage receipt')
+    return receipt
   }
 
   async dispose(): Promise<void> {
     clearInterval(this.timer)
     await Promise.allSettled(this.active.values())
+  }
+
+  async settleForUser(userId: string): Promise<void> {
+    await Promise.all([...this.pending.entries()]
+      .filter(([, entries]) => entries.some(entry => entry.userId === userId))
+      .map(([key]) => this.flush(key)))
   }
 
   private key(entry: PendingSessionUsage): string {
@@ -66,10 +82,11 @@ export class SessionUsageOutbox {
     }
   }
 
-  private flush(key: string): Promise<void> {
+  private flush(key: string): Promise<Map<string, BillingResult>> {
     const running = this.active.get(key)
-    if (running) return running.then(() => this.pending.has(key) ? this.flush(key) : undefined)
+    if (running) return running.then(receipts => this.pending.has(key) ? this.flush(key) : receipts)
     const run = Promise.resolve().then(async () => {
+      const receipts = new Map<string, BillingResult>()
       while (this.pending.has(key)) {
         const entry = this.pending.get(key)![0]!
         const recorded = await this.backend.recordUsage!(entry.userId, entry.input)
@@ -79,8 +96,10 @@ export class SessionUsageOutbox {
           throw new Error('Billing did not confirm the pending usage key')
         // New terminal bills may have arrived while the request was in flight.
         this.save(key, this.pending.get(key)!.filter(item => item.input.idempotencyKey !== entry.input.idempotencyKey))
+        receipts.set(entry.input.idempotencyKey, debited ?? recorded)
         this.settled(entry, recorded, debited)
       }
+      return receipts
     })
     this.active.set(key, run)
     void run.then(() => this.active.delete(key), () => this.active.delete(key))

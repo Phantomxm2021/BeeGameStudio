@@ -1,16 +1,18 @@
 import { act, render } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DashboardView } from './DashboardView';
 
-const { loadRuntime, refreshCredits, taskEvent, system, project, i18n } = vi.hoisted(() => {
+const { loadRuntime, refreshCredits, taskEvent, system, project, i18n, chat, preview } = vi.hoisted(() => {
   const loadRuntime = vi.fn<(projectId: string) => Promise<void>>().mockResolvedValue(undefined);
   return {
     loadRuntime,
+    chat: { sessionTokenUsage: undefined as undefined | { prompt_tokens: number; completion_tokens: number; cache_read_tokens?: number; total_tokens: number } },
+    preview: vi.fn((_props: Record<string, unknown>) => null),
     refreshCredits: vi.fn().mockResolvedValue(undefined),
     taskEvent: { current: undefined as undefined | ((type: string) => void) },
     system: { authenticationStatus: 'authenticated', currentUser: { id: 'user-a' },
       isSyncing: false, isDark: false, hasPermission: () => true },
-    project: { projects: [], pendingPermissions: [], projectStatus: { project_id: 'A', phase: 'idle' },
+    project: { projects: [], pendingPermissions: [], projectStatus: { project_id: 'A', phase: 'idle', context: undefined as undefined | { token_budget: Record<string, number> } },
       isOpeningProject: false, loadProjectRuntimeState: loadRuntime },
     i18n: { getFixedT: () => (key: string) => key },
   };
@@ -24,11 +26,17 @@ vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showWa
 vi.mock('../../hooks/useCredits', () => ({ useCredits: () => ({ creditBalance: null, creditSummary: null, refreshCredits }) }));
 vi.mock('../../hooks/useChat', () => ({ useChat: (options: { onTaskEvent: (type: string) => void }) => {
   taskEvent.current = options.onTaskEvent;
-  return { isLoading: false, isStopping: false, wsState: 'connected' };
+  return { isLoading: false, isStopping: false, wsState: 'connected', ...chat };
 } }));
 vi.mock('../../services/api', () => ({ api: { listProjectDeployments: vi.fn().mockResolvedValue([]) } }));
-vi.mock('./BeeGameLivePreviewPage', () => ({ BeeGameLivePreviewPage: () => null }));
+vi.mock('./BeeGameLivePreviewPage', () => ({ BeeGameLivePreviewPage: preview }));
 vi.mock('./RightSidebar', () => ({ RightSidebar: () => null }));
+
+beforeEach(() => {
+  loadRuntime.mockClear(); refreshCredits.mockClear(); preview.mockClear();
+  project.projectStatus = { project_id: 'A', phase: 'idle', context: undefined };
+  chat.sessionTokenUsage = undefined;
+});
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
@@ -48,4 +56,19 @@ it('routes runtime events to the scheduler and billing events to credits without
   expect(loadRuntime).toHaveBeenCalledTimes(2);
   unmount();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it('shows received session tokens immediately while runtime and billing snapshots remain stale', async () => {
+  const { rerender, unmount } = render(<DashboardView projectId="A" projectName="test" lang="en" onSetLang={vi.fn()} />);
+  await act(async () => {});
+  expect(preview.mock.lastCall?.[0].tokenUsage).toBeNull();
+  project.projectStatus = { project_id: 'A', phase: 'running', context: { token_budget: { input_tokens: 20, output_tokens: 1, total_tokens: 21 } } };
+  chat.sessionTokenUsage = { prompt_tokens: 120, completion_tokens: 30, cache_read_tokens: 400, total_tokens: 550 };
+  rerender(<DashboardView projectId="A" projectName="test" lang="en" onSetLang={vi.fn()} />);
+  expect(preview.mock.lastCall?.[0]).toMatchObject({ tokenUsage: chat.sessionTokenUsage, tokenUsageScope: 'session' });
+  chat.sessionTokenUsage = { ...chat.sessionTokenUsage, prompt_tokens: 150, total_tokens: 580 };
+  rerender(<DashboardView projectId="A" projectName="test" lang="en" onSetLang={vi.fn()} />);
+  expect(preview.mock.lastCall?.[0].tokenUsage).toEqual(chat.sessionTokenUsage);
+  unmount();
+  chat.sessionTokenUsage = undefined;
 });

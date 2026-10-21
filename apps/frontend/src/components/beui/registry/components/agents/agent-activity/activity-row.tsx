@@ -219,16 +219,20 @@ function TraceIcon({ kind }: { kind: AgentActivityTrace["kind"] }) {
 function TraceRow({ item }: { item: AgentActivityTrace }) {
   const [open, setOpen] = useState(false);
   const contentId = useId();
+  const metaId = useId();
   if (item.content !== undefined || item.onSelect) {
     return <div className="min-w-0">
       <button type="button"
+        aria-label={typeof item.label === 'string' ? item.label : undefined}
+        aria-describedby={item.meta !== undefined ? metaId : undefined}
         aria-expanded={item.content !== undefined ? open : undefined}
         aria-controls={item.content !== undefined ? contentId : undefined}
         onClick={() => item.onSelect ? item.onSelect() : setOpen(!open)}
-        className="group flex min-h-9 max-w-full items-start gap-2.5 rounded-md py-1.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        className="group flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-md py-1.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <span aria-hidden="true" className="mt-1 grid size-4 shrink-0 place-items-center opacity-75">{item.icon ?? <TraceIcon kind={item.kind} />}</span>
-        <span className="min-w-0 line-clamp-2 break-words leading-6 [overflow-wrap:anywhere]">{item.label}</span>
-        <ChevronRight aria-hidden="true" className={cn("mt-1 size-4 shrink-0 opacity-70 transition-transform", open && "rotate-90")} />
+        <span className={cn('min-w-0 flex-1 leading-6', item.meta !== undefined ? 'truncate' : 'line-clamp-2 break-words [overflow-wrap:anywhere]')}>{item.label}</span>
+        {item.meta !== undefined && <span id={metaId} className="shrink-0 text-xs tabular-nums">{item.meta}</span>}
+        <ChevronRight aria-hidden="true" className={cn("size-4 shrink-0 opacity-70 transition-transform", open && "rotate-90")} />
       </button>
       {item.content !== undefined && open && <div id={contentId} className="ml-[26px] min-w-0 pb-3 pt-1 text-sm leading-relaxed text-muted-foreground">{item.content}</div>}
     </div>;

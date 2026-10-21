@@ -133,12 +133,13 @@ type BeeGameUsageSummaryResponse = {
   creditsMicro: number
 }
 
-const getUsageWallet = async (): Promise<{
+const getUsageWallet = async (background = false): Promise<{
   userId: string
   includedCreditsMicro: number
   consumedCreditsMicro: number
   balanceCreditsMicro: number
-}> => apiClient.get('/api/usage-wallet')
+}> => background ? apiClient.get('/api/usage-wallet', { headers: { 'Hide-Error-Toast': 'true' } })
+  : apiClient.get('/api/usage-wallet')
 
 const toCreditBalance = (
   wallet: Awaited<ReturnType<typeof getUsageWallet>>,
@@ -164,8 +165,8 @@ const toCreditBalance = (
   }
 }
 
-export const getCreditBalance = async (): Promise<BeeGameCreditBalance> =>
-  toCreditBalance(await getUsageWallet())
+export const getCreditBalance = async (background = false): Promise<BeeGameCreditBalance> =>
+  toCreditBalance(await getUsageWallet(background))
 
 const toUsageEvent = (
   event: BeeGameUsageEventResponse,
@@ -191,15 +192,18 @@ export const getUsageEvents = async (): Promise<BeeGameUsageEvent[]> =>
 
 const requestUsageSummary = (
   projectId?: string,
+  background = false,
 ): Promise<BeeGameUsageSummaryResponse> =>
   apiClient.get('/api/usage/summary', {
+    ...(background ? { headers: { 'Hide-Error-Toast': 'true' } } : {}),
     ...(projectId ? { params: { projectId } } : {}),
   })
 
 export const getCreditSummary = async (
   projectId?: string,
+  background = false,
 ): Promise<BeeGameUsageSummary> => {
-  const summary = await requestUsageSummary(projectId)
+  const summary = await requestUsageSummary(projectId, background)
   return {
     entriesCount: summary.eventsCount,
     inputTokens: Number(summary.promptTokens) || 0,

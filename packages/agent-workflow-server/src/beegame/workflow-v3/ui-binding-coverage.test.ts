@@ -69,10 +69,14 @@ test.each(['bound', 'wrong-frame', 'missing-resource', 'missing-file', 'no-bindi
             { document, nodeId: 'play', status: 'passed', viewport: [960, 540] },
           ] }) }],
       }
-      const before = JSON.stringify(record), summary = measurementSummary(record, false)
+      const before = JSON.stringify(record), summary = measurementSummary(record, true)
       const reported = summary.uiBindingCoverage.nodes!
       expect(reported.find(row => row.nodeId === 'play')!.observations.map((item: any) => item.checkId)).toEqual(['ui-data-consumption'])
       expect(reported.find(row => row.nodeId === 'badge')!.observations).toEqual([])
+      const compact = measurementSummary(record, false)
+      expect(compact.uiBindingCoverage).toMatchObject({ nodeCount: 4, unobservedNodeCount: 3, nodesScope: 'issues-only' })
+      expect(compact.uiBindingCoverage.nodes!.map(node => node.nodeId)).toEqual(rows.filter(row => row.issues.length || row.resolution === 'invalid' || row.resolution === 'unverified').map(row => row.nodeId))
+      expect(compact.checks.find(check => check.id === 'content-resources')!.coverage).not.toHaveProperty('uiNodeBindings')
       expect(summary.uiBindingCoverage.limitation).toContain('do not verify image/frame consumption')
       expect(summary.quality).toBe('unverified')
       expect(summary.deliveryEligible).toBe(false)

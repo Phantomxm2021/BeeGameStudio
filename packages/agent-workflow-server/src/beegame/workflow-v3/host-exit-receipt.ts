@@ -9,7 +9,7 @@ import { readHostBootIdentity, type HostBootIdentity } from './host-boot-identit
 
 // Exit facts only: never checks, outputs, an acceptance verdict or a request
 // to replay. Signature key stays in the host; project files are not evidence.
-export type HostExitFacts = Pick<AgentTurn, 'quiescedAt' | 'notStarted' | 'turnId' | 'nativeSessionId' | 'usage' | 'skillUses' | 'designFileChanges'>
+export type HostExitFacts = Pick<AgentTurn, 'quiescedAt' | 'notStarted' | 'turnId' | 'nativeSessionId' | 'nativeRuntime' | 'usage' | 'skillUses' | 'designFileChanges'>
 export type HostExitReceipts = {
   save(run: Run, facts: HostExitFacts): Promise<void>
   read(run: Run): Promise<HostExitFacts | undefined>
@@ -19,7 +19,7 @@ export type HostExitReceipts = {
 }
 const factsSchema = z.object({
   quiescedAt: z.string().datetime(), notStarted: z.literal(true).optional(),
-  turnId: z.string().optional(), nativeSessionId: z.string().optional(), usage: z.unknown().optional(),
+  nativeRuntime: z.literal('bgs').optional(), turnId: z.string().optional(), nativeSessionId: z.string().optional(), usage: z.unknown().optional(),
   skillUses: z.array(z.unknown()).optional(),
   designFileChanges: z.object({ scope: z.literal('design-revision-files'), attemptId: z.string(), requestKey: z.string(),
     status: z.enum(['observed', 'unverified']), files: z.array(z.object({path: z.string(), change: z.enum(['added', 'modified', 'deleted'])})),

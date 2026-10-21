@@ -59,11 +59,12 @@ test('imports, old Runs and unsupported engines are not migrated; conflicts, ali
   try {
     const old={...f.run,creation:{initialDelivery:'design-led-first-version' as const,editableContent:true,webStarter:'react-canvas-2d-v1' as const}}
     expect(await installManagedWebBoot(old,new AbortController().signal)).toBeUndefined()
-    await writeFile(join(f.workspace,'index.html'),'Existing application')
+    await mkdir(join(f.workspace,'src'))
+    await writeFile(join(f.workspace,'src/bgs-entry.mjs'),'Existing application')
     await expect(installManagedWebBoot(f.run,new AbortController().signal)).rejects.toThrow('existing source preserved')
-    expect(await readFile(join(f.workspace,'index.html'),'utf8')).toBe('Existing application')
-    expect(await Bun.file(join(f.workspace,'src/bgs-entry.mjs')).exists()).toBe(false)
-    await rm(join(f.workspace,'index.html'))
+    expect(await readFile(join(f.workspace,'src/bgs-entry.mjs'),'utf8')).toBe('Existing application')
+    expect(await Bun.file(join(f.workspace,'index.html')).exists()).toBe(false)
+    await rm(join(f.workspace,'src'),{recursive:true})
     await mkdir(join(f.root,'other'));await symlink(join(f.root,'other'),join(f.workspace,'src'))
     await expect(installManagedWebBoot(f.run,new AbortController().signal)).rejects.toThrow('existing source preserved')
     expect(await Bun.file(join(f.workspace,'index.html')).exists()).toBe(false)
@@ -93,3 +94,22 @@ test('a generated game missing the factory does not become a passing runtime jus
     expect(JSON.parse(smoke.observation).errors.join(' ')).toContain('must export createGame')
   }finally{await f.close()}
 },15000)
+
+
+test('project HTML remains editable in new and legacy snapshots while adapters stay protected',async()=>{
+  const f=await fixture()
+  try {
+    await writeFile(join(f.workspace,'index.html'),'<!doctype html><title>My project</title><div id="root"></div><script type="module" src="./src/bgs-entry.mjs"></script>')
+    const webBoot=await installManagedWebBoot(f.run,new AbortController().signal)
+    const run={...f.run,webBoot}
+    expect(await readFile(join(f.workspace,'index.html'),'utf8')).toContain('My project')
+    const legacy={...run,webBoot:{...webBoot!,files:[{path:'index.html',sha256:'0'.repeat(64)},...webBoot!.files]}}
+    await writeFile(join(f.workspace,'index.html'),'<!doctype html><title>Updated title</title>')
+    await assertManagedWebBoot(run,true)
+    await assertManagedWebBoot(legacy,true)
+    await installManagedWebBoot(legacy,new AbortController().signal)
+    expect(await readFile(join(f.workspace,'index.html'),'utf8')).toContain('Updated title')
+    await writeFile(join(f.workspace,'src/bgs-storage.mjs'),'Changed adapter')
+    await expect(assertManagedWebBoot(legacy,true)).rejects.toThrow('startup/storage wiring')
+  } finally {await f.close()}
+})

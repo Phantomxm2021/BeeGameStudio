@@ -55,7 +55,7 @@ describe('billing app error handling', () => {
   test('logs one full failure and aggregates repeated billing failures', async () => {
     const repository = {
       debitRealTimeUsageForUser: async () => {
-        throw new Error('Insufficient realtime usage credits')
+        throw new Error('Synthetic persistent billing outage')
       },
     } as unknown as BeeGameBillingRouteRepository
     const app = createBeeGameBillingRouteApp({

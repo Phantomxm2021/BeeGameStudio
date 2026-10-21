@@ -12,10 +12,9 @@ test('capability API returns defaults and round-trips both states under existing
     currentUserResolver: async () => ({ id: 'fixture-owner', role: 'owner' }),
     registerCleanup: cleanup => cleanups.push(cleanup),
   })
-  const fields = ['autoMemoryEnabled', 'autoDreamEnabled', 'verificationAgentEnabled',
-    'agentTeamsEnabled', 'promptSuggestionEnabled', 'awaySummaryEnabled', 'coordinatorModeEnabled']
+  const fields = ['resourceLibraryEnabled']
   try {
-    const defaults = Object.fromEntries(fields.map(key => [key, false]))
+    const defaults = Object.fromEntries(fields.map(key => [key, true]))
     expect(await (await app.request('/api/runtime-settings')).json()).toMatchObject(defaults)
     for (const enabled of [true, false]) {
       const config = Object.fromEntries(fields.map(key => [key, enabled]))

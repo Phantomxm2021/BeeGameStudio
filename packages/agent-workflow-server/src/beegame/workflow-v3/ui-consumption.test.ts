@@ -2,12 +2,49 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { checkIsCurrent } from './checks'
+import { checkIsCurrent, versionsMatch } from './checks'
 import { runChecks } from './checker-test-driver'
-import { uiLayoutFixture } from '../fixtures/layout-fixture'
+import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import type { TaskSpec } from './state'
 import { prepareUiProbes } from './ui-consumption'
 import { resolveUiNodesForViewport } from '../../../../scene-editor/src/ui-responsive'
+
+test('UI consumption uses the saved Scene camera and tracks its packed identity', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-ui-consumption-camera-'))
+  try {
+    const ui: any = uiLayoutFixture(), scene = sceneLayoutFixture()
+    ui.data.nodes[0].data.layoutCamera = { nodeId: 'game', path: 'content/scenes/level.json' }
+    ui.data.nodes.push(
+      { id: 'game', role: 'container', parentId: 'root', layout: { position: [20,20], size: [500,280] } },
+      { id: 'plane', role: 'container', parentId: 'game', data: { space: 'camera-reference-2d' },
+        layout: { size: [960,540], item: { absolute: true } } },
+      { id: 'prompt', role: 'text', parentId: 'plane', text: 'World label', layout: { position: [100,100], size: [100,30] } },
+    )
+    for (const prefix of ['', 'dist/']) {
+      await mkdir(join(root, prefix+'content/ui'), { recursive: true })
+      await mkdir(join(root, prefix+'content/scenes'), { recursive: true })
+      await writeFile(join(root, prefix+'content/ui/menu.json'), JSON.stringify(ui))
+      await writeFile(join(root, prefix+'content/scenes/level.json'), JSON.stringify(scene))
+    }
+    await writeFile(join(root, 'content/index.json'), JSON.stringify({ schema:'beegame-content-package.v2', id:'fixture',
+      dimension:'2d', entryScene:'level', files:['ui/menu.json','scenes/level.json'], documents:[
+        { id:'menu', kind:'ui-screen', path:'ui/menu.json', loadPhase:'startup' },
+        { id:'level', kind:'scene-2d', path:'scenes/level.json', loadPhase:'startup' },
+      ] }))
+    const task = { runtimeArtifact:'dist', uiProbes:[{ document:'content/ui/menu.json', nodeId:'prompt', selector:'#prompt', viewport:[600,360] as [number,number] }] }
+    const result: any = { inputs:[] }
+    const [probe] = await prepareUiProbes(root, task, result)
+    expect(probe!.before.right - probe!.before.left).toBeCloseTo(100 * 280 / 540, 4)
+    expect(probe!.variants.length).toBeGreaterThan(0)
+    expect(result.inputs.map((input:any)=>input.path)).toContain('content/scenes/level.json')
+    expect(result.inputs.map((input:any)=>input.path)).toContain('dist/content/scenes/level.json')
+    expect(await versionsMatch(root, result.inputs)).toBe(true)
+    await writeFile(join(root,'dist/content/scenes/level.json'), JSON.stringify({...scene,id:'wrong-copy'}))
+    await expect(prepareUiProbes(root, task, {inputs:[]} as any)).rejects.toThrow('Packed Scene differs')
+    expect(await versionsMatch(root, result.inputs)).toBe(false)
+    expect(await readFile(join(root,'content/ui/menu.json'),'utf8')).toBe(JSON.stringify(ui))
+  } finally { await rm(root, { recursive:true, force:true }) }
+})
 
 for (const mode of ['shown','hidden','ignore-visibility','ignore-width','partial-values'] as const)
   test('declared UI binding scenario observes actual visibility and geometry: '+mode, async()=>{

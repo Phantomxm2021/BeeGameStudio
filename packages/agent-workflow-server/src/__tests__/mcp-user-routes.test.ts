@@ -14,12 +14,14 @@ test('ordinary users manage only their own MCP entries without host discovery ac
     modelConfigStore: false,
     skillsConfig: false,
     currentUser: { id, role: 'viewer' },
+    outboundTargetResolver: async value => ({ url: new URL(value), addresses: ['93.184.216.34'],
+      lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) }),
     registerCleanup: cleanup => cleanups.push(cleanup),
   })
   const alice = makeApp('alice')
   const bob = makeApp('bob')
   const body = {
-    name: 'My MCP', enabled: true, transport: 'stdio', scope: 'beegame', command: 'echo',
+    name: 'My MCP', enabled: true, transport: 'http', scope: 'beegame', url: 'https://mcp.example.test',
   }
   try {
     const created = await alice.request('/api/mcp-servers', {
@@ -27,12 +29,32 @@ test('ordinary users manage only their own MCP entries without host discovery ac
       body: JSON.stringify({ ...body, id: 'injected-id' }),
     })
     expect(created.status).toBe(200)
-    // Managing one's own configuration does not grant host process execution.
+    for (const route of ['/api/mcp-servers', '/api/mcp-servers/test']) {
+      const legacy = await alice.request(route, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...body, transport: 'sse' }) })
+      expect(legacy.status).toBe(400)
+      expect(await legacy.text()).toContain('Streamable HTTP')
+    }
+    // Saving, updating, and testing all enforce the same host execution boundary.
+    for (const transport of ['stdio', undefined, null, 1, {}, []]) {
+      expect((await alice.request('/api/mcp-servers', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Host', command: 'never-executed', autoStart: true, transport }),
+      })).status).toBe(403)
+      expect((await alice.request('/api/mcp-servers/test', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Host', command: 'never-executed', transport }),
+      })).status).toBe(403)
+    }
     expect((await alice.request('/api/mcp-servers/test', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, transport: 'stdio', command: 'never-executed' }),
     })).status).toBe(403)
     const saved = await created.json() as { id: string; name: string }
     expect(saved.id).not.toBe('injected-id')
+    expect((await alice.request(`/api/mcp-servers/${saved.id}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, transport: 'stdio', command: 'never-executed', autoStart: true }),
+    })).status).toBe(403)
     expect((await (await alice.request('/api/mcp-servers')).json()).length).toBe(1)
     expect(await (await bob.request('/api/mcp-servers')).json()).toEqual([])
     expect((await bob.request(`/api/mcp-servers/${saved.id}`, {

@@ -2,8 +2,6 @@ import { mkdir, realpath, stat } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { nativeTaskToolEnvironment } from '@bee-game-studio/agent-workflow/native-task-access'
-import { standardCliProvider } from '@bee-game-studio/agent-workflow/standard-cli-provider'
 import { nativeSessionTemporaryPath, nativeSessionOutputPath } from './native-runtime-process-path'
 import { sharedPlaywright, preparePreviewRecorder } from './shared-playwright'
 import { sharedSharp, sharedFont } from './shared-sharp'
@@ -81,13 +79,18 @@ export async function projectExecutionAccess(input: {
     throw new Error('Project execution directories must remain inside the workspace')
   await preparePreviewRecorder(resolve(temporary, 'browsers'))
   const environment: Record<string, string> = {
-    ...nativeTaskToolEnvironment(temporary),
-    CLAUDE_CODE_TMPDIR: nativeOutput,
+    TMPDIR: temporary,
+    // zsh heredocs use TMPPREFIX, independently of TMPDIR's safe location.
+    TMPPREFIX: resolve(temporary, 'zsh'),
+    TEMP: temporary,
+    TMP: temporary,
     GIT_TEMPLATE_DIR: templates,
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_CONFIG_NOSYSTEM: '1',
     XDG_CACHE_HOME: resolve(temporary, 'cache'),
     XDG_CONFIG_HOME: resolve(temporary, 'config'),
+    NPM_CONFIG_CACHE: resolve(temporary, 'npm-cache'),
+    npm_config_cache: resolve(temporary, 'npm-cache'),
     NPM_CONFIG_USERCONFIG: '/dev/null',
     npm_config_userconfig: '/dev/null',
     PLAYWRIGHT_BROWSERS_PATH: resolve(temporary, 'browsers'),
@@ -128,43 +131,17 @@ export async function projectExecutionAccess(input: {
       if (canonical) { readPaths.push(canonical); references.push(canonical) }
     }
   }
-  const { modelType } = standardCliProvider(input.environment)
-  const settings = {
-    ...(modelType ? { modelType } : {}),
-    // Shell sandbox settings do not constrain native file tools. Route every
-    // file mutation through the same host workspace boundary as file reads.
-    permissions: { ask: [...new Set(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', ...input.scopedTools ?? []])] },
-    ...(input.scopedTools ? { disableAllHooks: true } : {}),
-    sandbox: {
-      enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: !input.scopedTools,
-      allowUnsandboxedCommands: false, excludedCommands: [],
-      network: { allowedDomains: [], allowLocalBinding: true },
-      filesystem: { denyRead: ['/'], allowRead: [root, ...readPaths, ...toolReadPaths],
-        // Instructions are not a game output. Shell writes cannot bypass the
-        // existing explicit file-tool approval for changing the root guide.
-        allowWrite: [root, nativeOutput], denyWrite: ['CLAUDE.md', ...PROJECT_DESIGN_PATHS,
-          ...(input.managedWebBoot ? MANAGED_WEB_BOOT_PATHS : [])].map(path => resolve(root, path)), allowGitConfig: true },
+  const protectedPaths = ['AGENTS.md', ...PROJECT_DESIGN_PATHS,
+    ...(input.managedWebBoot ? MANAGED_WEB_BOOT_PATHS : [])].map(path => resolve(root, path))
+  const filesystem: Record<string, string> = { ':root': 'deny', ':minimal': 'read', ':slash_tmp': 'deny', [root]: 'write', [nativeOutput]: 'write' }
+  for (const path of [...readPaths, ...toolReadPaths]) filesystem[path] = 'read'
+  for (const path of protectedPaths) filesystem[path] = 'read'
+  // Keep credentials/configuration and BGS control data outside model writes.
+  for (const name of ['.git', '.bgs', '.agents', '.aws']) filesystem[resolve(root, name)] = 'read'
+  return { root, temporary, nativeOutput, environment, toolReadPaths, protectedPaths,
+    config: {
+      default_permissions: 'bgs-project',
+      permissions: { 'bgs-project': { filesystem, network: { enabled: true } } },
     },
   }
-  // Keep trusted host/plugin settings; project settings cannot broaden access.
-  return { root, temporary, nativeOutput, settings, environment, toolReadPaths,
-    async isReferenceRead(tool: string | undefined, input: Record<string, unknown>) {
-      if (!['Read', 'Glob', 'Grep'].includes(tool ?? '')) return false
-      const path = tool === 'Read' ? input.file_path : input.path
-      if (typeof path !== 'string') return false
-      if (tool === 'Glob' && (typeof input.pattern !== 'string' ||
-          isAbsolute(input.pattern) || input.pattern.split(/[\\/]/).includes('..'))) return false
-      const target = await realpath(resolve(root, path)).catch(() => undefined)
-      if (input.toolResultsDirectory && resolve(root, path).startsWith(input.toolResultsDirectory + '/') &&
-          target !== resolve(root, path)) return false
-      return Boolean(target && references.some(reference => {
-        const part = relative(reference, target)
-        return !isAbsolute(part) && part !== '..' && !part.startsWith('../')
-      }))
-    },
-    // Native bypass skips routine prompts, while explicit ask/deny rules above
-    // still route file effects through the host boundary. Scoped roles retain
-    // their existing per-tool approvals; the OS sandbox remains mandatory.
-    flags: ['--setting-sources', 'user', '--permission-mode', input.scopedTools ? 'default' : 'bypassPermissions',
-      '--settings', JSON.stringify(settings)] }
 }

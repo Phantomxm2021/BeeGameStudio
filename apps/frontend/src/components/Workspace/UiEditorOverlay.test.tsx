@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { beeGameAdapter } from '../../services/beeGameAdapter';
 import { UiEditorOverlay } from './UiEditorOverlay';
+import { createProductionUiSurface } from '../../../../../packages/scene-editor/src/production-surface';
 import { readFileSync } from 'node:fs';
 const editorCss = readFileSync('src/components/Workspace/UiEditorOverlay.css', 'utf8') + readFileSync('../../packages/scene-editor/src/ui-preview/UiContentRenderer.css', 'utf8');
 
@@ -33,6 +34,33 @@ const uiDocument = {
 };
 
 describe('UiEditorOverlay', () => {
+  it('removes a cleared font binding from the saved document and keeps it renderable', async () => {
+    const doc = { schema: 'beegame-content.v1' as const, id: 'font-clear', kind: 'ui-screen' as const, assetRefs: ['FONT'], data: {
+      rootId: 'root', nodes: [
+        { id: 'root', role: 'screen-root' },
+        { id: 'label', role: 'text', name: 'Label', text: 'Hello', parentId: 'root', layout: { size: [120, 40] as [number, number] },
+          data: { font: { assetRef: 'FONT', member: 'bold' }, marker: 'keep' } },
+      ],
+    } };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/menu.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    const save = vi.spyOn(beeGameAdapter, 'saveProjectGameContentDocument').mockImplementation(async (_projectId, input) => ({
+      path: input.path, document: input.document, revision: 'b'.repeat(64), contentRevision: 'c'.repeat(64),
+    }));
+    render(<UiEditorOverlay projectId="font-clear" onClose={vi.fn()} />);
+    const hierarchy = await screen.findByLabelText('UI hierarchy');
+    fireEvent.click(within(hierarchy).getByText('Label').closest('.ui-editor-tree-row')!);
+    selectEditorOption('Font asset', 'Default');
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const saved = save.mock.calls[0][1].document;
+    expect(saved.data.nodes[1].data).toEqual({ marker: 'keep' });
+    expect(doc.data.nodes[1].data!.font).toEqual({ assetRef: 'FONT', member: 'bold' });
+    const host = document.createElement('div'), surface = await createProductionUiSurface(host);
+    try { expect(() => surface.render(saved.data, { width: 400, height: 200 })).not.toThrow(); }
+    finally { surface.dispose(); }
+  });
+
   it('previews and saves container relationships without baking calculated child positions', async () => {
     const doc = { schema: 'beegame-content.v1' as const, id: 'hud', kind: 'ui-hud' as const, assetRefs: [], data: {
       rootId: 'root', nodes: [
@@ -987,4 +1015,41 @@ describe('UiEditorOverlay', () => {
     fireEvent.keyDown(viewport, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledOnce();
   });
+});
+
+it('imports into the existing image picker and saves a new binding without stale atlas fields or lost edits', async () => {
+  const doc = { schema: 'beegame-content.v1' as const, id: 'import-ui', kind: 'ui-screen' as const, assetRefs: [], data: {
+    rootId: 'root', nodes: [
+      { id: 'root', role: 'screen-root', layout: { size: [960, 540] as [number,number] } },
+      { id: 'picture', name: 'Picture', parentId: 'root', role: 'button', text: 'Keep this label',
+        actions: { click: 'start' }, style: { opacity: .6 }, layout: { position: [40,50] as [number,number], size: [180,60] as [number,number] },
+        data: { atlasMember: 'old.json', image: { atlasMember: 'old.json', frame: 'old', frameSize: [10,10] } } },
+    ],
+  } };
+  vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/menu.json', revision: 'a'.repeat(64), document: doc }] });
+  vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 9, requirements: [], resources: [] });
+  const resource = { id: 'NEW', status: 'verified', root_path: 'assets/new.png', file_paths: ['assets/new.png'], source: { type: 'user-provided' } } as const;
+  const upload = vi.spyOn(beeGameAdapter, 'uploadProjectAsset').mockResolvedValue({ resource, manifest: { version: 9, requirements: [], resources: [resource] } } as any);
+  vi.spyOn(beeGameAdapter, 'loadProjectAssetFile').mockResolvedValue(new Blob(['offline image'], { type: 'image/png' }));
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:new-image');
+  const save = vi.spyOn(beeGameAdapter, 'saveProjectGameContentDocument').mockImplementation(async (_id, input) => ({ path: input.path, document: input.document, revision: 'b'.repeat(64), contentRevision: 'c'.repeat(64) }));
+  render(<UiEditorOverlay projectId="import-ui" onClose={vi.fn()} />);
+  const tree = await screen.findByLabelText('UI hierarchy');
+  fireEvent.click(within(tree).getByText('Picture').closest('.ui-editor-tree-row')!);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose source image' }));
+  const file = new File(['offline'], 'new.png', { type: 'image/png' });
+  fireEvent.change(within(screen.getByRole('dialog', { name: 'Select Source Image' })).getByLabelText('Upload assets'), { target: { files: [file] } });
+  const choice = await screen.findByRole('button', { name: 'Use image new' });
+  await waitFor(() => expect(choice).toBeEnabled());
+  expect(upload).toHaveBeenCalledWith('import-ui', expect.stringMatching(/^user-/), [file]);
+  expect(screen.getByText('Picture')).toBeInTheDocument();
+  fireEvent.click(choice);
+  fireEvent.keyDown(window, { key: 's', metaKey: true });
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  const saved = save.mock.calls[0][1].document.data.nodes.find(node => node.id === 'picture')!;
+  expect(saved).toMatchObject({ text: 'Keep this label', actions: { click: 'start' }, style: { opacity: .6 }, layout: { position: [40,50] }, data: { image: { assetRef: 'NEW', member: 'new' } } });
+  expect(saved.data).not.toHaveProperty('atlasMember');
+  expect(saved.data?.image).not.toHaveProperty('atlasMember');
+  expect(saved.data?.image).not.toHaveProperty('frame');
+  expect(saved.data?.image).not.toHaveProperty('frameSize');
 });

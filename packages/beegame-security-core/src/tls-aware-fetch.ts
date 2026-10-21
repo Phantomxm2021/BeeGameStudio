@@ -26,9 +26,9 @@ function readConfiguredFile(path: string | undefined): string | undefined {
 }
 
 export function getTLSFetchOptions(): TLSAwareFetchOptions {
-  const cert = readConfiguredFile(process.env.CLAUDE_CODE_CLIENT_CERT)
-  const key = readConfiguredFile(process.env.CLAUDE_CODE_CLIENT_KEY)
-  const passphrase = process.env.CLAUDE_CODE_CLIENT_KEY_PASSPHRASE
+  const cert = readConfiguredFile(process.env.BEEGAME_CLIENT_CERT)
+  const key = readConfiguredFile(process.env.BEEGAME_CLIENT_KEY)
+  const passphrase = process.env.BEEGAME_CLIENT_KEY_PASSPHRASE
   const extraCA = readConfiguredFile(process.env.NODE_EXTRA_CA_CERTS)
   if (!cert && !key && !passphrase && !extraCA) return {}
 

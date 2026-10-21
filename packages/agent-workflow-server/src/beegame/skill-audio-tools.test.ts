@@ -3,13 +3,13 @@ import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { noteHz, beatMs, phrase, repeatPhrase, partials, audioRequest } from '../../../../.beegame/skills/builtinskills/game-audio-designer/scripts/compose-audio.mjs'
-import { inspectWav } from '../../../../.beegame/skills/builtinskills/game-audio-designer/scripts/inspect-audio.mjs'
-import { arrangementStudy } from '../../../../.beegame/skills/builtinskills/game-audio-designer/scripts/arrangement-study.mjs'
+import { noteHz, beatMs, phrase, repeatPhrase, partials, audioRequest } from '../../../../.beegame/skills/bgs-game-skills/game-audio-designer/scripts/compose-audio.mjs'
+import { inspectWav } from '../../../../.beegame/skills/bgs-game-skills/game-audio-designer/scripts/inspect-audio.mjs'
+import { arrangementStudy } from '../../../../.beegame/skills/bgs-game-skills/game-audio-designer/scripts/arrangement-study.mjs'
 import { produceResources, renderAudioCue } from './resource-production'
 import { parseBeeGameProgrammaticAudioResource } from './programmatic-audio-resource'
 
-const scripts = fileURLToPath(new URL('../../../../.beegame/skills/builtinskills/game-audio-designer/scripts/', import.meta.url))
+const scripts = fileURLToPath(new URL('../../../../.beegame/skills/bgs-game-skills/game-audio-designer/scripts/', import.meta.url))
 const melody = [{ at: 0, beats: .5, note: 'A4' }, { at: 1, beats: .5, note: null },
   { at: 2, beats: 1, note: 'C5', velocity: .5 }]
 

@@ -1,10 +1,11 @@
+import {inferRuntimeModelType} from '@bee-game-studio/agent-workflow/runtime-environment'
 import type { DesignFileChanges } from './workflow-v3/state'
 import { createHash, randomUUID } from 'node:crypto'
 import { PROJECT_DESIGN_PATHS } from './design-handoff'
 import { MANAGED_WEB_BOOT_PATHS } from './workflow-v3/managed-web-boot'
 import { projectRuntimeDisplayReason } from './project-runtime-display'
-import { normalizeRuntimeEnvironment } from '../../../../src/utils/runtimeEnvironment'
-import { isEnvTruthy } from '../../../../src/utils/envUtils'
+import { normalizeRuntimeEnvironment } from '@bee-game-studio/agent-workflow/runtime-environment'
+import { isEnvTruthy } from '@bee-game-studio/agent-workflow/runtime-environment'
 import {
   readCanonicalProjectArtifactConsistently,
   type ProjectArtifactIdentity,
@@ -50,16 +51,15 @@ import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
-import { createNativeCliProcessRunner } from './native-cli-process-runner'
+import { createBgsRunner } from '../bgs/runner'
 import { createNativeSubagentChatEnricher, isNativeTaskLifecycle, stoppedNativeTask } from './native-subagent-chat'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { ChatJsonlReader } from './chat-jsonl-reader'
 import { auditEventPage, type EventPageSelection } from './workflow-v3/event-page'
-import { answeredQuestionInput } from './user-question'
-import { sanitizePath } from '../../../../src/utils/sessionStoragePortable'
-import { expandPath } from '../../../../src/utils/path'
-import { SessionUsageOutbox } from './session-usage-outbox'
+import { answeredQuestionInput, UserQuestionValidationError } from './user-question'
+import { expandPath } from '@bee-game-studio/agent-workflow/runtime-path'
+import { UsageOutboxPersistenceError, SessionUsageOutbox } from './session-usage-outbox'
 import { isPersonalModelId } from '../model-connections'
 
 export type BeeGameImageAttachment = {
@@ -233,6 +233,7 @@ export type BeeGameSession = {
 }
 
 export type BeeGameRuntimeSnapshot = {
+  runtime?: 'bgs'
   sessionId: string
   /** Host-only binding; a session UUID alone cannot identify an interrupted attempt. */
   executionIdentity?: { attemptId: string; workerId: string; fence: number; turnId: string; nativeSubmitted?: true }
@@ -313,7 +314,7 @@ export type BeeGameSessionRunnerStartInput = {
   /** Native replay of this exact submitted command, not merely CLI startup. */
   onNativeSubmission?(sessionId: string): void
   /** Passive provider accounting, cumulative within this native process. */
-  onNativeUsage?(usage: Usage): void
+  onNativeUsage?(usage: Usage, epoch?: string, accounting?: { incomplete: boolean }): void
   cwd: string
   env: Record<string, string>
   /** Sanitized evidence of the selected versus forwarded launch settings. */
@@ -339,41 +340,34 @@ export type RuntimeLaunchContract = {
 }
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
+  'BGS_HOME',
+  'BEEGAME_BGS_PATH',
+  'BEEGAME_MODEL',
+  'BEEGAME_API_PROTOCOL',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'GEMINI_API_KEY',
+  'GEMINI_BASE_URL',
+  'GROK_API_KEY',
+  'GROK_BASE_URL',
+  'OPENAI_AUTH_MODE',
   'BEEGAME_CONFIG_DIR',
   'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR',
   'BEEGAME_NATIVE_MCP_SERVERS_JSON',
   'BEEGAME_ARTIFACTS_URL',
   'BEEGAME_ARTIFACTS_TOKEN',
-  'CLAUDE_ARTIFACTS_URL',
-  'CLAUDE_ARTIFACTS_TOKEN',
   'TAVILY_API_KEY',
   'BRAVE_SEARCH_API_KEY',
   'EXA_API_KEY',
   'SKILL_SEARCH_ENABLED',
   'BEEGAME_MODEL_TYPE',
-  'ANTHROPIC_BASE_URL',
-  'ANTHROPIC_AUTH_TOKEN',
   'BGS_DEFAULT_FAST_MODEL',
   'BGS_DEFAULT_BALANCED_MODEL',
   'BGS_DEFAULT_STRONG_MODEL',
   'BGS_USE_OPENAI',
   'OPENAI_BASE_URL',
   'OPENAI_API_KEY',
-  'OPENAI_DEFAULT_HAIKU_MODEL',
-  'OPENAI_DEFAULT_SONNET_MODEL',
-  'OPENAI_DEFAULT_OPUS_MODEL',
-  'BGS_USE_GEMINI',
-  'GEMINI_BASE_URL',
-  'GEMINI_API_KEY',
-  'GEMINI_DEFAULT_HAIKU_MODEL',
-  'GEMINI_DEFAULT_SONNET_MODEL',
-  'GEMINI_DEFAULT_OPUS_MODEL',
-  'BGS_USE_GROK',
-  'GROK_BASE_URL',
-  'GROK_API_KEY',
-  'GROK_DEFAULT_HAIKU_MODEL',
-  'GROK_DEFAULT_SONNET_MODEL',
-  'GROK_DEFAULT_OPUS_MODEL',
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'NO_PROXY',
@@ -383,11 +377,6 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
   'NODE_EXTRA_CA_CERTS',
-  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS',
-  'CLAUDE_CODE_CLIENT_CERT',
-  'CLAUDE_CODE_CLIENT_KEY',
-  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
-  'BGS_API_UNIX_SOCKET',
 ])
 
 export type BeeGameSessionSubmitInput = {
@@ -405,6 +394,7 @@ export type BeeGameSessionSubmitInput = {
 }
 
 export type BeeGameSessionRuntime = {
+  readonly reusable?: boolean
   submit(input: BeeGameSessionSubmitInput): Promise<void>
   stop(): void
   dispose?(): void | Promise<void>
@@ -435,10 +425,13 @@ export type DashboardPermissionDecision = {
   updatedPermissions?: Record<string, unknown>[]
   /** Native tool input returned after an interactive user response. */
   updatedInput?: Record<string, unknown>
+  /** Explicit human design-change authorization, never inferred from answer text. */
+  intent?: 'change'
 }
 
 type PendingPermission = DashboardPermissionRequest & {
   requestedAt: Date
+  designChangeAllowed?: boolean
   resolve(decision: DashboardPermissionDecision): void
 }
 
@@ -446,6 +439,7 @@ export type BeeGamePendingPermission = DashboardPermissionRequest & {
   sessionId: string
   projectId?: string
   requestedAt: Date
+  designChangeAllowed?: boolean
 }
 
 type SessionRecord = {
@@ -551,6 +545,7 @@ export type BeeGameSessionInternalMetadata = {
 }
 
 export type BeeGameSessionUsageBillingBackend = {
+  assertUsageAvailable?: (userId: string) => Promise<void>
   recordUsage?: (
     userId: string,
     options: {
@@ -562,6 +557,7 @@ export type BeeGameSessionUsageBillingBackend = {
       idempotencyKey: string
       metadata?: Record<string, unknown>
       authToken?: string
+      usageSource?: 'runtime_snapshot' | 'model_runtime_host'
     },
   ) => RecordUsageResult | Promise<RecordUsageResult>
   debitRealtimeUsage?: (
@@ -573,7 +569,8 @@ export type BeeGameSessionUsageBillingBackend = {
 }
 
 export class BeeGameSessionManager {
-  private readonly runnerDisposals = new Set<Promise<void>>()
+  private readonly runnerDisposals = new Map<Promise<void>, string | undefined>()
+  private closing?: Promise<void>
 
   private disposeRunner(runner: BeeGameSessionRuntime | null, record?: SessionRecord): Promise<void> {
     if (!runner) return Promise.resolve()
@@ -582,7 +579,7 @@ export class BeeGameSessionManager {
         if (record) record.runtimeCleanupFailed = true
         console.error('[BeeGame] Runtime cleanup failed; writer exit is unverified')
       })
-    this.runnerDisposals.add(completion)
+    this.runnerDisposals.set(completion, record?.userId)
     void completion.then(() => this.runnerDisposals.delete(completion))
     return completion
   }
@@ -600,7 +597,7 @@ export class BeeGameSessionManager {
   private readonly usageOutbox?: SessionUsageOutbox
 
   constructor(
-    private readonly runner: BeeGameSessionRunner = createNativeCliProcessRunner(),
+    private readonly runner: BeeGameSessionRunner = createBgsRunner(),
     dashboardDataRoot?: string,
     private readonly getAdditionalRuntimeEnv: (
       userDataRoot?: string,
@@ -639,7 +636,31 @@ export class BeeGameSessionManager {
     }
   }
 
+  /** Auxiliary calls use the same durable transport and restart recovery as agent turns. */
+  recordExternalUsage(userId: string, input: import('@bee-game-studio/beegame-billing-core/usage-control-client').BeeGameUsageBillingRecordInput): Promise<RecordUsageResult> {
+    if (!this.usageOutbox) return Promise.reject(new UsageOutboxPersistenceError(new Error('Usage billing is unavailable')))
+    return this.usageOutbox.submit({ userId, input: { ...input, dataDir: this.dashboardDataRoot } })
+  }
+
+  async assertModelRequestAllowed(userId: string): Promise<void> {
+    if (this.closing) throw Error('BeeGame runtime is shutting down')
+    if (this.usageBillingBackend.assertUsageAvailable) {
+      // Recover acknowledged work before authorizing another paid request,
+      // including debt left by a different job or a previous process.
+      await this.usageOutbox?.settleForUser(userId)
+      await this.usageBillingBackend.assertUsageAvailable(userId)
+    }
+    if (this.closing) throw Error('BeeGame runtime is shutting down')
+  }
+
+  hasActiveOwnerRuntime(userId: string): boolean {
+    return [...this.runnerDisposals.values()].includes(userId) || [...this.sessions.values()].some(record =>
+      record.userId === userId && (record.session.turnStatus !== 'idle' || Boolean(record.activeTurn) ||
+        Boolean(record.preparingTurn) || record.runtimeCleanupFailed === true))
+  }
+
   start(input: StartBeeGameSessionInput): BeeGameSession {
+    if (this.closing) throw Error('BeeGame runtime is shutting down')
     if (input.freshNativeContext && input.resumeNativeSessionId) throw Error('Fresh native context cannot resume a native session')
     if (!isAbsolute(input.workspacePath)) {
       throw new Error('Workspace path must be absolute')
@@ -657,6 +678,10 @@ export class BeeGameSessionManager {
         existingLease.userId === input.userId &&
         !input.workflowExecution && !existingLease.session.workflowExecution
       ) {
+        // The frontend may have opened this idle Chat before its first goal.
+        // Bind the current host authorization callback before dispatching work.
+        if (input.workflowQuestionGuard && existingLease.session.turnStatus === 'idle')
+          existingLease.workflowQuestionGuard = input.workflowQuestionGuard
         return cloneSession(existingLease.session)
       }
       throw new Error(
@@ -852,23 +877,12 @@ export class BeeGameSessionManager {
     }
   }
 
-  /** The native transcript is separate from BGS Chat history; both must rewind together. */
-  async projectEditCheckpointInfo(sessionId: string): Promise<{
-    nativeSessionId?: string
-    nativeTranscriptPath?: string
-  }> {
-    const record = this.sessions.get(sessionId)
-    if (!record) throw new Error('Project session not found')
-    if (record.session.turnStatus !== 'idle' || record.activeTurn || record.preparingTurn)
-      throw new Error('Wait for the current agent turn before editing a message')
-    const nativeSessionId = record.nativeSessionId
-    if (!nativeSessionId) return {}
-    const runtimeEnvironment = buildRuntimeEnv(mergeRuntimeEnv(record.runtime,
-      await this.loadAdditionalRuntimeEnv(record)))
-    const configRoot = runtimeEnvironment.BEEGAME_CONFIG_DIR
-    if (!configRoot) throw new Error('BeeGameStudio runtime config directory is unavailable')
-    return { nativeSessionId,
-      nativeTranscriptPath: join(configRoot, 'projects', sanitizePath(record.session.cwd), `${nativeSessionId}.jsonl`) }
+  /** Bgs history is owned by app-server, never edited as a raw JSONL file. */
+  async projectEditCheckpointInfo(sessionId: string): Promise<{ nativeSessionId?: string }> {
+    const record=this.sessions.get(sessionId)
+    if(!record)throw Error('Project session not found')
+    if(record.session.turnStatus!=='idle'||record.activeTurn||record.preparingTurn)throw Error('Wait for the current agent turn before editing a message')
+    return record.nativeSessionId ? {nativeSessionId:record.nativeSessionId} : {}
   }
 
   async restoreProjectEditCheckpoint(sessionId: string, nativeSessionId?: string): Promise<void> {
@@ -1139,6 +1153,7 @@ export class BeeGameSessionManager {
       usageExternallyAccounted?: boolean
     },
   ): Promise<BeeGameSession> {
+    if (this.closing) throw Error('BeeGame runtime is shutting down')
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     if (record.session.status !== 'running') {
@@ -1242,8 +1257,8 @@ export class BeeGameSessionManager {
       activeTurn = this.runDirectTurn(
         record,
         context?.turnContext ? [
-          // Keep platform facts before the user's text. The native CLI uses
-          // the final text block as the intent signal for Skill discovery.
+          // Keep platform facts before the final user intent, which Bgs uses
+          // for explicit Skill selection.
           { type: 'text' as const, text: context.turnContext },
           ...(typeof preparedPrompt.prompt === 'string'
             ? [{ type: 'text' as const, text: preparedPrompt.prompt }] : preparedPrompt.prompt),
@@ -1365,11 +1380,16 @@ export class BeeGameSessionManager {
     if (!record) return
     while (record.preparingTurn) await new Promise(resolve => setTimeout(resolve, 10))
     await record.activeTurn?.catch(() => undefined)
-    await Promise.all([...this.runnerDisposals])
+    await Promise.all([...this.runnerDisposals.keys()])
     if (record.runtimeCleanupFailed) throw new Error('Runtime cleanup failed; writer exit is unverified')
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    // Close admission synchronously, before any stop/cleanup callback yields.
+    return this.closing ??= Promise.resolve().then(() => this.drain())
+  }
+
+  private async drain(): Promise<void> {
     const activeTurnDrains: Promise<void>[] = []
     for (const record of this.sessions.values()) {
       // Mark the session stopped before the transport can flush any more
@@ -1390,7 +1410,7 @@ export class BeeGameSessionManager {
         activeTurnDrains.push(record.activeTurn.catch(() => undefined))
     }
     await Promise.all(activeTurnDrains)
-    await Promise.all(this.runnerDisposals)
+    await Promise.all(this.runnerDisposals.keys())
     await Promise.all([...this.sessions.values()].map(record => record.usageWriteTail))
     await this.usageOutbox?.dispose()
     this.eventSubscribers.clear()
@@ -1487,6 +1507,7 @@ export class BeeGameSessionManager {
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
+      await this.assertModelRequestAllowed(record.userId)
       let selectedEnvironment = mergeRuntimeEnv(
         record.runtime,
         await this.loadAdditionalRuntimeEnv(record),
@@ -1523,12 +1544,17 @@ export class BeeGameSessionManager {
             if(record.executionIdentity)record.executionIdentity={...record.executionIdentity,nativeSubmitted:true}
             this.persistRuntimeSnapshot(record)
           },
-          onNativeUsage: usage => {
-            // Passive accounting stays out of model history. Persist completed
-            // provider work even if cancellation prevents a parent result.
-            if (usage.total_tokens > 0) this.append(record, 'usage', '', {
-              type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: accountingEpoch, usage,
+          onNativeUsage: (usage, epoch, accounting) => {
+            // Passive accounting stays out of model history. Persist acknowledged
+            // provider work even if cancellation prevents a complete receipt.
+            if (usage.total_tokens > 0 || accounting?.incomplete) this.append(record, 'usage', '', {
+              type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch ?? accountingEpoch, usage,
+              ...(accounting?.incomplete ? { providerUsageIncomplete: true } : {}),
             })
+            // Native receipts arrive even during tool-only turns. Settle the
+            // acknowledged cumulative usage without waiting for an answer.
+            if (record.currentTurnId && !record.currentTurnUsageExternallyAccounted)
+              void this.recordUsageSnapshot(record, record.currentTurnId, true)
           },
           onNativeTaskNotification: notification => {
             const message = notification.message ?? notification.backgroundMessage
@@ -1580,6 +1606,11 @@ export class BeeGameSessionManager {
         prompt,
         signal,
       )
+      if (runner.reusable === false) {
+        await this.disposeRunner(runner, record)
+        if (record.runner === runner) record.runner = null
+        record.activeNativeTaskToolUseIds.clear()
+      }
       try {
         if (signal.aborted && record.session.status === 'running') {
           // A cooperative runner may return normally on cancellation. Preserve
@@ -1705,6 +1736,36 @@ export class BeeGameSessionManager {
       signal,
       onMessage: async message => {
         appendProjectAgentDiagnostic(record, message)
+        if (message.type === 'runtime_event') {
+          if (!submittedTurnId || record.currentTurnId !== submittedTurnId || signal.aborted ||
+              hasTurnEnded(this.runtimeSnapshotInputs(record), submittedTurnId)) return
+          const type = String(message.eventType) as BeeGameEventType
+          const text = typeof message.text === 'string' ? message.text : ''
+          if (type === 'system.status' && typeof message.childThreadId === 'string') {
+            if (['pendingInit','running'].includes(String(message.childStatus)))
+              record.activeNativeTaskToolUseIds.set(message.childThreadId, String(message.parentToolUseID || message.childThreadId))
+            else record.activeNativeTaskToolUseIds.delete(message.childThreadId)
+          }
+          if (type !== 'assistant.thinking') this.closeOpenThinkingLifecycle(record, 'visible_output_started')
+          let payload = message
+          if (type === 'tool.completed' && typeof message.imagePath === 'string') {
+            try {
+              const path = await realpath(resolve(record.session.cwd, message.imagePath))
+              const rel = relative(await realpath(record.session.cwd), path)
+              if (rel && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel)) {
+                const info = await stat(path)
+                const mediaType = IMAGE_ATTACHMENT_TYPES[extname(path).toLowerCase()]?.[0]
+                if (info.isFile() && info.size <= MAX_BEEGAME_ATTACHMENT_BYTES && mediaType) {
+                  const attachments = await materializeBeeGameAttachments(record.session.cwd, [{type:'image',
+                    mediaType: mediaType as BeeGameImageAttachment['mediaType'], data:(await readFile(path)).toString('base64')}])
+                  payload = {...message,attachments:attachments.map(({relativePath:_path,...reference})=>reference)}
+                }
+              }
+            } catch { payload = {...message,attachmentError: "Image preview could not be attached"} }
+          }
+          this.append(record, type, text, payload)
+          return
+        }
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
         }
@@ -1801,12 +1862,14 @@ export class BeeGameSessionManager {
     checkpoint = false,
   ): Promise<void> {
     if (!this.usageBillingBackend.recordUsage) return
-    const providerCumulativeUsage = this.deriveRuntimeSnapshot(record).usage
+    const providerCumulativeUsage = getLatestRuntimeUsage(this.runtimeSnapshotInputs(record))
     const turnDeltaUsage = subtractRuntimeUsage(
       providerCumulativeUsage,
       record.currentTurnStartingUsage ?? emptyRuntimeUsage(),
     )
-    if (turnDeltaUsage.total_tokens <= 0) return
+    const providerUsageIncomplete = record.events.some(event =>
+      event.type === 'usage' && event.payload?.providerUsageIncomplete === true)
+    if (turnDeltaUsage.total_tokens <= 0 && !providerUsageIncomplete) return
     const terminalEvent = checkpoint ? undefined : [...record.events]
       .reverse()
       .find(event =>
@@ -1822,9 +1885,10 @@ export class BeeGameSessionManager {
       )
     const terminalDigest = createHash('sha256')
       .update(JSON.stringify({
-        type: checkpoint ? 'assistant_checkpoint' : terminalEvent?.type ?? 'turn_terminal',
+        type: checkpoint ? 'usage_checkpoint' : terminalEvent?.type ?? 'turn_terminal',
         text: terminalEvent?.text ?? '',
         turnDeltaUsage,
+        ...(providerUsageIncomplete ? { providerUsageIncomplete: true } : {}),
       }))
       .digest('hex')
     const billingAuthority = `${record.session.id}:${turnId}`
@@ -1834,16 +1898,17 @@ export class BeeGameSessionManager {
       event.type === 'system.status' && event.payload?.subtype === 'delivery_phase')?.payload?.phase
     const write = {
       turnId,
-      sourceMessageType: checkpoint ? 'assistant_checkpoint' : terminalEvent?.type ?? 'turn_terminal',
+      sourceMessageType: checkpoint ? 'usage_checkpoint' : terminalEvent?.type ?? 'turn_terminal',
       // runtime_snapshot is session cumulative; the billing authority computes
       // its own delta. Sending a turn delta here subtracts usage a second time.
       usage: providerCumulativeUsage,
       idempotencyKey,
       metadata: {
         usageBasis: 'session-cumulative-v1',
+        ...(providerUsageIncomplete ? { providerUsageIncomplete: true } : {}),
         providerCumulativeUsage,
         turnDeltaUsage,
-        billableFinalUsage: providerCumulativeUsage,
+        ...(!providerUsageIncomplete ? { billableFinalUsage: providerCumulativeUsage } : {}),
         terminalDigest,
         ...(typeof deliveryPhase === 'string' ? { deliveryPhase } : {}),
       },
@@ -1957,9 +2022,12 @@ export class BeeGameSessionManager {
     const pending = record.pendingPermissions.get(toolUseID)
     if (!pending) throw new Error('Permission request not found')
 
+    if (decision.intent !== undefined && (decision.intent !== 'change' || decision.behavior !== 'allow' ||
+        pending.toolName !== 'AskUserQuestion' || !pending.designChangeAllowed || !record.workflowQuestionGuard))
+      throw new UserQuestionValidationError('Design changes require an explicit answer to a current locked-design question')
     // Validate before consuming the pending request so a failed submission can retry.
     if (decision.behavior === 'allow' &&
-        (pending.toolName === 'AskUserQuestion' || decision.answers !== undefined)) {
+        (['AskUserQuestion', 'McpElicitation'].includes(pending.toolName) || decision.answers !== undefined)) {
       decision = {
         ...decision,
         updatedInput: answeredQuestionInput(pending.toolName, pending.input, decision.answers),
@@ -1996,6 +2064,7 @@ export class BeeGameSessionManager {
         ...(pending.agentId ? { agentId: pending.agentId } : {}),
         message: pending.message,
         decision: decision.behavior,
+        ...(decision.intent ? {intent:decision.intent} : {}),
         scope: decision.scope ?? 'once',
         remember: Boolean(decision.remember),
         ...(pending.toolName === 'AskUserQuestion' && decision.behavior === 'allow' ? { input: decision.updatedInput } : {}),
@@ -2078,6 +2147,7 @@ export class BeeGameSessionManager {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,
         requestedAt: new Date(),
+        ...(workflowQuestion?.designChangeAllowed === true ? {designChangeAllowed:true} : {}),
         resolve,
       })
       this.append(record, 'permission.requested', request.message, {
@@ -2212,6 +2282,10 @@ export class BeeGameSessionManager {
       createdAt,
     }
     record.events.push(event)
+    // Keep the raw epoch receipt for accounting and publish the same session
+    // total used by billing/runtime snapshots, including across native restarts.
+    if (type === 'usage') event.payload = { type: 'usage', ...event.payload,
+      sessionUsage: getLatestRuntimeUsage(this.runtimeSnapshotInputs(record)) }
     appendChatTranscript(record.transcriptPath, event)
     // This index locates a Chat transcript; it is not a runtime event log.
     if (event.type === 'session.started' || event.type === 'session.resumed')
@@ -3102,6 +3176,7 @@ function deriveRuntimeSnapshotFromEvents(
   const turnDiagnostics = deriveLatestTurnDiagnostics(events)
   const phaseName = deriveSnapshotPhaseName(events, options)
   return {
+    runtime: 'bgs',
     sessionId,
     ...(options.nativeSessionId
       ? { nativeSessionId: options.nativeSessionId }
@@ -3179,7 +3254,7 @@ function hasNativeFinalResult(
   return events.some(
     event =>
       event.turnId === turnId &&
-      event.type === 'result' &&
+      (event.type === 'result' || (['bgs', 'codex'].includes(String(event.payload?.runtime)) && ['assistant.message','assistant.partial'].includes(event.type))) &&
       event.text.trim().length > 0 &&
       !isThinkingProtocolControlText(event.text),
   )
@@ -3706,9 +3781,10 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
       ? (record.usage as Record<string, unknown>)
       : {}
   return {
+    runtime: 'bgs',
     sessionId: String(record.sessionId || ''),
     ...(executionIdentity?{executionIdentity}:{}),
-    ...(typeof record.nativeSessionId === 'string' && record.nativeSessionId
+    ...(['bgs', 'codex'].includes(String(record.runtime)) && typeof record.nativeSessionId === 'string' && record.nativeSessionId
       ? { nativeSessionId: record.nativeSessionId }
       : {}),
     workspacePath: String(record.workspacePath || ''),
@@ -3979,8 +4055,8 @@ function projectWorkspaceFileAccessAuthority(
   if (writing && record.designLocked && PROJECT_DESIGN_PATHS.includes(rel))
     return { behavior: 'deny', reason: 'project_design_locked', message: 'Planning records are locked by the implementation baseline. An explicit user design change is required; finalize cannot replace the baseline.' }
   if (writing && record.managedWebBoot && MANAGED_WEB_BOOT_PATHS.includes(rel as typeof MANAGED_WEB_BOOT_PATHS[number]))
-    return { behavior: 'deny', reason: 'project_managed_web_boot', message: 'BGS maintains this startup/storage entry. Implement the game in src/game.jsx; the existing implementation handoff installs the reserved files.' }
-  if (writing && rel === 'CLAUDE.md') return undefined
+    return { behavior: 'deny', reason: 'project_managed_web_boot', message: 'BGS maintains only the startup/storage adapter modules. index.html remains editable. Implement the game in src/game.jsx; the existing implementation handoff installs the reserved files.' }
+  if (writing && rel === 'AGENTS.md') return undefined
   // Native serializes safety/other reasons, but not the ordinary ask rule
   // installed by BGS. Preserve those native prompts without allowing a human
   // approval to bypass the project boundary above.
@@ -4756,61 +4832,22 @@ export function mergeRuntimeEnv(
   delete selectedEnvironment.BEEGAME_NATIVE_MCP_SERVERS_JSON
   if (additionalEnv.BEEGAME_NATIVE_MCP_SERVERS_JSON !== undefined)
     selectedEnvironment.BEEGAME_NATIVE_MCP_SERVERS_JSON = additionalEnv.BEEGAME_NATIVE_MCP_SERVERS_JSON
-  const modelType =
-    additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? additionalEnv.BEEGAME_MODEL_TYPE : runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
+  const selectedType = additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? additionalEnv.BEEGAME_MODEL_TYPE : runtime?.modelType
+  const modelType = inferSelectedRuntimeModelType({ ...selectedEnvironment, ...(selectedType ? { BEEGAME_MODEL_TYPE: selectedType } : {}) })
   return {
     ...selectedEnvironment,
     ...(modelType ? { BEEGAME_MODEL_TYPE: modelType } : {}),
   }
 }
 
-function inferSelectedRuntimeModelType(
-  environment: Record<string, string>,
-): RuntimeModelConfig['modelType'] | undefined {
-  const candidates = new Set<RuntimeModelConfig['modelType']>()
-  if (
-    environment.ANTHROPIC_BASE_URL ||
-    environment.ANTHROPIC_AUTH_TOKEN ||
-    environment.BGS_DEFAULT_BALANCED_MODEL
-  ) {
-    candidates.add('anthropic')
-  }
-  if (
-    environment.OPENAI_BASE_URL ||
-    environment.OPENAI_API_KEY ||
-    isEnvTruthy(environment.BGS_USE_OPENAI)
-  ) {
-    candidates.add('openai')
-  }
-  if (
-    environment.GEMINI_BASE_URL ||
-    environment.GEMINI_API_KEY ||
-    isEnvTruthy(environment.BGS_USE_GEMINI)
-  ) {
-    candidates.add('gemini')
-  }
-  if (
-    environment.GROK_BASE_URL ||
-    environment.GROK_API_KEY ||
-    isEnvTruthy(environment.BGS_USE_GROK)
-  ) {
-    candidates.add('grok')
-  }
-  if (candidates.size > 1) {
-    throw new Error('Selected model environment contains multiple providers')
-  }
-  return candidates.values().next().value
-}
+function inferSelectedRuntimeModelType(environment:Record<string,string>) { return inferRuntimeModelType(environment) }
 
 function buildRuntimeLaunchContract(
   selectedEnvironment: Record<string, string>,
   forwardedEnvironment: Record<string, string>,
 ): RuntimeLaunchContract {
   const endpoint =
-    forwardedEnvironment.ANTHROPIC_BASE_URL ||
     forwardedEnvironment.OPENAI_BASE_URL ||
-    forwardedEnvironment.GEMINI_BASE_URL ||
-    forwardedEnvironment.GROK_BASE_URL ||
     ''
   return {
     selectedEnvironmentKeys: Object.keys(selectedEnvironment).sort(),
@@ -4818,10 +4855,7 @@ function buildRuntimeLaunchContract(
     endpointClass: classifyRuntimeEndpoint(endpoint),
     configDirectoryConfigured: Boolean(forwardedEnvironment.BEEGAME_CONFIG_DIR),
     credentialConfigured: Boolean(
-      forwardedEnvironment.ANTHROPIC_AUTH_TOKEN ||
-        forwardedEnvironment.OPENAI_API_KEY ||
-        forwardedEnvironment.GEMINI_API_KEY ||
-        forwardedEnvironment.GROK_API_KEY,
+      forwardedEnvironment.OPENAI_API_KEY || forwardedEnvironment.OPENAI_AUTH_MODE === 'chatgpt',
     ),
   }
 }
@@ -4833,7 +4867,6 @@ function classifyRuntimeEndpoint(
   try {
     const hostname = new URL(endpoint).hostname.toLowerCase()
     return [
-      'api.anthropic.com',
       'api.openai.com',
       'generativelanguage.googleapis.com',
       'api.x.ai',
