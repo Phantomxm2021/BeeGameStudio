@@ -56,9 +56,22 @@ export async function projectExecutionAccess(input: {
 }) {
   const root = await realpath(input.workspacePath)
   const toolReadPaths=await hostToolReadPaths(root)
-  const playwright = sharedPlaywright()
-  const sharp = await sharedSharp()
-  const font = await sharedFont()
+  // Optional inspection clients must not prevent unrelated project work.
+  // Failed preparations grant no paths and are disclosed to the native runner.
+  const unavailable: string[] = []
+  const optional = async <T>(name: string, prepare: () => T | Promise<T>): Promise<T | undefined> => {
+    try { return await prepare() }
+    catch (error) {
+      unavailable.push(name)
+      console.warn('[BGS optional runtime] ' + name + ':', error)
+      return undefined
+    }
+  }
+  const [playwright, sharp, font] = await Promise.all([
+    optional('browser inspection (Playwright)', sharedPlaywright),
+    optional('image processing (Sharp)', sharedSharp),
+    optional('font inspection', sharedFont),
+  ])
   const checker = await sharedContentChecker()
   const previewClient = new URL('./preview-test-client.mjs', checker.moduleUrl)
   const previewClientPath = await realpath(fileURLToPath(previewClient))
@@ -75,7 +88,7 @@ export async function projectExecutionAccess(input: {
   await mkdir(templates, { recursive: true, mode: 0o700 })
   if (await realpath(temporary) !== temporary || await realpath(templates) !== templates)
     throw new Error('Project execution directories must remain inside the workspace')
-  await preparePreviewRecorder(resolve(temporary, 'browsers'))
+  if (playwright) await preparePreviewRecorder(resolve(temporary, 'browsers'))
   const environment: Record<string, string> = {
     TMPDIR: temporary,
     // zsh heredocs use TMPPREFIX, independently of TMPDIR's safe location.
@@ -92,20 +105,22 @@ export async function projectExecutionAccess(input: {
     NPM_CONFIG_USERCONFIG: '/dev/null',
     npm_config_userconfig: '/dev/null',
     PLAYWRIGHT_BROWSERS_PATH: resolve(temporary, 'browsers'),
-    BEEGAME_PLAYWRIGHT_MODULE: playwright.moduleUrl,
+    // Empty values also override stale inherited module paths.
+    BEEGAME_PLAYWRIGHT_MODULE: playwright?.moduleUrl ?? '',
     BEEGAME_PREVIEW_TEST_MODULE: previewClient.href,
     BEEGAME_PREVIEW_CAPABILITY_FILE: previewCapability,
     BEEGAME_MEASUREMENT_CAPABILITY_FILE: measurementCapability,
     BEEGAME_CONTENT_CHECKER_MODULE: checker.moduleUrl,
-    BEEGAME_SHARP_MODULE: sharp.moduleUrl,
-    BEEGAME_FONT_MODULE: font.moduleUrl,
+    BEEGAME_SHARP_MODULE: sharp?.moduleUrl ?? '',
+    BEEGAME_FONT_MODULE: font?.moduleUrl ?? '',
     BEEGAME_UI_INSPECTOR_MODULE: new URL('./ui-inspector.mjs', checker.moduleUrl).href,
   }
   const readPaths = ['/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/private/etc',
     '/System', '/Library/Apple', '/Library/Developer', '/dev', '/opt/homebrew',
     // Bun's module resolver needs directory access even for one bundled .mjs.
     // This private directory contains only the checker, no server/dependencies.
-    await realpath(process.execPath), nativeOutput, playwright.root, previewClientPath, previewCapability, measurementCapability, checker.root, ...sharp.roots, ...font.roots]
+    await realpath(process.execPath), nativeOutput, previewClientPath, previewCapability, measurementCapability, checker.root,
+    ...(playwright ? [playwright.root] : []), ...(sharp?.roots ?? []), ...(font?.roots ?? [])]
   if (process.platform === 'darwin') {
     const developer = await realpath('/var/select/developer_dir').catch(() => undefined)
     if (developer) {
@@ -135,7 +150,7 @@ export async function projectExecutionAccess(input: {
   for (const path of protectedPaths) filesystem[path] = 'read'
   // Keep credentials/configuration and BGS control data outside model writes.
   for (const name of ['.git', '.bgs', '.agents', '.aws']) filesystem[resolve(root, name)] = 'read'
-  return { root, temporary, nativeOutput, environment, toolReadPaths, protectedPaths,
+  return { root, temporary, nativeOutput, environment, toolReadPaths, protectedPaths, unavailable,
     config: {
       default_permissions: 'bgs-project',
       permissions: { 'bgs-project': { filesystem, network: { enabled: true } } },

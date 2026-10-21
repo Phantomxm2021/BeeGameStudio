@@ -81,6 +81,25 @@ test('one navigation batch supplies saved commands and actual pointers without p
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
+test('navigation exposes native and custom source directories without guessing an engine or following aliases',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-native-navigation-')))
+  try {
+    for(const dir of ['Assets/Scripts','ProjectSettings','custom-code','node_modules','.private','transcripts'])
+      await mkdir(join(root,dir),{recursive:true})
+    await writeFile(join(root,'Assets/Scripts/Player.cs'),'NATIVE_SOURCE_NOT_READ')
+    await writeFile(join(root,'ProjectSettings/ProjectVersion.txt'),'ENGINE_VERSION_NOT_GUESSED')
+    await symlink(join(root,'Assets'),join(root,'alias'))
+    const facts=projectNavigationSnapshot(root)
+    expect(facts.rootDirectories).toEqual(['Assets','ProjectSettings','custom-code'])
+    expect(facts.codeFiles).toEqual([])
+    expect(facts.coverage).toContain('not a complete source inventory')
+    expect(facts.commands).toEqual({})
+    expect(facts.issues).toEqual([])
+    expect(JSON.stringify(facts)).not.toContain('NATIVE_SOURCE_NOT_READ')
+    expect(JSON.stringify(facts)).not.toContain('ENGINE_VERSION_NOT_GUESSED')
+  }finally{await rm(root,{recursive:true,force:true})}
+})
+
 test('guide delegates discovery to native Skills without installation paths or a second catalog',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-methods-'))),workspace=join(root,'project')
   const previous=process.env.BEEGAME_BUILTIN_SKILLS_DIR

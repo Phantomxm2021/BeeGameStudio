@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { inspectUiLayout, isUiControl, rectanglesIntersect } from '../../../scene-editor/src/ui-layout-inspection'
 import { parseBeeGameContentDocument } from './game-content-schema'
-import { auditUiInteractiveBounds, isViewportPair, readUiLayoutCameras, requiredTouchViewport, type LayoutConstraints, type UiDocument, type LayoutDiagnostic, type LayoutMeasurement } from './ui-layout-audit'
+import { auditUiInteractiveBounds, isViewportPair, readUiLayoutCameras, type LayoutConstraints, type UiDocument, type LayoutDiagnostic, type LayoutMeasurement } from './ui-layout-audit'
 import { designSupportingFiles } from './design-handoff'
 import { sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
 import { sceneLayoutDraftIssues, contentDraftStructureIssues } from './game-content-package'
@@ -72,10 +72,6 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
       const targets = root.data?.targetViewports
       if (!Array.isArray(targets) || !targets.length || !targets.every(isViewportPair))
         throw new Error('root.data.targetViewports must be a non-empty array of positive [width, height] pairs, for example [[960, 540]], not {width, height} objects. Choose the smallest supported size and relevant transition sizes for this composition.')
-      // Extend only the parsed inspection copy, never saved project data. This
-      // also feeds the existing camera/underlay inspectors at the same size.
-      const phone = requiredTouchViewport(confirmed)
-      if (phone && !targets.some(size => size[0] === phone[0] && size[1] === phone[1])) targets.push(phone)
       const reference = root.data?.referenceResolution ?? root.layout?.size
       targetsChecked.push({ source: name, viewports: [reference, ...targets] })
       for (const size of [reference, ...targets]) {

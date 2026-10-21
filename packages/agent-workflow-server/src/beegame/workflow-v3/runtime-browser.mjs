@@ -7,7 +7,7 @@ import { PREVIEW_STORAGE_PATH, PREVIEW_STORAGE_HEADER, PREVIEW_STORAGE_VERSION, 
 
 let input = ''
 for await (const part of process.stdin) input += part
-const { endpoint, artifact, files, uiProbes, requiredViewport, previewHost, entryUrl = 'http://bgs-runtime.invalid/index.html' } = JSON.parse(input)
+const { endpoint, artifact, files, uiProbes, hasTouch = false, previewHost, entryUrl = 'http://bgs-runtime.invalid/index.html' } = JSON.parse(input)
 const entry = new URL(entryUrl), servingBase = new URL('.', entry)
 if (!['http:', 'https:'].includes(entry.protocol) || entry.username || entry.password || entry.search || entry.hash)
   throw new Error('Expected a static publication entry URL')
@@ -115,9 +115,9 @@ function colorBounds(data, info, color, mask, regions) {
 try {
   const base = await realpath(artifact)
   const allowed = new Map(files.map(file => [file.path, file]))
-  async function observe(probe, variant, marker, suppressFont = false, silence = false, smokeViewport) {
+  async function observe(probe, variant, marker, suppressFont = false, silence = false) {
   const errors = [], missing = new Set(), unsupported = new Set(), requested = new Set()
-  const context = await browser.newContext({ viewport: { width: probe?.viewport[0] ?? smokeViewport?.[0] ?? 1280, height: probe?.viewport[1] ?? smokeViewport?.[1] ?? 720 }, hasTouch: Boolean(smokeViewport || probe?.hasTouch), deviceScaleFactor: probe?.deviceScaleFactor ?? 1, serviceWorkers: 'block', acceptDownloads: false })
+  const context = await browser.newContext({ viewport: { width: probe?.viewport[0] ?? 1280, height: probe?.viewport[1] ?? 720 }, hasTouch, deviceScaleFactor: probe?.deviceScaleFactor ?? 1, serviceWorkers: 'block', acceptDownloads: false })
   try {
     const hostUrl = 'http://bgs-preview.invalid/'
     const saves = new Map()
@@ -438,21 +438,13 @@ try {
         return true
       })
     })
-    return { driver: 'host-owned Chromium; actual static build', environment, viewport: probe?.viewport ?? smokeViewport ?? [1280, 720], surfacePresent, bounds, physicalBounds, coordinateSpace, pixels, scene, font, textFit, composition, reason,
+    return { driver: 'host-owned Chromium; actual static build', environment, viewport: probe?.viewport ?? [1280, 720], surfacePresent, bounds, physicalBounds, coordinateSpace, pixels, scene, font, textFit, composition, reason,
       requestedFiles: [...requested], missingFiles: [...missing], errors, unsupported: [...unsupported],
       limitations: 'Initial load/error smoke only. Container/text presence is NOT pixel/rendering proof. Fetching JSON is NOT proof its layout, hierarchy, resources or gameplay rules are consumed.' }
   } finally { await context.close() }
   }
   if (!uiProbes) {
-    const desktop = await observe()
-    if (!requiredViewport) console.log(JSON.stringify(desktop))
-    else {
-      const phone = await observe(undefined, undefined, undefined, false, false, requiredViewport)
-      console.log(JSON.stringify({...desktop, surfacePresent: desktop.surfacePresent && phone.surfacePresent,
-        errors: [...desktop.errors, ...phone.errors], missingFiles: [...desktop.missingFiles, ...phone.missingFiles],
-        unsupported: [...desktop.unsupported, ...phone.unsupported], phone,
-        limitations: desktop.limitations+' Host-required phone initial load only; control minima and other states require bound UI probes and remain unverified here.'}))
-    }
+    console.log(JSON.stringify(await observe()))
   }
   else {
     const results = [], errors = [], missing = new Set(), unsupported = new Set()

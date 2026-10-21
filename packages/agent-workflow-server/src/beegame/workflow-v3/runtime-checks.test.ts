@@ -35,6 +35,21 @@ test.each([
   }finally{await rm(root,{recursive:true,force:true})}
 },30000)
 
+test('Touch smoke keeps its stated viewport without adding an implicit phone run',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-touch-smoke-'))
+  try {
+    await mkdir(join(root,'dist'))
+    await writeFile(join(root,'dist/index.html'),'<button>Play</button><script>if(innerWidth<1000)throw Error("Outside fixture target");if(!navigator.maxTouchPoints)throw Error("Touch unavailable");</script>')
+    const check=(await runChecks(root,{...artifactTask,checks:['runtime-smoke']},[],undefined,
+      {platform:'Web',inputs:['Touch'],orientation:'Landscape'})).checks[0]!
+    expect(check.status,check.observation).toBe('passed')
+    const observed=JSON.parse(check.observation)
+    expect(observed.viewport).toEqual([1280,720])
+    expect(observed.environment.maxTouchPoints).toBeGreaterThan(0)
+    expect(observed.phone).toBeUndefined()
+  }finally{await rm(root,{recursive:true,force:true})}
+},30000)
+
 test('Preview smoke observes opaque-origin storage/Canvas failures without changing standalone publication semantics', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-preview-smoke-'))
   try {

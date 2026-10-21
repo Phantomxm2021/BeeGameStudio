@@ -15,7 +15,7 @@ In the existing resource inventory, connect each required visual/audio use to it
 
 Reference TECHNICAL_DESIGN.md for target/runtime and integration choices, and the owning UI/level designs for space and framing. Add resource-specific format, loading or feasibility constraints where needed; do not copy layout, camera or interface definitions into the asset plan. A prototype or calculation is needed only for a specific unresolved question, not document completion.
 
-BGS keeps Scene/UI document locations in `content/index.json` and resource identity in `assets/asset-manifest.json`. Screen UI and Scene objects remain distinct editable models consumed by the runtime. Preserve these data contracts; an optional renderer's limits do not justify deleting valid source data.
+Projects using the BGS Scene/UI Editor keep its document locations in `content/index.json`; native engines retain their own scene/UI formats. BGS resource identity lives in `assets/asset-manifest.json`. BGS screen UI and Scene objects remain distinct editable models consumed by the runtime. Preserve these data contracts; an optional renderer's limits do not justify deleting valid source data.
 
 For an uncertain resource family, sourcing or consequential cost choice, read the applicable [resource matching and cost examples](references/resource-selection.md). Compare a small relevant sample in its intended composition before acquiring or producing the whole family; preserve the selected visual/audio intent and actual resource policy. A candidate list is not delivered resources, and a fallback is not permission to change a required appearance or behavior.
 

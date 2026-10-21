@@ -65,15 +65,22 @@ function prepareProtectedFileEdit(text: string, args: Record<string, unknown>) {
     }
     if (matches !== 1) {
       let hint = lines.length ? `; original match lines: ${lines.join(', ')}${matches > lines.length ? ', …' : ''}` : ''
-      // An exact, unique first line can locate a stale multiline block. It is a
-      // diagnostic only: never use it to relax matching or apply a partial edit.
-      if (!matches && excerpts < 3 && edit.old_string.includes('\n')) {
+      // Locate stale text for diagnostics only. A prefix candidate must never
+      // become a replacement span or relax exact/unique matching.
+      if (!matches && excerpts < 3) {
         const anchor = edit.old_string.split('\n').find((line: string) => line.trim())
         const sourceLines = text.split('\n')
-        const line = anchor ? sourceLines.indexOf(anchor) : -1
-        if (line >= 0 && sourceLines.indexOf(anchor, line + 1) === -1) {
+        let candidates = anchor ? sourceLines.flatMap((value, line) => value === anchor ? [line] : []) : []
+        let locator = 'exact first-line anchor'
+        if (!candidates.length && anchor && anchor.trim().length >= 12) {
+          const prefix = [...anchor].slice(0, 12).join('')
+          candidates = sourceLines.flatMap((value, line) => value.startsWith(prefix) ? [line] : [])
+          locator = 'exact 12-character line-prefix candidate (diagnostic only)'
+        }
+        if (candidates.length === 1) {
+          const line = candidates[0]!
           excerpts++
-          hint = `; exact first-line anchor at original line ${line + 1}; current text (up to 3 lines/400 characters):\n` +
+          hint = `; ${locator} at original line ${line + 1}; current text (up to 3 lines/400 characters):\n` +
             sourceLines.slice(line, line + 3).map((value, offset) => `${line + offset + 1}: ${value}`).join('\n').slice(0, 400)
         }
       }
@@ -184,7 +191,10 @@ class BgsRuntime implements BeeGameSessionRuntime {
       profile[join(home, 'skills')] = 'read'
       const instructions = [BEEGAME_USER_RESPONSE_SCOPE, input.language && responseLanguageInstruction(input.language),
         'Use WriteProjectFile or EditProjectFile for these host-protected paths relative to the project root: ' + JSON.stringify(access.protectedPaths.map(path => relative(access.root, path))) +
-        '. Shell and apply_patch cannot modify them. A design lock is enforced by BGS; never bypass a rejection.', mcp.context].filter(Boolean).join('\n\n')
+        '. Shell and apply_patch cannot modify them. A design lock is enforced by BGS; never bypass a rejection.', mcp.context,
+        access.unavailable.length ? 'BGS host components unavailable: ' + access.unavailable.join('; ') +
+          '. Unrelated work can continue; dependent inspections remain unavailable and unverified.' : '',
+      ].filter(Boolean).join('\n\n')
       if(env.OPENAI_AUTH_MODE!=='chatgpt') {
         let incomplete = false
         const epoch='provider:'+randomUUID(),total={prompt_tokens:0,completion_tokens:0,cache_read_tokens:0,cache_creation_tokens:0,total_tokens:0}

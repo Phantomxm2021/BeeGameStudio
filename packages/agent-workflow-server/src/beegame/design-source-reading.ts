@@ -50,7 +50,11 @@ export function designSourceLocations(workspace: string, documents: readonly str
       const body = readSource(workspace, document)
       const sections = designDocumentSections(body).map(s => ({ heading: s.heading, offset: s.start, limit: s.end - s.start + 1 }))
       return { document, sections, ...(!sections.length ? { unavailable: 'No headings; read the actual file' } : {}) }
-    } catch { return { document, unavailable: 'Source unavailable; inspect the current file, do not infer missing decisions' } }
+    } catch (error) {
+      return { document, unavailable: (error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? 'No saved source at docs/' + document
+        : 'Cannot read saved source: ' + (error instanceof Error ? error.message : String(error)) }
+    }
   })
 }
 

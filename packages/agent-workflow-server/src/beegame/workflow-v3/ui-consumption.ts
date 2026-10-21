@@ -16,7 +16,6 @@ export type PreparedUiProbe = { document: string; nodeId: string; selector: stri
   minimumControlSize?: [number, number];
   composition: { nodes: { id: string; selector?: string; hidden?: boolean; bounds: PreparedUiProbe['before']; fontSize?: number; minimumControlSize?: [number, number] }[];
     unverified: { id: string; reason: string }[] };
-  hasTouch?: boolean;
   unobservedProperties: { property: 'position' | 'size' | 'sizeDelta'; reason: string }[];
   originalSha256: string; before: { left: number; top: number; right: number; bottom: number };
   disabledSource: string;
@@ -26,24 +25,10 @@ export type PreparedUiProbe = { document: string; nodeId: string; selector: stri
  * UI/DOM geometry, enabled visibility and text fit only. Scene, pixels, resources and audio require
  * other observations; rendering the host preview is not a substitute. */
 export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProbes'|'runtimeArtifact'>, result: CheckResult,
-  scope: 'registered'|'selected' = 'registered', requiredViewport?: [number, number]): Promise<PreparedUiProbe[]> {
+  scope: 'registered'|'selected' = 'registered'): Promise<PreparedUiProbe[]> {
   // Artifact inventory is not observed UI coverage, especially on preparation failure.
   result.coverage = { files: [], limitations: ['No runtime UI observations yet; source preparation is not consumption proof.'] }
   if (!task.uiProbes?.length) throw new Error('Declare actual target UI selectors, viewports and optional click paths in uiProbes')
-  if (requiredViewport && task.uiProbes.some(probe=>probe.bindingValues && !task.uiProbes!.some(other=>
-      other.document===probe.document && other.nodeId===probe.nodeId && other.selector===probe.selector &&
-      other.viewport[0]===requiredViewport[0] && other.viewport[1]===requiredViewport[1] &&
-      JSON.stringify(other.steps)===JSON.stringify(probe.steps) && other.bindingValues)))
-    throw Error('State-dependent UI needs an explicit bindingValues scenario at the required phone viewport; state values cannot be copied from another environment')
-  // Reuse the actual selected target/click path at the host-required phone size.
-  // Author-authored targetViewports cannot remove this observation.
-  if (requiredViewport) task = {...task, uiProbes: [...task.uiProbes, ...task.uiProbes
-    .filter(probe => !task.uiProbes!.some(other => other.document === probe.document && other.nodeId === probe.nodeId &&
-      other.selector === probe.selector && JSON.stringify(other.steps) === JSON.stringify(probe.steps) &&
-      other.viewport[0] === requiredViewport[0] && other.viewport[1] === requiredViewport[1]))
-    .filter((probe, index, all) => all.findIndex(other => other.document === probe.document && other.nodeId === probe.nodeId &&
-      other.selector === probe.selector && JSON.stringify(other.steps) === JSON.stringify(probe.steps)) === index)
-    .map(probe => ({...probe, viewport: requiredViewport}))]}
   await initializeUiLayout()
   result.inputs.push(await readVersion(root, 'content/index.json'))
   const index = contentIndexSchema.parse(JSON.parse(await readFile(resolve(root, 'content/index.json'), 'utf8')))
@@ -225,7 +210,6 @@ export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProb
           ...(isUiControl(candidate) && Array.isArray(minimum) && minimum.length === 2 ? { minimumControlSize: minimum as [number, number] } : {}) })
       }
       probes.push({ ...probe, ...(layoutViewport?{layoutViewport}:{}), minimumControlSize, disabledSource: JSON.stringify(disabled),
-        hasTouch: Boolean(requiredViewport && probe.viewport[0] === requiredViewport[0] && probe.viewport[1] === requiredViewport[1]),
         checkTextFit: node.role==='text' || node.role==='button', composition, unobservedProperties, originalSha256: digest(body), before: before.bounds, variants })
     } catch (error) {
       throw new Error('UI probe '+probe.document+'#'+probe.nodeId+' @ '+probe.viewport.join('x')+' ['+property+']: '+
@@ -237,7 +221,6 @@ export async function prepareUiProbes(root: string, task: Pick<TaskSpec, 'uiProb
     'Text clipping/pseudo-content cannot establish complete text fit; source geometry and runtime observations do not prove gameplay or design semantics.',
     'Declared control minima are checked against transformed CSS bounds, never inverse-scaled logical dimensions. Unselected controls remain unverified.',
     'Baseline/restoration compare marked composition visibility/geometry for the supplied bindingValues scenario. Missing binding inputs or markers remain unverified. Values are declared expectations, not proof of private game-state transitions or complete state coverage.',
-    ...(requiredViewport ? ['Host-required Web Touch phone viewport: '+requiredViewport.join('x')+'; representative coverage, not every mobile device.'] : []),
     ...(probes.some(probe=>probe.coordinateRoot)?['coordinateRoot maps fixed saved logical dimensions through an independently observed stable axis-aligned DOM root. Root scale/translation is observed, not acceptance of the intended whole-frame adaptation; rotation, perspective, border/padding and changing roots remain unverified.']:[]),
     ...probes.map(probe=>'Selected '+probe.document+'#'+probe.nodeId+' @ '+probe.viewport.join('x')+
       '; requested DPR: '+(probe.deviceScaleFactor??1)+' (other pixel densities untested)'+

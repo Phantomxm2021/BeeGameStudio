@@ -86,7 +86,7 @@ for (const mode of ['shown','hidden','ignore-visibility','ignore-width','partial
       expect(result.status,result.observation).toBe(mode==='shown'||mode==='hidden'?'passed':mode==='partial-values'?'unverified':'failed')
       const observation=JSON.parse(result.observation)
       expect(observation.probes[0].conditions.scenario.bindingValues.showControls).toBe(shown)
-      if(mode==='shown')await expect(prepareUiProbes(root,task,{inputs:[]} as any,'selected',[390,844])).rejects.toThrow('explicit bindingValues scenario')
+      if(mode==='shown')expect((await prepareUiProbes(root,task,{inputs:[]} as any,'selected')).map(probe=>probe.viewport)).toEqual([[1280,720]])
       if(mode==='ignore-visibility')expect(observation.probes[0].composition.before.issues).toContainEqual(expect.objectContaining({id:'panel',kind:'visibility'}))
       if(mode==='ignore-width')expect(observation.probes[0].composition.before.issues).toContainEqual(expect.objectContaining({id:'bar',kind:'geometry'}))
       expect(await readFile(join(root,document),'utf8')).toBe(body)

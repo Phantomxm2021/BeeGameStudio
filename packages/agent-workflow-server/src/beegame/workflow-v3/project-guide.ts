@@ -51,11 +51,12 @@ export function projectNavigationSnapshot(workspacePath:string) {
     if(realpathSync(file)!==file)throw Error('Source aliases are not navigation inputs')
     return file
   }
-  const list=(path:string)=>{
+  const list=(path:string,kind:'file'|'directory'='file')=>{
     try {
       const dir=path?safe(path):root
       if(!statSync(dir).isDirectory())throw Error('Navigation source directory expected')
-      return readdirSync(dir,{withFileTypes:true}).filter(e=>e.isFile()&&!e.name.startsWith('.')&&e.name!=='AGENTS.md')
+      return readdirSync(dir,{withFileTypes:true}).filter(e=>(kind==='file'?e.isFile():e.isDirectory())&&!e.name.startsWith('.')&&
+          !['AGENTS.md','node_modules','transcripts'].includes(e.name))
         .map(e=>path?path+'/'+e.name:e.name).sort()
     } catch(error) {
       if((error as NodeJS.ErrnoException).code!=='ENOENT')issues.push(path+': '+(error instanceof Error?error.message:String(error)))
@@ -91,7 +92,8 @@ export function projectNavigationSnapshot(workspacePath:string) {
       registeredContent.push(path)
     } catch(error) {issues.push('content/index.json: '+(error instanceof Error?error.message:String(error)))}
   }
-  return {scope:'project-navigation-sources',rootFiles,designFiles,codeFiles,testFiles,
+  return {scope:'project-navigation-sources',rootFiles,rootDirectories:list('','directory'),designFiles,codeFiles,testFiles,
+    coverage:'Shallow listing only: root files/directories, docs/*.md, src/* and tests/* files. codeFiles/testFiles are not a complete source inventory; inspect other listed directories as needed. Commands are package.json scripts only, not an engine build contract.',
     registries:index?['content/index.json']:[],registeredContent:[...new Set(registeredContent)].sort(),commands,issues,
     verified:'saved names and declared commands only; no command executed, entry/engine chosen or consumption/quality certified'}
 }

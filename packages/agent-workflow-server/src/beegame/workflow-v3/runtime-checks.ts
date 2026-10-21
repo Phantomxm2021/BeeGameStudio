@@ -8,7 +8,6 @@ import { contentIndexSchema, contentDocumentSchema, isContentEntryKind } from '.
 import { createPreviewTestBrowser } from '../preview-test-browser'
 import { previewTestHostDocument } from '../preview-test-access'
 import { sharedPlaywright } from '../shared-playwright'
-import { requiredTouchViewport } from '../ui-layout-audit'
 import { readVersion, versionsMatch } from './checks'
 import { runContentCheck } from './content-checks'
 import type { TaskSpec, FileVersion, CheckResult } from './state'
@@ -49,6 +48,7 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
     observation: 'Declare runtimeArtifact for a static web build with index.html. Server/native/XR runtimes are not supported by this driver.',
     createdAt: new Date().toISOString() }
   if (!task.runtimeArtifact) return result
+  const hasTouch = Array.isArray(constraints.inputs) && constraints.inputs.includes('Touch')
   try {
     if (signal?.aborted) throw new Error('Check cancelled')
     const artifact = task.runtimeArtifact, paths = await staticArtifactFiles(root, artifact)
@@ -109,11 +109,11 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
       result.status = 'passed'; result.observation = 'Host checked actual static package registry, structure, resource closure and identical packaged source bytes. Not runtime data consumption or game delivery acceptance.'
     } else if (id === 'ui-data-consumption') {
       let probes: PreparedUiProbe[]
-      try { probes = await prepareUiProbes(root, task, result, uiScope, requiredTouchViewport(constraints)) }
+      try { probes = await prepareUiProbes(root, task, result, uiScope) }
       catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported UI consumption input'; return result }
       // prepareUiProbes records the selected scope and unobserved screens;
       // do not replace it with an implicit whole-registry coverage claim.
-      await observeStaticBuild(root, artifact, paths, result, signal, probes)
+      await observeStaticBuild(root, artifact, paths, result, signal, probes, undefined, hasTouch)
     } else if (id === 'scene-data-consumption') {
       let probes: PreparedSceneProbe[]
       try { probes = await prepareSceneProbes(root, task, result) }
@@ -151,7 +151,7 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
       ] }
       await observeStaticBuild(root, artifact, paths, result, signal, probes)
     } else {
-      await observeStaticBuild(root, artifact, paths, result, signal, undefined, undefined, requiredTouchViewport(constraints))
+      await observeStaticBuild(root, artifact, paths, result, signal, undefined, undefined, hasTouch)
     }
     if (result.status === 'passed' && (!await versionsMatch(root, result.inputs) ||
         await artifactDigest(root, artifact, true) !== result.artifacts[0]!.sha256)) {
@@ -177,7 +177,7 @@ export async function observeStaticPublication(root: string, artifact: string, e
   if(!await versionsMatch(root,result.inputs)) throw new Error('Publication copy changed during observation')
 }
 
-export async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedSceneProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[], entryUrl?: string, requiredViewport?: [number, number], timeoutMs = 120_000) {
+export async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedSceneProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[], entryUrl?: string, hasTouch = false, timeoutMs = 120_000) {
   const owned = createPreviewTestBrowser()
   let child: ReturnType<typeof spawn> | undefined
   // One host-owned budget for the whole browser batch, not a per-probe retry.
@@ -224,7 +224,7 @@ export async function observeStaticBuild(root: string, artifact: string, paths: 
       // immutable copy; no running project Preview is started or replaced.
       else {
         const measuredEntry = new URL(entryUrl ?? 'http://bgs-runtime.invalid/previews/measurement/index.html')
-        child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes, entryUrl: measuredEntry.href, requiredViewport,
+        child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes, entryUrl: measuredEntry.href, hasTouch,
           previewHost: entryUrl ? undefined : previewTestHostDocument(measuredEntry) }))
       }
     })

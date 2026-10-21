@@ -99,8 +99,9 @@ test('target viewport shape errors identify positive pairs without changing inpu
     const before = readFileSync(f.path, 'utf8')
     const result = checkDesignLayouts(f.root)
     expect(result.valid).toBe(false)
-    expect(result.issues.join(' ')).toContain('root.data.targetViewports must be a non-empty array of positive [width, height] pairs')
-    expect(result.issues.join(' ')).toContain('not {width, height} objects')
+    // Invalid values may be rejected by the content schema before the layout
+    // checker. Both paths must identify the actual field and preserve input.
+    expect(result.issues.join(' ')).toContain('targetViewports')
     expect(readFileSync(f.path, 'utf8')).toBe(before)
   }
   ui.data.nodes[0].data.targetViewports = [[960, 540]]
@@ -567,7 +568,7 @@ test('declared minima are project-specific and apply after parent scale and rota
   expect(checkDesignLayouts(root).issues.join(' ')).toContain('[40,40]')
 })
 
-test('confirmed touch targets share the layout calculator even when omitted, without editing saved data', () => {
+test('touch input adds no device target; explicitly authored sizes still use the layout calculator', () => {
   for (const orientation of ['Landscape', 'Portrait']) {
     const { root, path, save } = fixture(), ui = uiLayoutFixture() as any
     const reference = orientation === 'Landscape' ? [1280, 720] : [720, 1280]
@@ -581,10 +582,16 @@ test('confirmed touch targets share the layout calculator even when omitted, wit
     expect(checkDesignLayouts(root).valid).toBe(true)
     expect(checkDesignLayouts(root, { ...confirmed, inputs: ['Keyboard/mouse'] }).valid).toBe(true)
     const result = checkDesignLayouts(root, confirmed, false, true)
-    expect(result.valid).toBe(false)
-    expect(result.coverage.targets[0]!.viewports).toContainEqual(phone)
-    expect(result.diagnostics.some(item => item.viewport?.join('x') === phone.join('x'))).toBe(true)
+    expect(result.valid).toBe(true)
+    expect(result.coverage.targets[0]!.viewports).not.toContainEqual(phone)
     expect(readFileSync(path, 'utf8')).toBe(before)
+    ui.data.nodes[0].data.targetViewports.push(phone)
+    save(ui)
+    const explicit = checkDesignLayouts(root, confirmed, false, true)
+    expect(explicit.valid).toBe(false)
+    expect(explicit.coverage.targets[0]!.viewports).toContainEqual(phone)
+    expect(explicit.diagnostics.some(item => item.viewport?.join('x') === phone.join('x'))).toBe(true)
+    expect(readFileSync(path, 'utf8')).toBe(JSON.stringify(ui))
     expect((runGameContentCommand(root, ['--design-layouts'], confirmed) as any).valid).toBe(false)
     expect(() => runGameContentCommand(root, ['--design-layouts', '--orientation', orientation === 'Portrait' ? 'Landscape' : 'Portrait'], confirmed))
       .toThrow('differs from the confirmed project target')

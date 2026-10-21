@@ -10,7 +10,6 @@ import { publishProjectPreviewCapability } from '../project-preview-capability'
 import type { createAgentMeasurement } from './agent-measurement'
 import type { openImageGenerationAccess } from '../../image-generation/access'
 import { contentConsumerDistribution, contentConsumerCommand, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
-import { sharedPlaywright } from '../shared-playwright'
 import type { LayoutConstraints } from '../ui-layout-audit'
 import { PROJECT_DOCUMENTS, DESIGN_WRITING_ORDER } from '@bee-game-studio/agent-workflow/design-review-result'
 import { checkDesignHandoff, checkDesignHandoffDraft, DESIGN_HANDOFF_INSTRUCTION, DESIGN_IMPLEMENTATION_INSTRUCTION, DESIGN_INDEX_INSTRUCTION,
@@ -44,7 +43,7 @@ export function openDesignActions(root: string, requireEditableContent = false, 
       relatedHelp: '--design implementation --help describes the implementation handoff; --design acceptance --help describes runtime reports. Help only reads contracts; it does not lock planning, build or invoke a model.',
     }
     if (action === 'implementation-help') return { valid: true, instruction: DESIGN_IMPLEMENTATION_INSTRUCTION,
-      help: '--design implementation reads saved design sources, records the implementation baseline and locks planning records; it is not user approval. For flagged new React/Web projects, it installs the reserved thin startup/storage entry and returns its game factory contract; it never migrates existing projects or creates game/UI content. Use --details for full task/source references and requirement hashes. Native file tools author planning records before that lock; Shell cannot write them. Ordinary work/finalize cannot release it. This help performs none of those actions.',
+      help: '--design implementation reads saved design sources, records the implementation baseline and locks planning records; it is not user approval. Use --details for full task/source references and requirement hashes. Native file tools author planning records before that lock; Shell cannot write them. Ordinary work/finalize cannot release it. This help performs none of those actions.',
     }
     if (action === 'acceptance-help') return { valid: true,
       acceptanceExample: {
@@ -251,12 +250,11 @@ export async function openAgentTools(input: {
         'else if(args[0]==="--snapshot" && args.length===4){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {capturePreviewSnapshot}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await capturePreviewSnapshot(args[1],Number(args[2]),Number(args[3]));console.log(JSON.stringify(result,null,2));if(result.status!=="observed")process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}}\n'+
         'else if(args.length===1 && args[0]==="--client")console.log(JSON.stringify({...'+JSON.stringify({
           runtime:'node',
-          playwrightModule:sharedPlaywright().moduleUrl,
           environment:{helper:'BEEGAME_PREVIEW_TEST_MODULE',playwright:'BEEGAME_PLAYWRIGHT_MODULE',capability:'BEEGAME_PREVIEW_CAPABILITY_FILE'},
           playCapture:'withPlayCapture({mode,viewport?,outputParent?,audio?,audioLimitMs?}, async ({page,gameFrame,mark,captureFrame,runtimeErrors}) => {...})',
           runCommand:'node '+JSON.stringify(entry('preview.mjs'))+' --run <project-test.mjs> [args...]',
           scope:'Existing test tooling only; no browser, build, test or model executed. Capability still requires the active project turn.',
-        }) +',helperModule:process.env.BEEGAME_PREVIEW_TEST_MODULE || new URL("./preview-test-client.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE).href}));\n'+
+        }) +',playwrightModule:process.env.BEEGAME_PLAYWRIGHT_MODULE || null,helperModule:process.env.BEEGAME_PREVIEW_TEST_MODULE || new URL("./preview-test-client.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE).href}));\n'+
         'else if(args.length===1 && args[0]==="--help")console.log('+JSON.stringify('Preview: --snapshot development|production <width> <height> (first-load diagnostic); --run <project-test.mjs> [args...] (one existing playtest); --inspect <execution.json> (read retained evidence); --client (helper API).\nOptional diagnostics: --keyboard-sample <JSON> {startSelector?,readySelector,key,holdMs,observeMs,viewport?}; --countdown-blur-sample <JSON> {startSelector,countdownSelector,playingSelector,countdownMs,observeMs?,viewport?}; --sprite-sample <sheet.png> <atlas.json> <frame-ms> <frame-id> ...; --sprite-capture.\n--snapshot captures the actual first-load viewport and runtime error counts into a unique .beegame/tmp/preview-snapshot-* directory, without a project test script. This is a visual diagnostic, not a pass, playtest or freshness receipt. --run executes once with Node, retaining stdout/stderr and execution.json, with a five-minute execution budget and no retries. Catchable interruption/timeout is retained as non-success; hard termination can leave an unfinished receipt, never a pass. --inspect reads source freshness and supplied-tool identity separately without executing it; legacy/missing tool identity and actual browser environment remain unverified. Exit code is not test quality; scripts choose assertions and use the existing helper for current access.\nPreview environment: '+JSON.stringify(PREVIEW_ENVIRONMENT)+'\n'+preview.instruction)+');\n'+
         'else {console.error("Use --help, --countdown-blur-sample <JSON>, --keyboard-sample <JSON>, --snapshot <mode> <width> <height>, --client, or --run <project-test.mjs> [args...]");process.exitCode=1;}\n', { flag: 'wx', mode: 0o600 })
     }

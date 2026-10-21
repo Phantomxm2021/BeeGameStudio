@@ -409,3 +409,22 @@ test('edit diagnostics bound source excerpts and distinguish ambiguous from abse
   expect(error('# Title\nold\n# Title\nnew', '# Title\nabsent')).not.toContain('current text')
   expect(error('# Title\n' + 'x'.repeat(10000), '# Title\nabsent').length).toBeLessThan(700)
 })
+
+test('a unique line-prefix helps locate stale text without applying fuzzy or partial edits', () => {
+  const body = '# Design\n| Recovery action | Display "Try again" |\n'
+  const stale = '| Recovery action | Display “Try again” |'
+  let error = ''
+  try { editProtectedFileText(body, {old_string:stale,new_string:'replacement'}) }
+  catch (caught) { error = String(caught) }
+  expect(error).toContain('matched 0 times')
+  expect(error).toContain('line-prefix candidate (diagnostic only) at original line 2')
+  expect(error).toContain('2: | Recovery action | Display "Try again" |')
+  expect(error).toContain('Nothing saved')
+  expect(() => editProtectedFileText(body + '| Recovery action | Another entry |\n',
+    {old_string:stale,new_string:''})).toThrow('matched 0 times; must match exactly once. Nothing saved')
+  expect(editProtectedFileText(body,{old_string:'| Recovery action | Display "Try again" |',new_string:'Updated'}))
+    .toBe('# Design\nUpdated\n')
+  expect(() => editProtectedFileText(body,{edits:[
+    {old_string:'# Design',new_string:'# Changed'}, {old_string:stale,new_string:'replacement'},
+  ]})).toThrow('Nothing saved')
+})

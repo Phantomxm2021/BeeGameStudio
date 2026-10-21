@@ -5,6 +5,23 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { designSourceLocations } from './design-source-reading'
 import { runGameContentCommand } from './game-content-validation-cli'
+import { readDesignHandoff } from './workflow-read-tools'
+
+test('new documents are reported as absent while invalid sources retain the actual reason', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-source-availability-'))
+  try {
+    const listing = readDesignHandoff(root, {})
+    expect(listing.valid).toBe(true)
+    expect(listing.documents.find(d => d.document === 'GDD.md')).toMatchObject({
+      available: false, unavailable: 'No saved source at docs/GDD.md',
+    })
+    expect(readDesignHandoff(root, {read:[{document:'GDD.md'}]}).valid).toBe(false)
+    mkdirSync(join(root, 'docs'))
+    writeFileSync(join(root, 'docs/LEVEL_SCENE_DESIGN.md'), '# Source')
+    symlinkSync(join(root, 'docs/LEVEL_SCENE_DESIGN.md'), join(root, 'docs/GDD.md'))
+    expect(designSourceLocations(root, ['GDD.md'])[0]?.unavailable).toContain('cannot contain symlinks')
+  } finally { rmSync(root, {recursive:true, force:true}) }
+})
 
 test('source directory includes unindexed headings; batch reader returns exact current clauses only', () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-section-read-'))

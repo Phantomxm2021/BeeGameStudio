@@ -11,15 +11,15 @@ import {prepareFontProbes} from './font-consumption'
 for(const mode of ['identity','scaled','letterbox','axis-scale','offset-root','root-size-fallback',
   'ignore','wrong-center','wrong-position','overflow','self','unrelated','missing','invalid-selector','rotate','perspective',
   'border','wrong-root-size','changing-basis','source-size-conflict','no-reference','legacy-window','hidden-target-wrapper','ancestor-clipped',
-  'phone-required','phone-valid','missing-minimum'] as const)
+  'phone-too-small','phone-valid','touch-selected','missing-minimum'] as const)
 test('UI reference coordinates preserve causality: '+mode,async()=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-ui-coordinate-'))
   try {
-    const windowSize:[number,number]=mode==='identity'?[1280,720]:['letterbox','axis-scale','offset-root','changing-basis'].includes(mode)?[1000,800]:[960,540]
+    const windowSize:[number,number]=mode.startsWith('phone-')?[844,390]:mode==='identity'||mode==='touch-selected'?[1280,720]:['letterbox','axis-scale','offset-root','changing-basis'].includes(mode)?[1000,800]:[960,540]
     const ui=uiLayoutFixture(mode==='phone-valid'?96:52) as any
     // Coordinate-causality fixtures keep a permissive declared minimum so a
     // separate size failure cannot hide their specific geometry diagnostics.
-    if(!['identity','scaled','phone-required','phone-valid','missing-minimum'].includes(mode))ui.data.nodes[0].data.minimumControlSize=[20,20]
+    if(!['identity','scaled','phone-too-small','phone-valid','missing-minimum'].includes(mode))ui.data.nodes[0].data.minimumControlSize=[20,20]
     if(mode==='missing-minimum')delete ui.data.nodes[0].data.minimumControlSize
     ui.data.nodes[0].layout.size=[1280,720]
     ui.data.nodes[0].data.referenceResolution=[1280,720]
@@ -57,16 +57,17 @@ test('UI reference coordinates preserve causality: '+mode,async()=>{
       uiProbes:[{document:'content/ui/menu.json',nodeId:'play',selector:'#play',viewport:windowSize,
         ...(mode==='legacy-window'?{}:{coordinateRoot})}]}
     expect(taskSchema.safeParse(task).success).toBe(true)
-    const result=(await runChecks(root,task,[],undefined,mode.startsWith('phone-')?{platform:'Web',inputs:['Touch'],orientation:'Landscape'}:{})).checks[0]!
-    const expected=['identity','letterbox','axis-scale','offset-root','root-size-fallback','phone-valid'].includes(mode)?'passed':
-      ['scaled','phone-required','ignore','wrong-center','wrong-position','overflow','legacy-window'].includes(mode)?'failed':'unverified'
+    const result=(await runChecks(root,task,[],undefined,(mode.startsWith('phone-')||mode==='touch-selected')?{platform:'Web',inputs:['Touch'],orientation:'Landscape'}:{})).checks[0]!
+    const expected=['identity','letterbox','axis-scale','offset-root','root-size-fallback','phone-valid','touch-selected'].includes(mode)?'passed':
+      ['scaled','phone-too-small','ignore','wrong-center','wrong-position','overflow','legacy-window'].includes(mode)?'failed':'unverified'
     expect(result.status,result.observation).toBe(expected)
     if(mode==='source-size-conflict'||mode==='no-reference')expect(result.observation).toContain('[coordinateRoot]')
     else if(mode==='missing-minimum')expect(result.observation).toContain('[minimumControlSize]')
     else {
+      expect(JSON.parse(result.observation).probes).toHaveLength(1)
       const probe=JSON.parse(result.observation).probes[0]
       expect(probe.coordinateDomain).toBe(mode==='legacy-window'?'window CSS pixels':'saved logical UI pixels')
-      if(['identity','scaled','letterbox','axis-scale','offset-root','root-size-fallback','phone-valid'].includes(mode)){
+      if(['identity','scaled','letterbox','axis-scale','offset-root','root-size-fallback','phone-valid','touch-selected'].includes(mode)){
         for(const key of ['left','top','right','bottom'])expect(probe.before[key]).toBeCloseTo(probe.expectedBefore[key],3)
         expect(probe.before).toEqual(probe.restored)
         expect(probe.changed).toHaveLength(2)

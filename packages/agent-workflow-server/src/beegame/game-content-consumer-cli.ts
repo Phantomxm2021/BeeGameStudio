@@ -28,6 +28,7 @@ export const CONTENT_CONSUMER_API = {
     lifecycle: 'render replaces nodes; call it again with changed data/state/viewport. No update/setState/element lookup methods. Use host.querySelector with [data-node-id] for observations. dispose removes the surface.',
   },
   documents: {
+    formats: 'This API describes the optional browser consumer, not the Editor file schemas. In the current BGS tools directory, bun check-content.mjs --format lists sections; --format index sceneDocument uiDocument coordinates returns selected schemas/units; --format examples returns valid minimal inputs. These reads do not require or create project content. Resource registration uses resources.mjs --help.',
     loadProductionResources: 'await loadProductionResources(absolute assets/asset-manifest.json URL, parsed documents, fetcher?) -> {assets, fonts, resourceUrl(id,member?), dispose}; static images/atlas/fonts only. resourceUrl resolves registered audio/model/dependency files for your own integration; it does not play audio or render 3D.',
     readUiData: 'readUiData(document object) -> validated document.data; not a path, DOM element or Promise',
     readSceneData: 'readSceneData(document object) -> validated document.data',
@@ -158,7 +159,7 @@ export async function contentConsumerDistribution(): Promise<Record<string, stri
       'provenance.json': JSON.stringify(provenance, null, 2) + '\n',
       'README.md': `# BGS content runtime
 
-This directory is a local, self-contained browser dependency. Keep game business code in its owning project modules. No BGS server, temporary tools or npm package is needed to import this copy.
+This directory is an optional, self-contained browser dependency. Keep game business code in its owning project modules. No BGS server, temporary tools or npm package is needed to import this copy.
 
 Import the installed .mjs module (default content-consumer.mjs); api.json contains the existing signatures, return shapes and limitations. This is a content consumer, not a gameplay engine. Gameplay, input, simulation and audio integration remain project code. content/ and the registered resources remain the editable sources; do not copy their layouts into this module.
 

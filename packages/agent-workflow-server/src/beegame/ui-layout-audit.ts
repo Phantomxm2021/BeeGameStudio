@@ -22,12 +22,6 @@ export const isViewportPair = (size: unknown): size is [number, number] => Array
 
 export type LayoutConstraints = { platform?: unknown; inputs?: unknown; orientation?: unknown; dimension?: unknown }
 
-/** Same representative device at design and runtime; not an all-device guarantee. */
-export function requiredTouchViewport(constraints?: LayoutConstraints): [number, number] | undefined {
-  if (constraints?.platform !== 'Web' || !Array.isArray(constraints.inputs) || !constraints.inputs.includes('Touch')) return
-  return constraints.orientation === 'Portrait' ? [390, 844] : [844, 390]
-}
-
 /** Linking the Scene preserves camera identity and required geometry in one source. */
 export function layoutCameraSource(nodeId: string, source: unknown, workspacePath?: string): NonNullable<UiLayoutInspectionOptions['camera']> {
   if (source && typeof source === 'object' && 'kind' in source) {

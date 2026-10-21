@@ -176,7 +176,8 @@ test('handoff sends reference reading to native Read without a visual certificat
 
 async function command(root: string, directory: string, name: string, ...args: string[]) {
   const child = Bun.spawn([process.execPath, join(root, directory, name), ...args], {
-    cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl },
+    cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl,
+      BEEGAME_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl },
     stdout: 'pipe', stderr: 'pipe',
   })
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
@@ -262,7 +263,7 @@ test('actual author entry supplies executable pure UI examples with no manual ha
     }
   } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
 }, 30000)
-test('materialized layout command retains confirmed device scope without model-supplied flags', async () => {
+test('materialized layout command preserves confirmed orientation without adding phone targets', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-layout-target-tools-'))
   const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined,
     constraints: { platform: 'Web', inputs: ['Touch'], orientation: 'Landscape', dimension: '2D' } })
@@ -275,9 +276,9 @@ test('materialized layout command retains confirmed device scope without model-s
     const path = join(root, 'content/ui/menu.json'), bytes = JSON.stringify(ui)
     await writeFile(path, bytes)
     const check = await command(root, tools.directory, 'check-content.mjs', '--design-layouts', '--details')
-    expect(check.code).toBe(1)
+    expect(check.code).toBe(0)
     const result = JSON.parse(check.stdout)
-    expect(result.coverage.targets[0].viewports).toContainEqual([844, 390])
+    expect(result.coverage.targets[0].viewports).not.toContainEqual([844, 390])
     expect(await readFile(path, 'utf8')).toBe(bytes)
     const conflict = await command(root, tools.directory, 'check-content.mjs', '--design-layouts', '--orientation', 'Portrait')
     expect(conflict.code).toBe(1)

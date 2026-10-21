@@ -43,7 +43,7 @@ const pixels = (width: number, height: number) => {
 export async function produceMedia(workspace: string, value: unknown, suppliedSharp?: typeof sharp, reuseIdentical = false) {
   const request = requestSchema.parse(value)
   const root = await realpath(workspace)
-  const image = suppliedSharp ?? (await import(process.env.BEEGAME_SHARP_MODULE ??
+  const image = suppliedSharp ?? (await import(process.env.BEEGAME_SHARP_MODULE ||
     (() => { throw Error('Media runtime is unavailable in this execution environment') })())).default as typeof sharp
   const inputPath = async (path: string) => {
     const lexical = resolve(root, path)
