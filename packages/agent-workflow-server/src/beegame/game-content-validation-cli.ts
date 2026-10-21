@@ -16,6 +16,8 @@ import { auditBeeGameContentPackage, parseBeeGameContentIndex, contentDraftStruc
 import type { BeeGameContentIndex } from './game-content-schema'
 import { parseBeeGameContentDocument } from './game-content-schema'
 import { projectGuideTemplate } from './workflow-v3/project-guide'
+import { PREVIEW_ENVIRONMENT } from '@bee-game-studio/agent-workflow/preview-environment'
+import { CONTENT_CONSUMER_API } from './game-content-consumer-cli'
 import { inspectUiLayout, inspectUiLayoutBoundaries, summarizeUiLayoutInspection, type UiLayoutInspectionOptions } from '../../../scene-editor/src/ui-layout-inspection'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import { checkDesignLayouts, checkReviewDesignLayouts } from './design-layout-check'
@@ -253,6 +255,7 @@ export const CURRENT_CONTENT_CHECK_HELP = `Usage: bun <supplied-check-content-en
   --package-metadata FILE ... Legacy compatibility hashes only; not needed for new indexes; no writes
   --format [SECTION ...]    No sections: {ok,scope,sections:[names]}; selected: {ok,scope,values:{SECTION:content}} for one or many sections. projectGuide is optional navigation, not a new design contract
   --format examples         Executable minimal UI/index and an unbound Scene draft; no manual revision hashes
+  --format preview          Existing Preview environment and game-storage API; static contract, not availability or quality verification
   --check-drafts FILE ...   Check saved draft structure together; resource bindings remain pending
   --inspect-draft FILE [--node ID | --pointer /json/pointer] ... Read exact draft fields together
   --layout-draft FILE W H [--game-view ID --camera FILE] Inspect UI/Scene geometry without an index; --appendix prints UI/HUD coordinate tables
@@ -264,7 +267,7 @@ export const CURRENT_CONTENT_CHECK_HELP = `Usage: bun <supplied-check-content-en
   --scene-point FILE NODE W H Derive saved Scene world/logical-screen coordinates; not rendered pixels
   --read-design JSON        Batch exact sections: [{"document":"GDD.md","sections":["Exact heading"]}]
   --review-sources FILE ... [--details] Batch saved source hashes/headings; --details adds text, not a semantic review
-FILE is workspace-relative unless stated otherwise. Use --format for actual fields, not the generated runtime bundle.
+FILE is workspace-relative unless stated otherwise. --format reads selected Editor/Preview contracts without creating content or starting Preview. Use index/sceneDocument/uiDocument/coordinates for Editor fields; preview for host constraints and storage.
 --report produces human-readable text and a saved JSON report path; omit it for JSON. --details retains full observations.
 --appendix replaces JSON with the existing UI/HUD coordinate tables and diagnostics; use it after FILE W H or the --game-view/--camera pair.
 Checks inspect selected saved inputs only. They do not create design records or certify complete gameplay/visual quality.
@@ -528,7 +531,14 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: La
     if (!format || typeof format !== 'object' || Array.isArray(format)) throw new Error('Invalid content format')
     // The running parser owns canonical shapes; an older saved reference may
     // retain extra command sections, but cannot advertise an obsolete schema.
-    const reference: Record<string,unknown>={...format,...sceneUiContentFormat()}
+    const reference: Record<string,unknown>={...format,...sceneUiContentFormat(),
+      preview: {
+        environment: PREVIEW_ENVIRONMENT,
+        gameStorage: CONTENT_CONSUMER_API.createGameStorage,
+        runtimeVerified: false, quality: 'unverified',
+        note: 'Static host contract, not current Preview availability or project delivery/quality evidence. Native engines keep their own runtime. Optional browser helper usage/install: consumer.mjs --help in the current BGS tools directory.',
+      },
+    }
     if (args.length === 1) return { ok: true, scope: 'content-format-sections', sections: Object.keys(reference) }
     const sections = [...new Set(args.slice(1))]
     for (const section of sections)

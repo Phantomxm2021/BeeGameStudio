@@ -54,6 +54,7 @@ test('design reads distinguish availability from delivery completeness without r
   expect(empty.issues).toEqual([])
   expect(empty.documents).toHaveLength(8)
   expect(empty.documents.every(document => !document.available)).toBe(true)
+  expect(empty.contracts).toContain('check-content.mjs --format')
   save(root, 'docs/GDD.md', '# GDD\n\n' + Array.from({ length: 250 }, (_, i) => `## Decision ${i}\nOriginal prose ${i}.\n`).join('\n'))
   const before = snapshot(root), overview = readDesignHandoff(root, {})
   expect(overview.valid).toBe(true)
@@ -74,6 +75,18 @@ test('design reads distinguish availability from delivery completeness without r
   symlinkSync(join(root, 'docs/GDD.md'), join(root, 'docs/ASSET_PLAN.md'))
   expect(readDesignHandoff(root, { read: [{ document: 'ASSET_PLAN.md' }] }).valid).toBe(false)
   rmSync(join(root, 'docs/ASSET_PLAN.md'))
+  expect(snapshot(root)).toEqual(before)
+})
+
+test('eight delivered documents remain source availability, not quality approval', () => {
+  const root = fixture()
+  for (const document of readDesignHandoff(root, {}).documents)
+    save(root, document.path, '# Design\nUnverified author decisions.\n')
+  const before = snapshot(root), result = readDesignHandoff(root, {})
+  expect(result.valid).toBe(true)
+  expect(result.documents.every(document => document.available)).toBe(true)
+  expect(result.note).toContain('not design completeness or approval')
+  expect(result).not.toHaveProperty('deliveryEligible')
   expect(snapshot(root)).toEqual(before)
 })
 

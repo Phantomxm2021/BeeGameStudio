@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +10,8 @@ import type { BeeGameAssetManifest } from './asset-contracts'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import type { inspectUiLayout } from '../../../scene-editor/src/ui-layout-inspection'
 import { materializeSceneUiFormat } from './scene-ui-content-authoring'
+import { PREVIEW_ENVIRONMENT } from '@bee-game-studio/agent-workflow/preview-environment'
+import { CONTENT_CONSUMER_API } from './game-content-consumer-cli'
 import { CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
 import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 
@@ -277,13 +279,35 @@ test('draft geometry checks targets without unfinished prose; final Review still
   expect(readFileSync(path, 'utf8')).toBe(before)
 })
 
+test('Editor and Preview contracts share a selective read-only entry without content or live Preview', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-contract-navigation-')); roots.push(root)
+  const query = ['--format', 'index', 'preview']
+  const result = runGameContentCommand(root, query) as any
+  expect(Object.keys(result.values)).toEqual(['index', 'preview'])
+  expect(result.values.index.documents[0].kind).toBe('scene-2d')
+  expect(result.values.preview).toMatchObject({
+    environment: PREVIEW_ENVIRONMENT, gameStorage: CONTENT_CONSUMER_API.createGameStorage,
+    runtimeVerified: false, quality: 'unverified',
+  })
+  expect(readdirSync(root)).toEqual([])
+  expect((runGameContentCommand(root, ['--format']) as any).sections).toContain('preview')
+  // An old saved reference cannot replace the current host contract.
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  const path = join(root, '.beegame/delivery/content-format.json')
+  const old = JSON.stringify({ preview: { environment: { origin: 'same-origin' }, quality: 'passed' } })
+  writeFileSync(path, old)
+  expect(runGameContentCommand(root, query)).toEqual(result)
+  expect(readFileSync(path, 'utf8')).toBe(old)
+  expect(CONTENT_CHECK_HELP).toContain('--format preview')
+})
+
 test('format entry reads one actual contract section without full Content or resource prerequisites', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-format-section-')); roots.push(root)
   await materializeSceneUiFormat(root)
   const path = join(root, '.beegame/delivery/content-format.json'), before = readFileSync(path, 'utf8')
   const format = JSON.parse(before)
   expect(format).not.toHaveProperty('layoutDraftAppendixCommand')
-  expect(runGameContentCommand(root, ['--format'])).toMatchObject({ ok: true, sections: Object.keys(format) })
+  expect(runGameContentCommand(root, ['--format'])).toMatchObject({ ok: true, sections: [...Object.keys(format), 'preview'] })
   const result = runGameContentCommand(root, ['--format', 'coordinates'])
   expect(result).toMatchObject({ ok: true, values: { coordinates: format.coordinates } })
   expect(result).not.toHaveProperty('value')
@@ -302,7 +326,7 @@ test('format entry reads one actual contract section without full Content or res
   const single = runGameContentCommand(root, ['--format', 'uiDocument']) as any
   const batch = runGameContentCommand(root, ['--format', 'uiDocument', 'uiVocabulary']) as any
   expect(single.values.uiDocument).toEqual(batch.values.uiDocument)
-  const command = ['--format', 'uiDocument', 'uiVocabulary', 'uiLayoutContract']
+  const command = ['--format', 'uiDocument', 'uiVocabulary', 'uiLayoutContract', 'preview']
   const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'), ...command],
     { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
   const [output, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])

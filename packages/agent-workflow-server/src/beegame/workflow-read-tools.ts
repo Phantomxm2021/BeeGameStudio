@@ -44,6 +44,7 @@ export function readDesignHandoff(workspace: string, input: unknown) {
       }
     })
   return { valid: !issues.length, scope: 'saved-design-handoff', issues: [...new Set(issues)], documents, sources,
+    contracts: 'Editor fields and Preview capabilities: bun check-content.mjs --format in the current BGS tools directory lists sections for selective reading; no project content required.',
     note: 'Read availability only, not design completeness or approval. Unrequested missing documents do not fail a read. No index requirement counts, metadata changes or baseline lock. Use read:[{document:"GDD.md"}] for headings; add sections:["Exact heading"] for prose.' }
 }
 

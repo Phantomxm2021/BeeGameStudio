@@ -301,6 +301,7 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(tools.turnContext).not.toContain('React/Canvas does not waive promised editable data') // responsibility remains in the production system slot
     expect(tools.turnContext).toContain('Tool availability is not runtime consumption or quality evidence')
     expect(tools.systemContext).toContain('consumer.mjs')
+    expect(tools.systemContext).toContain('check-content.mjs --format')
     expect(tools.turnContext).not.toContain('consumer.mjs')
     expect(tools.turnContext).not.toContain('Native bgs-ui-layout reads:')
     expect(tools.turnContext).not.toContain('detailsFor:')
@@ -311,6 +312,11 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(tools.systemContext).not.toContain(token)
     expect(tools.systemContext).not.toContain('node preview.mjs') // unavailable here
     expect(tools.systemContext.length).toBeLessThan(600)
+    const contracts = await command(root, located, 'check-content.mjs', '--format', 'index', 'preview')
+    expect(contracts.code, contracts.stderr).toBe(0)
+    expect(JSON.parse(contracts.stdout)).toMatchObject({
+      ok: true, values: { preview: { environment: { origin: 'opaque' }, runtimeVerified: false, quality: 'unverified' } },
+    })
     expect((await command(root, located, 'resources.mjs', '--help')).code).toBe(0)
     const consumerHelp=await command(root,tools.directory,'consumer.mjs','--help')
     expect(consumerHelp.code).toBe(0)
@@ -842,6 +848,7 @@ test('optional Preview is published to the bound native session, lazy help works
     const path=projectPreviewCapabilityPath(root,'synthetic-preview')
     expect(JSON.parse(await readFile(path,'utf8')).apiUrl).toBe(preview.baseUrl)
     expect(tools.turnContext).not.toContain(preview.baseUrl)
+    expect(tools.turnContext).toContain('check-content.mjs --format preview')
     expect(tools.turnContext.length).toBeLessThan(2600)
     expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('POST /preview')
     expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('--snapshot development|production')

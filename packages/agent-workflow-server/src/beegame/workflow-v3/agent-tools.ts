@@ -283,14 +283,14 @@ export async function openAgentTools(input: {
       // Keep the locator outside compactable message history. Capabilities
       // still expire normally; this is only the current turn's tool location.
       systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
-        'Use the relevant entry with --help when its contract is needed: bun check-content.mjs (Editor formats/checks), consumer.mjs (optional runtime API via --api), assets.mjs (sourcing/generation), resources.mjs (registration), bind-content.mjs (bindings), media.mjs (media processing)'+
+        'Read contracts as needed: bun check-content.mjs --format [SECTION ...] (Editor fields or preview); consumer.mjs --api (optional runtime). Other entries use --help: assets.mjs, resources.mjs, bind-content.mjs, media.mjs'+
         (input.measurement ? '; node measure.mjs, handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
         (input.measurement ? 'Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Plain documents need no index or finalization. ' : ''),
       turnContext: [
         libraryState,
         ...(!preview ? ['Managed browser Preview is unavailable; native tools remain available.'] : []),
-        ...(preview ? ['Preview uses a sandboxed opaque iframe: native browser storage can fail. See preview.mjs --help for environment constraints and consumer.mjs --api for async game storage.'] : []),
+        ...(preview ? ['Preview uses a sandboxed opaque iframe: native browser storage can fail. Contract: check-content.mjs --format preview. Browser commands: preview.mjs --help.'] : []),
         image ? 'Image generation is configured, not yet verified available; assets.mjs --help provides usage and quoting.' : 'No AI image bridge is configured for this turn.',
         'Credentials stay in BGS. Tool availability is not runtime consumption or quality evidence.',
       ].join('\n'),
