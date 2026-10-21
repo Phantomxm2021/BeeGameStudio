@@ -37,13 +37,10 @@ test('real auxiliary worker pins serialized addresses and returns usage on succe
         expect(usage?.incomplete).toBe(partial ? true : undefined)
       }
     }
-    try {
-      await host.generateWithUsage!({ ...base, runtimeEnv: { OPENAI_API_KEY: 'synthetic', OPENAI_BASE_URL: endpoint, BEEGAME_MODEL: 'missing-usage' } })
-      throw Error('Expected a missing receipt failure')
-    } catch (error) {
-      expect(error).toBeInstanceOf(BeeGameModelRuntimeError)
-      expect((error as BeeGameModelRuntimeError).usage).toMatchObject({ total_tokens: 0, incomplete: true })
-    }
+    const unknown = await host.generateWithUsage!({ ...base,
+      runtimeEnv: { OPENAI_API_KEY: 'synthetic', OPENAI_BASE_URL: endpoint, BEEGAME_MODEL: 'missing-usage' } })
+    expect(unknown.content).toBe('offline success')
+    expect(unknown.usage).toMatchObject({ total_tokens: 0, incomplete: true })
     expect(requests).toBe(4)
   } finally { upstream.stop(true) }
 }, 15_000)

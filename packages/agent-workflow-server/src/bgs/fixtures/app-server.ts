@@ -41,7 +41,10 @@ createInterface({ input: process.stdin }).on('line', async line => {
       event('turn/completed', { turn: { id: turnId, status: 'failed', ...(prompt === 'failure-details' ? { error } : {}) } })
       return
     }
-    if (prompt === 'provider-unknown-tool') {
+    if (prompt === 'compaction') {
+      event('item/started', { item: { id: 'compact-1', type: 'contextCompaction' } })
+      event('item/completed', { item: { id: 'compact-1', type: 'contextCompaction' } })
+    } else if (prompt === 'provider-unknown-tool') {
       const url = new URL(process.env.OPENAI_BASE_URL + '/responses')
       if (url.hostname !== '127.0.0.1') throw Error('Fixture requires a local provider bridge')
       const response = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer ' + process.env.OPENAI_API_KEY },
@@ -57,7 +60,26 @@ createInterface({ input: process.stdin }).on('line', async line => {
           arguments: prompt.startsWith('edit-design:') ? { file_path: 'docs/GDD.md', ...JSON.parse(prompt.slice('edit-design:'.length)) } : { file_path, content: 'Authorized design' } } })
       })
       awaiting = undefined
-      event('item/completed', { item: { id: 'write-result', type: 'agentMessage', text: result.result?.success ? 'Saved design' : 'Write rejected: ' + JSON.stringify(result.result), phase: 'final_answer' } })
+      event('item/completed', { item: { id: 'write-result', type: 'agentMessage', text: (result.result?.success ? 'Saved design: ' : 'Write rejected: ') + JSON.stringify(result.result), phase: 'final_answer' } })
+    } else if (prompt?.startsWith('native-denial:')) {
+      const mode = prompt.slice('native-denial:'.length)
+      event('item/started', { item: { id: 'denied-command', type: 'commandExecution', command: 'fixture command', status: 'inProgress' } })
+      if (mode !== 'unspecified') {
+        const result = await new Promise<any>(resolve => {
+          awaiting = resolve
+          send({ id: 'host-approval', method: 'item/commandExecution/requestApproval', params: { threadId, turnId,
+            itemId: 'denied-command', command: 'fixture command', cwd: process.cwd(),
+            ...(mode === 'policy' ? { additionalPermissions: { fileSystem: { read: [process.cwd()] } } } : {}) } })
+        })
+        awaiting = undefined
+        if (result.result?.decision !== 'decline') throw Error('Fixture expected a denied command')
+      }
+      event('item/completed', { item: { id: 'denied-command', type: 'commandExecution', command: 'fixture command',
+        status: 'declined', aggregatedOutput: null, exitCode: null, durationMs: null } })
+    } else if (prompt?.startsWith('mcp-error:')) {
+      event('item/completed', { item: { id: 'mcp-error', type: 'mcpToolCall', tool: 'fixture', status: 'failed',
+        result: prompt.endsWith('result') ? { content: [{ type: 'text', text: 'Partial output' }] } : null,
+        error: { message: 'Fixture resource unavailable', internal: 'PRIVATE_INTERNAL_DATA' } } })
     } else if (prompt === 'file-diff') {
       const changes = [{ path: 'src/Example.ts', diff: '@@ -11 +11 @@\n-old\n+new\n' }]
       event('item/started', { item: { id: 'edit-1', type: 'fileChange', status: 'inProgress', changes } })

@@ -24,6 +24,7 @@ type ApprovalContext = {
   networkEnabled: boolean
   items: Map<string, RpcObject>
   current(): boolean
+  onDenied?(reason: string): void
   permission(request: DashboardPermissionRequest): Promise<DashboardPermissionDecision>
 }
 
@@ -70,7 +71,10 @@ function boundedPermissions(context: ApprovalContext, profile: RpcObject): boole
 
 export async function bgsApproval(method: string, p: RpcObject, context: ApprovalContext): Promise<RpcObject> {
   const permissions = method === 'item/permissions/requestApproval'
-  const rejected = () => permissions ? { permissions: {}, scope: 'turn' } : { decision: 'decline' }
+  const rejected = (reason = 'BGS denied the request because it cannot preserve the project permission boundary.') => {
+    context.onDenied?.(reason)
+    return permissions ? { permissions: {}, scope: 'turn' } : { decision: 'decline' }
+  }
   let eligible = false
   if (permissions) eligible = boundedPermissions(context, p.permissions)
   else if (method === 'item/commandExecution/requestApproval') {
@@ -87,7 +91,8 @@ export async function bgsApproval(method: string, p: RpcObject, context: Approva
       canGrantPath(context, resolve(context.root, change.path), true) &&
       (!change.kind?.move_path || canGrantPath(context, resolve(context.root, change.kind.move_path), true)))
   }
-  if (!eligible || !context.current()) return rejected()
+  if (!context.current()) return rejected('BGS approval cancelled because the turn ended.')
+  if (!eligible) return rejected()
   const item = context.items.get(p.itemId)
   const decision = await context.permission({
     toolUseID: p.approvalId || p.itemId,
@@ -96,8 +101,11 @@ export async function bgsApproval(method: string, p: RpcObject, context: Approva
     input: { command: p.command, cwd: p.cwd, permissions: p.permissions || p.additionalPermissions,
       network: p.networkApprovalContext, changes: item?.changes },
   })
-  if (!context.current()) return permissions ? rejected() : { decision: 'cancel' }
-  if (decision.behavior !== 'allow') return rejected()
+  if (!context.current()) {
+    rejected('BGS approval cancelled because the turn ended.')
+    return permissions ? { permissions: {}, scope: 'turn' } : { decision: 'cancel' }
+  }
+  if (decision.behavior !== 'allow') return rejected(decision.message || 'BGS permission authority denied the request; no detailed reason was supplied.')
   // Recheck paths after a human wait, including symlinks changed in the meantime.
   if (permissions) return boundedPermissions(context, p.permissions) ? { permissions: p.permissions, scope: 'turn' } : rejected()
   if (p.additionalPermissions && !boundedPermissions(context, p.additionalPermissions)) return rejected()

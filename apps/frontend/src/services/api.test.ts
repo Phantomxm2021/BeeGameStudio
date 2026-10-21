@@ -8,6 +8,15 @@ import {
 } from './api'
 
 describe('API normalization', () => {
+  it('retains confirmed token totals and missing-receipt state across runtime normalization', () => {
+    const token_budget = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 0,
+      providerUsageIncomplete: true };
+    const first = normalizeProjectBaselineStatusPayload({ project_id: 'p', phase: 'idle', blocked: false,
+      context: { token_budget } });
+    expect(first.context?.token_budget).toEqual(token_budget);
+    // Both the API caller and project store normalize this response.
+    expect(normalizeProjectBaselineStatusPayload(first).context?.token_budget).toEqual(token_budget);
+  });
   beforeEach(() => stubLocalStorage())
 
   afterEach(() => {

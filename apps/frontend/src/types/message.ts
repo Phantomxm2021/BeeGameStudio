@@ -408,6 +408,8 @@ export interface ProjectEventMessage {
  * Tracks LLM token consumption for cost monitoring
  */
 export interface TokenUsage {
+  /** Confirmed counts are a lower bound when any provider receipt is missing. */
+  providerUsageIncomplete?: boolean
   /** Number of tokens used in the prompt */
   prompt_tokens: number
 

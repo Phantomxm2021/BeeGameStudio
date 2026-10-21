@@ -78,3 +78,9 @@ const result = await inspectUiLayoutInBrowser(ui.nodes, ui.rootId, viewport, {
 This returns computed nodes/diagnostics and textMeasurements, including measured values and candidate-font versus registered-font basis. It does not render a screen or certify glyph coverage or aesthetics. Computed nodes contain id, bounds, layout and diagnostic fields, not the authored style/text/role; use id to associate each result with its original source node when consuming geometry. Missing referenced font files must not silently become verified fallback metrics. Inspect complete rendered compositions with the delivered fonts, and recheck affected text/rendering when inputs change.
 
 The target runtime may consume the projected rectangles or map these relationships to native containers. It must retain the authored hierarchy and responsive rules, not invent a second layout. Check actual rendered rectangles against the data at the same container size.
+
+## Runtime typography and observation
+
+Keep text/value ranges and typography traceable. Measure real font weights/glyph coverage and image proportions/pivots/frames; label provisional metrics. An existing asset or small critical sample can resolve uncertainty. Specify overflow/formatting; necessary type/geometry changes are owner design corrections, not permission to shrink text or remove content.
+
+When runnable, inspect every agreed screen/state at supported sizes/inputs: wrapping, overlap, clipping, hierarchy, world visibility, focus, actions and motion. Geometry, DOM presence, clicks or editor appearance do not prove visual quality; stills do not prove motion. Label unavailable observations. Repair owning sources without hiding consumer defects in valid UI. Reuse unchanged measurements; consult [runtime cost tradeoffs](../../game-technical-artist/references/runtime-cost-tradeoffs.md) only for measured expensive updates/effects, not default profiling.

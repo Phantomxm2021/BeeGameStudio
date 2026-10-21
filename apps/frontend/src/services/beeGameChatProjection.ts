@@ -48,7 +48,7 @@ function eventToProjectEventMessagesBase(
   switch (event.type) {
     case 'usage': {
       const usage = getUsageFromEventPayload(event.payload?.sessionUsage
-        ? { usage: event.payload.sessionUsage } : event.payload)
+        ? { usage: event.payload.sessionUsage, providerUsageIncomplete: event.payload.providerUsageIncomplete } : event.payload)
       return usage ? [{
         type: 'usage',
         task_id: taskId,
@@ -786,6 +786,7 @@ export function getUsageFromEventPayload(payload?: Record<string, unknown>): {
   total_tokens: number
   cache_read_tokens: number
   cache_creation_tokens: number
+  providerUsageIncomplete?: boolean
 } | null {
   const usage = getUsageRecord(payload)
   if (!usage) return null
@@ -801,13 +802,15 @@ export function getUsageFromEventPayload(payload?: Record<string, unknown>): {
     usage.total_tokens,
     promptTokens + completionTokens + cacheReadTokens + cacheCreationTokens,
   )
-  if (!promptTokens && !completionTokens && !cacheReadTokens && !cacheCreationTokens && !totalTokens) return null
+  const incomplete = payload?.providerUsageIncomplete === true
+  if (!promptTokens && !completionTokens && !cacheReadTokens && !cacheCreationTokens && !totalTokens && !incomplete) return null
   return {
     prompt_tokens: promptTokens,
     completion_tokens: completionTokens,
     total_tokens: totalTokens,
     cache_read_tokens: cacheReadTokens,
     cache_creation_tokens: cacheCreationTokens,
+    ...(incomplete ? { providerUsageIncomplete: true } : {}),
   }
 }
 

@@ -232,7 +232,7 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
     const guide=await readFile(join(f.root,'AGENTS.md'),'utf8')
     expect(guide).not.toContain('Built-in Skill index')
     expect(guide).not.toContain('Collection navigator:')
-    expect(guide).toContain('before related design or implementation decisions')
+    expect(guide).toContain('Select and read applicable Skills')
     expect(f.starts[0].systemContext).not.toContain(guide.slice(guide.indexOf('## Professional methods')))
     expect(run.blockedReason).not.toContain('not full-game completion')
     expect(f.submissions).toHaveLength(1)
@@ -778,7 +778,7 @@ test('shared guide supplies design methods once without a compatibility fallback
     expect(context.split('## Required design dependencies')).toHaveLength(2)
     for(const step of ['1. Design records:','2. Actual visual designs:','3. Resources:',
       '4. UI/Scene JSON:','5. Implementation and runtime verification:'])expect(context.split(step)).toHaveLength(2)
-    for(const value of ['select applicable Skills','game-implementation-planning','PROJECT_SPECIFIC_ROUTE',
+    for(const value of ['select applicable Skills','TECHNICAL_DESIGN.md','PROJECT_SPECIFIC_ROUTE',
       'unknown paid replay or automatic paid retry','respect exclusions and the project budget','required licenses'])expect(context).toContain(value)
   }
 })
@@ -827,7 +827,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
 test('stable system context preserves design authority and evidence boundaries, not implementation recipes', () => {
   const message={intent:'change',text:'Change only movement speed'} as Parameters<typeof agentMessagePrompt>[0]
   for(const prompt of [agentProfessionalContext,PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run,true)]) {
-    expect(prompt).toContain('with $skill-name')
+    expect(prompt).toContain('Select and read applicable Skills')
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(prompt).toContain('without a second hardcoded layout')
     expect(prompt).toContain('Prose, palettes and JSON geometry do not replace visual design')
@@ -1319,9 +1319,8 @@ test('first and resumed goals retain professional coverage and design dependenci
   for (const professional of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
     const prompt=PROJECT_WORKING_CONVENTIONS+'\n'+professional
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
-    for (const skill of ['game-creative-director-expert','game-systems-designer-expert','game-level-designer-expert',
-      'game-balance-designer-expert','gameplay-programmer','game-implementation-planning','game-art-director-expert',
-      'game-ui-ux-designer','game-audio-designer','game-content-pipeline-engineer']) expect(prompt).toContain(skill)
+    for (const document of ['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ART_DIRECTION.md',
+      'UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md']) expect(prompt).toContain(document)
     const steps=['1. Design records:', '2. Actual visual designs:', '3. Resources:', '4. UI/Scene JSON:', '5. Implementation and runtime verification:']
     const positions=steps.map(step=>prompt.indexOf(step))
     expect(positions.every((position,index)=>position>=0 && (!index || position>positions[index-1]!))).toBe(true)

@@ -12,7 +12,7 @@ const { loadRuntime, refreshCredits, taskEvent, system, project, i18n, chat, pre
     taskEvent: { current: undefined as undefined | ((type: string) => void) },
     system: { authenticationStatus: 'authenticated', currentUser: { id: 'user-a' },
       isSyncing: false, isDark: false, hasPermission: () => true },
-    project: { projects: [], pendingPermissions: [], projectStatus: { project_id: 'A', phase: 'idle', context: undefined as undefined | { token_budget: Record<string, number> } },
+    project: { projects: [], pendingPermissions: [], projectStatus: { project_id: 'A', phase: 'idle', context: undefined as undefined | { token_budget: Record<string, number | boolean> } },
       isOpeningProject: false, loadProjectRuntimeState: loadRuntime },
     i18n: { getFixedT: () => (key: string) => key },
   };
@@ -71,4 +71,14 @@ it('shows received session tokens immediately while runtime and billing snapshot
   expect(preview.mock.lastCall?.[0].tokenUsage).toEqual(chat.sessionTokenUsage);
   unmount();
   chat.sessionTokenUsage = undefined;
+});
+
+it('restores the incomplete usage notice from runtime history without a new live event', async () => {
+  project.projectStatus = { project_id: 'A', phase: 'idle', context: { token_budget: {
+    input_tokens: 0, output_tokens: 0, total_tokens: 0, providerUsageIncomplete: true,
+  } } };
+  const { unmount } = render(<DashboardView projectId="A" projectName="test" lang="zh" onSetLang={vi.fn()} />);
+  await act(async () => {});
+  expect(preview.mock.lastCall?.[0].tokenUsage).toMatchObject({ total_tokens: 0, providerUsageIncomplete: true });
+  unmount();
 });

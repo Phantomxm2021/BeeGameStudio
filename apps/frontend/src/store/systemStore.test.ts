@@ -90,6 +90,16 @@ describe('systemStore token usage', () => {
     });
   });
 
+  it('retains a missing receipt across later snapshots without leaking it to another session', () => {
+    const update = useSystemStore.getState().updateTokenUsage;
+    update({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, providerUsageIncomplete: true }, 'project', 'first');
+    update({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }, 'project', 'first');
+    update({ prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 }, 'project', 'second');
+    expect(useSystemStore.getState().taskUsage.first).toMatchObject({ total_tokens: 120, providerUsageIncomplete: true });
+    expect(useSystemStore.getState().tokenUsage.project.providerUsageIncomplete).toBe(true);
+    expect(useSystemStore.getState().taskUsage.second.providerUsageIncomplete).toBeUndefined();
+  });
+
   it('loads the current user and checks named permissions', async () => {
     vi.mocked(api.getCurrentUser).mockResolvedValue({
       id: 'developer-user',

@@ -52,6 +52,28 @@ async function fixture(admission = false) {
 }
 
 describe('model runtime usage recorder', () => {
+  test('completed calls retain incomplete accounting without replay or loss of content', async () => {
+    const f = await fixture()
+    let calls = 0
+    try {
+      for (const tokens of [0, 100]) {
+        const receipt = { ...usage(tokens), incomplete: true as const }
+        const content = await generateBeeGameModelWithUsage({
+          async generate() { throw Error('Unexpected legacy call') },
+          async generateWithUsage() { calls++; return { content: 'Completed result', usage: receipt } },
+        }, { cwd: f.root, runtimeEnv: {}, systemPrompt: 'Offline', messages: [], querySource: 'intake' }, f.recorder, true)
+        expect(content).toBe('Completed result')
+      }
+      expect(calls).toBe(2)
+      expect(f.rows.size).toBe(2)
+      expect([...f.rows.values()].every(row => row.event.metadata.providerUsageIncomplete === true)).toBe(true)
+      expect(f.state.charged).toBe(100)
+      await expect(generateBeeGameModelWithUsage({ async generate() { return 'Unaccounted result' } },
+        { cwd: f.root, runtimeEnv: {}, systemPrompt: 'Offline', messages: [], querySource: 'intake' }, f.recorder, true))
+        .rejects.toThrow('Realtime usage billing requires provider token usage')
+    } finally { await f.close() }
+  })
+
   test('zero balance and unsettled owner debt block new physical calls, including after restart; top-up recovers billing only', async () => {
     const f = await fixture(true)
     let modelCalls = 0

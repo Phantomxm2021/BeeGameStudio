@@ -875,6 +875,7 @@
     "revisionRequest": "Revision request",
     "thinking": "Thinking",
     "thinkingActive": "Thinking...",
+    "waitingForModelResponse": "Waiting for the model response",
     "thinkingStalled": "Still thinking. You can wait or stop.",
     "contextCompacted": "Context automatically compacted",
     "contextCompacting": "Compacting conversation...",

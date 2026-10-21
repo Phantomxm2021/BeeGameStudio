@@ -138,7 +138,8 @@ export async function openAgentTools(input: {
   })()
   let libraryState = 'Built-in resource library is not configured for this session.'
   try {
-    await materializeBalanceCalculator(root)
+    // Refresh existing helpers only; new projects do not need a calculation appendix.
+    if (existsSync(resolve(root, BALANCE_CALCULATOR_PATH))) await materializeBalanceCalculator(root)
     if (input.measurement) {
       if(!input.sessionId)throw Error('Measurement requires the bound native session')
       const token = crypto.randomUUID()
@@ -256,7 +257,7 @@ export async function openAgentTools(input: {
           runCommand:'node '+JSON.stringify(entry('preview.mjs'))+' --run <project-test.mjs> [args...]',
           scope:'Existing test tooling only; no browser, build, test or model executed. Capability still requires the active project turn.',
         }) +',helperModule:process.env.BEEGAME_PREVIEW_TEST_MODULE || new URL("./preview-test-client.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE).href}));\n'+
-        'else if(args.length===1 && args[0]==="--help")console.log('+JSON.stringify('Preview: --snapshot development|production <width> <height> (first-load diagnostic); --run <project-test.mjs> [args...] (one existing playtest); --inspect <execution.json> (read retained evidence); --client (helper API).\nOptional diagnostics: --keyboard-sample <JSON> {startSelector?,readySelector,key,holdMs,observeMs,viewport?}; --countdown-blur-sample <JSON> {startSelector,countdownSelector,playingSelector,countdownMs,observeMs?,viewport?}; --sprite-sample <sheet.png> <atlas.json> <frame-ms> <frame-id> ...; --sprite-capture.\n--snapshot captures the actual first-load viewport and runtime error counts into a unique .beegame/tmp/preview-snapshot-* directory, without a project test script. This is a visual diagnostic, not a pass, playtest or freshness receipt. --run executes once with Node, retaining stdout/stderr and execution.json, with a five-minute execution budget and no retries. Catchable interruption/timeout is retained as non-success; hard termination can leave an unfinished receipt, never a pass. --inspect reads source freshness and supplied-tool identity separately without executing it; legacy/missing tool identity and actual browser environment remain unverified. Exit code is not test quality; scripts choose assertions and use the existing helper for current access.\n'+preview.instruction)+');\n'+
+        'else if(args.length===1 && args[0]==="--help")console.log('+JSON.stringify('Preview: --snapshot development|production <width> <height> (first-load diagnostic); --run <project-test.mjs> [args...] (one existing playtest); --inspect <execution.json> (read retained evidence); --client (helper API).\nOptional diagnostics: --keyboard-sample <JSON> {startSelector?,readySelector,key,holdMs,observeMs,viewport?}; --countdown-blur-sample <JSON> {startSelector,countdownSelector,playingSelector,countdownMs,observeMs?,viewport?}; --sprite-sample <sheet.png> <atlas.json> <frame-ms> <frame-id> ...; --sprite-capture.\n--snapshot captures the actual first-load viewport and runtime error counts into a unique .beegame/tmp/preview-snapshot-* directory, without a project test script. This is a visual diagnostic, not a pass, playtest or freshness receipt. --run executes once with Node, retaining stdout/stderr and execution.json, with a five-minute execution budget and no retries. Catchable interruption/timeout is retained as non-success; hard termination can leave an unfinished receipt, never a pass. --inspect reads source freshness and supplied-tool identity separately without executing it; legacy/missing tool identity and actual browser environment remain unverified. Exit code is not test quality; scripts choose assertions and use the existing helper for current access.\nPreview environment: '+JSON.stringify(PREVIEW_ENVIRONMENT)+'\n'+preview.instruction)+');\n'+
         'else {console.error("Use --help, --countdown-blur-sample <JSON>, --keyboard-sample <JSON>, --snapshot <mode> <width> <height>, --client, or --run <project-test.mjs> [args...]");process.exitCode=1;}\n', { flag: 'wx', mode: 0o600 })
     }
     await writeProjectAssetCommand(resolve(directory, 'assets.mjs'), {
@@ -284,16 +285,15 @@ export async function openAgentTools(input: {
       // Keep the locator outside compactable message history. Capabilities
       // still expire normally; this is only the current turn's tool location.
       systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
-        'Use the relevant entry with --help when its contract is needed: bun assets.mjs, check-content.mjs, bind-content.mjs, consumer.mjs, media.mjs, resources.mjs'+
+        'Use the relevant entry with --help when its contract is needed: bun check-content.mjs (Editor formats/checks), consumer.mjs (optional runtime API via --api), assets.mjs (sourcing/generation), resources.mjs (registration), bind-content.mjs (bindings), media.mjs (media processing)'+
         (input.measurement ? '; node measure.mjs, handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
-        (input.measurement ? 'Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Plain documents need no index or finalization. ' : '')+
-        'Optional numerical calculation (project-root path): bun '+BALANCE_CALCULATOR_PATH+' --help.',
+        (input.measurement ? 'Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Plain documents need no index or finalization. ' : ''),
       turnContext: [
         libraryState,
         ...(!preview ? ['Managed browser Preview is unavailable; native tools remain available.'] : []),
-        ...(preview ? ['Preview environment (available before starting it): '+JSON.stringify(PREVIEW_ENVIRONMENT)] : []),
-        image ? 'AI image bridge is configured, not yet verified available. Quote: assets.mjs cost. Keep a stable requestId for recovery. Opening the bridge does not charge.' : 'No AI image bridge is configured for this turn.',
+        ...(preview ? ['Preview uses a sandboxed opaque iframe: native browser storage can fail. See preview.mjs --help for environment constraints and consumer.mjs --api for async game storage.'] : []),
+        image ? 'Image generation is configured, not yet verified available; assets.mjs --help provides usage and quoting.' : 'No AI image bridge is configured for this turn.',
         'Credentials stay in BGS. Tool availability is not runtime consumption or quality evidence.',
       ].join('\n'),
       // Retain tiny adapters as execution evidence, not game deliverables.

@@ -233,6 +233,7 @@ export type BeeGameSession = {
 }
 
 export type BeeGameRuntimeSnapshot = {
+  providerUsageIncomplete?: boolean
   runtime?: 'bgs'
   sessionId: string
   /** Host-only binding; a session UUID alone cannot identify an interrupted attempt. */
@@ -2286,7 +2287,12 @@ export class BeeGameSessionManager {
     // Keep the raw epoch receipt for accounting and publish the same session
     // total used by billing/runtime snapshots, including across native restarts.
     if (type === 'usage') event.payload = { type: 'usage', ...event.payload,
-      sessionUsage: getLatestRuntimeUsage(this.runtimeSnapshotInputs(record)) }
+      sessionUsage: getLatestRuntimeUsage(this.runtimeSnapshotInputs(record)),
+      // A later complete response cannot fill an earlier missing receipt.
+      // Keep this alongside the cumulative total for live and history readers.
+      ...(record.events.some(item => item.type === 'usage' && item.payload?.providerUsageIncomplete === true)
+        ? { providerUsageIncomplete: true } : {}),
+    }
     appendChatTranscript(record.transcriptPath, event)
     // This index locates a Chat transcript; it is not a runtime event log.
     if (event.type === 'session.started' || event.type === 'session.resumed')
@@ -3179,6 +3185,8 @@ function deriveRuntimeSnapshotFromEvents(
   return {
     runtime: 'bgs',
     sessionId,
+    ...(events.some(event => event.type === 'usage' && event.payload?.providerUsageIncomplete === true)
+      ? { providerUsageIncomplete: true } : {}),
     ...(options.nativeSessionId
       ? { nativeSessionId: options.nativeSessionId }
       : {}),

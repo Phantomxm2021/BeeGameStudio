@@ -18,7 +18,7 @@ import { runArtifactCheck } from './runtime-checks'
 import { readContentView } from './content-view'
 import { designHandoffPath, readDesignImplementationChecklist } from '../design-handoff'
 import { writeDesignDocumentsFixture, designHandoffFixture } from '../fixtures/layout-fixture'
-import { BALANCE_CALCULATOR_PATH } from '../balance-calculation'
+import { BALANCE_CALCULATOR_PATH, materializeBalanceCalculator } from '../balance-calculation'
 
 test('finalize supports existing scoped documents and preserves independent work when a sibling is invalid', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-scoped-design-')))
@@ -182,7 +182,7 @@ async function command(root: string, directory: string, name: string, ...args: s
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   return { stdout, stderr, code }
 }
-test('autonomous tools expose the optional balance CLI without executing or retrying project calculations', async () => {
+test('existing balance helpers remain usable without default appendix guidance or automatic calculation', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs optional balance-')))
   await writeFile(join(root, 'parameters.json'), JSON.stringify({ count: 12, rate: 3 }))
   await writeFile(join(root, 'model.mjs'), `import {appendFile} from 'node:fs/promises';
@@ -193,9 +193,10 @@ export async function calculate({readJson}) {
     checks:[{name:'Nonnegative count',passed:p.count >= 0,details:String(p.count)}],
     limitations:['Synthetic calculation, not a game simulator']};
 }`)
+  await materializeBalanceCalculator(root)
   const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined })
   try {
-    expect(tools.systemContext).toContain('Optional numerical calculation (project-root path): bun '+BALANCE_CALCULATOR_PATH+' --help')
+    expect(tools.systemContext).not.toContain(BALANCE_CALCULATOR_PATH)
     const help = await command(root, '', BALANCE_CALCULATOR_PATH, '--help')
     expect(help.code, help.stderr).toBe(0)
     expect(help.stdout).toContain('calculate({readJson, readText})')
@@ -693,11 +694,13 @@ test('Preview test entry uses Node, retains complete output, and cannot reuse a 
   const preview=openPreviewTestAccess({start:async()=>({status:'running'}),status:()=>({status:'idle'}),stop(){},
     browser:{start:async()=>{throw Error('No browser requested')},status:()=>({status:'idle'}),close:async()=>{}} as any})
   const tools=await openAgentTools({workspacePath:root,sessionId:'test-entry',getAuthToken:()=>undefined,openPreview:()=>preview})
-  expect(tools.turnContext).toContain('Preview environment (available before starting it)')
-  expect(tools.turnContext).toContain('"origin":"opaque"')
-  expect(tools.turnContext).toContain('localStorage/sessionStorage can throw')
-  expect(tools.turnContext).toContain('async createGameStorage()')
-  expect(tools.turnContext).toContain('Root-absolute /assets or /content URLs escape')
+  expect(tools.turnContext).toContain('preview.mjs --help')
+  expect(tools.turnContext).not.toContain('Root-absolute /assets or /content URLs escape')
+  const help = await command(root, tools.directory, 'preview.mjs', '--help')
+  expect(help.code, help.stderr).toBe(0)
+  expect(help.stdout).toContain('localStorage/sessionStorage can throw')
+  expect(help.stdout).toContain('async createGameStorage()')
+  expect(help.stdout).toContain('Root-absolute /assets or /content URLs escape')
   const run=async(...args:string[])=>{
     const child=Bun.spawn([Bun.which('node')!,join(root,tools.directory,'preview.mjs'),...args],{cwd:root,
       env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,
@@ -969,3 +972,14 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('Preview capture helper retain
     expect(JSON.parse(await readFile(join(root,capture.directory,'observation.json'),'utf8')).frames).toEqual(capture.frames)
   } finally {await tools.close();game.stop(true);await rm(root,{recursive:true,force:true})}
 },30000)
+
+
+test('new projects do not prepare or advertise a calculation appendix helper', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-no-calculator-')))
+  const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined })
+  try {
+    expect(tools.systemContext).not.toContain(BALANCE_CALCULATOR_PATH)
+    await expect(access(join(root, BALANCE_CALCULATOR_PATH))).rejects.toThrow()
+    await expect(access(join(root, '.beegame/delivery/calculators'))).rejects.toThrow()
+  } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
+})

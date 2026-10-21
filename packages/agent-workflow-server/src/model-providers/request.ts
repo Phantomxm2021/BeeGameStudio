@@ -127,7 +127,6 @@ function safeStreamFailure(error: unknown): string {
     'Provider stream ended inside an event',
     'Model provider reported a stream error',
     'Provider stream ended without a terminal event',
-    'Provider did not report final token usage',
     'Provider reported invalid token usage',
     'Provider returned an unknown tool name',
     'Custom tool arguments must contain input text',

@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test'
+import { expect, test, spyOn } from 'bun:test'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { createBgsRunner, bgsUsage, bgsProviderConfig, editProtectedFileText } from './runner'
 import { BeeGameSessionManager, getLatestRuntimeUsage, type BeeGameEvent } from '../beegame/session-manager'
+import * as browserCleanup from '../beegame/native-test-browser-cleanup'
 
 const resolveOutboundTarget: typeof import('@bee-game-studio/security-core').resolveApprovedOutboundTarget = async (value) => ({ url: new URL(value), addresses: ['93.184.216.34'],
   lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) })
@@ -35,7 +36,7 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
       payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value } }),
     requestPermission: async request => {
       questions.push(request)
-      return { behavior: permission, source: 'policy', updatedInput: { ...request.input, answers: { 'Choose style': 'A' } } }
+      return { behavior: permission, source: 'policy', ...(permission === 'deny' ? { message: 'Fixture policy denied the operation' } : {}), updatedInput: { ...request.input, answers: { 'Choose style': 'A' } } }
     },
   })
   const submit = (prompt: Parameters<typeof runtime.submit>[0]['prompt'], signal = new AbortController().signal) => runtime.submit({ prompt, signal,
@@ -55,6 +56,22 @@ test('streams text once, preserves tool lifecycle, and counts cached tokens once
     expect(f.sessionId).toBe('019a0000-0000-7000-8000-000000000001')
   } finally { await f.close() }
 }, 30_000)
+
+test('native compaction start and completion use the existing Chat projection contract', async () => {
+  // This stdio fixture starts no browser. Keep OS process enumeration outside
+  // this event-contract test; browser ownership/cleanup has its own regressions.
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  try {
+    const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' })
+    try {
+      await f.submit('compaction')
+      expect(f.events.filter(event => event.eventType === 'system.status')).toEqual(expect.arrayContaining([
+        expect.objectContaining({ subtype: 'status', status: 'compacting' }),
+        expect.objectContaining({ subtype: 'compact_boundary', status: 'compacted' }),
+      ]))
+    } finally { await f.close() }
+  } finally { cleanup.mockRestore() }
+}, 10_000)
 
 test('a nonzero native command exit is a failed tool receipt even when the item status is completed', async () => {
   const f = await fixture()
@@ -312,3 +329,68 @@ test('provider unknown tools reach the active BGS event stream without executing
     expect(requests).toBe(1)
   } finally { await f?.close(); provider.stop(true) }
 }, 10_000)
+
+
+test.each(['boundary', 'policy', 'unspecified'])('native denial receipts retain the available reason: %s', async mode => {
+  const f = await fixture(mode === 'policy' ? 'deny' : 'allow')
+  try {
+    await f.submit('native-denial:' + mode)
+    const failed = f.events.filter(event => event.eventType === 'tool.failed')
+    expect(failed).toHaveLength(1)
+    expect(failed[0].output).toBe(mode === 'boundary'
+      ? 'BGS denied the request because it cannot preserve the project permission boundary.'
+      : mode === 'policy' ? 'Fixture policy denied the operation'
+      : 'Native tool approval was declined; no detailed reason was supplied.')
+    expect(f.questions).toHaveLength(mode === 'policy' ? 1 : 0)
+  } finally { await f.close() }
+}, 10000)
+
+test.each(['empty', 'result'])('native MCP failures keep their message and any partial result: %s', async mode => {
+  const f = await fixture()
+  try {
+    await f.submit('mcp-error:' + mode)
+    const failure = f.events.find(event => event.eventType === 'tool.failed')
+    if (mode === 'empty') expect(failure?.output).toBe('Fixture resource unavailable')
+    else expect(failure?.output).toEqual({ result: { content: [{ type: 'text', text: 'Partial output' }] }, error: 'Fixture resource unavailable' })
+    expect(JSON.stringify(failure)).not.toContain('PRIVATE_INTERNAL_DATA')
+  } finally { await f.close() }
+}, 10000)
+
+test.each(['stale', 'success', 'denied'])('edit feedback preserves atomic writes and authorization: %s', async mode => {
+  const f = await fixture(mode === 'denied' ? 'deny' : 'allow')
+  try {
+    const path = join(f.workspace, 'docs/GDD.md')
+    const original = '# Rules\nSpeed: 4\n\n# Controls\nAction: turn\n'
+    await writeFile(path, original)
+    await f.submit('edit-design:' + JSON.stringify(mode === 'success' ? { edits: [
+      { old_string: 'Speed: 4', new_string: 'Speed: 5\nNote: updated' },
+      { old_string: 'Action: turn', new_string: 'Action: move' },
+    ] } : { old_string: '# Rules\nSpeed: 3', new_string: '# Rules\nSpeed: 5' }))
+    const receipt = f.events.at(-1)?.text
+    if (mode === 'success') {
+      expect(receipt).toContain('File saved: docs/GDD.md. Applied 2 replacement(s); original lines: 2, 5.')
+      expect(await readFile(path, 'utf8')).toBe('# Rules\nSpeed: 5\nNote: updated\n\n# Controls\nAction: move\n')
+    } else {
+      expect(await readFile(path, 'utf8')).toBe(original)
+      if (mode === 'stale') {
+        expect(receipt).toContain('docs/GDD.md: edits[0]: old_string matched 0 times')
+        expect(receipt).toContain('exact first-line anchor at original line 1')
+        expect(receipt).toContain('2: Speed: 4')
+      } else {
+        expect(receipt).toContain('Fixture policy denied the operation')
+        expect(receipt).not.toContain('Speed: 4')
+        expect(receipt).not.toContain('current text')
+      }
+    }
+  } finally { await f.close() }
+}, 10000)
+
+test('edit diagnostics bound source excerpts and distinguish ambiguous from absent anchors', () => {
+  const error = (text: string, old_string: string) => {
+    try { editProtectedFileText(text, { old_string, new_string: '' }); throw Error('Expected rejection') }
+    catch (error) { return String(error) }
+  }
+  expect(error('alpha\nbeta\nalpha', 'alpha')).toContain('original match lines: 1, 3')
+  expect(error('# Title\nold\n# Title\nnew', '# Title\nabsent')).not.toContain('current text')
+  expect(error('# Title\n' + 'x'.repeat(10000), '# Title\nabsent').length).toBeLessThan(700)
+})

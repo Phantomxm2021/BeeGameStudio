@@ -13,7 +13,7 @@ Use when assessing a design-review conclusion or claiming that a requested revis
 - Establish the source facts and modeled situation before calculating. For design claims, check that the proposed action or state is allowed by the rules, and that timing, units and spatial relationships follow their definitions. A calculation on an impossible situation is not a valid counterexample.
 - Base a revision conclusion on the final source and affected behavior, including claims introduced by the correction; reuse unchanged evidence rather than repeating the whole review. For BGS UI/Scene geometry, use the project's supplied spatial calculator and the same shared space-allocation definitions instead of a second handwritten model.
 - State only the supported scope. Distinguish observed results, assumptions, untested behavior and blockers; an unavailable check is not a pass or proof of a game defect.
-- Keep the basis traceable through source sections, existing notes or test output. Report consequential findings and remaining gaps concisely, without imposing a separate report format.
+- Keep the basis, consequential findings and remaining gaps traceable through source sections, existing notes or test output.
 
 Choose methods, tools and delegation proportional to the actual claim. Preserve the requested scope; this Skill does not require extra design decisions, target devices, audit agents or approval stages.
 

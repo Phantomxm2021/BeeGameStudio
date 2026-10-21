@@ -308,6 +308,11 @@ export function BeeGameLivePreviewPage({
                   <ProjectHintRow label={`${labels.inputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.input_tokens ?? tokenUsage?.prompt_tokens)} />
                   <ProjectHintRow label={`${labels.cachedInputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.cached_input_tokens ?? tokenUsage?.cache_read_tokens)} />
                   <ProjectHintRow label={`${labels.outputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.output_tokens ?? tokenUsage?.completion_tokens)} />
+                  {tokenUsage?.providerUsageIncomplete ? <p role="status" className="type-footnote mt-2 text-[var(--text-secondary)]">
+                    {lang.startsWith('zh') ? '用量回执不完整，以上仅为已确认 Tokens。' : lang.startsWith('ja')
+                      ? '使用量の報告が不完全です。上記は確認済みの Tokens のみです。'
+                      : 'Usage receipts are incomplete. Only confirmed tokens are shown above.'}
+                  </p> : null}
                   {settledProjectTokens !== undefined ? <ProjectHintRow label={settledTokenLabel} value={formatUsage(settledProjectTokens)} /> : null}
                 </div>
               </div>

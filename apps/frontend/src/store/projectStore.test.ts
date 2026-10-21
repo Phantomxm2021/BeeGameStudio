@@ -346,6 +346,7 @@ describe('projectStore pending review normalization', () => {
         blocked: false,
         context: {
           token_budget: {
+            providerUsageIncomplete: true,
             prompt_tokens: 120,
             completion_tokens: 30,
             total_tokens: 150,
@@ -365,6 +366,7 @@ describe('projectStore pending review normalization', () => {
     ])
     expect(updateTokenUsage).toHaveBeenCalledWith(
       {
+        providerUsageIncomplete: true,
         cached_input_tokens: 0,
         completion_tokens: 30,
         input_tokens: 120,

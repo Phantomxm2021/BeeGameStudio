@@ -455,8 +455,11 @@ test('failed scenarios, non-finite arithmetic and malformed tables cannot overwr
     const original = await readFile(join(workspace, 'calculated.md'), 'utf8')
     for (const [script, error] of [
       [model.replace('stock >= 0', 'stock < 0'), 'Scenario check failed'],
-      [model.replace('p.stock / p.rate', 'Infinity'), 'Invalid table'],
-      [model.replace("['units','seconds']", "['units']"), 'Invalid table'],
+      [model.replace('p.stock / p.rate', 'Infinity'), 'tables[0] ("Capacity").rows[0][1] ("seconds"): expected a string, boolean or finite number; received Infinity'],
+      [model.replace('p.stock / p.rate', 'null'), 'rows[0][1] ("seconds"): expected a string, boolean or finite number; received null'],
+      [model.replace("tables: [", "tables: [{title:'First',columns:['value'],rows:[[1]]}, " ).replace('p.stock / p.rate', 'NaN'), 'tables[1] ("Capacity").rows[0][1] ("seconds"): expected a string, boolean or finite number; received NaN'],
+      [model.replace("['units','seconds']", "['units']"), 'tables[0] ("Capacity").rows[0]: expected 1 cells, received 2'],
+      [model.replace("['units','seconds']", "['units','']"), 'tables[0] ("Capacity").columns[1]: expected a nonempty string'],
     ]) {
       await writeFile(join(workspace, 'model.mjs'), script!)
       const result = await command(workspace, 'model.mjs', 'calculated.md')

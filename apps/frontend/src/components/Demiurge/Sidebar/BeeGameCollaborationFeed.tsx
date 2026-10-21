@@ -1,6 +1,6 @@
 import { RuntimeErrorNotice, type ModelRequestRetryControl } from './RuntimeErrorNotice';
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, Bot, Check, ChevronDown, CircleCheck, Copy, FileText, Hourglass, ImageIcon, LoaderCircle, Minus, Pencil, Search, Send, SquareTerminal, Wrench, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, Check, ChevronDown, CircleCheck, Copy, FileText, LoaderCircle, Minus, Pencil, Send, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { type ChatDisplayMessage, type ChatDisplaySource } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatMarkdownContent';
@@ -15,20 +15,18 @@ import {
     MessageGroup,
 } from '../../beui/registry/components/agents/message';
 import { AgentActivity, type AgentActivityItem } from '../../beui/registry/components/agents/agent-activity';
-import { FileDiff, type FileDiffLine } from '../../beui/registry/components/agents/file-diff';
 import { ReasoningText } from '../../beui/registry/components/agents/loading-states/reasoning-text';
 import { StreamingResponse } from '../../beui/registry/components/agents/streaming-response';
-import { ToolResult, ToolResultOutput } from '../../beui/registry/components/agents/tool-result';
 import { Drawer } from '../../beui/registry/components/motion/drawer';
 import { AnimatedBadge, type AnimatedBadgeStatus } from '../../beui/registry/components/motion/animated-badge';
 import { Loader } from '../../beui/registry/components/motion/loader';
 import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
-import { activityToolKind, toolActivitySummary, type ActivityToolKind } from '../../../utils/toolActivitySummary';
+import { activityToolKind, type ActivityToolKind } from '../../../utils/toolActivitySummary';
 import { useSmoothStreamText } from '../../../hooks/useSmoothStreamText';
 import { ArtifactCard } from './ArtifactCard';
 import { ChatAttachmentView } from './ChatAttachmentView';
 import { SubagentActivityView } from './SubagentActivityView';
-import { SourceCodeBlock } from './SourceCodeBlock';
+import { ToolActivityRow } from './ToolActivityRow';
 import { Button } from '../../beui/project-button';
 
 type BeeGameCollaborationFeedProps = {
@@ -80,15 +78,12 @@ type ToolFeedMessage = ChatDisplayMessage & {
 
 type NormalizedTool = {
     subagentActivity?: ChatDisplayMessage['subagentActivity'];
-    attachments?: ChatDisplayMessage['attachments'];
     completionReason?: ChatDisplayMessage['completionReason'];
     id: string;
     name: string;
     status: 'running' | 'completed' | 'failed';
     detail: string;
     output: string;
-    diff?: string;
-    artifactId?: string;
     kind: ToolKind;
     timestamp: number;
     startedAt?: number;
@@ -102,8 +97,6 @@ type NormalizedTool = {
     subagentOutput?: string;
     subagentTrace?: string;
     input?: unknown;
-    before?: string;
-    after?: string;
 };
 
 type ToolKind = ActivityToolKind;
@@ -151,26 +144,15 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
     const rawDetail = String(message.toolDetail || message.tool_detail || '').trim();
     const fullSubagentOutput = String(message.subagentOutput || '').trim();
     const output = fullSubagentOutput || String(message.toolOutput || message.tool_output || content).trim();
-    const structuredPatch = message.toolStructuredPatch ?? message.structured_patch;
     const kind = getToolKind(name);
-    const rawDiff = message.toolDiff || message.toolPatch || message.tool_diff || message.tool_patch || formatStructuredPatch(structuredPatch);
-    const diff = String(
-        rawDiff ||
-        ((message.toolBefore !== undefined && message.toolAfter !== undefined)
-            ? formatBeforeAfterDiff(message.toolBefore || message.tool_before || '', message.toolAfter || message.tool_after || '')
-            : ''),
-    ).trim() || undefined;
     if (!name && !rawDetail && !output) return null;
     return {
         id: message.id,
         name,
         status,
         completionReason: message.completionReason,
-        attachments: message.attachments,
         detail: displayText(rawDetail),
         output,
-        diff: diff ? displayText(diff) : undefined,
-        artifactId: String(message.artifactId || message.artifact_id || '').trim() || undefined,
         kind,
         timestamp: Number(message.timestamp || 0),
         startedAt: status === 'running' || (message.completionReason && message.turnCompletedAt) ? message.timestamp : undefined,
@@ -185,90 +167,8 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         subagentTrace: message.subagentTrace,
         subagentActivity: message.subagentActivity,
         input: message.toolInput ?? message.tool_input,
-        before: message.toolBefore ?? message.tool_before,
-        after: message.toolAfter ?? message.tool_after,
     };
 };
-
-function formatBeforeAfterDiff(before: string, after: string): string {
-    if (before === after) return '';
-    const removed = before.split('\n').map((line) => `-${line}`).join('\n');
-    const added = after.split('\n').map((line) => `+${line}`).join('\n');
-    return `--- before\n+++ after\n@@\n${removed}\n${added}`;
-}
-
-function formatStructuredPatch(value: unknown): string {
-    if (typeof value === 'string') return value.trim();
-    if (!Array.isArray(value) || value.length === 0) return '';
-    const lines = value.flatMap((hunk) => {
-        if (!hunk || typeof hunk !== 'object') return [];
-        const record = hunk as Record<string, unknown>;
-        if (Array.isArray(record.lines)) {
-            return record.lines.map((line) => {
-                if (typeof line === 'string') return line;
-                if (!line || typeof line !== 'object') return String(line ?? '');
-                const item = line as Record<string, unknown>;
-                const origin = typeof item.origin === 'string' ? item.origin : ' ';
-                const content = typeof item.content === 'string' ? item.content : '';
-                return `${origin}${content}`;
-            });
-        }
-        return [];
-    });
-    return lines.join('\n').trim();
-}
-
-function toActivityItem(
-    part: Extract<ResponsePart, { kind: 'thinking' | 'tool' }>,
-    lang: Language,
-    streamingMessageId: string | null,
-    onOpenTool: (tool: NormalizedTool) => void,
-): AgentActivityItem {
-    if (part.kind === 'thinking') {
-        return {
-            id: `activity-thinking-${part.message.id}`,
-            type: 'trace',
-            kind: 'thinking',
-            icon: <Hourglass className="size-4" />,
-            label: part.message.completionReason
-                ? (lang === 'zh' ? '思考已中断' : 'Thought · interrupted')
-                : (lang === 'zh' ? '思考' : 'Thought'),
-            content: <ThinkingActivityText part={part} lang={lang}
-                working={matchesStreamingMessage(part.message, streamingMessageId)} />,
-        };
-    }
-    return {
-        id: `activity-tool-${part.tool.id}`,
-        type: 'text',
-        content: <ToolActivity tool={part.tool} lang={lang} onOpenFull={() => onOpenTool(part.tool)} />,
-    };
-}
-
-function parseDiffLines(diff: string): FileDiffLine[] {
-    const lines: FileDiffLine[] = [];
-    const hasHunks = /^@@ -\d/m.test(diff);
-    let oldLine: number | undefined, newLine: number | undefined;
-    let oldRemaining = 0, newRemaining = 0;
-    for (const [index, line] of diff.split('\n').entries()) {
-        const hunk = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-        if (hunk) {
-            oldLine = Number(hunk[1]); newLine = Number(hunk[3]);
-            oldRemaining = Number(hunk[2] ?? 1); newRemaining = Number(hunk[4] ?? 1);
-            continue;
-        }
-        if (hasHunks && !oldRemaining && !newRemaining) continue;
-        if (!hasHunks && (/^(?:---|\+\+\+|diff |index |@@|\\)/.test(line))) continue;
-        if (!/^[+ -]/.test(line)) continue;
-        const type = line.startsWith('+') ? 'added' : line.startsWith('-') ? 'removed' : 'context';
-        lines.push({ id: `diff-line-${index}`, type, content: line.slice(1),
-            ...(type !== 'added' && oldLine !== undefined ? { oldLine } : {}),
-            ...(type !== 'removed' && newLine !== undefined ? { newLine } : {}),
-        });
-        if (type !== 'added' && oldLine !== undefined) { oldLine++; oldRemaining--; }
-        if (type !== 'removed' && newLine !== undefined) { newLine++; newRemaining--; }
-    }
-    return lines;
-}
 
 type ResponsePart =
     | { kind: 'thinking'; message: ChatDisplayMessage; timestamp: number; durationMs?: number; turnId?: string; activityGroupId?: string }
@@ -292,7 +192,7 @@ type FeedEntry =
     | { kind: 'context'; message: ChatDisplayMessage }
     | AgentResponseTurn;
 
-type AgentRunDetail = { kind: 'subagent' | 'tool'; tool: NormalizedTool };
+type AgentRunDetail = { tool: NormalizedTool };
 
 type ToolPartReference = {
     turn: AgentResponseTurn;
@@ -317,10 +217,6 @@ const mergeToolPart = (
                 name: tool.name === GENERIC_TOOL_NAME ? current.name : tool.name,
                 detail: tool.detail || current.detail,
                 output: tool.output || current.output,
-                attachments: tool.attachments ?? current.attachments,
-                diff: tool.diff || current.diff,
-                before: tool.before ?? current.before,
-                after: tool.after ?? current.after,
                 timestamp: Math.max(current.timestamp, tool.timestamp),
                 startedAt: current.startedAt ?? tool.startedAt,
                 exitCode: tool.exitCode ?? current.exitCode,
@@ -745,8 +641,7 @@ export const BeeGameCollaborationFeed = memo(({
                                         completedAt={completedAt}
                                         lang={lang}
                                         streamingMessageId={streamingMessageId}
-                                        onOpenSubagent={(tool) => openDetail({ kind: 'subagent', tool })}
-                                        onOpenTool={(tool) => openDetail({ kind: 'tool', tool })}
+                                        onOpenSubagent={(tool) => openDetail({ tool })}
                                         onPreviewArtifact={onPreviewArtifact}
                                     />}
                                     <ResponseParts parts={final} lang={lang} streamingMessageId={streamingMessageId}
@@ -759,7 +654,7 @@ export const BeeGameCollaborationFeed = memo(({
                     )}
                 </Fragment>;
             })}
-            {isLoading && !isCompacting && !hasStreamingMessage && activeResponseIndex < 0 ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><ReasoningText phrases={[text.thinkingActive || text.aiProcessing || '']} variant="scramble" /></MessageContent></Message> : null}
+            {isLoading && !isCompacting && !hasStreamingMessage && activeResponseIndex < 0 ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><ReasoningText phrases={[text.waitingForModelResponse || text.aiProcessing || '']} variant="scramble" /></MessageContent></Message> : null}
         </MessageGroup>
         <Drawer
             open={Boolean(detail)}
@@ -768,11 +663,11 @@ export const BeeGameCollaborationFeed = memo(({
             className="overflow-hidden"
         >
             {detail ? <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-                {detail.kind === 'tool' ? <ToolResultDetail tool={(currentDetail ?? detail).tool} lang={lang} /> : <AgentRunDetailView
+                <AgentRunDetailView
                     detail={currentDetail ?? detail}
                     lang={lang}
                     onBack={() => setDetail(null)}
-                />}
+                />
             </div> : null}
         </Drawer>
         </>
@@ -781,93 +676,30 @@ export const BeeGameCollaborationFeed = memo(({
 
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
 
-function toolActivityState(tool: NormalizedTool, lang: Language) {
+function toolActivityState(tool: NormalizedTool) {
     const state = tool.completionReason || tool.status;
-    const labels = lang === 'zh'
-        ? { running: '运行中', completed: '完成', failed: '失败', stopped: '已停止', incomplete: '未完成' }
-        : { running: 'Running', completed: 'Completed', failed: 'Failed', stopped: 'Stopped', incomplete: 'Incomplete' };
     const endedAt = state === 'running' ? Date.now() : tool.turnCompletedAt ??
         (tool.status === 'running' ? undefined : tool.timestamp);
     const elapsed = tool.durationMs ?? (tool.startedAt === undefined || endedAt === undefined ? undefined
         : Math.max(0, endedAt - tool.startedAt));
     const seconds = elapsed === undefined ? undefined : Math.floor(elapsed / 1000);
     const duration = seconds === undefined ? '' : seconds < 1 ? '<1s' : seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    return { state, label: labels[state], duration };
+    return { state, duration };
 }
 
-function ToolActivity({ tool, lang, onOpenFull }: { tool: NormalizedTool; lang: Language; onOpenFull: () => void }) {
-    const [open, setOpen] = useState(false);
-    const { state } = toolActivityState(tool, lang);
-    const lines = tool.diff ? parseDiffLines(tool.diff) : [];
-    // An attempted or interrupted edit must not acquire FileDiff's "applied" badge.
-    if (state === 'completed' && lines.some(line => line.type === 'added' || line.type === 'removed')) return <div data-tool-id={tool.id} data-tool-state={state}>
-        <FileDiff file={toolActivitySummary(tool.name, tool.input, tool.detail, lang === 'zh')} lines={lines}
-            status="complete" open={open} onOpenChange={setOpen} collapseOnComplete={false} copyText={tool.diff}>
-            <button type="button" onClick={onOpenFull} className="ml-6 py-2 text-xs text-muted-foreground hover:text-foreground">
-                {lang === 'zh' ? '查看完整详情' : 'Open full details'}
-            </button>
-        </FileDiff>
-    </div>;
-    return <div data-tool-state={state}><ToolResultDetail tool={tool} lang={lang} inline open={open} onOpenChange={setOpen} onOpenFull={onOpenFull} /></div>;
+function ToolActivity({ tool, lang }: { tool: NormalizedTool; lang: Language }) {
+    const { state, duration } = toolActivityState(tool);
+    return <ToolActivityRow id={tool.id} name={tool.name} input={tool.input} detail={tool.detail}
+        state={state} duration={duration} lang={lang} />;
 }
 
-function ToolResultDetail({ tool, lang, inline = false, open, onOpenChange, onOpenFull }: {
-    tool: NormalizedTool; lang: Language; inline?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void; onOpenFull?: () => void;
-}) {
-    const { state, label, duration } = toolActivityState(tool, lang);
-    const data = tool.input && typeof tool.input === 'object' ? tool.input as Record<string, unknown> : {};
-    const path = typeof data.file_path === 'string' ? data.file_path : typeof data.path === 'string' ? data.path : undefined;
-    const sourceRead = tool.kind === 'read' && Boolean(path) && state === 'completed';
-    const command = tool.kind === 'bash' && tool.input && typeof tool.input === 'object' && 'command' in tool.input
-        && typeof tool.input.command === 'string' ? tool.input.command : undefined;
-    const inputTitle = command !== undefined ? (lang === 'zh' ? '原始命令' : 'Original command') : (lang === 'zh' ? '输入' : 'Input');
-    const inputContent = command !== undefined ? <ToolResultOutput language="bash">{command}</ToolResultOutput>
-        : tool.input !== undefined && (!inline || !sourceRead) ? <ToolResultOutput language="json">{displayText(JSON.stringify(tool.input, null, 2))}</ToolResultOutput> : undefined;
-    const Icon = tool.kind === 'image' ? ImageIcon : tool.kind === 'read' ? FileText
-        : ['write', 'edit'].includes(tool.kind) ? Pencil : tool.kind === 'search' ? Search
-        : tool.kind === 'bash' ? SquareTerminal : Wrench;
-    return <ToolResult title={inline ? displayText(toolActivitySummary(tool.name, tool.input, tool.detail, lang === 'zh')) : displayText(tool.name)}
-        data-tool-id={tool.id} icon={<Icon className="size-4" />} statusLabel={label}
-        status={state === 'completed' ? 'success' : state === 'failed' ? 'error'
-        : state === 'stopped' ? 'cancelled' : state === 'incomplete' ? 'incomplete' : 'running'}
-        meta={[duration, tool.exitCode === undefined || (inline && tool.exitCode === 0) ? '' : `${lang === 'zh' ? '退出码' : 'Exit code'} ${tool.exitCode}`].filter(Boolean).join(' · ')}
-        defaultOpen={!inline} open={open} onOpenChange={onOpenChange} collapseOnComplete={false}
-        kind={tool.kind === 'bash' ? 'terminal' : 'custom'} copyText={sourceRead ? undefined : tool.kind === 'bash' ? tool.output : displayText(tool.output)}>
-        {(!inline || open) && <div className="space-y-4">
-            {!inline && inputContent && <section>
-                <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{inputTitle}</h3>
-                {inputContent}
-            </section>}
-            <section>
-                <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{lang === 'zh' ? '输出' : 'Output'}</h3>
-                {tool.name.toLowerCase() === 'websearch' && tool.output
-                    ? <MarkdownRenderer content={tool.output} messageId={`${tool.id}-search-results`} lang={lang} />
-                    : sourceRead
-                        ? <SourceCodeBlock path={path} output={tool.output} />
-                        : <ToolResultOutput language="text">{(tool.kind === 'bash' ? tool.output : displayText(tool.output)) || (lang === 'zh' ? '暂无输出' : 'No output yet')}</ToolResultOutput>}
-            </section>
-            {inline && inputContent && <details>
-                <summary className="cursor-pointer text-xs text-muted-foreground">{inputTitle}</summary>
-                <div className="mt-2">{inputContent}</div>
-            </details>}
-            {inline && tool.exitCode !== undefined && <p className="text-xs text-muted-foreground">
-                {lang === 'zh' ? '退出码' : 'Exit code'} {tool.exitCode}
-            </p>}
-            {onOpenFull && <button type="button" onClick={onOpenFull} className="text-xs text-muted-foreground hover:text-foreground">
-                {lang === 'zh' ? '查看完整详情' : 'Open full details'}
-            </button>}
-        </div>}
-    </ToolResult>;
-}
-
-function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang, streamingMessageId, onOpenTool, onOpenSubagent, onPreviewArtifact }: {
+function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang, streamingMessageId, onOpenSubagent, onPreviewArtifact }: {
     parts: ResponsePart[];
     working: boolean;
     hasFinalResponse: boolean;
     completedAt?: number;
     lang: Language;
     streamingMessageId: string | null;
-    onOpenTool: (tool: NormalizedTool) => void;
     onOpenSubagent: (tool: NormalizedTool) => void;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
 }) {
@@ -893,25 +725,16 @@ function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang,
         ? (lang === 'zh' ? '少于 1 秒' : 'less than 1s')
         : seconds < 60 ? (lang === 'zh' ? `${seconds} 秒` : `${seconds}s`)
         : lang === 'zh' ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    const outcomes = parts.map(part => part.kind === 'tool'
-        ? part.tool.completionReason || (part.tool.status === 'failed' ? 'failed' : undefined)
-        : part.message.completionReason);
-    // A tool failure is evidence of a failed operation, not of overall task
-    // failure (or successful recovery). Keep that distinction in the public notice.
-    const issue = outcomes.includes('failed') ? (working ? text.failedWorking : text.failed)
-        : outcomes.includes('stopped') ? text.stopped
-        : outcomes.includes('incomplete') ? text.incomplete : undefined;
     const heading = `${text.details}${duration ? ` · ${duration}` : ''}`;
     const latestProgress = [...parts].reverse().find((part): part is Extract<ResponsePart, { kind: 'agent' }> =>
-        part.kind === 'agent' && messagePresentation(part.message) !== 'artifact');
-    // Show the latest progress until a final reply arrives. Earlier commentary
-    // remains in the chronological log; artifacts and requests stay accessible.
+        part.kind === 'agent' && !part.message.requiresUserAction && messagePresentation(part.message) !== 'artifact');
+    // Show the latest progress until a final reply arrives; keep artifacts and
+    // requests accessible. Execution details contain tool records only.
     const visibleParts = parts.filter(part => part.kind === 'agent' && (
         part.message.requiresUserAction || messagePresentation(part.message) === 'artifact' ||
         (!hasFinalResponse && part.sourceMessageId === latestProgress?.sourceMessageId)
     ));
-    const visible = new Set(visibleParts);
-    const hasDetails = parts.some(part => !visible.has(part));
+    const hasDetails = parts.some(part => part.kind === 'tool');
     return <>
         <ResponseParts parts={visibleParts} lang={lang} streamingMessageId={streamingMessageId} onPreviewArtifact={onPreviewArtifact} />
         {working && <div role="status" data-testid="beegame-work-status"
@@ -919,16 +742,9 @@ function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang,
             <LoaderCircle aria-hidden="true" className="size-3.5 shrink-0 motion-safe:animate-spin" />
             {text.working}
         </div>}
-        {issue && <div role="status" data-testid="beegame-activity-issue"
-            className="my-3 flex items-start gap-2 text-sm text-[var(--text-secondary)]">
-            <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <span>{issue}</span>
-        </div>}
         {hasDetails && <AgentActivity
         items={parts.flatMap((part, index): AgentActivityItem[] => {
-            if (visible.has(part)) return [];
-            if (part.kind === 'agent') return [{ id: `activity-message-${part.message.id}`, type: 'text',
-                content: <ResponseParts parts={[part]} lang={lang} streamingMessageId={streamingMessageId} onPreviewArtifact={onPreviewArtifact} /> }];
+            if (part.kind !== 'tool') return [];
             const isSubagent = (candidate: ResponsePart | undefined): boolean =>
                 candidate?.kind === 'tool' && Boolean(candidate.tool.isSubagent || candidate.tool.kind === 'subagent');
             if (part.kind === 'tool' && isSubagent(part)) {
@@ -945,27 +761,13 @@ function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang,
                     </div>,
                 }];
             }
-            const items = [toActivityItem(part, lang, streamingMessageId, onOpenTool)];
-            if (part.kind === 'tool') {
-                const tool = part.tool;
-                if (tool.attachments?.length) items.push({ id: `activity-media-${tool.id}`, type: 'text',
-                    content: <div className="chat-image-gallery" role="group" aria-label={lang === 'zh' ? '工具输出素材' : 'Tool media'}>
-                        {tool.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} animateReveal />)}
-                    </div> });
-
-            }
-            return items;
+            return [{ id: `activity-tool-${part.tool.id}`, type: 'text',
+                content: <ToolActivity tool={part.tool} lang={lang} /> }];
         })}
         variant="timeline" defaultOpen={false} collapseOnComplete={false} maxHeight={360}
         status={working ? 'working' : 'complete'} activeLabel={heading} summary={heading}
         className="w-full text-[var(--text-secondary)]" contentClassName="pl-4" />}
     </>;
-}
-
-function ThinkingActivityText({ part, lang, working }: { part: Extract<ResponsePart, { kind: 'thinking' }>; lang: Language; working: boolean }) {
-    const thought = displayText(part.message.thought || part.message.content || '');
-    const visibleThought = useSmoothStreamText(thought, working);
-    return <MarkdownRenderer content={visibleThought} messageId={part.message.id} lang={lang} streaming={working} />;
 }
 
 function subagentStatus(tool: NormalizedTool, lang: Language) {
@@ -1087,7 +889,6 @@ function AgentRunDetailView({
     const title = subagentDisplayName(detail.tool);
     const prompt = displayText(String(detail.tool.subagentPrompt || detail.tool.detail || '').trim());
     const output = detail.tool.status === 'running' ? '' : displayText(String(detail.tool.subagentOutput || detail.tool.output || '').trim());
-    const trace = displayText(String(detail.tool.subagentTrace || '').trim());
 
     return <section className="min-w-0 space-y-4 px-1 py-2" data-testid="beegame-agent-run-detail">
         <header className="flex items-center gap-2 border-b border-[var(--border-subtle)] pb-3">
@@ -1114,9 +915,9 @@ function AgentRunDetailView({
                 <h3 className="mb-1 type-caption-1 font-medium text-[var(--text-muted)]">{lang === 'zh' ? '结果' : 'Result'}</h3>
                 <MarkdownRenderer content={output} messageId={`${detail.tool.id}-subagent-output`} lang={lang} />
             </section> : null}
-            {detail.tool.subagentActivity || trace ? <section>
+            {detail.tool.subagentActivity ? <section>
                 <h3 className="mb-1 type-caption-1 font-medium text-[var(--text-muted)]">{lang === 'zh' ? '执行记录' : 'Trace'}</h3>
-                <SubagentActivityView activity={detail.tool.subagentActivity} legacyTrace={trace} lang={lang}
+                <SubagentActivityView activity={detail.tool.subagentActivity} lang={lang}
                     running={detail.tool.status === 'running' && !detail.tool.completionReason} />
             </section> : null}
         </div>

@@ -209,6 +209,15 @@ describe('dashboard header', () => {
     expect(within(screen.getByTestId('beegame-project-hint')).getByText('0.0001')).toBeInTheDocument();
   });
 
+  it('identifies partial receipts even when no tokens have been confirmed', () => {
+    const view = render(<BeeGameLivePreviewPage {...props} tokenUsage={{ prompt_tokens: 0, completion_tokens: 0,
+      total_tokens: 0, providerUsageIncomplete: true }} />);
+    fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
+    expect(screen.getByText('用量回执不完整，以上仅为已确认 Tokens。')).toBeInTheDocument();
+    view.rerender(<BeeGameLivePreviewPage {...props} tokenUsage={{ prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 }} />);
+    expect(screen.queryByText('用量回执不完整，以上仅为已确认 Tokens。')).not.toBeInTheDocument();
+  });
+
   it('does not turn unavailable usage into zero', () => {
     render(<BeeGameLivePreviewPage {...props} />);
     fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));

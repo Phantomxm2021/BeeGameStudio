@@ -19,7 +19,9 @@ export const CONTENT_CONSUMER_API = {
     measurement: 'Isolated measurement uses disposable saves with the same request validation and quotas. It cannot read or overwrite actual Preview saves, and is not proof of cross-session persistence.',
   },
   createProductionUiSurface: {
-    signature: 'await createProductionUiSurface(host: HTMLElement) -> {render, dispose}',
+    signature: 'const surface = await createProductionUiSurface(host: HTMLElement); returns Promise<{render, dispose}>',
+    images: 'data.image.type: simple only (default); no sliced/nine-slice or clipChildren. These are optional helper limits, not Editor schema limits.',
+    camera: '{nodeId,input,scene?,tileSet?}: input is required Camera projection data, not replaced by scene. camera-reference-2d requires orthographic projection, matching viewport and positive pixelsPerUnit.',
     render: 'surface.render(data, {width,height}, {state?, assets?, fonts?, onAction?, camera?}) -> resolved geometry array',
     state: 'state uses flat exact keys from authored bindings. enabled hides subtrees; widthRatio 0..1 needs fixed base/responsive sizes; styleColor sets text color/other backgroundColor. Missing/invalid state fails.',
     assets: 'loadProductionResources(...).assets supplies decoded records, not URLs. Declare IDs in document.assetRefs; dispose. A button can use assetRef/data.frame for its skin while text/actions stay live.',

@@ -27,15 +27,23 @@ export async function* parseSse(response: Response): AsyncGenerator<Json> {
     decoder = new TextDecoder()
   let buffer = '',
     data: string[] = [],
-    eventSize = 0
+    eventSize = 0,
+    skipLf = false
   try {
     while (true) {
       const chunk = await reader.read()
-      buffer += decoder.decode(chunk.value, { stream: !chunk.done })
+      let text = decoder.decode(chunk.value, { stream: !chunk.done })
+      // SSE permits CR, LF and CRLF; a CRLF pair may cross read boundaries.
+      if (skipLf && text.length) {
+        if (text.startsWith('\n')) text = text.slice(1)
+        skipLf = false
+      }
+      buffer += text
       let end: number
-      while ((end = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, end).replace(/\r$/, '')
-        buffer = buffer.slice(end + 1)
+      while ((end = buffer.search(/[\r\n]/)) >= 0) {
+        const line = buffer.slice(0, end), cr = buffer[end] === '\r'
+        skipLf = cr && end === buffer.length - 1
+        buffer = buffer.slice(end + (cr && buffer[end + 1] === '\n' ? 2 : 1))
         if (!line && data.length) {
           const value = data.join('\n')
           data = []
@@ -216,6 +224,7 @@ export async function* responseEvents(
         if (!choice) continue
         const delta = choice.delta ?? {}
         yield* addText(delta.content ?? '')
+        yield* addText(delta.refusal ?? '')
         if (delta.reasoning_content)
           raw.reasoning_content =
             (raw.reasoning_content ?? '') + delta.reasoning_content
@@ -264,7 +273,10 @@ export async function* responseEvents(
         } else if (chunk.type === 'message_delta') {
           if (chunk.usage) observeUsage(chunk.usage)
           finish = chunk.delta?.stop_reason ?? finish
-        } else if (chunk.type === 'message_stop') ended = true
+        } else if (chunk.type === 'message_stop') {
+          ended = true
+          break // This is the terminal event; HTTP EOF carries no further usage.
+        }
       } else if (config.protocol === 'gemini') {
         if (chunk.usageMetadata) observeUsage(chunk.usageMetadata)
         const candidate = chunk.candidates?.[0]
@@ -300,6 +312,9 @@ export async function* responseEvents(
           finish = candidate.finishReason
         }
       }
+      // Native SSE idle detection must observe real upstream activity even when
+      // the chunk contains only private reasoning, signatures or a provider ping.
+      yield { type: 'response.in_progress', response: { ...envelope('in_progress'), output: [] } }
     }
     streamFinished = true
   } finally {
@@ -309,7 +324,6 @@ export async function* responseEvents(
       cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 0 }),
       ...(!streamFinished || !ended || !reported ? { incomplete: true as const } : {}) })
   }
-  reported = providerUsage(config, usage)
   if (!ended) throw Error('Provider stream ended without a terminal event')
   const complete =
     config.protocol === 'chat-completions'
@@ -317,6 +331,11 @@ export async function* responseEvents(
       : config.protocol === 'anthropic-messages'
         ? ['end_turn', 'tool_use', 'stop_sequence'].includes(finish)
         : finish === 'STOP'
+  const incompleteReason = ['length', 'max_tokens', 'MAX_TOKENS'].includes(finish)
+    ? 'max_output_tokens'
+    : ['content_filter', 'SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY'].includes(finish)
+      ? 'content_filter'
+      : 'provider_stop'
   if (textItem) {
     textItem.status = 'completed'
     yield {
@@ -422,7 +441,9 @@ export async function* responseEvents(
   }
   const result = {
     ...envelope(complete ? 'completed' : 'incomplete'),
-    usage: {
+    // Completion follows the provider's terminal event. Missing accounting is
+    // already retained by onUsage as incomplete; never synthesize a zero receipt.
+    ...(reported ? { usage: {
       input_tokens:
         reported.input_tokens +
         reported.cache_read_tokens +
@@ -436,9 +457,9 @@ export async function* responseEvents(
       ...(reported.reasoning_tokens !== undefined
         ? { output_tokens_details: { reasoning_tokens: reported.reasoning_tokens } }
         : {}),
-    },
+    } } : {}),
     ...(!complete
-      ? { incomplete_details: { reason: 'max_output_tokens' } }
+      ? { incomplete_details: { reason: incompleteReason } }
       : {}),
   }
   yield {
@@ -448,9 +469,8 @@ export async function* responseEvents(
 }
 function providerUsage(
   config: ProviderConfig,
-  value: Json | undefined,
+  value: Json,
 ): ProviderUsage {
-  if (!value) throw Error('Provider did not report final token usage')
   let input: number,
     output: number,
     reasoning: number | undefined,

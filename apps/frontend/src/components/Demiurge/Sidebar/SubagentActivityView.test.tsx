@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { SubagentActivityView } from './SubagentActivityView';
 
@@ -24,49 +24,44 @@ describe('subagent activity presentation', () => {
         expect(row).toHaveTextContent('审批已取消');
     });
 
-    it('shows missing terminal evidence, elapsed time and attachment errors without inventing a cancellation', () => {
+    it('keeps incomplete, stopped and completed statuses distinct without exposing attachment diagnostics', () => {
         const { container } = render(<SubagentActivityView lang="zh" running={false} activity={{ truncated: false, entries: [
             { id: 'unresolved', kind: 'tool', toolName: 'Bash', status: 'running', elapsedTimeSeconds: 120 },
-            { id: 'image', kind: 'tool', toolName: 'Read', status: 'completed', attachmentError: 'Tool image could not be stored for Chat.' },
+            { id: 'image', kind: 'tool', toolName: 'Read', status: 'completed', attachmentError: 'raw-attachment-error' },
             { id: 'stopped', kind: 'tool', toolName: 'Bash', status: 'cancelled' },
         ] }} />);
         const missing = container.querySelector('[data-tool-id="unresolved"]')!;
-        expect(missing).toHaveTextContent('Status unconfirmed');
-        expect(missing).not.toHaveTextContent('Cancelled');
+        expect(missing).toHaveTextContent('未完成');
+        expect(missing).not.toHaveTextContent('已停止');
         expect(missing).toHaveTextContent('120s');
-        expect(screen.getByRole('alert')).toHaveTextContent('附件显示失败');
-        expect(screen.getByRole('alert')).toHaveTextContent('could not be stored');
-        expect(container.querySelector('[data-tool-id="stopped"]')).toHaveTextContent('Cancelled');
-    });
-    it('renders Read output as TSX with separate line numbers and Bash output as literal text', () => {
-        const { container } = render(<SubagentActivityView lang="zh" running={false} activity={{ truncated: false, entries: [
-            { id: 'note', kind: 'message', text: '**检查布局**' },
-            { id: 'read', kind: 'tool', toolName: 'Read', filePath: '/Users/alice/Game/src/Game.tsx', status: 'completed', output: '237→const value = <div />;\n238→return value;' },
-            { id: 'bash', kind: 'tool', toolName: 'Bash', command: 'bun test src/Game.tsx', status: 'failed', output: 'Failed in /Users/alice/Game/src/Game.tsx\n<script>not executable</script>' },
-        ] }} />);
-        expect(screen.getByText('检查布局').tagName).toBe('STRONG');
-        expect(container).toHaveTextContent('Game.tsx');
-        expect(container).not.toHaveTextContent('/Users/alice/Game');
-        expect(container).not.toHaveTextContent('src/Game.tsx');
-        fireEvent.click(screen.getAllByRole('button', { name: /Game.tsx/ })[0]);
-        expect(container.querySelector('[data-language="tsx"]')).toHaveTextContent('const value = <div />;');
-        expect(screen.getByText('237')).toHaveAttribute('aria-hidden', 'true');
-        expect(screen.getByText('238')).toHaveAttribute('aria-hidden', 'true');
-        expect(screen.getByLabelText('命令')).toHaveTextContent('bun test');
-        expect(screen.getByLabelText('工具输出')).toHaveTextContent('<script>not executable</script>');
-        expect(container.querySelector('script')).toBeNull();
+        expect(container.querySelector('[data-tool-id="stopped"]')).toHaveTextContent('已停止');
+        expect(container).not.toHaveTextContent('raw-attachment-error');
     });
 
-    it('labels truncated and legacy output without inventing its type', () => {
-        const { rerender } = render(<SubagentActivityView lang="en" running={false} legacyTrace={'Read src/Old.ts\n<div>source</div>'} />);
-        expect(screen.getByTestId('subagent-legacy-trace')).toHaveTextContent('source metadata is unavailable');
-        expect(screen.getByTestId('subagent-legacy-trace')).toHaveTextContent('Old.ts');
-        expect(screen.getByTestId('subagent-legacy-trace')).not.toHaveTextContent('src/Old.ts');
-        expect(screen.getByTestId('subagent-legacy-trace')).toHaveTextContent('<div>source</div>');
-        rerender(<SubagentActivityView lang="en" running={false} activity={{ truncated: true, entries: [
-            { id: 'read', kind: 'tool', toolName: 'Read', status: 'failed', output: 'missing file', truncated: true },
+    it('shows tool actions and failures while omitting code, inputs and outputs', () => {
+        const { container } = render(<SubagentActivityView lang="zh" running={false} activity={{ truncated: false, entries: [
+            { id: 'note', kind: 'message', text: '**检查布局**' },
+            { id: 'read', kind: 'tool', toolName: 'Read', filePath: '/Users/alice/Game/src/Game.tsx', status: 'completed', output: '237→const value = <div />;' },
+            { id: 'bash', kind: 'tool', toolName: 'Bash', command: 'bun test src/Game.tsx --raw-flag', input: '{"raw-input":true}',
+                status: 'failed', output: 'raw-failure-output' },
+        ] }} />);
+        expect(screen.queryByText('检查布局')).not.toBeInTheDocument();
+        expect(container).toHaveTextContent('Game.tsx');
+        expect(container).not.toHaveTextContent('/Users/alice/Game');
+        expect(container).not.toHaveTextContent('const value');
+        expect(container).not.toHaveTextContent('raw-input');
+        expect(container).not.toHaveTextContent('raw-flag');
+        expect(container).not.toHaveTextContent('raw-failure-output');
+        expect(container.querySelector('[data-tool-id="bash"]')).toHaveAccessibleDescription('失败');
+        expect(container.querySelector('button, pre, details')).toBeNull();
+    });
+
+    it('keeps partial history marked without exposing truncated tool output', () => {
+        const { container } = render(<SubagentActivityView lang="en" running={false} activity={{ truncated: true, entries: [
+            { id: 'read', kind: 'tool', toolName: 'Read', status: 'failed', output: 'raw-truncated-output', truncated: true },
         ] }} />);
         expect(screen.getByText(/Recent activity only/)).toBeInTheDocument();
-        expect(screen.getByText(/This output is truncated/)).toBeInTheDocument();
+        expect(container).not.toHaveTextContent('raw-truncated-output');
+        expect(screen.getByRole('group', { name: 'Read' })).toHaveAccessibleDescription('Failed');
     });
 });

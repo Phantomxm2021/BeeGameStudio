@@ -32,7 +32,8 @@ No group requires every member or defines a fixed workflow.
 - Design inspection finds missing/conflicting decisions; completion evidence bounds a claim; playtesting observes the actual runtime. They are not a mandatory three-pass chain.
 
 The current Agent assignment supplies ownership, scope and authorization;
-Skills supply methods. Do not copy Skill bodies into project guides or load
+Skills supply methods and evidence requirements; BGS owns the user-facing
+completion format. Do not copy Skill bodies into project guides or load
 them all as one prompt. This navigator itself is a reference, not guaranteed
 automatic discovery or proof that a method was applied correctly.
 

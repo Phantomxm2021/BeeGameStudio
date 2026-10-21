@@ -38,13 +38,19 @@ protectedWriteTools.push({ type: 'function', name: 'AskUserQuestion', descriptio
       options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, description: { type: 'string' } }, required: ['label','description'], additionalProperties: false } },
       multiSelect: { type: 'boolean' } }, required: ['question','header','options'], additionalProperties: false } } }, required: ['questions'], additionalProperties: false } })
 
-/** Resolve every edit against the original bytes before the single authorized write. */
 export function editProtectedFileText(text: string, args: Record<string, unknown>): string {
+  return prepareProtectedFileEdit(text, args).content
+}
+
+/** Resolve every edit against the original bytes before the single authorized write. */
+function prepareProtectedFileEdit(text: string, args: Record<string, unknown>) {
   if ('edits' in args && ('old_string' in args || 'new_string' in args))
     throw Error('Use either edits or old_string/new_string, not both')
   const edits = 'edits' in args ? args.edits : [{ old_string: args.old_string, new_string: args.new_string }]
   if (!Array.isArray(edits) || !edits.length) throw Error('edits must be a nonempty array')
   const issues: string[] = []
+  let excerpts = 0
+  const lineAt = (offset: number) => text.slice(0, offset).split('\n').length
   const replacements = edits.flatMap((edit, index) => {
     if (!edit || typeof edit.old_string !== 'string' || !edit.old_string || typeof edit.new_string !== 'string') {
       issues.push(`edits[${index}]: requires an exact nonempty old_string and a string new_string`)
@@ -52,9 +58,26 @@ export function editProtectedFileText(text: string, args: Record<string, unknown
     }
     const start = text.indexOf(edit.old_string)
     let matches = 0
-    for (let at = start; at !== -1; at = text.indexOf(edit.old_string, at + 1)) matches++
+    const lines: number[] = []
+    for (let at = start; at !== -1; at = text.indexOf(edit.old_string, at + 1)) {
+      matches++
+      if (lines.length < 5) lines.push(lineAt(at))
+    }
     if (matches !== 1) {
-      issues.push(`edits[${index}]: old_string matched ${matches} times; must match exactly once`)
+      let hint = lines.length ? `; original match lines: ${lines.join(', ')}${matches > lines.length ? ', …' : ''}` : ''
+      // An exact, unique first line can locate a stale multiline block. It is a
+      // diagnostic only: never use it to relax matching or apply a partial edit.
+      if (!matches && excerpts < 3 && edit.old_string.includes('\n')) {
+        const anchor = edit.old_string.split('\n').find((line: string) => line.trim())
+        const sourceLines = text.split('\n')
+        const line = anchor ? sourceLines.indexOf(anchor) : -1
+        if (line >= 0 && sourceLines.indexOf(anchor, line + 1) === -1) {
+          excerpts++
+          hint = `; exact first-line anchor at original line ${line + 1}; current text (up to 3 lines/400 characters):\n` +
+            sourceLines.slice(line, line + 3).map((value, offset) => `${line + offset + 1}: ${value}`).join('\n').slice(0, 400)
+        }
+      }
+      issues.push(`edits[${index}]: old_string matched ${matches} times; must match exactly once${hint}`)
       return []
     }
     return [{ index, start, end: start + edit.old_string.length, value: edit.new_string }]
@@ -65,7 +88,15 @@ export function editProtectedFileText(text: string, args: Record<string, unknown
   // Slice concatenation keeps replacement text literal, including $&, $1 and $`.
   let result = '', cursor = 0
   for (const edit of replacements) { result += text.slice(cursor, edit.start) + edit.value; cursor = edit.end }
-  return result + text.slice(cursor)
+  return { content: result + text.slice(cursor),
+    summary: `Applied ${replacements.length} replacement(s); original lines: ${replacements.slice(0, 20).map(edit => lineAt(edit.start)).join(', ')}${replacements.length > 20 ? ', …' : ''}.` }
+}
+
+function toolFailureOutput(output: unknown, reason: string | undefined): unknown {
+  if (!reason) return output
+  if (output == null || output === '' || (Array.isArray(output) && !output.length)) return reason
+  if (typeof output === 'string') return output.includes(reason) ? output : `${output}\n${reason}`
+  return { result: output, error: reason }
 }
 
 export function createBgsRunner(options: ProviderNetworkOptions & { command?: readonly string[] } = {}): BeeGameSessionRunner {
@@ -128,7 +159,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       profile[builtinSkills] = 'read'
       profile[userSkills] = 'read'
       profile[join(home, 'skills')] = 'read'
-      const instructions = [BEEGAME_USER_RESPONSE_SCOPE, input.language && responseLanguageInstruction(input.language), input.systemContext,
+      const instructions = [BEEGAME_USER_RESPONSE_SCOPE, input.language && responseLanguageInstruction(input.language),
         'Use WriteProjectFile or EditProjectFile for these host-protected paths relative to the project root: ' + JSON.stringify(access.protectedPaths.map(path => relative(access.root, path))) +
         '. Shell and apply_patch cannot modify them. A design lock is enforced by BGS; never bypass a rejection.', mcp.context].filter(Boolean).join('\n\n')
       if(env.OPENAI_AUTH_MODE!=='chatgpt') {
@@ -204,8 +235,15 @@ class BgsRuntime implements BeeGameSessionRuntime {
           if (!skill) { reject(Error('Required BGS skill is unavailable: ' + name)); return }
           prompt.unshift({type:'skill',name,path:skill.path})
         }
+        // thread/resume does not replace instructions already in model history.
+        // Workflow context contains current bridge paths, authorization and host
+        // evidence, so deliver it in the existing per-turn application slot.
+        const additionalContext = {
+          ...(this.input.systemContext ? { bgsRuntime: { value: this.input.systemContext, kind: 'application' } } : {}),
+          ...(input.confirmedBriefContext ? { bgsConfirmedBrief: { value: input.confirmedBriefContext, kind: 'application' } } : {}),
+        }
         void this.client.request('turn/start', { threadId: this.threadId, input: prompt,
-          ...(input.confirmedBriefContext ? { additionalContext: { bgsConfirmedBrief: { value: input.confirmedBriefContext, kind: 'application' } } } : {}) })
+          ...(Object.keys(additionalContext).length ? { additionalContext } : {}) })
           .then(result => {
             if (this.active !== turn) return
             if (typeof result.turn?.id !== 'string') throw Error('BGS did not acknowledge a turn identity')
@@ -263,6 +301,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       const item = p.item as RpcObject
       if (!item || typeof item.id !== 'string') throw Error('Invalid BGS item')
       const complete = method === 'item/completed'
+      const prior = this.items.get(item.id)
       if (['commandExecution', 'fileChange'].includes(item.type) && !complete) this.items.set(item.id, item)
       else if (complete) this.items.delete(item.id)
       if (item.type === 'agentMessage' && complete) {
@@ -271,7 +310,9 @@ class BgsRuntime implements BeeGameSessionRuntime {
         if (remaining) await this.emit('assistant.message', remaining, identity(item.id))
         this.messages.delete(item.id)
       } else if (item.type === 'contextCompaction') {
-        await this.emit('system.status', complete ? 'Context compacted' : 'Compacting context', { status: complete ? 'compacted' : 'compacting' })
+        await this.emit('system.status', complete ? 'Context compacted' : 'Compacting context', {
+          subtype: complete ? 'compact_boundary' : 'status', status: complete ? 'compacted' : 'compacting',
+        })
       } else if (item.type === 'collabAgentToolCall') {
         for (const child of item.receiverThreadIds ?? []) {
           if (item.tool === 'spawnAgent' || !this.childOwners.has(child)) this.childOwners.set(child, item.id)
@@ -285,11 +326,13 @@ class BgsRuntime implements BeeGameSessionRuntime {
           output: complete ? item.agentsStates : undefined, is_error: item.status === 'failed',
           ...(owner ? { parentToolUseID: owner } : {}) })
       } else if (['commandExecution', 'fileChange', 'mcpToolCall', 'dynamicToolCall', 'webSearch', 'imageView'].includes(item.type)) {
+        const reason = typeof item.error === 'string' ? item.error : item.error?.message ?? prior?.bgsDenialReason ??
+          (item.status === 'declined' ? 'Native tool approval was declined; no detailed reason was supplied.' : undefined)
         const tools = item.type === 'webSearch' ? [webSearchTool(item, complete)] : item.type === 'fileChange' ? item.changes.map((change: RpcObject, i: number) => ({
-          toolUseID: item.id + ':' + i, toolName: 'Edit', input: { file_path: change.path }, diff: change.diff, output: change.diff })) : [{
+          toolUseID: item.id + ':' + i, toolName: 'Edit', input: { file_path: change.path }, diff: change.diff, output: toolFailureOutput(change.diff, reason) })) : [{
           toolUseID: item.id, toolName: item.type === 'commandExecution' ? 'Shell' : item.tool || item.type,
           input: item.arguments || { command: item.command, path: item.path },
-          output: item.aggregatedOutput ?? item.result ?? item.contentItems,
+          output: toolFailureOutput(item.aggregatedOutput ?? item.result ?? item.contentItems ?? prior?.aggregatedOutput, reason),
           ...(item.type === 'commandExecution' ? {
             ...(Number.isInteger(item.exitCode) ? { exitCode: item.exitCode } : {}),
             ...(typeof item.durationMs === 'number' && Number.isFinite(item.durationMs) && item.durationMs >= 0 ? { durationMs: item.durationMs } : {}),
@@ -371,19 +414,22 @@ class BgsRuntime implements BeeGameSessionRuntime {
         if (realpathSync(dirname(path)) !== dirname(path)) throw Error('Protected path contains an alias')
         try { if (realpathSync(path) !== path) throw Error('Protected file must not be a symlink') }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-        let content: string
+        let content: string, summary: string
         if (p.tool === 'WriteProjectFile') {
           if (typeof args.content !== 'string') throw Error('content is required')
           content = args.content
+          summary = `Wrote ${content.length} characters.`
         } else {
-          content = editProtectedFileText(readFileSync(path, 'utf8'), args)
+          const edit = prepareProtectedFileEdit(readFileSync(path, 'utf8'), args)
+          content = edit.content
+          summary = edit.summary
         }
         const temporary = path + '.' + randomUUID() + '.tmp'
         try { writeFileSync(temporary, content, {flag:'wx',mode:0o600}); renameSync(temporary, path) }
         finally { rmSync(temporary, {force:true}) }
-        return { contentItems: [{ type: 'inputText', text: 'File saved' }], success: true }
+        return { contentItems: [{ type: 'inputText', text: `File saved: ${relative(this.access.root, path)}. ${summary}` }], success: true }
       } catch (error) {
-        return { contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : 'File change failed' }], success: false }
+        return { contentItems: [{ type: 'inputText', text: `${typeof p.arguments?.file_path === 'string' ? p.arguments.file_path + ': ' : ''}${error instanceof Error ? error.message : 'File change failed'}` }], success: false }
       }
     }
     if (method === 'item/tool/call' && p.tool === 'AskUserQuestion') {
@@ -405,6 +451,10 @@ class BgsRuntime implements BeeGameSessionRuntime {
       return bgsApproval(method, p, { root: this.access.root,
         networkEnabled: this.access.config.permissions['bgs-project'].network.enabled,
         filesystem: this.access.config.permissions['bgs-project'].filesystem, items: this.items, current,
+        onDenied: reason => {
+          const item = this.items.get(p.itemId)
+          if (item) this.items.set(p.itemId, { ...item, bgsDenialReason: reason })
+        },
         permission: request => this.permission(request) })
     if (method === 'mcpServer/elicitation/request') {
       if (!['form', 'url'].includes(p.mode)) return { action: 'cancel', content: null }

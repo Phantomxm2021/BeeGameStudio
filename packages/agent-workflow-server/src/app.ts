@@ -3938,7 +3938,9 @@ export async function generateBeeGameModelWithUsage(
   if (result.usage && recordModelUsage) {
     await recordModelUsage(result.usage, input.querySource)
   }
-  if (requireUsage && (!result.usage || result.usage.incomplete)) {
+  // An explicit incomplete receipt preserves unknown usage for reconciliation;
+  // it does not invalidate a completed response or justify replaying the model.
+  if (requireUsage && !result.usage) {
     throw new Error('Realtime usage billing requires provider token usage')
   }
   return result.content
@@ -5557,6 +5559,8 @@ function deriveBeeGameContextVisibility(
     runtime_features: [],
     token_budget: {
       status: 'tracking',
+      ...(snapshot?.providerUsageIncomplete || events.some(event => event.type === 'usage' && event.payload?.providerUsageIncomplete === true)
+        ? { providerUsageIncomplete: true } : {}),
       input_tokens: usage.prompt_tokens,
       cached_input_tokens:
         usage.cache_read_tokens + usage.cache_creation_tokens,

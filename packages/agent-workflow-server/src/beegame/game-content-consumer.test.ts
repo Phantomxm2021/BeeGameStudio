@@ -379,3 +379,18 @@ test('existing consumer --inspect reports actual Scene field support without ren
     expect(await inspect()).toMatchObject({supported:false,issues:[{nodeId:'sprite',property:'appearance'}]})
   } finally { await rm(directory,{recursive:true,force:true}) }
 })
+
+
+test('advertised image, action and clipping capabilities match the optional surface', () => {
+  const capabilities = CONTENT_CONSUMER_API.capabilities
+  expect(capabilities.uiImageTypes).toEqual(['simple'])
+  expect(capabilities.uiActions).toEqual(['click'])
+  expect(capabilities.uiClipChildren).toBe(false)
+  const inspect = (data: Record<string, unknown>, actions: Record<string, string> = {click: 'start'}) => inspectProductionUiSupport({
+    rootId: 'root', nodes: [{id:'root',role:'screen-root'}, {id:'button',parentId:'root',role:'button',data,actions}],
+  })
+  expect(inspect({image:{type:'simple'}}).supported).toBe(true)
+  expect(inspect({image:{type:'sliced'}}).issues).toContainEqual(expect.objectContaining({property:'data.image.type'}))
+  expect(inspect({clipChildren:true}).issues).toContainEqual(expect.objectContaining({property:'data.clipChildren'}))
+  expect(inspect({}, {hover:'start'}).issues).toContainEqual(expect.objectContaining({property:'actions.hover'}))
+})

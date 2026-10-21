@@ -14,13 +14,13 @@ import { dirname, relative, resolve } from 'node:path'
 const catalogFilterKeys = ['packIds','dimensions','primaryCategories','categories','styles','gameTypes','packTags','usageTags','assetKinds','capabilities','formats']
 const catalogUsage = 'Catalog accepts structured filter arrays: '+catalogFilterKeys.join(', ')+
   '. No free-text query/search. Use {"filters":{"formats":["png"]},"limit":10,"cursor":"<returned nextCursor>"}; flat filter arrays with limit/cursor also work.'
-  + ' Catalog returns items, total, facets and optional nextCursor. readyElementCount counts technically browsable files, not proven matches. Empty usageTags means unclassified, not unavailable; inspect or audition before choosing a game role.'
+  + ' Catalog returns compact items, total, facets and optional nextCursor. Use pack/element for selected metadata or append --details for full list items. readyElementCount counts technically browsable files, not proven matches. Empty usageTags means unclassified, not unavailable; inspect or audition before choosing a game role.'
 
 const atlasInputFormat = 'Atlas input: {"frames":{"name":{"x":0,"y":0,"w":32,"h":32}}}. Frame values are flat rectangles; nested {frame:{x,y,w,h}} is the output sidecar format, not input.'
 
 const usage = `Usage: bun <this-file> <command> [arguments]
-  catalog [request-json]                Browse library packs and available facets
-  elements <pack-id> [request-json]      Browse a selected pack's elements
+  catalog [request-json] [--details]      Browse library packs and available facets
+  elements <pack-id> [request-json] [--details]  Browse a selected pack's elements
   pack <pack-id>                         Read license, version and pack metadata
   element <pack-id> <element-id>         Read element and dependency metadata
   fetch <pack-id> <element-id> <assets/path>  Download one selected library file
@@ -203,31 +203,23 @@ async function main() {
     !base
   )
     throw new Error('Built-in resource library is unavailable for this turn')
-  if (command === 'catalog') {
-    if (args.length > 1) throw new Error(usage)
-    console.log(
-      JSON.stringify(
-        await jsonRequest(base + '/api/resource-catalog/packs', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(catalogRequest(args[0])),
-        }),
-      ),
-    )
-  } else if (command === 'elements') {
-    if (args.length > 2) throw new Error(usage)
-    console.log(
-      JSON.stringify(
-        await jsonRequest(
-          base + '/api/resource-catalog/packs/' + id(args[0]) + '/elements',
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(catalogRequest(args[1])),
-          },
-        ),
-      ),
-    )
+  if (command === 'catalog' || command === 'elements') {
+    const details = args.at(-1) === '--details'
+    if (details) args.pop()
+    const isPack = command === 'catalog'
+    if (args.length > (isPack ? 1 : 2)) throw new Error(usage)
+    const path = '/api/resource-catalog/packs' + (isPack ? '' : '/' + id(args[0]) + '/elements')
+    const result = await jsonRequest(base + path, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(catalogRequest(args[isPack ? 0 : 1])),
+    })
+    if (!details && Array.isArray(result.items)) {
+      const fields = isPack
+        ? ['packId', 'packVersion', 'packName', 'dimension', 'primaryCategory', 'categories', 'styles', 'gameTypes', 'readyElementCount', 'assetKinds', 'formats', 'license']
+        : ['packId', 'packVersion', 'elementId', 'elementName', 'elementPath', 'category', 'dimension', 'assetKind', 'usageTags', 'capabilities', 'dependencyCount']
+      result.items = result.items.map(item => Object.fromEntries(fields.filter(key => Object.hasOwn(item, key)).map(key => [key, item[key]])))
+    }
+    console.log(JSON.stringify(result))
   } else if (command === 'pack' || command === 'element') {
     const path =
       '/api/resource-packs/' +

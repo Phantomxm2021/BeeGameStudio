@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { BgsClient } from './client'
 import { withBgsAccountUse } from './account-activity'
 import { getSafeRuntimeProcessEnvironment } from '../beegame/runtime-process-environment'
+import { parseSse } from '../model-providers/response-stream'
 
 export const bgsHome = (ownerRoot: string) => bgsHomeDirectory(join(ownerRoot, '.runtime', 'app'))
 
@@ -65,28 +66,5 @@ export async function createChatGPTResponsesStream(input: {
     body: JSON.stringify(input.request),
   })
   if (!response.ok) { await response.body?.cancel(); throw Object.assign(Error(`ChatGPT request failed (${response.status})`), { status: response.status }) }
-  return parseEvents(response)
-}
-
-async function* parseEvents(response: Response): AsyncIterable<Record<string, any>> {
-  if (!response.body) throw Error('Missing response stream')
-  const reader = response.body.getReader(), decoder = new TextDecoder()
-  let buffer = '', data: string[] = []
-  try {
-    while (true) {
-      const chunk = await reader.read()
-      buffer += decoder.decode(chunk.value, { stream: !chunk.done })
-      let end: number
-      while ((end = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, end).replace(/\r$/, ''); buffer = buffer.slice(end + 1)
-        if (!line && data.length) {
-          const event = data.join('\n'); data = []
-          if (event === '[DONE]') return
-          yield JSON.parse(event)
-        } else if (line.startsWith('data:')) data.push(line.slice(5).trimStart())
-      }
-      if (chunk.done) { if (buffer.trim() || data.length) throw Error('Truncated response stream'); return }
-      if (buffer.length > 64 * 1024 * 1024) throw Error('Response event exceeds the image response limit')
-    }
-  } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
+  return parseSse(response)
 }

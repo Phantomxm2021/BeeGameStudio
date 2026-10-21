@@ -1,6 +1,43 @@
 import { expect, test } from 'bun:test'
 import { createProcessIsolatedModelRuntimeHost } from '../beegame/model-runtime-host'
 
+test('subscription worker accepts its terminal response without reading a failing tail, and rejects a missing terminal event', async () => {
+  const authPath = new URL('./auth.ts', import.meta.url).pathname
+  const workerPath = new URL('../beegame/model-runtime-worker.ts', import.meta.url).pathname
+  for (const completed of [true, false]) {
+    // Module mocks stay inside this child; no login or outbound request occurs.
+    const script = `
+      import { mock } from 'bun:test';
+      mock.module(${JSON.stringify(authPath)}, () => ({
+        getDefaultBgsModel: async () => 'fixture',
+        createChatGPTResponsesStream: async () => (async function* () {
+          yield { type: ${JSON.stringify(completed ? 'response.completed' : 'response.created')},
+            response: { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'Completed' }] }] } };
+          throw Error('Synthetic transport tail');
+        })(),
+      }));
+      const result = new Promise(resolve => { process.send = message => { resolve(message); return true }; });
+      await import(${JSON.stringify(workerPath)});
+      process.emit('message', { type: 'model.generate', requestId: 'offline', input: {
+        runtimeEnv: { OPENAI_AUTH_MODE: 'chatgpt', BEEGAME_CONFIG_DIR: '/private/tmp/synthetic', BEEGAME_MODEL: 'fixture' },
+        approvedOutboundTargets: {}, systemPrompt: 'Offline', messages: [],
+      } });
+      console.log(JSON.stringify(await result));
+    `
+    const child = Bun.spawn([process.execPath, '-e', script], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
+    try {
+      const [output, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+      expect(error).toBe('')
+      expect(exit).toBe(0)
+      const result = JSON.parse(output)
+      expect(result.type).toBe(completed ? 'model.result' : 'model.error')
+      expect(result.usage).toMatchObject({ total_tokens: 0, incomplete: true })
+      if (completed) expect(result.content).toBe('Completed')
+      else expect(result.message).toBe('Synthetic transport tail')
+    } finally { child.kill() }
+  }
+})
+
 test('invalid or unsupported explicit temperatures fail before outbound work', async () => {
   let outbound = 0, workers = 0
   const host = createProcessIsolatedModelRuntimeHost({ outboundTargetPolicyOptions: {},

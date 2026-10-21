@@ -64,6 +64,48 @@ function deferred<T>() {
 }
 
 describe('RightSidebar tabs', () => {
+    it.each([
+        'stream disconnected before completion: Provider did not report final token usage',
+        'Provider reported invalid token usage',
+        'HTTP 401 Unauthorized',
+        'Permission denied for tool.',
+        'Invalid request parameters',
+        'Unrecognized runtime failure',
+    ])('offers manual recovery for any stopped failed turn: %s', async content => {
+        vi.useFakeTimers();
+        const onContinueTask = vi.fn().mockResolvedValue(undefined);
+        render(<RightSidebar projectId="generic-failure" lang="en" progress={0} isLoading={false}
+            messages={[{ id: 'failure', sender: 'system', type: 'error', turnId: 'failed-turn',
+                content, timestamp: Date.now() }]}
+            projectStatus={{ project_id: 'generic-failure', phase: 'paused', blocked: true }}
+            autoRetryTurnId="failed-turn" onContinueTask={onContinueTask} onSendMessage={vi.fn()}
+            waitingPermission={getWaitingPermissionState([])} />);
+        const retry = screen.getByRole('button', { name: 'Retry now' });
+        expect(retry).toHaveTextContent('Retry');
+        expect(retry).not.toHaveTextContent('Retry in');
+        await act(async () => vi.advanceTimersByTime(20_000));
+        expect(onContinueTask).not.toHaveBeenCalled();
+        fireEvent.click(retry);
+        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn', false);
+    });
+
+    it.each(['later-turn', 'active', 'other-project', 'delivery-notice'] as const)('does not resume a stale, live or successfully ended execution: %s', async kind => {
+        vi.useFakeTimers();
+        const onContinueTask = vi.fn();
+        render(<RightSidebar projectId="current-project" lang="en" progress={0} isLoading={kind === 'active'}
+            messages={[{ id: 'failure', sender: 'system', type: 'error', turnId: 'old-turn',
+                taskKind: kind === 'delivery-notice' ? 'delivery_error' : 'runtime_error',
+                content: 'Connection error.', timestamp: 1 },
+                ...(kind === 'later-turn' ? [{ id: 'later', sender: 'assistant', turnId: 'new-turn',
+                    content: 'Completed', timestamp: 2 }] : [])]}
+            projectStatus={{ project_id: kind === 'other-project' ? 'other' : 'current-project', phase: 'paused', blocked: true }}
+            autoRetryTurnId="old-turn" onContinueTask={onContinueTask} onSendMessage={vi.fn()}
+            waitingPermission={getWaitingPermissionState([])} />);
+        await act(async () => vi.advanceTimersByTime(20_000));
+        expect(screen.queryByRole('button', { name: 'Retry now' })).not.toBeInTheDocument();
+        expect(onContinueTask).not.toHaveBeenCalled();
+    });
+
     it('places the retry capsule beside the model error and keeps historical errors manual', async () => {
         vi.useFakeTimers();
         const onContinueTask = vi.fn().mockResolvedValue(undefined);

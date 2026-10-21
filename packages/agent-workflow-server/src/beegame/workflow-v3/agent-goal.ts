@@ -79,12 +79,12 @@ function agentGoalDisplayText(run: Run): string {
 export function agentGoalPrompt(run: Run): string {
   if (run.creation?.initialDelivery === 'playable-slice') return [
     'This first assignment delivers one small, complete player experience for user playtesting, not the full game. Reduced content quantity does not waive the required design dependencies. Keep the complete confirmed goal unchanged for subsequent work.',
-    'Reduce content quantity, not the controls, readability or audiovisual feedback needed to judge the chosen experience. Preserve confirmed core rules; a proposed rule change is not authorization to implement it. Record the experience focus and deferred content in the existing concise design record, implement and run it, and show the actual preview and observations. Identify unresolved experience questions, then end this turn for user feedback. Do not expand the full content set in this assignment or claim game acceptance.',
+    'Reduce content quantity, not the controls, readability or audiovisual feedback needed to judge the chosen experience. Preserve confirmed core rules; a proposed rule change is not authorization to implement it. Record the experience focus and deferred content in the existing concise design record, implement and run it, and make the actual preview available. Retain observations and unresolved experience questions in that same record, then end this turn for user feedback. Do not expand the full content set in this assignment or claim game acceptance.',
     ...(run.creation.webStarter ? ['The host supplied a generic React/Canvas connection scaffold: content/ is consumed by src/main.jsx, src/game.js owns simulation and UI state/actions. It is not gameplay or an approved art style. Extend the connected sources; do not replace saved Scene/UI data with a second hardcoded layout.'] : []),
     'Use the complete confirmed goal in bgsConfirmedBrief; its full scope is retained, not all due in this first assignment.',
   ].join('\n\n')
   return [
-    'Complete the current user assignment in this project. Select relevant Skills, organize the work and self-check the requested deliverables. Respect the production dependencies for work in scope; do not infer additional deliverables from the project creation mode. Stop at the requested boundary and report completed work, blockers and unverified outcomes.',
+    'Complete the current user assignment in this project. Select relevant Skills, organize the work and self-check the requested deliverables. Respect the production dependencies for work in scope; do not infer additional deliverables from the project creation mode. Stop at the requested boundary.',
     'Use the complete confirmed goal supplied in bgsConfirmedBrief.',
   ].join('\n\n')
 }
@@ -152,7 +152,7 @@ export async function agentTurnHandoffReason(run: Run, turn: AgentTurn) {
     acceptanceNote = ' Runtime report: ' + (acceptance.valid ? 'reported checks/version/evidence validated; ' : acceptance.summary + ' ') + counts +
       '. Observation truth and visual/game quality are not host-certified.'
   }
-  if(!record)return 'Native goal turn ended; execution completion is not acceptance. See the Agent report and saved files for the requested deliverables and unresolved work. No target-runtime measurement was recorded.'
+  if(!record)return 'Native goal turn ended; execution completion is not acceptance. See saved files for the requested deliverables and unresolved work. No target-runtime measurement was recorded.'
   try {
     const freshness=await inspectAgentMeasurementInputs(run,record)
     const invalid=blockingRegisteredContentChecks(record)
@@ -282,8 +282,8 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
           const local=active.get(turn.attemptId)
           if(local?.runId===run.id)local.turnId=id
         },
-        // Stable responsibilities belong to the existing system-context slot,
-        // not another full copy in each resumed user message/history entry.
+        // The BGS adapter delivers this context through turn/start's application
+        // slot, so resumed threads receive current capabilities and host facts.
         // Project conventions/navigation are one current file snapshot, including
         // discussion; production capabilities stay scoped to authorized work.
         prepareTurn:async ()=>{

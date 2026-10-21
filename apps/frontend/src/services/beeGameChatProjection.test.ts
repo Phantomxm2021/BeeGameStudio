@@ -28,6 +28,13 @@ const message = (type: ProjectEventMessage['type'], overrides: Partial<ProjectEv
 })
 
 describe('standalone chat projection', () => {
+  it.each([0, 120])('preserves incomplete usage when projecting receipts with %i known tokens', total => {
+    const usage = { prompt_tokens: total, completion_tokens: 0, total_tokens: total };
+    const [live] = projectEventMessages('project-a', event({ type: 'usage', payload: {
+      usage, sessionUsage: usage, providerUsageIncomplete: true,
+    } }));
+    expect(live.usage).toMatchObject({ total_tokens: total, providerUsageIncomplete: true });
+  });
   it.each(['tool.progress', 'tool.completed', 'tool.failed'])('preserves structured %s results in live and restored Chat', type => {
     for (const output of [[{ type: 'inputText', text: 'Design remains locked' }], { answers: ['A'], tasks: [{ status: 'unverified' }] }]) {
       const [live] = projectEventMessages('project-a', frozen(event({ type: type as BeeGameEvent['type'], text: 'FixtureTool',

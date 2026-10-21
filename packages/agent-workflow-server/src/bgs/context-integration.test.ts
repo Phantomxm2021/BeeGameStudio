@@ -8,9 +8,11 @@ import type { Run } from '../beegame/workflow-v3/state'
 
 // Real CLI, synthetic local Responses server; no model or project artifacts.
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
-localTest('native instructions refresh on resume while BGS sends the confirmed goal once', async () => {
+localTest('native resume receives current BGS context as well as project instructions and confirmed goal', async () => {
   const root = await mkdtemp('/private/tmp/bgs-context-'), game = join(root, 'game'), catalog = join(root, 'skills')
   await mkdir(game); await mkdir(catalog)
+  await mkdir(join(catalog, 'fixture'))
+  await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: synthetic\ndescription: Offline fixture.\n---\nFixture.')
   const inputs: any[][] = []
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     if (new URL(request.url).pathname !== '/v1/responses') return new Response('Unexpected fixture route', { status: 404 })
@@ -39,7 +41,7 @@ localTest('native instructions refresh on resume while BGS sends the confirmed g
       runtime = await runner.start({
         sessionId: 'context-fixture', cwd: game,
         ...(index === 1 ? { resumeSessionId: nativeSessionId } : {}),
-        systemContext: projectGuideContext(await readProjectGuide(game)),
+        systemContext: projectGuideContext(await readProjectGuide(game)) + '\nCURRENT_TOOLS_DIRECTORY_' + marker,
         env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
           OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-model' },
         onNativeSessionId: id => { nativeSessionId = id },
@@ -51,12 +53,20 @@ localTest('native instructions refresh on resume while BGS sends the confirmed g
         onMessage() {}, requestPermission: async () => ({ behavior: 'deny' }),
       })
       const sent = JSON.stringify(inputs.at(-1))
-      expect(sent.split(marker)).toHaveLength(2)
+      expect(sent.split('CURRENT_TOOLS_DIRECTORY_' + marker)).toHaveLength(2)
+      // Unlike AGENTS.md, this marker exists only in BGS memory. Refreshing the
+      // project guide alone cannot make this assertion pass on native resume.
+      const current = inputs.at(-1)!.findLast(item => JSON.stringify(item).includes('CURRENT_TOOLS_DIRECTORY_' + marker))
+      expect(current.role).toBe('developer')
+      expect(sent).toContain('# Project instructions\\n' + marker)
       // A resumed conversation retains its earlier application-context message.
       // The new submission adds one authoritative brief, not a prompt copy.
       expect(sent.split(run.requirements.text)).toHaveLength(index === 1 ? 3 : 2)
-      if (index === 1) expect(sent.lastIndexOf(marker)).toBeGreaterThan(sent.indexOf('INITIAL_GUIDE_MARKER'))
+      if (index === 1) expect(sent.indexOf('CURRENT_TOOLS_DIRECTORY_' + marker))
+        .toBeGreaterThan(sent.indexOf('CURRENT_TOOLS_DIRECTORY_INITIAL_GUIDE_MARKER'))
       if (index === 2) expect(sent).not.toContain('UPDATED_GUIDE_MARKER')
+      await runtime.dispose?.()
+      runtime = undefined
     }
     expect(inputs).toHaveLength(3)
   } finally { await runtime?.dispose?.(); server.stop(true); await rm(root, { recursive: true, force: true }) }

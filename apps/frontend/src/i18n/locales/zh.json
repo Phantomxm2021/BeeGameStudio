@@ -875,6 +875,7 @@
     "revisionRequest": "修订请求",
     "thinking": "思考",
     "thinkingActive": "正在思考...",
+    "waitingForModelResponse": "等待模型响应",
     "thinkingStalled": "仍在思考，可以继续等待或停止。",
     "contextCompacted": "上下文已自动压缩",
     "contextCompacting": "正在压缩上下文…",

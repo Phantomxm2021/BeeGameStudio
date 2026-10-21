@@ -214,6 +214,8 @@ export const useSystemStore = create<SystemState>()(
           // Optional task-level mirror for debugging/inspection.
           if (taskId && typeof taskId === 'string' && taskId.trim().length > 0) {
             newTaskUsage[taskId] = {
+              ...(usage.providerUsageIncomplete || newTaskUsage[taskId]?.providerUsageIncomplete
+                ? { providerUsageIncomplete: true } : {}),
               prompt_tokens: Math.max((newTaskUsage[taskId]?.prompt_tokens || 0), safeUsage.prompt_tokens),
               completion_tokens: Math.max((newTaskUsage[taskId]?.completion_tokens || 0), safeUsage.completion_tokens),
               total_tokens: Math.max((newTaskUsage[taskId]?.total_tokens || 0), safeUsage.total_tokens),
@@ -226,6 +228,8 @@ export const useSystemStore = create<SystemState>()(
           // Cumulative usage per project.
           const currentProjectUsage = newTokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
           newTokenUsage[projectId] = {
+            ...(usage.providerUsageIncomplete || currentProjectUsage.providerUsageIncomplete
+              ? { providerUsageIncomplete: true } : {}),
             prompt_tokens: Math.max(currentProjectUsage.prompt_tokens || 0, safeUsage.prompt_tokens),
             completion_tokens: Math.max(currentProjectUsage.completion_tokens || 0, safeUsage.completion_tokens),
             total_tokens: Math.max(currentProjectUsage.total_tokens || 0, safeUsage.total_tokens),

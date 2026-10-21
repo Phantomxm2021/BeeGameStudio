@@ -4,6 +4,33 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BeeGameSessionManager, type BeeGameSessionUsageBillingBackend } from './session-manager'
 
+test('cumulative live and saved usage retains an earlier missing receipt after a complete response', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-partial-history-'))
+  let calls = 0
+  const manager = new BeeGameSessionManager({ async start(input) { return { stop() {}, async submit() {
+    const incomplete = calls++ === 0
+    input.onNativeUsage?.({ prompt_tokens: incomplete ? 0 : 100, completion_tokens: 0, cache_read_tokens: 0,
+      cache_creation_tokens: 0, total_tokens: incomplete ? 0 : 100 }, 'fixture', { incomplete })
+  } } } }, root, () => ({}))
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'fixture' })
+    await manager.sendWithDisplay(session.id, 'First'); await manager.waitForSessionIdle(session.id)
+    await manager.sendWithDisplay(session.id, 'Second'); await manager.waitForSessionIdle(session.id)
+    const last = manager.transcript(session.id).filter(event => event.type === 'usage').at(-1)!
+    expect(last.payload).toMatchObject({ providerUsageIncomplete: true, sessionUsage: { total_tokens: 100 } })
+    expect(manager.transcriptFacts(session.id).filter(event => event.type === 'usage').at(-1)?.payload)
+      .toMatchObject({ providerUsageIncomplete: true })
+    expect(manager.runtimeSnapshot(session.id).providerUsageIncomplete).toBe(true)
+    await manager.dispose()
+    const recovered = new BeeGameSessionManager({ async start() { throw Error('Recovery must not start a model') } }, root, () => ({}))
+    try {
+      expect(recovered.runtimeSnapshot(session.id, root)).toMatchObject({
+        providerUsageIncomplete: true, usage: { total_tokens: 100 },
+      })
+    } finally { await recovered.dispose() }
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
 test('incomplete provider usage persists known tokens and retains unknown zero receipts for reconciliation', async () => {
   for (const knownTokens of [100, 0]) {
     const root = await mkdtemp(join(tmpdir(), 'bgs-partial-provider-bill-'))

@@ -1,6 +1,6 @@
 ---
 name: game-implementation-planning
-description: Writing plans for multi-step game implementation from design and scene/UI content. 中文：依据文档和场景界面数据拆解实现任务。
+description: Write technical design and useful implementation guidance from agreed requirements and available design/content sources. 中文：技术设计、模块接口与实现任务规划。
 ---
 
 # Game Implementation Planning
@@ -23,7 +23,7 @@ Choose independently implementable/checkable results, whether foundations or pla
 
 Use focused tests for deterministic rules and actual runtime views for audiovisual/interactive results. One current integration observation can cover several tasks; no build/browser/screenshot per task. For consequential audiovisual uncertainty, expose a useful integrated slice before repeating the treatment, without adding a prototype/approval stage or reducing final scope.
 
-Before using the plan, check required outcomes against implementation/check coverage and tasks against authorized sources; naming a whole document alone is not coverage. Neighboring tasks must agree on IDs, units, coordinates, paths and interfaces, with dependencies actually producing needed outputs. Replace vague “handle edge cases” with relevant cases/results. Keep omissions/untested outcomes explicit; exclusions need authorization. This is self-review, not another coverage artifact or a semantic-completeness certificate. Consolidate a plan that becomes another eight documents or code transcript.
+Check that guidance covers required outcomes and that dependencies provide the agreed interfaces and inputs. Describe relevant edge cases/results and unresolved or untested outcomes in the same plan; exclusions need authorization. Keep product rules, numeric values and appearance definitions in their owning records rather than expanding technical guidance into another set of design documents.
 
 ## BGS handoff
 

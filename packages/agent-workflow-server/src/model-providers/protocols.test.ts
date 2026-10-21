@@ -235,7 +235,49 @@ test('custom grammar calls retain the exact input and become custom_tool_call it
   ])
 })
 
-test('truncation and missing usage cannot be reported as completed', async () => {
+for (const stream of [false, true]) test.each([
+  ['chat-completions', [{ choices: [{ delta: { content: 'answer' }, finish_reason: 'stop' }] }]],
+  ['anthropic-messages', [
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'answer' } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+    { type: 'message_stop' },
+  ]],
+  ['gemini', [{ candidates: [{ content: { parts: [{ text: 'answer' }] }, finishReason: 'STOP' }] }]],
+] as const)('%s completes without usage and retains an unknown receipt; stream=' + stream, async (protocol, chunks) => {
+  const receipts: unknown[] = []
+  const response = await requestProvider({ ...base, protocol }, { input: 'Synthetic', stream },
+    (async () => sse([...chunks])) as unknown as typeof fetch, signal(), usage => receipts.push(usage))
+  let result: any
+  if (stream) {
+    const events = []
+    for await (const event of parseSse(response)) events.push(event)
+    expect(events.some(event => event.type === 'response.failed')).toBe(false)
+    expect(events.some(event => event.type === 'response.output_text.done')).toBe(true)
+    result = events.find(event => event.type === 'response.completed')?.response
+  } else result = await response.json()
+  expect(result?.status).toBe('completed')
+  expect(result.output).toContainEqual(expect.objectContaining({ type: 'message',
+    content: [{ type: 'output_text', text: 'answer', annotations: [] }] }))
+  expect(result).not.toHaveProperty('usage')
+  expect(receipts).toEqual([{ input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
+    cache_creation_tokens: 0, total_tokens: 0, incomplete: true }])
+})
+
+test('tool calls complete without usage and retain their identity and arguments', async () => {
+  const alias = mapTools(body.tools)[0]!.alias
+  const response = await requestProvider(base, { ...body, stream: true }, (async () => sse([
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: 'synthetic-call',
+      function: { name: alias, arguments: '{"value":"fixture"}' } }] }, finish_reason: 'tool_calls' }] },
+  ])) as unknown as typeof fetch, signal())
+  const events = []
+  for await (const event of parseSse(response)) events.push(event)
+  const result = events.find(event => event.type === 'response.completed')?.response
+  expect(result?.output).toContainEqual(expect.objectContaining({ type: 'function_call',
+    name: 'probe', call_id: 'synthetic-call', arguments: '{"value":"fixture"}', status: 'completed' }))
+  expect(result).not.toHaveProperty('usage')
+})
+
+test('truncation stays incomplete and missing terminal events fail regardless of usage', async () => {
   const incomplete = (async () =>
     sse([
       {
@@ -247,13 +289,13 @@ test('truncation and missing usage cannot be reported as completed', async () =>
     await requestProvider(base, { input: 'Synthetic' }, incomplete, signal())
   ).json()) as any
   expect(result.status).toBe('incomplete')
-  const missingUsage = (async () =>
-    sse([
-      { choices: [{ delta: { content: 'answer' }, finish_reason: 'stop' }] },
-    ])) as typeof fetch
-  await expect(
-    requestProvider(base, { input: 'Synthetic' }, missingUsage, signal()),
-  ).rejects.toThrow('final token usage')
+  const noUsageTruncation = await requestProvider(base, { input: 'Synthetic' },
+    (async () => sse([{ choices: [{ delta: { content: 'partial' }, finish_reason: 'length' }] }])) as unknown as typeof fetch, signal())
+  expect(await noUsageTruncation.json()).toMatchObject({ status: 'incomplete',
+    incomplete_details: { reason: 'max_output_tokens' } })
+  await expect(requestProvider(base, { input: 'Synthetic' },
+    (async () => sse([{ choices: [{ delta: { content: 'partial' } }] }])) as unknown as typeof fetch, signal()))
+    .rejects.toThrow('terminal event')
   const truncated = (async () =>
     sse([
       {
@@ -273,7 +315,7 @@ test('stream failures use the terminal Response envelope recognized by native Bg
           controller.error(Object.assign(Error('PRIVATE_UPSTREAM_SECRET'),
             malformed === 'timeout' ? { code: 'UND_ERR_BODY_TIMEOUT' } : {}))
         } }))
-      : sse([{ choices: [{ delta: { content: 'partial' }, finish_reason: 'stop' }] }])) as typeof fetch
+      : sse([{ choices: [{ delta: { content: 'partial' } }] }])) as typeof fetch
     const response = await requestProvider(base, { input: 'Synthetic', stream: true }, request, signal())
     const wire = await response.text()
     expect(wire).toContain('event: response.failed\n')
@@ -284,7 +326,7 @@ test('stream failures use the terminal Response envelope recognized by native Bg
       status: 'failed', error: { code: 'provider_stream_failed', message: malformed === 'timeout'
         ? 'The provider transport failed (UND_ERR_BODY_TIMEOUT)' : malformed
         ? 'The provider response failed or was incomplete'
-        : 'Provider did not report final token usage' },
+        : 'Provider stream ended without a terminal event' },
     } })
   }
 })

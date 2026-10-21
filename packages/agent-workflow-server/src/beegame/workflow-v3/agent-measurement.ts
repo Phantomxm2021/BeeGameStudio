@@ -500,7 +500,7 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
     ...(record.consumption?{consumption:details?record.consumption:{checks:record.consumption.checks}}:{}),
     ...(!details?{detailsHint:'Read this measurement ID with details:true (CLI: --inspect ID --details) for all node bindings and saved observations; no verification is rerun.'}:{}),
     deliveryEligible:false,quality:'unverified',note:record.consumption?
-      'Receipt records source-copy build, static smoke and explicitly selected consumption probes only. Reference this ID, not a source/report footer. Probe results do not prove report semantics, complete gameplay or game quality.':
-      'Receipt is saved in BGS; reference this ID in the final reply, not in measured source/report files. Only source-copy build and static browser smoke are measured, not report semantics or game quality.'}
+      'Receipt records source-copy build, static smoke and explicitly selected consumption probes only. Do not add its ID to measured source/report files. Probe results do not prove report semantics, complete gameplay or game quality.':
+      'Receipt is saved in BGS; do not add its ID to measured source/report files. Only source-copy build and static browser smoke are measured, not report semantics or game quality.'}
 }
 

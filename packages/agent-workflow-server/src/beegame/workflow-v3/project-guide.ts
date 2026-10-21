@@ -3,7 +3,7 @@ import { readdirSync, realpathSync, statSync, fstatSync, openSync, readSync, clo
 import { open, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
-import { DESIGN_WRITING_ORDER, DESIGN_METHODS } from '@bee-game-studio/agent-workflow/design-review-result'
+import { DESIGN_WRITING_ORDER } from '@bee-game-studio/agent-workflow/design-review-result'
 
 // One working contract for generated guides and active goal context. Native
 // metadata resolves Skill names/namespaces; procedures stay in the Skills.
@@ -12,17 +12,11 @@ export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - Architecture decisions belong in their existing design/configuration sources, not this guide. Navigation pointers do not verify behavior.
 
 ## Professional methods
-- The Agent selects methods for the document or focused task currently being authored or checked. Use the current Bgs skill catalog to resolve installed methods; select the relevant Skill with $skill-name or read its SKILL.md before related design or implementation decisions. The table below suggests relevant methods; it does not prescribe Skill selection or task order and is not a preload checklist: load later documents' methods when their work begins, or earlier for a concrete current dependency. Reuse guidance already available in context; apply confirmed platform/runtime constraints throughout.
-
-| Design responsibility | Skills |
-| --- | --- |
-${DESIGN_WRITING_ORDER.map(document => `| ${document}: ${DESIGN_METHODS[document].responsibility} | ${DESIGN_METHODS[document].skills.join(', ')} |`).join('\n')}
-
-Other available methods include: control response/gameplay feedback → game-feel-designer; runtime animation/VFX → game-technical-artist; playable-path/experience verification → game-playtest-performance.
+- Select and read applicable Skills from the installed catalog for the current task or a concrete dependency; reuse guidance already in context. The Agent chooses methods and work order within the confirmed scope.
 
 ## Required design dependencies
 For a full new-game delivery, preserve these production dependencies. The user's current assignment determines which deliverables are in scope and where to stop; a document-only assignment ends after document self-check, without later production or runtime acceptance.
-1. Design records: complete the eight design documents, including TECHNICAL_DESIGN.md with the technical approach, module responsibilities, interfaces, data consumption and necessary implementation/verification guidance. The Agent chooses how to organize that guidance; machine indexes and task coverage graphs are not required. Complete technical design in this stage before actual visual design or resource production. Describe unproduced inputs as planned, not delivered. Use prose/sketches for space needs; do not create UI/Scene JSON here.
+1. Design records: complete the eight design documents (${DESIGN_WRITING_ORDER.join(', ')}), including TECHNICAL_DESIGN.md with the technical approach, module responsibilities, interfaces, data consumption and necessary implementation/verification guidance. The Agent chooses how to organize that guidance; machine indexes and task coverage graphs are not required. Complete technical design in this stage before actual visual design or resource production. Describe unproduced inputs as planned, not delivered. Use prose/sketches for space needs; do not create UI/Scene JSON here.
 2. Actual visual designs: use existing image tools or supplied designs for complete game screens/key states shared by UI and Scene records, with detail views only for subjects unresolved in those screens. Save and Read pictures; reconcile composition, hierarchy, game visibility and appearance in affected UI/art/Scene record sections, not just image links. Correct pictures that contradict confirmed requirements rather than silently changing scope. Resolve consequential conflicts before affected production. Prose, palettes and JSON geometry do not replace visual design. Missing supplied pictures do not waive it.
 3. Resources: revise ASSET_PLAN.md from selected visual/audio designs and reconciled owner records; acquire suitable assets, inspect actual files/metrics and register them. Preserve the selected style; a screen board is not runtime UI.
 4. UI/Scene JSON: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings. Use actual asset metrics and existing checks; correct the same sources. Revise the existing TECHNICAL_DESIGN.md only for actual produced inputs and affected decisions; do not postpone technical design or recreate the plan here.

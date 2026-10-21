@@ -98,7 +98,8 @@ export function responseToolCall(
       status: 'completed',
     }
   }
-  JSON.parse(args)
+  // Native tool handlers validate arguments and return errors to the model.
+  // Rejecting ordinary JSON here would abort the entire response instead.
   return {
     type: 'function_call',
     id: 'fc_' + id,

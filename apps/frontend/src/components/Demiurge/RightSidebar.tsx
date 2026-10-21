@@ -1,4 +1,4 @@
-import { isModelRequestFailure, canAutomaticallyRetryModelFailure } from '../../utils/modelRequestFailure';
+import { canAutomaticallyRetryModelFailure } from '../../utils/modelRequestFailure';
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
@@ -692,9 +692,14 @@ export function RightSidebar({
     const sidebarTabs = ['chat', 'todo', 'artifacts'] as const;
     const lastError = [...messages].reverse().find(message => message.type === 'error');
     const retryTurnId = lastError?.turnId || lastError?.turn_id;
-    const canRetryModel = Boolean(lastError && retryTurnId && isModelRequestFailure(lastError.content) &&
-        projectStatus?.phase === 'paused' && projectStatus.blocked && !isAgentWorking && onContinueTask);
-    const retry = canRetryModel && lastError && retryTurnId ? {
+    const latestTurnMessage = [...messages].reverse().find(message => message.turnId || message.turn_id);
+    const latestTurnId = latestTurnMessage?.turnId || latestTurnMessage?.turn_id;
+    // Recovery is tied to the stopped turn, not a list of provider error phrases.
+    const canRetryTurn = Boolean(lastError && lastError.taskKind !== 'delivery_error' &&
+        retryTurnId && retryTurnId === latestTurnId &&
+        projectStatus?.project_id === projectId && projectStatus.phase === 'paused' &&
+        projectStatus.blocked && !isAgentWorking && onContinueTask);
+    const retry = canRetryTurn && lastError && retryTurnId ? {
         messageId: lastError.id,
         autoRetry: autoRetryTurnId === retryTurnId && canAutomaticallyRetryModelFailure(lastError.content),
         disabled: !canSendMessage || isStopping || isComposerLocked || waitingPermission.isBlockingChat,

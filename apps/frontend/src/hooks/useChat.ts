@@ -1167,6 +1167,8 @@ export const useChat = ({
         content: errorMessage,
         timestamp: Date.now(),
         type: 'error',
+        turnId: failedTurnId,
+        taskKind: 'runtime_error',
       })
 
       showToastError?.(errorMessage)

@@ -124,7 +124,10 @@ async function generate(message: ModelRuntimeWorkerRequest) {
           ].includes(event.type)
         )
           throw Error('ChatGPT model response failed')
-        if (event.type === 'response.completed') completed = event.response
+        if (event.type === 'response.completed') {
+          completed = event.response
+          break
+        }
       }
       if (!completed) throw Error('ChatGPT model response was incomplete')
       result = completed
@@ -142,7 +145,6 @@ async function generate(message: ModelRuntimeWorkerRequest) {
     }
     if (result.usage) usage = responseUsage(result.usage)
     stage = 'model_response'
-    if (!usage || usage.incomplete) throw Error('Provider did not report final token usage')
     if (result.status !== 'completed' || !Array.isArray(result.output))
       throw Error('Model response was incomplete')
     let content: string

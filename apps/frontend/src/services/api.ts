@@ -81,6 +81,7 @@ export interface ContextVisibilityPayload {
     status?: string
   }>
   token_budget?: {
+    providerUsageIncomplete?: boolean
     status?: string
     input_tokens?: number
     cached_input_tokens?: number
@@ -348,6 +349,7 @@ const normalizeContextVisibilityPayload = (
     failure_reason: String(payload.failure_reason ?? '').trim(),
     blackboard_record_count: Number(payload.blackboard_record_count ?? 0),
     memory_hits: Number(payload.memory_hits ?? 0),
+    ...(payload.token_budget ? { token_budget: { ...payload.token_budget } } : {}),
     rag_sources: Array.isArray(payload.rag_sources)
       ? payload.rag_sources.map(item => String(item).trim()).filter(Boolean)
       : [],

@@ -33,4 +33,4 @@ For supplied BGS geometry or legacy handoff inputs, use the applicable [saved-co
 
 Inspect supplied visual references and compare relevant treatment with source clauses; markup alone does not establish appearance. Reference inspection differs from produced Scene/UI or runtime observation, and an old capture does not verify a changed source. Missing required observation remains unverified.
 
-Report checked scope and unresolved findings using a receipt only when supplied. Reading, hashes, structural checks and Skill invocation do not certify semantics, authority or game quality. Keep source checks, professional judgment, runtime evidence and unresolved decisions distinct; optional improvements cannot block work.
+Keep checked scope and unresolved findings in the existing review record or supplied receipt. Reading, hashes, structural checks and Skill invocation do not certify semantics, authority or game quality. Keep source checks, professional judgment, runtime evidence and unresolved decisions distinct; optional improvements cannot block work.

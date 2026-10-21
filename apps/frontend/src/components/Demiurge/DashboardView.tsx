@@ -159,6 +159,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const live = projectStatus?.project_id === projectId ? projectStatus.context?.token_budget : null;
     if (!live) return null;
     return {
+      ...(live.providerUsageIncomplete ? { providerUsageIncomplete: true } : {}),
       prompt_tokens: Number(live.input_tokens) || 0,
       input_tokens: Number(live.input_tokens) || 0,
       cached_input_tokens: Number(live.cached_input_tokens) || 0,

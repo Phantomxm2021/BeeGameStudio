@@ -126,6 +126,8 @@ describe('useChat clarification gate handling', () => {
   });
 
   it.each([
+    'stream disconnected before completion: Provider did not report final token usage',
+    'Provider reported invalid token usage',
     'API Error: OpenAI stream ended before a terminal finish_reason was received',
     'API Error: OpenAI stream ended before message_stop',
     'API Error: OpenCode Go: Connection error.',
@@ -136,6 +138,22 @@ describe('useChat clarification gate handling', () => {
       message_id: 'incomplete', turn_id: 'incomplete-turn', content }));
     expect(result.current.autoRetryTurnId).toBeNull();
     expect(api.continueTask).not.toHaveBeenCalled();
+  });
+
+  it('retains the failed-turn binding when continuation preflight fails, allowing a corrected manual retry', async () => {
+    vi.mocked(api.continueTask).mockRejectedValueOnce(new Error('HTTP 401 Unauthorized'))
+      .mockResolvedValueOnce({ resume_task_id: 'recovered-turn' } as any);
+    const { result } = renderHook(() => useChat({ projectId: 'retry-preflight' }));
+    await act(async () => result.current.continueTask('failed-turn'));
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'error', turnId: 'failed-turn', taskKind: 'runtime_error', content: 'HTTP 401 Unauthorized',
+    }));
+    expect(result.current.autoRetryTurnId).toBeNull();
+    await act(async () => result.current.continueTask('failed-turn'));
+    expect(api.continueTask).toHaveBeenCalledTimes(2);
+    expect(api.continueTask).toHaveBeenLastCalledWith(expect.objectContaining({
+      project_id: 'retry-preflight', failed_turn_id: 'failed-turn',
+    }));
   });
 
   it('cancels automatic retry on a stop or project switch, and ignores non-model failures', async () => {

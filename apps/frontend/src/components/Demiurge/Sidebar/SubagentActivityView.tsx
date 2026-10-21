@@ -1,27 +1,16 @@
 import { memo } from 'react';
-import { FileText } from 'lucide-react';
+import { ToolActivityRow } from './ToolActivityRow';
 import type { SubagentActivitySnapshot } from '@bee-game-studio/agent-workflow/subagent-activity';
-import { AgentCode } from '../../beui/registry/components/agents/agent-code';
-import { ToolResult } from '../../beui/registry/components/agents/tool-result';
 import { MarkdownRenderer } from './ChatMarkdownContent';
-import { SourceCodeBlock } from './SourceCodeBlock';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { filterPathsForDisplay } from '../../../utils/chatPathDisplay';
-import { activityToolKind, toolActivitySummary } from '../../../utils/toolActivitySummary';
 import type { Language } from '../AgentsConfig';
-import { normalizeChatAttachments } from '../../../services/chatAttachments';
-import { ChatAttachmentView } from './ChatAttachmentView';
 
-export const SubagentActivityView = memo(function SubagentActivityView({ activity, legacyTrace, lang, running }: {
-    activity?: SubagentActivitySnapshot; legacyTrace?: string; lang: Language; running: boolean;
+export const SubagentActivityView = memo(function SubagentActivityView({ activity, lang, running }: {
+    activity?: SubagentActivitySnapshot; lang: Language; running: boolean;
 }) {
     const labels = useBeeGameText(lang).subagentActivity;
-    if (!activity) return <div className="space-y-2" data-testid="subagent-legacy-trace">
-        <p className="type-caption-1 text-muted-foreground">{labels.legacy}</p>
-        <div className="max-h-80 overflow-auto rounded-lg border border-border bg-muted/20 p-3">
-            <AgentCode code={filterPathsForDisplay(legacyTrace || '')} language="text" />
-        </div>
-    </div>;
+    if (!activity) return null;
 
     return <div className="space-y-3" data-testid="subagent-activity-list">
         {activity.truncated && <p className="type-caption-1 text-muted-foreground">{labels.recent}</p>}
@@ -34,37 +23,12 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
                     <MarkdownRenderer content={filterPathsForDisplay(entry.message)} messageId={entry.id} lang={lang} />
                 </section>;
             }
-            if (entry.kind === 'message') return <div key={entry.id}>
-                <MarkdownRenderer content={filterPathsForDisplay(entry.text)} messageId={entry.id} lang={lang} />
-                {entry.truncated && <p className="type-caption-1 text-muted-foreground">{labels.truncated}</p>}
-            </div>;
-            const isShell = activityToolKind(entry.toolName) === 'bash';
-            const isRead = entry.toolName === 'Read' && Boolean(entry.filePath) && entry.status !== 'failed';
-            const status = entry.status === 'running' ? (running ? 'running' : 'incomplete')
-                : entry.status === 'cancelled' ? 'cancelled' : entry.status === 'failed' ? 'error' : 'success';
-            return <ToolResult key={entry.id} data-tool-id={entry.id} tool={entry.toolName || labels.output}
-                title={toolActivitySummary(entry.toolName, { command: entry.command, file_path: entry.filePath }, '', lang === 'zh')}
-                icon={entry.filePath ? <FileText className="size-4" /> : undefined}
-                kind={isShell ? 'terminal' : 'custom'} status={status} defaultOpen={entry.status === 'failed' || Boolean(entry.attachmentError)}
-                meta={entry.elapsedTimeSeconds !== undefined ? `${labels.elapsed}: ${entry.elapsedTimeSeconds}s` : status === 'incomplete' ? labels.incomplete : undefined}
-                collapseOnComplete={false} maxHeight={360} copyText={filterPathsForDisplay(entry.output || entry.command || entry.input || '')}
-                className="min-w-0" contentClassName="space-y-3">
-                {entry.command && <section aria-label={labels.command}>
-                    <p className="mb-2 type-caption-1 text-muted-foreground">{labels.command}</p>
-                    <AgentCode code={filterPathsForDisplay(entry.command)} language={isShell ? 'bash' : 'text'} />
-                </section>}
-                {entry.input && <AgentCode code={filterPathsForDisplay(entry.input)} language="json" />}
-                {entry.output !== undefined && <section aria-label={isRead ? labels.file : labels.output}>
-                    <p className="mb-2 type-caption-1 text-muted-foreground">{isRead ? labels.file : labels.output}</p>
-                    {isRead ? <SourceCodeBlock output={entry.output} path={entry.filePath} /> : <AgentCode code={filterPathsForDisplay(entry.output)} language="text" />}
-                </section>}
-                {normalizeChatAttachments(entry.attachments)?.map((attachment, index) =>
-                    <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}
-                {entry.attachmentError && <p role="alert" className="type-caption-1 text-destructive">
-                    {labels.attachmentError}: {filterPathsForDisplay(entry.attachmentError)}
-                </p>}
-                {entry.truncated && <p className="type-caption-1 text-muted-foreground">{labels.truncated}</p>}
-            </ToolResult>;
+            if (entry.kind === 'message') return null;
+            const state = entry.status === 'running' ? (running ? 'running' : 'incomplete')
+                : entry.status === 'cancelled' ? 'stopped' : entry.status;
+            return <ToolActivityRow key={entry.id} id={entry.id} name={entry.toolName}
+                input={{ command: entry.command, file_path: entry.filePath }} state={state} lang={lang}
+                duration={entry.elapsedTimeSeconds === undefined ? undefined : `${entry.elapsedTimeSeconds}s`} />;
         })}
     </div>;
 });

@@ -308,6 +308,7 @@ export const useProjectStore = create<ProjectState>()(
           const tokenBudget = runtimeState.status.context?.token_budget;
           if (tokenBudget) {
             useSystemStore.getState().updateTokenUsage({
+              ...(tokenBudget.providerUsageIncomplete ? { providerUsageIncomplete: true } : {}),
               prompt_tokens: Number(tokenBudget.prompt_tokens ?? tokenBudget.input_tokens) || 0,
               input_tokens: Number(tokenBudget.input_tokens ?? tokenBudget.prompt_tokens) || 0,
               cached_input_tokens:

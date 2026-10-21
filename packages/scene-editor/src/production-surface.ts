@@ -35,6 +35,9 @@ export const PRODUCTION_SURFACE_CAPABILITIES = {
   uiStyles: ['background', 'backgroundColor', 'color', 'border', 'borderColor', 'borderWidth', 'borderStyle',
     'borderRadius', 'boxShadow', 'textShadow', 'fontVariantNumeric', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'opacity', 'align', 'verticalAlign'],
   uiBindings: ['text', 'enabled', 'widthRatio', 'styleColor'],
+  uiImageTypes: ['simple'],
+  uiActions: ['click'],
+  uiClipChildren: false,
   sceneComponents: ['camera', 'sprite-renderer', 'image', 'text', 'rect-transform', 'canvas', 'canvas-renderer',
     'box-collider-2d', 'circle-collider-2d', 'capsule-collider-2d', 'polygon-collider-2d'],
 } as const

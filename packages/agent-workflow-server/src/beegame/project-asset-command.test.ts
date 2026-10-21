@@ -410,3 +410,44 @@ test('project asset command keeps the generated sheet intact and writes frame me
     await expect(readFile(join(root, 'assets/runtime/overlap.png'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+
+test('catalog lists are compact while details, selection IDs and pagination remain available', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-catalog-summary-'))
+  const item = {packId:'pack-1',packVersion:'1',packName:'Sample',license:'CC0',
+    elementId:'item-1',elementName:'Sample image',elementPath:'image.png',dimension:'2D',
+    category:'ui',assetKind:'sprite',usageTags:['button'],capabilities:['static'],dependencyCount:2,
+    description:'Long catalog description. '.repeat(200),technicalFacts:{notes:'Metadata. '.repeat(200)},
+    relations:[{target:'item-2'}],contentProfile:{notes:'Profile. '.repeat(200)},preview:'https://example.test/image.png'}
+  const response = {items:[item],total:100,facets:{dimensions:['2D']},nextCursor:'page-two'}
+  const received: Array<{path:string,body:unknown}> = []
+  const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
+    const path = new URL(request.url).pathname
+    received.push({path,body:request.method === 'POST' ? await request.json() : null})
+    return Response.json(path.startsWith('/api/resource-catalog/') ? response : {element:item})
+  }})
+  try {
+    const script = join(root,'assets.mjs')
+    await writeProjectAssetCommand(script,{libraryBaseUrl:`http://127.0.0.1:${server.port}`})
+    for (const command of [['catalog'],['elements','pack-1']]) {
+      const query = JSON.stringify({filters:{formats:['png']},limit:10,cursor:'page-one'})
+      const summary = await run(root,script,...command,query)
+      expect(summary.code,summary.stderr).toBe(0)
+      const result = JSON.parse(summary.stdout)
+      expect(result).toMatchObject({total:100,facets:response.facets,nextCursor:'page-two'})
+      expect(result.items[0]).toMatchObject({packId:'pack-1',packVersion:'1',dimension:'2D'})
+      if (command[0] === 'catalog') expect(result.items[0].license).toBe('CC0')
+      else expect(result.items[0]).toMatchObject({elementId:'item-1',elementPath:'image.png',dependencyCount:2})
+      expect(result.items[0].technicalFacts).toBeUndefined()
+      expect(result.items[0].description).toBeUndefined()
+      const full = await run(root,script,...command,query,'--details')
+      expect(full.code,full.stderr).toBe(0)
+      expect(JSON.parse(full.stdout)).toEqual(response)
+      expect(summary.stdout.length).toBeLessThan(full.stdout.length / 2)
+      expect(received.at(-1)?.body).toEqual(JSON.parse(query))
+      expect(received.at(-2)?.body).toEqual(JSON.parse(query))
+    }
+    expect(JSON.parse((await run(root,script,'element','pack-1','item-1')).stdout)).toEqual({element:item})
+    expect(received).toHaveLength(5)
+  } finally {server.stop(true);await rm(root,{recursive:true,force:true})}
+})

@@ -3,7 +3,7 @@ import {mkdtemp,realpath,mkdir,writeFile,readFile,rm,symlink,access} from 'node:
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,PROJECT_WORKING_CONVENTIONS,projectNavigationSnapshot,projectGuideTemplate,initializeProjectGuide} from './project-guide'
-import {DESIGN_WRITING_ORDER, DESIGN_METHODS} from '@bee-game-studio/agent-workflow/design-review-result'
+import {DESIGN_WRITING_ORDER} from '@bee-game-studio/agent-workflow/design-review-result'
 import {readDesignHandoff} from '../workflow-read-tools'
 import {runGameContentCommand} from '../game-content-validation-cli'
 
@@ -18,9 +18,9 @@ test('template is read-only and remains available with an older saved content fo
     expect(runGameContentCommand(root,['--format','coordinates'])).not.toMatchObject({values:{coordinates:{saved:true}}})
     expect((runGameContentCommand(root,['--format','index']) as any).values.index).not.toHaveProperty('documentRevision')
     expect((runGameContentCommand(root,['--format','uiDocument']) as any).values.uiDocument.data.nodes[0].data.referenceResolution).toHaveLength(2)
-    expect(PROJECT_GUIDE_TEMPLATE).toContain('before related design or implementation decisions')
+    expect(PROJECT_GUIDE_TEMPLATE).toContain('Select and read applicable Skills')
     expect(PROJECT_GUIDE_TEMPLATE).toContain(PROJECT_WORKING_CONVENTIONS)
-    expect(PROJECT_GUIDE_TEMPLATE).toContain('The table below suggests relevant methods')
+    expect(PROJECT_GUIDE_TEMPLATE).not.toContain('| Design responsibility | Skills |')
     expect(PROJECT_GUIDE_TEMPLATE).toContain('GDD.md')
     expect(PROJECT_GUIDE_TEMPLATE).toContain('Architecture decisions belong in their existing design/configuration sources')
     expect(PROJECT_GUIDE_TEMPLATE).not.toContain('update them when the implementation changes')
@@ -88,7 +88,7 @@ test('guide delegates discovery to native Skills without installation paths or a
     process.env.BEEGAME_BUILTIN_SKILLS_DIR=join(root,'old-installation')
     const result=projectGuideTemplate(workspace)
     expect(result.facts).toEqual(projectNavigationSnapshot(workspace))
-    expect(result.value).toContain("current Bgs skill catalog")
+    expect(result.value).toContain("installed catalog")
     expect(result.value).not.toContain('base directory supplied by that invocation')
     expect(result.value).not.toContain(root)
     expect(result.value).not.toContain('Collection navigator:')
@@ -110,12 +110,12 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     await initializeProjectGuide(root)
     const guide=await readFile(path,'utf8')
     expect(guide.split('\n').length).toBeLessThan(200)
-    expect(guide).toContain('with $skill-name')
+    expect(guide).toContain('Select and read applicable Skills')
     expect(guide).not.toContain('only the references needed for the task')
     expect(guide).not.toContain('Do not duplicate the catalog')
     expect(guide).not.toContain('bgs-builtins:')
-    expect(guide).toContain('game-ui-ux-designer')
-    expect(guide).toContain('game-art-director-expert')
+    expect(guide).not.toContain('game-ui-ux-designer')
+    expect(guide).not.toContain('game-art-director-expert')
     expect(guide).toContain('Prose, palettes and JSON geometry do not replace visual design')
     expect(guide).toContain('complete game screens/key states shared by UI and Scene records')
     expect(guide).toContain('detail views only for subjects unresolved in those screens')
@@ -126,13 +126,10 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     expect(guide).not.toContain('complete UI screens/key states, scenes and needed props')
     expect(guide).toContain('do not create UI/Scene JSON here')
     expect(guide).toContain('only after selected visual designs and corresponding resources exist')
-    expect(guide).toContain('complete the eight design documents, including TECHNICAL_DESIGN.md')
+    expect(guide).toContain('complete the eight design documents')
     expect(guide).toContain('Complete technical design in this stage before actual visual design or resource production')
-    expect(guide).toContain('does not prescribe Skill selection or task order')
-    expect([...guide.matchAll(/^\| (\w+\.md):/gm)].map(match=>match[1])).toEqual([
-      'GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ART_DIRECTION.md',
-      'UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md',
-    ])
+    expect(guide).toContain('The Agent chooses methods and work order')
+    for (const document of DESIGN_WRITING_ORDER) expect(guide).toContain(document)
     expect(guide).toContain('Revise the existing TECHNICAL_DESIGN.md only for actual produced inputs')
     expect(guide).not.toContain('Technical/resource plans start as drafts')
     expect(guide).not.toContain('Finalize TECHNICAL_DESIGN.md tasks from these inputs')
@@ -236,18 +233,15 @@ test('unsafe, non-text and oversized guides are diagnosed without stale content 
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
-test('professional navigation and the default read directory share the writing order',async()=>{
+test('document navigation preserves all eight documents without a duplicate Skill recommendation table',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-writing-order-')))
   try {
     expect(DESIGN_WRITING_ORDER).toEqual(['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md',
       'ART_DIRECTION.md','UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md'])
     expect(readDesignHandoff(root,{}).documents.map(item=>item.document)).toEqual(DESIGN_WRITING_ORDER)
-    let previous=-1
-    for(const document of DESIGN_WRITING_ORDER){
-      const row=`| ${document}: ${DESIGN_METHODS[document].responsibility} | ${DESIGN_METHODS[document].skills.join(', ')} |`
-      const position=PROJECT_WORKING_CONVENTIONS.indexOf(row)
-      expect(position).toBeGreaterThan(previous);previous=position
-    }
+    for (const document of DESIGN_WRITING_ORDER) expect(PROJECT_WORKING_CONVENTIONS).toContain(document)
+    expect(PROJECT_WORKING_CONVENTIONS).not.toContain('| Design responsibility | Skills |')
+    expect(PROJECT_WORKING_CONVENTIONS).not.toContain('gameplay-programmer')
     const selected=runGameContentCommand(root,['--format','projectGuide']) as any
     const batch=runGameContentCommand(root,['--format','coordinates','projectGuide']) as any
     expect(batch.values.projectGuide).toBe(selected.values.projectGuide)
