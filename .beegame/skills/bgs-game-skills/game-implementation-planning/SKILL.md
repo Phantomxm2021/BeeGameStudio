@@ -27,6 +27,6 @@ Check that guidance covers required outcomes and that dependencies provide the a
 
 ## BGS handoff
 
-ReadDesignHandoff locates current documents/sections. ReadImplementationTask returns an existing index when present, otherwise technical source; native reads cover other sources/pictures. Plain documents require no machine index, output mapping or finalize. Existing indexed projects may use supplied `--design help --details` and finalize for metadata compatibility after authorized edits.
+ReadDesignHandoff locates current documents/sections. ReadImplementationTask returns an existing index when present, otherwise technical source; native reads cover other sources/pictures. Plain documents require no machine index, output mapping or finalize.
 
 Before the implementation lock, update affected guidance from produced designs/resources/content, preserving valid work/task IDs. After locking, keep concise progress and result paths in the conversation or existing task list, not another database or technical-document progress log. A Todo tick is not delivery; design changes follow current authorization.

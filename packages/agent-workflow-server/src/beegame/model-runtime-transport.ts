@@ -2,9 +2,15 @@ import { getGlobalDispatcher, interceptors, request, type Dispatcher } from 'und
 import { Readable } from 'node:stream'
 import { safeErrorFacts } from '../security/safe-error-facts'
 
+type ModelRequestInit = RequestInit & Pick<Dispatcher.RequestOptions, 'headersTimeout' | 'bodyTimeout'>
+// Provider-bridge policy: first response may include queueing/prefill. Allow ten
+// minutes; once streaming, retain the existing five-minute inactivity limit.
+// Both remain interruptible by the caller's signal; neither retries a request.
+export const MODEL_RESPONSE_TIMEOUTS = { headersTimeout: 600_000, bodyTimeout: 300_000 } as const
+
 // Undici fetch's Web-stream adapter stalls on live SSE under Bun. Its Node
 // request stream delivers chunks correctly; keep the same pinned dispatcher.
-export const modelRuntimeFetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+export const modelRuntimeFetch = (async (input: RequestInfo | URL, init: ModelRequestInit = {}) => {
   const source = input instanceof Request ? input : undefined
   const headers = new Headers(init.headers ?? source?.headers)
   const dispatcher = (init as RequestInit & { dispatcher?: Dispatcher }).dispatcher ?? getGlobalDispatcher()
@@ -14,6 +20,9 @@ export const modelRuntimeFetch = (async (input: RequestInfo | URL, init: Request
     headers: Object.fromEntries(headers),
     body: (init.body ?? (source?.body ? Readable.fromWeb(source.body as never) : undefined)) as Dispatcher.RequestOptions['body'],
     signal: init.signal ?? source?.signal,
+    // Other callers (including MCP) retain their dispatcher policy.
+    headersTimeout: init.headersTimeout,
+    bodyTimeout: init.bodyTimeout,
     dispatcher: dispatcher.compose(interceptors.decompress({ skipErrorResponses: false })),
   }).catch(error => {
     if (!(init.signal ?? source?.signal)?.aborted)

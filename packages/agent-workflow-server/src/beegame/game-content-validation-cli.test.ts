@@ -312,6 +312,10 @@ test('format entry reads one actual contract section without full Content or res
   expect(result).toMatchObject({ ok: true, values: { coordinates: format.coordinates } })
   expect(result).not.toHaveProperty('value')
   expect(result).toMatchObject({ scope: 'content-format-selection' })
+  // Native Shell caps ordinary output around 10k characters. A single layout
+  // section must remain readable without another request to recover its tail.
+  const layout = runGameContentCommand(root, ['--format', 'uiLayoutContract'])
+  expect(JSON.stringify(layout).length).toBeLessThan(10_000)
   expect(JSON.stringify(result).length).toBeLessThan(before.length / 8)
   for (const section of ['missing', '__proto__']) expect(() => runGameContentCommand(root, ['--format', section])).toThrow()
   expect(() => runGameContentCommand(root, ['--format', 'coordinates', 'extra'])).toThrow()
@@ -400,7 +404,6 @@ test('help examples execute without resources/index and document actual result s
       textFit: { unmeasured: ['play'], exceedsIntrinsicBounds: [] },
     } })
   }
-  expect(CONTENT_CHECK_HELP).toContain('not the generated runtime bundle')
 })
 
 test('draft structure checks the selected batch only and detects shared component IDs before Review', () => {

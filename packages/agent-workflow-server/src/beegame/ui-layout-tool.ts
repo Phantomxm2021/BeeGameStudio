@@ -72,7 +72,7 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
     }
   })
   server.registerTool('CheckUiLayouts', {
-    description: 'Check all saved BGS UI layouts at authored reference/target sizes and host-required sizes, including linked Cameras and underlays. Use {} for effective variants, spatial observations, diagnostics and coverage; detailsFor:"content/ui/hud.json" or an array of source paths expands only selected layouts with effective container/item constraints, position ownership, node coordinates and saved node facts (text, style, actions, bindings and other authored fields, once per source). Global diagnostics and coverage remain complete. Edit source with native Edit, then recheck. Read-only; no Shell, builds, rendering or visual-design approval.',
+    description: 'Check all saved BGS UI layouts at authored reference/target sizes, including linked Cameras and underlays. Use {} for effective variants, spatial observations, diagnostics and coverage; detailsFor:"content/ui/hud.json" or an array of source paths expands only selected layouts with effective container/item constraints, position ownership, node coordinates and saved node facts (text, style, actions, bindings and other authored fields, once per source). Global diagnostics and coverage remain complete. Edit source with native Edit, then recheck. Read-only; no Shell, builds, rendering or visual-design approval.',
     inputSchema: uiInputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     _meta: { 'anthropic/alwaysLoad': true },

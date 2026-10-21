@@ -317,7 +317,17 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(JSON.parse(contracts.stdout)).toMatchObject({
       ok: true, values: { preview: { environment: { origin: 'opaque' }, runtimeVerified: false, quality: 'unverified' } },
     })
-    expect((await command(root, located, 'resources.mjs', '--help')).code).toBe(0)
+    // Execute the runtime advertised by navigation, not the test helper's Bun
+    // default: a missing/wrong runtime used to send these entries through Node.
+    for (const name of ['resources', 'bind-content']) {
+      const runtime = tools.systemContext.match(new RegExp('(bun|node) ' + name + '\\.mjs'))?.[1]
+      expect(runtime).toBeDefined()
+      const child = Bun.spawn([runtime === 'bun' ? process.execPath : 'node', join(root, located, name+'.mjs'), '--help'],
+        { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl },
+          stdout: 'pipe', stderr: 'pipe' })
+      const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+      expect(code, out + err).toBe(0)
+    }
     const consumerHelp=await command(root,tools.directory,'consumer.mjs','--help')
     expect(consumerHelp.code).toBe(0)
     expect(consumerHelp.stdout).toContain(tools.directory+'/content-consumer.mjs')
@@ -563,8 +573,8 @@ test('consumer compatibility is batched/read-only and installation never overwri
       projection: 'orthographic', framing: 'keep-height', halfWidth: 5, halfHeight: 5,
       rect: { x: 0, y: 0, width: 480, height: 480 },
     })
-    // Include the renderer's actual capability table instead of requiring a source scan.
-    expect(api.stdout.length).toBeLessThan(9000)
+    // The actual capability table must fit one native Shell result (~10k chars).
+    expect(api.stdout.length).toBeLessThan(10_000)
     const doc={schema:'beegame-content.v1',id:'menu',kind:'ui-screen',assetRefs:[],data:{rootId:'root',nodes:[
       {id:'root',role:'screen-root'}, {id:'text',parentId:'root',role:'text',text:'Go',style:{align:'left',fontSize:18},layout:{size:[80,30]}},
       {id:'button',parentId:'root',role:'button',data:{action:'legacy-action'},layout:{size:[80,30]}},

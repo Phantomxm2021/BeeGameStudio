@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-21",
+  "baselineCommit": "54733a39",
+  "scope": {
+    "BGS": true,
+    "builtinSkills": true,
+    "CodexChanges": false,
+    "projectArtifactChanges": false,
+    "modelCalls": 0,
+    "serviceRestarts": 0
+  },
+  "changes": [
+    "Provider Bridge显式设置首次响应头600000ms、流内无数据300000ms；保留取消与零自动重试。共享网络函数只传递显式选项，MCP等调用继续遵循原dispatcher策略。",
+    "请求已尝试发出但抛错且尚无回执时发送一次incomplete零增量，既不伪造消耗也不清空累计；本地转换失败不标上游用量未知，已报告的部分用量不重复记账。",
+    "当前导航逐项标明Bun/Node和用途，保持项目根目录；以导航中实际运行时执行资源/绑定帮助验证。",
+    "删除布局格式与MCP工具描述中的固定手机/额外宿主尺寸声明，仍按实际作者声明的参考和目标尺寸检查。",
+    "保留现有格式查询和所有布局字段，缩短重复解释；布局节14631→9109字符、规则8253→5038字符。其余格式节逐项对比无变化。删除规划Skill中的旧交接兼容帮助引导和格式内的旧inspector路径引导。"
+  ],
+  "validation": {
+    "transport_protocol_bridge_mcp": {
+      "pass": 67,
+      "fail": 0,
+      "scope": "localhost及合成流，包括响应头超时、body超时、真实活动、取消、前置转换失败、HTTP拒绝、部分回执去重、Responses与Chat路径、MCP"
+    },
+    "query_geometry_usage_billing": {
+      "pass": 91,
+      "fail": 0,
+      "skip": 3,
+      "scope": "临时项目，实际CLI入口、几何契约、暂停/失败后未知用量保留与结算；3项真实浏览器绘制/预览测试未运行"
+    },
+    "production_types": "tsc --noEmit -p tsconfig.json passed",
+    "skill": "quick_validate.py passed",
+    "diff": "git diff --check passed",
+    "package_test_types": "另行运行server包tsconfig（含全部历史测试）发现43项类型错误，均位于本轮未修改文件；没有为过关调整无关测试类型。仓库正式生产类型检查通过。",
+    "fixture_repairs": "新增导航测试最初遗漏内容检查器模块环境，已补齐真实调用环境。移除已有过期help文案断言；已有consumer API长度检查改按实际原生10000字符边界（现有输出9356），未改运行时或放宽权限。",
+    "sandbox": "首次普通沙箱不允许loopback监听；获自动审核授权后仅对localhost测试使用提升权限。"
+  },
+  "selfReview": [
+    "修改前核对共享网络消费者，较长等待只施加到模型Bridge，没有更改MCP、DNS pinning、重定向政策或native CLI。",
+    "10分钟是显式且有限的初次等待策略，不是提供方一定能完成的证明；持续无响应时可能比此前多等5分钟。上游迟响应的原因仍未解决。",
+    "本次已证实入口可执行、契约缩短和缺失回执可见；没有真实模型重跑，不能宣称整体tokens/耗时下降比例。",
+    "保留八文档流程、Agent自主选择、Editor数据契约和已交付/质量未验证区分；不新增流程门禁、审查轮次、强制Skill名单或上下文压缩机制。"
+  ]
+}

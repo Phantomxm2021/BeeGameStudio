@@ -283,8 +283,8 @@ export async function openAgentTools(input: {
       // Keep the locator outside compactable message history. Capabilities
       // still expire normally; this is only the current turn's tool location.
       systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
-        'Read contracts as needed: bun check-content.mjs --format [SECTION ...] (Editor fields or preview); consumer.mjs --api (optional runtime). Other entries use --help: assets.mjs, resources.mjs, bind-content.mjs, media.mjs'+
-        (input.measurement ? '; node measure.mjs, handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
+        'Read contracts as needed: bun check-content.mjs --format [SECTION ...] (Editor fields or preview); bun consumer.mjs --api (optional runtime). Other entries use --help: bun assets.mjs (sourcing), bun resources.mjs (registration), bun bind-content.mjs (bindings), bun media.mjs (processing)'+
+        (input.measurement ? '; node measure.mjs, node handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
         (input.measurement ? 'Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Plain documents need no index or finalization. ' : ''),
       turnContext: [

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { modelRuntimeFetch } from './model-runtime-transport'
+import { modelRuntimeFetch, MODEL_RESPONSE_TIMEOUTS } from './model-runtime-transport'
 import { parseSse } from '../model-providers/response-stream'
 import { Agent } from 'undici/index.js'
 import { safeErrorFacts } from '../security/safe-error-facts'
@@ -40,6 +40,31 @@ test('body timeout retains its code after headers without leaking the upstream m
     expect(diagnostics).toHaveLength(1)
     expect(diagnostics[0]?.[1]).toMatchObject({ event: 'response-body-failed', networkCode: 'UND_ERR_BODY_TIMEOUT' })
   } finally { console.warn = warn; server.stop(true); await dispatcher.destroy() }
+}, 5000)
+
+test('model deadlines override dispatcher defaults and waiting for headers remains cancellable', async () => {
+  const dispatcher = new Agent({ headersTimeout: 50, bodyTimeout: 50 })
+  let started!: () => void
+  const received = new Promise<void>(resolve => { started = resolve })
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (new URL(request.url).pathname === '/silent') {
+      started()
+      return new Promise<Response>(() => {})
+    }
+    // Undici checks short timeouts on a roughly one-second clock.
+    await Bun.sleep(1200)
+    return new Response('delayed response')
+  } })
+  const abort = new AbortController()
+  try {
+    expect(MODEL_RESPONSE_TIMEOUTS).toEqual({ headersTimeout: 600_000, bodyTimeout: 300_000 })
+    const response = await modelRuntimeFetch(server.url, { dispatcher, ...MODEL_RESPONSE_TIMEOUTS, signal: AbortSignal.timeout(4000) } as RequestInit)
+    expect(await response.text()).toBe('delayed response')
+    const pending = modelRuntimeFetch(new URL('/silent', server.url), { dispatcher, ...MODEL_RESPONSE_TIMEOUTS, signal: abort.signal } as RequestInit)
+    await received
+    abort.abort()
+    await expect(pending).rejects.toThrow()
+  } finally { abort.abort(); server.stop(true); await dispatcher.destroy() }
 }, 5000)
 
 test('live SSE delivers frames before EOF and DONE cancels the socket, including gzip', async () => {

@@ -1,4 +1,4 @@
-import { modelRuntimeFetch } from '../beegame/model-runtime-transport'
+import { modelRuntimeFetch, MODEL_RESPONSE_TIMEOUTS } from '../beegame/model-runtime-transport'
 import {
   getTLSFetchOptions,
   resolveApprovedOutboundTarget,
@@ -72,6 +72,11 @@ export async function startProviderBridge(
         }),
       )
       let upstreamStarted = false
+      let usageReported = false
+      const onUsage = (usage: ProviderUsage) => {
+        usageReported = true
+        options.onUsage(usage)
+      }
       try {
         const body = await incoming.json()
         const signal = AbortSignal.any([incoming.signal, abort.signal])
@@ -83,15 +88,15 @@ export async function startProviderBridge(
         headers.set('authorization', 'Bearer ' + config.apiKey)
         // Identify the real network boundary; conversion errors are local,
         // even when their exception has no recognizable code or HTTP status.
-        const requestUpstream = ((...args: Parameters<typeof fetch>) => {
+        const requestUpstream = ((input: RequestInfo | URL, init?: RequestInit) => {
           upstreamStarted = true
-          return request(...args)
+          return request(input, { ...init, ...MODEL_RESPONSE_TIMEOUTS } as RequestInit)
         }) as typeof fetch
         const response = config.protocol === 'responses'
           ? await requestUpstream(config.baseUrl + '/responses' + (compact ? '/compact' : ''), {
               method: 'POST', headers, signal, redirect: 'error', body: JSON.stringify(body),
             })
-          : await requestProvider(config, body, requestUpstream, signal, options.onUsage, options.onToolError)
+          : await requestProvider(config, body, requestUpstream, signal, onUsage, options.onToolError)
         if (!response.body) {
           finish()
           return response
@@ -128,6 +133,14 @@ export async function startProviderBridge(
       } catch (error) {
         abort.abort()
         finish()
+        // A request may have reached the supplier without returning headers or
+        // a final receipt. Preserve known totals; zero here is only a delta.
+        // Conversion failures before dispatch and already reported streams
+        // must not create another usage event.
+        if (upstreamStarted && !usageReported) onUsage({
+          input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
+          cache_creation_tokens: 0, total_tokens: 0, incomplete: true,
+        })
         const facts = safeErrorFacts(error)
         const candidate = facts.httpStatus
         const upstreamStatus = typeof candidate === 'number' && Number.isInteger(candidate) &&
