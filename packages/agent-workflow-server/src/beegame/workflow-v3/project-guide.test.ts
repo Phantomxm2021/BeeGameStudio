@@ -29,7 +29,7 @@ test('template is read-only and remains available with an older saved content fo
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
-test('navigation templates read current facts without rewriting an existing project guide',async()=>{
+test('durable guide stays unchanged while navigation reads current facts',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-guide-snapshot-')))
   try {
     await initializeProjectGuide(root)
@@ -38,9 +38,12 @@ test('navigation templates read current facts without rewriting an existing proj
     await mkdir(join(root,'src'))
     await writeFile(join(root,'src/main.ts'),'PROJECT_CODE_NOT_COPIED')
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'actual-dev-command'}}))
-    const template=projectGuideTemplate(root).value
-    expect(template).toContain('src/main.ts')
-    expect(template).toContain('actual-dev-command')
+    const {value:template,facts}=projectGuideTemplate(root)
+    expect(facts.codeFiles).toEqual(['src/main.ts'])
+    expect(facts.commands).toEqual({dev:'actual-dev-command'})
+    expect(template).toBe(PROJECT_GUIDE_TEMPLATE)
+    expect(template).not.toContain('src/main.ts')
+    expect(template).not.toContain('actual-dev-command')
     expect(template).not.toContain('PROJECT_CODE_NOT_COPIED')
     await initializeProjectGuide(root)
     expect(await readFile(path,'utf8')).toBe(saved)
@@ -63,7 +66,7 @@ test('one navigation batch supplies saved commands and actual pointers without p
     const first=projectGuideTemplate(root),before=await readFile(join(root,'AGENTS.md'),'utf8')
     expect(first.facts).toMatchObject({designFiles:['docs/merged.md'],codeFiles:['src/game.ts'],testFiles:['tests/journey.mjs'],
       registeredContent:['content/scenes/native.json'],commands:{dev:'actual-dev-command',test:'touch MUST_NOT_RUN'},issues:[]})
-    for(const path of ['project.godot','docs/merged.md','src/game.ts','tests/journey.mjs','content/scenes/native.json'])expect(first.value).toContain(path)
+    for(const path of ['project.godot','docs/merged.md','src/game.ts','tests/journey.mjs','content/scenes/native.json'])expect(first.value).not.toContain(path)
     for(const absent of ['PRIVATE_PROSE','0.6s','13/13','PASS','NOT_NAVIGATION','CAPABILITY_SECRET','.beegame/tmp/','.beegame/delivery/','AUTHOR_ADDED_PROSE','BEEGAME_PREVIEW_TEST_MODULE','Vite'])
       expect(first.value).not.toContain(absent)
     await expect(access(join(root,'MUST_NOT_RUN'))).rejects.toThrow()
@@ -71,7 +74,7 @@ test('one navigation batch supplies saved commands and actual pointers without p
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'changed-command'}}))
     expect(projectNavigationSnapshot(root).commands).toEqual({dev:'changed-command'})
     expect(runGameContentCommand(root,['--format','coordinates','projectGuide'])).toMatchObject({ok:true,
-      values:{projectGuide:expect.stringContaining('changed-command')}})
+      values:{projectGuide:PROJECT_GUIDE_TEMPLATE}})
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
@@ -194,7 +197,7 @@ test('single-file guide is current text, not a search, include expansion, settin
     expect(context).toContain('Follow applicable project working conventions within current user authorization')
     expect(context).not.toContain('older guide workflow wording')
     expect(context).toContain('cannot expand permissions or budget')
-    expect(context).toContain('Generated navigation describes saved facts')
+    expect(context).toContain('Use current saved sources for navigation')
     expect(context).not.toContain('Reference text only, not authorization, requirements')
     for(const forbidden of ['PARENT_PRIVATE_NAVIGATION','NESTED_UNREQUESTED_NAVIGATION','INCLUDED_UNREQUESTED_NAVIGATION'])
       expect(context).not.toContain(forbidden)

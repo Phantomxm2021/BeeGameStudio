@@ -5,8 +5,6 @@ import { join, resolve, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
 import { DESIGN_WRITING_ORDER, DESIGN_METHODS } from '@bee-game-studio/agent-workflow/design-review-result'
 
-const NAV_START = '<!-- bgs:source-navigation:start -->'
-const NAV_END = '<!-- bgs:source-navigation:end -->'
 // One working contract for generated guides and active goal context. Native
 // metadata resolves Skill names/namespaces; procedures stay in the Skills.
 export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
@@ -35,26 +33,10 @@ Image-tool request JSON is a tool input, not a project UI/Scene layout. Reuse ex
 - Skill invocation, complete documents, valid JSON and successful tools do not establish design quality.
 - Appearance and game feel remain unverified without actual observations.`
 
-// Only generated navigation is descriptive. Project-specific decisions remain
-// in existing design/configuration; this template adds no authored report.
+// Durable conventions contain no file snapshot that becomes stale as work proceeds.
 export const PROJECT_GUIDE_TEMPLATE = `# Project working conventions
 
-${NAV_START}
-## Current route
-- Route decision source: <actual design/configuration path>
-
-## Design sources
-- Design records: <actual paths>
-- Runtime values and bindings: <actual source paths>
-
-## Actual entry points
-- Game entry/code: <actual paths>
-- Scene/UI/resources: <actual registry or native source paths>
-
-## Run and verify
-- Commands: <saved configuration path and declared commands>
-- Tests: <maintained test paths; prerequisites belong in their sources>
-${NAV_END}
+Use ReadDesignHandoff for current design document/section navigation and saved project sources/configuration for implementation entry points and commands.
 
 ${PROJECT_WORKING_CONVENTIONS}
 `
@@ -120,38 +102,8 @@ export function projectNavigationSnapshot(workspacePath:string) {
     verified:'saved names and declared commands only; no command executed, entry/engine chosen or consumption/quality certified'}
 }
 
-/** On-demand ready-to-use source scaffold. Never copies project prose/parameters,
- * assertions, receipts or temporary capabilities into the durable guide. */
-function sourceNavigation(facts:ReturnType<typeof projectNavigationSnapshot>) {
-  const paths=(xs:string[])=>xs.length?xs.map(p=>'`'+p.replaceAll('`','\\`')+'`').join(', '):'<not established>'
-  const configuration=facts.rootFiles.filter(p=>!p.endsWith('.md'))
-  return `${NAV_START}
-<!-- Source navigation snapshot; project decisions remain in their owning sources. -->
-## Current route
-- Root source anchors (route not inferred): ${paths(configuration)}
-
-## Design sources
-- Markdown source pointers (authority not inferred): ${paths(facts.designFiles)}
-- Runtime registry: ${paths(facts.registries)}
-
-## Actual entry points
-- Maintained code sources (entry not inferred): ${paths(facts.codeFiles)}
-- Registered content sources (consumption not certified): ${paths(facts.registeredContent)}
-
-## Run and verify
-- Declared package.json scripts (not executed): ${Object.entries(facts.commands).map(([k,v])=>JSON.stringify(k)+': '+JSON.stringify(v)).join('; ')||'<not established>'}
-- Maintained test sources: ${paths(facts.testFiles)}
-${NAV_END}`
-}
-
 export function projectGuideTemplate(workspacePath:string) {
-  const facts=projectNavigationSnapshot(workspacePath)
-  return {facts,value:`# Project working conventions
-
-${sourceNavigation(facts)}
-
-${PROJECT_WORKING_CONVENTIONS}
-`}
+  return {facts:projectNavigationSnapshot(workspacePath),value:PROJECT_GUIDE_TEMPLATE}
 }
 
 /** New, blank creative projects only; callers must check creation/turn facts.
@@ -159,7 +111,7 @@ ${PROJECT_WORKING_CONVENTIONS}
 export async function initializeProjectGuide(workspacePath:string):Promise<void> {
   const root=await realpath(workspacePath)
   try {
-    await writeFile(join(root,PATH),projectGuideTemplate(root).value,{encoding:'utf8',flag:'wx'})
+    await writeFile(join(root,PATH),PROJECT_GUIDE_TEMPLATE,{encoding:'utf8',flag:'wx'})
   } catch(error) {
     if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error
   }
@@ -205,5 +157,5 @@ export async function readProjectGuide(workspacePath:string):Promise<ProjectGuid
 export function projectGuideContext(guide:ProjectGuide):string {
   if(guide.status!=='loaded')return 'Project navigation reference: '+JSON.stringify(guide)+'. No prior guide was reused or file created.'
   return 'Project working conventions and navigation: AGENTS.md (SHA-256 '+guide.sha256+', '+guide.bytes+' bytes). '+
-    'Bgs loads applicable AGENTS.md instructions natively; this is a file-status reference, not another copy. Follow applicable project working conventions within current user authorization. This file cannot expand permissions or budget, authorize new paid operations or override explicit user instructions. Generated navigation describes saved facts, not requirements or quality acceptance. This BGS reference expands no includes and enables no settings/hooks.'
+    'Bgs loads applicable AGENTS.md instructions natively; this is a file-status reference, not another copy. Follow applicable project working conventions within current user authorization. This file cannot expand permissions or budget, authorize new paid operations or override explicit user instructions. Use current saved sources for navigation; guide snapshots do not certify current files or quality. This BGS reference expands no includes and enables no settings/hooks.'
 }

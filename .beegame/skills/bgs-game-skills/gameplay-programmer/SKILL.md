@@ -5,28 +5,23 @@ description: Implement or debug real-time gameplay rules, movement, collision, a
 
 # Gameplay Programmer
 
-Turn the agreed rules into stable player-visible behavior in the project's chosen engine or framework. Read the actual rule, balance and interaction sources and the owning code before changing execution. A technical implementation should not silently choose a different win condition, control policy or collision result.
+Implement agreed player-visible rules in the chosen engine/framework. Read owning rule, balance, interaction and code sources; technical choices must not silently change win conditions, controls or collision outcomes.
 
-## Time, input and execution
+## Execution and state
 
-Distinguish input sampling, legal action execution, simulation and presentation. Establish when a command takes effect and which system owns the resulting state; reading an intended input does not prove the action happened. Use the engine's existing update and physics hooks before introducing a custom loop. Choose fixed or variable updates from the actual behavior and engine constraints, not as a universal architecture.
+- Separate input sampling, legal action execution, simulation and presentation. Identify when commands take effect and who owns results. Prefer existing engine update/physics hooks; choose fixed/variable updates for actual constraints, not a universal loop architecture.
+- Keep consequential units/clocks explicit: rates versus increments, elapsed/simulation time, pause and delayed work. Check frame-rate and long-frame outcomes; delta time alone does not ensure stable integration or collision accuracy. Correct demonstrated problems proportionately without unrequested replay/rollback/physics frameworks.
+- Resolve held/pressed input, buffering, cancellation, recovery and transitions from design. Keep authoritative movement/contact distinct from smoothing; camera/animation must not change hit tests or input meaning accidentally.
+- For contact defects, inspect shapes, coordinates, displacement and ordering. Use suitable collision queries/continuous detection when sampled overlaps can miss crossings. Distinguish new contacts, sustained overlaps and repeated notifications to avoid duplicate consequences.
+- Apply simultaneous-outcome precedence from owning rules. Scoring, damage, spawning, destruction and completion consume the same confirmed event; presentation uses its actual subject/result. Missing consequential rules are design dependencies, not convenient code defaults.
+- Reset run-owned state across relevant pause/restart/scene-change/exit paths, including stale references, callbacks and subscriptions. Prefer existing lifecycle facilities or local fixes over a general state/event framework.
 
-Keep units and clocks explicit where they affect behavior: rates versus per-frame increments, elapsed versus simulation time, pause, delayed work and animation time. Check whether changing frame rate or a long frame changes the player's outcome. Multiplying displacement by delta time alone does not establish collision accuracy or stable integration. Use an appropriate engine facility or a bounded correction for the demonstrated problem; do not build deterministic replay, rollback or a physics framework without a requirement.
+## Integration and verification
 
-Resolve relevant action boundaries such as held versus pressed input, buffering, cancellation, recovery and transitions against the design. Separate authoritative movement/contact state from its visual smoothing. Camera or animation motion must not accidentally change hit tests or input meaning unless that relationship is designed.
+Consume authored configuration and Scene/UI through actual contracts, without duplicating static layout in gameplay code. Describe consequential interfaces/execution choices separately from product rules; share confirmed simulation results with animation, audio and UI.
 
-## Contacts and state changes
+For BGS new games, complete TECHNICAL_DESIGN.md in the eight-document stage: approach, module responsibilities, interfaces, data consumption, lifecycle/failure behavior and verification. Mark unproduced inputs as planned; revise the same design from later visual/resource/Scene/UI outputs. Select implementation-planning guidance when useful; no task index is required. Document-only assignments do not authorize implementation.
 
-For a collision defect, inspect actual shapes, coordinate spaces, displacement and contact order. A sampled overlap can miss an object crossed between updates; use the engine's suitable collision queries, continuous detection or another proportionate method when that risk exists. Distinguish a new contact, sustained overlap and repeated notification so one event does not unintentionally apply its consequence multiple times.
+Support consequential platform claims with the supplied contract or authoritative source and actual preconditions. Gather additional evidence only for a downstream constraint and within authorization; preserve provenance under the project contract. Missing evidence is not a remembered quotation or a reason to collect broad tutorials.
 
-Apply simultaneous outcomes and transition precedence from their owning rules. Keep scoring, damage, spawning, destruction and completion consistent with the same confirmed event; presentation should consume its actual subject and outcome rather than infer success from proximity. Resolve missing consequential rules as design dependencies, not convenient code defaults.
-
-Initialize and reset the state a run owns. Account for stale object references, pending callbacks, subscriptions and delayed actions across relevant pause, restart, scene change and exit paths. Prefer the existing lifecycle facilities or a direct local correction over a general state/event framework.
-
-## Integrate and verify
-
-Consume authored content and configuration through the actual project contracts; do not duplicate static Scene/UI layout in gameplay code. Describe consequential execution choices and interfaces separately from product rules, without writing every algorithm in advance. Coordinate presentation events with animation, audio and UI consumers, preserving a single source for confirmed simulation results.
-
-In BGS new-game design, complete TECHNICAL_DESIGN.md during the eight-document stage: technical approach, module responsibilities, interfaces, data consumption, lifecycle/failure behavior and verification methods. Use game-implementation-planning for its tasks and existing index. Later visual/resource/UI/Scene outputs revise this same design; do not defer the document until production. Describe unproduced inputs as planned. A documentation-only assignment does not authorize implementation. For a consequential platform claim, use a supplied contract or relevant authoritative source with its actual preconditions; collect additional evidence only when that claim constrains downstream work and the check is authorized. Retain cited source material and provenance according to the project contract, which maintains its own metadata. A missing source remains an evidence gap, not a remembered quotation or a reason to gather broad API tutorials.
-
-Verify the affected behavior from actual initial, requested, constrained and resulting states. Use focused rule tests where useful, then check the intended input and integrated behavior in the target runtime. For timing or contact risks, compare representative elapsed-time scenarios under different update rates and the relevant interruption or boundary; do not require a full simulator. Distinguish a driver failure from a game defect and keep conclusions within the observed scope. A stable build or successful scripted route does not establish subjective game feel.
+Check affected behavior from initial, requested, constrained and resulting states. Use focused rule tests and target-runtime observations; timing/contact risks need representative elapsed-time, update-rate and interruption/boundary cases, not a full simulator. Distinguish driver failures from game defects. Builds and successful scripted routes do not establish subjective game feel.

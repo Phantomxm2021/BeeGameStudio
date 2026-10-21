@@ -5,47 +5,28 @@ description: Writing plans for multi-step game implementation from design and sc
 
 # Game Implementation Planning
 
-Use for a multi-step game implementation once the relevant design or feature requirements exist. A small localized fix can go straight to investigation and implementation. This is a working method for the Agent, not a new BeeGameStudio delivery phase.
+Plan multi-step implementation from relevant requirements/designs. A local fix can go directly to investigation and implementation; this Skill adds no delivery phase.
 
-## Establish the source of truth
+## Sources and scope
 
-1. For new games, complete TECHNICAL_DESIGN.md and necessary implementation guidance in the eight-document stage, before actual visual designs, resources and UI/Scene data. Define the technical approach, module responsibilities, interfaces, data consumption and verification methods. Mark unproduced inputs as planned dependencies with consumption contracts, not delivered files, IDs or evidence. Follow the project guide's production order; revise this same plan from actual outputs before implementation, without early layout JSON. Reuse valid existing work for follow-ups.
-2. Read the confirmed requirements and relevant professional records, plus selected pictures, content, resources/audio, code and tests when available. Derive outcomes from these original sources; indexes alone can omit necessary work. Do not add content to fill a template or silently defer, drop or simplify confirmed outcomes.
-3. Preserve the project's content authority: selected JSON/YAML, engine scenes/assets or framework source. Do not duplicate layouts in runtime code or invent a separate BGS data layer for a native engine or DOM project.
-4. Reconcile missing or contradictory rules, interfaces and resources in their owning sources before planning consumption. Compare prose with selected pictures: correct pictures contradicting confirmed requirements; revise affected UI/art/Scene records, resource choices and task inputs/checks within current authority. Preserve unrelated content and IDs; otherwise identify the decision needed. If JSON contradicts the reconciled design, correct authored data; if JSON matches but runtime differs, inspect loading/consumption/rendering rather than rewriting valid data. Geometry/binding PASS does not establish visual agreement; missing observations remain unverified.
+Complete TECHNICAL_DESIGN.md in the eight-document stage, before visual/resource/UI/Scene production: approach, modules, interfaces, data consumption and verification. Mark unproduced inputs as planned contracts, not delivered paths/IDs/evidence. Revise the same design from actual outputs before implementation; no early layout JSON or second plan.
 
-## Decompose the implementation
+Derive outcomes from confirmed requirements and owning professional records, selected pictures and actual content/code/tests when available. Indexes alone can omit work. Preserve the chosen engine/framework and content authority; do not duplicate layouts or invent another data layer. Do not add template filler or silently defer/drop/simplify confirmed outcomes.
 
-Keep implementation guidance in TECHNICAL_DESIGN.md; choose task structure and detail to suit the work, without a required machine index; professional records remain design sources, not separate development backlogs. Map owning files and shared interfaces once: producer/consumer, action or state names, inputs/outputs and consequential types/units. Reference these definitions rather than inventing a general event framework or specifying every function.
+Resolve consequential rule/interface/resource conflicts in their owning sources before dependent work. Correct pictures contradicting requirements and reconcile affected UI/art/Scene records and production choices within authorization. If authored data contradicts design, correct data; if runtime contradicts valid data, inspect consumption/rendering. Preserve unrelated work/IDs and identify decisions needing authorization. Geometry/binding PASS is not visual agreement.
 
-Split by an independently implementable and checkable result: a reusable foundation or a player-visible behavior are both valid. Modules may organize the plan, but their names alone do not define execution tasks. Group coupled work; split independently verifiable outcomes without prescribing a task count or one task per function/field. Fold scaffolding into its consumer. Order tasks by actual dependencies and name their needed outputs. A task need not launch a complete game independently; foundations and presentation need their applicable checks.
+## Useful implementation guidance
 
-For work that benefits from explicit tasks, the following is an optional example. Include only what another implementer would otherwise have to guess:
+Keep guidance in TECHNICAL_DESIGN.md. Define shared interfaces once—producer/consumer, names, inputs/outputs and consequential types/units—and reference them. No machine index, general event framework or function-by-function implementation is required.
 
-```text
-Task: <stable task ID and observable result, not “work on UI”>
-Sources: <owner clauses/sections and available paths/IDs/pictures; identify unproduced inputs as planned>
-Files/interfaces: <owning code, consumed data and shared interface references>
-Behavior: <list the mandatory outcomes from this project's sources, including applicable trigger/state/feedback and boundary conditions>
-Check: <for those outcomes: conditions/actions -> observable expected results, applicable test/inspection/runtime method and its coverage>
-Depends on: <task IDs or existing capabilities, and actual outputs needed>
-```
+Choose independently implementable/checkable results, whether foundations or player-visible behavior. Group coupled work, fold scaffolding into consumers and order by actual needed outputs. Use explicit tasks only when useful: outcome, owning sources/files/interfaces, required behavior, conditions/actions and expected check results, and dependencies. Mark unavailable inputs as planned; reference numeric/appearance definitions rather than copy them. Names alone do not define tasks, and foundations need not launch a complete game independently.
 
-Use concise Behavior and Check points; reference original numeric tables and appearance definitions. One check may cover several mandatory points. Name a professional Skill only when a task needs its specialist decision. Interface names, source values and expected results must be usable without inventing product decisions; do not write full implementations into the plan.
+Use focused tests for deterministic rules and actual runtime views for audiovisual/interactive results. One current integration observation can cover several tasks; no build/browser/screenshot per task. For consequential audiovisual uncertainty, expose a useful integrated slice before repeating the treatment, without adding a prototype/approval stage or reducing final scope.
 
-For a consequential audiovisual uncertainty, plan a useful slice exposing the selected design, prepared resource, Scene/UI and action feedback together before repeating that treatment across content. This does not add a prototype/approval stage or replace final scope coverage.
-
-Use focused tests for deterministic rules and actual running views for visual/interactive results. One current integration result may cover several tasks; do not require a separate build/browser session/screenshot for each. Preserve the chosen engine and test tools; state uncovered outcomes rather than mark them complete.
-
-## Review the plan before using it
-
-- Walk original requirements and applicable professional source sections, including selected designs and produced inputs. Map each mandatory outcome to a task's Behavior and Check; citing a whole document or output ID alone is not coverage. Check the reverse direction: task outcomes need an authorized source. Reference global constraints rather than copying them into each task. Keep omissions/unresolved inputs explicit; exclusions/deferments require authorization. Structural coverage cannot certify semantic completeness.
-- Neighboring tasks agree on IDs, coordinates, units, types, resource paths, and interface names. No task assumes output that an earlier task does not produce.
-- Each task has a meaningful completion check. Replace vague steps such as “handle edge cases” with the particular case and expected result.
-- The plan is shorter than the work it guides. If it becomes a second set of eight documents or a transcript of code to type, consolidate it.
+Before using the plan, check required outcomes against implementation/check coverage and tasks against authorized sources; naming a whole document alone is not coverage. Neighboring tasks must agree on IDs, units, coordinates, paths and interfaces, with dependencies actually producing needed outputs. Replace vague “handle edge cases” with relevant cases/results. Keep omissions/untested outcomes explicit; exclusions need authorization. This is self-review, not another coverage artifact or a semantic-completeness certificate. Consolidate a plan that becomes another eight documents or code transcript.
 
 ## BGS handoff
 
-ReadDesignHandoff locates current documents and sections. ReadImplementationTask exposes an existing task index when present, otherwise the technical source; native reads cover other sources and pictures. No machine index, output mapping or finalize step is required for plain documents. Existing indexed projects can use the supplied --design help --details and finalize commands for metadata compatibility after authorized edits.
+ReadDesignHandoff locates current documents/sections. ReadImplementationTask returns an existing index when present, otherwise technical source; native reads cover other sources/pictures. Plain documents require no machine index, output mapping or finalize. Existing indexed projects may use supplied `--design help --details` and finalize for metadata compatibility after authorized edits.
 
-Before the implementation lock, update only affected tasks from produced designs, resources/frames and content; preserve still-valid work and task IDs. After locking, retain concise progress and result paths in the working conversation or an existing task list, not the technical document or another task database. A Todo tick is not a saved result; planning is not delivery. Required design changes follow current authorization.
+Before the implementation lock, update affected guidance from produced designs/resources/content, preserving valid work/task IDs. After locking, keep concise progress and result paths in the conversation or existing task list, not another database or technical-document progress log. A Todo tick is not delivery; design changes follow current authorization.
