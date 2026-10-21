@@ -3,13 +3,12 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, realpath, symlink } from 'node
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
-import { observeProjectCreation, installWebStarter, webStarterFiles } from './web-project-start'
+import { observeProjectCreation, requiresBgsEditableContent } from './web-project-start'
+import { webStarterFiles, writeWebContentFixture } from '../fixtures/web-content-fixture'
 import { registeredContentChecks, activeUserTask } from './agent-measurement'
 import { createRun, type AgentTurn } from './state'
-import { assertCommit } from './store'
 import { agentGoalPrompt, focusedExecutionFacts } from './agent-goal'
 import { sharedPlaywright } from '../shared-playwright'
-import { CONTENT_CONSUMER_API } from '../game-content-consumer-cli'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
 import sharp from 'sharp'
@@ -28,7 +27,7 @@ async function fixture(legacy = true) {
 test('creation facts cover blank creative and blueprint intake; source/import/unknown are not silently migrated',async()=>{
   const f=await fixture(false)
   try {
-    expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true,webStarter:'react-canvas-2d-v1',webBoot:'react-web-storage-v1'})
+    expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true})
     for(const path of ['.beegame','transcripts','logs'])await mkdir(join(f.root,path))
     await writeFile(join(f.root,'logs/index.json'),'{}')
     expect(await observeProjectCreation(f.root,brief)).toEqual(f.run.creation)
@@ -37,45 +36,25 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:undefined})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:'unknown'})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,settings:{...brief.settings,bgsVisualEditing:false}}))
-      .toEqual({initialDelivery:'design-led-first-version',editableContent:false,webBoot:'react-web-storage-v1'})
+      .toEqual({initialDelivery:'design-led-first-version',editableContent:false})
     expect((await observeProjectCreation(f.root,{...brief,settings:{platform:'Native',engine:'Unity'}}))?.webStarter).toBeUndefined()
     await writeFile(join(f.root,'README.md'),'Existing user source')
     expect(await observeProjectCreation(f.root,brief)).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:'blueprint'})).toBeUndefined()
-    await installWebStarter(f.run)
     expect(await readFile(join(f.root,'README.md'),'utf8')).toBe('Existing user source')
     await expect(readFile(join(f.root,'package.json'))).rejects.toThrow()
   }finally{await f.close()}
 })
 
-test('starter installs once, recovers exact partial writes, preserves edits and retains initial scope facts',async()=>{
-  const f=await fixture()
+test.each(['React','Unity','Godot','Unreal'])('Editor contract follows the engine, including historical Web flags: %s',async engine=>{
+  const f=await fixture(false)
   try {
-    await installWebStarter(f.run)
-    const before=await readFile(join(f.root,'src/game.js'),'utf8')
-    expect(JSON.parse(await readFile(join(f.root,'vendor/bgs-runtime/api.json'),'utf8'))).toEqual(CONTENT_CONSUMER_API)
-    expect(before).toContain('../vendor/bgs-runtime/api.json')
-    await rm(join(f.root,'src/style.css'))
-    await installWebStarter(f.run)
-    expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe(before)
-    await writeFile(join(f.root,'src/game.js'),'// user edit')
-    await expect(installWebStarter(f.run)).rejects.toThrow('Existing project source preserved')
-    expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// user edit')
-    expect(agentGoalPrompt(f.run)).toContain('then end this turn for user feedback')
-    expect(agentGoalPrompt(f.run)).not.toContain(f.run.requirements.text)
-    expect(agentGoalPrompt(f.run)).toContain('bgsConfirmedBrief')
-    const next=structuredClone(f.run); next.version++; delete next.creation
-    expect(()=>assertCommit('sample','owner',f.run.version,next,f.run)).toThrow('creation facts')
+    const settings={...brief.settings,engine}
+    const creation=await observeProjectCreation(f.root,{...brief,settings})
+    expect(creation).toEqual({initialDelivery:'design-led-first-version',editableContent:engine==='React'})
+    const run={...f.run,requirements:{...f.run.requirements,constraints:settings},creation:{...creation!,editableContent:true}}
+    expect(requiresBgsEditableContent(run)).toBe(engine==='React')
   }finally{await f.close()}
-})
-
-test('starter rejects aliased destinations without writing through them',async()=>{
-  const f=await fixture(),other=await fixture()
-  try {
-    await symlink(other.root,join(f.root,'src'))
-    await expect(installWebStarter(f.run)).rejects.toThrow('Existing project source preserved')
-    await expect(readFile(join(other.root,'game.js'))).rejects.toThrow()
-  }finally{await f.close();await other.close()}
 })
 
 test('focused interrupted continuation retains the slice assignment; new user work keeps its own scope',async()=>{
@@ -98,7 +77,7 @@ test('existing content check distinguishes required absence, exemption and valid
   try {
     expect(await registeredContentChecks(f.root,{},false)).toEqual([])
     expect(await registeredContentChecks(f.root,{},true)).toMatchObject([{id:'content-structure',status:'failed'}])
-    await installWebStarter(f.run)
+    await writeWebContentFixture(f.root)
     for (const orientation of ['Landscape','Portrait'] as const) {
       const files=await webStarterFiles(orientation,'zh')
       for(const path of ['content/index.json','content/ui/hud.json','content/scenes/main.json'] as const)
@@ -117,16 +96,16 @@ test('existing content check distinguishes required absence, exemption and valid
 },30000)
 
 // Local synthetic connection test, never a game acceptance or a paid model run.
-test.each(['procedural','resources','pure-ui'])('built starter consumes edited scene/UI data and dispatches actions through real React/Canvas: %s',async mode=>{
+test.each(['procedural','resources','pure-ui'])('test-authored Web content consumes edited scene/UI data and dispatches actions through real React/Canvas: %s',async mode=>{
   const f=await fixture()
   const require=createRequire(new URL('../../../../../apps/frontend/package.json',import.meta.url))
   let browser: any, server: ReturnType<typeof Bun.serve>|undefined
   try {
-    await installWebStarter(f.run)
+    await writeWebContentFixture(f.root)
     await mkdir(join(f.root,'node_modules'))
     for(const name of ['react','react-dom','vite'])
       await symlink(dirname(require.resolve(name+'/package.json')),join(f.root,'node_modules',name))
-    // Exercise the shipped example itself, not a replacement game callback.
+    // Exercise the optional consumer against the test-authored application.
     const scene=JSON.parse(await readFile(join(f.root,'content/scenes/main.json'),'utf8'))
     scene.data.nodes[1].components[0].data.color='#224466'
     if (mode === 'resources') {
@@ -191,18 +170,25 @@ test.each(['procedural','resources','pure-ui'])('built starter consumes edited s
     const {chromium}=await import(sharedPlaywright().moduleUrl)
     browser=await chromium.launch({headless:true,executablePath:process.env.BGS_LAYOUT_BROWSER_EXECUTABLE ?? chromium.executablePath()})
     const page=await browser.newPage({viewport:{width:960,height:540}})
-    const errors:string[]=[]
+    const errors:string[]=[],requested:string[]=[]
+    page.on('request',(request:{url():string})=>requested.push(new URL(request.url()).pathname))
     page.on('pageerror',(e:Error)=>errors.push(e.message))
     await page.goto('http://127.0.0.1:'+server.port+'/nested/')
     await page.locator('[data-node-id=status]').waitFor()
     expect(await page.locator('[data-node-id=status]').innerText()).toBe('BGS · 0')
     const pixel=()=>page.locator('main > canvas').evaluate((c:any)=>Array.from(c.getContext('2d').getImageData(480,270,1,1).data))
-    if(mode!=='pure-ui')expect(await pixel()).toEqual(mode==='resources'?[0,255,0,255]:[34,68,102,255])
+    // Resource pixels also consume the saved Sprite tint (#224466, later #663322).
+    if(mode!=='pure-ui')expect(await pixel()).toEqual(mode==='resources'?[0,68,0,255]:[34,68,102,255])
     else expect(await Bun.file(join(f.root,'dist/content/scenes/main.json')).exists()).toBe(false)
     if(mode==='resources') {
       expect(await page.locator('[data-node-id=reset] canvas').evaluate((c:any)=>Array.from(c.getContext('2d').getImageData(10,10,1,1).data))).toEqual([255,0,0,255])
-      expect(await page.locator('[data-node-id=status]').evaluate((el:Element)=>getComputedStyle(el).fontFamily)).toBe('FixtureFont')
-      expect(await page.evaluate(()=>Array.from(document.fonts).some(face=>face.family==='FixtureFont'&&face.status==='loaded'))).toBe(true)
+      // A bound resource takes precedence over the fallback family string.
+      expect(requested).toContain('/nested/assets/runtime/example/member.ttf')
+      expect(requested).not.toContain('/nested/assets/runtime/example/default.ttf')
+      expect(await page.locator('[data-node-id=status]').evaluate((el:Element)=>{
+        const family=getComputedStyle(el).fontFamily.replaceAll('"','')
+        return Array.from(document.fonts).some(face=>face.family===family&&face.status==='loaded')
+      })).toBe(true)
       expect(await Bun.file(join(f.root,'dist/assets/runtime/example/unbound.png')).exists()).toBe(true)
       expect(await Bun.file(join(f.root,'dist/assets/visual/design.html')).exists()).toBe(false)
     }
@@ -219,7 +205,7 @@ test.each(['procedural','resources','pure-ui'])('built starter consumes edited s
     await page.reload()
     await page.waitForFunction(()=>document.querySelector('[data-node-id=status]')?.textContent==='BGS · 0')
     expect(await page.locator('[data-node-id=status]').evaluate((el:Element)=>getComputedStyle(el).fontSize)).toBe('30px')
-    if(mode!=='pure-ui')expect(await pixel()).toEqual(mode==='resources'?[255,0,0,255]:[102,51,34,255])
+    if(mode!=='pure-ui')expect(await pixel()).toEqual(mode==='resources'?[102,0,0,255]:[102,51,34,255])
     expect(errors).toEqual([])
     expect(await page.locator('[role=alert]').count()).toBe(0)
   }finally{await browser?.close();server?.stop(true);await f.close()}

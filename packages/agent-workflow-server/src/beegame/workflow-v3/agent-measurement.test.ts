@@ -810,8 +810,9 @@ test('task context exposes current comparison before optional tool parsing; does
     const handoff=await f.measurement.handoff()
     const inspected=await f.measurement.inspect(record.id)
     for(const scope of [context.checkScope,handoff.checkScope,inspected.checkScope]){
-      expect(scope.build).toContain('runs package.json scripts.build in an isolated source copy')
-      expect(scope.build).toContain('project bundlers are allowed')
+      expect(scope.build).toContain('runs an existing package.json scripts.build in an isolated source copy')
+      expect(scope.build).toContain('Optional static-Web measurement only')
+      expect(scope.build).toContain('does not define the project build method or verify native/server exports')
     }
     expect(handoff.checkScope.consumptionOption).toBe('--consumption-json')
     expect(handoff.checkScope.availableConsumptionChecks).toContain('ui-data-consumption')

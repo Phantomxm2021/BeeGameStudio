@@ -9,10 +9,9 @@ import { createAgentMeasurement, AGENT_CONSUMPTION_CHECKS } from './agent-measur
 import { blockingRegisteredContentChecks, inspectAgentMeasurementInputs } from './measured-build'
 import { readProjectGuide, projectGuideContext, PROJECT_WORKING_CONVENTIONS } from './project-guide'
 import { saveHostExitReceipt, type HostExitReceipts, type HostExitFacts } from './host-exit-receipt'
-import { installWebStarter } from './web-project-start'
+import { requiresBgsEditableContent } from './web-project-start'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
 import { DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
-import { assertManagedWebBoot } from './managed-web-boot'
 
 type AgentExecutionOptions = Partial<StartBeeGameSessionInput> & {
   attachments?: BeeGameAttachment[]
@@ -44,7 +43,7 @@ export const agentMessageSchema = z.object({
 
 // Business data and authorization contracts only. Execution methods stay in Skills.
 const professionalContextParagraphs = [
-  'Consume applicable BGS editable visual nodes and bindings in the actual runtime, without a second hardcoded layout. Unity/Godot use native data; do not migrate source-only projects or duplicate native content into Web JSON. Maintain resources and bindings together.',
+  'Preserve the user-selected engine and platform in bgsConfirmedBrief.settings. Choose architecture, entry points, source organization, build and verification methods in TECHNICAL_DESIGN.md. Consume applicable editable content in the actual runtime, without a second hardcoded layout. BGS Editor reads BGS Scene/UI JSON; Unity/Godot/Unreal retain native data and have no BGS native-editing adapter. Report an unmet BGS Editor requirement instead of switching engines or duplicating native content into Web JSON. Maintain resources and bindings together.',
   'Honor explicit resource sources and usage rights; AI is not the default for all core art. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Procedural replacement of required art needs a concrete blocker and authorization; placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
   'Keep editable sources separate from publication output and retain required licenses.',
 ]
@@ -52,11 +51,11 @@ const firstVersionDeliveryContext = 'Deliver the confirmed scope using the desig
 const editableWebDeliveryContext = 'This project requires BGS visual editing: content/scenes/*.json and content/ui/*.json are editable data consumed by the confirmed engine, not a separate engine or required game scaffold. Register Scene/UI documents in content/index.json and resources in assets/asset-manifest.json. Scene data holds editable world layout and object/resource bindings; UI-only games without a world scene need no empty Scene. Canvas rendering or a single screen does not imply UI-only. Dynamic simulation state and game logic belong in code. The optional browser consumer supports a subset of this data; project code implements the remaining behavior.'
 export const agentProfessionalContext = [PROJECT_WORKING_CONVENTIONS, ...professionalContextParagraphs, firstVersionDeliveryContext].join('\n')
 // Design conventions come from the saved project guide, without a legacy fallback.
-export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation'>>, followup = false) => [
+export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation' | 'requirements'>>, followup = false) => [
   ...professionalContextParagraphs,
   'Current BGS contract: the current user assignment determines scope and stopping point. Select Skills and organize/self-check the work yourself. Machine design indexes, task coverage graphs and finalization of plain documents are not required, including when an older BGS-generated project guide says otherwise. Preserve explicit user requirements and Editor data contracts.',
   ...(!followup && run.creation?.initialDelivery === 'design-led-first-version' ? [firstVersionDeliveryContext] : []),
-  ...(run.creation?.editableContent ? [editableWebDeliveryContext] : []),
+  ...(requiresBgsEditableContent(run) ? [editableWebDeliveryContext] : []),
 ].join('\n')
 export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run['sourceEdits']> = []): string {
   return [...(message.intent==='discuss' ? ['This request authorizes discussion only, without changes or execution.'] : []),
@@ -80,7 +79,6 @@ export function agentGoalPrompt(run: Run): string {
   if (run.creation?.initialDelivery === 'playable-slice') return [
     'This first assignment delivers one small, complete player experience for user playtesting, not the full game. Reduced content quantity does not waive the required design dependencies. Keep the complete confirmed goal unchanged for subsequent work.',
     'Reduce content quantity, not the controls, readability or audiovisual feedback needed to judge the chosen experience. Preserve confirmed core rules; a proposed rule change is not authorization to implement it. Record the experience focus and deferred content in the existing concise design record, implement and run it, and make the actual preview available. Retain observations and unresolved experience questions in that same record, then end this turn for user feedback. Do not expand the full content set in this assignment or claim game acceptance.',
-    ...(run.creation.webStarter ? ['The host supplied a generic React/Canvas connection scaffold: content/ is consumed by src/main.jsx, src/game.js owns simulation and UI state/actions. It is not gameplay or an approved art style. Extend the connected sources; do not replace saved Scene/UI data with a second hardcoded layout.'] : []),
     'Use the complete confirmed goal in bgsConfirmedBrief; its full scope is retained, not all due in this first assignment.',
   ].join('\n\n')
   return [
@@ -145,7 +143,7 @@ export async function agentTurnHandoffReason(run: Run, turn: AgentTurn) {
   const record=run.agentTurns?.flatMap(t=>t.measurements??[]).at(-1)
   let acceptanceNote = ''
   if (record?.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
-    const acceptance = await inspectDesignAcceptance(run.workspacePath,true,run.creation?.editableContent,
+    const acceptance = await inspectDesignAcceptance(run.workspacePath,true,requiresBgsEditableContent(run),
       {runId:run.id,requirementsRevision:run.requirements.revision})
     const counts = ['passed','failed','unverified'].map(status =>
       status + '=' + acceptance.requirementChecks.filter(check=>check.status===status).length).join(', ')
@@ -239,8 +237,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     try {
       if (disposing || (await read(run)).paused) throw new Error('Worker stopped or user paused before dispatch')
       const previous=run.agentTurns!.filter(t=>t.attemptId!==turn.attemptId).at(-1)
-      await assertManagedWebBoot(run)
-      if (!turn.message) await installWebStarter(run)
       const focused=turn.message?.contextMode==='focused' || Boolean(previous?.nativeSessionId && previous.nativeRuntime !== 'bgs')
       if(focused)executionContext=focusedExecutionFacts(run,await readSessionTranscriptFromDisk(run.chatSessionId,run.workspacePath))
       if(turn.message && input.sessions.get(turn.sessionId)?.status==='running') {
@@ -266,7 +262,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         } })
       if (session.id!==run.chatSessionId) throw new Error('Native goal must use the bound project conversation')
       input.sessions.setProjectDesignLocked(session.id,Boolean(run.designBaseline))
-      input.sessions.setProjectManagedWebBoot(session.id,Boolean(run.creation?.webBoot))
       const prompt = turn.message ? agentMessagePrompt(turn.message,
         run.sourceEdits?.filter(e=>e.fence>(run.agentTurns?.at(-2)?.fence??0))) : agentGoalPrompt(run)
       await input.sessions.sendWithDisplay(session.id, prompt, {
@@ -304,7 +299,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
           }):''
           if(turn.message?.intent==='discuss')return {systemContext:guide,...(confirmedChanges?{turnContext:confirmedChanges}: {})}
           tools=await openAgentTools({ workspacePath:run.workspacePath, constraints:run.requirements.constraints,
-            requireEditableContent:run.creation?.editableContent,
+            requireEditableContent:requiresBgsEditableContent(run),
             sessionId:session.id,openPreview:options.openPreview ? async ()=>preview=await options.openPreview!() : undefined,
             libraryBaseUrl:input.resourceLibraryBaseUrl,
             getAuthToken:()=>options.getValidAuthToken?.() ?? options.authToken, measurement,

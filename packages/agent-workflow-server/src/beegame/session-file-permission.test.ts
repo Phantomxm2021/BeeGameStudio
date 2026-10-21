@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BeeGameSessionManager, type DashboardPermissionDecision } from './session-manager'
 import { MANAGED_WEB_BOOT_PATHS } from './workflow-v3/managed-web-boot'
+import { projectExecutionAccess } from './project-execution-access'
 
-test('new-project managed entry rejects native mutations and aliases, without reserving old projects or game implementation',async()=>{
+test('startup files use ordinary workspace permissions; design and instruction protections remain',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-boot-permissions-'))),workspace=join(root,'project')
   await mkdir(join(workspace,'src'),{recursive:true});await writeFile(join(workspace,'index.html'),'Host entry')
   await writeFile(join(workspace,'src/bgs-entry.mjs'),'Host adapter')
@@ -13,23 +14,25 @@ test('new-project managed entry rejects native mutations and aliases, without re
   const decisions:DashboardPermissionDecision[]=[]
   let id=''
   const manager=new BeeGameSessionManager({async start(start){
-    expect(start.managedWebBoot).toBe(true)
+    expect(start).not.toHaveProperty('managedWebBoot')
     return {stop(){},async submit(turn){
       for(const toolName of ['Write','Edit','MultiEdit','NotebookEdit']) {
         const key=toolName==='NotebookEdit'?'notebook_path':'file_path'
         for(const path of [...MANAGED_WEB_BOOT_PATHS,'entry-alias.html','index.html','src/game.jsx'])
           decisions.push(await turn.requestPermission({toolName,toolUseID:crypto.randomUUID(),input:{[key]:join(workspace,path)},message:'Fixture decision'}))
       }
-      manager.setProjectManagedWebBoot(id,false)
       decisions.push(await turn.requestPermission({toolName:'Write',toolUseID:'old-project',input:{file_path:join(workspace,'index.html')},message:'Existing entry remains editable'}))
       await turn.onMessage({type:'result',subtype:'success',result:'Fixture complete'})
     }}
   }},root)
   try {
     id=manager.start({workspacePath:workspace,userId:'owner',projectId:'fixture'}).id
-    manager.setProjectManagedWebBoot(id,true)
     await manager.sendWithDisplay(id,'Fixture checks');await manager.waitForSessionIdle(id)
-    expect(decisions.map(d=>d.behavior)).toEqual([...Array(4).fill(['deny','deny','deny','allow','allow']).flat(),'allow'])
+    expect(decisions.map(d=>d.behavior)).toEqual(Array(21).fill('allow'))
+    const access=await projectExecutionAccess({workspacePath:workspace,sessionId:id,environment:{BEEGAME_CONFIG_DIR:join(root,'config')}})
+    for(const path of MANAGED_WEB_BOOT_PATHS)expect(access.protectedPaths).not.toContain(join(workspace,path))
+    expect(access.protectedPaths).toContain(join(workspace,'AGENTS.md'))
+    expect(access.protectedPaths).toContain(join(workspace,'docs/GDD.md'))
     expect(manager.pendingPermissionsForProject('owner','fixture',workspace)).toHaveLength(0)
   }finally{await manager.dispose();await rm(root,{recursive:true,force:true})}
 })

@@ -8,7 +8,6 @@ import { sharedSharp, sharedFont } from './shared-sharp'
 import { sharedContentChecker } from './content-checker-runtime'
 import { projectPreviewCapabilityPath } from './project-preview-capability'
 import { PROJECT_DESIGN_PATHS } from './design-handoff'
-import { MANAGED_WEB_BOOT_PATHS } from './workflow-v3/managed-web-boot'
 
 const TOOL_READ_PATHS='BEEGAME_PROJECT_TOOL_READ_PATHS'
 const within=(parent:string,path:string)=>{
@@ -54,7 +53,6 @@ export async function projectExecutionAccess(input: {
   environment: Record<string, string>
   scopedTools?: readonly string[]
   toolResultsDirectory?: string
-  managedWebBoot?: true
 }) {
   const root = await realpath(input.workspacePath)
   const toolReadPaths=await hostToolReadPaths(root)
@@ -131,8 +129,7 @@ export async function projectExecutionAccess(input: {
       if (canonical) { readPaths.push(canonical); references.push(canonical) }
     }
   }
-  const protectedPaths = ['AGENTS.md', ...PROJECT_DESIGN_PATHS,
-    ...(input.managedWebBoot ? MANAGED_WEB_BOOT_PATHS : [])].map(path => resolve(root, path))
+  const protectedPaths = ['AGENTS.md', ...PROJECT_DESIGN_PATHS].map(path => resolve(root, path))
   const filesystem: Record<string, string> = { ':root': 'deny', ':minimal': 'read', ':slash_tmp': 'deny', [root]: 'write', [nativeOutput]: 'write' }
   for (const path of [...readPaths, ...toolReadPaths]) filesystem[path] = 'read'
   for (const path of protectedPaths) filesystem[path] = 'read'

@@ -7,7 +7,7 @@ import { createRun, digest, type AgentTurn } from './state'
 import { createLocalWorkflowStore } from './store'
 import { createAgentMeasurement, registeredContentChecks } from './agent-measurement'
 import { openAgentTools } from './agent-tools'
-import { observeProjectCreation, installWebStarter } from './web-project-start'
+import { observeProjectCreation } from './web-project-start'
 import { projectPreviewCapabilityPath } from '../project-preview-capability'
 import { writeDesignDocumentsFixture, designRequirementChecksFixture } from '../fixtures/layout-fixture'
 import { DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
@@ -17,9 +17,9 @@ import { writeBeeGameAssetManifest } from '../asset-contracts'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { sharedPlaywright } from '../shared-playwright'
 
-// A new-policy project, not the legacy starter. BGS installs its thin boot;
-// the authored game wires its own rendering helpers, not its storage service.
-test('new design-led project installs public helpers and consumes its registered resources in a nested build', async () => {
+// Test-authored entry points and rendering consume the optional BGS helpers.
+// The implementation handoff supplies design facts, never startup files.
+test('Agent-authored Web project chooses public helpers and consumes its registered resources in a nested build', async () => {
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-new-design-integration-')))
   const workspace=join(root,'project')
   await mkdir(workspace)
@@ -40,7 +40,6 @@ test('new design-led project installs public helpers and consumes its registered
   let browser:any,server:ReturnType<typeof Bun.serve>|undefined
   try {
     expect(run.creation?.initialDelivery).toBe('design-led-first-version')
-    await installWebStarter(run)
     expect(await Bun.file(join(workspace,'package.json')).exists()).toBe(false)
     expect(await Bun.file(join(workspace,'content/index.json')).exists()).toBe(false)
     tools=await openAgentTools({workspacePath:workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement,
@@ -97,11 +96,13 @@ test('new design-led project installs public helpers and consumes its registered
     expect(implementation.valid).toBe(true)
     expect(implementation.execution.sources).toContain('choose Skills and work organization as needed')
     expect(implementation.execution).not.toHaveProperty('skill')
-    expect(implementation.webBoot.factory).toBe('export async function createGame({root, storage})')
+    expect(implementation.webBoot).toBeUndefined()
+    expect(await Bun.file(join(workspace,'index.html')).exists()).toBe(false)
+    await writeFile(join(workspace,'index.html'), '<!doctype html><div id="root"></div><script type="module" src="./src/start.mjs"></script>')
+    await writeFile(join(workspace,'src/start.mjs'), "import { createGame } from './game.jsx'; await createGame({root:document.getElementById('root')});")
     expect(implementation.designBaseline.revision).toBeString()
     await writeFile(join(workspace,'src/game.jsx'),`import {parseBeeGameContentIndex,fetchStartupContentDocuments,readSceneData,readUiData,loadProductionResources,createProductionUiSurface,renderProductionScene2d} from './consumer.mjs';
-export async function createGame({root,storage}) {
-if(!storage)throw Error('Thin entry did not initialize storage');
+export async function createGame({root}) {
 root.innerHTML='<canvas id="scene"></canvas><div id="ui"></div>';
 const style=document.createElement('style');style.textContent='body{margin:0}#scene,#ui{position:absolute;inset:0;width:960px;height:540px}';document.head.append(style);
 const indexUrl=new URL('./content/index.json',document.baseURI);

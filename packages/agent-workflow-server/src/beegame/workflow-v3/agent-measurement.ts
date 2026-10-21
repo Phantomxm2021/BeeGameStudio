@@ -18,7 +18,7 @@ import { priorMainSkillLoads } from './context'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
 import { snapshotDesignRevisionFiles, designRevisionFileDigest, DESIGN_ACCEPTANCE_PATH, readDesignImplementationChecklist, readDesignAcceptanceRequirements } from '../design-handoff'
 import { captureDesignBaseline, designBaselineIssue } from './design-baseline'
-import { assertManagedWebBoot, installManagedWebBoot, MANAGED_WEB_BOOT_CONTRACT } from './managed-web-boot'
+import { requiresBgsEditableContent } from './web-project-start'
 
 export const AGENT_CONSUMPTION_CHECKS = ['ui-data-consumption','scene-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'] as const
 export const AGENT_CONSUMPTION_SUPPORT = {
@@ -101,7 +101,7 @@ export async function registeredContentChecks(root: string, constraints: Record<
 // Expose them through the already-used handoff/inspect, including when the
 // Agent has an old receipt or no receipt; help-only discovery was insufficient.
 function measurementCheckScope(record?: AgentMeasurement) {
-  return {build:'Host measurement scope: runs package.json scripts.build in an isolated source copy using installed dependencies. Source-copy describes the workspace, not a copy-only build requirement; project bundlers are allowed.',runtimeSmoke:'initial static-browser load only',
+  return {build:'Optional static-Web measurement only: runs an existing package.json scripts.build in an isolated source copy using installed dependencies and checks the resulting index.html. This tool does not define the project build method or verify native/server exports.',runtimeSmoke:'initial static-browser load only',
     consumptionOption:'--consumption-json',availableConsumptionChecks:AGENT_CONSUMPTION_CHECKS,
     consumptionSupport:AGENT_CONSUMPTION_SUPPORT,
     ...(record?.consumption?{consumption:record.consumption.checks}:{}),
@@ -194,7 +194,6 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     try {
       const baselineIssue = designBaselineIssue(run)
       if (baselineIssue) throw new WorkflowError('design-baseline-changed', baselineIssue)
-      await assertManagedWebBoot(run, true)
       // Refresh before hashing/building: guide maintenance must not stale the
       // just-created receipt when the turn settles without further source edits.
       // Only explicitly selected execution receipts may enter from host
@@ -204,7 +203,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
           throw new WorkflowError('report-alias','Execution receipt must not resolve through an alias')
       record.reports=await Promise.all(request.reportPaths.map(path=>readVersion(root,path)))
       if (request.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
-        const acceptance = await inspectDesignAcceptance(root,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent,
+        const acceptance = await inspectDesignAcceptance(root,run.creation?.initialDelivery === 'design-led-first-version',requiresBgsEditableContent(run),
           {runId:run.id,requirementsRevision:run.requirements.revision})
         // Reject unsupported PASS claims before building as well as malformed
         // reports. Honest blocked/failed reports remain diagnostic inputs.
@@ -219,7 +218,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       const build=await buildEditableProject(root,{editableProject:true,runtimeArtifact:request.runtimeArtifact,
         writablePaths:[request.runtimeArtifact+'/**']},[requirements,...record.reports],[AGENT_EVIDENCE_DIRECTORY],controller.signal)
       record.checks.push(build)
-      record.checks.push(...await registeredContentChecks(root,run.requirements.constraints,run.creation?.editableContent))
+      record.checks.push(...await registeredContentChecks(root,run.requirements.constraints,requiresBgsEditableContent(run)))
       if(build.status==='passed' && build.projectBuild) {
         record.checks.push(await runArtifactCheck(root,'runtime-smoke',{runtimeArtifact:request.runtimeArtifact,expectedOutputs:[]},
           [requirements,...record.reports],run.requirements.constraints,controller.signal))
@@ -266,10 +265,9 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
         const checklist = readDesignImplementationChecklist(run.workspacePath)
         const issue = designBaselineIssue(run)
         if (issue) throw new WorkflowError('design-baseline-changed', issue)
-        if (!run.designBaseline || run.creation?.webBoot && !run.webBoot) {
+        if (!run.designBaseline) {
           const next = structuredClone(run)
           next.designBaseline ??= await captureDesignBaseline(run)
-          next.webBoot = await installManagedWebBoot(run, controller.signal)
           if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
           next.version++
           try { await input.store.commit(run.projectId, run.ownerId, run.version, next, 'agent.design-baseline-locked') }
@@ -279,10 +277,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
         input.onDesignLocked?.()
         const saved = await current(), changed = designBaselineIssue(saved)
         if (changed) throw new WorkflowError('design-baseline-changed', changed)
-        await assertManagedWebBoot(saved, true)
         return { valid: true, ...checklist, requirements: readDesignAcceptanceRequirements(run.workspacePath),
-          ...(saved.webBoot ? {webBoot:{...MANAGED_WEB_BOOT_CONTRACT,version:saved.webBoot.version,files:saved.webBoot.files,
-            scope:'Installed startup wiring only, not proof of gameplay save events or state schema'}} : {}),
           designBaseline: { revision: saved.designBaseline!.revision, capturedAt: saved.designBaseline!.capturedAt,
             scope: 'Implementation constraint, not user approval or game acceptance' } }
       }
@@ -327,14 +322,13 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       return {...(input.executionContext?.()?{executionContext:input.executionContext!()}:{}),task,
         requirementsRevision:run.requirements.revision,
         designBaseline:run.designBaseline?{revision:run.designBaseline.revision,capturedAt:run.designBaseline.capturedAt,locked:true}:null,
-        ...(run.creation?.webBoot ? {webBoot:{...MANAGED_WEB_BOOT_CONTRACT,installed:Boolean(run.webBoot)}} : {}),
         project:projectNavigationSnapshot(run.workspacePath),skills:skillFacts(run),
         measurement:latest?{id:latest.id,requestKey:latest.requestKey,runtimeArtifact:latest.runtimeArtifact,requirementsRevision:latest.requirementsRevision,
           freshness,
           checks:latest.checks.map(c=>({id:c.id,status:c.status})),reportPaths:latest.reportPaths}:null,
         // Startup stays unchanged. Availability/omissions travel in the normal
         // read-only handoff/inspection rather than every subsequent request.
-        checkScope:{build:'Host measurement scope: runs package.json scripts.build in an isolated source copy using installed dependencies. Source-copy describes the workspace, not a copy-only build requirement; project bundlers are allowed.',runtimeSmoke:'initial static-browser load only',
+        checkScope:{build:'Optional static-Web measurement only: runs an existing package.json scripts.build in an isolated source copy using installed dependencies and checks the resulting index.html. This tool does not define the project build method or verify native/server exports.',runtimeSmoke:'initial static-browser load only',
           ...(latest?.consumption?{consumption:latest.consumption.checks}:{})},
         reportSemantics:'not-verified',quality:'unverified',deliveryEligible:false}
     },
@@ -351,7 +345,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       // place of the newest pending or failed record.
       const measurement=latest ? {freshness:await inspectAgentMeasurementInputs(run,latest.record),
         attemptId:latest.attemptId,...measurementSummary(latest.record,details)} : null
-      const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',run.creation?.editableContent,
+      const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',requiresBgsEditableContent(run),
         {runId:run.id,requirementsRevision:run.requirements.revision})
       return {
         ...(input.executionContext?.()?{executionContext:input.executionContext!()}:{}),

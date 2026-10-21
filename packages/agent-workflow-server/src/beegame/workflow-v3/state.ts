@@ -77,9 +77,10 @@ export type Run = {
   visualHandoffVersion?: 1;
   // Host-observed blank-project intake, not a phase or model-authored plan.
   // Absent on existing/imported runs; never infer it from missing content later.
+  // webStarter/webBoot are historical observations only; new intake never assigns them.
   creation?: { initialDelivery: 'playable-slice' | 'design-led-first-version'; editableContent: boolean; webStarter?: 'react-canvas-2d-v1'; webBoot?: 'react-web-storage-v1' };
-  // Actual host-installed startup bytes, pinned once; system upgrades and
-  // follow-ups cannot silently rewrite a project's working runtime.
+  // Historical installation receipt only. It neither locks project sources
+  // nor dictates entry points; retain it without rewriting the saved history.
   webBoot?: { version: 'react-web-storage-v1'; files: FileVersion[] };
   version: number; requestKey: string; status: 'planning' | 'running' | 'blocked' | 'completed';
   requirements: { revision: string; text: string; constraints: Record<string, unknown>; ids: string[]; sha256: string };

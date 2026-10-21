@@ -217,7 +217,7 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true,webStarter:'react-canvas-2d-v1',webBoot:'react-web-storage-v1'})
+    expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true})
     const initialMessage = f.sessions.transcript(run.chatSessionId).find(event => event.type === 'user.message')!
     expect(initialMessage, run.blockedReason).toBeDefined()
     expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
@@ -777,7 +777,7 @@ test('shared guide supplies design methods once without a compatibility fallback
     expect(context.split('## Professional methods')).toHaveLength(2)
     expect(context.split('## Required design dependencies')).toHaveLength(2)
     for(const step of ['1. Design records:','2. Actual visual designs:','3. Resources:',
-      '4. UI/Scene JSON:','5. Implementation and runtime verification:'])expect(context.split(step)).toHaveLength(2)
+      '4. Editable scene/UI content:','5. Implementation and runtime verification:'])expect(context.split(step)).toHaveLength(2)
     for(const value of ['select applicable Skills','TECHNICAL_DESIGN.md','PROJECT_SPECIFIC_ROUTE',
       'unknown paid replay or automatic paid retry','respect exclusions and the project budget','required licenses'])expect(context).toContain(value)
   }
@@ -808,7 +808,7 @@ test.each([undefined,'# Custom navigation\nRun the saved command'])('goal dispat
 // Prompt contracts do not prove that a model read, understood or reproduced art.
 test.each([1, undefined] as const)('first-version deliverables do not become a follow-up production schedule: %s', visualHandoffVersion => {
   const run={visualHandoffVersion,creation:{initialDelivery:'design-led-first-version',editableContent:true},
-    requirements:{text:'ORIGINAL_CONFIRMED_GOAL'}} as Run
+    requirements:{text:'ORIGINAL_CONFIRMED_GOAL',constraints:{engine:'React',platform:'Web'}}} as Run
   const first=agentProfessionalContextForRun(run), followup=agentProfessionalContextForRun(run,true)
   expect(first).toContain('design dependencies and professional methods in the project guide')
   expect(first).not.toContain('GDD.md,')
@@ -831,7 +831,7 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(prompt).toContain('without a second hardcoded layout')
     expect(prompt).toContain('Prose, palettes and JSON geometry do not replace visual design')
-    expect(prompt).toContain('do not create UI/Scene JSON here')
+    expect(prompt).toContain('do not create runtime scene/UI content here')
     expect(prompt).toContain('Complete technical design in this stage before actual visual design or resource production')
     expect(prompt).not.toContain('Technical/resource plans start as drafts')
     expect(prompt).not.toContain('without waiting for production assets')
@@ -1315,13 +1315,13 @@ test('pause survives a simultaneous saved exit; rebasing does not execute a mode
 
 
 test('first and resumed goals retain professional coverage and design dependencies within the confirmed scope', () => {
-  const run={creation:{initialDelivery:'design-led-first-version',editableContent:true},requirements:{text:'CONFIRMED_GAME'}} as Run
+  const run={creation:{initialDelivery:'design-led-first-version',editableContent:true},requirements:{text:'CONFIRMED_GAME',constraints:{engine:'React',platform:'Web'}}} as Run
   for (const professional of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
     const prompt=PROJECT_WORKING_CONVENTIONS+'\n'+professional
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     for (const document of ['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ART_DIRECTION.md',
       'UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md']) expect(prompt).toContain(document)
-    const steps=['1. Design records:', '2. Actual visual designs:', '3. Resources:', '4. UI/Scene JSON:', '5. Implementation and runtime verification:']
+    const steps=['1. Design records:', '2. Actual visual designs:', '3. Resources:', '4. Editable scene/UI content:', '5. Implementation and runtime verification:']
     const positions=steps.map(step=>prompt.indexOf(step))
     expect(positions.every((position,index)=>position>=0 && (!index || position>positions[index-1]!))).toBe(true)
     expect(prompt).toContain('only after selected visual designs and corresponding resources exist')
