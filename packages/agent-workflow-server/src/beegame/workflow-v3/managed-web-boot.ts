@@ -7,15 +7,17 @@ export const MANAGED_WEB_BOOT_VERSION = 'react-web-storage-v1' as const
 export const MANAGED_WEB_BOOT_PATHS = ['src/bgs-entry.mjs', 'src/bgs-storage.mjs'] as const
 export const MANAGED_WEB_BOOT_CONTRACT = {
   entry: 'index.html', gameModule: 'src/game.jsx',
+  mountId: 'root',
+  startupScript: { type: 'module', src: './' + MANAGED_WEB_BOOT_PATHS[0] },
   factory: 'export async function createGame({root, storage})',
-  lifecycle: 'Mount the game into root; storage is already initialized. Await storage.getItem/setItem/removeItem. An optional returned function disposes the game.',
+  lifecycle: 'index.html provides the root mount and loads startupScript. That script initializes storage, imports gameModule and calls createGame({root, storage}); loading gameModule alone does not call its factory. Mount the game into root. Await storage.getItem/setItem/removeItem. An optional returned function disposes the game.',
   ownership: 'BGS maintains only src/bgs-entry.mjs and src/bgs-storage.mjs. The implementation handoff installs them and supplies index.html when absent. index.html belongs to the project: maintain its title, metadata and markup normally, preserving the root mount and startup script connection. Author game logic/UI/styles/build configuration; no game/UI/Scene template is installed.',
 } as const
 
 // This source is the actual application entry, not an example the author must
 // remember to import. A factory receives storage only after initialization.
 const ENTRY = `import { createGameStorage } from './bgs-storage.mjs';
-const root = document.getElementById('root');
+const root = document.getElementById('${MANAGED_WEB_BOOT_CONTRACT.mountId}');
 const abort = new AbortController();
 let stopped = false, dispose;
 function stop() {
@@ -73,7 +75,7 @@ export async function installManagedWebBoot(run: Run, signal: AbortSignal): Prom
   const language = JSON.parse(run.requirementChanges?.[0]?.before.text ?? run.requirements.text).game_user_visible_language
   if (!/^[a-zA-Z-]+$/.test(language)) throw new WorkflowError('web-boot-invalid', 'Saved game language is required for the managed Web entry')
   const files = {
-    'index.html': '<!doctype html><html lang="' + language + '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game</title></head><body><div id="root"></div><script type="module" src="./src/bgs-entry.mjs"></script></body></html>\n',
+    'index.html': '<!doctype html><html lang="' + language + '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game</title></head><body><div id="' + MANAGED_WEB_BOOT_CONTRACT.mountId + '"></div><script type="' + MANAGED_WEB_BOOT_CONTRACT.startupScript.type + '" src="' + MANAGED_WEB_BOOT_CONTRACT.startupScript.src + '"></script></body></html>\n',
     'src/bgs-entry.mjs': ENTRY,
     // Pure browser-safe module, no server credentials or filesystem imports.
     // The project's normal bundler removes the unused HTTP-handler exports.

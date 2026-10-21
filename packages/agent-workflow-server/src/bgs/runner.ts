@@ -103,6 +103,29 @@ export function createBgsRunner(options: ProviderNetworkOptions & { command?: re
   return { start: input => BgsRuntime.start(input, options) }
 }
 
+/** The native additionalContext renderer caps each value at 1,000 estimated
+ * tokens (4,000 UTF-8 bytes). Frame long values here instead of losing their
+ * middle. Keep line boundaries where possible and never split a code point. */
+export function bgsApplicationContext(key: string, value?: string): Record<string, { value: string; kind: 'application' }> {
+  if (!value) return {}
+  const bytes = Buffer.from(value, 'utf8'), parts: string[] = []
+  for (let start = 0; start < bytes.length;) {
+    let end = Math.min(start + 4000, bytes.length)
+    if (end < bytes.length) {
+      while ((bytes[end]! & 0xc0) === 0x80) end--
+      const newline = bytes.subarray(start, end).lastIndexOf(10)
+      if (newline >= 0) end = start + newline + 1
+    }
+    parts.push(bytes.subarray(start, end).toString('utf8'))
+    start = end
+  }
+  const width = String(parts.length).length
+  return Object.fromEntries(parts.map((part, index) => [
+    parts.length === 1 ? key : `${key}_part_${String(index + 1).padStart(width, '0')}_of_${parts.length}`,
+    { value: part, kind: 'application' as const },
+  ]))
+}
+
 export function bgsProviderConfig(env: Record<string, string>): Record<string, unknown> {
   if (env.BEEGAME_MODEL_TYPE && env.BEEGAME_MODEL_TYPE !== 'openai')
     throw Error('BGS requires an OpenAI Responses-compatible model connection')
@@ -239,8 +262,8 @@ class BgsRuntime implements BeeGameSessionRuntime {
         // Workflow context contains current bridge paths, authorization and host
         // evidence, so deliver it in the existing per-turn application slot.
         const additionalContext = {
-          ...(this.input.systemContext ? { bgsRuntime: { value: this.input.systemContext, kind: 'application' } } : {}),
-          ...(input.confirmedBriefContext ? { bgsConfirmedBrief: { value: input.confirmedBriefContext, kind: 'application' } } : {}),
+          ...bgsApplicationContext('bgsRuntime', this.input.systemContext),
+          ...bgsApplicationContext('bgsConfirmedBrief', input.confirmedBriefContext),
         }
         void this.client.request('turn/start', { threadId: this.threadId, input: prompt,
           ...(Object.keys(additionalContext).length ? { additionalContext } : {}) })

@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createBgsRunner } from './runner'
-import { agentGoalPrompt } from '../beegame/workflow-v3/agent-goal'
-import { projectGuideContext, readProjectGuide } from '../beegame/workflow-v3/project-guide'
+import { agentGoalPrompt, agentProfessionalContextForRun } from '../beegame/workflow-v3/agent-goal'
+import { PROJECT_GUIDE_TEMPLATE, projectGuideContext, readProjectGuide } from '../beegame/workflow-v3/project-guide'
 import type { Run } from '../beegame/workflow-v3/state'
 
 // Real CLI, synthetic local Responses server; no model or project artifacts.
@@ -32,16 +32,45 @@ localTest('native resume receives current BGS context as well as project instruc
   } })
   const runner = createBgsRunner({ resolveOutboundTarget: async value => ({ url: new URL(value), addresses: ['127.0.0.1'],
     lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }) })
-  const run = { creation: { initialDelivery: 'design-led-first-version' },
-    requirements: { text: 'CURRENT_CONFIRMED_BRIEF_MARKER' } } as Run
+  // Current host context was ~5.5 KB when the lost tools path was observed.
+  // Use production contracts plus representative saved evidence, and a long
+  // Chinese brief to exercise byte limits rather than ASCII character counts.
+  const run = { creation: { initialDelivery: 'design-led-first-version', editableContent: true },
+    requirements: { text: '' } } as Run
+  const longBrief = JSON.stringify({ kind: 'confirmed_build_brief', idea: '离线长度验证 🎮',
+    requirements: Array.from({ length: 90 }, (_, i) => ({ id: i, text: '保留用户明确要求的设计流程、交互体验与可编辑内容，具体安排由执行者自行决定。' })) })
+  expect(Buffer.byteLength(longBrief)).toBeGreaterThan(12_000)
+  const latestContext = (items: any[], key: string) => {
+    const fragments = items.flatMap(item => (item.content ?? []).flatMap((block: any) => {
+      const match = new RegExp('^<(' + key + '(?:_part_([0-9]+)_of_[0-9]+)?)>([\\s\\S]*)</\\1>$').exec(block.text ?? '')
+      if (!match) return []
+      expect(item.role).toBe('developer')
+      expect(Buffer.byteLength(match[3]!)).toBeLessThanOrEqual(4000)
+      return [{ first: !match[2] || Number(match[2]) === 1, value: match[3]! }]
+    }))
+    return fragments.slice(fragments.findLastIndex(part => part.first)).map(part => part.value).join('')
+  }
   let nativeSessionId = '', runtime: Awaited<ReturnType<typeof runner.start>> | undefined
   try {
-    for (const [index, marker] of ['INITIAL_GUIDE_MARKER', 'UPDATED_GUIDE_MARKER', 'FOCUSED_GUIDE_MARKER'].entries()) {
+    for (const [index, marker] of ['INITIAL_GUIDE_MARKER', 'UPDATED_GUIDE_MARKER', 'SHORT_GUIDE_MARKER', 'FOCUSED_GUIDE_MARKER'].entries()) {
       await writeFile(join(game, 'AGENTS.md'), '# Project instructions\n' + marker + '\n')
+      run.requirements.text = index === 2 ? 'SHORT_CURRENT_BRIEF' : longBrief + '\nCURRENT_BRIEF_' + marker
+      const systemContext = index === 2 ? 'CURRENT_TOOLS_DIRECTORY_' + marker : [
+        agentProfessionalContextForRun(run, index > 0), PROJECT_GUIDE_TEMPLATE,
+        projectGuideContext(await readProjectGuide(game)),
+        'Current BGS tools directory: .beegame/tmp/goal-tools-' + marker,
+        'CURRENT_TOOLS_DIRECTORY_' + marker,
+        'BGS saved evidence (not game acceptance): ' + JSON.stringify({
+          documents: Array.from({ length: 8 }, (_, i) => ({ path: 'docs/design-' + i + '.md', sha256: 'f'.repeat(64),
+            headings: ['目标与范围', '设计决定与开放问题'], status: 'saved; quality not verified' })),
+          authorization: 'CURRENT_AUTHORIZATION_' + marker,
+        }),
+      ].join('\n')
+      if (index !== 2) expect(Buffer.byteLength(systemContext)).toBeGreaterThan(5500)
       runtime = await runner.start({
         sessionId: 'context-fixture', cwd: game,
-        ...(index === 1 ? { resumeSessionId: nativeSessionId } : {}),
-        systemContext: projectGuideContext(await readProjectGuide(game)) + '\nCURRENT_TOOLS_DIRECTORY_' + marker,
+        ...([1, 2].includes(index) ? { resumeSessionId: nativeSessionId } : {}),
+        systemContext,
         env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
           OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-model' },
         onNativeSessionId: id => { nativeSessionId = id },
@@ -53,21 +82,22 @@ localTest('native resume receives current BGS context as well as project instruc
         onMessage() {}, requestPermission: async () => ({ behavior: 'deny' }),
       })
       const sent = JSON.stringify(inputs.at(-1))
+      expect(sent).not.toContain('tokens truncated')
+      expect(latestContext(inputs.at(-1)!, 'bgsRuntime')).toBe(systemContext)
+      expect(latestContext(inputs.at(-1)!, 'bgsConfirmedBrief')).toBe(run.requirements.text)
+      expect(sent.split(index === 2 ? 'SHORT_CURRENT_BRIEF' : 'CURRENT_BRIEF_' + marker)).toHaveLength(2)
       expect(sent.split('CURRENT_TOOLS_DIRECTORY_' + marker)).toHaveLength(2)
       // Unlike AGENTS.md, this marker exists only in BGS memory. Refreshing the
       // project guide alone cannot make this assertion pass on native resume.
       const current = inputs.at(-1)!.findLast(item => JSON.stringify(item).includes('CURRENT_TOOLS_DIRECTORY_' + marker))
       expect(current.role).toBe('developer')
       expect(sent).toContain('# Project instructions\\n' + marker)
-      // A resumed conversation retains its earlier application-context message.
-      // The new submission adds one authoritative brief, not a prompt copy.
-      expect(sent.split(run.requirements.text)).toHaveLength(index === 1 ? 3 : 2)
       if (index === 1) expect(sent.indexOf('CURRENT_TOOLS_DIRECTORY_' + marker))
         .toBeGreaterThan(sent.indexOf('CURRENT_TOOLS_DIRECTORY_INITIAL_GUIDE_MARKER'))
-      if (index === 2) expect(sent).not.toContain('UPDATED_GUIDE_MARKER')
+      if (index === 3) expect(sent).not.toContain('UPDATED_GUIDE_MARKER')
       await runtime.dispose?.()
       runtime = undefined
     }
-    expect(inputs).toHaveLength(3)
+    expect(inputs).toHaveLength(4)
   } finally { await runtime?.dispose?.(); server.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 60_000)

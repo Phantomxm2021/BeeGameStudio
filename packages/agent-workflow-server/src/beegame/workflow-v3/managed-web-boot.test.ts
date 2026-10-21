@@ -6,7 +6,7 @@ import { createRun, type AgentTurn } from './state'
 import { createLocalWorkflowStore, assertCommit } from './store'
 import { observeProjectCreation } from './web-project-start'
 import { createAgentMeasurement } from './agent-measurement'
-import { assertManagedWebBoot, installManagedWebBoot, MANAGED_WEB_BOOT_PATHS } from './managed-web-boot'
+import { assertManagedWebBoot, installManagedWebBoot, MANAGED_WEB_BOOT_PATHS, MANAGED_WEB_BOOT_CONTRACT } from './managed-web-boot'
 import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
 
 async function fixture() {
@@ -31,12 +31,18 @@ test('existing implementation handoff installs only the thin entry after valid p
     await writeDesignDocumentsFixture(f.workspace)
     const result=await f.measurement.lockDesignBaseline()
     expect(result.webBoot?.factory).toBe('export async function createGame({root, storage})')
+    expect(result.webBoot).toMatchObject(MANAGED_WEB_BOOT_CONTRACT)
+    expect((await f.measurement.context()).webBoot).toMatchObject(MANAGED_WEB_BOOT_CONTRACT)
     const locked=(await f.store.read('project','owner'))!
     expect(locked.webBoot?.files.map(file=>file.path)).toEqual([...MANAGED_WEB_BOOT_PATHS])
     expect(await Bun.file(join(f.workspace,'src/game.jsx')).exists()).toBe(false)
     expect(await Bun.file(join(f.workspace,'package.json')).exists()).toBe(false)
-    expect(await readFile(join(f.workspace,'index.html'),'utf8')).not.toContain('<style>')
+    const html=await readFile(join(f.workspace,'index.html'),'utf8')
+    expect(html).not.toContain('<style>')
+    expect(html).toContain('<div id="' + result.webBoot!.mountId + '"></div>')
+    expect(html).toContain('<script type="' + result.webBoot!.startupScript.type + '" src="' + result.webBoot!.startupScript.src + '"></script>')
     const entry=await readFile(join(f.workspace,'src/bgs-entry.mjs'),'utf8')
+    expect(entry).toContain("document.getElementById('" + result.webBoot!.mountId + "')")
     expect(entry.indexOf('await createGameStorage')).toBeLessThan(entry.indexOf("await import('./game.jsx')"))
     expect(entry).toContain('await createGame({ root, storage })')
     await f.measurement.lockDesignBaseline()

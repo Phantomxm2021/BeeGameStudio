@@ -2,13 +2,28 @@ import { expect, test, spyOn } from 'bun:test'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
-import { createBgsRunner, bgsUsage, bgsProviderConfig, editProtectedFileText } from './runner'
+import { createBgsRunner, bgsUsage, bgsProviderConfig, editProtectedFileText, bgsApplicationContext } from './runner'
 import { BeeGameSessionManager, getLatestRuntimeUsage, type BeeGameEvent } from '../beegame/session-manager'
 import * as browserCleanup from '../beegame/native-test-browser-cleanup'
 
 const resolveOutboundTarget: typeof import('@bee-game-studio/security-core').resolveApprovedOutboundTarget = async (value) => ({ url: new URL(value), addresses: ['93.184.216.34'],
   lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) })
 const command = [process.execPath, fileURLToPath(new URL('./fixtures/app-server.ts', import.meta.url))]
+test('application context preserves complete UTF-8 values within native field limits and ordering', () => {
+  expect(bgsApplicationContext('fixture')).toEqual({})
+  for (const value of ['', 'a'.repeat(3999), 'a'.repeat(4000), 'a'.repeat(4001),
+    'a'.repeat(3999) + '中🎮' + 'b'.repeat(4000),
+    ('编辑器契约 🎮\n' + '中'.repeat(1800) + '\r\n').repeat(12)]) {
+    const entries = Object.entries(bgsApplicationContext('fixture', value)).sort(([a], [b]) => a.localeCompare(b))
+    expect(entries.map(([, part]) => part.value).join('')).toBe(value)
+    for (const [, part] of entries) {
+      expect(Buffer.byteLength(part.value)).toBeLessThanOrEqual(4000)
+      expect(part.kind).toBe('application')
+    }
+  }
+  expect(bgsApplicationContext('fixture', 'short')).toEqual({ fixture: { value: 'short', kind: 'application' } })
+})
+
 test('game Agent startup rejects a missing or empty catalog before starting native processes', async () => {
   const root = await mkdtemp('/private/tmp/bgs-missing-skills-')
   const workspace = join(root, 'game'), catalog = join(root, 'game-skills')
