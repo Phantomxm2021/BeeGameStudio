@@ -33,7 +33,7 @@ test('finalize supports existing scoped documents and preserves independent work
     expect(await design('finalize',['docs/GDD.md'])).toMatchObject({valid:true,finalized:['GDD.md']})
     expect(await readFile(path,'utf8')).toBe(original)
     await writeFile(path,original.replace('Changed decision.','Another decision.'))
-    expect(await design('finalize')).toMatchObject({valid:true,finalized:['GDD.md','AUDIO_DESIGN.md']})
+    expect(await design('finalize')).toMatchObject({valid:true,finalized:['GDD.md'],skipped:['AUDIO_DESIGN.md']})
     const finalized = await readFile(path,'utf8')
     expect(finalized).not.toBe(original)
     await design('finalize')

@@ -109,7 +109,7 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
 export const DESIGN_INDEX_INSTRUCTION = `Author decisions in docs/<NAME>.md. The eight-document deliverable is the prose itself, including the technical approach and necessary implementation guidance in TECHNICAL_DESIGN.md. Select Skills and organize work to suit the current task; self-check original requirements, contradictions and unresolved decisions. BGS does not require output indexes, task graphs or coverage mappings. Stop at the user's requested scope. Existing indexes remain readable; do not create them merely to satisfy a tool.`
 
 export const DESIGN_HANDOFF_INSTRUCTION = DESIGN_INDEX_INSTRUCTION + `
-Use --design baseline or ReadDesignHandoff to locate saved sources. These reads check file/index integrity, not design quality. Plain documents need no finalize command or version header. Existing versioned indexes can use --design finalize after an authorized revision; this updates metadata, not approval. Read selected reference pictures and reconcile actual resources and Editor data in their owning documents before implementation. Unproduced inputs remain planned; links, task ticks and hashes are not proof of delivery.`
+Use ReadDesignHandoff to locate saved documents and read selected sections. Explicit --design baseline checks saved source/index integrity, not design quality. Plain documents need no finalize command or version header. Existing versioned indexes can use --design finalize after an authorized revision; this updates metadata, not approval. Read selected reference pictures and reconcile actual resources and Editor data in their owning documents before implementation. Unproduced inputs remain planned; links, task ticks and hashes are not proof of delivery.`
 
 export const DESIGN_IMPLEMENTATION_INSTRUCTION = `Read the saved technical plan and relevant original documents; choose Skills and task organization for the work. ReadDesignHandoff locates documents/sections. ReadImplementationTask exposes existing indexed tasks when available, otherwise the technical source; no index is required. Use --design implementation only when entering authorized implementation: it records the current design baseline, not user approval or game acceptance. Consume actual selected designs, resources and Editor data. Resume from saved work and evidence, not task ticks. Compare actual results with the confirmed scope and original designs; report unresolved and unverified outcomes. Do not create another plan, index or task database to satisfy BGS.`
 
@@ -559,7 +559,7 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
   }
   const completeDesign = PROJECT_DOCUMENTS.every(name => documents.includes(name)) && !_options.technicalBaseline
   issues.push(...implementationIssues(indexes, completeDesign))
-  return { valid: !issues.length, issues, ...(_options.planningInputs ? { availableRequirements } : {}), snapshots, evidenceHashes, documentVersions, digestVersion: _options.digestVersion ?? DESIGN_DIGEST_VERSION,
+  return { valid: !issues.length, issues, ...(_options.planningInputs ? { availableRequirements, indexedDocuments: Object.keys(indexes) } : {}), snapshots, evidenceHashes, documentVersions, digestVersion: _options.digestVersion ?? DESIGN_DIGEST_VERSION,
     revision: hash(JSON.stringify([snapshots, evidenceHashes])),
     note: 'Checks saved documents, supporting files and any existing index integrity. Indexes and task coverage are not required. File presence and structural validity do not establish design completeness, semantic quality or acceptance.' }
 }
@@ -702,10 +702,10 @@ function designFilePath(root: string, path: string) {
  * Stages metadata after validating saved decisions/evidence; does not invent proof. */
 export function finalizeDesignDocuments(workspace: string, documents: readonly DesignDocument[], snapshot: DesignDocumentSnapshot,
   prior?: { changedDocuments: string[]; documentVersions?: Record<string, string> }) {
-  const issues: string[] = [], unsafeIssues: string[] = [], writes: Array<{ path: string; body: string }> = [], root = realpathSync(workspace)
+  const issues: string[] = [], unsafeIssues: string[] = [], skipped: string[] = [], writes: Array<{ path: string; body: string }> = [], root = realpathSync(workspace)
   if (snapshot.workspace !== root) {
     const issue = 'Design finalization snapshot belongs to another workspace'
-    return { issues: [issue], unsafeIssues: [issue] }
+    return { issues: [issue], unsafeIssues: [issue], skipped }
   }
   for (const name of new Set(documents)) {
     let safeTargets = false
@@ -713,7 +713,7 @@ export function finalizeDesignDocuments(workspace: string, documents: readonly D
       const before = snapshot.documents[name]
       if (!before) throw new Error('Document was not captured in the authorized write scope')
       const sourcePath = designFilePath(root, `docs/${name}`)
-      if (!optionalDesignFile(root, designHandoffPath(name))) continue
+      if (!optionalDesignFile(root, designHandoffPath(name))) { skipped.push(name); continue }
       const indexPath = designFilePath(root, designHandoffPath(name))
       const body = readFileSync(sourcePath, 'utf8'), originalIndex = readFileSync(indexPath, 'utf8')
       safeTargets = true
@@ -758,7 +758,7 @@ export function finalizeDesignDocuments(workspace: string, documents: readonly D
       issues.push(issue); unsafeIssues.push(issue); break
     }
   }
-  return { issues, unsafeIssues }
+  return { issues, unsafeIssues, skipped }
 }
 
 /** Reuse the only output index actually consumed by runtime acceptance. */

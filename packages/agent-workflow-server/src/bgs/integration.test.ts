@@ -14,7 +14,7 @@ sandboxTest('pinned Bgs completes a real app-server turn against a local Respons
   const catalog = join(root,'catalog'),skill = join(catalog,'synthetic')
   await mkdir(skill,{recursive:true})
   await writeFile(join(skill,'SKILL.md'),'---\nname: bgs-synthetic-skill\ndescription: Local fixture skill.\n---\nSYNTHETIC_SKILL_BODY_MARKER\n')
-  const requests: string[] = [], events: any[] = [], usage: any[] = [], toolCatalogs: string[] = []
+  const requests: string[] = [], events: any[] = [], usage: any[] = [], toolCatalogs: string[] = [], systemPrompts: string[] = []
   const require = createRequire(import.meta.url)
   const mcpCode = `import {McpServer} from ${JSON.stringify(require.resolve('@modelcontextprotocol/sdk/server/mcp.js'))};import {StdioServerTransport} from ${JSON.stringify(require.resolve('@modelcontextprotocol/sdk/server/stdio.js'))};const server=new McpServer({name:'fixture',version:'1'});server.registerTool('fixture_echo',{inputSchema:{}},async()=>({content:[{type:'text',text:process.env.MCP_FIXTURE_TOKEN}]}));await server.connect(new StdioServerTransport());`
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
@@ -28,6 +28,7 @@ sandboxTest('pinned Bgs completes a real app-server turn against a local Respons
       return Response.json({jsonrpc:'2.0',id:body.id,result:body.method==='tools/list'
         ? {tools:[{name:'fixture_http_echo',description:'Offline HTTP tool',inputSchema:{type:'object',properties:{}}}]} : {}})
     }
+    systemPrompts.push(JSON.stringify([body.instructions, ...(body.input ?? []).filter((item: any) => ['system', 'developer'].includes(item.role))]))
     toolCatalogs.push(JSON.stringify(body.tools))
     expect(JSON.stringify(body)).not.toContain('synthetic-mcp-secret')
     expect(JSON.stringify(body.input)).toContain('SYNTHETIC_SKILL_BODY_MARKER')
@@ -58,7 +59,11 @@ sandboxTest('pinned Bgs completes a real app-server turn against a local Respons
       onNativeUsage: value => { usage.push(value) }, requestPermission: async () => ({ behavior: 'deny' }) })
     await runtime.submit({ prompt: '$bgs-synthetic-skill Return the fixture answer', signal: AbortSignal.timeout(15_000),
       onMessage: message => { events.push(message) }, requestPermission: async () => ({ behavior: 'deny' }) })
-    expect(requests).toContain('/v1/responses')
+    expect(requests.filter(path => path === '/v1/responses')).toHaveLength(1)
+    expect(systemPrompts[0]).toContain('You are a coding agent running in the BGS CLI')
+    expect(systemPrompts[0]).toContain('When the task is complete, summarize what you accomplished in one sentence.')
+    expect(systemPrompts[0]).not.toContain('Final answer structure and style guidelines')
+    expect(systemPrompts[0]).not.toContain('Reserve multi-section structured responses')
     expect(toolCatalogs.join('')).toContain('fixture_echo')
     expect(toolCatalogs.join('')).toContain('fixture_http_echo')
     expect(events.filter(e => e.eventType?.startsWith('assistant.')).map(e => e.text).join('')).toContain('Local fixture completed')

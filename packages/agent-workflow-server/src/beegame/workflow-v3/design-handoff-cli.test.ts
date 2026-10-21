@@ -52,7 +52,7 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     const compact = await command('--design', 'baseline')
     expect(compact.code, compact.stderr).toBe(0)
     expect(JSON.parse(compact.stdout)).toMatchObject({
-      scope: 'design-index-integrity', valid: true, issues: [], requirementCount: 8,
+      scope: 'design-source-integrity', valid: true, issues: [], requirementCount: 8,
       layoutVerified: false, runtimeVerified: false,
     })
     expect(JSON.parse(compact.stdout)).not.toHaveProperty('requirements')
@@ -68,7 +68,7 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     expect(implementationCalls).toBe(0)
     const implementationHelp = await command('--design', 'implementation', '--help')
     expect(implementationHelp.code, implementationHelp.stderr).toBe(0)
-    expect(JSON.parse(implementationHelp.stdout).instruction).toContain('Implementation uses game-plan-execution')
+    expect(JSON.parse(implementationHelp.stdout).instruction).toContain('Use --design implementation only when entering authorized implementation')
     expect(JSON.parse(implementationHelp.stdout).help).toContain('locks planning records')
     expect(implementationCalls).toBe(0)
     expect(inspected.every(write => write === false)).toBe(true)
@@ -80,7 +80,7 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     expect(implementationDetails.code, implementationDetails.stderr).toBe(0)
     const complete = JSON.parse(implementationDetails.stdout)
     expect(entry).toMatchObject({ scope: 'implementation-handoff', valid: true,
-      execution: { skill: 'game-plan-execution', tasks: expect.stringContaining('ReadImplementationTask') } })
+      execution: { sources: expect.stringContaining('ReadDesignHandoff') } })
     expect(entry).not.toHaveProperty('requirements')
     expect(entry.items).toEqual(complete.items.map((item: any) => ({
       id: item.id, dependsOn: item.dependsOn, section: item.taskSource.section,
@@ -105,15 +105,19 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     expect(shortHelp.stdout.length).toBeLessThan(fullHelp.stdout.length)
     expect(JSON.parse(shortHelp.stdout)).not.toHaveProperty('acceptanceExample')
     expect(JSON.parse(shortHelp.stdout).details).toContain('--design help --details')
-    expect(JSON.parse(shortHelp.stdout).instruction).toContain('Do not finalize after each write or edit')
+    expect(JSON.parse(shortHelp.stdout).help).toContain('Plain documents need no index or finalization')
+    expect(JSON.parse(shortHelp.stdout).help).toContain('ReadDesignHandoff')
+    expect(JSON.parse(shortHelp.stdout).help).not.toContain('--design finalize')
+    expect(tools.systemContext).toContain('Document navigation: ReadDesignHandoff')
+    expect(tools.systemContext).not.toContain('Document authoring contract:')
     const help = JSON.parse(fullHelp.stdout)
     expect(help.writingOrder).toEqual(['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md',
       'ART_DIRECTION.md','UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md'])
-    expect(help.instruction).toContain('implementationItems:[{id,section,dependsOn:')
-    expect(help.instruction).toContain('Contract evidence checks its JSON pointer against expected')
+    expect(help.instruction).toContain('BGS does not require output indexes, task graphs or coverage mappings')
+    expect(help.help).toContain('--design finalize')
     expect(help).not.toHaveProperty('acceptanceExample')
     expect(help).not.toHaveProperty('acceptanceInstruction')
-    expect(help.instruction).not.toContain('Implementation uses game-plan-execution')
+    expect(help.instruction).not.toContain('Use --design implementation only when entering authorized implementation')
     expect(help.relatedHelp).toContain('--design acceptance --help')
     expect(help.relatedHelp).toContain('--design implementation --help')
     const acceptanceHelp = await command('--design', 'acceptance', '--help')
@@ -172,14 +176,14 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     await writeFile(technicalPath, technical)
 
     // The real CLI must distinguish pending writing from errors, and still
-    // run the complete task coverage check once all owner inputs are saved.
-    const artPath = join(root, designHandoffPath('ART_DIRECTION.md'))
+    // check supplied task references once all owner inputs are saved.
+    const artPath = join(root, 'docs/ART_DIRECTION.md')
     const art = await readFile(artPath, 'utf8')
     await rm(artPath)
     const pending = await command('--design', 'draft', 'TECHNICAL_DESIGN.md')
     expect(pending.code, pending.stderr).toBe(0)
     expect(JSON.parse(pending.stdout)).toMatchObject({
-      valid: true, issues: [], pendingDocuments: ['ART_DIRECTION.md'], taskCoverageChecked: false,
+      valid: true, issues: [], pendingDocuments: ['ART_DIRECTION.md'], taskReferencesChecked: false,
     })
     const wrongRef = JSON.parse(technical)
     wrongRef.implementationItems[0].requirementRefs[0].id = 'invented'
@@ -192,10 +196,9 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     uncovered.implementationItems.shift()
     await writeFile(technicalPath, JSON.stringify(uncovered))
     const completeInputs = await command('--design', 'draft', 'TECHNICAL_DESIGN.md')
-    expect(completeInputs.code).toBe(1)
+    expect(completeInputs.code).toBe(0)
     expect(JSON.parse(completeInputs.stdout)).toMatchObject({
-      valid: false, pendingDocuments: [], taskCoverageChecked: true,
-      issues: expect.arrayContaining([expect.stringContaining('required output GDD.md#play has no implementation item')]),
+      valid: true, pendingDocuments: [], taskReferencesChecked: true, issues: [],
     })
     await writeFile(technicalPath, technical)
 
@@ -228,6 +231,21 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     expect(sourceRequests).toEqual([{ paths: ['docs/GDD.md'], details: true }])
     expect(JSON.parse(source.stdout)).toEqual({ error: 'Synthetic source inspection failure' })
     expect((await command('--design', 'draft', '../GDD.md')).code).toBe(1)
+    // Plain documents have no index metadata to finalize or indexed requirements to count.
+    for (const name of help.writingOrder) {
+      await rm(join(root, designHandoffPath(name)))
+      await writeFile(join(root, 'docs', name), '# Fixture\n\nPlain design decisions.\n')
+    }
+    const plainBefore = await Promise.all(help.writingOrder.map((name: string) => readFile(join(root, 'docs', name), 'utf8')))
+    const plain = await command('--design', 'finalize')
+    expect(plain.code, plain.stderr).toBe(0)
+    expect(JSON.parse(plain.stdout)).toMatchObject({ valid: true, finalized: [], skipped: expect.arrayContaining(help.writingOrder) })
+    expect(JSON.parse(plain.stdout).skipped).toHaveLength(8)
+    const plainBaseline = await command('--design', 'baseline')
+    expect(plainBaseline.code, plainBaseline.stderr).toBe(0)
+    expect(JSON.parse(plainBaseline.stdout)).not.toHaveProperty('requirementCount')
+    expect(await Promise.all(help.writingOrder.map((name: string) => readFile(join(root, 'docs', name), 'utf8')))).toEqual(plainBefore)
+    for (const name of help.writingOrder) expect(await Bun.file(join(root, designHandoffPath(name))).exists()).toBe(false)
     const beforeInvalid = inspected.length
     for (const args of [
       ['--design', 'baseline', '--details', '--details'],
@@ -243,7 +261,7 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
       ['--design', 'draft', 'GDD.md', 'TECHNICAL_DESIGN.md'],
     ]) expect((await command(...args)).code).toBe(1)
     expect(inspected).toHaveLength(beforeInvalid)
-    expect(inspected.filter(Boolean)).toHaveLength(2)
+    expect(inspected.filter(Boolean)).toHaveLength(3)
   } finally {
     await tools.close()
     await rm(root, { recursive: true, force: true })

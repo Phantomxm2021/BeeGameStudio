@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test'
 import { requestProvider } from './request'
 import { nativeRequest } from './requests'
-import { toolAlias, mapTools, opaqueReasoning } from './messages'
+import { toolAlias, mapTools, opaqueReasoning, conversation, UNKNOWN_TOOL_FEEDBACK } from './messages'
 import type { ProviderConfig } from './config'
 import { startProviderBridge } from './bridge'
 import { providerConfig } from './config'
@@ -330,12 +330,16 @@ test('unknown tools become native rejection calls; provider failures and unsuppo
       },
     ])
   }) as typeof fetch
-  const result = await (await requestProvider(base, { ...body, input: 'Synthetic' }, request, signal())).json() as any
+  const failures: { callId: string; diagnostic: string }[] = []
+  const result = await (await requestProvider(base, { ...body, input: 'Synthetic' }, request, signal(), undefined,
+    (callId, diagnostic) => { failures.push({ callId, diagnostic }) })).json() as any
   expect(result.output[0]).toMatchObject({ type: 'function_call', namespace: 'bgs_provider_errors', name: 'unknown_tool', call_id: 'call' })
   expect(JSON.parse(result.output[0].arguments).error).toContain('unknown tool name')
   const continuation = nativeRequest(base, { ...body, input: [...result.output,
     { type: 'function_call_output', call_id: 'call', output: 'unsupported function name' }] })
   expect(continuation.body.messages[0].tool_calls[0].function.name).toBe('unknown')
+  expect(continuation.body).toMatchObject({ messages: [expect.anything(), { content: UNKNOWN_TOOL_FEEDBACK }] })
+  expect(failures).toEqual([{ callId: 'call', diagnostic: expect.stringContaining(UNKNOWN_TOOL_FEEDBACK) }])
   expect(calls).toBe(1)
   await expect(
     requestProvider(
@@ -505,4 +509,20 @@ test('Go requests identify BGS and preserve one session id across calls and prot
       ),
     ).toThrow('stable model session')
   }
+})
+
+
+test.each(['chat-completions', 'anthropic-messages', 'gemini'] as const)('unknown tool feedback preserves call IDs and ordinary outputs: %s', protocol => {
+  const input = [
+    { type: 'function_call', namespace: 'bgs_provider_errors', name: 'unknown_tool', call_id: 'bad', arguments: '{}' },
+    { type: 'function_call_output', call_id: 'bad', output: 'unsupported call: bgs_provider_errorsunknown_tool' },
+    { type: 'function_call', name: 'probe', call_id: 'good', arguments: '{}' },
+    { type: 'function_call_output', call_id: 'good', output: 'actual tool result' },
+  ]
+  const outputs = conversation({ input }, protocol).messages.filter(item => item.role === 'tool')
+  expect(outputs).toEqual([
+    { role: 'tool', id: 'bad', content: [{ type: 'text', text: UNKNOWN_TOOL_FEEDBACK }] },
+    { role: 'tool', id: 'good', content: [{ type: 'text', text: 'actual tool result' }] },
+  ])
+  expect(conversation({ input: input.slice(0, 1) }, protocol).messages.some(item => item.role === 'tool')).toBe(false)
 })

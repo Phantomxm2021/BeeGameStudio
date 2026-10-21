@@ -1,6 +1,6 @@
 import type { ProviderConfig } from './config'
 import { nativeRequest } from './requests'
-import { responseEvents, type ProviderUsage } from './response-stream'
+import { responseEvents, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
 import { UnknownProviderToolError, type Json } from './messages'
 import { safeErrorFacts } from '../security/safe-error-facts'
 
@@ -11,6 +11,7 @@ export async function requestProvider(
   request: typeof fetch,
   signal: AbortSignal,
   onUsage?: (usage: ProviderUsage) => void,
+  onToolError?: ProviderToolErrorHandler,
 ): Promise<Response> {
   if (config.protocol === 'responses')
     return request(config.baseUrl + '/responses', {
@@ -44,6 +45,7 @@ export async function requestProvider(
     upstream,
     native.tools,
     onUsage,
+    onToolError,
   )
   if (!body.stream) {
     let result: Json | undefined

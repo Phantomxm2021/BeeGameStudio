@@ -41,7 +41,14 @@ createInterface({ input: process.stdin }).on('line', async line => {
       event('turn/completed', { turn: { id: turnId, status: 'failed', ...(prompt === 'failure-details' ? { error } : {}) } })
       return
     }
-    if (prompt === 'write-design' || prompt === 'write-outside' || prompt?.startsWith('write-path:') || prompt?.startsWith('edit-design:')) {
+    if (prompt === 'provider-unknown-tool') {
+      const url = new URL(process.env.OPENAI_BASE_URL + '/responses')
+      if (url.hostname !== '127.0.0.1') throw Error('Fixture requires a local provider bridge')
+      const response = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer ' + process.env.OPENAI_API_KEY },
+        body: JSON.stringify({ input: 'Fixture', tools: [{ type: 'function', name: 'probe', parameters: { type: 'object' } }] }) })
+      if (!response.ok) throw Error('Fixture bridge rejected request: ' + response.status)
+      await response.json()
+    } else if (prompt === 'write-design' || prompt === 'write-outside' || prompt?.startsWith('write-path:') || prompt?.startsWith('edit-design:')) {
       const file_path = prompt === 'write-design' ? 'docs/GDD.md' : prompt === 'write-outside' ? '../outside.md' : prompt.slice('write-path:'.length)
       const result = await new Promise<any>(resolve => {
         awaiting = resolve

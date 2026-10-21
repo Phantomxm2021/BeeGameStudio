@@ -38,7 +38,8 @@ export function openDesignActions(root: string, requireEditableContent = false, 
     if (action === 'help') return {
       valid: true, writingOrder: DESIGN_WRITING_ORDER,
       instruction: details ? DESIGN_HANDOFF_INSTRUCTION : DESIGN_INDEX_INSTRUCTION,
-      help: 'Complete requested documents and self-check them. Plain documents need no index or finalization. --design draft DOCUMENT.md reads a document and any existing index; --design finalize [DOCUMENT.md ...] updates existing index metadata only. --design baseline reads available inputs; --design baseline --details includes requirements and source hashes. Baseline checks saved sources and any existing index integrity, not visual design or layout geometry. These checks validate structure, not design quality or user approval.',
+      help: 'ReadDesignHandoff {} lists saved documents; read:[{document}] lists headings; add sections to read selected prose. Plain documents need no index or finalization.' +
+        (details ? ' Compatibility commands: --design draft DOCUMENT.md inspects saved prose and any existing index; --design finalize [DOCUMENT.md ...] updates existing index metadata only and skips plain documents. --design baseline reads saved inputs; --design baseline --details includes indexed requirements and source hashes. Baseline checks saved sources and any existing index integrity, not visual design or layout geometry.' : ''),
       ...(!details ? { details: 'Use --design help --details only when reference/evidence or existing index compatibility details are needed.' } : {}),
       relatedHelp: '--design implementation --help describes the implementation handoff; --design acceptance --help describes runtime reports. Help only reads contracts; it does not lock planning, build or invoke a model.',
     }
@@ -59,19 +60,21 @@ export function openDesignActions(root: string, requireEditableContent = false, 
     if (action === 'finalize') {
       const names = PROJECT_DOCUMENTS.filter(name => selected.length ? selected.includes(name) :
         existsSync(resolve(root,'docs',name)))
-      const issues: string[] = [], finalized: string[] = []
+      const issues: string[] = [], finalized: string[] = [], skipped: string[] = []
       for (const name of names) {
         const draft = checkDesignHandoffDraft(root, name).issues
         if (draft.length) { issues.push(...draft); continue }
         const result = finalizeDesignDocuments(root, [name], before)
         issues.push(...result.issues)
-        if (!result.issues.length) {
+        skipped.push(...result.skipped)
+        if (!result.issues.length && !result.skipped.includes(name)) {
           before.documents[name] = snapshotDesignDocuments(root, [name]).documents[name]
           finalized.push(name)
         }
       }
       if (!names.length) issues.push('No saved design documents to finalize')
-      return { valid: !issues.length, issues, finalized }
+      return { valid: !issues.length, issues, finalized, skipped,
+        ...(skipped.length ? { note: 'Skipped documents have no existing index; plain documents need no finalization. This is not design approval.' } : {}) }
     }
     if (action === 'baseline') {
       const { availableRequirements = [], ...check } = checkDesignHandoff(root, PROJECT_DOCUMENTS, { technicalBaseline: true, planningInputs: true })
@@ -210,7 +213,7 @@ export async function openAgentTools(input: {
       // start measurement or manufacture an author-written review assignment.
       await writeFile(resolve(directory,'handoff.mjs'),[
         'import {realpath,readFile} from "node:fs/promises";',
-        'const help="Task/evidence handoff: node <this-entry> [FILE ...] [--details]. With no files: task, source navigation and latest measurement/freshness; no source coverage. Files must be explicit public project-relative design/source/test/report paths. --design help describes document authoring; --design help --details adds source/evidence and existing index compatibility guidance. --design implementation --help and --design acceptance --help read their respective contracts without entering implementation or executing checks. --details includes current requirement text, selected source text and saved observations/history. --design baseline prints status/issues and available input counts, including while documents are missing; --design baseline --details returns full requirements and source hashes. --design draft DOCUMENT.md inspects saved prose and any existing index; no new index is required. --design implementation records the implementation baseline and returns design sources plus optional existing task pointers; --design implementation --details includes full requirement/source hashes. This is not user approval. Only --design finalize [DOCUMENT.md ...] writes existing project version metadata, before the lock. Source/evidence reads do not build, test, invoke a model or certify quality.";',
+        'const help="Task/evidence handoff: node <this-entry> [FILE ...] [--details]. With no files: source navigation and latest measurement/freshness. For documents, use ReadDesignHandoff to list files/headings and read selected sections. Plain documents need no index or finalization. Files must be explicit public project-relative design/source/test/report paths. --details includes selected source text and saved observations/history. --design help --details describes explicit source/index compatibility commands. --design implementation --help and --design acceptance --help describe authorized implementation and runtime reports. Reads do not build, test, invoke a model or certify quality.";',
         'const args=process.argv.slice(2);if(args.length===1 && args[0]==="--help"){console.log(help);process.exit(0)}',
         'const helpOnly=args.length===3 && args[0]==="--design" && ["implementation","acceptance"].includes(args[1]) && args[2]==="--help";const details=args.at(-1)==="--details",positional=details||helpOnly?args.slice(0,-1):args;let designAction=positional[0]==="--design"?positional[1]:undefined;if(positional[0]==="--design" && (!designAction || designAction==="draft" && positional.length!==3 || !["finalize","draft"].includes(designAction) && positional.length!==2 || details && !["baseline","implementation","help"].includes(designAction)))throw Error("Use --design help");if(helpOnly)designAction+="-help";const documents=["finalize","draft"].includes(designAction)?positional.slice(2):[];const paths=designAction?[]:positional;if(paths.some(p=>p.startsWith("--")))throw Error(help);',
         'if(await realpath(process.cwd())!=='+JSON.stringify(root)+')throw Error("Handoff belongs to another workspace");',
@@ -220,7 +223,7 @@ export async function openAgentTools(input: {
         'const api=new URL(capability.apiUrl);if(api.protocol!=="http:" || api.hostname!=="127.0.0.1" || api.username || api.password || api.search || api.hash)throw Error("Invalid handoff endpoint");',
         'const response=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(designAction?{designAction,documents,details}:{handoffPaths:paths,details}),redirect:"error"});',
         'const result=await response.json();let output=result;',
-        'if(designAction==="baseline" && !details && typeof result.valid==="boolean")output={scope:"design-source-integrity",valid:result.valid,issues:result.issues,revision:result.revision,documentVersions:result.documentVersions,requirementCount:result.requirements?.length??0,layoutVerified:false,runtimeVerified:false,note:result.note,details:"Use --design baseline --details for full requirements/source hashes. Geometry is not checked here; use check-content.mjs --design-layouts --draft."};',
+        'if(designAction==="baseline" && !details && typeof result.valid==="boolean")output={scope:"design-source-integrity",valid:result.valid,issues:result.issues,revision:result.revision,documentVersions:result.documentVersions,...(result.indexedDocuments?.length?{requirementCount:result.requirements.length,requirementScope:"Existing indexed requirements only; not prose coverage"}:{}),layoutVerified:false,runtimeVerified:false,note:result.note,details:"Use --design baseline --details for full requirements/source hashes. Geometry is not checked here; use check-content.mjs --design-layouts --draft."};',
         'if(designAction==="implementation" && response.ok && !result.error && result.valid===true){const execution={sources:"ReadDesignHandoff locates saved documents/sections. ReadImplementationTask exposes existing indexed tasks or the technical source; choose Skills and work organization as needed."};output=details?{...result,execution}:{scope:"implementation-handoff",valid:true,source:result.source,designRevision:result.designRevision,resultPath:result.resultPath,items:result.items.map(item=>({id:item.id,dependsOn:item.dependsOn,section:item.taskSource.section})),execution,webBoot:result.webBoot,designBaseline:result.designBaseline,limitation:result.limitation,details:"Use --design implementation --details for full task/source references and requirement hashes."}};',
         'console.log(JSON.stringify(output,null,2));if(!response.ok || result.error || !(designAction?result.valid:result.sources?.valid))process.exitCode=1;',
       ].join('\n'),{flag:'wx',mode:0o600})
@@ -284,7 +287,7 @@ export async function openAgentTools(input: {
         'Use the relevant entry with --help when its contract is needed: bun assets.mjs, check-content.mjs, bind-content.mjs, consumer.mjs, media.mjs, resources.mjs'+
         (input.measurement ? '; node measure.mjs, handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
-        (input.measurement ? 'Document authoring contract: node '+entry('handoff.mjs')+' --design help; add --details for reference/evidence and existing index guidance. ' : '')+
+        (input.measurement ? 'Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Plain documents need no index or finalization. ' : '')+
         'Optional numerical calculation (project-root path): bun '+BALANCE_CALCULATOR_PATH+' --help.',
       turnContext: [
         libraryState,

@@ -44,15 +44,24 @@ export function editProtectedFileText(text: string, args: Record<string, unknown
     throw Error('Use either edits or old_string/new_string, not both')
   const edits = 'edits' in args ? args.edits : [{ old_string: args.old_string, new_string: args.new_string }]
   if (!Array.isArray(edits) || !edits.length) throw Error('edits must be a nonempty array')
-  const replacements = edits.map(edit => {
-    if (!edit || typeof edit.old_string !== 'string' || !edit.old_string || typeof edit.new_string !== 'string')
-      throw Error('Each edit requires an exact nonempty old_string and a string new_string')
+  const issues: string[] = []
+  const replacements = edits.flatMap((edit, index) => {
+    if (!edit || typeof edit.old_string !== 'string' || !edit.old_string || typeof edit.new_string !== 'string') {
+      issues.push(`edits[${index}]: requires an exact nonempty old_string and a string new_string`)
+      return []
+    }
     const start = text.indexOf(edit.old_string)
-    if (start < 0 || text.indexOf(edit.old_string, start + 1) !== -1) throw Error('old_string must match exactly once')
-    return { start, end: start + edit.old_string.length, value: edit.new_string }
+    let matches = 0
+    for (let at = start; at !== -1; at = text.indexOf(edit.old_string, at + 1)) matches++
+    if (matches !== 1) {
+      issues.push(`edits[${index}]: old_string matched ${matches} times; must match exactly once`)
+      return []
+    }
+    return [{ index, start, end: start + edit.old_string.length, value: edit.new_string }]
   }).sort((a, b) => a.start - b.start)
+  if (issues.length) throw Error(issues.join('; ') + '. Nothing saved. Indices are zero-based; matches use the original file.')
   for (let i = 1; i < replacements.length; i++) if (replacements[i]!.start < replacements[i - 1]!.end)
-    throw Error('Edits must not overlap in the original file')
+    throw Error(`edits[${replacements[i - 1]!.index}] and edits[${replacements[i]!.index}] overlap in the original file. Nothing saved.`)
   // Slice concatenation keeps replacement text literal, including $&, $1 and $`.
   let result = '', cursor = 0
   for (const edit of replacements) { result += text.slice(cursor, edit.start) + edit.value; cursor = edit.end }
@@ -120,7 +129,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       profile[userSkills] = 'read'
       profile[join(home, 'skills')] = 'read'
       const instructions = [BEEGAME_USER_RESPONSE_SCOPE, input.language && responseLanguageInstruction(input.language), input.systemContext,
-        'Use WriteProjectFile or EditProjectFile for these host-protected paths: ' + JSON.stringify(access.protectedPaths) +
+        'Use WriteProjectFile or EditProjectFile for these host-protected paths relative to the project root: ' + JSON.stringify(access.protectedPaths.map(path => relative(access.root, path))) +
         '. Shell and apply_patch cannot modify them. A design lock is enforced by BGS; never bypass a rejection.', mcp.context].filter(Boolean).join('\n\n')
       if(env.OPENAI_AUTH_MODE!=='chatgpt') {
         let incomplete = false
@@ -130,7 +139,9 @@ class BgsRuntime implements BeeGameSessionRuntime {
           total.cache_read_tokens+=usage.cache_read_tokens;total.cache_creation_tokens+=usage.cache_creation_tokens;total.total_tokens+=usage.total_tokens
           incomplete ||= usage.incomplete === true
           input.onNativeUsage?.({...total},epoch, { incomplete })
-        }})
+        }, onToolError: (callId, diagnostic) => runtime.emit('tool.failed', 'Unknown provider tool', {
+          toolUseID: callId, toolName: 'Unknown provider tool', output: diagnostic, is_error: true,
+        })})
         if(runtime.bridge) {
           // Provider secrets stay in the host, never in Bgs argv or its shell.
           for(const key of ['OPENAI_API_KEY','ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN','GEMINI_API_KEY','GROK_API_KEY'])delete env[key]

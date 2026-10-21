@@ -31,7 +31,7 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
         text: name + ' failed: ' + (error instanceof Error ? error.message : String(error)) }] }
     }
   })
-  readTool('ReadDesignHandoff', 'Read saved design inputs without finalizing or locking. {} returns all eight documents, versions, issues and actual heading locations. {read:[{document:"GDD.md",sections:["Exact heading"]}]} returns only selected original prose and locations; independently readable sources remain available when others are missing. Structure is not design approval.',
+  readTool('ReadDesignHandoff', 'Read saved design inputs without finalizing or locking. {} returns a compact availability list for all eight documents. {read:[{document:"GDD.md"}]} lists that document’s headings. {read:[{document:"GDD.md",sections:["Exact heading"]}]} returns only selected original prose and locations; independently readable sources remain available when others are missing. Structure is not design approval.',
     designReadSchema, input => readDesignHandoff(root, input))
   readTool('ReadImplementationTask', 'Read existing TECHNICAL_DESIGN tasks: {} lists IDs, dependencies and issues; {id:"exact-task-id"} returns task prose plus referenced owner requirement/acceptance text, merging repeated sections. No new plan, completion inference, baseline lock or implementation permission. Missing sources remain explicit.',
     implementationReadSchema, input => readImplementationTask(root, input))

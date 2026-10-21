@@ -1082,18 +1082,19 @@ export class BeeGameSessionManager {
     const zh = record.language === 'zh'
     const statuses: Record<string, string> = {passed:'通过',failed:'失败',unverified:'未验证','execution-error':'执行错误'}
     const text = [
-      zh ? 'BGS 宿主检查｜本轮执行已结束，不等于游戏验收通过' : 'BGS host evidence | Execution ended, not game acceptance',
+      zh ? 'BGS 执行记录｜本轮执行已结束' : 'BGS execution record | Turn ended',
       (zh ? '执行状态：' : 'Execution: ')+facts.execution,
       ...(facts.designFileChanges ? [
         (zh ? '本轮设计文件差异（不代表修改者或验收）：' : 'Design file changes this turn (not authorship or acceptance): ')+
           (facts.designFileChanges.status === 'unverified' ? (zh ? '未验证' : 'unverified') :
             facts.designFileChanges.files.map(file => file.path+' ('+file.change+')').join(', ') || (zh ? '无' : 'none')),
       ] : []),
-      facts.measurementId ? (zh ? '已保存测量（非整体验收）：' : 'Saved measurement (not acceptance): ')+facts.measurementId : (zh ? '没有宿主测量记录。' : 'No host measurement.'),
+      facts.measurementId ? (zh ? '已保存测量（非整体验收）：' : 'Saved measurement (not acceptance): ')+facts.measurementId : (zh ? '本轮没有宿主测量记录。' : 'No host measurement in this turn.'),
       ...facts.checkStatuses.map(check => check.id+': '+(zh ? statuses[check.status] ?? check.status : check.status)),
       ...(facts.unmeasured.length ? [(zh ? '未测量：' : 'Not measured: ')+facts.unmeasured.join(', ')] : []),
-      zh ? '以上是回合结束时的有限范围检查；不证明玩法、审美或完整覆盖。作者测试报告的断言数量和语义未经宿主认证；游戏质量仍未验证。后续改动需重新检查证据有效性。'
-        : 'Turn-end scoped checks only, not gameplay, aesthetics or complete coverage. Author report assertions/semantics are not host-certified; game quality remains unverified. Later edits require freshness inspection.',
+      facts.measurementId ? (zh ? '以上是回合结束时的有限范围检查；不证明玩法、审美或完整覆盖。作者测试报告的断言数量和语义未经宿主认证；游戏质量仍未验证。后续改动需重新检查证据有效性。'
+        : 'Turn-end scoped checks only, not gameplay, aesthetics or complete coverage. Author report assertions/semantics are not host-certified; game quality remains unverified. Later edits require freshness inspection.')
+        : (zh ? '执行结束和文件变化不代表内容验收；内容质量未验证。' : 'Execution and file changes do not certify content acceptance; quality is unverified.'),
       note,
     ].join('\n')
     this.append(record, 'system.status', text, {type:'system.status',subtype:'host_evidence',...facts,note,quality:'unverified',deliveryEligible:false}, facts.turnId)

@@ -216,10 +216,10 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       try {
         await input.store.commit(run.projectId,run.ownerId,current.version,next,'agent.turn-settled')
         observedExits.delete(turn.attemptId)
-        const measured = next.agentTurns!.flatMap(value => value.measurements ?? []).at(-1)
+        const measured = result.measurements?.at(-1)
         input.sessions.recordHostEvidence(run.chatSessionId, {attemptId:turn.attemptId,turnId:result.turnId,
           execution:result.status,measurementId:measured?.id,checkStatuses:measured?.checks.map(({id,status})=>({id,status})) ?? [],
-          unmeasured:['build','runtime-smoke',...AGENT_CONSUMPTION_CHECKS].filter(id=>!measured?.checks.some(check=>check.id===id)),
+          unmeasured:measured ? ['build','runtime-smoke',...AGENT_CONSUMPTION_CHECKS].filter(id=>!measured.checks.some(check=>check.id===id)) : [],
           note:next.blockedReason,designFileChanges:result.designFileChanges})
         return next
       }

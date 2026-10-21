@@ -152,6 +152,8 @@ function rawReasoning(
     ? data.raw
     : undefined
 }
+export const UNKNOWN_TOOL_FEEDBACK = 'Tool call rejected: its name does not match any tool advertised in the current request. No action was executed. Use an exact tool name from the current tool list, or respond directly if no tool is needed.'
+
 export type ConversationItem =
   | { role: 'user' | 'assistant'; content: Json[]; raw?: Json }
   | { role: 'tool'; id: string; content: Json[] }
@@ -190,7 +192,10 @@ export function conversation(
     }
     pending.length = 0
   }
+  const rejectedCalls = new Set<string>()
   for (const item of input) {
+    if (item.type === 'function_call' && item.namespace === 'bgs_provider_errors' && item.name === 'unknown_tool')
+      rejectedCalls.add(item.call_id)
     if (
       ['reasoning', 'function_call', 'custom_tool_call'].includes(item.type) ||
       item.role === 'assistant'
@@ -211,7 +216,8 @@ export function conversation(
       messages.push({
         role: 'tool',
         id: item.call_id,
-        content: parts(item.output),
+        // The native rejection already happened; expose its reason instead of the internal marker name.
+        content: parts(rejectedCalls.has(item.call_id) ? UNKNOWN_TOOL_FEEDBACK : item.output),
       })
     else if (item.role === 'user')
       messages.push({ role: 'user', content: parts(item.content) })

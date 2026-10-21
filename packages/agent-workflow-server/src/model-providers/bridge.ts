@@ -7,7 +7,7 @@ import {
 import { createPinnedRuntimeFetch } from '../beegame/model-runtime-network'
 import { providerConfig } from './config'
 import { requestProvider } from './request'
-import type { ProviderUsage } from './response-stream'
+import type { ProviderUsage, ProviderToolErrorHandler } from './response-stream'
 import { safeErrorFacts } from '../security/safe-error-facts'
 
 export type ProviderNetworkOptions = {
@@ -19,6 +19,7 @@ export async function startProviderBridge(
   options: ProviderNetworkOptions & {
     sessionId?: string
     onUsage(usage: ProviderUsage): void
+    onToolError?: ProviderToolErrorHandler
   },
 ) {
   const config = { ...providerConfig(env), sessionId: options.sessionId }
@@ -90,7 +91,7 @@ export async function startProviderBridge(
           ? await requestUpstream(config.baseUrl + '/responses' + (compact ? '/compact' : ''), {
               method: 'POST', headers, signal, redirect: 'error', body: JSON.stringify(body),
             })
-          : await requestProvider(config, body, requestUpstream, signal, options.onUsage)
+          : await requestProvider(config, body, requestUpstream, signal, options.onUsage, options.onToolError)
         if (!response.body) {
           finish()
           return response

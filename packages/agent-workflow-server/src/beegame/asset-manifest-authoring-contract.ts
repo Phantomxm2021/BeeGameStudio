@@ -127,15 +127,46 @@ export async function materializeAssetManifestAuthoringContract(
   return ASSET_MANIFEST_AUTHORING_CONTRACT_PATH
 }
 
-export function renderAssetManifestAuthoringContract(): string {
+export function renderAssetManifestAuthoringContract(section: 'registration' | 'atlas' | 'tilemap' | 'full' = 'full'): string {
   const examples = assetManifestAuthoringExamples()
   const json = (value: unknown) => JSON.stringify(value, null, 2)
+  const registration = `## Registration request
+
+Use this input with resources.mjs request.json or combine requests with --register-from.
+Minimal local-authoring request (replace example values with actual project facts):
+
+\`\`\`json
+${json({ operation: 'register', projectTarget: examples.canonical.project_target,
+  requirements: examples.canonical.requirements, resources: [{
+    id: 'EXAMPLE-RUNTIME-DATA-01', fulfills: ['EXAMPLE-RUNTIME-DATA'],
+    root_path: 'assets/runtime/example/resource.json', file_paths: ['assets/runtime/example/resource.json'],
+    provisional: false, reason: 'Locally authored example data.', selection_reason: ['Matches the actual requirement.'],
+  }] })}
+\`\`\`
+
+The example target supports JSON only; supply the actual approved runtime and supported formats.
+For locally authored files, omit source and supply resource.reason. Explicit source accepts web or resource-library provenance; user-provided files use the upload/import path.
+Hashes, status, timestamps and registry modules are computed, not request fields.
+fulfills names actual requirement IDs. root_path is a loadable file in file_paths; selection_reason is a non-empty string array.
+On later registration, omit projectTarget or pass it unchanged; existing requirements cannot be redefined.
+Use --contract full for source fields, enums and saved registry examples; --contract atlas or --contract tilemap for those formats.
+`
+  const atlas = `## Sprite atlas contract
+
+Named atlas entries must use \`frames: { "idle": { "frame": { "x": 0, "y": 0, "w": 32, "h": 32 } } }\`.
+Use an image and same-basename JSON sidecar in file_paths. Flat rectangles, rotated and trimmed entries are not supported.
+Every rectangle must fit inside the actual image dimensions. Render the full atlas before registering it; do not clamp rectangles to conceal cropped artwork.
+Run the resource checker after generating assets. Editors and Agent-written game code consume this data; the Agent owns target-engine mapping, not a BGS game runtime.`
+  const tilemap = `## Optional rectangular TileSet data\n\n${json(TILEMAP_AUTHORING_CONTRACT)}\n`
+  if (section === 'registration') return registration
+  if (section === 'atlas') return atlas
+  if (section === 'tilemap') return tilemap
   return `# Asset Manifest authoring contract (v${CURRENT_ASSET_MANIFEST_VERSION})
 
-This is the canonical resource registry interface for this project. Read this
-file before creating or registering runtime assets. It is an interface
-reference, not a request to use a particular tool, source, engine, or asset
-creation method.
+This is the canonical resource registry reference for this project. Consult the
+relevant section when authoring assets; resources.mjs --contract registration
+provides the compact registration input. This reference does not prescribe a
+source, engine, asset creation method or work organization.
 
 For locally authored or downloaded files, use the resources.mjs entry supplied
 in the current project tool context with --help
@@ -143,11 +174,9 @@ and its batch register operation. Supply source facts and file paths; the tool
 computes hashes and writes the canonical modules/index. Do not hand-fill hashes.
 Select and download library files with assets.mjs; preserve its registrationSource
 as source in the same resources.mjs registration, including downloaded dependency bindings.
-Visual/font and audio workers supply only their resource registration requests.
-The shared owner defines the project-wide target and actual requirement IDs in
-a separate register request with resources:[]; combine that configuration and
-worker requests with the supplied resources.mjs entry and --register-from. Include every required
-supported runtime format, not just the formats produced by one worker.
+Define the project-wide target and actual requirement IDs consistently. A separate
+configuration request with resources:[] may be combined with resource requests
+using --register-from. Include every required supported runtime format.
 The data-only example below is not a PNG/audio/font target configuration.
 
 ## Registration input versus saved manifest
@@ -162,16 +191,7 @@ agent-authored/user-provided source examples into a registration request.
 User-provided provenance is written by the upload/import path; do not relabel
 those files as agent-authored.
 
-Minimal local-authoring request (replace the example paths and requirement ID;
-the owner must also provide the actual projectTarget and requirements):
-
-\`\`\`json
-${json({ operation: 'register', resources: [{
-  id: 'EXAMPLE-RUNTIME-DATA-01', fulfills: ['EXAMPLE-RUNTIME-DATA'],
-  root_path: 'assets/runtime/example/resource.json', file_paths: ['assets/runtime/example/resource.json'],
-  provisional: false, reason: 'Locally authored example data.', selection_reason: ['Matches the actual requirement.'],
-}] })}
-\`\`\`
+${registration}
 
 ## Deliverables
 
@@ -192,17 +212,6 @@ ${json({ operation: 'register', resources: [{
   this registry.
 
 ## Canonical example
-
-## Sprite atlas contract
-
-Named atlas entries must use \`frames: { "idle": { "frame": { "x": 0, "y": 0, "w": 32, "h": 32 } } }\`.
-Use an image and same-basename JSON sidecar in file_paths. Flat rectangles, rotated and trimmed entries are not supported.
-Every rectangle must fit inside the actual image dimensions. Render the full atlas before registering it; do not clamp rectangles to conceal cropped artwork.
-Run the resource checker after generating assets. Editors and Agent-written game code consume this data; the Agent owns target-engine mapping, not a BGS game runtime.
-
-## Optional rectangular TileSet data
-
-${json(TILEMAP_AUTHORING_CONTRACT)}
 
 ### \`assets/asset-manifest.json\`
 
@@ -242,6 +251,10 @@ ${json(assetSourceAuthoringExamples)}
 - \`usage_tags\` and \`capabilities\` describe the asset in your own words (string
   arrays), not a closed catalogue vocabulary. Extra resource/source description
   fields such as \`notes\` and \`toolchain\` are preserved, not rejected.
+
+${atlas}
+
+${tilemap}
 
 ## Check the actual delivery interface
 

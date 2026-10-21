@@ -2,7 +2,7 @@
 
 Read only for an assigned geometry/integration question using these actual inputs, or a supplied legacy handoff. This reference preserves format-specific details without making them a default design-review workflow. Native engine or DOM tasks use their actual source and runtime, not BGS JSON created for a checker.
 
-For current BGS source reads, use ReadDesignHandoff `{}` for available inputs/issues/headings and `{read:[{document:"GDD.md",sections:["Exact heading"]}]}` for original clauses. ReadImplementationTask `{}` or `{"id":"actual-id"}` reads the existing task directory or task/owner section locations without locking. CheckResourcesAndBindings `{}` checks actual registered files and saved UI/Scene references; `detailsFor` expands one file without narrowing checks. ReadVerificationResults reads existing results/freshness without running checks. These tools do not certify semantics or runtime quality; use BGS file-reading tools for additional sources and pictures.
+For current BGS source reads, use ReadDesignHandoff `{}` for file availability, `{read:[{document:"GDD.md"}]}` for one document’s headings, and `{read:[{document:"GDD.md",sections:["Exact heading"]}]}` for original clauses. ReadImplementationTask `{}` or `{"id":"actual-id"}` reads the existing task directory or task/owner section locations without locking. CheckResourcesAndBindings `{}` checks actual registered files and saved UI/Scene references; `detailsFor` expands one file without narrowing checks. ReadVerificationResults reads existing results/freshness without running checks. These tools do not certify semantics or runtime quality; use BGS file-reading tools for additional sources and pictures.
 
 ## Linked Scene/UI geometry
 

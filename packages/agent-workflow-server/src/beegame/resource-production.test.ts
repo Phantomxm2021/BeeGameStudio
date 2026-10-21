@@ -298,6 +298,39 @@ test('missing project target points to the supplied contract, not an absent save
   } finally { await rm(root, { recursive:true, force:true }) }
 })
 
+test('compact registration reference is executable and CLI topics remain available without writing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-registration-help-'))
+  try {
+    await materializeContentCheckerEntry(root)
+    const env = { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl }
+    const run = async (...args: string[]) => {
+      const child = Bun.spawn([process.execPath, '.beegame/delivery/resources.mjs', ...args], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' })
+      const text = await new Response(child.stdout).text()
+      return { text, exit: await child.exited }
+    }
+    const help = await run('--help')
+    expect(help.exit).toBe(0)
+    expect(help.text.length).toBeLessThan(2000)
+    const registration = await run('--contract', 'registration')
+    expect(registration.exit).toBe(0)
+    expect(registration.text.length).toBeLessThan(4000)
+    expect(registration.text).not.toContain('Optional rectangular TileSet data')
+    expect((await run('--contract', 'atlas')).text).toContain('frames:')
+    expect((await run('--contract', 'tilemap')).text).toContain('TileSet')
+    expect((await run('--contract')).text).toBe((await run('--contract', 'full')).text)
+    expect((await run('--help', 'full')).text).toContain('frequency_hz')
+    expect((await run('--contract', 'unknown')).exit).toBe(1)
+    expect((await readBeeGameAssetManifest(root)).resources).toEqual([])
+    const request = JSON.parse(registration.text.split('```json\n')[1]!.split('\n```')[0]!)
+    await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
+    await writeFile(join(root, request.resources[0].root_path), '{}')
+    expect((await produceResources(root, request)).valid).toBe(true)
+    const saved = await readBeeGameAssetManifest(root)
+    expect(saved.requirements[0]!.id).toBe(request.requirements[0].id)
+    expect(saved.resources[0]!.fulfills).toEqual([request.requirements[0].id])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test('registration input distinguishes generated provenance and reports exact web source fields through the CLI', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-resource-source-contract-'))
   try {

@@ -3,9 +3,12 @@ import {
   opaqueReasoning,
   responseToolCall,
   UnknownProviderToolError,
+  UNKNOWN_TOOL_FEEDBACK,
   type Json,
   type MappedTool,
 } from './messages'
+
+export type ProviderToolErrorHandler = (callId: string, diagnostic: string) => void | Promise<void>
 
 export type ProviderUsage = {
   /** Known lower bound; the supplier did not deliver a complete usage receipt. */
@@ -77,6 +80,7 @@ export async function* responseEvents(
   response: Response,
   tools: MappedTool[],
   onUsage?: (usage: ProviderUsage) => void,
+  onToolError?: ProviderToolErrorHandler,
 ): AsyncGenerator<Json> {
   if (!response.ok) {
     await response.body?.cancel()
@@ -346,6 +350,7 @@ export async function* responseEvents(
       // resolution or host execution is permitted. Keep arbitrary provider
       // names/arguments only in the opaque native history below.
       const diagnostic = new UnknownProviderToolError(call.alias, tools, call.nameParts).message
+      await onToolError?.(call.id, UNKNOWN_TOOL_FEEDBACK + ' ' + diagnostic)
       const item = { type: 'function_call', id: 'fc_' + call.id, call_id: call.id,
         name: 'unknown_tool', namespace: 'bgs_provider_errors',
         arguments: JSON.stringify({ error: diagnostic }), status: 'completed' }

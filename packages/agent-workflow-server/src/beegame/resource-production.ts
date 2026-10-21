@@ -268,18 +268,31 @@ export async function produceResources(workspace: string, value: unknown, fetche
       ['Composition, anti-aliasing, seamless loop sound and listening quality. This renders explicit synthesis recipes, not arbitrary high-quality music.'] }
 }
 
-export const RESOURCE_HELP = `Usage: bun <resources-entry> --capabilities
+export const RESOURCE_HELP = `Usage: bun <resources-entry> request.json
+  --register-from request-1.json request-2.json   Combine registration requests
+  --list [RESOURCE-ID ...] [--details]           Read saved resource records
+  --contract registration                      Input fields and complete minimal request
+  --contract atlas | --contract tilemap         Format-specific reference
+  --contract [full]                             Complete registry reference
+  --help full                                  Audio recipes, font acquisition and provenance fields
+  --capabilities                               Available operations
+Operations: register, audio, fonts. Image/atlas processing uses the supplied media.mjs entry.
+For locally authored files, omit source and supply resource.reason; the host computes hashes and registry modules. Explicit source is web or resource-library with provenance. User-provided files use the upload/import path.
+Read --contract registration before first registration. Once established, projectTarget cannot be changed through registration; supply files in its listed formats. Keep actual requirement IDs consistent; these inputs are not the saved Manifest format.
+No package installation is needed. Tools do not certify artistic or gameplay quality.`
+
+const RESOURCE_DETAILS = `Usage: bun <resources-entry> --capabilities
   bun <resources-entry> request.json
   bun <resources-entry> --register-from registration-1.json registration-2.json
   bun <resources-entry> --list [RESOURCE-ID ...] [--details]
 --list reads the current registry without writing: all IDs/fulfills/default roots/statuses/file counts. Specified IDs also return exact member paths. --details returns full selected records including hashes/provenance. Do not cat every resource module or reread large persisted output merely to find binding operands.
 No package installation is needed. Existing image processing/atlas packing stays at media.mjs.
-atlas: media.mjs atlas fields plus resource:{id,fulfills,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}, registrationOutput:"assets/atlas-registration.json". Produces the actual atlas/frame table and a ready-to-register request with exact output paths. No manual rectangles, hashes or registry edits. Workers only produce these request files; the shared owner combines them with --register-from. Existing images/media.mjs remain supported.
+atlas: media.mjs atlas fields plus resource:{id,fulfills,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}, registrationOutput:"assets/atlas-registration.json". Produces the actual atlas/frame table and a ready-to-register request with exact output paths. No manual rectangles, hashes or registry edits. Registration requests can be combined with --register-from. Existing images/media.mjs remain supported.
 register: {operation:"register",resources:[{id,fulfills,root_path,file_paths,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}],projectTarget?,requirements?}.
 Registration input is NOT a canonical manifest resource. For locally agent-authored files, omit source and supply resource.reason; the registrar writes source.type=agent-authored and created_at. Explicit source accepts only web or resource-library with the fields below. Do not copy canonical agent-authored/user-provided source objects, status, selected_at or local_file_hashes into a request. User-provided files use the upload/import path; do not relabel them as agent-authored.
 selection_reason is a non-empty string array, not a string. Encoded audio (including recipe-rendered WAV) uses asset_kind:"audio-clip" (or music/ambience/voice), never "audio". Structured synthesis JSON uses audio-cue/audio-bank and is not encoded playback evidence.
-Workers return only their resources; projectTarget and requirements belong to the shared owner, not one audio/visual group. The owner may supply a separate configuration request with resources:[] and combine it with all workers using --register-from owner-config.json visual-registration.json audio-registration.json. This is one registration batch, not repeated initialization.
-projectTarget uses the Manifest project's project_target fields: {platform,runtime,asset_format_capabilities,resource_library_usage,runtime_asset_root,generated_asset_root}. For a Web consumer proven to load PNG/WAV/WOFF2/JSON, an example is {platform:"web",runtime:"react",asset_format_capabilities:["png","wav","woff2","json"],resource_library_usage:"optional",runtime_asset_root:"assets/runtime",generated_asset_root:"assets/generated"}. This example is NOT platform evidence or permission to broaden an existing target. Use the actual approved runtime and all required supported formats, including fonts and metadata; never infer global capabilities from one worker's file extensions.
+projectTarget and requirements describe the whole project. A configuration request with resources:[] can be combined with resource requests using --register-from config.json resources-1.json resources-2.json. This is one registration batch, not repeated initialization.
+projectTarget uses the Manifest project's project_target fields: {platform,runtime,asset_format_capabilities,resource_library_usage,runtime_asset_root,generated_asset_root}. For a Web consumer proven to load PNG/WAV/WOFF2/JSON, an example is {platform:"web",runtime:"react",asset_format_capabilities:["png","wav","woff2","json"],resource_library_usage:"optional",runtime_asset_root:"assets/runtime",generated_asset_root:"assets/generated"}. This example is NOT platform evidence or permission to broaden an existing target. Use the actual approved runtime and all required supported formats, including fonts and metadata; never infer global capabilities from one resource group’s file extensions.
 Use --contract for exact requirement objects/enums without creating a Manifest. Use the actual resources/media entries supplied in the project context. Every fulfills ID must be an actual requirement id, not its display name or a resource id. Once established, projectTarget cannot be changed through registration: omit it or pass the unchanged value, and supply files in its listed formats. Existing requirements cannot be redefined. Hashes and registry modules are computed, never supplied. Web resources use source:{type:"web",source_url,page_url,license,license_url?,retrieved_at}; fonts are not agent-authored. Library downloads return registrationSource:{type:"resource-library",pack_id,pack_version,element_id,element_path}; preserve it as source. Include required downloaded dependencies in file_paths and dependencies:[{key,parent_key,element_id,element_path,reference_path,local_path,kind?}]. Missing files or unregistered dependency paths fail registration; no manual manifest edits or source relabeling.
 Registration stdout lists resource IDs, file counts and the canonical manifest location; source facts, full paths and computed hashes remain in its modules. Append --details only when those full values are needed. Do not grep bundled implementations to discover these input fields.
 audio: {operation:"audio",recipe:{format:"beegame-programmatic-audio-v1",cues:[{id,duration_ms,loop?:{start_ms,end_ms},voices:[{source:{type:"oscillator",waveform:"sine"|"square"|"triangle"|"sawtooth",frequency_hz,end_frequency_hz?},start_ms,duration_ms,gain,attack_ms?,release_ms?,pan?}]}]},outputs:{"cue-id":"assets/runtime/cue.wav"},sampleRate?:44100}.
@@ -290,8 +303,16 @@ Batch failures retain valid files and identify failed items. Retry only failed i
 
 export async function runResourceProductionCli(args = process.argv.slice(2)) {
   try {
-    if (args[0] === '--help') { console.log(RESOURCE_HELP); return }
-    if (args.length === 1 && args[0] === '--contract') { console.log(renderAssetManifestAuthoringContract()); return }
+    if (args[0] === '--help') {
+      if (args.length > 2 || (args[1] && args[1] !== 'full')) throw Error('Usage: --help [full]')
+      console.log(args[1] === 'full' ? RESOURCE_DETAILS : RESOURCE_HELP); return
+    }
+    if (args[0] === '--contract') {
+      const section = args[1] ?? 'full'
+      if (args.length > 2 || !['registration', 'atlas', 'tilemap', 'full'].includes(section))
+        throw Error('Usage: --contract [registration|atlas|tilemap|full]')
+      console.log(renderAssetManifestAuthoringContract(section as 'registration' | 'atlas' | 'tilemap' | 'full')); return
+    }
     if (args[0] === '--capabilities') {
       console.log(JSON.stringify({ registration: true, audioSynthesisWav: true, fontDownload: true,
         atlasWithRegistrationRequest: true, batchRegistrationFromFiles: true,

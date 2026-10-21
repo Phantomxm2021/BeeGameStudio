@@ -2,7 +2,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { z } from 'zod/v4'
 import { PROJECT_DOCUMENTS, DESIGN_WRITING_ORDER } from '@bee-game-studio/agent-workflow/design-review-result'
-import { checkDesignHandoff, checkDesignHandoffDraft, designReviewIndexes, type DesignHandoff } from './design-handoff'
+import { checkDesignHandoffDraft, designReviewIndexes, type DesignHandoff } from './design-handoff'
 import { designSourceLocations, readDesignSections } from './design-source-reading'
 import { auditAssetContract } from './asset-contract-audit'
 import { readBeeGameAssetManifestSync } from './asset-contracts'
@@ -13,7 +13,7 @@ import { validateResourceSelections } from './tilemap-contract'
 import { collectContentSourceFiles } from './content-source-files'
 
 export const designReadSchema = z.strictObject({ read: z.array(z.strictObject({
-  document: z.enum(PROJECT_DOCUMENTS), sections: z.array(z.string().min(1)).min(1),
+  document: z.enum(PROJECT_DOCUMENTS), sections: z.array(z.string().min(1)).min(1).optional(),
 })).min(1).optional() })
 export const implementationReadSchema = z.strictObject({ id: z.string().trim().min(1).optional() })
 export const bindingsReadSchema = z.strictObject({ detailsFor: z.string().optional() })
@@ -26,20 +26,25 @@ const reason = (error: unknown) => error instanceof Error ? error.message : Stri
 /** Current saved inputs, including independently readable drafts. Never finalize or lock. */
 export function readDesignHandoff(workspace: string, input: unknown) {
   const { read = [] } = designReadSchema.parse(input)
-  const check = checkDesignHandoff(workspace, PROJECT_DOCUMENTS, { technicalBaseline: true, planningInputs: true })
-  const issues = [...check.issues]
+  const issues: string[] = []
   const sources = read.flatMap(request => {
+    if (!request.sections) return []
     try { return readDesignSections(workspace, [request]).sources }
     catch (error) { issues.push(request.document + ': ' + reason(error)); return [] }
   })
-  return { valid: !issues.length, scope: 'saved-design-handoff', issues,
-    documents: designSourceLocations(workspace, read.length ? [...new Set(read.map(item => item.document))] : DESIGN_WRITING_ORDER).map(document => ({ ...document,
-      ...(read.length ? { sections: 'sections' in document ? document.sections.filter(section => read.some(request =>
-        request.document === document.document && request.sections.includes(section.heading))) : undefined } : {}),
-      version: check.documentVersions[document.document as typeof PROJECT_DOCUMENTS[number]],
-      requirementCount: (check.availableRequirements ?? []).filter(item => item.document === document.document).length,
-    })), sources,
-    note: 'Saved source/index structure only, not design completeness, visual approval or implementation permission. Missing siblings do not hide readable sources. No metadata changes or baseline lock.' }
+  const documents = designSourceLocations(workspace, read.length ? [...new Set(read.map(item => item.document))] : DESIGN_WRITING_ORDER)
+    .map(document => {
+      if (read.length && document.unavailable) issues.push(document.document + ': ' + document.unavailable)
+      const requests = read.filter(request => request.document === document.document)
+      return { document: document.document, path: 'docs/' + document.document,
+        available: !document.unavailable,
+        ...(document.unavailable ? { unavailable: document.unavailable } : {}),
+        ...(read.length && 'sections' in document ? { sections: requests.some(request => !request.sections)
+          ? document.sections : document.sections.filter(section => requests.some(request => request.sections?.includes(section.heading))) } : {}),
+      }
+    })
+  return { valid: !issues.length, scope: 'saved-design-handoff', issues: [...new Set(issues)], documents, sources,
+    note: 'Read availability only, not design completeness or approval. Unrequested missing documents do not fail a read. No index requirement counts, metadata changes or baseline lock. Use read:[{document:"GDD.md"}] for headings; add sections:["Exact heading"] for prose.' }
 }
 
 /** The existing technical index locates prose; it is not a second task store. */

@@ -23,13 +23,13 @@ test('game Agent startup rejects a missing or empty catalog before starting nati
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-async function fixture(permission: 'allow' | 'deny' = 'allow') {
+async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<string, string> = {}, network = resolveOutboundTarget) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
   await mkdir(join(workspace, 'docs'), { recursive: true })
   const events: Record<string, any>[] = [], usage: BeeGameEvent[] = [], questions: unknown[] = []
   let sessionId = ''
-  const runtime = await createBgsRunner({ command, resolveOutboundTarget }).start({ sessionId: 'fixture', cwd: workspace,
-    env: { BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only' },
+  const runtime = await createBgsRunner({ command, resolveOutboundTarget: network }).start({ sessionId: 'fixture', cwd: workspace,
+    env: { BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only', ...env },
     onNativeSessionId: id => { sessionId = id },
     onNativeUsage: (value, epoch) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
       payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value } }),
@@ -262,6 +262,18 @@ test('protected edits are literal, unique and non-overlapping against the origin
   expect(() => editProtectedFileText('aaa', { old_string: 'aa', new_string: 'x' })).toThrow('exactly once')
 })
 
+test('protected edit errors identify all failing original-file matches without echoing content', () => {
+  const run = () => editProtectedFileText('alpha beta beta', { edits: [
+    { old_string: 'alpha', new_string: 'saved only if all succeed' },
+    { old_string: 'PRIVATE_ABSENT_CONTENT', new_string: 'x' },
+    { old_string: 'beta', new_string: 'y' },
+  ] })
+  expect(run).toThrow('edits[1]: old_string matched 0 times')
+  expect(run).toThrow('edits[2]: old_string matched 2 times')
+  expect(run).toThrow('Nothing saved')
+  try { run() } catch (error) { expect(String(error)).not.toContain('PRIVATE_ABSENT_CONTENT') }
+})
+
 test.each(['success', 'missing-match', 'denied'] as const)('protected batch edits preserve permissions and all-or-nothing writes: %s', async mode => {
   const f = await fixture(mode === 'denied' ? 'deny' : 'allow')
   try {
@@ -276,3 +288,27 @@ test.each(['success', 'missing-match', 'denied'] as const)('protected batch edit
     expect(f.events.some(e => e.text?.includes(mode === 'success' ? 'Saved design' : 'Write rejected'))).toBe(true)
   } finally { await f.close() }
 }, 30_000)
+
+
+test('provider unknown tools reach the active BGS event stream without executing or retrying them', async () => {
+  let requests = 0
+  const provider = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    requests++
+    return new Response('data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'unknown-call',
+      function: { name: 'PRIVATE_UNSUPPORTED_NAME', arguments: '{"secret":"PRIVATE_ARGUMENT"}' } }] }, finish_reason: 'tool_calls' }],
+      usage: { prompt_tokens: 4, completion_tokens: 2 } }) + '\n\n', { headers: { 'Content-Type': 'text/event-stream' } })
+  } })
+  let f: Awaited<ReturnType<typeof fixture>> | undefined
+  try {
+    f = await fixture('allow', { BEEGAME_API_PROTOCOL: 'chat-completions', BEEGAME_MODEL: 'fixture-model', OPENAI_BASE_URL: provider.url.toString().replace(/\/$/, '') },
+      async value => ({ url: new URL(value), addresses: ['127.0.0.1'], lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }))
+    await f.submit('provider-unknown-tool')
+    const failures = f.events.filter(event => event.eventType === 'tool.failed')
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toMatchObject({ toolUseID: 'unknown-call', toolName: 'Unknown provider tool', is_error: true,
+      output: expect.stringContaining('No action was executed') })
+    expect(JSON.stringify(failures)).not.toContain('PRIVATE_')
+    expect(f.questions).toHaveLength(0)
+    expect(requests).toBe(1)
+  } finally { await f?.close(); provider.stop(true) }
+}, 10_000)

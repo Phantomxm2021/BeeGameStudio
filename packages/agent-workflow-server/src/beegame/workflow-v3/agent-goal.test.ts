@@ -93,12 +93,14 @@ test('ended native goal exposes independent host evidence, never author acceptan
     expect(host).toBeDefined()
     expect(host.type).toBe('system.status')
     expect(host.payload).toMatchObject({execution:'ended',quality:'unverified',deliveryEligible:false,checkStatuses:[]})
-    expect(host.payload!.unmeasured).toContain('audio-data-consumption')
+    expect(host.payload!.unmeasured).toEqual([])
+    expect(host.text).not.toContain('audio-data-consumption')
+    expect(host.text).not.toContain('runtime-smoke')
     expect(host.turnId).toBe(run.agentTurns![0]!.turnId)
     expect(run.deliveryEligible).toBe(false)
     expect(run.status).toBe('blocked')
     const facts={attemptId:'synthetic-report',execution:'ended',measurementId:'scoped-receipt',
-      checkStatuses:[{id:'build',status:'passed'},{id:'audio-data-consumption',status:'unverified'}],
+      checkStatuses:[{id:'build',status:'failed'},{id:'audio-data-consumption',status:'unverified'}],
       unmeasured:['ui-data-consumption'],note:'Only saved host facts, not 0-assertion author report'}
     f.sessions.recordHostEvidence(run.chatSessionId,facts)
     f.sessions.recordHostEvidence(run.chatSessionId,facts)
