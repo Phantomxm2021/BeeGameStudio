@@ -5,6 +5,9 @@ import { join, resolve, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
 import { DESIGN_WRITING_ORDER } from '@bee-game-studio/agent-workflow/design-review-result'
 
+// Scope dependencies to the part currently being produced.
+export const PRODUCTION_DEPENDENCIES = 'For a full new-game delivery, complete the eight design records as shared decisions first. Then apply production dependencies to the coherent part being implemented: its selected visual designs, needed resources and interfaces must be ready, while unrelated planned resources/content may remain pending. Implement and observe that part before repeating an uncertain treatment across the game. This does not reduce the final scope or add a prototype/approval stage. The current user assignment determines deliverables and stopping point; document-only or reference-only work stops at that boundary.'
+
 // One working contract for generated guides and active goal context. Native
 // metadata resolves Skill names/namespaces; procedures stay in the Skills.
 export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
@@ -15,12 +18,12 @@ export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - Select and read applicable Skills from the installed catalog for the current task or a concrete dependency; reuse guidance already in context. The Agent chooses methods and work order within the confirmed scope.
 
 ## Required design dependencies
-For a full new-game delivery, preserve these production dependencies. The user's current assignment determines which deliverables are in scope and where to stop; a document-only assignment ends after document self-check, without later production or runtime acceptance.
+${PRODUCTION_DEPENDENCIES}
 1. Design records: complete the eight design documents (${DESIGN_WRITING_ORDER.join(', ')}), including TECHNICAL_DESIGN.md with the technical approach, module responsibilities, interfaces, data consumption and necessary implementation/verification guidance. The Agent chooses how to organize that guidance; machine indexes and task coverage graphs are not required. Complete technical design in this stage before actual visual design or resource production. Describe unproduced inputs as planned, not delivered. Use prose/sketches for space needs; do not create runtime scene/UI content here.
 2. Actual visual designs: use existing image tools or supplied designs for complete game screens/key states shared by UI and Scene records, with detail views only for subjects unresolved in those screens. Save and Read pictures; reconcile composition, hierarchy, game visibility and appearance in affected UI/art/Scene record sections, not just image links. Correct pictures that contradict confirmed requirements rather than silently changing scope. Resolve consequential conflicts before affected production. Prose, palettes and JSON geometry do not replace visual design. Missing supplied pictures do not waive it.
-3. Resources: revise ASSET_PLAN.md from selected visual/audio designs and reconciled owner records; acquire suitable assets, inspect actual files/metrics and register them. Preserve the selected style; a screen board is not runtime UI.
-4. Editable scene/UI content: only after selected visual designs and corresponding resources exist, author layout, objects, cameras and resource/action/state bindings in the format appropriate to the confirmed engine and applicable Editor interface. Use actual asset metrics and existing checks; correct the same sources. Revise the existing TECHNICAL_DESIGN.md only for actual produced inputs and affected decisions; do not postpone technical design or recreate the plan here.
-5. Implementation and runtime verification: implement from saved designs/content and verify actual runtime behavior and experience; select applicable Skills.
+3. Resources: use ASSET_PLAN.md and the selected visual/audio designs for the current part; acquire suitable assets, inspect actual files/metrics and register them. Keep delivered paths, frames and metrics in the Manifest; the plan describes intended uses and production choices. Preserve the selected style; a screen board is not runtime UI.
+4. Editable scene/UI content: once the selected designs and resources for that content exist, author its layout, objects, cameras and resource/action/state bindings in the format appropriate to the confirmed engine and applicable Editor interface. Use actual asset metrics and existing checks; correct the same sources. Before entering implementation, reconcile the technical interfaces needed now with actual inputs; keep later inputs planned. Preserve the existing design lock once entered; normal file registration and implementation progress do not require rewriting the plan. The lock protects configuration present when captured; content first created later remains subject to the normal content and runtime checks.
+5. Implementation and runtime verification: implement each coherent part from its ready inputs and verify its actual behavior and presentation, then expand the remaining scope. Final delivery still covers the complete assignment; select applicable Skills.
 Image-tool request JSON is a tool input, not a project UI/Scene layout. Reuse existing Skills and entries; add no separate plan or task database.
 
 ## Quality and evidence

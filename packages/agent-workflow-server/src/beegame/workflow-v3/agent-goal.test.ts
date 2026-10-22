@@ -10,7 +10,7 @@ import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProf
 import { createRun, digest, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
-import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS } from './project-guide'
+import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS, PRODUCTION_DEPENDENCIES } from './project-guide'
 import { createAgentMeasurement } from './agent-measurement'
 import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
 import { readContentView } from './content-view'
@@ -384,14 +384,14 @@ test('initial goal continues through visual direction without host Tasks or a se
     expect(f.starts[0].systemContext).toContain(agentProfessionalContextForRun(run))
     expect(f.starts[0].systemContext).toContain('No root project guide exists')
     expect(f.starts[0].systemContext).toContain('Current BGS tools directory')
-    expect(f.starts[0].systemContext).toContain('node measure.mjs, handoff.mjs')
+    expect(f.starts[0].systemContext).toContain('node measure.mjs, node handoff.mjs')
     expect(f.starts[0].systemContext).toContain('Document navigation: ReadDesignHandoff {} lists files')
     expect(f.starts[0].systemContext).toContain('Plain documents need no index or finalization')
     expect(f.starts[0].systemContext).not.toContain('Document authoring contract:')
     expect(f.starts[0].systemContext).not.toContain('Maintain root AGENTS.md')
     expect(f.starts[0].systemContext).toContain('project-navigation-sources')
     expect(JSON.stringify(submit.prompt)).not.toContain('BGS saved evidence')
-    expect(f.starts[0].systemContext.split('Use the relevant entry with --help when its contract is needed:')).toHaveLength(2)
+    expect(f.starts[0].systemContext.split('Read contracts as needed:')).toHaveLength(2)
     expect(f.starts[0].systemContext).not.toContain('Optional BGS project tools')
     expect(JSON.stringify(submit.prompt)).not.toContain('Optional BGS project tools')
     expect(String(submit.prompt)).not.toContain(JSON.stringify(f.body.brief))
@@ -578,6 +578,7 @@ test('project guide refreshes at the next turn, including discussion, without re
     expect(f.starts[0].systemContext).not.toContain('GUIDE_ROUTE_ONE')
     expect(f.starts[0].systemContext).not.toContain(PROJECT_WORKING_CONVENTIONS)
     expect(f.starts[0].systemContext).not.toContain('## Required design dependencies')
+    expect(f.starts[0].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
     expect(f.starts[0].systemContext).toContain('Follow applicable project working conventions within current user authorization')
     expect(await readFile(file,'utf8')).toBe(first)
     expect(JSON.stringify(f.submissions[0].prompt)).not.toContain('GUIDE_ROUTE_ONE')
@@ -598,9 +599,10 @@ test('project guide refreshes at the next turn, including discussion, without re
     expect(f.starts[2].systemContext).not.toContain('GUIDE_ROUTE_TWO')
     expect(f.starts[2].systemContext).toContain(digest(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO')))
     expect(f.starts[2].systemContext).not.toContain('Professional coverage:')
-    await rm(file);await send('discuss','guide-missing')
+    await rm(file);await send('work','guide-missing')
     expect(f.starts[3].systemContext).toContain('No root project guide exists')
     expect(f.starts[3].systemContext).not.toContain('GUIDE_ROUTE_TWO')
+    expect(f.starts[3].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
     expect(run.requirements).toEqual(requirements)
     expect(run.requirementChanges).toBeUndefined()
     expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
@@ -1324,8 +1326,8 @@ test('first and resumed goals retain professional coverage and design dependenci
     const steps=['1. Design records:', '2. Actual visual designs:', '3. Resources:', '4. Editable scene/UI content:', '5. Implementation and runtime verification:']
     const positions=steps.map(step=>prompt.indexOf(step))
     expect(positions.every((position,index)=>position>=0 && (!index || position>positions[index-1]!))).toBe(true)
-    expect(prompt).toContain('only after selected visual designs and corresponding resources exist')
-    expect(prompt).toContain('preserve these production dependencies')
+    expect(prompt).toContain('once the selected designs and resources for that content exist')
+    expect(prompt).toContain('unrelated planned resources/content may remain pending')
     expect(prompt).toContain('Preserve confirmed requirements')
     expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
   }

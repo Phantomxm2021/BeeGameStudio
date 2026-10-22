@@ -6,13 +6,22 @@ import { readVersion, versionsMatch } from './checks'
 import { parseBeeGameContentIndex } from '../game-content-schema'
 import { digest, WorkflowError, type Run, type SourceEdit } from './state'
 
+// Freeze existing project configuration, not the growing content inventory.
 function registryRevision(workspace: string) {
   try {
     const file=resolve(realpathSync(workspace),'content/index.json')
     if(realpathSync(file)!==file)throw new WorkflowError('invalid-content-path','Content registry cannot be an alias')
-    const {documentRevision:_documents,assetManifestRevision:_assets,...routing}=parseBeeGameContentIndex(JSON.parse(readFileSync(file,'utf8')))
-    return digest(JSON.stringify(routing))
+    const {documentRevision:_documents,assetManifestRevision:_assets,files:_files,documents:_entries,...config}=
+      parseBeeGameContentIndex(JSON.parse(readFileSync(file,'utf8')))
+    return digest(JSON.stringify(config))
   }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
+}
+
+function registryMatches(run: Run) {
+  const current = registryRevision(run.workspacePath)
+  // A design-only handoff has no saved content configuration to freeze.
+  // Later content still goes through the normal registry and runtime checks.
+  return run.designBaseline!.registryRevision === undefined || current === run.designBaseline!.registryRevision
 }
 
 export async function captureDesignBaseline(run: Run): Promise<NonNullable<Run['designBaseline']>> {
@@ -39,7 +48,7 @@ export function designBaselineIssue(run: Run, required = false): string | undefi
   if (!run.designBaseline) return required ? 'Implementation design baseline is missing; complete the existing implementation handoff before delivery.' : undefined
   const check = checkDesignHandoff(run.workspacePath, PROJECT_DOCUMENTS, { digestVersion: run.designBaseline.digestVersion })
   try {
-    if(registryRevision(run.workspacePath)!==run.designBaseline.registryRevision)
+    if(!registryMatches(run))
       return 'Content registry routing differs from the locked implementation baseline; an explicit user design change is required.'
   }catch{return 'Content registry routing is unreadable; the implementation baseline is not current.'}
   if (!check.valid || check.revision !== run.designBaseline.revision)
@@ -53,7 +62,7 @@ export function designBaselineIssue(run: Run, required = false): string | undefi
 export async function baselineAfterSourceEdit(run: Run, edit: SourceEdit): Promise<Run['designBaseline']> {
   const baseline = run.designBaseline
   if (!baseline || edit.sourceEdit.status !== 'saved') return baseline
-  if(registryRevision(run.workspacePath)!==baseline.registryRevision)return baseline
+  if(!registryMatches(run))return baseline
   const path = relative(run.workspacePath, resolve(run.workspacePath,edit.sourceEdit.path)).split('\\').join('/')
   if (!Object.hasOwn(baseline.supportingFiles, path) || !await versionsMatch(run.workspacePath, baseline.protectedFiles) ||
       (await readVersion(run.workspacePath, path)).sha256 !== edit.sourceEdit.after) return baseline

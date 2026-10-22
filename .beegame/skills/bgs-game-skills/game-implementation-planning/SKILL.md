@@ -9,7 +9,7 @@ Plan multi-step implementation from relevant requirements/designs. A local fix c
 
 ## Sources and scope
 
-Complete TECHNICAL_DESIGN.md in the eight-document stage, before visual/resource/UI/Scene production: approach, modules, interfaces, data consumption and verification. Mark unproduced inputs as planned contracts, not delivered paths/IDs/evidence. Revise the same design from actual outputs before implementation; no early layout JSON or second plan.
+Complete TECHNICAL_DESIGN.md in the eight-document stage, before visual/resource/UI/Scene production: approach, modules, interfaces, data consumption and verification. Mark unproduced inputs as planned contracts, not delivered paths/IDs/evidence. Reconcile the interfaces and inputs needed for the first coherent implementation part before locking; unrelated planned resources/content need not be produced yet. No early layout JSON or second plan.
 
 Derive outcomes from confirmed requirements and owning professional records, selected pictures and actual content/code/tests when available. Indexes alone can omit work. Preserve the chosen engine/framework and content authority; do not duplicate layouts or invent another data layer. Do not add template filler or silently defer/drop/simplify confirmed outcomes.
 
@@ -29,4 +29,4 @@ Check that guidance covers required outcomes and that dependencies provide the a
 
 ReadDesignHandoff locates current documents/sections. ReadImplementationTask returns an existing index when present, otherwise technical source; native reads cover other sources/pictures. Plain documents require no machine index, output mapping or finalize.
 
-Before the implementation lock, update affected guidance from produced designs/resources/content, preserving valid work/task IDs. After locking, keep concise progress and result paths in the conversation or existing task list, not another database or technical-document progress log. A Todo tick is not delivery; design changes follow current authorization.
+Before the implementation lock, update affected guidance from the inputs needed now, preserving valid work/task IDs and explicit planned dependencies. After locking, record delivered resource facts in the existing Manifest and concise progress/result paths in the conversation or existing task list; normal content registration does not require a technical-document rewrite or another database. A Todo tick is not delivery; design changes follow current authorization.

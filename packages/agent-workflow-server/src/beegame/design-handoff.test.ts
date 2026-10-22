@@ -11,7 +11,7 @@ import { checkDesignDocumentReferences } from './design-document-references'
 
 const digest = (body: string) => createHash('sha256').update(body).digest('hex')
 
-test('implementation exposes both owner/registry link errors before an acceptance report, including legacy registries', () => fixture(async workspace => {
+test('implementation permits unlinked registered content and still checks explicit owner source links', () => fixture(async workspace => {
   // No documents metadata: kinds must come from the saved documents.
   await writeFile(join(workspace, 'content/index.json'), JSON.stringify({ schema: 'beegame-content-package.v2',
     id: 'fixture', dimension: '2d', entryScene: 'level', files: ['ui/menu.json', 'scenes/level.json'] }))
@@ -22,11 +22,15 @@ test('implementation exposes both owner/registry link errors before an acceptanc
     await writeFile(path, body.replace(/\[[^\]]*\]\((\.\.\/content\/[^)]+)\)/g, '`$1`'))
   }
   expect(checkDesignHandoff(workspace, [...originals.keys()].map(path => path.split('/').at(-1) as DesignDocument)).valid).toBe(true)
-  expect(() => readDesignImplementationChecklist(workspace)).toThrow('UI_UX_SPEC.md and content/index.json')
-  expect(() => readDesignImplementationChecklist(workspace)).toThrow('LEVEL_SCENE_DESIGN.md and content/index.json')
-  expect(() => readDesignImplementationChecklist(workspace)).toThrow('actual Markdown links')
+  expect(readDesignImplementationChecklist(workspace).items.length).toBeGreaterThan(0)
   for (const [path, body] of originals) await writeFile(path, body)
   expect(readDesignImplementationChecklist(workspace).items.length).toBeGreaterThan(0)
+  for (const source of ['ui/menu.json', 'scenes/level.json'])
+    await writeFile(join(workspace, 'content', source.replace('.json', '-actual.json')), await readFile(join(workspace, 'content', source)))
+  await writeFile(join(workspace, 'content/index.json'), JSON.stringify({ schema: 'beegame-content-package.v2',
+    id: 'fixture', dimension: '2d', entryScene: 'level', files: ['ui/menu-actual.json', 'scenes/level-actual.json'] }))
+  expect(() => readDesignImplementationChecklist(workspace)).toThrow('UI_UX_SPEC.md links to sources not registered')
+  expect(() => readDesignImplementationChecklist(workspace)).toThrow('LEVEL_SCENE_DESIGN.md links to sources not registered')
 }))
 
 test('document handoff does not constrain HTML/SVG game implementation', () => fixture(async workspace => {

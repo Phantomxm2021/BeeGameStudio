@@ -47,13 +47,12 @@ const professionalContextParagraphs = [
   'Honor explicit resource sources and usage rights; AI is not the default for all core art. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Procedural replacement of required art needs a concrete blocker and authorization; placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
   'Keep editable sources separate from publication output and retain required licenses.',
 ]
-const firstVersionDeliveryContext = 'Deliver the confirmed scope using the design dependencies and professional methods in the project guide; design records live under docs/. Subsequent production revises those same records.'
+const firstVersionDeliveryContext = 'Deliver the confirmed scope using the design dependencies and professional methods in the project guide; design records live under docs/.'
 const editableWebDeliveryContext = 'This project requires BGS visual editing: content/scenes/*.json and content/ui/*.json are editable data consumed by the confirmed engine, not a separate engine or required game scaffold. Register Scene/UI documents in content/index.json and resources in assets/asset-manifest.json. Scene data holds editable world layout and object/resource bindings; UI-only games without a world scene need no empty Scene. Canvas rendering or a single screen does not imply UI-only. Dynamic simulation state and game logic belong in code. The optional browser consumer supports a subset of this data; project code implements the remaining behavior.'
 export const agentProfessionalContext = [PROJECT_WORKING_CONVENTIONS, ...professionalContextParagraphs, firstVersionDeliveryContext].join('\n')
-// Design conventions come from the saved project guide, without a legacy fallback.
+// Native execution reads production guidance from the saved project guide once.
 export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation' | 'requirements'>>, followup = false) => [
   ...professionalContextParagraphs,
-  'Current BGS contract: the current user assignment determines scope and stopping point. Select Skills and organize/self-check the work yourself. Machine design indexes, task coverage graphs and finalization of plain documents are not required, including when an older BGS-generated project guide says otherwise. Preserve explicit user requirements and Editor data contracts.',
   ...(!followup && run.creation?.initialDelivery === 'design-led-first-version' ? [firstVersionDeliveryContext] : []),
   ...(requiresBgsEditableContent(run) ? [editableWebDeliveryContext] : []),
 ].join('\n')

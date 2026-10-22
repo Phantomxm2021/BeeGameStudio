@@ -1,9 +1,10 @@
-import { readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { readdirSync, readFileSync, realpathSync, lstatSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { inspectUiLayout, isUiControl, rectanglesIntersect } from '../../../scene-editor/src/ui-layout-inspection'
 import { parseBeeGameContentDocument } from './game-content-schema'
 import { auditUiInteractiveBounds, isViewportPair, readUiLayoutCameras, type LayoutConstraints, type UiDocument, type LayoutDiagnostic, type LayoutMeasurement } from './ui-layout-audit'
 import { designSupportingFiles } from './design-handoff'
+import { collectContentSourceFiles } from './content-source-files'
 import { sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
 import { sceneLayoutDraftIssues, contentDraftStructureIssues } from './game-content-package'
 
@@ -191,8 +192,8 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
     note: 'Checks each saved file and explicitly linked layoutUnderlay compositions with declared clearance/occluders. Unlinked layers, omitted markers and agreement with prose are not established; Review must inspect their actual coverage. Not runtime or visual verification.' }
 }
 
-/** The prose owns coverage/meaning; one linked UI source owns computed geometry.
- * Links also put these files in the existing revision and version/hash scope. */
+/** Check saved geometry and preserve explicit design-source references without
+ * requiring the design document to enumerate later production files. */
 export function checkReviewUiLayouts(workspace: string, confirmed?: LayoutConstraints, deferTileSets = true, details = false) {
   const check = checkDesignLayouts(workspace, confirmed, deferTileSets, details)
   const issues = [...check.issues]
@@ -200,7 +201,6 @@ export function checkReviewUiLayouts(workspace: string, confirmed?: LayoutConstr
   let expected: string[] = []
   try {
     expected = designSupportingFiles(workspace, ['UI_UX_SPEC.md']).filter(file => file.startsWith('content/ui/'))
-    const linked = new Set(expected)
     for (const file of expected) if (!savedFiles.has(file))
       issues.push(`${file}: required owner-linked UI source is missing from the saved batch.`)
     const ids = new Set<string>()
@@ -211,7 +211,6 @@ export function checkReviewUiLayouts(workspace: string, confirmed?: LayoutConstr
         issues.push(...contentDraftStructureIssues(file, doc))
         if (doc.kind === 'ui-flow') continue
         compositions++
-        if (!linked.has(file)) issues.push(`${file}: link this layout from its owning docs/UI_UX_SPEC.md section before Review, e.g. [layout](../${file}). Markdown links resolve relative to docs/, so content/... alone points to docs/content/... rather than the saved source.`)
         if (ids.has(doc.id)) issues.push(`${file}: duplicate reviewed UI composition id ${doc.id}; use distinct ids for different compositions.`)
         ids.add(doc.id)
       } catch { /* Invalid inputs are already reported by the geometry check. */ }
@@ -230,9 +229,16 @@ export function checkReviewUiLayouts(workspace: string, confirmed?: LayoutConstr
 export function checkReviewSceneLayouts(workspace: string) {
   const issues: string[] = [], files: string[] = []
   try {
-    files.push(...designSupportingFiles(workspace, ['LEVEL_SCENE_DESIGN.md'])
-      .filter(path => path.startsWith('content/scenes/')))
-    if (!files.length) issues.push('Link the planned Scene JSON from its owning docs/LEVEL_SCENE_DESIGN.md section before Review, e.g. [scene](../content/scenes/<file>.json). Markdown links resolve relative to docs/, not the workspace root.')
+    const expected = designSupportingFiles(workspace, ['LEVEL_SCENE_DESIGN.md'])
+      .filter(path => path.startsWith('content/scenes/'))
+    // UI-only work needs no empty Scene; an existing directory is still checked
+    // for aliases, malformed files and every newly added Scene.
+    try {
+      lstatSync(join(workspace, 'content/scenes'))
+      files.push(...collectContentSourceFiles(workspace, ['content/scenes'], issues))
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    for (const file of expected) if (!files.includes(file))
+      issues.push(`${file}: required owner-linked Scene source is missing from the saved batch.`)
     const ids = new Set<string>()
     for (const file of files) try {
       const doc = parseBeeGameContentDocument(JSON.parse(readFileSync(join(workspace, file), 'utf8')))

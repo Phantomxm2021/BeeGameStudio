@@ -1,3 +1,4 @@
+import { readDesignHandoff } from '../workflow-read-tools'
 import { test, expect } from 'bun:test'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -244,6 +245,18 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     const plainBaseline = await command('--design', 'baseline')
     expect(plainBaseline.code, plainBaseline.stderr).toBe(0)
     expect(JSON.parse(plainBaseline.stdout)).not.toHaveProperty('requirementCount')
+    const plainImplementation = await command('--design', 'implementation')
+    expect(plainImplementation.code, plainImplementation.stderr).toBe(0)
+    const navigation = JSON.parse(plainImplementation.stdout)
+    expect(navigation.items).toEqual([])
+    expect(navigation.documents).toHaveLength(1)
+    expect(navigation.documents[0]).toMatchObject({ document: 'TECHNICAL_DESIGN.md' })
+    const section = navigation.documents[0].sections[0].heading
+    expect(section).toBe('Fixture')
+    const plainSource = readDesignHandoff(root, { read: [{ document: 'TECHNICAL_DESIGN.md', sections: [section] }] })
+    expect(plainSource.valid).toBe(true)
+    expect(plainSource.sources[0]!.reads[0]!.text).toContain('Plain design decisions.')
+
     expect(await Promise.all(help.writingOrder.map((name: string) => readFile(join(root, 'docs', name), 'utf8')))).toEqual(plainBefore)
     for (const name of help.writingOrder) expect(await Bun.file(join(root, designHandoffPath(name))).exists()).toBe(false)
     const beforeInvalid = inspected.length

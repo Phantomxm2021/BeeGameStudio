@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkDesignLayouts, checkReviewUiLayouts, checkReviewSceneLayouts, checkReviewDesignLayouts } from './design-layout-check'
 import { designSupportingFileDigest } from './design-handoff'
+import { checkDesignDocumentReferences } from './design-document-references'
 import { runGameContentCommand } from './game-content-validation-cli'
 import { uiLayoutFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
 
@@ -42,7 +43,7 @@ test('UI Review rejects illegal resource slots before freezing but accepts genui
   expect(runGameContentCommand(f.root, ['--check-drafts', 'content/ui/menu.json'])).toMatchObject({ valid: true })
 })
 
-test('Review requires owner-linked Scene drafts, not an asset manifest, package or model PASS', () => {
+test('Review checks saved Scenes without new owner links and still reports missing linked sources', () => {
   const f = sceneDraft()
   const before = readFileSync(f.scenePath, 'utf8')
   expect(checkReviewSceneLayouts(f.root)).toMatchObject({ valid: true, files: ['content/scenes/level.json'] })
@@ -51,7 +52,11 @@ test('Review requires owner-linked Scene drafts, not an asset manifest, package 
   expect(checkReviewSceneLayouts(f.root).valid).toBe(false)
   f.saveScene()
   writeFileSync(join(f.root, 'docs/LEVEL_SCENE_DESIGN.md'), '# Scene\n')
-  expect(checkReviewSceneLayouts(f.root).issues.join(' ')).toContain('Link the planned Scene JSON')
+  expect(checkReviewSceneLayouts(f.root)).toMatchObject({valid:true, files:['content/scenes/level.json']})
+  const later=sceneLayoutFixture(); later.id='later'
+  later.data.cameraNodeId = 'missing'
+  writeFileSync(join(f.root,'content/scenes/later.json'),JSON.stringify(later))
+  expect(checkReviewSceneLayouts(f.root).issues.join(' ')).toContain('later.json')
 })
 
 test.each(['duplicate-node', 'missing-parent', 'cycle', 'wrong-kind', 'invalid-transform', 'missing-camera'])(
@@ -378,12 +383,12 @@ test('Review recomputes linked saved geometry without a Content package or claim
   writeFileSync(path, JSON.stringify(ui))
   expect(checkReviewUiLayouts(root)).toMatchObject({ valid: true, files: ['content/ui/menu.json'] })
   writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n')
-  expect(checkReviewUiLayouts(root).issues.join(' ')).toContain('link this layout')
+  expect(checkReviewUiLayouts(root).valid).toBe(true)
   writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Layout](content/ui/menu.json)\n')
   const wrongBase=checkReviewUiLayouts(root)
-  expect(wrongBase.valid).toBe(false)
-  expect(wrongBase.issues.join(' ')).toContain('[layout](../content/ui/menu.json)')
-  expect(wrongBase.issues.join(' ')).toContain('docs/content/')
+  expect(wrongBase.valid).toBe(true)
+  // Prose links have their own existing checker; geometry does not invent links.
+  expect(checkDesignDocumentReferences(root, 'UI_UX_SPEC.md').issues.join(' ')).toContain('content/ui/menu.json')
   expect(readFileSync(path,'utf8')).toBe(JSON.stringify(ui))
 })
 
@@ -686,4 +691,20 @@ test('checks declared world/screen clearance through the real camera projection 
     const result = runGameContentCommand(root, ['--layout-draft', 'content/ui/menu.json', ...size.map(String)]) as any
     expect(result.diagnostics.occlusionViolations).toEqual([])
   }
+})
+
+
+test('joint layout inspection supports incremental UI-only content without an empty Scene or new prose links', () => {
+  const f = fixture()
+  writeFileSync(join(f.root, 'docs/UI_UX_SPEC.md'), '# UI\nPlanned screens.\n')
+  writeFileSync(join(f.root, 'docs/LEVEL_SCENE_DESIGN.md'), '# Scene\nUI-only.\n')
+  f.save(uiLayoutFixture())
+  const later = uiLayoutFixture(); later.id = 'later'
+  writeFileSync(join(f.root, 'content/ui/later.json'), JSON.stringify(later))
+  expect(checkReviewDesignLayouts(f.root)).toMatchObject({ valid: true })
+  expect(checkReviewDesignLayouts(f.root).files).toEqual(['content/ui/later.json', 'content/ui/menu.json'])
+  later.data.nodes[1]!.layout!.size![1] = 20
+  writeFileSync(join(f.root, 'content/ui/later.json'), JSON.stringify(later))
+  expect(checkReviewDesignLayouts(f.root).issues.join(' ')).toContain('later.json')
+  expect(checkReviewDesignLayouts(f.root).valid).toBe(false)
 })
