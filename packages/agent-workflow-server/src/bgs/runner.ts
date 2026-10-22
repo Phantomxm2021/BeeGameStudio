@@ -178,7 +178,6 @@ class BgsRuntime implements BeeGameSessionRuntime {
     private access: Awaited<ReturnType<typeof projectExecutionAccess>>) {}
 
   static async start(input: BeeGameSessionRunnerStartInput, options:ProviderNetworkOptions & {command?:readonly string[]}) {
-    if (input.isolatedTask || input.nativeTools?.length) throw Error('Legacy CLI role policies are unavailable in the BGS runtime')
     if (!input.env.BEEGAME_CONFIG_DIR) throw Error('An owner-scoped BGS configuration directory is required')
     const access = await projectExecutionAccess({ workspacePath: input.cwd, sessionId: input.sessionId,
       environment: input.env })

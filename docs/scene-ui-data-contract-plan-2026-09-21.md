@@ -1,5 +1,7 @@
 # Scene / UI 数据规范与编辑器落地方案
 
+> 2026-10-22 维护说明：下文保留历史方案与验证记录。旧离线 PNG Scene/Tilemap 预览已退役；坐标与透明度覆盖改测当前共享几何和 Canvas，Tilemap 像素与排序覆盖迁到 [现有编辑器浏览器测试](../packages/agent-workflow-server/src/beegame/scene-layout-browser.test.ts)，空地图、atlas UV 与 10000-cell 批处理由 [Tilemap 单元测试](../packages/scene-editor/tests/tilemap.test.ts) 覆盖。未给轻量 Scene Canvas 新增 Tilemap 支持。
+
 状态：核心数据合同与矩形 Tilemap 编辑闭环已实施，并完成下述无费用验证；新项目交付及完整性能验收未完成。2026-09-21。
 
 本方案替代已撤回的“共享游戏运行时/绘制模块”方案。此前试验性代码已撤销；不得恢复或据旧方案继续开发。

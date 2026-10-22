@@ -4,7 +4,6 @@ import {
   buildApiEnv,
   buildFrontendEnv,
   resolveDashboardDevOptions,
-  resolveProductionApiBase,
 } from './dashboard-dev-lib'
 
 describe('dashboard dev launcher helpers', () => {
@@ -72,10 +71,4 @@ describe('dashboard dev launcher helpers', () => {
     expect(env.BEEGAME_API_CORS_ORIGINS).toBe('http://127.0.0.1:62173')
   })
 
-  test('keeps production frontend on same-origin api by default', () => {
-    expect(resolveProductionApiBase({ env: {} })).toBe('')
-    expect(resolveProductionApiBase({
-      env: { BEEGAME_DASHBOARD_API_BASE_URL: 'http://127.0.0.1:3040' },
-    })).toBe('http://127.0.0.1:3040')
-  })
 })

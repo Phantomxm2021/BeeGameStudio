@@ -21,16 +21,6 @@ export type BeeGameCreditBalance = {
   }
 }
 
-export type BeeGameUsageEvent = {
-  id: string
-  userId: string
-  credits: number
-  projectId?: string
-  weightedTokens?: number
-  metadata: Record<string, unknown>
-  createdAt: string
-}
-
 export type BeeGameUsageSummary = {
   entriesCount: number
   inputTokens: number
@@ -112,16 +102,6 @@ export type BeeGameBillingEvents = {
   events: BeeGameBillingEvent[]
 }
 
-type BeeGameUsageEventResponse = {
-  id: string
-  userId: string
-  projectId?: string
-  weightedTokensDelta: number
-  creditsMicro: number
-  metadata: Record<string, unknown>
-  createdAt: string
-}
-
 type BeeGameUsageSummaryResponse = {
   eventsCount: number
   promptTokens: number
@@ -168,28 +148,6 @@ const toCreditBalance = (
 export const getCreditBalance = async (background = false): Promise<BeeGameCreditBalance> =>
   toCreditBalance(await getUsageWallet(background))
 
-const toUsageEvent = (
-  event: BeeGameUsageEventResponse,
-): BeeGameUsageEvent => ({
-  id: event.id,
-  userId: event.userId,
-  credits: event.creditsMicro / 1_000_000,
-  ...(event.projectId ? { projectId: event.projectId } : {}),
-  weightedTokens: event.weightedTokensDelta,
-  metadata: event.metadata,
-  createdAt: event.createdAt,
-})
-
-const requestUsageEvents = (
-  projectId?: string,
-): Promise<BeeGameUsageEventResponse[]> =>
-  apiClient.get('/api/usage/events', {
-    ...(projectId ? { params: { projectId } } : {}),
-  })
-
-export const getUsageEvents = async (): Promise<BeeGameUsageEvent[]> =>
-  (await requestUsageEvents()).map(toUsageEvent)
-
 const requestUsageSummary = (
   projectId?: string,
   background = false,
@@ -215,7 +173,6 @@ export const getCreditSummary = async (
     weightedTokens: summary.weightedTokens,
   }
 }
-
 
 export const grantCredits = (
   input: BeeGameCreditGrantInput,

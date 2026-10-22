@@ -56,25 +56,10 @@ export function openProjectRoute(projectId: string, options: { replace?: boolean
   notifyWorkspaceRouteChanged();
 }
 
-export function openProjectEditorRoute(projectId: string, editor: ProjectEditorRoute): void {
-  const url = currentUrl();
-  const normalizedProjectId = projectId.trim();
-  if (!url || !normalizedProjectId) return;
-  url.pathname = '/';
-  url.searchParams.set(PROJECT_QUERY, normalizedProjectId);
-  url.searchParams.set(EDITOR_QUERY, editor);
-  url.searchParams.delete(EDITOR_FILE_QUERY);
-  url.searchParams.delete('resourceLibrary');
-  url.searchParams.delete('resourcePack');
-  window.history.pushState({ projectId: normalizedProjectId, editor }, '', url);
-  notifyWorkspaceRouteChanged();
-}
-
 /**
  * Open one project editor document in a separate browser tab.
  *
- * Unlike openProjectEditorRoute this does not mutate the current tab's
- * history. URLSearchParams performs the required encoding for document paths
+ * Keeps the current tab's history unchanged. URLSearchParams encodes document paths
  * containing slashes, spaces, unicode, or query-like characters.
  */
 export function openProjectEditorFileRoute(

@@ -54,18 +54,6 @@ export function browseResourceCatalogPacks(
   return page(filtered.map(({ pack, elements: packElements }) => summarizePack(pack, packElements)), catalogRequest, facets, item => item.packId)
 }
 
-/** Browse pre-aggregated Pack summaries without loading every element. */
-export function browseResourceCatalogPackSummaries(
-  summaries: readonly ResourceCatalogPack[],
-  request: ResourceCatalogRequest,
-): ResourceCatalogPage<ResourceCatalogPack> {
-  const catalogRequest = resolveCatalogRequest(request, 'pack-summaries')
-  const filtered = summaries
-    .filter(pack => catalogPackMatches(pack, catalogRequest.filters))
-    .sort((left, right) => compareText(left.packName, right.packName) || compareText(left.packId, right.packId))
-  return page(filtered, catalogRequest, collectSummaryFacets(summaries), item => item.packId)
-}
-
 export function hasElementCatalogFilters(
   filters?: ResourceCatalogFilter,
 ): boolean {
@@ -336,37 +324,6 @@ function summarizePack(pack: ResourcePack, elements: readonly ResourceElement[])
     ...(pack.author ? { author: pack.author } : {}),
     ...(pack.source ? { source: pack.source } : {}),
     compatibleEngines: [...(pack.compatibleEngines ?? [])],
-  }
-}
-
-function catalogPackMatches(pack: ResourceCatalogPack, filters?: ResourceCatalogFilter): boolean {
-  if (!filters) return true
-  if (filters.packIds?.length && !filters.packIds.includes(pack.packId)) return false
-  if (filters.dimensions?.length && !filters.dimensions.includes(pack.dimension)) return false
-  if (filters.primaryCategories?.length && !filters.primaryCategories.includes(pack.primaryCategory)) return false
-  if (filters.styles?.length && !intersectsNormalized(filters.styles, pack.styles)) return false
-  if (filters.gameTypes?.length && !intersectsNormalized(filters.gameTypes, pack.gameTypes)) return false
-  if (filters.packTags?.length && !intersectsNormalized(filters.packTags, pack.tags)) return false
-  if (filters.categories?.length && !intersects(filters.categories, pack.categories)) return false
-  if (filters.usageTags?.length && !intersects(filters.usageTags, pack.usageTags)) return false
-  if (filters.assetKinds?.length && !intersects(filters.assetKinds, pack.assetKinds)) return false
-  if (filters.capabilities?.length && !filters.capabilities.every(value => pack.capabilities.includes(value))) return false
-  if (filters.formats?.length && !intersectsNormalized(filters.formats.map(value => value.replace(/^\./, '')), pack.formats)) return false
-  return true
-}
-
-function collectSummaryFacets(packs: readonly ResourceCatalogPack[]): ResourceCatalogFacets {
-  return {
-    dimensions: unique(packs.map(pack => pack.dimension)),
-    primaryCategories: unique(packs.map(pack => pack.primaryCategory)),
-    categories: unique(packs.flatMap(pack => [...pack.categories])),
-    styles: unique(packs.flatMap(pack => [...pack.styles])),
-    gameTypes: unique(packs.flatMap(pack => [...pack.gameTypes])),
-    packTags: unique(packs.flatMap(pack => [...pack.tags])),
-    usageTags: unique(packs.flatMap(pack => [...pack.usageTags])),
-    assetKinds: unique(packs.flatMap(pack => [...pack.assetKinds])),
-    capabilities: unique(packs.flatMap(pack => [...pack.capabilities])),
-    formats: unique(packs.flatMap(pack => [...pack.formats])),
   }
 }
 

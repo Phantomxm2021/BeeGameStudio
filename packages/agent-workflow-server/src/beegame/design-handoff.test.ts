@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, writeFile, rm, rename, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkDesignHandoff, checkDesignHandoffDraft, designCalculationFiles, designSupportingFiles, designDocumentVersion, designHandoffPath,
+import { checkDesignHandoff, checkDesignHandoffDraft, designSupportingFiles, designDocumentVersion, designHandoffPath,
   readDesignAcceptanceRequirements, snapshotDesignDocuments, finalizeDesignDocuments, designReviewIndexes,
   DESIGN_HANDOFF_INSTRUCTION, readDesignImplementationChecklist, type DesignDocument } from './design-handoff'
 import { designDocumentFixture, designHandoffFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
@@ -539,16 +539,16 @@ test('only existing explicitly cited calculation files enter scoped writes and r
   await writeFile(join(workspace, 'docs/calc/unrelated.json'), '{}')
   await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'), designDocumentFixture('BALANCE_DESIGN.md') +
     '[Model](calc/model.mjs)\n[Results][result]\n\n[result]: calc/appendix.md\n')
-  expect(designCalculationFiles(workspace, ['BALANCE_DESIGN.md'])).toEqual(['docs/calc/appendix.md', 'docs/calc/model.mjs'])
+  expect(designSupportingFiles(workspace, ['BALANCE_DESIGN.md'])).toEqual(['docs/calc/appendix.md', 'docs/calc/model.mjs'])
   const original = checkDesignHandoff(workspace, ['BALANCE_DESIGN.md'])
   expect(Object.keys(original.evidenceHashes).sort()).toEqual(['docs/calc/appendix.md', 'docs/calc/model.mjs'])
   await writeFile(join(workspace, 'docs/calc/model.mjs'), 'export default { changed: true }')
   expect(checkDesignHandoff(workspace, ['BALANCE_DESIGN.md']).revision).not.toBe(original.revision)
   await rm(join(workspace, 'docs/calc/model.mjs'))
   await symlink(join(workspace, 'docs/calc/unrelated.json'), join(workspace, 'docs/calc/model.mjs'))
-  expect(() => designCalculationFiles(workspace, ['BALANCE_DESIGN.md'])).toThrow('must not be a symlink')
+  expect(() => designSupportingFiles(workspace, ['BALANCE_DESIGN.md'])).toThrow('must not be a symlink')
   await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'), designDocumentFixture('BALANCE_DESIGN.md') + '\n[Missing](calc/missing.json)\n')
-  expect(designCalculationFiles(workspace, ['BALANCE_DESIGN.md'])).toEqual([])
+  expect(designSupportingFiles(workspace, ['BALANCE_DESIGN.md'])).toEqual([])
   expect(checkDesignDocumentReferences(workspace, 'BALANCE_DESIGN.md').valid).toBe(false)
 }))
 

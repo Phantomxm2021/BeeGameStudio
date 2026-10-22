@@ -63,7 +63,7 @@ test('project turn preparation forwards host UI conditions and clears them for a
   } finally { await manager.dispose() }
 })
 
-test('native MCP exposes the read-only always-loaded tool and preserves host sizes, coordinates and source bytes', async () => {
+test('native MCP exposes the read-only tools and preserves host sizes, coordinates and source bytes', async () => {
   const { root } = fixture()
   const before = readFileSync(join(root, 'content/ui/menu.json'))
   const files = readdirSync(root, { recursive: true })
@@ -72,7 +72,6 @@ test('native MCP exposes the read-only always-loaded tool and preserves host siz
     const tools = (await access.client.listTools()).tools
     expect(tools.map(t => t.name).sort()).toEqual([...NATIVE_READ_TOOLS].sort())
     expect(tools[0]!.annotations?.readOnlyHint).toBe(true)
-    expect(tools[0]!._meta?.['anthropic/alwaysLoad']).toBe(true)
     const summary = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })
     expect(summary.isError).toBe(false)
     expect(text(summary)).toContain('PASS (reported scope only)')

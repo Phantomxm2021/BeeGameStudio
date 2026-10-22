@@ -60,7 +60,7 @@ export function openResourceLibraryAccess(input: {
     baseUrl: base,
     instruction: [
       'Built-in resource library is available. Its catalog exposes pack/element facets, previews, license and dependency metadata; access failures are not empty search results.',
-      'Use the optional project asset command described in the current project context for catalog browsing and selected-file download. Native WebSearch/WebFetch and other sourcing methods remain available independently.',
+      'Use the optional project asset command described in the current project context for catalog browsing and selected-file download.',
     ].join('\n'),
     catalogObserved() { return catalogObserved },
     close() { server.stop(true) },

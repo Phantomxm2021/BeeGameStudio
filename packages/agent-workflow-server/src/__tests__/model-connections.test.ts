@@ -185,7 +185,7 @@ test('administrator can publish a subscription-only model without a platform API
   const app = createAgentWorkflowApp({ dashboardDataRoot: root, modelConfigStore: false, skillsConfig: false,
     currentUser: { id: 'owner', role: 'owner' }, registerCleanup: cleanup => cleanups.push(cleanup) })
   try {
-    const response = await app.request('/api/model-configs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'My Bgs', provider: 'openai-compatible', authMethods: ['chatgpt-subscription'], published: true, models: { balanced: 'claude-fixture' } }) })
+    const response = await app.request('/api/model-configs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'My Bgs', provider: 'openai-compatible', authMethods: ['chatgpt-subscription'], published: true, models: { balanced: 'model-fixture' } }) })
     expect(response.status).toBe(200)
     const config = await response.json()
     expect(config).toMatchObject({ apiKeyPreview: '', authMethods: ['chatgpt-subscription'], published: true })

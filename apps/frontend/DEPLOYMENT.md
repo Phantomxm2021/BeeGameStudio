@@ -51,12 +51,23 @@ Do not configure Supabase service-role keys in the frontend or runtime host for 
 ## Build
 
 ```bash
-cd apps/frontend
-bun install
-bun run build
+# From the repository root, using the same lockfile as CI and Docker:
+bun install --frozen-lockfile --ignore-scripts
+bun run --cwd apps/frontend build
 ```
 
-Deploy the generated `dist/` folder to your static hosting provider.
+Deploy the generated `apps/frontend/dist/` folder to your static hosting provider.
+The frontend depends on workspace packages; a standalone npm install and local
+`package-lock.json` are no longer supported.
+
+To build only its Docker image, use the repository root as the context:
+
+```bash
+docker build -f docker/Dockerfile.frontend -t beegame-frontend .
+```
+
+`apps/frontend/Dockerfile` aliases the same recipe and also requires the root
+context. This build does not compile or copy `vendor/bgs`.
 
 ## Docker Compose
 

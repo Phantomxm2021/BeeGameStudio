@@ -72,12 +72,6 @@ import type {
   SupabaseDashboardStore,
 } from './supabase-dashboard-store'
 import type { SupabaseRuntimeEnvClient } from './supabase-runtime-env-client'
-import {
-  loadWebToolsConfig,
-  saveWebToolsConfig,
-  toPublicWebToolsConfig,
-  type WebToolsConfig,
-} from './web-tools-store'
 import type {
   BeeGameUsageBillingClient,
   BeeGameUsageBillingRecordInput,
@@ -504,32 +498,6 @@ export class DashboardRepository {
         })
   }
 
-  async loadWebTools(
-    request: Request,
-    user: BeeGameUserContext,
-  ): Promise<WebToolsConfig> {
-    const supabase = this.supabaseForRequest(request)
-    const config = supabase
-      ? await supabase.loadWebTools(user.id)
-      : loadWebToolsConfig({
-          dataDir: this.options.getUserDataRoot(request),
-        })
-    return toPublicWebToolsConfig(config)
-  }
-
-  async saveWebTools(
-    request: Request,
-    user: BeeGameUserContext,
-    input: WebToolsConfig,
-  ): Promise<WebToolsConfig> {
-    const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.saveWebTools(user.id, input)
-      : saveWebToolsConfig(input, {
-          dataDir: this.options.getUserDataRoot(request),
-        })
-  }
-
   async loadRuntimeSettings(
     request: Request,
     _user: BeeGameUserContext,
@@ -826,10 +794,6 @@ export class DashboardRepository {
     modelConfigId?: string,
   ): Promise<Record<string, string>> {
     const dataDir = userDataRoot ?? this.options.dashboardDataRoot
-    const hostToolEnv = Object.fromEntries(
-      ['BEEGAME_ARTIFACTS_URL', 'BEEGAME_ARTIFACTS_TOKEN', 'TAVILY_API_KEY']
-        .flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []),
-    )
     clearRuntimeBuiltinSkills({ dataDir })
     const builtinSkillsDir = resolveBuiltinSkillsDirectory()
     if (this.supabaseStore && userId) {
@@ -874,7 +838,6 @@ export class DashboardRepository {
       return {
         ...env,
         ...selectedModelEnv,
-        ...hostToolEnv,
         ...hostIsolationEnv,
         BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(mcpServers),
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
@@ -895,7 +858,6 @@ export class DashboardRepository {
     if (selectedId && !selected) throw new Error('Selected model is no longer available')
     const selectedModelEnv = selected ? resolveModelConnection(dataDir, selected, mapModelConfigToRuntime(selected.id)?.env ?? {}) : {}
     return {
-      ...hostToolEnv,
       ...platformEnv,
       ...selectedModelEnv,
       BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(await this.authorizeRuntimeMcpServers(

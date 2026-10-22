@@ -5,7 +5,7 @@ import { acquireTextureSource } from './texture-cache'
 afterEach(() => vi.restoreAllMocks())
 
 it('shares concurrent atlas loads and releases only after the last consumer', async () => {
-  const texture = new THREE.Texture()
+  const texture = new THREE.Texture<HTMLImageElement>()
   const dispose = vi.spyOn(texture, 'dispose')
   const load = vi.spyOn(THREE.TextureLoader.prototype, 'loadAsync').mockResolvedValue(texture)
   const a = acquireTextureSource('test-atlas.png')
@@ -31,7 +31,7 @@ it('shares concurrent atlas loads and releases only after the last consumer', as
 })
 
 it('allows a fresh attempt after failed consumers release the source', async () => {
-  const load = vi.spyOn(THREE.TextureLoader.prototype, 'loadAsync').mockRejectedValueOnce(new Error('decode failed')).mockResolvedValue(new THREE.Texture())
+  const load = vi.spyOn(THREE.TextureLoader.prototype, 'loadAsync').mockRejectedValueOnce(new Error('decode failed')).mockResolvedValue(new THREE.Texture<HTMLImageElement>())
   const failed = acquireTextureSource('failed-atlas.png')
   await expect(failed.texture).rejects.toThrow('decode failed')
   failed.release()

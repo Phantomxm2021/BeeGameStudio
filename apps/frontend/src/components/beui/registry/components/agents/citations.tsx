@@ -1,15 +1,12 @@
 "use client";
 
-import { BookOpenText, ChevronDown, ExternalLink, Globe2 } from "lucide-react";
+import { ExternalLink, Globe2 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type ReactNode,
-  useCallback,
   useId,
-  useState,
 } from "react";
-import { AgentDisclosure } from "@/components/beui/registry/components/agents/agent-disclosure";
-import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@/components/beui/registry/lib/ease";
+import { EASE_OUT, SPRING_LAYOUT } from "@/components/beui/registry/lib/ease";
 import { useFavicon } from "@/components/beui/registry/lib/hooks/use-favicon";
 import { cn } from "@/components/beui/registry/lib/utils";
 
@@ -18,24 +15,6 @@ export interface CitationItem {
   title: ReactNode;
   domain?: ReactNode;
   url?: string;
-}
-
-export interface CitationsProps {
-  citations: CitationItem[];
-  title?: ReactNode;
-  open?: boolean;
-  defaultOpen?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  idPrefix?: string;
-  className?: string;
-}
-
-export interface CitationProps {
-  citationId: string;
-  index: number;
-  /** Must match the related Citations idPrefix. */
-  idPrefix: string;
-  className?: string;
 }
 
 export interface CitationListProps {
@@ -52,26 +31,6 @@ export interface CitationStackProps {
 
 function citationTargetId(prefix: string, citationId: string) {
   return `${prefix}-${citationId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-}
-
-export function Citation({
-  citationId,
-  index,
-  idPrefix,
-  className,
-}: CitationProps) {
-  return (
-    <a
-      href={`#${citationTargetId(idPrefix, citationId)}`}
-      aria-label={`View citation ${index}`}
-      className={cn(
-        "mx-0.5 inline-flex min-w-4 -translate-y-0.5 items-center justify-center rounded-md bg-muted/60 px-1 py-0.5 text-xs font-semibold leading-4 text-muted-foreground no-underline outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-        className,
-      )}
-    >
-      {index}
-    </a>
-  );
 }
 
 export function CitationFavicon({
@@ -221,68 +180,6 @@ export function CitationList({
           </motion.div>
         ))}
       </AnimatePresence>
-    </div>
-  );
-}
-
-export function Citations({
-  citations,
-  title = "Sources",
-  open,
-  defaultOpen = false,
-  onOpenChange,
-  idPrefix,
-  className,
-}: CitationsProps) {
-  const reduce = useReducedMotion() ?? false;
-  const baseId = useId();
-  const contentId = `${baseId}-content`;
-  const resolvedPrefix =
-    idPrefix ?? `citation-${baseId.replace(/:/g, "")}`;
-  const [internalOpen, setInternalOpen] = useState(defaultOpen);
-  const currentOpen = open ?? internalOpen;
-  const setOpen = useCallback(
-    (next: boolean) => {
-      if (open === undefined) setInternalOpen(next);
-      onOpenChange?.(next);
-    },
-    [onOpenChange, open],
-  );
-
-  return (
-    <div className={cn("w-full text-sm", className)}>
-      <button
-        type="button"
-        aria-expanded={currentOpen}
-        aria-controls={contentId}
-        onClick={() => setOpen(!currentOpen)}
-        className="group -ml-1 flex min-h-8 items-center gap-2 rounded-lg px-1 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <BookOpenText className="size-4" />
-        <span className="font-medium">{title}</span>
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-semibold tabular-nums">
-          {citations.length}
-        </span>
-        <motion.span
-          aria-hidden="true"
-          animate={{ rotate: currentOpen ? 180 : 0 }}
-          transition={reduce ? { duration: 0 } : SPRING_SWAP}
-          className="text-muted-foreground/60"
-        >
-          <ChevronDown className="size-3.5" />
-        </motion.span>
-      </button>
-
-      <AgentDisclosure
-        id={contentId}
-        open={currentOpen}
-      >
-        <CitationList
-          citations={citations}
-          idPrefix={resolvedPrefix}
-          className="mt-1"
-        />
-      </AgentDisclosure>
     </div>
   );
 }

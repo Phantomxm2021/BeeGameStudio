@@ -115,7 +115,6 @@ export async function projectExecutionAccess(input: {
     BEEGAME_CONTENT_CHECKER_MODULE: checker.moduleUrl,
     BEEGAME_SHARP_MODULE: sharp?.moduleUrl ?? '',
     BEEGAME_FONT_MODULE: font?.moduleUrl ?? '',
-    BEEGAME_UI_INSPECTOR_MODULE: new URL('./ui-inspector.mjs', checker.moduleUrl).href,
   }
   const readPaths = ['/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/private/etc',
     '/System', '/Library/Apple', '/Library/Developer', '/dev', '/opt/homebrew',

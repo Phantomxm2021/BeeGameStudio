@@ -12,13 +12,6 @@ export function isProjectExecutionActive(status?: {
   return ['starting', 'queued', 'running', 'resuming', 'waiting_approval'].includes(status?.phase ?? '');
 }
 
-/** Parent completion is not child completion. Consume the canonical child
- * lifecycle, including terminal outcomes restored from transcript history. */
-export function hasActiveSubagents(messages: ReadonlyArray<Pick<Activity, 'isSubagentTool' | 'toolStatus' | 'completionReason'>>): boolean {
-  return messages.some(message => message.isSubagentTool === true &&
-    message.toolStatus === 'running' && !message.completionReason);
-}
-
 /** A terminal turn settles only its own unfinished activity. A completed
  * parent turn does not imply a detached subagent has completed. */
 export function settleChatActivity<T extends Activity>(messages: T[], scope: {

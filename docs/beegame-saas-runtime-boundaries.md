@@ -14,7 +14,7 @@ Supabase owns durable user and business data:
 
 The BeeGame runtime host owns local execution only:
 
-- Claude/BeeGame session hosting.
+- BGS session hosting.
 - Workspace filesystem access inside the configured project root.
 - Preview process start/stop.
 - Tool permission policy and transcript/event streaming.

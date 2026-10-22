@@ -2,9 +2,8 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { readBeeGameAssetManifestSync, writeBeeGameAssetManifest } from './asset-contracts'
-import { validateResourceDelivery } from './resource-validation-cli'
+import { auditAssetContract } from './asset-contract-audit'
 import {
   assetManifestAuthoringExamples,
   assetSourceAuthoringExamples,
@@ -67,7 +66,7 @@ test('every documented source example passes the host source validation', async 
   }
 })
 
-test('independent resource CLI matches the host on pass and actionable failure without rewriting assets', async () => {
+test('production asset audit checks real bytes without rewriting the registry or assets', async () => {
   workspace = await mkdtemp(join(tmpdir(), 'asset-checker-parity-'))
   const value = assetManifestAuthoringExamples().canonical
   await mkdir(join(workspace, 'assets/runtime/example'), { recursive: true })
@@ -78,15 +77,10 @@ test('independent resource CLI matches the host on pass and actionable failure w
   const registryFiles: string[] = ['assets/asset-manifest.json', index.modules.requirements, ...index.modules.resources]
   const check = async (valid: boolean) => {
     const before = await Promise.all(registryFiles.map(path => readFile(join(workspace, path), 'utf8')))
-    const child = Bun.spawn([process.execPath, fileURLToPath(new URL('./resource-validation-cli.ts', import.meta.url))], { cwd: workspace, stdout: 'pipe', stderr: 'pipe' })
-    const stdout = await new Response(child.stdout).text()
-    const stderr = await new Response(child.stderr).text()
-    expect(stderr).toBe('')
-    expect(await child.exited).toBe(valid ? 0 : 1)
-    const result = JSON.parse(stdout)
-    const host = validateResourceDelivery(workspace)
-    expect(result.valid).toBe(host.valid)
-    expect(result.issues).toEqual(host.issues)
+    const result = auditAssetContract(workspace)
+    expect(result.present).toBe(true)
+    expect(result.valid).toBe(valid)
+    if (!valid) expect(result.issues.join(' ')).toContain('assets/runtime/example/resource.json')
     expect(await Promise.all(registryFiles.map(path => readFile(join(workspace, path), 'utf8')))).toEqual(before)
   }
   await check(true)

@@ -40,6 +40,3 @@ export const filterPathsForDisplay = (value: string): string => value
     .split(HTTP_URL)
     .map(segment => /^https?:\/\//i.test(segment) ? segment : filterPathSegment(segment))
     .join('');
-
-/** @deprecated Prefer the explicit filter name; retained for existing Chat call sites. */
-export const shortenAbsolutePathsForDisplay = filterPathsForDisplay;

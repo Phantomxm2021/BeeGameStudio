@@ -50,7 +50,6 @@ test('native Scene tool reports actual hierarchy and Camera coordinates read-onl
   try {
     const tool = (await access.client.listTools()).tools.find(t => t.name === 'CheckSceneLayouts')!
     expect(tool.annotations?.readOnlyHint).toBe(true)
-    expect(tool._meta?.['anthropic/alwaysLoad']).toBe(true)
     const summary = await access.client.callTool({ name: 'CheckSceneLayouts', arguments: {} })
     expect(summary.isError).toBe(false)
     expect(text(summary)).toContain('Camera reference viewports only, not the UI game-view')

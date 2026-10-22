@@ -382,7 +382,6 @@ export type AgentWorkflowAppOptions = {
 
 export const ROUTE_PERMISSION = {
   modelConfig: 'model_config.manage',
-  webTools: 'secrets.manage',
   runtimeSettings: 'runtime_settings.manage',
   mcp: 'mcp.manage',
   userSkills: 'skills.manage',
@@ -1484,65 +1483,6 @@ export function createAgentWorkflowApp(
       })
     }
     return c.json({ deleted })
-  })
-
-  app.get('/api/web-tools', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, ROUTE_PERMISSION.webTools)
-    if (forbidden) return c.json(forbidden, 403)
-    return c.json(await dashboardRepository.loadWebTools(c.req.raw, user))
-  })
-
-  app.put('/api/web-tools', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, ROUTE_PERMISSION.webTools)
-    if (forbidden) return c.json(forbidden, 403)
-    const body = await readJson(c.req.raw)
-    if (
-      !(await hasPermittedOutboundUrl(body.tavilyEndpointUrl)) ||
-      !(await hasPermittedOutboundUrl(body.exaEndpointUrl))
-    ) {
-      return c.json({ error: 'Outbound URL is not permitted' }, 400)
-    }
-    const input = {
-      ...(typeof body.webSearchAdapter === 'string'
-        ? { webSearchAdapter: body.webSearchAdapter as never }
-        : {}),
-      ...(typeof body.webFetchAdapter === 'string'
-        ? { webFetchAdapter: body.webFetchAdapter as never }
-        : {}),
-      ...(typeof body.tavilyEndpointUrl === 'string'
-        ? { tavilyEndpointUrl: body.tavilyEndpointUrl }
-        : {}),
-      ...(typeof body.braveApiKey === 'string'
-        ? { braveApiKey: body.braveApiKey }
-        : {}),
-      ...(typeof body.exaApiKey === 'string'
-        ? { exaApiKey: body.exaApiKey }
-        : {}),
-      ...(typeof body.exaEndpointUrl === 'string'
-        ? { exaEndpointUrl: body.exaEndpointUrl }
-        : {}),
-      ...(typeof body.webFetchHttpTimeoutMs === 'number'
-        ? { webFetchHttpTimeoutMs: body.webFetchHttpTimeoutMs }
-        : {}),
-      ...(body.clearSecret === true ? { clearSecret: true } : {}),
-    }
-    const saved = await dashboardRepository.saveWebTools(c.req.raw, user, input)
-    await dashboardRepository.appendAuditEvent(c.req.raw, user, {
-      actorId: user.id,
-      action: 'web_tools.updated',
-      targetType: 'web_tools',
-      targetId: user.id,
-      metadata: {
-        ...(typeof body.webSearchAdapter === 'string'
-          ? { webSearchAdapter: body.webSearchAdapter }
-          : {}),
-        braveApiKeyChanged: typeof body.braveApiKey === 'string',
-        exaApiKeyChanged: typeof body.exaApiKey === 'string',
-      },
-    })
-    return c.json(saved)
   })
 
   app.get('/api/runtime-settings', async c => {
@@ -3877,7 +3817,6 @@ function publicSessionRouteError(
 function isPrivilegedConfigurationPath(path: string): boolean {
   return [
     '/api/model-configs',
-    '/api/web-tools',
     '/api/runtime-settings',
     '/api/image-generation/settings',
     '/api/mcp-servers',

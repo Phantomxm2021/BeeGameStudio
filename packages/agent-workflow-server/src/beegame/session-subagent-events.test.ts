@@ -4,38 +4,28 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BeeGameSessionManager } from './session-manager'
 
-test('successful TaskStop settles only the matching current task and late progress cannot resurrect it', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-task-stop-'))
-  const manager = new BeeGameSessionManager({ start: async options => ({ stop() {}, async submit(turn) {
-    const notify = (subtype: string, task_id: string) => options.onNativeTaskNotification?.({
-      message: { type: 'system', subtype, task_id, tool_use_id: task_id + '-tool', task_type: 'local_bash' },
-    } as any)
-    notify('task_started', 'server')
-    notify('task_started', 'other')
-    const stop = async (id: string, target: string, returned: string, failed = false) => {
-      await turn.onMessage({ type: 'assistant', message: { content: [
-        { type: 'tool_use', id, name: 'TaskStop', input: { task_id: target } },
-      ] } })
-      await turn.onMessage({ type: 'user', message: { content: [
-        { type: 'tool_result', tool_use_id: id, is_error: failed, content: JSON.stringify({
-          task_id: returned, task_type: 'local_bash', message: 'Successfully stopped task: ' + returned + ' (server)',
-        }) },
-      ] } })
-    }
-    await stop('mismatch', 'server', 'other')
-    await stop('failed', 'other', 'other', true)
-    expect(manager.runtimeSnapshot(options.sessionId)?.activeSubagentToolUseIds).toEqual(['server-tool', 'other-tool'])
-    await stop('success', 'server', 'server')
-    await stop('duplicate', 'server', 'server')
-    notify('task_progress', 'server')
+test('BGS child events track active work and close only the matching child', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-child-lifecycle-'))
+  const manager = new BeeGameSessionManager({ start: async options => ({ reusable: false, stop() {}, async submit(turn) {
+    const notify = (childThreadId: string, childStatus: string) => turn.onMessage({
+      type: 'runtime_event', runtime: 'bgs', eventType: 'system.status',
+      childThreadId, childStatus, parentToolUseID: childThreadId + '-tool',
+    })
+    await notify('first', 'pendingInit')
+    await notify('other', 'running')
+    expect(manager.runtimeSnapshot(options.sessionId)?.activeSubagentToolUseIds).toEqual(['first-tool', 'other-tool'])
+    await notify('first', 'running')
+    await notify('first', 'completed')
     expect(manager.runtimeSnapshot(options.sessionId)?.activeSubagentToolUseIds).toEqual(['other-tool'])
-    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+    await notify('other', 'errored')
+    expect(manager.runtimeSnapshot(options.sessionId)?.activeSubagentToolUseIds).toEqual([])
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Done' })
   } }) }, root)
   try {
-    const session = manager.start({ workspacePath: join(root, 'workspace'), projectId: 'stop-test', userId: 'test' })
+    const session = manager.start({ workspacePath: join(root, 'workspace'), projectId: 'child-test', userId: 'test' })
     await manager.send(session.id, 'Offline fixture')
     await manager.waitForSessionIdle(session.id)
-    expect(manager.runtimeSnapshot(session.id)?.activeSubagentToolUseIds).toEqual(['other-tool'])
+    expect(manager.runtimeSnapshot(session.id)?.activeSubagentToolUseIds).toEqual([])
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 

@@ -4,39 +4,37 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BeeGameSessionManager } from '../beegame/session-manager'
 
-test('web search credentials reach the native process without a project-file copy', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-web-env-'))
+test('runtime forwards current provider credentials and drops retired tool settings', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-runtime-env-'))
+  const retired = Object.fromEntries(['BEEGAME_ARTIFACTS_URL', 'BEEGAME_ARTIFACTS_TOKEN',
+    'TAVILY_API_KEY', 'BRAVE_SEARCH_API_KEY', 'EXA_API_KEY', 'SKILL_SEARCH_ENABLED', 'BGS_USE_OPENAI']
+    .map(key => [key, 'retained-fixture-value']))
   let forwarded: Record<string, string> | undefined
   const manager = new BeeGameSessionManager({ start: async input => {
     forwarded = input.env
     return { stop() {}, async submit(turn) {
-      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Done' })
     } }
-  } }, root, () => ({ BRAVE_SEARCH_API_KEY: 'brave-fixture', EXA_API_KEY: 'exa-fixture' }))
+  } }, root, () => ({ ...retired, OPENAI_API_KEY: 'provider-fixture' }))
   try {
     const session = manager.start({ workspacePath: root, userId: 'owner', projectId: 'project' })
     await manager.sendWithDisplay(session.id, 'Offline environment fixture')
-    for (let i = 0; i < 200 && !forwarded; i++) await new Promise(resolve => setTimeout(resolve, 5))
-    expect(forwarded).toMatchObject({
-      BRAVE_SEARCH_API_KEY: 'brave-fixture', EXA_API_KEY: 'exa-fixture',
-    })
+    await manager.waitForSessionIdle(session.id)
+    expect(forwarded?.OPENAI_API_KEY).toBe('provider-fixture')
+    for (const key of Object.keys(retired)) expect(forwarded).not.toHaveProperty(key)
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
 test('project Chat redacts known runtime credentials from tool output without changing native input', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-chat-secret-'))
-  const secret = 'brave-secret-fixture'
+  const secret = 'provider-secret-fixture'
   let nativeOutput = ''
   const manager = new BeeGameSessionManager({ start: async () => ({ stop() {}, async submit(turn) {
-    nativeOutput = `Search result: ${secret}`
-    await turn.onMessage({ type: 'assistant', message: { content: [
-      { type: 'tool_use', id: 'search-1', name: 'WebSearch', input: { query: 'game sprites' } },
-    ] } })
-    await turn.onMessage({ type: 'user', message: { content: [
-      { type: 'tool_result', tool_use_id: 'search-1', content: nativeOutput },
-    ] } })
-    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
-  } }) }, root, () => ({ BRAVE_SEARCH_API_KEY: secret }))
+    nativeOutput = `Tool output: ${secret}`
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'tool.completed',
+      toolUseID: 'command-1', toolName: 'Bash', output: nativeOutput })
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Done' })
+  } }) }, root, () => ({ OPENAI_API_KEY: secret }))
   try {
     const session = manager.start({ workspacePath: root, userId: 'owner', projectId: 'project' })
     await manager.sendWithDisplay(session.id, 'Offline Chat fixture')

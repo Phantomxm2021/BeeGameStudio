@@ -2,6 +2,8 @@
 
 Last audited: 2026-07-08
 
+> 2026-10-22 maintenance: `GET/PUT /api/web-tools` have been retired. Their dedicated storage/import/re-encryption code is also removed. Historical configuration files, database rows and SQL migrations are retained without modification; no keys were deleted. Model and MCP secret migration remains supported. The table below records the earlier audit boundary, not a currently available Web Tools API.
+
 This audit maps the platform settings UI to the backend or Supabase authority
 that protects each operation. The current product boundary is intentionally
 stricter than a pure permission list: the Platform settings tab is only exposed

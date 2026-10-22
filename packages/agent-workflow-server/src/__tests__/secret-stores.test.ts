@@ -91,20 +91,4 @@ describe('local secret persistence', () => {
     expect(listMcpServers({ dataDir })[0]?.env).toEqual([{ key: 'TOKEN' }])
   })
 
-  test('encrypts web-tools secrets and rewrites legacy plaintext once', async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), 'beegame-web-tools-'))
-    const filePath = join(dataDir, 'web-tools.json')
-    await Bun.write(filePath, JSON.stringify({ version: 1, config: { braveApiKey: 'generated-web-secret' } }))
-    const { loadWebToolsConfig, saveWebToolsConfig } = await import('../web-tools-store')
-
-    expect(loadWebToolsConfig({ dataDir }).braveApiKey).toBe('generated-web-secret')
-    const migrated = await readFile(filePath, 'utf8')
-    expect(migrated).not.toContain('generated-web-secret')
-    expect(JSON.parse(migrated).config.braveApiKey).toMatch(/^v1\./u)
-    expect(await readFile(filePath, 'utf8')).toBe(migrated)
-    saveWebToolsConfig({ braveApiKey: '' }, { dataDir })
-    expect(loadWebToolsConfig({ dataDir }).braveApiKey).toBe('generated-web-secret')
-    saveWebToolsConfig({ clearSecret: true }, { dataDir })
-    expect(loadWebToolsConfig({ dataDir }).braveApiKey).toBeUndefined()
-  })
 })

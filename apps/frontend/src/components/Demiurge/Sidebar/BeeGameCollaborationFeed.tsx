@@ -20,7 +20,7 @@ import { StreamingResponse } from '../../beui/registry/components/agents/streami
 import { Drawer } from '../../beui/registry/components/motion/drawer';
 import { AnimatedBadge, type AnimatedBadgeStatus } from '../../beui/registry/components/motion/animated-badge';
 import { Loader } from '../../beui/registry/components/motion/loader';
-import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
+import { filterPathsForDisplay } from '../../../utils/chatPathDisplay';
 import { redactImageConfigurationForDisplay } from '../../../utils/imageConfigurationDisplay';
 import { activityToolKind, type ActivityToolKind } from '../../../utils/toolActivitySummary';
 import { useSmoothStreamText } from '../../../hooks/useSmoothStreamText';
@@ -129,7 +129,7 @@ const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
         message.taskKind === 'session_lifecycle' || raw.task_kind === 'session_lifecycle';
 };
 
-const displayText = (value: string): string => shortenAbsolutePathsForDisplay(redactImageConfigurationForDisplay(value));
+const displayText = (value: string): string => filterPathsForDisplay(redactImageConfigurationForDisplay(value));
 
 const getToolKind = (toolName?: string): ToolKind => activityToolKind(toolName || '');
 

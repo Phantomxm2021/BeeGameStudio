@@ -6,7 +6,6 @@ import {
   getProjectRouteId,
   openIdeaHomeRoute,
   openProjectEditorFileRoute,
-  openProjectEditorRoute,
   openProjectRoute,
   WORKSPACE_ROUTE_CHANGE_EVENT,
 } from './workspaceRoute';
@@ -35,7 +34,7 @@ describe('workspaceRoute', () => {
   });
 
   it('exits an in-page editor without closing the project tab', () => {
-    openProjectEditorRoute('project-1', 'ui');
+    window.history.replaceState({}, '', '/?project=project-1&editor=ui');
     const close = vi.spyOn(window, 'close').mockImplementation(() => {});
     closeProjectEditorRoute('project-1');
     expect(close).not.toHaveBeenCalled();
@@ -48,16 +47,16 @@ describe('workspaceRoute', () => {
     expect(getProjectRouteId()).toBe('project-1');
     expect(getProjectEditorRoute('project-1')).toBeNull();
 
-    openProjectEditorRoute('project-1', 'scene');
+    window.history.replaceState({}, '', '/?project=project-1&editor=scene');
     expect(window.location.search).toContain('editor=scene');
     expect(getProjectEditorRoute('project-1')).toBe('scene');
 
-    openProjectEditorRoute('project-1', 'ui');
+    window.history.replaceState({}, '', '/?project=project-1&editor=ui');
     expect(getProjectEditorRoute('project-1')).toBe('ui');
   });
 
   it('uses the root route as Idea Home instead of restoring a project', () => {
-    openProjectEditorRoute('project-1', 'scene');
+    window.history.replaceState({}, '', '/?project=project-1&editor=scene');
     openIdeaHomeRoute();
     expect(window.location.pathname).toBe('/');
     expect(window.location.search).toBe('');
@@ -89,7 +88,7 @@ describe('workspaceRoute', () => {
     window.history.replaceState({}, '', '/?project=project-1&editor=scene&editorFile=content%2Fscenes%2Fboss.json');
     expect(getProjectEditorFileRoute('project-1')).toBe('content/scenes/boss.json');
 
-    openProjectEditorRoute('project-1', 'ui');
+    openProjectRoute('project-1');
     expect(getProjectEditorFileRoute('project-1')).toBeNull();
     window.history.replaceState({}, '', '/?project=project-1&editor=ui&editorFile=content%2Fui%2Fmenu.json');
     openIdeaHomeRoute();

@@ -48,5 +48,5 @@ jobs:
         run: bun run test:run --maxWorkers=2
       - name: Build production frontend
         run: bun run build
-      - name: Build shared UI inspector
-        run: bun build ../../packages/scene-editor/src/ui-preview/uiStaticInspection.tsx --target=browser --minify --outfile="${{ runner.temp }}/ui-inspector.mjs"
+      - name: Build shared content runtime
+        run: bun build ../../packages/agent-workflow-server/src/beegame/game-content-consumer.ts --target=browser --minify --outfile="${{ runner.temp }}/content-consumer.mjs"

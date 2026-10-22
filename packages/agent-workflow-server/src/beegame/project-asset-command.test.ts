@@ -10,7 +10,7 @@ import { writeProjectAssetCommand } from './project-asset-command'
 import { parseSpriteSheet, readUiData, spriteSheetSelection } from './game-content-consumer'
 import { writeBeeGameAssetManifest } from './asset-contracts'
 import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contract'
-import { validateResourceDelivery } from './resource-validation-cli'
+import { auditAssetContract } from './asset-contract-audit'
 
 async function run(cwd: string, script: string, ...args: string[]) {
   const child = Bun.spawn([process.execPath, script, ...args], {
@@ -450,7 +450,7 @@ test('project asset command keeps the generated sheet intact and writes frame me
       root_path: 'assets/runtime/ui.png', file_paths: ['assets/runtime/ui.png', 'assets/runtime/ui.json'],
       asset_kind: 'sprite-atlas', dimension: '2D' }
     await writeBeeGameAssetManifest(root, manifest)
-    expect(validateResourceDelivery(root).valid).toBe(true)
+    expect(auditAssetContract(root).valid).toBe(true)
     const ui = readUiData({ schema: 'beegame-content.v1', id: 'title', kind: 'ui-screen',
       assetRefs: ['UI-ATLAS-01'], data: { rootId: 'root', nodes: [
         { id: 'root', role: 'screen-root' },

@@ -32,7 +32,7 @@ test('a language change relaunches the native runner without changing the user m
     expect(submissions.map(input => input.language)).toEqual(['zh', 'en'])
     expect(submissions.map(input => input.prompt)).toEqual(['Continue', 'Continue'])
   } finally {
-    manager.dispose()
+    await manager.dispose()
     await rm(root, { recursive: true, force: true })
   }
 })

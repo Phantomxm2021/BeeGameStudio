@@ -38,12 +38,6 @@ import {
   type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
-import type {
-  WebFetchAdapter,
-  WebSearchAdapter,
-  WebToolsConfig,
-} from './web-tools-store'
-import { toPublicWebToolsConfig } from './web-tools-store'
 
 type Env = Record<string, string | undefined>
 const PLATFORM_RUNTIME_SETTINGS_KEY = 'runtime_settings'
@@ -89,12 +83,6 @@ type SupabaseRuntimeSettingsRow = {
 
 type SupabasePlatformSettingsRow = {
   key: string
-  config: JsonObject
-  updated_at: string
-}
-
-type SupabaseWebToolsRow = {
-  owner_id: string
   config: JsonObject
   updated_at: string
 }
@@ -586,20 +574,11 @@ export class SupabaseDashboardStore {
     return normalized
   }
 
-  async loadWebTools(ownerId: string): Promise<WebToolsConfig> {
-    const rows = await this.rest<SupabaseWebToolsRow[]>(
-      `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=config&limit=1`,
-    )
-    return normalizeWebTools(decryptWebTools(rows[0]?.config ?? {}))
-  }
-
   async migrateLegacySecrets(ownerId: string): Promise<{
     modelConfigs: number
-    webTools: number
     mcpServers: number
   }> {
     let modelConfigs = 0
-    let webTools = 0
     let mcpServers = 0
     const modelRows = await this.rest<SupabaseModelConfigRow[]>(
       `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&select=*`,
@@ -622,29 +601,6 @@ export class SupabaseDashboardStore {
         },
       )
       modelConfigs += 1
-    }
-    const webRows = await this.rest<SupabaseWebToolsRow[]>(
-      `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=*`,
-    )
-    for (const row of webRows) {
-      const config = isObject(row.config) ? row.config : {}
-      const legacy =
-        (typeof config.braveApiKey === 'string' &&
-          !isSecretEnvelope(config.braveApiKey)) ||
-        (typeof config.exaApiKey === 'string' &&
-          !isSecretEnvelope(config.exaApiKey))
-      if (!legacy) continue
-      const normalized = normalizeWebTools(decryptWebTools(config))
-      await this.upsert(
-        'beegame_web_tools',
-        {
-          owner_id: ownerId,
-          config: encryptWebTools(normalized),
-          updated_at: new Date().toISOString(),
-        },
-        'owner_id',
-      )
-      webTools += 1
     }
     const mcpRows = await this.rest<SupabaseMcpServerRow[]>(
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*`,
@@ -683,17 +639,17 @@ export class SupabaseDashboardStore {
       )
       mcpServers += 1
     }
-    const count = modelConfigs + webTools + mcpServers
+    const count = modelConfigs + mcpServers
     if (count > 0) {
       await this.appendAuditEvent(ownerId, {
         actorId: ownerId,
         action: 'secret.migrated',
         targetType: 'secret',
         targetId: 'migration',
-        metadata: { modelConfigs, webTools, mcpServers, count },
+        metadata: { modelConfigs, mcpServers, count },
       })
     }
-    return { modelConfigs, webTools, mcpServers }
+    return { modelConfigs, mcpServers }
   }
 
   async recordSecretMigration(
@@ -707,37 +663,6 @@ export class SupabaseDashboardStore {
       targetId: 'migration',
       metadata,
     })
-  }
-
-  async saveWebTools(
-    ownerId: string,
-    config: WebToolsConfig,
-  ): Promise<WebToolsConfig> {
-    const previous = await this.loadWebTools(ownerId)
-    const normalized = normalizeWebTools({
-      ...previous,
-      ...config,
-      braveApiKey: resolveSecretInput(
-        config.braveApiKey,
-        previous.braveApiKey,
-        config.clearSecret,
-      ),
-      exaApiKey: resolveSecretInput(
-        config.exaApiKey,
-        previous.exaApiKey,
-        config.clearSecret,
-      ),
-    })
-    await this.upsert(
-      'beegame_web_tools',
-      {
-        owner_id: ownerId,
-        config: encryptWebTools(normalized),
-        updated_at: new Date().toISOString(),
-      },
-      'owner_id',
-    )
-    return toPublicWebToolsConfig(normalized)
   }
 
   async listMcpServers(ownerId: string): Promise<McpServerConfig[]> {
@@ -1473,71 +1398,6 @@ function normalizeRuntimeSettings(value: unknown): RuntimeSettingsConfig {
   return normalized
 }
 
-function normalizeWebTools(value: unknown): WebToolsConfig {
-  if (!isObject(value)) return {}
-  return {
-    ...(isWebSearchAdapter(value.webSearchAdapter)
-      ? { webSearchAdapter: value.webSearchAdapter }
-      : {}),
-    ...(isWebFetchAdapter(value.webFetchAdapter)
-      ? { webFetchAdapter: value.webFetchAdapter }
-      : {}),
-    ...(trimString(value.tavilyEndpointUrl)
-      ? { tavilyEndpointUrl: trimString(value.tavilyEndpointUrl) }
-      : {}),
-    ...(trimString(value.braveApiKey)
-      ? { braveApiKey: trimString(value.braveApiKey) }
-      : {}),
-    ...(trimString(value.exaApiKey)
-      ? { exaApiKey: trimString(value.exaApiKey) }
-      : {}),
-    ...(trimString(value.exaEndpointUrl)
-      ? { exaEndpointUrl: trimString(value.exaEndpointUrl) }
-      : {}),
-    ...(Number.isInteger(value.webFetchHttpTimeoutMs) &&
-    Number(value.webFetchHttpTimeoutMs) > 0
-      ? { webFetchHttpTimeoutMs: Number(value.webFetchHttpTimeoutMs) }
-      : {}),
-  }
-}
-
-function encryptWebTools(config: WebToolsConfig): JsonObject {
-  return {
-    ...config,
-    ...(config.braveApiKey !== undefined
-      ? {
-          braveApiKey: encryptSecret(
-            config.braveApiKey,
-            'web-tools:brave-api-key',
-          ),
-        }
-      : {}),
-    ...(config.exaApiKey !== undefined
-      ? { exaApiKey: encryptSecret(config.exaApiKey, 'web-tools:exa-api-key') }
-      : {}),
-    braveApiKeyPreview: undefined,
-    exaApiKeyPreview: undefined,
-  }
-}
-
-function decryptWebTools(value: unknown): JsonObject {
-  if (!isObject(value)) return {}
-  return {
-    ...value,
-    ...(typeof value.braveApiKey === 'string'
-      ? {
-          braveApiKey: decryptSecret(
-            value.braveApiKey,
-            'web-tools:brave-api-key',
-          ),
-        }
-      : {}),
-    ...(typeof value.exaApiKey === 'string'
-      ? { exaApiKey: decryptSecret(value.exaApiKey, 'web-tools:exa-api-key') }
-      : {}),
-  }
-}
-
 function resolveSecretInput(
   next: string | undefined,
   previous: string | undefined,
@@ -1969,18 +1829,4 @@ function isMcpServerTransport(value: unknown): value is McpServerTransport {
 
 function isMcpServerScope(value: unknown): value is McpServerScope {
   return value === 'beegame' || value === 'global' || value === 'project'
-}
-
-function isWebSearchAdapter(value: unknown): value is WebSearchAdapter {
-  return (
-    value === 'tavily' ||
-    value === 'api' ||
-    value === 'bing' ||
-    value === 'brave' ||
-    value === 'exa'
-  )
-}
-
-function isWebFetchAdapter(value: unknown): value is WebFetchAdapter {
-  return value === 'tavily' || value === 'http'
 }

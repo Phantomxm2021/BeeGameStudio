@@ -244,11 +244,6 @@ export function designSupportingFiles(workspace: string, documents: readonly str
   }
   return [...files].sort()
 }
-/** Kept for callers requesting calculations only, not visual source files. */
-export function designCalculationFiles(workspace: string, documents: readonly string[]) {
-  return designSupportingFiles(workspace, documents).filter(path => path.startsWith('docs/calc/'))
-}
-
 export function isDesignUiFile(path: string) {
   return /^content\/ui\/[A-Za-z0-9_./-]+\.json$/.test(path)
 }

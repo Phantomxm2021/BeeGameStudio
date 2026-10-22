@@ -36,6 +36,7 @@ describe('versioned rectangular Tilemap data and editor',()=>{
   })
   it('uses exact atlas UVs and y-down to editor y-up once; batches 10,000 cells',()=>{
     const t=texture(), textures=new Map([['image',t]])
+    expect(tileBatches(grid,{...map,cells:[]},set.tiles,assets,textures,32)).toEqual([])
     const batches=tileBatches(grid,map,set.tiles,assets,textures,32)
     expect(batches).toHaveLength(1)
     expect(Array.from(batches[0].geometry.getAttribute('position').array).slice(0,6)).toEqual([-1,-0,0,-1,-1,0])

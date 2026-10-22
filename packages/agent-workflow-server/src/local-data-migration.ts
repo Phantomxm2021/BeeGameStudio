@@ -14,17 +14,12 @@ import {
   loadRuntimeSettingsConfig,
   type RuntimeSettingsConfig,
 } from './runtime-settings-store'
-import {
-  loadWebToolsConfig,
-  type WebToolsConfig,
-} from './web-tools-store'
 
 export type BeeGameLocalDashboardData = {
   projects: BeeGameProjectMetadata[]
   sessions: BeeGameLocalSessionMetadata[]
   modelConfigs: ModelConfigSnapshotRecord[]
   runtimeSettings: RuntimeSettingsConfig
-  webTools: WebToolsConfig
   mcpServers: McpServerConfig[]
 }
 
@@ -36,13 +31,11 @@ export type BeeGameLocalMigrationSummary = {
   sessions: number
   modelConfigs: number
   runtimeSettings: boolean
-  webTools: boolean
   mcpServers: number
 }
 
 export type BeeGameSecretMigrationMetadata = {
   modelConfigs: number
-  webTools: number
   mcpServers: number
   count: number
 }
@@ -79,7 +72,6 @@ export type BeeGameLocalMigrationStore = {
     ownerId: string,
     settings: RuntimeSettingsConfig,
   ): Promise<unknown>
-  saveWebTools(ownerId: string, config: WebToolsConfig): Promise<unknown>
   upsertMcpServer(
     ownerId: string,
     server: McpServerConfig,
@@ -99,7 +91,6 @@ export function loadBeeGameLocalDashboardData(
     sessions: loadLocalSessions(projects),
     modelConfigs: loadLocalModelConfigs(dataDir),
     runtimeSettings: loadRuntimeSettingsConfig({ dataDir }),
-    webTools: loadWebToolsConfig({ dataDir }),
     mcpServers: exportMcpServersSnapshot({ dataDir }),
   }
 }
@@ -132,9 +123,6 @@ export async function migrateBeeGameLocalDashboardData(
     if (summary.runtimeSettings) {
       await options.store.saveRuntimeSettings(ownerId, data.runtimeSettings)
     }
-    if (summary.webTools) {
-      await options.store.saveWebTools(ownerId, data.webTools)
-    }
   }
   for (const server of data.mcpServers) {
     await options.store.upsertMcpServer(ownerId, server)
@@ -155,20 +143,14 @@ function getSecretMigrationMetadata(
   const modelConfigs = includePlatformSettings
     ? data.modelConfigs.filter(config => typeof config.apiKey === 'string' && config.apiKey.length > 0).length
     : 0
-  const webTools = includePlatformSettings
-    ? [data.webTools.braveApiKey, data.webTools.exaApiKey]
-      .filter((value): value is string => typeof value === 'string' && value.length > 0)
-      .length
-    : 0
   const mcpServers = data.mcpServers
     .flatMap(server => server.env ?? [])
     .filter(item => typeof item.value === 'string' && item.value.length > 0)
     .length
   return {
     modelConfigs,
-    webTools,
     mcpServers,
-    count: modelConfigs + webTools + mcpServers,
+    count: modelConfigs + mcpServers,
   }
 }
 
@@ -266,7 +248,6 @@ function toMigrationSummary(
     sessions: data.sessions.length,
     modelConfigs: data.modelConfigs.length,
     runtimeSettings: Object.keys(data.runtimeSettings).length > 0,
-    webTools: Object.keys(data.webTools).length > 0,
     mcpServers: data.mcpServers.length,
   }
 }

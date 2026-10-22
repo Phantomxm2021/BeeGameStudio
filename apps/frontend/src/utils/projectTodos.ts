@@ -1,5 +1,5 @@
 import type { ChatDisplayMessage } from '../viewModels/displayModels';
-import { shortenAbsolutePathsForDisplay } from './chatPathDisplay';
+import { filterPathsForDisplay } from './chatPathDisplay';
 
 export type ProjectTodoStatus = 'pending' | 'in-progress' | 'completed' | 'cancelled';
 
@@ -40,7 +40,7 @@ const parseSnapshot = (input: unknown, messageId: string): TodoRecord[] | null =
         return [{
             id: `${messageId}-${index}`,
             key: typeof record.id === 'string' && record.id ? record.id : title.trim(),
-            title: shortenAbsolutePathsForDisplay(title.trim()),
+            title: filterPathsForDisplay(title.trim()),
             status: normalizeStatus(record.status),
         }];
     });

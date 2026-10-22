@@ -31,6 +31,7 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('actual Tilemap and 3D GLB c
     browser=await chromium.launch({executablePath,headless:true,args:['--mute-audio','--use-angle=swiftshader','--enable-unsafe-swiftshader']})
     page=await browser.newPage({viewport:{width:1280,height:720}})
     page.setDefaultTimeout(8000)
+    await page.route('**/favicon.ico',(route:any)=>route.fulfill({status:204,body:''}))
     page.on('pageerror',(error:Error)=>errors.push(error.message))
     page.on('console',(message:any)=>{if(message.type()==='error')errors.push(message.text())})
     page.on('response',async(response:any)=>{if(response.status()>=400)errors.push((await response.text()).slice(0,2000))})
@@ -56,7 +57,7 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('actual Tilemap and 3D GLB c
         data.nodes[0].components[0].data.framing=framing
         const inspected=lib.inspectSceneLayout2d(data,{width:host.width,height:host.height},()=>fixture.tiles)
         const projected=lib.point2d(inspected.worldToScreen,128,74)
-        return {projected,view:inspected.view,sourcePreserved:JSON.stringify(fixture.source)===fixture.before,
+        return {projected, samplePoints:[[152,156],[184,124],[192,56],[160,74],[192,106]].map(([x,y])=>lib.point2d(inspected.worldToScreen,x,y)),view:inspected.view,sourcePreserved:JSON.stringify(fixture.source)===fixture.before,
           editorPreserved:JSON.stringify(fixture.doc)===fixture.editorBefore}
       },{source,framing})
       expect(result.sourcePreserved).toBe(true);expect(result.editorPreserved).toBe(true)
@@ -69,6 +70,17 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('actual Tilemap and 3D GLB c
       expect(pixels.data[offset]).toBeGreaterThan(200)
       expect(pixels.data[offset+1]).toBeLessThan(40)
       expect(pixels.data[offset+2]).toBeLessThan(40)
+      if (framing === 'expand' && width === 1280 && height === 720) {
+        // Negative cell, tall atlas frame, inherited rotation/scale, disabled
+        // renderer/ancestor, and front sorting order: independently known colours.
+        for (const [index, color] of [[0,'red'],[1,'green'],[2,'red'],[3,'green'],[4,'red']] as const) {
+          const [sx,sy]=result.samplePoints[index]
+          const at=(Math.round(sy-result.view.rect.y)*pixels.info.width+Math.round(sx-result.view.rect.x))*4
+          expect(pixels.data[at+(color==='red'?0:1)], JSON.stringify({index,point:[sx,sy],rgba:[...pixels.data.subarray(at,at+4)]})).toBeGreaterThan(200)
+          expect(pixels.data[at+(color==='red'?1:0)]).toBeLessThan(40)
+          expect(pixels.data[at+2]).toBeLessThan(40)
+        }
+      }
       if(process.env.BGS_LAYOUT_REPORT_DIR)evidence.push({group:'2D Tilemap',viewport:`${width} × ${height}`,strategy:framing,
         screenshot:await page.getByTestId('scene-camera-host').screenshot(),checks:[
           '实际 Tilemap 像素与计算位置一致',

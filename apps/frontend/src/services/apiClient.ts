@@ -63,15 +63,6 @@ export const buildApiUrlWithBase = (path: string, baseUrl: string): string => {
   return `${normalizedBase}${normalizedPath}`;
 };
 
-export const buildAuthHeaders = (headers?: HeadersInit): Headers => {
-  const nextHeaders = new Headers(headers);
-  const token = resolveAuthToken();
-  if (token && !nextHeaders.has('Authorization')) {
-    nextHeaders.set('Authorization', `Bearer ${token}`);
-  }
-  return nextHeaders;
-};
-
 export const authenticatedFetch = (
   input: RequestInfo | URL,
   init: RequestInit = {},

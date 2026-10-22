@@ -1,4 +1,4 @@
-import type { Message, MessageType, RenderHint, ProjectEventMessage } from '../types/message';
+import type { ProjectEventMessage } from '../types/message';
 
 export type CanonicalChatMessageType =
   | 'text'
@@ -64,21 +64,6 @@ export const normalizeCanonicalMessageType = ({
   return 'text';
 };
 
-export const normalizeMessageSemanticFields = <T extends {
-  type?: MessageType | string;
-  renderHint?: RenderHint | string;
-  isDocument?: boolean;
-  taskKind?: string;
-  nextAction?: string;
-  requiresUserAction?: boolean;
-  content?: string;
-}>(message: T): T & { type: CanonicalChatMessageType } => {
-  return {
-    ...message,
-    type: normalizeCanonicalMessageType(message),
-  };
-};
-
 export const normalizeProjectEventSemanticType = (message: ProjectEventMessage): CanonicalChatMessageType =>
   normalizeCanonicalMessageType({
     type: message.message_type,
@@ -108,8 +93,3 @@ export const normalizeHistorySemanticType = (message: {
     requiresUserAction: message.requiresUserAction,
     content: message.content,
   });
-
-export const getSystemStatusLabel = (message: Message): string => {
-  const kind = String(message.taskKind || '').trim().replace(/_/g, ' ');
-  return kind || 'System Status';
-};

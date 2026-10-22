@@ -150,3 +150,59 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('skin button keeps its atlas
     expect(result.shadow).not.toBe('none')
   } finally {await browser?.close();server.stop(true)}
 },30000)
+
+// Migrated from the retired sharp preview: inspect actual production Canvas pixels.
+test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('Scene pixels preserve alpha, rotation, mirroring, clipping and zero-scale visibility', async () => {
+  const { chromium } = await import(sharedPlaywright().moduleUrl)
+  const executablePath = process.env.BGS_LAYOUT_BROWSER_EXECUTABLE ?? chromium.executablePath()
+  if (!existsSync(executablePath)) throw Error('An installed Chromium is required; no browser download')
+  const source = await bundleContentConsumer()
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: req => new URL(req.url).pathname === '/consumer.mjs'
+    ? new Response(source, { headers: { 'content-type': 'text/javascript' } }) : new Response('<!doctype html><body>') })
+  let browser
+  try {
+    browser = await chromium.launch({ executablePath, headless: true })
+    const page = await browser.newPage()
+    await page.route('**/*', (route: any) => new URL(route.request().url()).origin === server.url.origin ? route.continue() : route.abort())
+    await page.goto(server.url.href)
+    const result = await page.evaluate(async () => {
+      const path = '/consumer.mjs', lib = await import(path)
+      const image = document.createElement('canvas'); image.width = 2; image.height = 1
+      image.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray([200,100,50,128,20,40,60,255]), 2, 1), 0, 0)
+      const canvas = document.createElement('canvas')
+      const data: any = { cameraNodeId: 'camera', settings: { coordinateSystem: { pixelsPerUnit: 1 } }, nodes: [
+        { id: 'camera', transform: { position: [50,50,0] }, components: [{ type: 'camera', data: {
+          orthographic: true, orthographicSize: 50, coordinateSpace: 'logical-pixels', viewport: {width:100,height:100} } }] },
+        { id: 'sprite', transform: {position:[0,0,0]}, components: [{type:'sprite-renderer',assetRef:'image',data:{size:[2,1],anchor:[0,0]}}] },
+      ] }
+      const node = data.nodes[1], visual = node.components[0].data, assets = new Map([['image',{source:image,url:'memory'}]])
+      const draw = () => lib.renderProductionScene2d(canvas,data,{width:100,height:100},assets)
+      const pixel = (x:number,y:number) => [...canvas.getContext('2d')!.getImageData(x,y,1,1).data]
+      const alpha = [0,.5,1].map(opacity => { visual.opacity=opacity; draw(); return [...pixel(0,0),...pixel(1,0)] })
+      delete node.components[0].assetRef
+      visual.opacity=1; visual.color='#ff0000'; visual.size=[20,10]
+      node.transform={position:[30,20,0],rotation:[0,0,Math.PI/2]}; draw()
+      const rotated=[pixel(25,25),pixel(31,25),pixel(25,41)]
+      node.transform={position:[-10,-5,0]}; draw()
+      const clipped=[pixel(0,0),pixel(9,4),pixel(10,5)]
+      node.components[0].assetRef='image';delete visual.color;visual.size=[2,1]
+      image.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray([255,0,0,255,0,0,255,255]),2,1),0,0)
+      node.transform={position:[20,20,0],scale:[-10,10,1]};draw()
+      const mirrored=[pixel(2,25),pixel(17,25)]
+      node.transform.scale=[0,10,1];draw()
+      const zero=[pixel(2,25),pixel(17,25)]
+      return {alpha,rotated,clipped,mirrored,zero}
+    })
+    // Canvas stores premultiplied alpha: rounding can change unpremultiplied RGB slightly.
+    expect(result.alpha[0]).toEqual(Array(8).fill(0))
+    for (const [index, opacity] of [[1,.5],[2,1]]) {
+      for (const [at, expected] of [200,100,50,Math.round(128*opacity),20,40,60,Math.round(255*opacity)].entries())
+        expect(Math.abs(result.alpha[index][at]-expected)).toBeLessThanOrEqual(3)
+    }
+    expect(result.rotated).toEqual([[255,0,0,255],[0,0,0,0],[0,0,0,0]])
+    expect(result.clipped).toEqual([[255,0,0,255],[255,0,0,255],[0,0,0,0]])
+    expect(result.mirrored[0][2]).toBeGreaterThan(result.mirrored[0][0])
+    expect(result.mirrored[1][0]).toBeGreaterThan(result.mirrored[1][2])
+    expect(result.zero).toEqual([[0,0,0,0],[0,0,0,0]])
+  } finally { await browser?.close(); server.stop(true) }
+},30000)

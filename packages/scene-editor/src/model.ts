@@ -82,7 +82,6 @@ export interface ApplyResult { document: SceneDocument; inverse: SceneOperation[
 export const clone = <T>(value: T): T => structuredClone(value)
 export const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 export const identityTransform = (): Transform => ({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] })
-export const newId = (prefix = 'game-object') => `${prefix}-${crypto.randomUUID()}`
 export const componentOf = <T extends SceneComponent['type']>(node: Pick<SceneGameObject, 'components'>, type: T): Extract<SceneComponent, { type: T }> | undefined => node.components.find(component => component.type === type) as Extract<SceneComponent, { type: T }> | undefined
 export function rendererOrder(node: Pick<SceneNode, 'components' | 'order' | 'renderLayerRank'>): number {
   const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
@@ -92,7 +91,6 @@ export function rendererOrder(node: Pick<SceneNode, 'components' | 'order' | 're
   // Keep source layer priority above any finite order within that layer.
   return node.renderLayerRank === undefined ? local : node.renderLayerRank * 2 + Math.atan(local) * 2 / Math.PI
 }
-export const componentById = (node: SceneGameObject, id: string): SceneComponent | undefined => node.components.find(component => component.id === id)
 export const primaryComponentType = (node: SceneGameObject): SceneComponent['type'] | 'transform' => ['camera', 'particle-system', 'sprite-renderer', 'skinned-mesh-renderer', 'mesh-renderer', 'tilemap-renderer', 'image', 'light-2d', 'light', 'audio-source', 'box-collider-2d', 'circle-collider-2d', 'box-collider', 'sphere-collider', 'rigidbody-2d', 'rigidbody', 'animator'].find(type => node.components.some(component => component.type === type)) as SceneComponent['type'] | undefined ?? 'transform'
 
 export function makeFixture(): SceneDocument {

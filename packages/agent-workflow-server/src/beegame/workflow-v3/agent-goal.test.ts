@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { BeeGameSessionManager, type BeeGameSessionSubmitInput } from '../session-manager'
 import { registerV3Routes } from './routes'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, assertCommit, type WorkflowStore } from './store'
-import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProfessionalContext, agentProfessionalContextForRun, focusedExecutionFacts } from './agent-goal'
+import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProfessionalContextForRun, focusedExecutionFacts } from './agent-goal'
 import { createRun, digest, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
@@ -63,7 +63,7 @@ test('only explicit change releases the implementation baseline; exact visual sa
 },30000)
 
 test('resource obligations retain authorization and provenance without prescribing a sourcing or atlas tour', () => {
-  for (const prompt of [agentProfessionalContext, agentProfessionalContextForRun({} as Run)]) {
+  for (const prompt of [agentProfessionalContextForRun({} as Run), agentProfessionalContextForRun({} as Run, true)]) {
     expect(prompt).not.toContain('purpose: production')
     expect(prompt).not.toContain('file_paths')
     expect(prompt).not.toContain('local_path')
@@ -79,9 +79,9 @@ test('resource obligations retain authorization and provenance without prescribi
 })
 
 test('task-specific countdown procedure stays in tool help instead of the universal production context', () => {
-  expect(agentProfessionalContext).not.toContain('--countdown-blur-sample')
-  expect(agentProfessionalContext).toContain('actual runtime')
-  expect(agentProfessionalContext).toContain('## Required design dependencies')
+  expect(PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run)).not.toContain('--countdown-blur-sample')
+  expect(PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run)).toContain('actual runtime')
+  expect(PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run)).toContain('## Required design dependencies')
 })
 
 test('ended native goal exposes independent host evidence, never author acceptance',async()=>{
@@ -858,7 +858,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
 
 test('stable system context preserves design authority and evidence boundaries, not implementation recipes', () => {
   const message={intent:'change',text:'Change only movement speed'} as Parameters<typeof agentMessagePrompt>[0]
-  for(const prompt of [agentProfessionalContext,PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run,true)]) {
+  for(const prompt of [false,true].map(followup=>PROJECT_WORKING_CONVENTIONS+'\n'+agentProfessionalContextForRun({} as Run,followup))) {
     expect(prompt).toContain('Select and read applicable Skills')
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(prompt).toContain('without a second hardcoded layout')

@@ -39,7 +39,7 @@ verification.
 
 Fill Supabase URL, anon key, and service-role values in
 `docker/.env.resource`. Keeping these in a separate file prevents resource
-Storage/database credentials from entering the browser image or Claude runtime
+Storage/database credentials from entering the browser image or BGS runtime
 container.
 
 `BEEGAME_CREDIT_CONTROL_TOKEN` must match in both files. The runtime host uses
@@ -127,8 +127,22 @@ The four Bun backend services share one dependency-install stage in
 `docker/Dockerfile.backend`. Only `beegame-runtime` keeps the full workspace and
 dependency tree. Billing, Skills, and Resource Library are emitted as compact
 runtime bundles, so Compose does not export four duplicate `node_modules`
-layers. Bun and npm download caches use BuildKit cache mounts and are not copied
-into the final images.
+layers. The frontend also installs the workspace from the root `bun.lock`, then
+builds `apps/frontend` with the shared `packages` sources present. Bun download
+caches use BuildKit cache mounts and are not copied into the final images.
+The obsolete frontend `package-lock.json` is no longer maintained.
+
+Build just the frontend from the repository root (without starting services):
+
+```bash
+docker build -f docker/Dockerfile.frontend -t beegame-frontend .
+```
+
+The old `apps/frontend/Dockerfile` path aliases this same recipe and also requires
+the repository root as its build context. The Dockerfile-specific ignore file
+excludes local `node_modules`, build output, env files, runtime data, and native
+sources. Dependencies come from the root lockfile; frontend configuration
+comes from the explicit `VITE_*` build arguments.
 
 On a small host, keep `BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY=2` (the default)
 and build without Compose-level parallelism:
@@ -137,7 +151,7 @@ and build without Compose-level parallelism:
 COMPOSE_PARALLEL_LIMIT=1 ./scripts/beegame-docker.sh up
 ```
 
-The launcher uses the same configurable package registry for frontend npm and
+The launcher uses the same configurable package registry for frontend and
 backend Bun installs. The default is `https://registry.npmmirror.com/`. Override
 it for one build without editing a Dockerfile or env file:
 
@@ -146,8 +160,8 @@ sudo ./scripts/beegame-docker.sh up --registry https://registry.npmjs.org/
 ```
 
 For a persistent override, set `BEEGAME_PACKAGE_REGISTRY` in
-`docker/.env.production`. npm replaces registry hosts recorded in the lockfile,
-and retries transient downloads with bounded backoff.
+`docker/.env.production`. Both builds use `bun install --frozen-lockfile` and
+retain the versions recorded in the root lockfile.
 
 If the host previously attempted builds with the legacy per-service
 Dockerfiles, old BuildKit layers can still occupy `/var/lib/docker` or

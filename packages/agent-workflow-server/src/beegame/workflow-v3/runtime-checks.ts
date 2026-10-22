@@ -192,7 +192,7 @@ export async function observeStaticBuild(root: string, artifact: string, paths: 
     if (observationSignal.aborted) throw stopped()
     const { endpoint } = await owned.start()
     if (observationSignal.aborted) throw stopped()
-    // Like the existing design-browser-inspection.mjs, use Node for the pinned
+    // Use Node for the pinned
     // Playwright client. Bun's in-process CDP connection times out on this host.
     const node = Bun.which('node')
     if (!node) throw new Error('Browser driver needs an installed Node executable; no runtime was downloaded')

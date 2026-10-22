@@ -17,7 +17,7 @@ vi.mock('../beui/project-select', () => ({ ProjectSelect: ({ ariaLabel, value, o
 
 const connection = (method: api.ModelAuthMethod = 'platform', extra: Partial<api.ModelConnectionStatus> = {}): api.ModelConnectionStatus => ({ method, hasKey: false, isPreferred: false, chatgptConnected: false, ...extra });
 const catalog = (): api.CatalogModel[] => [
-  { id: 'official', name: 'Published Claude', provider: 'openai-compatible', models: { balanced: 'published' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: connection() },
+  { id: 'official', name: 'Published model', provider: 'openai-compatible', models: { balanced: 'published' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: connection() },
   { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
   { id: 'personal-chatgpt-subscription', name: 'ChatGPT subscription', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'], connection: connection() },
   { id: OPENCODE_GO_ID, name: 'OpenCode Go', provider: 'anthropic-compatible', baseUrl: OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl, models: OPENCODE_GO_PROFILES['anthropic-compatible'].defaults, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
@@ -44,9 +44,8 @@ it('shows direct subscription choices and keeps official as the default', async 
   expect(screen.getByLabelText('Connection type')).toHaveValue('official');
   expect(screen.getAllByRole('combobox')).toHaveLength(1);
   expect(screen.getByRole('option', { name: 'Bee Game Studio LLM' })).toBeInTheDocument();
-  expect(screen.queryByRole('option', { name: 'Published Claude' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: 'Published model' })).not.toBeInTheDocument();
   expect(screen.getByRole('option', { name: 'BYOK' })).toBeInTheDocument();
-  expect(screen.queryByRole('option', { name: 'Claude account with subscription' })).not.toBeInTheDocument();
   expect(screen.getByRole('option', { name: 'ChatGPT account with subscription' })).toBeInTheDocument();
   expect(api.saveModelConnection).not.toHaveBeenCalled();
 });
@@ -207,11 +206,10 @@ it('does not start login when the browser blocks the authorization window', asyn
   expect(api.startModelLogin).not.toHaveBeenCalled();
 });
 
-it('offers OpenCode Go alongside BYOK and ChatGPT without restoring Claude Code login', async () => {
+it('offers OpenCode Go alongside BYOK and ChatGPT', async () => {
   render(<ModelConnectionsPanel language="en" />);
   await waitForCatalog();
   expect(screen.getByRole('option', { name: 'OpenCode Go' })).toBeInTheDocument();
-  expect(screen.queryByRole('option', { name: /Claude/i })).not.toBeInTheDocument();
   expect(screen.getByRole('option', { name: /ChatGPT/ })).toBeInTheDocument();
   expect(api.listOpenCodeGoModels).not.toHaveBeenCalled();
 });

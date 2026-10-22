@@ -10,7 +10,6 @@ import {
 import { upsertMcpServer } from '../mcp-servers-store'
 import { BeeGameProjectMetadataStore, getBeeGameProjectDatabasePath } from '../project-metadata-store'
 import { saveRuntimeSettingsConfig } from '../runtime-settings-store'
-import { saveWebToolsConfig } from '../web-tools-store'
 import { listAuditEvents } from '../audit-events-store'
 import { encryptSecret } from '../security/secret-crypto'
 
@@ -29,6 +28,8 @@ describe('local data migration', () => {
   test('loads local dashboard data without stripping migration secrets', async () => {
     const dataDir = await createLocalDashboardData()
 
+    const retiredPath = join(dataDir, 'web-tools.json')
+    const retiredBytes = readFileSync(retiredPath, 'utf8')
     const data = loadBeeGameLocalDashboardData(dataDir)
 
     expect(data.projects).toEqual([
@@ -49,7 +50,8 @@ describe('local data migration', () => {
         apiKey: 'sk-local-secret',
       }),
     ])
-    expect(data.webTools.braveApiKey).toBe('brave-local-secret')
+    expect(data).not.toHaveProperty('webTools')
+    expect(readFileSync(retiredPath, 'utf8')).toBe(retiredBytes)
     expect(data.mcpServers).toEqual([
       expect.objectContaining({
         env: [{ key: 'TOKEN', value: 'mcp-local-secret' }],
@@ -105,11 +107,12 @@ describe('local data migration', () => {
       }],
     })}\n`, 'utf8')
 
+    const retiredBytes = readFileSync(join(dataDir, 'web-tools.json'), 'utf8')
     loadBeeGameLocalDashboardData(dataDir)
+    expect(readFileSync(join(dataDir, 'web-tools.json'), 'utf8')).toBe(retiredBytes)
 
     const events = listAuditEvents({ dataDir })
     expect(events.map(event => event.metadata)).toEqual([
-      { count: 1 },
       { count: 1 },
       { count: 2 },
     ])
@@ -138,10 +141,6 @@ describe('local data migration', () => {
         calls.push({ method: 'saveRuntimeSettings', ownerId, payload })
         return payload
       },
-      saveWebTools: async (ownerId: string, payload: unknown) => {
-        calls.push({ method: 'saveWebTools', ownerId, payload })
-        return payload
-      },
       upsertMcpServer: async (ownerId: string, payload: unknown) => {
         calls.push({ method: 'upsertMcpServer', ownerId, payload })
         return payload
@@ -161,7 +160,6 @@ describe('local data migration', () => {
       sessions: 1,
       modelConfigs: 1,
       runtimeSettings: true,
-      webTools: true,
       mcpServers: 1,
     })
     expect(calls).toEqual([])
@@ -206,10 +204,6 @@ describe('local data migration', () => {
         calls.push({ method: 'saveRuntimeSettings', ownerId, payload })
         return payload
       },
-      saveWebTools: async (ownerId: string, payload: unknown) => {
-        calls.push({ method: 'saveWebTools', ownerId, payload })
-        return payload
-      },
       upsertMcpServer: async (ownerId: string, payload: unknown) => {
         calls.push({ method: 'upsertMcpServer', ownerId, payload })
         return payload
@@ -224,12 +218,13 @@ describe('local data migration', () => {
       includePlatformSettings: true,
     })
 
+    expect(JSON.parse(readFileSync(join(dataDir, 'web-tools.json'), 'utf8')).config.braveApiKey)
+      .toBe('brave-local-secret')
     expect(calls.map(call => call.method)).toEqual([
       'upsertProject',
       'upsertSession',
       'upsertModelConfig',
       'saveRuntimeSettings',
-      'saveWebTools',
       'upsertMcpServer',
     ])
     expect(calls.every(call =>
@@ -251,7 +246,6 @@ describe('local data migration', () => {
       upsertSession: async () => undefined,
       upsertModelConfig: async () => undefined,
       saveRuntimeSettings: async () => undefined,
-      saveWebTools: async () => undefined,
       upsertMcpServer: async () => undefined,
       recordSecretMigration: async (_ownerId: string, metadata: unknown) => {
         auditCalls.push(metadata)
@@ -268,9 +262,8 @@ describe('local data migration', () => {
 
     expect(auditCalls).toEqual([{
       modelConfigs: 1,
-      webTools: 1,
       mcpServers: 1,
-      count: 3,
+      count: 2,
     }])
     expect(JSON.stringify(auditCalls)).not.toContain('sk-local-secret')
     expect(JSON.stringify(auditCalls)).not.toContain('project_1')
@@ -283,7 +276,6 @@ describe('local data migration', () => {
       upsertSession: async () => undefined,
       upsertModelConfig: async () => undefined,
       saveRuntimeSettings: async () => undefined,
-      saveWebTools: async () => undefined,
       upsertMcpServer: async () => undefined,
     }
 
@@ -348,10 +340,10 @@ async function createLocalDashboardData(): Promise<string> {
     'utf8',
   )
   saveRuntimeSettingsConfig({ resourceLibraryEnabled: false }, { dataDir })
-  saveWebToolsConfig({
+  writeFileSync(join(dataDir, 'web-tools.json'), JSON.stringify({ version: 1, config: {
     webSearchAdapter: 'brave',
     braveApiKey: 'brave-local-secret',
-  }, { dataDir })
+  } }))
   mkdirSync(dataDir, { recursive: true })
   upsertMcpServer({
     name: 'Local MCP',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasActiveSubagents, isProjectExecutionActive, settleChatActivity } from './chatActivity';
+import { isProjectExecutionActive, settleChatActivity } from './chatActivity';
 import { transcriptEventsToHistory } from '../services/beeGameAdapter';
 
 describe('terminal Chat activity', () => {
@@ -10,14 +10,6 @@ describe('terminal Chat activity', () => {
     expect(isProjectExecutionActive({ phase: 'paused' })).toBe(false);
     expect(isProjectExecutionActive(null)).toBe(false);
   });
-  it('only active child lifecycle blocks input; stopped, failed and incomplete history does not', () => {
-    expect(hasActiveSubagents([{ isSubagentTool: true, toolStatus: 'running' }])).toBe(true);
-    for (const completionReason of ['stopped', 'failed', 'incomplete'] as const)
-      expect(hasActiveSubagents([{ isSubagentTool: true, toolStatus: 'running', completionReason }])).toBe(false);
-    expect(hasActiveSubagents([{ isSubagentTool: true, toolStatus: 'completed' }])).toBe(false);
-    expect(hasActiveSubagents([{ toolStatus: 'running' }])).toBe(false);
-  });
-
   it('session stop settles turnless mirrored tools without stopping another session', () => {
     const events = [
       { id: 1, sessionId: 's', type: 'tool.started', text: 'Bash',

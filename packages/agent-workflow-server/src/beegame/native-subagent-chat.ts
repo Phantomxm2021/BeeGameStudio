@@ -14,21 +14,6 @@ const record = (value: unknown): Record<string, unknown> =>
 const str = (value: unknown): string => typeof value === 'string' ? value : ''
 const redactVisible = createResponseRedactor({})
 
-/** Native TaskStop returns a structured receipt only after stop succeeds.
- * Never infer termination from a request, prose, or an unrelated task ID. */
-export function stoppedNativeTask(event: ChatEvent): string | undefined {
-  const p = event.payload
-  if (event.type !== 'tool.completed' || p?.toolName !== 'TaskStop' || p.is_error || p.isError) return
-  const input = record(p.input)
-  let output: Record<string, unknown>
-  try { output = typeof p.output === 'string' ? record(JSON.parse(p.output)) : record(p.output) } catch { return }
-  const taskId = str(output.task_id)
-  if (!taskId || taskId !== str(input.task_id || input.shell_id) ||
-      !['local_bash', 'local_agent'].includes(str(output.task_type)) ||
-      !str(output.message).startsWith('Successfully stopped task: ' + taskId + ' (')) return
-  return taskId
-}
-
 /** Passive projection only: never starts, waits for, or controls a native task. */
 export function createNativeSubagentChatEnricher() {
   const inputs = new Map<string, Record<string, unknown>>()

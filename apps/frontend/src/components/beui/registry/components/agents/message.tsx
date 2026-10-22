@@ -8,7 +8,6 @@ import {
   type ReactNode,
   useContext,
 } from "react";
-import { EASE_OUT } from "@/components/beui/registry/lib/ease";
 import { cn } from "@/components/beui/registry/lib/utils";
 import { MessageSideContext } from "@/components/beui/registry/components/agents/message-context";
 
@@ -43,20 +42,9 @@ export interface MessageGroupProps extends ComponentPropsWithRef<"div"> {
   spacing?: "compact" | "default";
 }
 
-export interface MessageAvatarProps extends ComponentPropsWithRef<"div"> {
-  /** Keep an empty avatar slot so grouped messages remain aligned. */
-  placeholder?: boolean;
-}
-
 export type MessageContentProps = ComponentPropsWithRef<"div">;
-export type MessageHeaderProps = ComponentPropsWithRef<"div">;
-export type MessageFooterProps = ComponentPropsWithRef<"div">;
 
 export type MessageMarkerProps = ComponentPropsWithRef<"div">;
-
-export interface MessageTypingProps extends ComponentPropsWithRef<"span"> {
-  label?: string;
-}
 
 // A sent row should rise from the live edge without changing measured layout.
 const MESSAGE_POP_UP = {
@@ -153,28 +141,6 @@ export function MessageGroup({
   );
 }
 
-export function MessageAvatar({
-  placeholder = false,
-  children,
-  className,
-  ...props
-}: MessageAvatarProps) {
-  return (
-    <div
-      data-slot="message-avatar"
-      aria-hidden={placeholder || undefined}
-      className={cn(
-        "grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground [&_img]:size-full [&_img]:object-cover [&_svg]:size-3.5",
-        placeholder && "invisible",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </div>
-  );
-}
-
 export function MessageContent({ className, ...props }: MessageContentProps) {
   const { from } = useContext(MessageContext);
 
@@ -184,38 +150,6 @@ export function MessageContent({ className, ...props }: MessageContentProps) {
       className={cn(
         "flex min-w-0 flex-1 flex-col gap-1.5",
         from === "user" ? "items-end" : "items-start",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-export function MessageHeader({ className, ...props }: MessageHeaderProps) {
-  const { from } = useContext(MessageContext);
-
-  return (
-    <div
-      data-slot="message-header"
-      className={cn(
-        "flex items-center gap-1.5 px-1 text-xs leading-4 text-muted-foreground",
-        from === "user" ? "justify-end" : "justify-start",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-export function MessageFooter({ className, ...props }: MessageFooterProps) {
-  const { from } = useContext(MessageContext);
-
-  return (
-    <div
-      data-slot="message-footer"
-      className={cn(
-        "flex min-h-5 items-center gap-1 px-1 text-xs text-muted-foreground",
-        from === "user" ? "justify-end" : "justify-start",
         className,
       )}
       {...props}
@@ -233,41 +167,5 @@ export function MessageMarker({ className, ...props }: MessageMarkerProps) {
       )}
       {...props}
     />
-  );
-}
-
-export function MessageTyping({
-  label = "Responding",
-  className,
-  ...props
-}: MessageTypingProps) {
-  const reduce = useReducedMotion() ?? false;
-
-  return (
-    <span
-      data-slot="message-typing"
-      className={cn("inline-flex h-5 items-center gap-1", className)}
-      {...props}
-    >
-      <span className="sr-only">{label}</span>
-      {[0, 1, 2].map((index) => (
-        <motion.span
-          key={index}
-          aria-hidden="true"
-          className="size-1 rounded-full bg-current"
-          animate={
-            reduce
-              ? { opacity: 0.45 }
-              : { opacity: [0.28, 0.85, 0.28], y: [0, -2, 0] }
-          }
-          transition={{
-            duration: 1.05,
-            ease: EASE_OUT,
-            repeat: Number.POSITIVE_INFINITY,
-            delay: index * 0.14,
-          }}
-        />
-      ))}
-    </span>
   );
 }

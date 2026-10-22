@@ -1,5 +1,7 @@
 # BGS 资源与 Content 执行调整方案
 
+> 2026-10-22 维护说明：下文保留历史方案。旧 `inspect-design` / `uiStaticInspection` 及其专用构建已退役；有效资源解码、字体与 DOM 布局覆盖迁到 [当前共享运行时浏览器测试](../packages/agent-workflow-server/src/beegame/production-inspection.test.ts)、[字体消费测试](../packages/agent-workflow-server/src/beegame/workflow-v3/font-consumption.test.ts) 和现行预览边界测试。旧命令、报表格式与整库候选字体比较不再是当前入口；未新增验收门禁。
+
 日期：2026-10-08。状态：系统实现及本地回归完成；真实付费流程、实际成本收益尚未验收。以下保留原方案，实施证据与剩余边界见文末。
 
 ## 2026-10-09 Content 冻结阻断补查
@@ -248,6 +250,6 @@ FontFace 加载成功不等于所有字符都由该字体绘制。已知缺字�
 - [原生主会话及同目录子任务记录](/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/.runtime/app/projects/-Users-nswell-Documents-PhantomsXR-Projects-InternalProjects-Others-BeeGameStudio-Projects-users-30fb0202-1f77-414f-82da-f92936e7bba3-classic-snake-arcade--21485f566a4a/0f59a087-c0de-4fe1-933d-cc860a6f90a0.jsonl)
 - [阶段任务与上下文](../packages/agent-workflow-server/src/beegame/project-conversation.ts)
 - [原生分派及等待](../src/beegame/native-assignments.ts)
-- [现有浏览器检查能力](../packages/agent-workflow-server/src/beegame/design-browser-inspection.mjs)
+- 历史浏览器检查路径：`packages/agent-workflow-server/src/beegame/design-browser-inspection.mjs`（2026-10-22 已退役，见页首维护说明）
 - [Preview 生命周期](../packages/agent-workflow-server/src/beegame/preview-test-access.ts)
 - [UI Editor 绘制](../apps/frontend/src/components/Workspace/UiEditorOverlay.tsx)

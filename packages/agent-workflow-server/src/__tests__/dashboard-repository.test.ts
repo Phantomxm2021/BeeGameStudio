@@ -83,24 +83,25 @@ describe('DashboardRepository Supabase boundaries', () => {
       expect(JSON.stringify(await repository.listMcpServers(new Request('http://fixture'),{id:'a',role:'owner'}))).not.toContain('synthetic-private-token')
     } finally { await rm(root,{recursive:true,force:true}) }
   })
-  test('forwards only explicitly configured host artifact credentials', async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-artifact-env-'))
-    const previousUrl = process.env.BEEGAME_ARTIFACTS_URL
-    const previousToken = process.env.BEEGAME_ARTIFACTS_TOKEN
+  test('retired host tool credentials are not forwarded or removed from the host environment', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-retired-tool-env-'))
+    const keys = ['BEEGAME_ARTIFACTS_URL', 'BEEGAME_ARTIFACTS_TOKEN', 'TAVILY_API_KEY']
+    const previous = keys.map(key => process.env[key])
     const repository = new DashboardRepository({
       dashboardDataRoot: dataRoot, getUserDataRoot: () => dataRoot, skillsConfig: false,
     })
     try {
-      process.env.BEEGAME_ARTIFACTS_URL = 'https://artifacts.example.test'
-      process.env.BEEGAME_ARTIFACTS_TOKEN = 'configured-test-token'
+      for (const key of keys) process.env[key] = 'retained-fixture-value'
       const env = await repository.getRuntimeEnv(dataRoot)
-      expect(env.BEEGAME_ARTIFACTS_URL).toBe('https://artifacts.example.test')
-      expect(env.BEEGAME_ARTIFACTS_TOKEN).toBe('configured-test-token')
+      for (const key of keys) {
+        expect(env).not.toHaveProperty(key)
+        expect(process.env[key]).toBe('retained-fixture-value')
+      }
     } finally {
-      if (previousUrl === undefined) delete process.env.BEEGAME_ARTIFACTS_URL
-      else process.env.BEEGAME_ARTIFACTS_URL = previousUrl
-      if (previousToken === undefined) delete process.env.BEEGAME_ARTIFACTS_TOKEN
-      else process.env.BEEGAME_ARTIFACTS_TOKEN = previousToken
+      keys.forEach((key, i) => {
+        if (previous[i] === undefined) delete process.env[key]
+        else process.env[key] = previous[i]
+      })
       await rm(dataRoot, { recursive: true, force: true })
     }
   })
@@ -176,11 +177,7 @@ describe('DashboardRepository Supabase boundaries', () => {
         url: 'https://project.supabase.co',
         anonKey: 'anon-key',
         authToken: 'user-token',
-        fetchImpl: (async (input: Parameters<typeof fetch>[0]) => Response.json(
-          String(input).includes('beegame_web_tools')
-            ? [{ config: { webSearchAdapter: 'exa', webFetchAdapter: 'http', exaEndpointUrl: 'https://search.test/mcp', webFetchHttpTimeoutMs: 12000 } }]
-            : [],
-        )) as unknown as typeof fetch,
+        fetchImpl: (async () => Response.json([])) as unknown as typeof fetch,
       }),
       supabaseRuntimeEnvClient: new SupabaseRuntimeEnvClient({
         url: 'https://project.supabase.co',

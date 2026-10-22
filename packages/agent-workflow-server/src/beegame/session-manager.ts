@@ -44,16 +44,15 @@ import type {
   BeeGameUsageBillingRecordResult as RecordUsageResult,
   BeeGameUsageBillingUsage as Usage,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
-import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
+import { validateConfirmedBriefContext } from './confirmed-brief-context'
 import { appendChatTranscript, appendRuntimeDiagnostic } from './project-records'
 import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
 import { createBgsRunner } from '../bgs/runner'
-import { createNativeSubagentChatEnricher, isNativeTaskLifecycle, stoppedNativeTask } from './native-subagent-chat'
+import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
-import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { ChatJsonlReader } from './chat-jsonl-reader'
 import { auditEventPage, type EventPageSelection } from './workflow-v3/event-page'
 import { answeredQuestionInput, UserQuestionValidationError } from './user-question'
@@ -301,12 +300,7 @@ export type BeeGameSessionRunnerStartInput = {
   systemContext?: string
   /** Host-confirmed UI check conditions; never accepted from model tool input. */
   uiLayoutConstraints?: import('./ui-layout-audit').LayoutConstraints
-  /** Optional private execution directory; Chat and billing retain project identity. */
-  isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
-  /** Platform evidence root exposed only through read-only contract facts. */
   resumeSessionId?: string
-  /** Host-owned workflow task identity supplied through standard --session-id. */
-  nativeSessionId?: string
   /** Records the UUID emitted by the native runtime for durable resume. */
   onNativeSessionId?(sessionId: string): void
   /** Native replay of this exact submitted command, not merely CLI startup. */
@@ -318,12 +312,8 @@ export type BeeGameSessionRunnerStartInput = {
   /** Sanitized evidence of the selected versus forwarded launch settings. */
   runtimeLaunchContract?: RuntimeLaunchContract
   language?: BeeGameSessionLanguage
-  /** Native background tasks may outlive the foreground turn that spawned them. */
-  onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
   /** BGS business scope evaluated before standard permission shortcuts. */
   toolPolicy?(request: DashboardPermissionRequest): Promise<DashboardPermissionDecision | undefined>
-  /** Standard CLI role configuration; never private native task metadata. */
-  nativeTools?: readonly string[]
   requestPermission?(
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision>
@@ -353,17 +343,10 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
   'BEEGAME_CONFIG_DIR',
   'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR',
   'BEEGAME_NATIVE_MCP_SERVERS_JSON',
-  'BEEGAME_ARTIFACTS_URL',
-  'BEEGAME_ARTIFACTS_TOKEN',
-  'TAVILY_API_KEY',
-  'BRAVE_SEARCH_API_KEY',
-  'EXA_API_KEY',
-  'SKILL_SEARCH_ENABLED',
   'BEEGAME_MODEL_TYPE',
   'BGS_DEFAULT_FAST_MODEL',
   'BGS_DEFAULT_BALANCED_MODEL',
   'BGS_DEFAULT_STRONG_MODEL',
-  'BGS_USE_OPENAI',
   'OPENAI_BASE_URL',
   'OPENAI_API_KEY',
   'HTTP_PROXY',
@@ -385,7 +368,6 @@ export type BeeGameSessionSubmitInput = {
   confirmedBriefContext?: string
   signal: AbortSignal
   onMessage(message: DashboardSDKMessage): void | Promise<void>
-  onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
   requestPermission(
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision>
@@ -449,7 +431,6 @@ type SessionRecord = {
   uiLayoutConstraints?: BeeGameSessionRunnerStartInput['uiLayoutConstraints']
   preparingTurn?: boolean
   session: BeeGameSession
-  isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   /** Native runtime UUID, distinct from session.id (the BGS routing key). */
   nativeSessionId?: string
   currentTurnUsageExternallyAccounted?: boolean
@@ -476,11 +457,8 @@ type SessionRecord = {
   /** User-approved network hosts for this live session only. */
   approvedNetworkHosts: Set<string>
   toolUses: Map<string, { toolName: string; input?: unknown }>
-  /** Attribution only; the native runner owns task lifecycle and turn draining. */
-  nativeTaskTurnIds: Map<string, string | undefined>
   /** Active native background tasks from live lifecycle notifications. */
   activeNativeTaskToolUseIds: Map<string, string>
-  terminalNativeTaskIds: Set<string>
   /** Tool-use blocks observed before their streamed JSON input is complete. */
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
@@ -511,7 +489,6 @@ export type StartBeeGameSessionInput = {
   workflowExecution?: { runId: string; taskId: string; attemptId: string }
   /** BGS-side evidence binding only; never forwarded to the native runner. */
   workflowQuestionGuard?: (request: DashboardPermissionRequest, decision?: DashboardPermissionDecision) => Promise<Record<string, unknown>>
-  isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   projectId?: string
   modelConfigId?: string
   transcriptSessionId?: string
@@ -722,7 +699,6 @@ export class BeeGameSessionManager {
       session,
       ...(!input.freshNativeContext && persistedRuntime?.workspacePath===cwd && persistedRuntime.executionIdentity
         ? {executionIdentity:persistedRuntime.executionIdentity}:{}),
-      ...(input.isolatedTask ? { isolatedTask: input.isolatedTask } : {}),
       ...(input.resumeNativeSessionId
         ? { nativeSessionId: input.resumeNativeSessionId }
         : {}),
@@ -753,9 +729,7 @@ export class BeeGameSessionManager {
       ...(input.workflowQuestionGuard ? { workflowQuestionGuard: input.workflowQuestionGuard } : {}),
       approvedNetworkHosts: new Set(),
       toolUses: new Map(),
-      nativeTaskTurnIds: new Map(),
       activeNativeTaskToolUseIds: new Map(),
-      terminalNativeTaskIds: new Set(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
@@ -775,12 +749,7 @@ export class BeeGameSessionManager {
       resumeEventPending: Boolean(recoveredTranscript),
     }
     if (confirmedBriefContext) {
-      recordConfirmedBriefEvidence({
-        dataRoot: this.dashboardDataRoot,
-        sessionId: session.id,
-        confirmedBriefContext,
-        createdAt: now,
-      })
+      validateConfirmedBriefContext(confirmedBriefContext)
     }
     archiveInterruptedRecoveredTurn(record)
     this.sessions.set(session.id, record)
@@ -1184,13 +1153,8 @@ export class BeeGameSessionManager {
       }
       if (record.session.status !== 'running') throw new Error('Session was stopped during turn preparation')
       if (display?.confirmedBriefContext) {
+        validateConfirmedBriefContext(display.confirmedBriefContext)
         record.confirmedBriefContext = display.confirmedBriefContext
-        recordConfirmedBriefEvidence({
-          dataRoot: this.dashboardDataRoot,
-          sessionId: record.session.id,
-          confirmedBriefContext: display.confirmedBriefContext,
-          createdAt: new Date(),
-        })
       }
       if (record.resumeEventPending) {
         record.resumeEventPending = false
@@ -1522,7 +1486,6 @@ export class BeeGameSessionManager {
           sessionId: record.session.id,
           systemContext: record.systemContext,
           uiLayoutConstraints: record.uiLayoutConstraints,
-          ...(record.isolatedTask ? { isolatedTask: record.isolatedTask } : {}),
           ...(record.nativeSessionId
             ? { resumeSessionId: record.nativeSessionId }
             : {}),
@@ -1546,34 +1509,6 @@ export class BeeGameSessionManager {
             // acknowledged cumulative usage without waiting for an answer.
             if (record.currentTurnId && !record.currentTurnUsageExternallyAccounted)
               void this.recordUsageSnapshot(record, record.currentTurnId, true)
-          },
-          onNativeTaskNotification: notification => {
-            const message = notification.message ?? notification.backgroundMessage
-            const taskId = message && getStringField(message, 'task_id')
-            const toolUseId = message && (getStringField(message, 'tool_use_id') || getStringField(message, 'toolUseID'))
-            if (taskId && !record.terminalNativeTaskIds.has(taskId) && ['task_started', 'task_progress'].includes(String(message?.subtype))) {
-              record.nativeTaskTurnIds.set(taskId, record.currentTurnId ?? undefined)
-              record.activeNativeTaskToolUseIds.set(taskId,
-                toolUseId || record.activeNativeTaskToolUseIds.get(taskId) || taskId)
-            } else if (taskId && message?.subtype === 'task_notification' &&
-              ['completed', 'failed', 'stopped', 'killed'].includes(getStringField(message, 'status'))) {
-              record.activeNativeTaskToolUseIds.delete(taskId)
-              record.terminalNativeTaskIds.add(taskId)
-              if (toolUseId) {
-                for (const [activeTaskId, activeToolUseId] of record.activeNativeTaskToolUseIds) {
-                  if (activeToolUseId === toolUseId) record.activeNativeTaskToolUseIds.delete(activeTaskId)
-                }
-              }
-            }
-            this.persistRuntimeSnapshot(record)
-            // Foreground messages already go through onMessage. Background
-            // notifications must remain visible after that turn has returned.
-            if (notification.backgroundMessage) {
-              const taskId = getStringField(notification.backgroundMessage, 'task_id')
-              this.append(record, 'system.status', String(notification.backgroundMessage.subtype),
-                notification.backgroundMessage as DashboardSDKMessage,
-                record.nativeTaskTurnIds.get(taskId))
-            }
           },
           cwd: record.session.cwd,
           env,
@@ -2215,33 +2150,6 @@ export class BeeGameSessionManager {
     }
     let eventPayload = enrich({ type, payload }).payload as DashboardSDKMessage | undefined
     if (record.session.workflowExecution) eventPayload = { type, ...eventPayload, workflowExecution: record.session.workflowExecution }
-    const stoppedTask = stoppedNativeTask({ type, payload: eventPayload })
-    if (stoppedTask && record.activeNativeTaskToolUseIds.has(stoppedTask) &&
-        record.nativeTaskTurnIds.get(stoppedTask) === effectiveTurnId) {
-      record.activeNativeTaskToolUseIds.delete(stoppedTask)
-      record.terminalNativeTaskIds.add(stoppedTask)
-    }
-    if (type === 'tool.completed' && eventPayload?.nativeBackgroundTask) {
-      const launch = eventPayload.nativeBackgroundTask as Record<string, unknown>
-      const taskId = typeof launch.taskId === 'string' ? launch.taskId : ''
-      const toolUseId = getDashboardPayloadString(eventPayload, 'toolUseID')
-      if (taskId && !record.terminalNativeTaskIds.has(taskId)) {
-        record.nativeTaskTurnIds.set(taskId, effectiveTurnId)
-        record.activeNativeTaskToolUseIds.set(taskId, toolUseId || taskId)
-      }
-    }
-    if (type === 'tool.completed' && eventPayload?.nativeBackgroundTaskResult) {
-      const result = eventPayload.nativeBackgroundTaskResult as Record<string, unknown>
-      const toolUseId = typeof result.toolUseID === 'string' ? result.toolUseID : ''
-      if (toolUseId) {
-        for (const [taskId, activeToolUseId] of record.activeNativeTaskToolUseIds) {
-          if (activeToolUseId === toolUseId) {
-            record.activeNativeTaskToolUseIds.delete(taskId)
-            record.terminalNativeTaskIds.add(taskId)
-          }
-        }
-      }
-    }
     if (type === 'assistant.thinking') {
       const thinkingBlockId = getDashboardPayloadString(payload, 'thinkingBlockId') || 'default'
       const thinkingKey = `${effectiveTurnId ?? record.session.id}:${thinkingBlockId}`

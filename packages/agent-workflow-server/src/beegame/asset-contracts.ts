@@ -480,14 +480,6 @@ export async function uploadBeeGameAsset(
   return { manifest: updated, resource, path: rootFile.path, message: `Project resource ${id} was added at ${rootFile.path}.` }
 }
 
-export async function registerBeeGameAuthoredResources(
-  workspacePath: string,
-  inputs: readonly BeeGameAuthoredResourceInput[],
-  options: { additionalFormatCapabilities?: readonly string[] } = {},
-): Promise<BeeGameAssetManifest> {
-  return registerBeeGameLocalResources(workspacePath, inputs.map(input => ({ ...input, source: undefined })), options)
-}
-
 /** Shared registration for already-produced files; web provenance is preserved.
  * Mechanical verification is not aesthetic, licensing or runtime approval. */
 export async function registerBeeGameLocalResources(

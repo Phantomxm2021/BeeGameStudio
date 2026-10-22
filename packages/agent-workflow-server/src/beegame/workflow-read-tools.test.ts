@@ -284,7 +284,7 @@ test('native tools discover all six; result reads use fixed read requests, prese
     await client.connect(new StdioClientTransport({ ...config.mcp_servers['bgs-ui-layout']!, cwd: root }))
     const tools = (await client.listTools()).tools
     expect(tools.map(tool => tool.name).sort()).toEqual([...NATIVE_READ_TOOLS].sort())
-    expect(tools.every(tool => tool.annotations?.readOnlyHint && tool._meta?.['anthropic/alwaysLoad'])).toBe(true)
+    expect(tools.every(tool => tool.annotations?.readOnlyHint)).toBe(true)
     expect((await call('ReadDesignHandoff')).json().documents).toHaveLength(8)
     const sibling = join(root, 'docs/AUDIO_DESIGN.md'), original = readFileSync(sibling)
     rmSync(sibling)

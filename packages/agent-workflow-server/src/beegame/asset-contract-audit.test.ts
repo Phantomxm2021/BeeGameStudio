@@ -8,7 +8,7 @@ import { validateResourceSelections } from './tilemap-contract'
 import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
 import sharp from 'sharp'
 import { audioProbeWav } from './workflow-v3/audio-consumption'
-import { registerBeeGameAuthoredResources, readBeeGameAssetManifest, readBeeGameAssetManifestSync, toCanonicalBeeGameAssetManifest } from './asset-contracts'
+import { registerBeeGameLocalResources, readBeeGameAssetManifest, readBeeGameAssetManifestSync, toCanonicalBeeGameAssetManifest } from './asset-contracts'
 
 test('encoded authored audio rejects generic audio type before registration and accepts canonical audio-clip', async () => {
   const root = await mkdtemp(join(tmpdir(),'bgs-audio-kind-')); workspaces.push(root)
@@ -18,9 +18,9 @@ test('encoded authored audio rejects generic audio type before registration and 
   const path='assets/runtime/tone.wav'
   await writeFile(join(root,path),audioProbeWav(false))
   const input={id:'tone',root_path:path,file_paths:[path],provisional:false,reason:'Synthetic encoded tone',selection_reason:['test'],asset_kind:'audio'}
-  await expect(registerBeeGameAuthoredResources(root,[input])).rejects.toThrow('unsupported audio type audio; use audio-clip')
+  await expect(registerBeeGameLocalResources(root,[input])).rejects.toThrow('unsupported audio type audio; use audio-clip')
   expect((await readBeeGameAssetManifest(root)).resources).toHaveLength(0)
-  const registered=await registerBeeGameAuthoredResources(root,[{...input,asset_kind:'audio-clip'}])
+  const registered=await registerBeeGameLocalResources(root,[{...input,asset_kind:'audio-clip'}])
   expect(registered.resources[0]!.asset_kind).toBe('audio-clip')
   expect(registered.resources[0]!.status).toBe('verified')
   const invalid=structuredClone(registered); invalid.resources[0]!.asset_kind='audio'
@@ -390,4 +390,70 @@ describe('Manifest-owned resource bindings', () => {
       }),
     ).toThrow(/unknown fields/i)
   })
+})
+
+describe('resource contract boundaries', () => {
+  test('uses Manifest bindings and does not require content files', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resources-'))
+    workspaces.push(workspace)
+    await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
+    await writeFile(join(workspace, 'assets/runtime/player.json'), '{}\n')
+    await writeBeeGameAssetManifest(workspace, {
+      version: 9,
+      project_target: {
+        asset_format_capabilities: ['json'],
+        resource_library_usage: 'preferred',
+        runtime_asset_root: 'assets/runtime',
+        generated_asset_root: 'assets/generated',
+      },
+      requirements: [
+        {
+          id: 'visual.player',
+          required: true,
+          acquisition_profile: { dimensions: ['agnostic'], asset_kinds: ['data'], usage_tags: [], capabilities: [], styles: [] },
+        },
+      ],
+      resources: [
+        {
+          id: 'player-art',
+          fulfills: ['visual.player'],
+          source: {
+            type: 'agent-authored',
+            created_at: new Date().toISOString(),
+            reason: 'fixture resource',
+          },
+          root_path: 'assets/runtime/player.json',
+          file_paths: ['assets/runtime/player.json'],
+          provisional: false,
+          status: 'verified',
+          selected_at: new Date().toISOString(),
+          selection_reason: ['Matches the requirement.'],
+          dimension: 'agnostic',
+          asset_kind: 'data',
+        },
+      ],
+    })
+
+    expect(
+      auditAssetContract(workspace),
+    ).toMatchObject({
+      present: true,
+      valid: true,
+      requirements: [expect.objectContaining({id:'visual.player'})],
+      bindings: [{requirementId:'visual.player',resourceIds:['player-art']}],
+      resources: [expect.objectContaining({id:'player-art'})],
+    })
+  })
+
+  test('rejects the retired assets/content root', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resources-'))
+    workspaces.push(workspace)
+    await mkdir(join(workspace, 'assets/content'), { recursive: true })
+
+    const result = auditAssetContract(workspace)
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.join('\n')).toContain('Retired resource content root')
+  })
+
 })

@@ -25,10 +25,6 @@ type FrontendEnvInput = {
   baseEnv: Record<string, string | undefined>
 }
 
-type ProductionApiBaseInput = {
-  env: Record<string, string | undefined>
-}
-
 export function resolveDashboardDevOptions(
   argv: string[],
   input: ResolveOptionsInput,
@@ -93,10 +89,6 @@ function appendApiCorsOrigin(value: string | undefined, origin: string): string 
     .filter(Boolean)
   if (!origins.includes(origin)) origins.push(origin)
   return origins.join(',')
-}
-
-export function resolveProductionApiBase(input: ProductionApiBaseInput): string {
-  return String(input.env.BEEGAME_DASHBOARD_API_BASE_URL || '').trim()
 }
 
 function parseArgs(argv: string[]): Record<string, string> {

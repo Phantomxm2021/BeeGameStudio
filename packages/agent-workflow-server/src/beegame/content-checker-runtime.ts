@@ -43,23 +43,6 @@ export function sharedContentChecker(): Promise<{ root: string; path: string; mo
     // resolver needs directory reads; never grant the server source directory.
     for (const name of ['preview-test-command.mjs', 'preview-test-client.mjs', 'preview-play-capture.mjs', 'sprite-sample.mjs'])
       await writeFile(join(root, name), await readFile(new URL('./'+name, import.meta.url)), { flag: 'wx', mode: 0o400 })
-    const uiSource = new URL('../../../scene-editor/src/ui-preview/uiStaticInspection.tsx', import.meta.url)
-    const uiBuild = Bun.spawn([process.execPath, 'build', fileURLToPath(uiSource), '--target=browser', '--minify'], { stdout: 'pipe', stderr: 'pipe' })
-    const [uiCode, uiScript, uiError] = await Promise.all([uiBuild.exited, new Response(uiBuild.stdout).text(), new Response(uiBuild.stderr).text()])
-    if (uiCode !== 0 || !uiScript) throw Error('Cannot prepare shared UI inspector: ' + uiError)
-    await writeFile(join(root, 'ui-inspector.mjs'), uiScript, { flag: 'wx', mode: 0o400 })
-    await writeFile(join(root, 'ui-inspector.css'), await readFile(new URL('UiContentRenderer.css', uiSource)), { flag: 'wx', mode: 0o400 })
-    // inspect-design is a Node entry; do not import the Bun-only checker there.
-    const manifestBuild = Bun.spawn([process.execPath, 'build', fileURLToPath(new URL('./asset-contracts.ts', import.meta.url)),
-      '--target=node', '--production'], { stdout: 'pipe', stderr: 'pipe' })
-    const [manifestCode, manifestSource, manifestError] = await Promise.all([manifestBuild.exited, new Response(manifestBuild.stdout).text(), new Response(manifestBuild.stderr).text()])
-    if (manifestCode !== 0 || !manifestSource) throw Error('Cannot prepare inspector manifest reader: ' + manifestError)
-    await writeFile(join(root, 'inspection-manifest.mjs'), manifestSource, { flag: 'wx', mode: 0o400 })
-    const fontBuild = Bun.spawn([process.execPath, 'build', fileURLToPath(new URL('./font-inspection.ts', import.meta.url)),
-      '--target=node', '--production'], { stdout: 'pipe', stderr: 'pipe' })
-    const [fontCode, fontSource, fontError] = await Promise.all([fontBuild.exited, new Response(fontBuild.stdout).text(), new Response(fontBuild.stderr).text()])
-    if (fontCode !== 0 || !fontSource) throw Error('Cannot prepare font inspector: ' + fontError)
-    await writeFile(join(root, 'font-inspection.mjs'), fontSource, { flag: 'wx', mode: 0o400 })
     const toolBuild = Bun.spawn([process.execPath, 'build', fileURLToPath(new URL('./ui-layout-tool.ts', import.meta.url)),
       '--target=bun', '--production'], { stdout: 'pipe', stderr: 'pipe' })
     const [toolCode, toolSource, toolError] = await Promise.all([toolBuild.exited, new Response(toolBuild.stdout).text(), new Response(toolBuild.stderr).text()])

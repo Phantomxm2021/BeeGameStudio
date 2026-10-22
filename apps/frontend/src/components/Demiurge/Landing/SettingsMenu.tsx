@@ -91,7 +91,6 @@ import { InvitationSettingsPanel } from '../../Settings/InvitationSettingsPanel'
 import { UserSkillsSettingsPanel } from '../../Settings/UserSkillsSettingsPanel';
 import { ModelConfigPanel } from '../../Settings/ModelConfigPanel';
 import { getOpenCodeGoProvider, OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
-import { WebToolsPanel } from '../../Settings/WebToolsPanel';
 import { Dialog, DialogContent } from '../../ui/dialog';
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../../beui/registry/components/motion/popover-morph';
 import { CloseIconButton } from '../../ui/CloseIconButton';
@@ -117,7 +116,6 @@ interface SettingsMenuProps {
   onClose: () => void;
   onSetLang: (lang: Language) => void;
   canManageWorkspace?: boolean;
-  canManageSecrets?: boolean;
   canManageRuntimeSettings?: boolean;
   canManageMcp?: boolean;
   canManageSkills?: boolean;
@@ -142,7 +140,6 @@ export function SettingsMenu({
   onClose,
   onSetLang,
   canManageWorkspace,
-  canManageSecrets,
   canManageRuntimeSettings,
   canManageMcp,
   canManageSkills,
@@ -171,7 +168,6 @@ export function SettingsMenu({
   const canOpenPlatformSettings = currentUser?.role === 'owner';
   const effectiveCanManageWorkspace =
     canManageWorkspace ?? (canOpenPlatformSettings && hasPermission('workspace.manage'));
-  const effectiveCanManageSecrets = canManageSecrets ?? (canOpenPlatformSettings && hasPermission('secrets.manage'));
   const effectiveCanManageRuntimeSettings =
     canManageRuntimeSettings ?? (canOpenPlatformSettings && hasPermission('runtime_settings.manage'));
   const effectiveCanManageMcp = canManageMcp ?? Boolean(currentUser && hasPermission('mcp.manage'));
@@ -186,7 +182,6 @@ export function SettingsMenu({
   const effectiveCanManageCredits = canManageCredits ?? (canOpenPlatformSettings && hasPermission('credits.admin'));
   const hasPlatformSettings =
     effectiveCanManageWorkspace ||
-    effectiveCanManageSecrets ||
     effectiveCanManageRuntimeSettings ||
     effectiveCanManageModelConfig ||
     effectiveCanManageInvitations ||
@@ -1316,11 +1311,6 @@ export function SettingsMenu({
                       </div>
                     </div>
                   ) : null}
-
-                  {effectiveCanManageSecrets ? (
-                    <WebToolsPanel label={text.webSearch} language={lang} />
-                  ) : null}
-
                 </div>
               ) : null}
 

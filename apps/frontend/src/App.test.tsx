@@ -91,10 +91,6 @@ vi.mock('./utils/chatHistory', () => ({
   normalizeChatHistory: (value: unknown) => value,
 }));
 
-vi.mock('./utils/bootstrapIdea', () => ({
-  buildBootstrapPayload: (idea: string) => ({ idea }),
-}));
-
 vi.mock('./components/Common/ErrorBoundary', () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));

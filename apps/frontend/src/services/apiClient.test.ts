@@ -5,7 +5,6 @@ import {
   API_BASE_URL,
   AUTHENTICATION_REQUIRED_EVENT,
   authenticatedFetch,
-  buildAuthHeaders,
   buildApiUrlWithBase,
   buildUnauthorizedMessage,
   isAuthenticationServiceUnavailable,
@@ -286,12 +285,15 @@ describe('apiClient defaults', () => {
     expect(adapter.mock.calls[1]?.[0]?.headers?.Authorization).toBeUndefined();
   });
 
-  it('does not overwrite an explicit authorization header', () => {
+  it('does not overwrite an explicit authorization header', async () => {
     vi.stubEnv('VITE_API_AUTH_TOKEN', 'runtime-token');
 
-    const headers = buildAuthHeaders({
-      Authorization: 'Bearer explicit-token',
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    await authenticatedFetch('/api/current-user', {
+      headers: { Authorization: 'Bearer explicit-token' },
     });
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
 
     expect(headers.get('Authorization')).toBe('Bearer explicit-token');
   });

@@ -7,7 +7,7 @@ import { skillEvidence } from './context'
 import { openAgentTools, type AgentPreviewAccess, type AgentImageAccess } from './agent-tools'
 import { createAgentMeasurement, AGENT_CONSUMPTION_CHECKS } from './agent-measurement'
 import { blockingRegisteredContentChecks, inspectAgentMeasurementInputs } from './measured-build'
-import { readProjectGuide, projectGuideContext, PROJECT_WORKING_CONVENTIONS } from './project-guide'
+import { readProjectGuide, projectGuideContext } from './project-guide'
 import { saveHostExitReceipt, type HostExitReceipts, type HostExitFacts } from './host-exit-receipt'
 import { requiresBgsEditableContent } from './web-project-start'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
@@ -49,7 +49,6 @@ const professionalContextParagraphs = [
 ]
 const firstVersionDeliveryContext = 'Deliver the confirmed scope using the design dependencies and professional methods in the project guide; design records live under docs/.'
 const editableWebDeliveryContext = 'This project requires BGS visual editing: content/scenes/*.json and content/ui/*.json are editable data consumed by the confirmed engine, not a separate engine or required game scaffold. Register Scene/UI documents in content/index.json and resources in assets/asset-manifest.json. Scene data holds editable world layout and object/resource bindings; UI-only games without a world scene need no empty Scene. Canvas rendering or a single screen does not imply UI-only. Dynamic simulation state and game logic belong in code. The optional browser consumer supports a subset of this data; project code implements the remaining behavior.'
-export const agentProfessionalContext = [PROJECT_WORKING_CONVENTIONS, ...professionalContextParagraphs, firstVersionDeliveryContext].join('\n')
 // Native execution reads production guidance from the saved project guide once.
 export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation' | 'requirements'>>, followup = false) => [
   ...professionalContextParagraphs,
