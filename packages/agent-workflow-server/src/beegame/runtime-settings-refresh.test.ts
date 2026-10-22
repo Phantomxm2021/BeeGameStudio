@@ -18,7 +18,7 @@ test('changing capabilities during work refreshes the next task without interrup
       async submit(input) {
         turns++
         if (turns === 1) { entered(); await gate }
-        await input.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic task complete' })
+        await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic task complete' })
       },
     }
   } }, root)

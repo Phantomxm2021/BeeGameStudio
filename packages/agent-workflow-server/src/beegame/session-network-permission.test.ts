@@ -12,7 +12,7 @@ test('a session network approval covers only the same host in the live session',
       decisions.push(await turn.requestPermission({ toolUseID, toolName: 'SandboxNetworkAccess',
         input: { host }, message: `${host} requires permission` }))
     }
-    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Done' })
   } }) }, root)
   try {
     const session = manager.start({ workspacePath: root, userId: 'owner', projectId: 'project' })

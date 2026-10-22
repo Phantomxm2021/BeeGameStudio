@@ -86,7 +86,7 @@ it('does not offer a stopped native permission as actionable after service resta
     expect((await post(app, '/api/projects', { id: projectId, name: 'Permission test',
       root_path: workspace, created_at: Date.now() })).status).toBe(200)
     expect((await post(app, '/api/model-configs', { name: 'Offline', provider: 'openai-compatible',
-      apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
+      apiKey: 'fake', model: 'fake', isDefault: true })).status).toBe(200)
     const ensured = await post(app, `/api/projects/${projectId}/session/ensure`, {})
     const { session } = await ensured.json() as { session: { id: string } }
     const started = await post(app, `${workflow}/agent/goal`,
@@ -203,7 +203,7 @@ it('keeps provider refusal actionable after host settlement and a later successf
     expect((await post('/api/projects', { id: projectId, name: 'Refusal test', root_path: workspace,
       created_at: Date.now() })).status).toBe(200)
     expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake',
-      models: { balanced: 'mimo-v2.6-flash' }, isDefault: true })).status).toBe(200)
+      model: 'mimo-v2.6-flash', isDefault: true })).status).toBe(200)
     const { session } = await (await post(`/api/projects/${projectId}/session/ensure`, { language: 'zh' })).json() as { session: { id: string } }
     const recovered = await recoverLatestProjectSessionFromDisk(workspace)
     expect(recovered?.transcriptPath).toBeTruthy()
@@ -285,7 +285,7 @@ it('reports only live native child tasks as runtime activity', async () => {
     expect((await post('/api/projects', { id: projectId, name: 'Subagent status test', root_path: workspace,
       created_at: Date.now() })).status).toBe(200)
     expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake',
-      models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
+      model: 'fake', isDefault: true })).status).toBe(200)
     const ensured = await post(`/api/projects/${projectId}/session/ensure`, {})
     const { session } = await ensured.json() as { session: { id: string } }
     const started = await post(`/api/projects/${projectId}/workflow-v3/agent/goal`,
@@ -350,7 +350,7 @@ it('question answers cross both HTTP permission routes without replacing native 
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   try {
     expect((await post('/api/projects', { id: projectId, name: 'Question test', root_path: workspace, created_at: Date.now() })).status).toBe(200)
-    expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
+    expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake', model: 'fake', isDefault: true })).status).toBe(200)
     const ensured = await post(`/api/projects/${projectId}/session/ensure`, {})
     const { session } = await ensured.json() as { session: { id: string } }
     const workflow = `/api/projects/${projectId}/workflow-v3`

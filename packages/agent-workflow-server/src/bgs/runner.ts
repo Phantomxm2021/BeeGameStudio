@@ -9,7 +9,7 @@ import { bgsApproval, elicitationAnswer, webSearchTool } from './interactions'
 import { bgsReasoningConfig } from './preferences'
 import { configureBgsSkills } from './skills'
 import type { BeeGameSessionRunner, BeeGameSessionRunnerStartInput, BeeGameSessionRuntime,
-  BeeGameSessionSubmitInput, DashboardPermissionRequest } from '../beegame/session-manager'
+  BeeGameSessionSubmitInput, BeeGameEventType, DashboardPermissionRequest } from '../beegame/session-manager'
 import { getSafeRuntimeProcessEnvironment } from '../beegame/runtime-process-environment'
 import { projectExecutionAccess } from '../beegame/project-execution-access'
 import { prepareNativeMcpConfig } from '../beegame/native-mcp-config'
@@ -136,7 +136,7 @@ export function bgsApplicationContext(key: string, value?: string): Record<strin
 export function bgsProviderConfig(env: Record<string, string>): Record<string, unknown> {
   if (env.BEEGAME_MODEL_TYPE && env.BEEGAME_MODEL_TYPE !== 'openai')
     throw Error('BGS requires an OpenAI Responses-compatible model connection')
-  const model = env.BEEGAME_MODEL || env.BGS_DEFAULT_BALANCED_MODEL
+  const model = env.BEEGAME_MODEL
   const custom = env.OPENAI_BASE_URL
   if (env.OPENAI_AUTH_MODE === 'chatgpt' && custom && !/^https:\/\/api\.openai\.com\/?(?:v1\/?)?$/.test(custom))
     throw Error('ChatGPT credentials cannot be sent to a custom model endpoint')
@@ -314,7 +314,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
     })()
   }
 
-  private async emit(eventType: string, text = '', payload: RpcObject = {}) {
+  private async emit(eventType: BeeGameEventType, text = '', payload: RpcObject = {}) {
     await this.active?.input.onMessage({ type: 'runtime_event', eventType, text,
       ...payload, runtime: 'bgs', threadId: this.threadId })
   }

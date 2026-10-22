@@ -197,9 +197,7 @@ export function SettingsMenu({
   const [apiProtocol,setApiProtocol]=useState<ModelApiProtocol>('responses');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [fastModel, setFastModel] = useState('');
-  const [balancedModel, setBalancedModel] = useState('');
-  const [strongModel, setStrongModel] = useState('');
+  const [model, setModel] = useState('');
   const [apiKeyPreview, setApiKeyPreview] = useState('');
   const [isDefault, setIsDefault] = useState(true);
   const [published, setPublished] = useState(true);
@@ -281,9 +279,7 @@ export function SettingsMenu({
           setProvider(defaultConfig.provider);
           setApiProtocol(defaultConfig.apiProtocol ?? resolveModelApiProtocol(defaultConfig.provider));
           setBaseUrl(defaultConfig.baseUrl || '');
-          setFastModel(defaultConfig.models.fast || '');
-          setBalancedModel(defaultConfig.models.balanced || '');
-          setStrongModel(defaultConfig.models.strong || '');
+          setModel(defaultConfig.model || '');
           setApiKeyPreview(defaultConfig.apiKeyPreview || '');
           setIsDefault(defaultConfig.isDefault);
           setPublished(defaultConfig.published ?? true);
@@ -449,7 +445,7 @@ export function SettingsMenu({
   const openModelConfig = (action: NonNullable<typeof modelAction>, config?: ModelConfig) => {
     setSelectedModelConfigId(config?.id ?? ''); setName(config?.name ?? ''); setProvider(config?.provider ?? 'openai-compatible');setApiProtocol(config ? config.apiProtocol ?? resolveModelApiProtocol(config.provider) : 'responses');
     setBaseUrl(config?.baseUrl ?? ''); setApiKey(''); setApiKeyPreview(config?.apiKeyPreview ?? '');
-    setFastModel(config?.models.fast ?? ''); setBalancedModel(config?.models.balanced ?? ''); setStrongModel(config?.models.strong ?? '');
+    setModel(config?.model ?? '');
     setIsDefault(config?.isDefault ?? existingConfigs.length === 0); setPublished(config?.published ?? true); setAuthMethods(config?.authMethods ?? ['platform']);
     setStatus(''); setModelAction(action);
   };
@@ -484,11 +480,7 @@ export function SettingsMenu({
         apiProtocol,
         baseUrl: baseUrl.trim(),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        models: {
-          ...(fastModel.trim() ? { fast: fastModel.trim() } : {}),
-          balanced: balancedModel.trim(),
-          ...(strongModel.trim() ? { strong: strongModel.trim() } : {}),
-        },
+        model: model.trim(),
         isDefault,
       };
       const saved = selectedModelConfigId
@@ -506,9 +498,7 @@ export function SettingsMenu({
       setProvider(saved.provider);
       setApiProtocol(saved.apiProtocol ?? resolveModelApiProtocol(saved.provider));
       setBaseUrl(saved.baseUrl || '');
-      setFastModel(saved.models.fast || '');
-      setBalancedModel(saved.models.balanced || '');
-      setStrongModel(saved.models.strong || '');
+      setModel(saved.model || '');
       setApiKeyPreview(saved.apiKeyPreview || apiKeyPreview);
       setApiKey('');
       return true;
@@ -897,7 +887,7 @@ export function SettingsMenu({
                 ? true
                 : activeTab === 'credit'
                   ? true
-                  : isSavingCurrentTab || !authMethods.length || !balancedModel.trim() || !goModelsComplete || (!selectedModelConfigId && authMethods.includes('platform') && !apiKey.trim());
+                  : isSavingCurrentTab || !authMethods.length || !model.trim() || !goModelsComplete || (!selectedModelConfigId && authMethods.includes('platform') && !apiKey.trim());
 
   const handleSaveSettings = async () => {
     if (activeSection !== 'platform') return;
@@ -994,30 +984,20 @@ export function SettingsMenu({
           protocol: lang.startsWith('zh') ? '协议' : 'Protocol',
           baseUrl: text.baseUrl,
           apiKey: text.apiKey,
-          models: text.models,
-          fast: text.fast,
-          balanced: text.balanced,
-          strong: text.strong,
-          fastModel: text.fastModel,
-          balancedModel: text.balancedModel,
-          strongModel: text.strongModel,
+          model: text.model,
         }}
         provider={provider}
         apiProtocol={apiProtocol}
         onApiProtocolChange={setApiProtocol}
         baseUrl={baseUrl}
         apiKey={apiKey}
-        fastModel={fastModel}
-        balancedModel={balancedModel}
-        strongModel={strongModel}
+        model={model}
         apiKeyPreview={apiKeyPreview}
         savedPrefix={savedPrefix}
         onProviderChange={value => { setProvider(value); setAuthMethods(current => current.filter(method => method === 'platform' || method === 'byok')); }}
         onBaseUrlChange={setBaseUrl}
         onApiKeyChange={setApiKey}
-        onFastModelChange={setFastModel}
-        onBalancedModelChange={setBalancedModel}
-        onStrongModelChange={setStrongModel}
+        onModelChange={setModel}
         onSubmit={event => {
           event.preventDefault();
           if (!isSaveDisabled) void handleSaveSettings();

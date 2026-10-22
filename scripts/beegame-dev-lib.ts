@@ -343,7 +343,6 @@ function buildFrontendEnv(input: {
     ...omitFrontendAndRuntimeForbiddenEnv(input.baseEnv),
     PORT: String(input.ports.frontend),
     VITE_API_BASE_URL: `http://127.0.0.1:${input.ports.runtime}`,
-    VITE_WS_BASE_URL: `ws://127.0.0.1:${input.ports.runtime}`,
   })
 }
 

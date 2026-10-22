@@ -13,7 +13,6 @@ describe('billing app error handling', () => {
     const app = createBeeGameBillingRouteApp({
       billingConfig: {
         mode: 'server',
-        usageBillingMode: 'realtime',
         creditControlToken: 'service-token',
       },
       dashboardRepository: repository,
@@ -61,7 +60,6 @@ describe('billing app error handling', () => {
     const app = createBeeGameBillingRouteApp({
       billingConfig: {
         mode: 'server',
-        usageBillingMode: 'realtime',
         creditControlToken: 'service-token',
       },
       dashboardRepository: repository,

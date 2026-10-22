@@ -167,11 +167,7 @@ type CreateModelConfigInput = {
   apiProtocol?: import('@bee-game-studio/agent-workflow').ModelApiProtocol
   baseUrl?: string
   apiKey: string
-  models: {
-    fast?: string
-    balanced?: string
-    strong?: string
-  }
+  model?: string
   isDefault?: boolean
 }
 type UpdateModelConfigInput = Partial<CreateModelConfigInput>

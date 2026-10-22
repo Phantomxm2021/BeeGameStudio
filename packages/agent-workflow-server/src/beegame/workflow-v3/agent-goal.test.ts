@@ -173,21 +173,19 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     }
   }}
   const starts:any[]=[]
-  const sessions=new BeeGameSessionManager({async start(input){starts.push(input);const nativeId=input.resumeSessionId??(starts.length===1?'11111111':String(starts.length).padStart(8,'0'))+'-2222-4333-8444-555555555555';input.onNativeSessionId?.(nativeId);return {
+  const sessions=new BeeGameSessionManager({async start(input){starts.push(input);const nativeId=input.resumeSessionId??(starts.length===1?'11111111':String(starts.length).padStart(8,'0'))+'-2222-4333-8444-555555555555';input.onNativeSessionId?.(nativeId);const onNativeUsage=input.onNativeUsage;return {
     async submit(input) {
       submissions.push(input)
       const prompt = typeof input.prompt === 'string' ? input.prompt : ''
-      if (prompt.startsWith('/bgs-builtins:') && !faults.missingEntrySkill) await input.onMessage({type:'system',subtype:'status',status:null,
-        message:'Loaded entry skill',skill:{name:prompt.slice(1,prompt.indexOf(' ')),messageId:'entry-body',source:'command',status:'loaded'}} as any)
+      if (prompt.startsWith('/bgs-builtins:') && !faults.missingEntrySkill) await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'system.status', text: 'Loaded entry skill', skill: {name:prompt.slice(1,prompt.indexOf(' ')),messageId:'entry-body',source:'command',status:'loaded'} })
       await writeFile(join(root,'candidate.txt'),'Synthetic partial candidate')
-      for(let i=0;i<extraEvents;i++)await input.onMessage({type:'assistant',session_id:nativeId,
-        message:{id:'synthetic-'+i,role:'assistant',content:[{type:'text',text:'Synthetic audit event '+i}]}} as any)
+      for(let i=0;i<extraEvents;i++)await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic audit event ' + i, assistantBlockId: 'synthetic-' + i })
       if(mode==='wait') await new Promise<void>(resolve=>{
         if(input.signal.aborted)resolve();else input.signal.addEventListener('abort',()=>resolve(),{once:true})
       })
       if(mode==='fail')throw new Error('Synthetic native failure')
-      await input.onMessage({type:'result',subtype:'success',session_id:nativeId,
-        total_cost_usd:0,usage:{input_tokens:40,output_tokens:8},modelUsage:{synthetic:{inputTokens:40,outputTokens:8}},result:'Synthetic end, not game acceptance'} as any)
+      onNativeUsage?.({prompt_tokens:40,completion_tokens:8,cache_read_tokens:0,cache_creation_tokens:0,total_tokens:48})
+      await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic end, not game acceptance' })
     },stop(){},
   }}},join(container,'native'),async userDataRoot=>({BEEGAME_CONFIG_DIR:userDataRoot ?? join(root,'wrong-shared-config')}),{},true)
   const userDataRoot=join(root,'owner-config')
@@ -954,8 +952,7 @@ test('restoring an older project transcript reports history mismatch without cha
 test('reconstructed worker resumes persisted native UUID and pause intent without replaying the original goal',async()=>{
   const f=await fixture('wait'),starts:any[]=[],submissions:BeeGameSessionSubmitInput[]=[]
   const sessions=new BeeGameSessionManager({async start(input){starts.push(input);input.onNativeSessionId?.(input.resumeSessionId!);return {
-    async submit(turn){submissions.push(turn);await turn.onMessage({type:'result',subtype:'success',session_id:input.resumeSessionId,
-      total_cost_usd:0,usage:{input_tokens:5,output_tokens:2},result:'Synthetic resumed end'} as any)},stop(){},
+    async submit(turn){submissions.push(turn);input.onNativeUsage?.({prompt_tokens:5,completion_tokens:2,cache_read_tokens:0,cache_creation_tokens:0,total_tokens:7});await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic resumed end' })},stop(){},
   }}},join(f.root,'native'),async()=>({}),{},true)
   const executor=createAgentGoalExecutor({store:f.store,sessions})
   try {

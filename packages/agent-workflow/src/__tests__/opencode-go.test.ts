@@ -14,9 +14,9 @@ test('discovers new IDs by protocol without including Responses, Google, removed
     expect(catalog[provider]).toEqual([...goModelCatalog[provider]].sort())
   expect(get).toHaveBeenCalledTimes(2)
   const config = { provider: 'openai-compatible', baseUrl: OPENCODE_GO_PROFILES['openai-compatible'].baseUrl,
-    models: { fast: 'new-chat-model', balanced: 'new-chat-model', strong: 'new-chat-model' }, authMethods: ['byok'] }
+    model: 'new-chat-model', authMethods: ['byok'] }
   expect(() => validateOpenCodeGoConfig(config, catalog)).not.toThrow()
-  expect(() => validateOpenCodeGoConfig({ ...config, models: { ...config.models, fast: 'new-anthropic-model' } }, catalog)).toThrow()
+  expect(() => validateOpenCodeGoConfig({ ...config, model: 'new-anthropic-model' }, catalog)).toThrow()
 })
 
 test('catalog failures and malformed responses fail without retry or static fallback', async () => {

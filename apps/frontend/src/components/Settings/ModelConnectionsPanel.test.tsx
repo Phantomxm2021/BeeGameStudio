@@ -17,10 +17,10 @@ vi.mock('../beui/project-select', () => ({ ProjectSelect: ({ ariaLabel, value, o
 
 const connection = (method: api.ModelAuthMethod = 'platform', extra: Partial<api.ModelConnectionStatus> = {}): api.ModelConnectionStatus => ({ method, hasKey: false, isPreferred: false, chatgptConnected: false, ...extra });
 const catalog = (): api.CatalogModel[] => [
-  { id: 'official', name: 'Published model', provider: 'openai-compatible', models: { balanced: 'published' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: connection() },
-  { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
-  { id: 'personal-chatgpt-subscription', name: 'ChatGPT subscription', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'], connection: connection() },
-  { id: OPENCODE_GO_ID, name: 'OpenCode Go', provider: 'anthropic-compatible', baseUrl: OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl, models: OPENCODE_GO_PROFILES['anthropic-compatible'].defaults, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
+  { id: 'official', name: 'Published model', provider: 'openai-compatible', model: 'published', apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: connection() },
+  { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', model: undefined, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
+  { id: 'personal-chatgpt-subscription', name: 'ChatGPT subscription', provider: 'openai-compatible', model: undefined, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'], connection: connection() },
+  { id: OPENCODE_GO_ID, name: 'OpenCode Go', provider: 'anthropic-compatible', baseUrl: OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl, model: OPENCODE_GO_PROFILES['anthropic-compatible'].model, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
 ];
 const waitForCatalog = async () => { await act(async () => { await vi.mocked(api.listModelCatalog).mock.results[0]?.value; }); };
 beforeEach(() => {
@@ -50,7 +50,7 @@ it('shows direct subscription choices and keeps official as the default', async 
   expect(api.saveModelConnection).not.toHaveBeenCalled();
 });
 
-it('saves one independent BYOK config with provider, URL, key and three tiers', async () => {
+it('saves one independent BYOK config with provider, URL, key and one model', async () => {
   const ref = createRef<ModelConnectionsHandle>();
   render(<><ModelConnectionsPanel ref={ref} language="en" /><button onClick={() => ref.current?.saveByok()}>Footer save</button></>);
   await waitForCatalog();
@@ -58,18 +58,16 @@ it('saves one independent BYOK config with provider, URL, key and three tiers', 
   await userEvent.selectOptions(screen.getByLabelText('Provider'), 'openai-compatible');
   await userEvent.type(screen.getByLabelText('Base URL'), 'https://personal.example/v1');
   await userEvent.type(screen.getByLabelText('API Key'), 'user-fixture-secret');
-  await userEvent.type(screen.getByLabelText('Fast model'), 'fast-id');
-  await userEvent.type(screen.getByLabelText('Balanced model'), 'balanced-id');
-  await userEvent.type(screen.getByLabelText('Strong model'), 'strong-id');
+  await userEvent.type(screen.getByLabelText('Model'), 'balanced-id');
   expect(screen.queryByRole('button', { name: 'Save BYOK' })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
-  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'user-fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://personal.example/v1', models: { fast: 'fast-id', balanced: 'balanced-id', strong: 'strong-id' } }));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'user-fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://personal.example/v1', model: 'balanced-id' }));
   expect(screen.getByLabelText('API Key')).toHaveValue('');
 });
 
 it('returns to the published official model without exposing a second selector', async () => {
   const result = catalog();
-  result[1] = { ...result[1], isDefault: true, connection: connection('byok', { hasKey: true, isPreferred: true, baseUrl: 'https://personal.example/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong' } }) };
+  result[1] = { ...result[1], isDefault: true, connection: connection('byok', { hasKey: true, isPreferred: true, baseUrl: 'https://personal.example/v1', model: 'balanced' }) };
   vi.mocked(api.listModelCatalog).mockResolvedValue(result);
   render(<ModelConnectionsPanel language="en" />);
   expect(await screen.findByLabelText('Base URL')).toHaveValue('https://personal.example/v1');
@@ -78,17 +76,17 @@ it('returns to the published official model without exposing a second selector',
   await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('official', 'platform', undefined, true, undefined));
 });
 
-it('loads and edits saved personal tiers without re-entering an unchanged key', async () => {
+it('loads and edits the saved personal model without re-entering an unchanged key', async () => {
   const result = catalog();
-  result[1] = { ...result[1], isDefault: true, connection: connection('byok', { hasKey: true, isPreferred: true, baseUrl: 'https://personal.example/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong' } }) };
+  result[1] = { ...result[1], isDefault: true, connection: connection('byok', { hasKey: true, isPreferred: true, baseUrl: 'https://personal.example/v1', model: 'balanced' }) };
   vi.mocked(api.listModelCatalog).mockResolvedValue(result);
   const ref = createRef<ModelConnectionsHandle>();
   render(<><ModelConnectionsPanel ref={ref} language="en" /><button onClick={() => ref.current?.saveByok()}>Footer save</button></>);
   expect(await screen.findByLabelText('Base URL')).toHaveValue('https://personal.example/v1');
-  await userEvent.clear(screen.getByLabelText('Strong model'));
-  await userEvent.type(screen.getByLabelText('Strong model'), 'strong-new');
+  await userEvent.clear(screen.getByLabelText('Model'));
+  await userEvent.type(screen.getByLabelText('Model'), 'strong-new');
   await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
-  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', '', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://personal.example/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong-new' } }));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', '', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://personal.example/v1', model: 'strong-new' }));
 });
 
 it('cancels an unfinished subscription login when the panel closes', async () => {
@@ -227,9 +225,9 @@ it.each([
   if(provider==='openai-compatible'||provider==='grok') await userEvent.selectOptions(screen.getByLabelText('API Protocol'),apiProtocol);
   await userEvent.type(screen.getByLabelText('Base URL'),'https://fixture.example/v1');
   await userEvent.type(screen.getByLabelText('API Key'),'fixture-key');
-  for(const label of ['Fast model','Balanced model','Strong model']) await userEvent.type(screen.getByLabelText(label),'fixture-model');
+  for(const label of ['Model']) await userEvent.type(screen.getByLabelText(label),'fixture-model');
   await userEvent.click(screen.getByRole('button',{name:'Footer save'}));
-  await waitFor(()=>expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok','byok','fixture-key',true,{provider,apiProtocol,baseUrl:'https://fixture.example/v1',models:{fast:'fixture-model',balanced:'fixture-model',strong:'fixture-model'}}));
+  await waitFor(()=>expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok','byok','fixture-key',true,{provider,apiProtocol,baseUrl:'https://fixture.example/v1',model: 'fixture-model'}));
 });
 
 it('saves Go through the existing footer and restricts model choices to the selected protocol', async () => {
@@ -240,16 +238,16 @@ it('saves Go through the existing footer and restricts model choices to the sele
   await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'opencode-go');
   expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument();
   expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: true, busy: false });
-  expect(screen.getByLabelText('Fast model')).toHaveValue('qwen3.8-flash');
+  expect(screen.getByLabelText('Model')).toHaveValue('minimax-m3');
   expect(screen.queryByRole('option', { name: 'kimi-k3' })).not.toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText('Protocol'), 'openai-compatible');
-  expect(screen.getByLabelText('Strong model')).toHaveValue('kimi-k3');
+  expect(screen.getByLabelText('Model')).toHaveValue('kimi-k2.7-code');
   expect(screen.queryByRole('option', { name: 'minimax-m3' })).not.toBeInTheDocument();
   expect(screen.queryByRole('option', { name: 'gpt-6-luna' })).not.toBeInTheDocument();
   await userEvent.type(screen.getByLabelText('OpenCode Go API Key'), 'go-fixture-key');
   expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: false, busy: false });
   await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
-  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith(OPENCODE_GO_ID, 'byok', 'go-fixture-key', true, { provider: 'openai-compatible', baseUrl: OPENCODE_GO_PROFILES['openai-compatible'].baseUrl, models: OPENCODE_GO_PROFILES['openai-compatible'].defaults }));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith(OPENCODE_GO_ID, 'byok', 'go-fixture-key', true, { provider: 'openai-compatible', baseUrl: OPENCODE_GO_PROFILES['openai-compatible'].baseUrl, model: OPENCODE_GO_PROFILES['openai-compatible'].model }));
   expect(screen.getByLabelText('OpenCode Go API Key')).toHaveValue('');
   expect(api.startModelLogin).not.toHaveBeenCalled();
 });
@@ -257,12 +255,12 @@ it('saves Go through the existing footer and restricts model choices to the sele
 it('restores a preferred Go connection and requires a key again when switching protocol', async () => {
   const result = catalog();
   const go = result.find(item => item.id === OPENCODE_GO_ID)!;
-  go.connection = connection('byok', { hasKey: true, isPreferred: true, baseUrl: go.baseUrl, models: { fast: 'minimax-m3', balanced: 'qwen3.7-plus', strong: 'qwen3.8-max' } });
+  go.connection = connection('byok', { hasKey: true, isPreferred: true, baseUrl: go.baseUrl, model: 'qwen3.7-plus' });
   vi.mocked(api.listModelCatalog).mockResolvedValue(result);
   const saveState = vi.fn();
   render(<ModelConnectionsPanel language="en" onSaveStateChange={saveState} />);
   expect(await screen.findByLabelText('Protocol')).toHaveValue('anthropic-compatible');
-  expect(screen.getByLabelText('Fast model')).toHaveValue('minimax-m3');
+  expect(screen.getByLabelText('Model')).toHaveValue('qwen3.7-plus');
   await waitFor(() => expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: false, busy: false }));
   await userEvent.selectOptions(screen.getByLabelText('Protocol'), 'openai-compatible');
   expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: true, busy: false });
@@ -274,11 +272,11 @@ it('loads new Go models dynamically and saves a newly listed choice', async () =
   await waitForCatalog();
   await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'opencode-go');
   await screen.findAllByRole('option', { name: 'new-anthropic-model' });
-  await userEvent.selectOptions(screen.getByLabelText('Fast model'), 'new-anthropic-model');
+  await userEvent.selectOptions(screen.getByLabelText('Model'), 'new-anthropic-model');
   await userEvent.type(screen.getByLabelText('OpenCode Go API Key'), 'fixture-key');
   await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
   await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith(OPENCODE_GO_ID, 'byok', 'fixture-key', true,
-    expect.objectContaining({ models: { ...OPENCODE_GO_PROFILES['anthropic-compatible'].defaults, fast: 'new-anthropic-model' } })));
+    expect.objectContaining({ model: 'new-anthropic-model' })));
 });
 
 it('preserves saved model selections on catalog failure and refreshes only when requested', async () => {
@@ -286,13 +284,13 @@ it('preserves saved model selections on catalog failure and refreshes only when 
   const saved = catalog();
   const go = saved.find(item => item.id === OPENCODE_GO_ID)!;
   go.connection = connection('byok', { hasKey: true, isPreferred: true, baseUrl: go.baseUrl,
-    models: { ...go.models, fast: 'minimax-m3' } });
+    model: 'minimax-m3' });
   vi.mocked(api.listModelCatalog).mockResolvedValue(saved);
   const saveState = vi.fn();
   render(<ModelConnectionsPanel language="en" onSaveStateChange={saveState} />);
   await waitForCatalog();
   expect(await screen.findByRole('status')).toHaveTextContent('Could not load models');
-  expect(screen.getByLabelText('Fast model')).toHaveValue('minimax-m3');
+  expect(screen.getByLabelText('Model')).toHaveValue('minimax-m3');
   expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: true, busy: false });
   expect(api.listOpenCodeGoModels).toHaveBeenCalledTimes(1);
   expect(api.saveModelConnection).not.toHaveBeenCalled();
@@ -312,19 +310,19 @@ it('ignores an older catalog response after switching protocol', async () => {
   await screen.findAllByRole('option', { name: 'new-chat-model' });
   await act(async () => resolve(goModelCatalog));
   expect(screen.queryByRole('option', { name: 'new-anthropic-model' })).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Balanced model')).toHaveValue('kimi-k2.7-code');
+  expect(screen.getByLabelText('Model')).toHaveValue('kimi-k2.7-code');
 });
 
 it('reactivates a saved Go connection separately from ordinary BYOK and reports failed saves', async () => {
   const result = catalog();
   const go = result.find(item => item.id === OPENCODE_GO_ID)!;
-  go.connection = connection('byok', { hasKey: true, models: go.models, baseUrl: go.baseUrl });
+  go.connection = connection('byok', { hasKey: true, model: go.model, baseUrl: go.baseUrl });
   vi.mocked(api.listModelCatalog).mockResolvedValue(result);
   const ref = createRef<ModelConnectionsHandle>();
   render(<><ModelConnectionsPanel ref={ref} language="en" /><button onClick={() => ref.current?.saveByok()}>Footer save</button></>);
   await waitForCatalog();
   await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'opencode-go');
-  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith(OPENCODE_GO_ID, 'byok', undefined, true, { provider: go.provider, baseUrl: go.baseUrl, models: go.models }));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith(OPENCODE_GO_ID, 'byok', undefined, true, { provider: go.provider, baseUrl: go.baseUrl, model: go.model }));
   vi.mocked(api.saveModelConnection).mockRejectedValueOnce(new Error('save failed'));
   await userEvent.type(screen.getByLabelText('OpenCode Go API Key'), 'replacement-key');
   await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));

@@ -58,7 +58,7 @@ test.each([
             expect(decision.behavior).toBe('allow')
           }
         }catch(error){failures.push(error);throw error}
-        await turn.onMessage({type:'result',subtype:'success',session_id:nativeId,total_cost_usd:0,result:'Offline author fixture; quality unverified'} as any)
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Offline author fixture; quality unverified' })
       }}
     }},
   })
@@ -68,7 +68,7 @@ test.each([
     throw Error('Local workflow did not settle')
   }
   try {
-    expect((await request('/api/model-configs',{name:'Offline',provider:'openai-compatible',apiKey:'fake',models:{balanced:'fake'},isDefault:true})).status).toBe(200)
+    expect((await request('/api/model-configs',{name:'Offline',provider:'openai-compatible',apiKey:'fake',model: 'fake',isDefault:true})).status).toBe(200)
     const goal=await request('/api/projects/bootstrap',{project:{id:'fixture',name:'Fixture',created_at:Date.now()},projectName:'Fixture',language:'en',
       brief:{creationMode:'creative',idea:'Only prepare the eight design documents using the selected engine and platform.',option:{title:'Fixture'},
         settings:{...settings,dimension:settings.platform==='VR/AR'?'VR':'2D',orientation:'Landscape',resourceLibraryUsage:'optional'},

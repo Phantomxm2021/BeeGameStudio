@@ -47,7 +47,7 @@ describe('SupabaseRuntimeEnvClient', () => {
       })
       return Response.json({
         OPENAI_API_KEY: 'sk-secret',
-        BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
+        BEEGAME_MODEL: 'balanced-model',
       })
     }) as typeof fetch
 
@@ -61,7 +61,7 @@ describe('SupabaseRuntimeEnvClient', () => {
       }),
     ).resolves.toEqual({
       OPENAI_API_KEY: 'sk-secret',
-      BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
+      BEEGAME_MODEL: 'balanced-model',
     })
 
     expect(calls).toHaveLength(1)
@@ -89,7 +89,7 @@ describe('SupabaseRuntimeEnvClient', () => {
       Response.json({
         OPENAI_API_KEY: encrypted,
         OPENAI_BASE_URL: 'https://llm.example/v1',
-        BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
+        BEEGAME_MODEL: 'balanced-model',
       })) as unknown as typeof fetch
 
     const client = createSupabaseRuntimeEnvClientFromEnv()
@@ -102,7 +102,7 @@ describe('SupabaseRuntimeEnvClient', () => {
     ).resolves.toEqual({
       OPENAI_API_KEY: 'sk-runtime-secret',
       OPENAI_BASE_URL: 'https://llm.example/v1',
-      BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
+      BEEGAME_MODEL: 'balanced-model',
     })
   })
 

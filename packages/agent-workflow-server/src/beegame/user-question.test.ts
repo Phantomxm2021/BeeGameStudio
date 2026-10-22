@@ -29,7 +29,7 @@ test('keeps invalid submissions pending and delivers valid answers once', async 
     let received: DashboardPermissionDecision | undefined
     const manager = new BeeGameSessionManager({ start: async () => ({ stop() {}, async submit(turn) {
       received = await turn.requestPermission({ toolUseID: 'question', toolName: 'AskUserQuestion', input, message: 'Answer?' })
-      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Answered' })
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Answered' })
     } }) }, root)
     try {
       const session = manager.start({ workspacePath: root, userId: 'owner', projectId: 'project' })

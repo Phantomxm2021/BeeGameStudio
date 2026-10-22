@@ -398,7 +398,7 @@ export class SupabaseDashboardStore {
       base_url: input.baseUrl ?? null,
       api_protocol: input.apiProtocol ?? null,
       api_key_ciphertext: encryptSecret(input.apiKey, 'model-config:api-key'),
-      models: input.models,
+      models: { balanced: input.model },
       published: input.published ?? true,
       auth_methods: input.authMethods ?? ['platform'],
       is_default: false,
@@ -433,7 +433,7 @@ export class SupabaseDashboardStore {
         'model-config:api-key',
       )
     }
-    if (input.models !== undefined) patch.models = input.models
+    if (input.model !== undefined) patch.models = { balanced: input.model }
     if (input.published !== undefined) patch.published = input.published
     if (input.authMethods !== undefined) patch.auth_methods = input.authMethods
     if (input.isDefault === false) patch.is_default = false
@@ -470,7 +470,7 @@ export class SupabaseDashboardStore {
           record.apiKey,
           'model-config:api-key',
         ),
-        models: record.models,
+        models: { balanced: record.model },
         published: record.published ?? true,
         auth_methods: record.authMethods ?? ['platform'],
         is_default: record.isDefault ? false : record.isDefault,
@@ -1333,14 +1333,6 @@ function parseSupabaseStorageUri(
   return { bucket, path }
 }
 
-function toModelMap(value: JsonObject): ModelConfigSnapshotRecord['models'] {
-  return {
-    ...(typeof value.fast === 'string' ? { fast: value.fast } : {}),
-    ...(typeof value.balanced === 'string' ? { balanced: value.balanced } : {}),
-    ...(typeof value.strong === 'string' ? { strong: value.strong } : {}),
-  }
-}
-
 function rowToPublicModelConfig(
   row: SupabaseModelConfigRow,
 ): PublicModelConfig {
@@ -1357,7 +1349,7 @@ function rowToPublicModelConfig(
     ...(row.api_protocol ? {apiProtocol:row.api_protocol} : {}),
     ...(row.base_url ? { baseUrl: row.base_url } : {}),
     apiKeyPreview: maskSecret(apiKey),
-    models: toModelMap(row.models),
+    model: typeof row.models.balanced === 'string' ? row.models.balanced.trim() : undefined,
     isDefault: row.is_default,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -1375,7 +1367,7 @@ function modelConfigRowToRuntimeEnv(
     ...(row.api_protocol ? {apiProtocol:row.api_protocol} : {}),
     ...(row.base_url ? { baseUrl: row.base_url } : {}),
     apiKey,
-    models: toModelMap(row.models),
+    model: typeof row.models.balanced === 'string' ? row.models.balanced.trim() : undefined,
   }).env
 }
 
@@ -1396,16 +1388,6 @@ function normalizeRuntimeSettings(value: unknown): RuntimeSettingsConfig {
     if (typeof value[field] === 'boolean') normalized[field] = value[field]
   }
   return normalized
-}
-
-function resolveSecretInput(
-  next: string | undefined,
-  previous: string | undefined,
-  clearSecret = false,
-): string | undefined {
-  if (clearSecret) return undefined
-  if (next === undefined) return previous
-  return trimString(next) || previous
 }
 
 function rowToMcpServer(row: SupabaseMcpServerRow): McpServerConfig {

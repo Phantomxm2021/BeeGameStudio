@@ -47,7 +47,7 @@ test('project turn preparation forwards host UI conditions and clears them for a
   const manager = new BeeGameSessionManager({ start: async input => {
     starts.push(input)
     return { stop() {}, async submit(turn) {
-      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Offline fixture' })
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Offline fixture' })
     } }
   } }, root)
   try {

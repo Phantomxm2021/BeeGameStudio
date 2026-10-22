@@ -19,12 +19,12 @@ describe('agent workflow model configs', () => {
 
   test('preserves each provider protocol and supports explicit Responses without guessing from model names', () => {
     for (const [provider,modelType,protocol] of [['anthropic-compatible','anthropic','anthropic-messages'],['gemini','gemini','gemini'],['grok','grok','chat-completions'],['openai-compatible','openai','chat-completions']] as const) {
-      expect(mapStoredModelConfigToRuntime({provider,apiKey:'fixture',models:{balanced:'selected'}})).toMatchObject({modelType,env:{BEEGAME_API_PROTOCOL:protocol,BEEGAME_MODEL:'selected'}})
+      expect(mapStoredModelConfigToRuntime({provider,apiKey:'fixture',model: 'selected'})).toMatchObject({modelType,env:{BEEGAME_API_PROTOCOL:protocol,BEEGAME_MODEL:'selected'}})
     }
-    expect(mapStoredModelConfigToRuntime({provider:'openai-compatible',apiProtocol:'responses',apiKey:'fixture',models:{}}).env.BEEGAME_API_PROTOCOL).toBe('responses')
+    expect(mapStoredModelConfigToRuntime({provider:'openai-compatible',apiProtocol:'responses',apiKey:'fixture',model: undefined}).env.BEEGAME_API_PROTOCOL).toBe('responses')
     for (const [provider,profile] of Object.entries(OPENCODE_GO_PROFILES))
-      expect(mapStoredModelConfigToRuntime({provider:provider as any,baseUrl:profile.baseUrl,apiKey:'fixture',models:profile.defaults}).env.BEEGAME_MODEL).toBe(profile.defaults.balanced)
-    expect(()=>mapStoredModelConfigToRuntime({provider:'gemini',apiProtocol:'responses',apiKey:'fixture',models:{}})).toThrow('Unsupported')
+      expect(mapStoredModelConfigToRuntime({provider:provider as any,baseUrl:profile.baseUrl,apiKey:'fixture',model: profile.model}).env.BEEGAME_MODEL).toBe(profile.model)
+    expect(()=>mapStoredModelConfigToRuntime({provider:'gemini',apiProtocol:'responses',apiKey:'fixture',model: undefined})).toThrow('Unsupported')
   })
 
   test('masks API keys while preserving runtime mapping internally', () => {
@@ -33,7 +33,7 @@ describe('agent workflow model configs', () => {
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.invalid/v1',
       apiKey: 'sk-dashboard-secret',
-      models: { fast: 'fast-model', balanced: 'balanced-model' },
+      model: 'balanced-model',
       isDefault: true,
     })
 
@@ -48,8 +48,6 @@ describe('agent workflow model configs', () => {
         OPENAI_BASE_URL: 'https://llm.example.invalid/v1',
         OPENAI_API_KEY: 'sk-dashboard-secret',
         BEEGAME_API_PROTOCOL:'chat-completions',
-        BGS_DEFAULT_FAST_MODEL: 'fast-model',
-        BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
         BEEGAME_MODEL: 'balanced-model',
       },
     })
@@ -61,21 +59,21 @@ describe('agent workflow model configs', () => {
       name: 'First',
       provider: 'gemini',
       apiKey: 'first-secret',
-      models: { balanced: 'gemini-balanced' },
+      model: 'gemini-balanced',
       isDefault: true,
     })
     const second = createModelConfig('owner-a', {
       name: 'Second',
       provider: 'grok',
       apiKey: 'second-secret',
-      models: { balanced: 'grok-balanced' },
+      model: 'grok-balanced',
       isDefault: true,
     })
     const otherOwner = createModelConfig('owner-b', {
       name: 'Other',
       provider: 'anthropic-compatible',
       apiKey: 'other-secret',
-      models: { balanced: 'beegame-balanced' },
+      model: 'beegame-balanced',
       isDefault: true,
     })
 
@@ -93,20 +91,20 @@ describe('agent workflow model configs', () => {
       name: 'Editable',
       provider: 'anthropic-compatible',
       apiKey: 'anthropic-secret',
-      models: { strong: 'strong-model' },
+      model: 'strong-model',
     })
 
     const updated = updateModelConfig(config.id, {
       name: 'Updated',
       apiKey: 'updated-secret',
-      models: { strong: 'strong-next' },
+      model: 'strong-next',
     })
 
     expect(updated).toEqual(
       expect.objectContaining({
         name: 'Updated',
         apiKeyPreview: 'upda...cret',
-        models: { strong: 'strong-next' },
+        model: 'strong-next',
       }),
     )
     expect(deleteModelConfig(config.id)).toBe(true)
@@ -119,7 +117,7 @@ describe('agent workflow model configs', () => {
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.invalid/v1',
       apiKey: 'persisted-secret',
-      models: { balanced: 'balanced-model' },
+      model: 'balanced-model',
       isDefault: true,
     })
 
@@ -142,5 +140,18 @@ describe('agent workflow model configs', () => {
         }),
       }),
     )
+  })
+
+  test('preserves the previously selected model when reading a stored three-tier snapshot', () => {
+    const config = createModelConfig('owner-a', {
+      name: 'Saved selection', provider: 'openai-compatible', apiKey: 'fixture-key', model: 'selected',
+    })
+    const [snapshot] = exportModelConfigSnapshot()
+    const { model: _model, ...record } = snapshot!
+    importModelConfigSnapshot([{ ...record, models: { fast: 'unused-fast', balanced: 'selected', strong: 'unused-strong' } } as any])
+    expect(listModelConfigs('owner-a')[0]).toMatchObject({ id: config.id, model: 'selected' })
+    expect(listModelConfigs('owner-a')[0]).not.toHaveProperty('models')
+    expect(mapModelConfigToRuntime(config.id)?.env.BEEGAME_MODEL).toBe('selected')
+    expect(exportModelConfigSnapshot()[0]).not.toHaveProperty('models')
   })
 })

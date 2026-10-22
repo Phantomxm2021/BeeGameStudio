@@ -99,7 +99,7 @@ test('legacy config migrates to one profile, all provider keys remain encrypted 
     expect(selectImageConfig(restored, 'cloudflare').upstreamApiKey).toBe('upstream-secret')
     expect(publicImageConfig(selectImageConfig(restored, 'cloudflare'))).not.toHaveProperty('upstreamApiKey')
     const runtime = await loadRuntimeImageConfig('/unused', {
-      remote: true, billing: { mode: 'remote', usageBillingMode: 'realtime', remoteApiBaseUrl: 'https://service.test', creditControlToken: 'host-key' },
+      remote: true, billing: { mode: 'remote', remoteApiBaseUrl: 'https://service.test', creditControlToken: 'host-key' },
     }, async () => Response.json({ config: encoded, rowExists: true }))
     expect(runtime.provider).toBe('openrouter')
     expect(runtime.apiKey).toBe('original-key')

@@ -5,12 +5,12 @@ export const OPENCODE_GO_PROFILES = {
   'anthropic-compatible': {
     label: 'Anthropic',
     baseUrl: 'https://opencode.ai/zen/go',
-    defaults: { fast: 'qwen3.8-flash', balanced: 'minimax-m3', strong: 'qwen3.8-max' },
+    model: 'minimax-m3',
   },
   'openai-compatible': {
     label: 'Chat Completions',
     baseUrl: 'https://opencode.ai/zen/go/v1',
-    defaults: { fast: 'glm-5.3-flash', balanced: 'kimi-k2.7-code', strong: 'kimi-k3' },
+    model: 'kimi-k2.7-code',
   },
 } as const
 export type OpenCodeGoProvider = keyof typeof OPENCODE_GO_PROFILES
@@ -52,14 +52,13 @@ export function getOpenCodeGoProvider(baseUrl: string | undefined): OpenCodeGoPr
 }
 
 export function validateOpenCodeGoConfig(config: {
-  provider: string; baseUrl?: string; models: { fast?: string; balanced?: string; strong?: string }; authMethods: readonly string[]
+  provider: string; baseUrl?: string; model?: string; authMethods: readonly string[]
 }, catalog?: OpenCodeGoModels): void {
   const provider = getOpenCodeGoProvider(config.baseUrl)
   if (!provider) return
   if (config.provider !== provider) throw new Error('Choose the protocol matching the OpenCode Go endpoint')
   if (config.authMethods.some(method => method !== 'platform' && method !== 'byok')) throw new Error('OpenCode Go requires API key authentication')
-  if ((['fast', 'balanced', 'strong'] as const).some(tier => !config.models[tier]?.trim() ||
-    (catalog && !catalog[provider].includes(config.models[tier]!)))) {
-    throw new Error('Choose three OpenCode Go models supported by this protocol')
+  if (!config.model?.trim() || (catalog && !catalog[provider].includes(config.model))) {
+    throw new Error('Choose an OpenCode Go model supported by this protocol')
   }
 }

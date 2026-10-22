@@ -43,7 +43,6 @@ describe('dashboard dev launcher helpers', () => {
     expect(env.EXISTING).toBe('1')
     expect(env.PORT).toBe('62173')
     expect(env.VITE_API_BASE_URL).toBe('http://127.0.0.1:62174')
-    expect(env.VITE_WS_BASE_URL).toBe('ws://127.0.0.1:62174')
   })
 
   test('keeps V3 service-role credentials on the runtime host and strips them from the frontend', () => {

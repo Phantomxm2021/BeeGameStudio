@@ -39,11 +39,15 @@ export async function validateBgsModelConfig(
     provider: string
     baseUrl?: string
     apiProtocol?: unknown
-    models?: unknown
+    model?: unknown
     authMethods?: unknown
   },
   assertPermittedUrl?: (url: string) => Promise<void>,
 ) {
+  if (config.model !== undefined && (typeof config.model !== 'string' || !config.model.trim()))
+    throw new Error('Enter a model')
+  if (!config.model && !(Array.isArray(config.authMethods) && config.authMethods.every(method => method === 'chatgpt-subscription')))
+    throw new Error('Enter a model')
   const protocol = resolveModelApiProtocol(
     config.provider as ModelProviderKind,
     config.apiProtocol,
@@ -51,7 +55,7 @@ export async function validateBgsModelConfig(
   if (getOpenCodeGoProvider(config.baseUrl)) {
     validateOpenCodeGoConfig({
       ...config,
-      models: config.models as any,
+      model: config.model as string | undefined,
       authMethods: config.authMethods as string[],
     })
     const native =
@@ -63,7 +67,7 @@ export async function validateBgsModelConfig(
     validateOpenCodeGoConfig(
       {
         ...config,
-        models: config.models as any,
+        model: config.model as string | undefined,
         authMethods: config.authMethods as string[],
       },
       await loadOpenCodeGoModels(assertPermittedUrl),
@@ -150,10 +154,10 @@ export function registerModelConnectionRoutes(
       const id = c.req.param('id')
       if (
         id === OPENCODE_GO_ID &&
-        (!isOpenCodeGoProvider(body.provider) || !body.models)
+        (!isOpenCodeGoProvider(body.provider) || !body.model)
       )
         return c.json(
-          { error: 'Choose an OpenCode Go protocol and three models' },
+          { error: 'Choose an OpenCode Go protocol and a model' },
           400,
         )
       const config =
@@ -172,20 +176,15 @@ export function registerModelConnectionRoutes(
         typeof body.method !== 'string' ||
         (body.apiKey !== undefined && typeof body.apiKey !== 'string') ||
         (body.baseUrl !== undefined && typeof body.baseUrl !== 'string') ||
-        (body.models !== undefined &&
-          (!body.models ||
-            typeof body.models !== 'object' ||
-            ['fast', 'balanced', 'strong'].some(
-              tier => typeof body.models[tier] !== 'string',
-            )))
+        (body.model !== undefined && typeof body.model !== 'string')
       )
         return c.json({ error: 'Invalid connection' }, 400)
       if (
         body.method !== 'byok' &&
-        (body.baseUrl !== undefined || body.models !== undefined)
+        (body.baseUrl !== undefined || body.model !== undefined)
       )
         return c.json(
-          { error: 'Personal endpoint and models require BYOK' },
+          { error: 'Personal endpoint and model require BYOK' },
           400,
         )
       if (
@@ -197,10 +196,10 @@ export function registerModelConnectionRoutes(
           'grok',
         ].includes(body.provider) ||
           !body.baseUrl ||
-          !body.models)
+          !body.model)
       )
         return c.json(
-          { error: 'BYOK requires provider, URL, key and three models' },
+          { error: 'BYOK requires provider, URL, key and a model' },
           400,
         )
       if (body.method === 'byok' && body.baseUrl) {
@@ -221,7 +220,7 @@ export function registerModelConnectionRoutes(
           provider: config.provider,
           apiProtocol: body.apiProtocol ?? config.apiProtocol,
           baseUrl: body.baseUrl ?? config.baseUrl,
-          models: body.models ?? config.models,
+          model: body.model ?? config.model,
           authMethods: [body.method],
         },
         options.assertPermittedUrl,
@@ -234,7 +233,7 @@ export function registerModelConnectionRoutes(
         body.preferred === true,
         {
           baseUrl: body.baseUrl,
-          models: body.models,
+          model: body.model,
           apiProtocol: body.apiProtocol,
         },
       )

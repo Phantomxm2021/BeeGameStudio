@@ -55,7 +55,6 @@ async function generate(message: ModelRuntimeWorkerRequest) {
     const model =
       config?.model ||
       env.BEEGAME_MODEL ||
-      env.BGS_DEFAULT_BALANCED_MODEL ||
       (subscription && env.BEEGAME_CONFIG_DIR
         ? await getDefaultBgsModel(env.BEEGAME_CONFIG_DIR)
         : undefined)

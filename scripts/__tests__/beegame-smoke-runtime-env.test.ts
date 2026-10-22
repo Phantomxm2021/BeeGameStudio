@@ -22,14 +22,14 @@ describe('BeeGame Supabase smoke runtime env', () => {
     const env = {
       OPENAI_API_KEY: 'sk-secret',
       OPENAI_BASE_URL: 'https://llm.example/v1',
-      BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
+      BEEGAME_MODEL: 'balanced-model',
     }
 
     expect(() => assertSmokeRuntimeEnv(env)).not.toThrow()
     expect(summarizeRuntimeEnv(env)).toEqual({
       OPENAI_API_KEY: '<redacted>',
       OPENAI_BASE_URL: '<set>',
-      BGS_DEFAULT_BALANCED_MODEL: '<set>',
+      BEEGAME_MODEL: '<set>',
     })
   })
 })

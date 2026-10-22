@@ -51,7 +51,7 @@ import {
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
 import { createBgsRunner } from '../bgs/runner'
-import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
+import { createNativeSubagentChatEnricher } from './native-subagent-chat'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import { ChatJsonlReader } from './chat-jsonl-reader'
 import { auditEventPage, type EventPageSelection } from './workflow-v3/event-page'
@@ -169,7 +169,7 @@ export type BeeGameEventType =
   | 'session.stopped'
   | 'session.failed'
 
-export type DashboardSDKMessage = {
+export type BeeGameEventPayload = {
   type: string
   [key: string]: unknown
 }
@@ -180,7 +180,7 @@ export type BeeGameEvent = {
   turnId?: string
   type: BeeGameEventType
   text: string
-  payload?: DashboardSDKMessage
+  payload?: BeeGameEventPayload
   createdAt: Date
 }
 
@@ -309,22 +309,12 @@ export type BeeGameSessionRunnerStartInput = {
   onNativeUsage?(usage: Usage, epoch?: string, accounting?: { incomplete: boolean }): void
   cwd: string
   env: Record<string, string>
-  /** Sanitized evidence of the selected versus forwarded launch settings. */
-  runtimeLaunchContract?: RuntimeLaunchContract
   language?: BeeGameSessionLanguage
   /** BGS business scope evaluated before standard permission shortcuts. */
   toolPolicy?(request: DashboardPermissionRequest): Promise<DashboardPermissionDecision | undefined>
   requestPermission?(
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision>
-}
-
-export type RuntimeLaunchContract = {
-  selectedEnvironmentKeys: string[]
-  forwardedEnvironmentKeys: string[]
-  endpointClass: 'default' | 'first_party' | 'custom'
-  configDirectoryConfigured: boolean
-  credentialConfigured: boolean
 }
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
@@ -344,9 +334,6 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
   'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR',
   'BEEGAME_NATIVE_MCP_SERVERS_JSON',
   'BEEGAME_MODEL_TYPE',
-  'BGS_DEFAULT_FAST_MODEL',
-  'BGS_DEFAULT_BALANCED_MODEL',
-  'BGS_DEFAULT_STRONG_MODEL',
   'OPENAI_BASE_URL',
   'OPENAI_API_KEY',
   'HTTP_PROXY',
@@ -367,7 +354,7 @@ export type BeeGameSessionSubmitInput = {
   /** User-confirmed context exposed read-only to platform contract tools. */
   confirmedBriefContext?: string
   signal: AbortSignal
-  onMessage(message: DashboardSDKMessage): void | Promise<void>
+  onMessage(message: BeeGameEventPayload & { type: 'runtime_event'; eventType: BeeGameEventType }): void | Promise<void>
   requestPermission(
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision>
@@ -456,16 +443,8 @@ type SessionRecord = {
   workflowQuestionGuard?: StartBeeGameSessionInput['workflowQuestionGuard']
   /** User-approved network hosts for this live session only. */
   approvedNetworkHosts: Set<string>
-  toolUses: Map<string, { toolName: string; input?: unknown }>
   /** Active native background tasks from live lifecycle notifications. */
   activeNativeTaskToolUseIds: Map<string, string>
-  /** Tool-use blocks observed before their streamed JSON input is complete. */
-  assistantPartialTextByMessage: Map<string, string>
-  activeAssistantMessageId: string | null
-  emittedAssistantMessageIds: Set<string>
-  thinkingBlockIndexes: Set<number>
-  activeAssistantTextBlockIndex?: number
-  visibleThinkingBlockIds: Map<number, string>
   /** Start time for each visible thinking block, used when its end event arrives. */
   thinkingBlockStartedAt: Map<string, string>
   events: BeeGameEvent[]
@@ -476,7 +455,7 @@ type SessionRecord = {
   currentTurnStartingUsage?: BeeGameRuntimeSnapshot['usage']
   /** The complete active model turn, including final event/usage callbacks. */
   activeTurn?: Promise<void>
-  /** Serializes usage billing events without blocking the SDK callback. */
+  /** Serializes usage billing events without blocking the runtime callback. */
   usageWriteTail: Promise<void>
   usageLastCommittedKey?: string
   usageFailureReported: boolean
@@ -728,13 +707,7 @@ export class BeeGameSessionManager {
       pendingPermissions: new Map(),
       ...(input.workflowQuestionGuard ? { workflowQuestionGuard: input.workflowQuestionGuard } : {}),
       approvedNetworkHosts: new Set(),
-      toolUses: new Map(),
       activeNativeTaskToolUseIds: new Map(),
-      assistantPartialTextByMessage: new Map(),
-      activeAssistantMessageId: null,
-      emittedAssistantMessageIds: new Set(),
-      thinkingBlockIndexes: new Set(),
-      visibleThinkingBlockIds: new Map(),
       thinkingBlockStartedAt: new Map(),
       events: recoveredTranscript?.events ?? [],
       nextEventId: recoveredTranscript
@@ -980,7 +953,7 @@ export class BeeGameSessionManager {
     type: BeeGameEventType
     text: string
     turnId?: string
-    payload?: DashboardSDKMessage
+    payload?: BeeGameEventPayload
     createdAt: Date
   }> {
     const record = this.sessions.get(sessionId)
@@ -998,14 +971,14 @@ export class BeeGameSessionManager {
   }
 
   /** Full live-branch facts for host decisions; never display-summarized.
-   * Avoid formatting every SDK message just to locate Question outcomes. */
+   * Avoid formatting every runtime message just to locate Question outcomes. */
   transcriptFacts(sessionId:string):readonly BeeGameEvent[] {
     const record=this.sessions.get(sessionId)
     if(!record)throw new Error('Session not found')
     return liveProjectConversationEvents(record.events).filter(event=>!isThinkingProtocolControlEvent(event))
   }
 
-  /** Read-only V3 debug view; avoid formatting/serializing all prior SDK events. */
+  /** Read-only V3 debug view; avoid formatting/serializing all prior runtime events. */
   transcriptPage(sessionId:string, selection:EventPageSelection) {
     const record=this.sessions.get(sessionId)
     if(!record)throw new Error('Session not found')
@@ -1177,11 +1150,6 @@ export class BeeGameSessionManager {
       })
       if (record.session.status !== 'running') throw new Error('Session was stopped during turn preparation')
       const nextTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
-      record.assistantPartialTextByMessage.clear()
-      record.activeAssistantMessageId = null
-      record.emittedAssistantMessageIds.clear()
-      record.thinkingBlockIndexes.clear()
-      record.visibleThinkingBlockIds.clear()
       record.thinkingBlockStartedAt.clear()
       record.currentTurnStartingUsage = this.deriveRuntimeSnapshot(record).usage
       record.currentTurnId = nextTurnId
@@ -1268,7 +1236,6 @@ export class BeeGameSessionManager {
       record.approvedNetworkHosts.clear()
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
-      this.closeOpenThinkingLifecycle(record, 'session_stopped')
       this.append(record, 'session.stopped', 'BeeGame session stopped', { type: 'session.stopped', reason })
     }
     return cloneSession(record.session)
@@ -1288,7 +1255,6 @@ export class BeeGameSessionManager {
         message: 'Current production stage was interrupted.',
       })
       record.approvedNetworkHosts.clear()
-      this.closeOpenThinkingLifecycle(record, 'turn_interrupted')
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
     }
@@ -1350,7 +1316,7 @@ export class BeeGameSessionManager {
     for (const record of this.sessions.values()) {
       // Mark the session stopped before the transport can flush any more
       // messages. Aborting a runner while leaving the record "running" lets
-      // late SDK events cross a hot-reload boundary and mutate durable state.
+      // late runtime events cross a hot-reload boundary and mutate durable state.
       if (record.session.status === 'running') this.stop(record.session.id, 'service_shutdown')
       else {
         record.abortController?.abort('service_shutdown')
@@ -1512,10 +1478,6 @@ export class BeeGameSessionManager {
           },
           cwd: record.session.cwd,
           env,
-          runtimeLaunchContract: buildRuntimeLaunchContract(
-            selectedEnvironment,
-            env,
-          ),
           ...(record.language ? { language: record.language } : {}),
           requestPermission: request => this.requestPermission(record, request),
         }))
@@ -1545,10 +1507,6 @@ export class BeeGameSessionManager {
         } else if (record.session.status === 'running') {
           const turnId = record.currentTurnId
           const hasFinalResult = hasNativeFinalResult(record.events, turnId)
-          this.closeOpenThinkingLifecycle(
-            record,
-            hasFinalResult ? 'turn_completed' : 'turn_empty',
-          )
           if (hasFinalResult) {
             this.append(record, 'turn.completed', 'Turn ended')
           } else {
@@ -1573,10 +1531,9 @@ export class BeeGameSessionManager {
       await this.disposeRunner(turnRunner ?? record.runner, record)
       if (!turnRunner || record.runner === turnRunner) record.runner = null
       // The disposed process cannot keep any task live. Clear attribution,
-      // without fabricating completed SDK events for unfinished writers.
+      // without fabricating completed events for unfinished writers.
       record.activeNativeTaskToolUseIds.clear()
       if (record.session.status === 'running') {
-        this.closeOpenThinkingLifecycle(record, 'turn_failed')
         this.append(
           record,
           'turn.failed',
@@ -1602,11 +1559,6 @@ export class BeeGameSessionManager {
       // delete earlier user uploads or tool screenshots from the same store.
       record.currentTurnId = null
       record.currentTurnStartingUsage = undefined
-      record.assistantPartialTextByMessage.clear()
-      record.activeAssistantMessageId = null
-      record.emittedAssistantMessageIds.clear()
-      record.thinkingBlockIndexes.clear()
-      record.visibleThinkingBlockIds.clear()
       record.thinkingBlockStartedAt.clear()
       record.abortController = null
       record.currentTurnUsageExternallyAccounted = undefined
@@ -1651,8 +1603,6 @@ export class BeeGameSessionManager {
     signal: AbortSignal,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
-    const accountingEpoch = record.nativeAccountingEpoch
-    let executionError: Error | undefined
     await runner.submit({
       prompt,
       ...(record.language ? { language: record.language } : {}),
@@ -1672,7 +1622,6 @@ export class BeeGameSessionManager {
               record.activeNativeTaskToolUseIds.set(message.childThreadId, String(message.parentToolUseID || message.childThreadId))
             else record.activeNativeTaskToolUseIds.delete(message.childThreadId)
           }
-          if (type !== 'assistant.thinking') this.closeOpenThinkingLifecycle(record, 'visible_output_started')
           let payload = message
           if (type === 'tool.completed' && typeof message.imagePath === 'string') {
             try {
@@ -1692,94 +1641,9 @@ export class BeeGameSessionManager {
           this.append(record, type, text, payload)
           return
         }
-        if (isSDKExecutionError(message)) {
-          executionError = new Error(getSDKExecutionErrorDetail(message))
-        }
-        // Timed-out runtimes can flush synthetic messages after their turn closed.
-        // Preserve raw diagnostics without leaking them into chat or a later turn.
-        if (
-          !submittedTurnId ||
-          record.currentTurnId !== submittedTurnId ||
-          hasTurnEnded(this.runtimeSnapshotInputs(record), submittedTurnId)
-        )
-          return
-        // Compatible streaming transports report authoritative usage on
-        // message_delta, which has no visible text. Preserve it as a
-        // first-class event so runtime snapshots advance during the turn.
-        if (
-          message.type === 'stream_event' &&
-          getUsageFromEventPayload(message).total_tokens > 0
-        ) {
-          this.append(record, 'usage', '', message)
-        }
-        const toolInputActivity = mapStreamingToolInputActivity(message)
-        if (toolInputActivity) {
-          this.append(
-            record,
-            toolInputActivity.type,
-            toolInputActivity.text,
-            toolInputActivity.payload,
-          )
-        }
-        const mapped = mapSDKMessageToEvent(record, message)
-        const childOwner = getStringField(message, 'parent_tool_use_id')
-        if (mapped) {
-          if (mapped.type !== 'assistant.thinking' && !childOwner)
-            this.closeOpenThinkingLifecycle(record, 'visible_output_started')
-          if (childOwner) {
-            // Child output must not reconcile against the parent's answer or
-            // consume its partial-text/thinking cursors.
-            this.append(record, mapped.type, mapped.text, { ...message, ...mapped.payload })
-          } else if (mapped.type === 'assistant.partial') {
-            this.append(record, mapped.type, mapped.text, {
-              ...message, messageId: record.activeAssistantMessageId,
-              assistantBlockId: nativeAssistantBlockId(record, record.activeAssistantMessageId),
-            })
-            this.appendAssistantPartialText(record, message)
-          } else if (mapped.type === 'assistant.message') {
-            const reconciled = this.reconcileAssistantText(
-              record,
-              message,
-              mapped.text,
-            )
-            if (reconciled)
-              this.append(record, mapped.type, reconciled, { ...message,
-                assistantBlockId: nativeAssistantBlockId(record, getSDKAssistantMessageId(message) ?? record.activeAssistantMessageId) })
-          } else {
-            this.append(
-              record,
-              mapped.type,
-              mapped.text,
-              message.type === 'result'
-                ? { ...(mapped.payload ?? message), nativeAccountingEpoch: accountingEpoch }
-                : mapped.payload ?? message,
-            )
-          }
-        }
-        for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
-          if (toolEvent.type === 'tool.started' && !childOwner)
-            this.closeOpenThinkingLifecycle(record, 'tool_started')
-          const images = extractNativeToolImages(message, String(toolEvent.payload?.toolUseID ?? ''))
-          if (images.length) {
-            try {
-              const displayImages = await preferOriginalReadImage(record.session.cwd, toolEvent.payload, images)
-              const attachments = await materializeBeeGameAttachments(record.session.cwd, displayImages)
-              toolEvent.payload = { ...toolEvent.payload, attachments: attachments.map(({ relativePath: _path, ...reference }) => reference) }
-            } catch {
-              toolEvent.payload = { ...toolEvent.payload, attachmentError: 'Tool image could not be stored for Chat.' }
-            }
-          }
-          this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
-        }
-        // A completed native assistant message is an authoritative model-usage
-        // checkpoint. The terminal snapshot still catches late usage and turns
-        // that end without an assistant message.
-        if (message.type === 'assistant' && !record.currentTurnUsageExternallyAccounted)
-          void this.recordUsageSnapshot(record, submittedTurnId, true)
       },
       requestPermission: request => this.requestPermission(record, request),
     })
-    if (executionError) throw executionError
   }
 
   private async recordUsageSnapshot(
@@ -1902,40 +1766,6 @@ export class BeeGameSessionManager {
       },
     }
     await this.usageOutbox!.submit({ userId: record.userId, input: options })
-  }
-
-  private appendAssistantPartialText(
-    record: SessionRecord,
-    message: DashboardSDKMessage,
-  ): void {
-    const messageKey = nativeAssistantBlockId(record, record.activeAssistantMessageId) ?? record.currentTurnId
-    if (!messageKey) return
-    const text = extractAssistantPartialText(message)
-    if (!text) return
-    record.assistantPartialTextByMessage.set(
-      messageKey,
-      `${record.assistantPartialTextByMessage.get(messageKey) ?? ''}${text}`,
-    )
-  }
-
-  private reconcileAssistantText(
-    record: SessionRecord,
-    message: DashboardSDKMessage,
-    finalText: string,
-  ): string | null {
-    const messageId =
-      getSDKAssistantMessageId(message) ?? record.activeAssistantMessageId
-    const blockId = nativeAssistantBlockId(record, messageId)
-    if (blockId && record.emittedAssistantMessageIds.has(blockId))
-      return null
-
-    const messageKey = blockId ?? record.currentTurnId
-    const partialText = messageKey
-      ? record.assistantPartialTextByMessage.get(messageKey)
-      : undefined
-    if (messageKey) record.assistantPartialTextByMessage.delete(messageKey)
-    if (blockId) record.emittedAssistantMessageIds.add(blockId)
-    return finalText || partialText || null
   }
 
   resolvePermission(
@@ -2104,20 +1934,6 @@ export class BeeGameSessionManager {
     return decision
   }
 
-  private closeOpenThinkingLifecycle(
-    record: SessionRecord,
-    reason: string,
-  ): void {
-    if (record.thinkingBlockIndexes.size === 0) return
-    record.thinkingBlockIndexes.clear()
-    const visibleBlockIds = [...record.visibleThinkingBlockIds.values()]
-    record.visibleThinkingBlockIds.clear()
-    for (const thinkingBlockId of visibleBlockIds) this.append(record, 'assistant.thinking', 'Thinking', {
-      type: 'assistant.thinking', status: 'ended', reason,
-      thinkingBlockId,
-    })
-  }
-
   private resolveAllPendingPermissions(
     record: SessionRecord,
     decision: DashboardPermissionDecision,
@@ -2137,7 +1953,7 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     type: BeeGameEventType,
     text: string,
-    payload?: DashboardSDKMessage,
+    payload?: BeeGameEventPayload,
     turnId?: string,
   ): BeeGameEvent {
     const effectiveTurnId = turnId || record.currentTurnId || undefined
@@ -2148,7 +1964,7 @@ export class BeeGameSessionManager {
       enrich = createNativeSubagentChatEnricher()
       this.subagentChat.set(record, enrich)
     }
-    let eventPayload = enrich({ type, payload }).payload as DashboardSDKMessage | undefined
+    let eventPayload = enrich({ type, payload }).payload as BeeGameEventPayload | undefined
     if (record.session.workflowExecution) eventPayload = { type, ...eventPayload, workflowExecution: record.session.workflowExecution }
     if (type === 'assistant.thinking') {
       const thinkingBlockId = getDashboardPayloadString(payload, 'thinkingBlockId') || 'default'
@@ -2169,7 +1985,7 @@ export class BeeGameSessionManager {
     }
     if (record.redactVisible && type !== 'user.message') {
       text = record.redactVisible(text) as string
-      if (eventPayload) eventPayload = record.redactVisible(eventPayload) as DashboardSDKMessage
+      if (eventPayload) eventPayload = record.redactVisible(eventPayload) as BeeGameEventPayload
     }
     const event: BeeGameEvent = {
       id: record.nextEventId,
@@ -2380,7 +2196,7 @@ export async function readSessionTranscriptFromDisk(
     type: BeeGameEventType
     text: string
     turnId?: string
-    payload?: DashboardSDKMessage
+    payload?: BeeGameEventPayload
     createdAt: string
   }>
 > {
@@ -2528,7 +2344,7 @@ function parseTranscriptEvents(raw: string): BeeGameEvent[] {
         turnId?: string
         type: BeeGameEventType
         text: string
-        payload?: DashboardSDKMessage
+        payload?: BeeGameEventPayload
         createdAt: string
       }
       return {
@@ -2655,55 +2471,6 @@ export async function prepareBeeGamePromptInput(input: {
   }
 }
 
-export function extractNativeToolImages(message: DashboardSDKMessage, toolUseId: string): BeeGameImageAttachment[] {
-  const content = getObjectField(message, 'message')?.content ?? message.content
-  if (!Array.isArray(content)) return []
-  return content.flatMap(block => {
-    if (!block || !['tool_result', 'mcp_tool_result'].includes(block.type) || block.tool_use_id !== toolUseId || !Array.isArray(block.content)) return []
-    return block.content.flatMap((part: any): BeeGameImageAttachment[] => {
-      const source = part?.source
-      if (part?.type !== 'image' || source?.type !== 'base64' ||
-        !['image/png', 'image/jpeg', 'image/webp'].includes(source.media_type) || typeof source.data !== 'string') return []
-      return [{ type: 'image', mediaType: source.media_type, data: source.data }]
-    })
-  })
-}
-
-// The Read tool may downsample an image for the model's token budget. Save a
-// bounded snapshot of its project source for Chat, without changing what the
-// model receives. The source may have changed since Read; this is display data,
-// not evidence that the model saw identical bytes.
-export async function preferOriginalReadImage(
-  workspace: string,
-  tool: unknown,
-  images: BeeGameImageAttachment[],
-): Promise<BeeGameImageAttachment[]> {
-  const event = tool && typeof tool === 'object' ? tool as Record<string, unknown> : undefined
-  const input = event?.input as { file_path?: unknown } | undefined
-  if (event?.toolName !== 'Read' || typeof input?.file_path !== 'string' || images.length !== 1) return images
-  try {
-    const root = await realpath(workspace)
-    const path = await realpath(input.file_path)
-    const within = relative(root, path)
-    if (!within || isAbsolute(within) || within === '..' || within.startsWith(`..${sep}`)) return images
-    const mediaType = IMAGE_ATTACHMENT_TYPES[extname(path).toLowerCase()]?.[0]
-    if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp') return images
-    const info = await stat(path)
-    if (!info.isFile() || info.size === 0 || info.size > MAX_BEEGAME_ATTACHMENT_BYTES) return images
-    const bytes = await readFile(path)
-    if (bytes.length === 0 || bytes.length > MAX_BEEGAME_ATTACHMENT_BYTES) return images
-    const valid = mediaType === 'image/png'
-      ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-      : mediaType === 'image/jpeg'
-        ? bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
-        : bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP'
-    if (!valid) return images
-    return [{ type: 'image', mediaType, data: bytes.toString('base64'), filename: basename(path) }]
-  } catch {
-    return images
-  }
-}
-
 export async function materializeBeeGameAttachments(
   workspace: string,
   attachments: BeeGameAttachment[],
@@ -2816,7 +2583,7 @@ function getEmptyTurnMessage(language?: BeeGameSessionLanguage): string {
 
 /**
  * Converts a structured provider error envelope into readable chat text while
- * leaving the original SDK message untouched in agent.raw.jsonl and payloads.
+ * leaving the stored event payload untouched.
  * Known provider refusal codes also carry a concrete continuation explanation.
  */
 export function formatRuntimeErrorForDisplay(
@@ -3425,7 +3192,7 @@ function isRuntimeRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function getUsageFromEventPayload(
-  payload: DashboardSDKMessage | undefined,
+  payload: BeeGameEventPayload | undefined,
 ): BeeGameRuntimeSnapshot['usage'] {
   const usage = getUsageRecord(payload)
   if (!usage) {
@@ -3457,7 +3224,7 @@ function getUsageFromEventPayload(
 }
 
 function getModelUsageFromEventPayload(
-  payload: DashboardSDKMessage | undefined,
+  payload: BeeGameEventPayload | undefined,
 ): BeeGameRuntimeSnapshot['usage'] | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload))
     return null
@@ -3607,7 +3374,7 @@ function addRuntimeUsage(
 }
 
 function getUsageRecord(
-  payload: DashboardSDKMessage | undefined,
+  payload: BeeGameEventPayload | undefined,
 ): Record<string, unknown> | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return null
@@ -4042,7 +3809,7 @@ function getTopLevelWorkspacePath(cwd: string, artifactPath: string): string {
 }
 
 function getDashboardPayloadString(
-  payload: DashboardSDKMessage | undefined,
+  payload: BeeGameEventPayload | undefined,
   field: string,
 ): string {
   const value = payload?.[field]
@@ -4050,7 +3817,7 @@ function getDashboardPayloadString(
 }
 
 function getDashboardPayloadRecord(
-  payload: DashboardSDKMessage | undefined,
+  payload: BeeGameEventPayload | undefined,
   field: string,
 ): Record<string, unknown> {
   const value = payload?.[field]
@@ -4074,7 +3841,7 @@ type ProjectLogIndexSession = {
 
 function appendProjectAgentDiagnostic(
   record: SessionRecord,
-  message: DashboardSDKMessage,
+  message: BeeGameEventPayload,
 ): void {
   appendRuntimeDiagnostic({
     path: getProjectRuntimeDiagnosticPath(record),
@@ -4086,7 +3853,7 @@ function appendProjectAgentDiagnostic(
       ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
       createdAt: new Date().toISOString(),
       messageType: typeof message.type === 'string' ? message.type : 'unknown',
-      ...(typeof message.uuid === 'string' ? { messageId: message.uuid } : {}),
+      ...(typeof message.messageId === 'string' ? { messageId: message.messageId } : {}),
       ...(typeof message.subtype === 'string' ? { subtype: message.subtype } : {}),
     },
     maxBytes: MAX_PROJECT_AGENT_RAW_LOG_BYTES,
@@ -4170,117 +3937,6 @@ function toProjectRelativePath(workspacePath: string, path: string): string {
   return relative(workspacePath, path).split('\\').join('/')
 }
 
-function mapSDKMessageToEvent(
-  record: SessionRecord,
-  message: DashboardSDKMessage,
-): {
-  type: BeeGameEventType
-  text: string
-  payload?: DashboardSDKMessage
-} | null {
-  if (getStringField(message, 'parent_tool_use_id') && message.type === 'stream_event') {
-    // Preserve visible child text without altering the parent's stream state.
-    // Private reasoning/signature blocks are not display text.
-    return mapTextEvent('assistant.partial', extractStreamTextDelta(message))
-  }
-  switch (message.type) {
-    case 'user':
-      return null
-    case 'assistant':
-      return mapTextEvent(
-        'assistant.message',
-        formatRuntimeErrorForDisplay(
-          extractAssistantVisibleText(message),
-          record.language,
-        ),
-      )
-    case 'partial_assistant':
-      return mapTextEvent(
-        'assistant.partial',
-        extractAssistantVisibleText(message),
-      )
-    case 'stream_event':
-      return mapStreamEvent(record, message)
-    case 'tool_progress':
-      return { type: 'tool.progress', text: extractMessageText(message), payload: { ...message,
-        toolUseID: getStringField(message, 'tool_use_id'), toolName: getStringField(message, 'tool_name'),
-        ...(getStringField(message, 'parent_tool_use_id') ? { parentToolUseID: getStringField(message, 'parent_tool_use_id') } : {}),
-      } }
-    case 'result': {
-      // A native terminal result can legitimately carry accounting and status
-      // metadata without user-visible text. Persist that envelope so credits,
-      // diagnostics, and transcript recovery remain lossless; the frontend
-      // already projects result events to usage only, so this does not create
-      // an empty chat message. Protocol-only thinking markers stay hidden.
-      const text = extractMessageText(message).trim()
-      return {
-        type: 'result',
-        text: isThinkingProtocolControlText(text) ? '' : text,
-        payload: message,
-      }
-    }
-    case 'system':
-    case 'status':
-      return (
-        mapNativeTaskLifecycleEvent(message) ??
-        mapTextEvent('system.status', extractMessageText(message))
-      )
-    default:
-      return mapTextEvent('system.status', extractMessageText(message))
-  }
-}
-
-function mapNativeTaskLifecycleEvent(message: DashboardSDKMessage): {
-  type: BeeGameEventType
-  text: string
-  payload: DashboardSDKMessage
-} | null {
-  const subtype = getStringField(message, 'subtype')
-  if (!isNativeTaskLifecycle(message)) return null
-  return { type: 'system.status', text: subtype, payload: message }
-}
-
-function isSDKExecutionError(message: DashboardSDKMessage): boolean {
-  return (
-    message.type === 'result' && getBooleanField(message, 'is_error') === true
-  )
-}
-
-export function getSDKExecutionErrorDetail(
-  message: DashboardSDKMessage,
-): string {
-  const errors = Array.isArray(message.errors)
-    ? message.errors.filter(
-        (value): value is string =>
-          typeof value === 'string' && value.trim().length > 0,
-      )
-    : []
-  if (errors[0]) return errors[0].trim()
-  if (typeof message.result === 'string' && message.result.trim()) {
-    return message.result.trim()
-  }
-  return (
-    extractMessageText(message).trim() ||
-    'Model runtime returned an execution error.'
-  )
-}
-
-function mapTextEvent(
-  type: BeeGameEventType,
-  text: string,
-): { type: BeeGameEventType; text: string } | null {
-  const normalized = text.trim()
-  if (
-    (type === 'assistant.partial' ||
-      type === 'assistant.message' ||
-      type === 'result') &&
-    isThinkingProtocolControlText(normalized)
-  ) {
-    return null
-  }
-  return normalized ? { type, text: normalized } : null
-}
-
 function isThinkingProtocolControlEvent(event: BeeGameEvent): boolean {
   return (
     (event.type === 'assistant.partial' ||
@@ -4305,412 +3961,6 @@ function isThinkingProtocolControlText(value: string): boolean {
     remaining = remaining.slice(token.length).trim()
   }
   return foundControlToken
-}
-
-function mapStreamEvent(
-  record: SessionRecord,
-  message: DashboardSDKMessage,
-): {
-  type: BeeGameEventType
-  text: string
-  payload?: DashboardSDKMessage
-} | null {
-  const streamMessageId = extractStreamMessageId(message)
-  if (streamMessageId) {
-    record.activeAssistantMessageId = streamMessageId
-    record.activeAssistantTextBlockIndex = undefined
-  }
-  const event = getObjectField(message, 'event') ?? message
-  if (event.type === 'content_block_start' && getObjectField(event, 'content_block')?.type === 'text')
-    record.activeAssistantTextBlockIndex = getNumberField(event, 'index')
-  if (event.type === 'content_block_delta' && getObjectField(event, 'delta')?.type === 'text_delta')
-    record.activeAssistantTextBlockIndex = getNumberField(event, 'index') ?? record.activeAssistantTextBlockIndex
-
-  const textDelta = extractStreamTextDelta(message)
-  if (textDelta) return { type: 'assistant.partial', text: textDelta }
-
-  const thinking = extractStreamThinkingStatus(record, message)
-  if (!thinking) return null
-  const thinkingText = extractStreamThinkingDelta(message)
-  if (thinking.status === 'streaming' && !thinkingText) return null
-  return {
-    type: 'assistant.thinking',
-    text: thinkingText || 'Thinking',
-    payload: {
-      type: 'assistant.thinking',
-      status: thinking.status,
-      ...(thinking.blockId ? { thinkingBlockId: thinking.blockId } : {}),
-    },
-  }
-}
-
-function mapSDKMessageToToolEvents(
-  record: SessionRecord,
-  message: DashboardSDKMessage,
-): Array<{
-  type: BeeGameEventType
-  text: string
-  payload: DashboardSDKMessage
-}> {
-  // Stream fragments are presentation-only and may contain a tool block before
-  // its JSON input is complete. BeeGame Studio emits the authoritative tool_use
-  // block on the final assistant message, so only that block may start a tool.
-  if (message.type === 'stream_event' || message.type === 'partial_assistant') {
-    return []
-  }
-  const events: Array<{
-    type: BeeGameEventType
-    text: string
-    payload: DashboardSDKMessage
-  }> = []
-  const parentToolUseID = getStringField(message, 'parent_tool_use_id')
-  for (const block of extractContentBlocks(message)) {
-    const blockType = getStringField(block, 'type')
-    if (
-      blockType === 'tool_use' ||
-      blockType === 'server_tool_use' ||
-      blockType === 'mcp_tool_use'
-    ) {
-      const toolUseID = getStringField(block, 'id')
-      if (!toolUseID) continue
-      const toolName = getStringField(block, 'name') || 'Tool'
-      const input = getObjectField(block, 'input')
-      const existingToolUse = record.toolUses.get(toolUseID)
-      record.toolUses.set(toolUseID, { toolName, input })
-      if (existingToolUse) continue
-      events.push({
-        type: 'tool.started',
-        text: toolName,
-        payload: {
-          type: 'tool.started',
-          toolUseID,
-          toolName,
-          ...(parentToolUseID ? { parentToolUseID } : {}),
-          ...(input ? { input } : {}),
-        },
-      })
-      continue
-    }
-
-    if (blockType === 'tool_result' || blockType === 'mcp_tool_result') {
-      const toolUseID = getStringField(block, 'tool_use_id')
-      if (!toolUseID) continue
-      const cached = record.toolUses.get(toolUseID)
-      const toolName = cached?.toolName ?? 'Tool'
-      const failed = getBooleanField(block, 'is_error') === true
-      const output = extractMessageText(block.content)
-      const nativeResult =
-        toolName === 'Agent'
-          ? extractNativeAgentResult(block.content)
-          : undefined
-      const nativeTaskResult =
-        toolName === 'TaskOutput'
-          ? extractNativeCompletedTaskResult(message)
-          : undefined
-      events.push({
-        type: failed ? 'tool.failed' : 'tool.completed',
-        text: `${toolName} ${failed ? 'failed' : 'completed'}`,
-        payload: {
-          type: failed ? 'tool.failed' : 'tool.completed',
-          toolUseID,
-          toolName,
-          ...(parentToolUseID ? { parentToolUseID } : {}),
-          ...(cached?.input ? { input: cached.input } : {}),
-          output,
-          ...(nativeResult ? { nativeResult } : {}),
-          ...(nativeTaskResult ? { nativeTaskResult } : {}),
-        },
-      })
-    }
-  }
-  return events
-}
-
-function extractNativeCompletedTaskResult(
-  message: DashboardSDKMessage,
-): { taskId: string; status: string; result?: string } | undefined {
-  const toolUseResult = getObjectField(message, 'tool_use_result')
-  if (getStringField(toolUseResult, 'retrieval_status') !== 'success') {
-    return undefined
-  }
-  const task = getObjectField(toolUseResult, 'task')
-  if (!task) return undefined
-  const taskId = getStringField(task, 'task_id').trim()
-  const status = getStringField(task, 'status').trim()
-  if (
-    !taskId ||
-    (status !== 'completed' &&
-      status !== 'failed' &&
-      status !== 'stopped' &&
-      status !== 'killed')
-  )
-    return undefined
-  const result =
-    getStringField(task, 'output').trim() ||
-    getStringField(task, 'result').trim()
-  return {
-    taskId,
-    status,
-    ...(result ? { result } : {}),
-  }
-}
-
-/**
- * BeeGame Studio may append Agent lifecycle/usage metadata as additional text
- * blocks. Preserve the subagent's own terminal text separately instead of
- * asking delivery evidence consumers to parse the flattened presentation
- * string.
- */
-function extractNativeAgentResult(value: unknown): string | undefined {
-  const items = Array.isArray(value) ? value : [value]
-  for (const item of items) {
-    if (typeof item === 'string' && item.trim()) return item.trim()
-    if (!isObject(item) || getStringField(item, 'type') !== 'text') continue
-    const text = getStringField(item, 'text').trim()
-    if (text) return text
-  }
-  return undefined
-}
-
-function extractContentBlocks(
-  message: DashboardSDKMessage,
-): Record<string, unknown>[] {
-  const blocks: Record<string, unknown>[] = []
-  const event = getObjectField(message, 'event')
-  const contentBlock = getObjectField(event, 'content_block')
-  if (contentBlock) blocks.push(contentBlock)
-  const delta = getObjectField(event, 'delta')
-  if (delta) blocks.push(delta)
-
-  const messageBody = getObjectField(message, 'message')
-  const content = messageBody?.content ?? message.content
-  if (Array.isArray(content)) {
-    for (const block of content) {
-      if (isObject(block)) blocks.push(block)
-    }
-  }
-  if (isObject(content)) blocks.push(content)
-  return blocks
-}
-
-function extractMessageText(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) {
-    return value.map(extractMessageText).filter(Boolean).join('')
-  }
-  if (!isObject(value)) return ''
-
-  if (typeof value.text === 'string') return value.text
-  if (typeof value.result === 'string') return value.result
-  if (typeof value.summary === 'string') return value.summary
-  if (typeof value.status === 'string') return value.status
-  if (typeof value.tool_name === 'string') return value.tool_name
-
-  if ('content' in value) {
-    const contentText = extractMessageText(value.content)
-    if (contentText) return contentText
-  }
-  if ('message' in value) {
-    const messageText = extractMessageText(value.message)
-    if (messageText) return messageText
-  }
-  if ('event' in value) {
-    const eventText = extractMessageText(value.event)
-    if (eventText) return eventText
-  }
-  if ('delta' in value) {
-    const deltaText = extractMessageText(value.delta)
-    if (deltaText) return deltaText
-  }
-
-  return value.type ? String(value.type) : ''
-}
-
-function extractAssistantVisibleText(message: DashboardSDKMessage): string {
-  return extractVisibleTextFromContent(getMessageContent(message) ?? message)
-}
-
-function getMessageContent(message: DashboardSDKMessage): unknown {
-  const messageBody = getObjectField(message, 'message')
-  if (messageBody && 'content' in messageBody) return messageBody.content
-  if ('content' in message) return message.content
-  return undefined
-}
-
-function extractVisibleTextFromContent(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) {
-    return value.map(extractVisibleTextFromContent).filter(Boolean).join('')
-  }
-  if (!isObject(value)) return ''
-
-  const blockType = getStringField(value, 'type')
-  if (blockType && blockType !== 'text') {
-    return ''
-  }
-  if (typeof value.text === 'string') return value.text
-  if ('content' in value) return extractVisibleTextFromContent(value.content)
-  return ''
-}
-
-function extractStreamTextDelta(message: DashboardSDKMessage): string {
-  const event = getObjectField(message, 'event') ?? message
-  const eventType = getStringField(event, 'type')
-  if (eventType !== 'content_block_delta') return ''
-
-  const delta = getObjectField(event, 'delta')
-  if (!delta || getStringField(delta, 'type') !== 'text_delta') return ''
-  return getStringField(delta, 'text')
-}
-
-function mapStreamingToolInputActivity(message: DashboardSDKMessage): {
-  type: 'tool.progress'
-  text: string
-  payload: DashboardSDKMessage
-} | null {
-  if (message.type !== 'stream_event') return null
-  const event = getObjectField(message, 'event') ?? message
-  if (getStringField(event, 'type') !== 'content_block_start') return null
-  const block = getObjectField(event, 'content_block')
-  if (getStringField(block, 'type') !== 'tool_use') return null
-  const toolUseId = getStringField(block, 'id')
-  const toolName = getStringField(block, 'name')
-  if (!toolUseId || !toolName) return null
-  return {
-    type: 'tool.progress',
-    text: `${toolName} input streaming`,
-    payload: {
-      type: 'tool_progress',
-      toolUseID: toolUseId,
-      toolName,
-      phase: 'input_streaming',
-      ...(getStringField(message, 'parent_tool_use_id')
-        ? { parentToolUseID: getStringField(message, 'parent_tool_use_id') } : {}),
-    },
-  }
-}
-
-function extractStreamThinkingStatus(
-  record: SessionRecord,
-  message: DashboardSDKMessage,
-): { status: 'started' | 'streaming' | 'ended'; blockId?: string } | null {
-  const event = getObjectField(message, 'event') ?? message
-  const eventType = getStringField(event, 'type')
-  if (eventType === 'content_block_start') {
-    const contentBlock = getObjectField(event, 'content_block')
-    const blockType = getStringField(contentBlock, 'type')
-    if (blockType !== 'thinking' && blockType !== 'redacted_thinking')
-      return null
-    const index = getNumberField(event, 'index')
-    if (index !== undefined) record.thinkingBlockIndexes.add(index)
-    return { status: 'streaming' }
-  }
-  if (eventType === 'content_block_stop') {
-    const index = getNumberField(event, 'index')
-    if (index === undefined || !record.thinkingBlockIndexes.has(index))
-      return null
-    record.thinkingBlockIndexes.delete(index)
-    const blockId = record.visibleThinkingBlockIds.get(index)
-    if (!blockId) return null
-    record.visibleThinkingBlockIds.delete(index)
-    return { status: 'ended', blockId }
-  }
-  if (eventType !== 'content_block_delta') return null
-
-  const delta = getObjectField(event, 'delta')
-  const deltaType = getStringField(delta, 'type')
-  if (
-    deltaType !== 'thinking_delta' &&
-    deltaType !== 'redacted_thinking_delta'
-  ) {
-    return null
-  }
-  const index = getNumberField(event, 'index')
-  if (index === undefined || !record.thinkingBlockIndexes.has(index))
-    return { status: 'streaming' }
-  const existingBlockId = record.visibleThinkingBlockIds.get(index)
-  if (existingBlockId) return { status: 'streaming', blockId: existingBlockId }
-  const blockId = `${record.activeAssistantMessageId ?? 'stream'}:${index}`
-  record.visibleThinkingBlockIds.set(index, blockId)
-  return { status: 'started', blockId }
-}
-
-function extractStreamThinkingDelta(message: DashboardSDKMessage): string {
-  const event = getObjectField(message, 'event') ?? message
-  if (getStringField(event, 'type') !== 'content_block_delta') return ''
-  const delta = getObjectField(event, 'delta')
-  const deltaType = getStringField(delta, 'type')
-  if (
-    deltaType !== 'thinking_delta' &&
-    deltaType !== 'redacted_thinking_delta'
-  )
-    return ''
-  return (
-    getStringField(delta, 'thinking') ||
-    getStringField(delta, 'text') ||
-    getStringField(delta, 'data')
-  )
-}
-
-function extractStreamMessageId(
-  message: DashboardSDKMessage,
-): string | undefined {
-  const event = getObjectField(message, 'event') ?? message
-  if (getStringField(event, 'type') !== 'message_start') return undefined
-  return getStringField(getObjectField(event, 'message'), 'id') || undefined
-}
-
-function getSDKAssistantMessageId(
-  message: DashboardSDKMessage,
-): string | undefined {
-  if (message.type !== 'assistant') return undefined
-  return getStringField(getObjectField(message, 'message'), 'id') || undefined
-}
-
-function nativeAssistantBlockId(record: SessionRecord, messageId?: string | null): string | undefined {
-  return messageId && record.activeAssistantTextBlockIndex !== undefined
-    ? `${record.session.id}:${messageId}:text:${record.activeAssistantTextBlockIndex}` : undefined
-}
-
-function extractAssistantPartialText(message: DashboardSDKMessage): string {
-  if (message.type === 'stream_event') return extractStreamTextDelta(message)
-  if (message.type === 'partial_assistant') {
-    return extractVisibleTextFromContent(getMessageContent(message) ?? message)
-  }
-  return ''
-}
-
-function getStringField(
-  value: Record<string, unknown> | undefined,
-  field: string,
-): string {
-  const fieldValue = value?.[field]
-  return typeof fieldValue === 'string' ? fieldValue : ''
-}
-
-function getBooleanField(
-  value: Record<string, unknown> | undefined,
-  field: string,
-): boolean | undefined {
-  const fieldValue = value?.[field]
-  return typeof fieldValue === 'boolean' ? fieldValue : undefined
-}
-
-function getNumberField(
-  value: Record<string, unknown> | undefined,
-  field: string,
-): number | undefined {
-  const fieldValue = value?.[field]
-  return typeof fieldValue === 'number' ? fieldValue : undefined
-}
-
-function getObjectField(
-  value: unknown,
-  field: string,
-): Record<string, unknown> | undefined {
-  if (!isObject(value)) return undefined
-  const fieldValue = value[field]
-  return isObject(fieldValue) ? fieldValue : undefined
 }
 
 function buildRuntimeEnv(
@@ -4745,42 +3995,6 @@ export function mergeRuntimeEnv(
 }
 
 function inferSelectedRuntimeModelType(environment:Record<string,string>) { return inferRuntimeModelType(environment) }
-
-function buildRuntimeLaunchContract(
-  selectedEnvironment: Record<string, string>,
-  forwardedEnvironment: Record<string, string>,
-): RuntimeLaunchContract {
-  const endpoint =
-    forwardedEnvironment.OPENAI_BASE_URL ||
-    ''
-  return {
-    selectedEnvironmentKeys: Object.keys(selectedEnvironment).sort(),
-    forwardedEnvironmentKeys: Object.keys(forwardedEnvironment).sort(),
-    endpointClass: classifyRuntimeEndpoint(endpoint),
-    configDirectoryConfigured: Boolean(forwardedEnvironment.BEEGAME_CONFIG_DIR),
-    credentialConfigured: Boolean(
-      forwardedEnvironment.OPENAI_API_KEY || forwardedEnvironment.OPENAI_AUTH_MODE === 'chatgpt',
-    ),
-  }
-}
-
-function classifyRuntimeEndpoint(
-  endpoint: string,
-): RuntimeLaunchContract['endpointClass'] {
-  if (!endpoint) return 'default'
-  try {
-    const hostname = new URL(endpoint).hostname.toLowerCase()
-    return [
-      'api.openai.com',
-      'generativelanguage.googleapis.com',
-      'api.x.ai',
-    ].includes(hostname)
-      ? 'first_party'
-      : 'custom'
-  } catch {
-    return 'custom'
-  }
-}
 
 function cloneSession(session: BeeGameSession): BeeGameSession {
   return { ...session }

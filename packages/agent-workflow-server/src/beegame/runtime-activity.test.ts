@@ -13,3 +13,10 @@ test('workflow timestamp does not hide later agent, tool and subagent observatio
   })
   expect(runtimeActivity([]).agentEventAt).toBeNull()
 })
+
+
+test('current BGS child lifecycle contributes to runtime activity', () => {
+  expect(runtimeActivity([
+    { type: 'system.status', createdAt: '2026-10-22T12:00:00Z', payload: { type: 'runtime_event', childThreadId: 'child', childStatus: 'running' } },
+  ])).toMatchObject({ agentEventAt: '2026-10-22T12:00:00.000Z', subagentEventAt: '2026-10-22T12:00:00.000Z', toolEventAt: null })
+})

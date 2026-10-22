@@ -553,7 +553,7 @@ beforeEach(() => {
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.test/v1',
       apiKeyPreview: 'sk-...test',
-      models: { balanced: 'balanced-model' },
+      model: 'balanced-model',
       isDefault: true,
     },
   ]);

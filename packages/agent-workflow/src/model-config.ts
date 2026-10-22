@@ -49,12 +49,6 @@ export function validateModelAccess(
   return [...new Set(methods)]
 }
 
-export type ModelTierMap = {
-  fast?: string
-  balanced?: string
-  strong?: string
-}
-
 export type PublicModelConfig = {
   published?: boolean
   authMethods?: ModelAuthMethod[]
@@ -66,7 +60,7 @@ export type PublicModelConfig = {
   baseUrl?: string
   apiKeyPreview: string
   apiKey?: undefined
-  models: ModelTierMap
+  model?: string
   isDefault: boolean
   createdAt: Date
   updatedAt: Date
@@ -80,7 +74,7 @@ export type ModelConfigInput = {
   apiProtocol?: ModelApiProtocol
   baseUrl?: string
   apiKey: string
-  models: ModelTierMap
+  model?: string
   isDefault?: boolean
 }
 
@@ -92,7 +86,7 @@ export type ModelConfigUpdate = Partial<
     | 'apiProtocol'
     | 'baseUrl'
     | 'apiKey'
-    | 'models'
+    | 'model'
     | 'published'
     | 'authMethods'
   > & {
@@ -111,7 +105,7 @@ export type StoredModelConfigRuntimeInput = {
   apiProtocol?: ModelApiProtocol
   baseUrl?: string
   apiKey: string
-  models: ModelTierMap
+  model?: string
 }
 
 type StoredModelConfig = Omit<PublicModelConfig, 'apiKeyPreview' | 'apiKey'> & {
@@ -143,7 +137,7 @@ export function exportModelConfigSnapshot(): ModelConfigSnapshotRecord[] {
     apiProtocol: config.apiProtocol,
     ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
     apiKey: config.apiKey,
-    models: { ...config.models },
+    model: readStoredModelSelection(config),
     isDefault: config.isDefault,
     createdAt: config.createdAt.toISOString(),
     updatedAt: config.updatedAt.toISOString(),
@@ -170,7 +164,7 @@ export function importModelConfigSnapshot(
       apiProtocol: config.apiProtocol,
       ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
       apiKey: config.apiKey,
-      models: { ...config.models },
+      model: readStoredModelSelection(config),
       isDefault: config.isDefault,
       createdAt: new Date(config.createdAt),
       updatedAt: new Date(config.updatedAt),
@@ -193,7 +187,7 @@ export function createModelConfig(
     apiProtocol: resolveModelApiProtocol(input.provider, input.apiProtocol),
     ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
     apiKey: input.apiKey,
-    models: { ...input.models },
+    model: input.model?.trim(),
     isDefault: input.isDefault ?? listModelConfigs(ownerId).length === 0,
     createdAt: now,
     updatedAt: now,
@@ -251,7 +245,7 @@ export function updateModelConfig(
   if (patch.clearSecret) record.apiKey = ''
   else if (patch.apiKey !== undefined && patch.apiKey.trim())
     record.apiKey = patch.apiKey
-  if (patch.models !== undefined) record.models = { ...patch.models }
+  if (patch.model !== undefined) record.model = patch.model.trim()
   if (patch.isDefault !== undefined) {
     if (patch.isDefault) {
       clearOwnerDefaults(record.ownerId)
@@ -309,10 +303,7 @@ export function mapStoredModelConfigToRuntime(
         record.provider,
         record.apiProtocol,
       ),
-      BGS_DEFAULT_FAST_MODEL: record.models.fast,
-      BGS_DEFAULT_BALANCED_MODEL: record.models.balanced,
-      BGS_DEFAULT_STRONG_MODEL: record.models.strong,
-      BEEGAME_MODEL: record.models.balanced,
+      BEEGAME_MODEL: record.model,
     }),
   }
 }
@@ -336,7 +327,7 @@ function toPublicConfig(record: StoredModelConfig): PublicModelConfig {
     apiProtocol: record.apiProtocol,
     ...(record.baseUrl ? { baseUrl: record.baseUrl } : {}),
     apiKeyPreview: maskApiKey(record.apiKey),
-    models: { ...record.models },
+    model: record.model,
     isDefault: record.isDefault,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -356,4 +347,13 @@ function compactEnv(
     if (value) env[key] = value
   }
   return env
+}
+
+/** Read the selected model from saved records, including pre-single-model snapshots.
+ * Legacy tiers are read only here; new API requests and writes use `model`. */
+export function readStoredModelSelection(record: { model?: unknown; models?: unknown }): string | undefined {
+  const previous = record.models && typeof record.models === 'object' && !Array.isArray(record.models)
+    ? (record.models as Record<string, unknown>).balanced : undefined
+  const value = record.model ?? previous
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }

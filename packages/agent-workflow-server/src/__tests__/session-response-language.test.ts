@@ -15,7 +15,7 @@ test('a language change relaunches the native runner without changing the user m
         stop() {},
         async submit(input) {
           submissions.push(input)
-          await input.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+          await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Done' })
         },
       }
     },

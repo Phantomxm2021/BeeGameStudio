@@ -12,7 +12,7 @@ export function hasVerifiedReasoningCatalog(env: Record<string, string>) {
 }
 
 export function reasoningCapabilities(env: Record<string, string>, models: RpcObject[]) {
-  const requested = env.BEEGAME_MODEL || env.BGS_DEFAULT_BALANCED_MODEL
+  const requested = env.BEEGAME_MODEL
   const selected = requested ? models.find(entry => entry.model === requested) : models.find(entry => entry.isDefault)
   const model = requested || selected?.model || ''
   const efforts: string[] = hasVerifiedReasoningCatalog(env) && selected

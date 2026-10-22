@@ -29,7 +29,7 @@ test('an issued preview remains readable when the identity upstream is unavailab
     headers: { authorization: 'Bearer fixture', 'content-type': 'application/json' }, body: JSON.stringify(body) })
   try {
     expect((await post('/api/projects', { id: 'fixture', name: 'Fixture', root_path: workspace, created_at: Date.now() })).status).toBe(200)
-    await post('/api/model-configs', { name: 'Fake', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })
+    await post('/api/model-configs', { name: 'Fake', provider: 'openai-compatible', apiKey: 'fake', model: 'fake', isDefault: true })
     const ensured = await post('/api/projects/fixture/session/ensure')
     expect(ensured.status).toBe(200)
     const { session } = await ensured.json()

@@ -1,8 +1,8 @@
 import { OPENCODE_GO_PROFILES } from '../../packages/agent-workflow/src/opencode-go'
 
 export const goModelCatalog = {
-  'anthropic-compatible': [...new Set([...Object.values(OPENCODE_GO_PROFILES['anthropic-compatible'].defaults), 'qwen3.7-plus', 'claude-haiku-5-5', 'new-anthropic-model'])],
-  'openai-compatible': [...new Set([...Object.values(OPENCODE_GO_PROFILES['openai-compatible'].defaults), 'mimo-v2.6-flash', 'new-chat-model'])],
+  'anthropic-compatible': [...new Set([OPENCODE_GO_PROFILES['anthropic-compatible'].model, 'qwen3.7-plus', 'claude-haiku-5-5', 'new-anthropic-model'])],
+  'openai-compatible': [...new Set([OPENCODE_GO_PROFILES['openai-compatible'].model, 'mimo-v2.6-flash', 'new-chat-model'])],
 }
 export const goRegistry = { 'opencode-go': { npm: '@ai-sdk/openai-compatible', models: {
   ...Object.fromEntries(goModelCatalog['anthropic-compatible'].map(id => [id, { provider: { npm: '@ai-sdk/anthropic' } }])),

@@ -68,7 +68,7 @@ export function providerConfig(
     protocol: protocol as ModelApiProtocol,
     baseUrl: baseUrl.replace(/\/+$/, ''),
     apiKey,
-    model: env.BEEGAME_MODEL || env.BGS_DEFAULT_BALANCED_MODEL,
+    model: env.BEEGAME_MODEL,
     auth: type === 'anthropic' && env.ANTHROPIC_API_KEY ? 'api-key' : 'bearer',
   }
 }

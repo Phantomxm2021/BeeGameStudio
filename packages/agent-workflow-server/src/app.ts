@@ -246,7 +246,7 @@ function buildResourceSemanticCuratorSystemPrompt(
 
 const RESOURCE_MODEL_RUNTIME_KEYS=new Set(['OPENAI_BASE_URL','OPENAI_API_KEY','ANTHROPIC_BASE_URL','ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN',
   'GEMINI_BASE_URL','GEMINI_API_KEY','GROK_BASE_URL','GROK_API_KEY','BEEGAME_MODEL','BEEGAME_API_PROTOCOL',
-  'BGS_DEFAULT_FAST_MODEL','BGS_DEFAULT_BALANCED_MODEL','BGS_DEFAULT_STRONG_MODEL'])
+])
 
 type BeeGameArtifactIndexItem = {
   path: string
@@ -1353,7 +1353,7 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, ROUTE_PERMISSION.modelConfig)
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
-    const error = requireFields(body, ['name', 'provider', 'models'])
+    const error = requireFields(body, ['name', 'provider'])
     if (error) return c.json({ error }, 400)
     let authMethods
     try { authMethods = validateModelAccess(body.provider as ModelProviderKind, body.authMethods) }
@@ -1367,7 +1367,7 @@ export function createAgentWorkflowApp(
     let apiProtocol
     try {
       apiProtocol = await validateBgsModelConfig({ provider: String(body.provider),apiProtocol:body.apiProtocol, baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : undefined,
-        models: toModelMap(body.models), authMethods }, assertPermittedOutboundUrl)
+        model: body.model, authMethods }, assertPermittedOutboundUrl)
     } catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
 
     const created = await dashboardRepository.createModelConfig(
@@ -1383,7 +1383,7 @@ export function createAgentWorkflowApp(
         apiKey: typeof body.apiKey === 'string' ? body.apiKey : '',
         authMethods,
         published: body.published !== false,
-        models: toModelMap(body.models),
+        ...(typeof body.model === 'string' ? { model: body.model.trim() } : {}),
         isDefault: body.isDefault === true,
       },
     )
@@ -1420,7 +1420,7 @@ export function createAgentWorkflowApp(
       let apiProtocol
       try {
         apiProtocol = await validateBgsModelConfig({ provider: String(body.provider ?? existing.provider),apiProtocol:body.apiProtocol ?? (body.provider && body.provider!==existing.provider?undefined:existing.apiProtocol), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : existing.baseUrl,
-          models: isObject(body.models) ? toModelMap(body.models) : existing.models, authMethods }, assertPermittedOutboundUrl)
+          model: body.model === undefined ? existing.model : body.model, authMethods }, assertPermittedOutboundUrl)
       } catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
       const updated = await dashboardRepository.updateModelConfig(
         c.req.raw,
@@ -1439,7 +1439,7 @@ export function createAgentWorkflowApp(
             : {}),
           ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
           ...(body.clearSecret === true ? { clearSecret: true } : {}),
-          ...(isObject(body.models) ? { models: toModelMap(body.models) } : {}),
+          ...(typeof body.model === 'string' ? { model: body.model.trim() } : {}),
           ...(typeof body.isDefault === 'boolean'
             ? { isDefault: body.isDefault }
             : {}),
@@ -6901,19 +6901,6 @@ function requireFields(body: JsonObject, fields: string[]): string | null {
     }
   }
   return null
-}
-
-function toModelMap(value: unknown): {
-  fast?: string
-  balanced?: string
-  strong?: string
-} {
-  if (!isObject(value)) return {}
-  return {
-    ...(typeof value.fast === 'string' ? { fast: value.fast } : {}),
-    ...(typeof value.balanced === 'string' ? { balanced: value.balanced } : {}),
-    ...(typeof value.strong === 'string' ? { strong: value.strong } : {}),
-  }
 }
 
 async function validateMcpServerBody(

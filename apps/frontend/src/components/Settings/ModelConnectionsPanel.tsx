@@ -5,7 +5,7 @@ import { ProjectSelect } from '../beui/project-select';
 import { OPENCODE_GO_ID } from '@bee-game-studio/agent-workflow/opencode-go';
 import { ModelConfigPanel } from './ModelConfigPanel';
 import { useToastContext } from '../../contexts/ToastContext';
-import { cancelModelLogin, listModelCatalog, readModelLogin, saveModelConnection, startModelLogin, type CatalogModel, type ModelAuthMethod, type ModelLogin, type ModelProviderKind, type ModelTierMap } from '../../services/modelConfigApi';
+import { cancelModelLogin, listModelCatalog, readModelLogin, saveModelConnection, startModelLogin, type CatalogModel, type ModelAuthMethod, type ModelLogin, type ModelProviderKind } from '../../services/modelConfigApi';
 
 const BYOK_ID = 'personal-byok';
 const CHATGPT_ID = 'personal-chatgpt-subscription';
@@ -26,7 +26,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
   const [apiProtocol,setApiProtocol]=useState<ModelApiProtocol>('responses');
   const goRef=useRef<ModelConnectionsHandle>(null);
   const [baseUrl, setBaseUrl] = useState('');
-  const [tiers, setTiers] = useState<ModelTierMap>({});
+  const [model, setModel] = useState('');
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
@@ -40,7 +40,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
   const subscription = models.find(item => item.id === subscriptionId);
   const connected = mode === 'chatgpt-subscription' && subscription?.connection.chatgptConnected;
   const keyRequired = !byok?.connection.hasKey || provider !== byok.provider || baseUrl.trim().replace(/\/$/, '') !== (byok.connection.baseUrl ?? '').replace(/\/$/, '');
-  const byokComplete = !!baseUrl.trim() && !!tiers.fast?.trim() && !!tiers.balanced?.trim() && !!tiers.strong?.trim() && (!keyRequired || !!key.trim());
+  const byokComplete = !!baseUrl.trim() && !!model.trim() && (!keyRequired || !!key.trim());
 
   const refresh = async () => {
     const result = await listModelCatalog();
@@ -59,7 +59,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
       else setMode('official');
       setOfficialId(active && !personalIds.includes(active.id) && active.authMethods?.includes('platform') ? active.id : result.find(item => !personalIds.includes(item.id) && item.authMethods?.includes('platform'))?.id ?? '');
       const personal = result.find(item => item.id === BYOK_ID);
-      if (personal) { setProvider(personal.provider);setApiProtocol(personal.connection.apiProtocol ?? personal.apiProtocol ?? resolveModelApiProtocol(personal.provider)); setBaseUrl(personal.connection.baseUrl ?? ''); setTiers(personal.connection.models ?? {}); }
+      if (personal) { setProvider(personal.provider);setApiProtocol(personal.connection.apiProtocol ?? personal.apiProtocol ?? resolveModelApiProtocol(personal.provider)); setBaseUrl(personal.connection.baseUrl ?? ''); setModel(personal.connection.model ?? ''); }
     }).catch(() => { if (mounted.current) setStatus(chatgptAuthorizationOnly ? copy('无法读取登录状态，请重新打开此页面。', 'Could not read login status. Reopen this page.') : copy('无法读取可用模型', 'Could not load available models')); });
     return () => { mounted.current = false; if (loginRef.current) void cancelModelLogin(loginRef.current.id).catch(() => {}); };
   }, [chatgptAuthorizationOnly]);
@@ -103,7 +103,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     try { await action(); } catch { onError?.(); showError(copy('操作失败，请检查连接或重新登录。', 'Operation failed. Check the connection or sign in again.')); }
     finally { if (mounted.current) setBusy(false); }
   };
-  const activate = async (id: string, method: ModelAuthMethod, byokConfig?: { provider: ModelProviderKind;apiProtocol?:ModelApiProtocol; baseUrl: string; models: ModelTierMap }) => {
+  const activate = async (id: string, method: ModelAuthMethod, byokConfig?: { provider: ModelProviderKind;apiProtocol?:ModelApiProtocol; baseUrl: string; model?: string }) => {
     await saveModelConnection(id, method, undefined, true, byokConfig);
     await refresh();
   };
@@ -111,10 +111,10 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     const previous = mode;
     setMode(next); setStatus('');
     if (next === 'official' && officialId) void run(() => activate(officialId, 'platform'), () => setMode(previous));
-    if (next === 'byok' && byok?.connection.hasKey && byokComplete) void run(() => activate(BYOK_ID, 'byok', { provider,apiProtocol, baseUrl: baseUrl.trim(), models: tiers }), () => setMode(previous));
+    if (next === 'byok' && byok?.connection.hasKey && byokComplete) void run(() => activate(BYOK_ID, 'byok', { provider,apiProtocol, baseUrl: baseUrl.trim(), model: model.trim() }), () => setMode(previous));
     if (next === 'opencode-go') {
       const go = models.find(item => item.id === OPENCODE_GO_ID);
-      if (go?.connection.hasKey && go.baseUrl) void run(() => activate(OPENCODE_GO_ID, 'byok', {provider:go.provider,baseUrl:go.baseUrl!,models:go.connection.models ?? go.models}),()=>setMode(previous));
+      if (go?.connection.hasKey && go.baseUrl) void run(() => activate(OPENCODE_GO_ID, 'byok', {provider:go.provider,baseUrl:go.baseUrl!,model:go.connection.model ?? go.model}),()=>setMode(previous));
     }
     if (next === 'chatgpt-subscription') {
       const id = CHATGPT_ID;
@@ -143,7 +143,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     try { await navigator.clipboard.writeText(login.userCode); setCodeCopied(true); }
     catch { showError(copy('复制失败，请手动复制设备码。', 'Copy failed. Select the device code manually.')); }
   };
-  const saveByok = () => void run(async () => { await saveModelConnection(BYOK_ID, 'byok', key, true, { provider,apiProtocol, baseUrl: baseUrl.trim(), models: tiers }); setKey(''); await refresh(); });
+  const saveByok = () => void run(async () => { await saveModelConnection(BYOK_ID, 'byok', key, true, { provider,apiProtocol, baseUrl: baseUrl.trim(), model: model.trim() }); setKey(''); await refresh(); });
   useImperativeHandle(ref, () => ({ saveByok:()=>mode==='opencode-go'?goRef.current?.saveByok():saveByok() }));
   useEffect(() => { if(mode==='opencode-go')return;onSaveStateChange?.({ visible: mode === 'byok', disabled: busy || !byokComplete, busy }); }, [mode, busy, byokComplete, onSaveStateChange]);
 
@@ -151,7 +151,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     {!chatgptAuthorizationOnly && <ProjectSelect ariaLabel={copy('连接方式', 'Connection type')} value={mode} disabled={busy || !!login} triggerClassName="h-10" onValueChange={value => switchMode(value as Mode)} options={[{ value: 'official', label: 'Bee Game Studio LLM' }, { value: 'byok', label: 'BYOK' },{value:'opencode-go',label:'OpenCode Go'}, { value: 'chatgpt-subscription', label: 'ChatGPT account with subscription' }]} />}
     {mode==='opencode-go' && <OpenCodeGoPanel ref={goRef} language={language} config={models.find(item=>item.id===OPENCODE_GO_ID)} busy={busy} setBusy={setBusy} refresh={refresh} onSaveStateChange={onSaveStateChange}/>}
     {mode === 'byok' && <div className="space-y-3">
-      <ModelConfigPanel labels={{ provider: copy('服务商', 'Provider'), baseUrl: copy('接口 URL', 'Base URL'), apiKey: 'API Key', models: copy('模型', 'Models'), fast: copy('快速', 'Fast'), balanced: copy('均衡', 'Balanced'), strong: copy('强力', 'Strong'), fastModel: copy('快速模型', 'Fast model'), balancedModel: copy('均衡模型', 'Balanced model'), strongModel: copy('强力模型', 'Strong model') }} provider={provider} apiProtocol={apiProtocol} onApiProtocolChange={setApiProtocol} baseUrl={baseUrl} apiKey={key} fastModel={tiers.fast ?? ''} balancedModel={tiers.balanced ?? ''} strongModel={tiers.strong ?? ''} apiKeyPreview={byok?.connection.hasKey && !keyRequired ? '••••' : ''} savedPrefix={copy('已保存：', 'Saved: ')} onProviderChange={setProvider} onBaseUrlChange={setBaseUrl} onApiKeyChange={setKey} onFastModelChange={value => setTiers(current => ({ ...current, fast: value }))} onBalancedModelChange={value => setTiers(current => ({ ...current, balanced: value }))} onStrongModelChange={value => setTiers(current => ({ ...current, strong: value }))} onSubmit={event => { event.preventDefault(); if (byokComplete && !busy) saveByok(); }} />
+      <ModelConfigPanel labels={{ provider: copy('服务商', 'Provider'), baseUrl: copy('接口 URL', 'Base URL'), apiKey: 'API Key', model: copy('模型', 'Model') }} provider={provider} apiProtocol={apiProtocol} onApiProtocolChange={setApiProtocol} baseUrl={baseUrl} apiKey={key} model={model} apiKeyPreview={byok?.connection.hasKey && !keyRequired ? '••••' : ''} savedPrefix={copy('已保存：', 'Saved: ')} onProviderChange={setProvider} onBaseUrlChange={setBaseUrl} onApiKeyChange={setKey} onModelChange={setModel} onSubmit={event => { event.preventDefault(); if (byokComplete && !busy) saveByok(); }} />
     </div>}
     {(mode === 'chatgpt-subscription') && <div className="flex min-h-48 flex-1 items-center justify-center">
       {!connected && !login && <div className="flex w-full max-w-sm flex-col items-center gap-4 text-center">

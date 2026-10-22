@@ -22,7 +22,7 @@ test('startup files use ordinary workspace permissions; design and instruction p
           decisions.push(await turn.requestPermission({toolName,toolUseID:crypto.randomUUID(),input:{[key]:join(workspace,path)},message:'Fixture decision'}))
       }
       decisions.push(await turn.requestPermission({toolName:'Write',toolUseID:'old-project',input:{file_path:join(workspace,'index.html')},message:'Existing entry remains editable'}))
-      await turn.onMessage({type:'result',subtype:'success',result:'Fixture complete'})
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture complete' })
     }}
   }},root)
   try {
@@ -52,7 +52,7 @@ test('implementation baseline locks native planning writes without blocking code
     for(const path of ['docs/GDD.md','plan-alias.md','.beegame/design-handoffs/GDD.json','src/game.js'])await write(path)
     manager.setProjectDesignLocked(sessionId,false)
     await write('docs/GDD.md')
-    await turn.onMessage({type:'result',subtype:'success',result:'Fixture complete'})
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture complete' })
   }})},base)
   try {
     sessionId=manager.start({workspacePath:workspace,userId:'owner',projectId:'project'}).id
@@ -74,7 +74,7 @@ test.each(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])('root AGENTS.md requir
     for (const path of ['AGENTS.md', 'guide-alias.md'])
       decisions.push(await turn.requestPermission({ toolName, toolUseID: path, input: { [key]: join(workspace, path) }, message: 'Change root instructions' }))
     decisions.push(await turn.requestPermission({ toolName, toolUseID: 'ordinary', input: { [key]: join(workspace, 'src/game.txt') }, message: 'Ordinary output' }))
-    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Fixture complete' })
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture complete' })
   } }) }, base)
   try {
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
@@ -111,7 +111,7 @@ test.each(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])('project boundary appl
     decisions.push(await turn.requestPermission({ toolName, toolUseID: 'wrong-key',
       input: { [key]: join(outside, 'new/file.txt'), [toolName === 'NotebookEdit' ? 'file_path' : 'path']: join(workspace, 'allowed.txt') },
       message: 'An unrelated input key cannot substitute the actual mutation target' }))
-    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Fixture complete' })
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture complete' })
   } }) }, base)
   try {
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
@@ -148,7 +148,7 @@ test('Glob cannot replace a checked project directory with an absolute or parent
   const manager = new BeeGameSessionManager({ start: async () => ({ stop() {}, async submit(turn) {
     for (const [index, input] of inputs.entries())
       decisions.push(await turn.requestPermission({ toolName: 'Glob', toolUseID: String(index), input, message: 'Path decisions only; never enumerate outside files' }))
-    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Fixture complete' })
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture complete' })
   } }) }, base)
   try {
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
@@ -172,7 +172,7 @@ test.each(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])('native %s safety prom
       input: { [key]: join(workspace, '.claude/settings.json') }, message: reason, decisionReason: reason }))
     decisions.push(await turn.requestPermission({ toolName, toolUseID: 'ordinary',
       input: { [key]: join(workspace, 'src/game.txt') }, message: 'Ordinary BGS ask rule' }))
-    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Fixture complete' })
+    await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture complete' })
   } }) }, base)
   try {
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })

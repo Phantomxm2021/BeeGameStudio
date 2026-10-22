@@ -263,7 +263,7 @@ test('receipt write outage does not block normal database settlement; native cle
   for(const cleanupFails of [false,true]) {
     const f=await fixture();let submitted=0,disposed=0,writes=0
     const sessions=new BeeGameSessionManager({async start(){return {stop(){},async dispose(){disposed++;if(cleanupFails)throw Error('Synthetic cleanup failed')},
-      async submit(turn){submitted++;await turn.onMessage({type:'result',subtype:'success',result:'Synthetic'} as any)}}}},join(f.root,'normal-native'),async()=>({}),{},true)
+      async submit(turn){submitted++;await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic' })}}}},join(f.root,'normal-native'),async()=>({}),{},true)
     const receipts:HostExitReceipts={read:f.receipts().read,save:async()=>{writes++;throw Error('Synthetic filesystem outage')}}
     const executor=createAgentGoalExecutor({store:f.store,sessions,exitReceipts:receipts})
     try {

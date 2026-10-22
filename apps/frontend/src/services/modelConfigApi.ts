@@ -5,12 +5,6 @@ import apiClient from './apiClient';
 export type ModelProviderKind = 'anthropic-compatible' | 'openai-compatible' | 'gemini' | 'grok';
 export type ModelAuthMethod = 'platform' | 'byok' | 'chatgpt-subscription';
 
-export type ModelTierMap = {
-  fast?: string;
-  balanced?: string;
-  strong?: string;
-};
-
 export type ModelConfig = {
   published?: boolean;
   authMethods?: ModelAuthMethod[];
@@ -20,7 +14,7 @@ export type ModelConfig = {
   apiProtocol?: ModelApiProtocol;
   baseUrl?: string;
   apiKeyPreview: string;
-  models: ModelTierMap;
+  model?: string;
   isDefault: boolean;
 };
 
@@ -32,7 +26,7 @@ export type CreateModelConfigInput = {
   apiProtocol?: ModelApiProtocol;
   baseUrl?: string;
   apiKey: string;
-  models: ModelTierMap;
+  model?: string;
   isDefault: boolean;
 };
 
@@ -44,7 +38,7 @@ export type UpdateModelConfigInput = {
   apiProtocol?: ModelApiProtocol;
   baseUrl?: string;
   apiKey?: string;
-  models?: ModelTierMap;
+  model?: string;
   isDefault?: boolean;
 };
 
@@ -64,12 +58,12 @@ export const deleteModelConfig = (id: string): Promise<{ deleted: boolean }> => 
   apiClient.delete(`/api/model-configs/${encodeURIComponent(id)}`)
 );
 
-export type ModelConnectionStatus = { method: ModelAuthMethod; hasKey: boolean; disabled?: boolean; isPreferred: boolean; baseUrl?: string; models?: ModelTierMap; apiProtocol?:ModelApiProtocol; chatgptConnected: boolean };
+export type ModelConnectionStatus = { method: ModelAuthMethod; hasKey: boolean; disabled?: boolean; isPreferred: boolean; baseUrl?: string; model?: string; apiProtocol?:ModelApiProtocol; chatgptConnected: boolean };
 export type CatalogModel = ModelConfig & { connection: ModelConnectionStatus };
 export type ModelLogin = { id: string; url: string; userCode?: string; method: ModelAuthMethod };
 export const listModelCatalog = (): Promise<CatalogModel[]> => apiClient.get('/api/model-catalog');
 export const listOpenCodeGoModels = (): Promise<import('@bee-game-studio/agent-workflow/opencode-go').OpenCodeGoModels> => apiClient.get('/api/model-catalog/opencode-go');
-export const saveModelConnection = (id: string, method: ModelAuthMethod, apiKey?: string, preferred = false, byok?: { provider?: ModelProviderKind; apiProtocol?:ModelApiProtocol; baseUrl: string; models: ModelTierMap }): Promise<ModelConnectionStatus> => apiClient.put(`/api/model-connections/${encodeURIComponent(id)}`, { method, ...(apiKey ? { apiKey } : {}), preferred, ...(method === 'byok' && byok ? byok : {}) });
+export const saveModelConnection = (id: string, method: ModelAuthMethod, apiKey?: string, preferred = false, byok?: { provider?: ModelProviderKind; apiProtocol?:ModelApiProtocol; baseUrl: string; model?: string }): Promise<ModelConnectionStatus> => apiClient.put(`/api/model-connections/${encodeURIComponent(id)}`, { method, ...(apiKey ? { apiKey } : {}), preferred, ...(method === 'byok' && byok ? byok : {}) });
 export const startModelLogin = (id: string, method: ModelAuthMethod): Promise<ModelLogin> => apiClient.post(`/api/model-connections/${encodeURIComponent(id)}/login`, { method });
 export const readModelLogin = (id: string): Promise<{ status: 'pending' | 'complete' | 'failed' }> => apiClient.get(`/api/model-logins/${encodeURIComponent(id)}`);
 export const cancelModelLogin = (id: string): Promise<unknown> => apiClient.delete(`/api/model-logins/${encodeURIComponent(id)}`);

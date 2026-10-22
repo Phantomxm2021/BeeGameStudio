@@ -55,7 +55,7 @@ test('conversation must not auto-approve native shell escalation', async () => {
       decision = await input.requestPermission({ toolUseID: 'escape', toolName: 'Bash',
         input: { command: 'pkill -f "vite"', dangerouslyDisableSandbox: true },
         message: 'Command explicitly disables sandbox', decisionReason: 'Command explicitly disables sandbox' })
-      await input.onMessage({ type: 'result', subtype: 'success', result: 'Fixture finished' })
+      await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture finished' })
     } }) }, root)
     const shared = { workspacePath: root, userId: 'owner', projectId: 'project' }
     try {

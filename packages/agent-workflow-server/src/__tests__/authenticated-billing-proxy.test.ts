@@ -4,7 +4,6 @@ import { proxyAuthenticatedBillingRequest } from '../auth/authenticated-billing-
 
 const billingConfig = {
   mode: 'remote' as const,
-  usageBillingMode: 'realtime' as const,
   remoteApiBaseUrl: 'https://billing.beegame.test',
 }
 

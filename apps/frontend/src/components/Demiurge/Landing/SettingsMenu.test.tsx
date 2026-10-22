@@ -409,11 +409,11 @@ describe('SettingsMenu model settings', () => {
         await openPlatformSettingsTab('模型');
         await userEvent.click(screen.getByRole('button', { name: '添加模型配置' }));
         await userEvent.type(screen.getByLabelText('API Key'), 'unsaved-model-key');
-        await userEvent.type(screen.getByLabelText('Balanced 模型'), 'draft-model');
+        await userEvent.type(screen.getByLabelText('模型'), 'draft-model');
 
         rerender(settingsElement({ lang: 'en' }));
         expect(screen.getByLabelText('API Key')).toHaveValue('unsaved-model-key');
-        expect(screen.getByLabelText(/Balanced/)).toHaveValue('draft-model');
+        expect(screen.getByLabelText('Model')).toHaveValue('draft-model');
         expect(listModelConfigs).toHaveBeenCalledTimes(1);
     });
 
@@ -508,8 +508,8 @@ describe('SettingsMenu model settings', () => {
     it('saves BYOK from the shared bottom-right footer, not inside the scroll area', async () => {
         useSystemStore.setState({ currentUser: { id: 'fixture-user', role: 'viewer', permissions: [] } });
         listModelCatalog.mockResolvedValue([
-            { id: 'official', name: 'Bee Game Studio LLM', provider: 'openai-compatible', models: { balanced: 'official' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: { method: 'platform', hasKey: false, isPreferred: false, chatgptConnected: false } },
-            { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: { method: 'platform', hasKey: false, isPreferred: false, chatgptConnected: false } },
+            { id: 'official', name: 'Bee Game Studio LLM', provider: 'openai-compatible', model: 'official', apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: { method: 'platform', hasKey: false, isPreferred: false, chatgptConnected: false } },
+            { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', model: undefined, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: { method: 'platform', hasKey: false, isPreferred: false, chatgptConnected: false } },
         ]);
         saveModelConnection.mockResolvedValue({ method: 'byok', hasKey: true, isPreferred: true, chatgptConnected: false });
         try {
@@ -519,15 +519,13 @@ describe('SettingsMenu model settings', () => {
             await userEvent.click(screen.getByRole('option', { name: 'BYOK' }));
             await userEvent.type(screen.getByLabelText('接口 URL'), 'https://example.com/v1');
             await userEvent.type(screen.getByLabelText('API Key'), 'fixture-secret');
-            await userEvent.type(screen.getByLabelText('快速模型'), 'fast');
-            await userEvent.type(screen.getByLabelText('均衡模型'), 'balanced');
-            await userEvent.type(screen.getByLabelText('强力模型'), 'strong');
+            await userEvent.type(screen.getByLabelText('模型'), 'balanced');
             const save = screen.getByRole('button', { name: '保存设置' });
             expect(screen.getByTestId('settings-modal-scroll-area')).not.toContainElement(save);
             expect(save.parentElement).toHaveClass('justify-end');
             expect(save).toHaveClass('rounded-full');
             await userEvent.click(save);
-            await waitFor(() => expect(saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://example.com/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong' } }));
+            await waitFor(() => expect(saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://example.com/v1', model: 'balanced' }));
         } finally {
             useSystemStore.setState({ currentUser: null });
         }
@@ -537,7 +535,7 @@ describe('SettingsMenu model settings', () => {
         useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: [] } });
         let connected = false;
         listModelCatalog.mockImplementation(async () => [{ id: 'personal-chatgpt-subscription', name: 'ChatGPT subscription',
-            provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'],
+            provider: 'openai-compatible', model: undefined, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'],
             connection: { method: 'platform', hasKey: false, isPreferred: false, chatgptConnected: connected } }]);
         startModelLogin.mockResolvedValue({ id: 'admin-device', url: 'https://auth.openai.com/codex/device', userCode: 'ADMIN-CODE', method: 'chatgpt-subscription' });
         readModelLogin.mockImplementation(async () => { connected = true; return { status: 'complete' }; });
@@ -1377,17 +1375,13 @@ describe('SettingsMenu model settings', () => {
  await waitFor(()=>expect(saveRuntimeSettings).toHaveBeenCalledWith({resourceLibraryEnabled:false}));
 });
 
-    it('shows compact tiered model fields and saves a new default model config', async () => {
+    it('shows a single model field and saves a new default model config', async () => {
         createModelConfig.mockResolvedValue({
             id: 'llm_1',
             name: 'BeeGame LLM',
             provider: 'openai-compatible',
             apiKeyPreview: 'sk-...cret',
-            models: {
-                fast: 'gpt-4.1-mini',
-                balanced: 'gpt-4.1',
-                strong: 'gpt-4.1-pro',
-            },
+            model: 'gpt-4.1',
             isDefault: true,
         });
 
@@ -1404,9 +1398,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('模型显示名称')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('设为默认模型')).not.toBeInTheDocument();
-        expect(screen.getByLabelText('Fast 模型')).toBeInTheDocument();
-        expect(screen.getByLabelText('Balanced 模型')).toBeInTheDocument();
-        expect(screen.getByLabelText('Strong 模型')).toBeInTheDocument();
+        expect(screen.getByLabelText('模型')).toBeInTheDocument();
         expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
         const publicationSwitch = screen.getByRole('switch', { name: '向普通用户发布' });
         expect(publicationSwitch).toBeChecked();
@@ -1419,9 +1411,7 @@ describe('SettingsMenu model settings', () => {
 
         await userEvent.type(screen.getByLabelText('Base URL'), 'https://api.example.com/v1');
         await userEvent.type(screen.getByLabelText('API Key'), 'sk-secret');
-        await userEvent.type(screen.getByLabelText('Fast 模型'), 'gpt-4.1-mini');
-        await userEvent.type(screen.getByLabelText('Balanced 模型'), 'gpt-4.1');
-        await userEvent.type(screen.getByLabelText('Strong 模型'), 'gpt-4.1-pro');
+        await userEvent.type(screen.getByLabelText('模型'), 'gpt-4.1');
         expect(screen.getByRole('button', { name: '保存设置' })).toHaveClass('rounded-full');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
@@ -1433,11 +1423,7 @@ describe('SettingsMenu model settings', () => {
             apiProtocol: 'responses',
             baseUrl: 'https://api.example.com/v1',
             apiKey: 'sk-secret',
-            models: {
-                fast: 'gpt-4.1-mini',
-                balanced: 'gpt-4.1',
-                strong: 'gpt-4.1-pro',
-            },
+            model: 'gpt-4.1',
             isDefault: true,
         }));
         expect(screen.queryByText('模型配置已保存')).not.toBeInTheDocument();
@@ -1446,7 +1432,7 @@ describe('SettingsMenu model settings', () => {
 
 
     it('loads a legacy OpenAI connection as Chat Completions and lets the user choose Responses', async () => {
- listModelConfigs.mockResolvedValue([{id:'legacy',name:'Saved Gateway',provider:'openai-compatible',baseUrl:'https://gateway.example/v1',models:{balanced:'fixture-model'},apiKeyPreview:'',isDefault:true,authMethods:['platform']}]);
+ listModelConfigs.mockResolvedValue([{id:'legacy',name:'Saved Gateway',provider:'openai-compatible',baseUrl:'https://gateway.example/v1',model: 'fixture-model',apiKeyPreview:'',isDefault:true,authMethods:['platform']}]);
  renderSettings(); await openPlatformSettingsTab('模型');
  fireEvent.keyDown(await screen.findByRole('button',{name:'Saved Gateway 操作'}),{key:'ArrowDown'});
  await userEvent.click(await screen.findByRole('menuitem',{name:'详情'}));
@@ -1469,7 +1455,7 @@ describe('SettingsMenu model settings', () => {
         await userEvent.click(screen.getByRole('button', { name: '添加模型配置' }));
         await userEvent.type(screen.getByLabelText('Base URL'), 'https://provider.example.com/v1');
         await userEvent.type(screen.getByLabelText('API Key'), 'sk-secret');
-        await userEvent.type(screen.getByLabelText('Balanced 模型'), 'model-balanced');
+        await userEvent.type(screen.getByLabelText('模型'), 'model-balanced');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
         await waitFor(() => expect(showError).toHaveBeenCalledWith('模型服务域名 provider.example.com 尚未获得当前部署授权。'));
@@ -1484,11 +1470,7 @@ describe('SettingsMenu model settings', () => {
                 provider: 'openai-compatible',
                 baseUrl: 'https://api.saved.test/v1',
                 apiKeyPreview: 'sk-...saved',
-                models: {
-                    fast: 'qwen3.5-flash',
-                    balanced: 'qwen3.7-plus',
-                    strong: 'qwen3.7-max',
-                },
+                model: 'qwen3.7-plus',
                 isDefault: true,
             },
         ]);
@@ -1498,11 +1480,7 @@ describe('SettingsMenu model settings', () => {
             provider: 'openai-compatible',
             baseUrl: 'https://api.saved.test/v1',
             apiKeyPreview: 'sk-...saved',
-            models: {
-                fast: 'qwen3.5-flash',
-                balanced: 'qwen3.7-max',
-                strong: 'qwen3.7-max',
-            },
+            model: 'qwen3.7-max',
             isDefault: true,
         });
 
@@ -1517,7 +1495,7 @@ describe('SettingsMenu model settings', () => {
         expect(apiKeyInput).toHaveAttribute('placeholder', '已保存：sk-...saved');
         expect(apiKeyInput).toHaveValue('');
 
-        const modelInput = screen.getByLabelText('Balanced 模型');
+        const modelInput = screen.getByLabelText('模型');
         await userEvent.clear(modelInput);
         await userEvent.type(modelInput, 'qwen3.7-max');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
@@ -1529,11 +1507,7 @@ describe('SettingsMenu model settings', () => {
             provider: 'openai-compatible',
             apiProtocol: 'chat-completions',
             baseUrl: 'https://api.saved.test/v1',
-            models: {
-                fast: 'qwen3.5-flash',
-                balanced: 'qwen3.7-max',
-                strong: 'qwen3.7-max',
-            },
+            model: 'qwen3.7-max',
             isDefault: true,
         }));
         expect(createModelConfig).not.toHaveBeenCalled();
@@ -1544,7 +1518,7 @@ describe('SettingsMenu model settings', () => {
             id: 'llm_existing',
             name: 'Existing LLM',
             provider: 'openai-compatible',
-            models: { balanced: 'model-balanced' },
+            model: 'model-balanced',
             isDefault: true,
         }]);
         renderSettings();
@@ -1558,7 +1532,7 @@ describe('SettingsMenu model settings', () => {
     });
 
     it('renames only the selected platform model and deletes only after confirmation', async () => {
-        const model = { id: 'model-a', name: 'Model A', provider: 'openai-compatible', models: { balanced: 'model' }, apiKeyPreview: 'sk-...key', isDefault: true };
+        const model = { id: 'model-a', name: 'Model A', provider: 'openai-compatible', model: 'model', apiKeyPreview: 'sk-...key', isDefault: true };
         listModelConfigs.mockResolvedValue([model, { ...model, id: 'model-b', name: 'Model B', isDefault: false }]);
         updateModelConfig.mockResolvedValue({ ...model, name: 'Renamed' });
         deleteModelConfig.mockResolvedValue({ deleted: true });
@@ -1593,7 +1567,7 @@ describe('SettingsMenu model settings', () => {
     });
 
     it('keeps the model item and reports an error when deletion fails', async () => {
-        listModelConfigs.mockResolvedValue([{ id: 'model-a', name: 'Model A', provider: 'openai-compatible', models: { balanced: 'model' }, apiKeyPreview: '', isDefault: true }]);
+        listModelConfigs.mockResolvedValue([{ id: 'model-a', name: 'Model A', provider: 'openai-compatible', model: 'model', apiKeyPreview: '', isDefault: true }]);
         deleteModelConfig.mockResolvedValue({ deleted: false });
         renderSettings();
         await openPlatformSettingsTab('模型');

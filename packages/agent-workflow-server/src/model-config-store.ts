@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path'
 import {
   exportModelConfigSnapshot,
   importModelConfigSnapshot,
+  readStoredModelSelection,
   type ModelConfigSnapshotRecord,
 } from '@bee-game-studio/agent-workflow'
 import {
@@ -76,7 +77,7 @@ export function readModelConfigSnapshotFromStore(
     mkdirSync(dirname(filePath), { recursive: true })
     const encryptedPayload: StorePayload = {
       version: 1,
-      configs: payload.configs.map(config => ({
+      configs: configs.map(config => ({
         ...config,
         apiKey: encryptSecret(config.apiKey, 'model-config:api-key'),
       })),
@@ -119,8 +120,10 @@ function decryptModelConfigSnapshot(
   let legacySecretCount = 0
   const decrypted = configs.map(config => {
     if (!isSecretEnvelope(config.apiKey)) legacySecretCount += 1
+    const { models: _previousTiers, ...current } = config as ModelConfigSnapshotRecord & { models?: unknown }
     return {
-      ...config,
+      ...current,
+      model: readStoredModelSelection(config),
       apiKey: decryptSecret(config.apiKey, 'model-config:api-key'),
     }
   })

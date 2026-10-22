@@ -24,13 +24,13 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
       input.onNativeSessionId?.(nativeId)
       return { stop() {}, async submit(turn) {
       prompts.push(JSON.stringify(turn.prompt))
-      await turn.onMessage({ type: 'result', subtype: 'success', session_id: nativeId, result: 'Synthetic goal ended' })
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic goal ended' })
     } } } }, registerCleanup: cleanup => cleanups.push(cleanup) })
   try {
     const model = await app.request('/api/model-configs', { method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'Offline', provider: 'openai-compatible', apiKey: 'fake',
-        models: { balanced: 'fake' }, isDefault: true }) })
+        model: 'fake', isDefault: true }) })
     expect(model.status).toBe(200)
     const response = await app.request('/api/projects/bootstrap', { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({

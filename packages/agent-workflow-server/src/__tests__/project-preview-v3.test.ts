@@ -60,7 +60,7 @@ test('actual Agent production Preview API serves the isolated existing build wit
             expect(asset.headers.get('Access-Control-Allow-Origin')).toBe('*')
             expect((await f!.app.request(new URL('/api/projects',previewUrl))).status).toBe(404)
           }catch(error){observedError=error;throw error}
-          await input.onMessage({type:'result',subtype:'success',session_id:nativeId,total_cost_usd:0,result:'Synthetic Preview only, not acceptance'} as any)
+          await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic Preview only, not acceptance' })
         },stop(){}}
       }}})
     await mkdir(join(f.workspace,'dist/assets'),{recursive:true})
@@ -201,8 +201,7 @@ test('accepted resume stays busy while its native session is being rebuilt', asy
           if (turn.signal.aborted) resolve()
           else turn.signal.addEventListener('abort', () => resolve(), { once: true })
         })
-      } else await turn.onMessage({ type: 'result', subtype: 'success', session_id: nativeId,
-        total_cost_usd: 0, result: 'Offline completion' } as any)
+      } else await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Offline completion' })
     } }
   } } })
   const waitForEnd = async (index: number) => {
@@ -211,7 +210,7 @@ test('accepted resume stays busy while its native session is being rebuilt', asy
   }
   try {
     const configured = await f.request('/api/model-configs', 'POST', { name: 'Offline resume', provider: 'openai-compatible',
-      apiKey: 'offline-only', models: { balanced: 'offline-model' }, isDefault: true })
+      apiKey: 'offline-only', model: 'offline-model', isDefault: true })
     expect(configured.status).toBe(200)
     const modelConfigId = (await configured.json()).id
     const ensured = await f.request('/api/projects/fixture/session/ensure', 'POST', {})

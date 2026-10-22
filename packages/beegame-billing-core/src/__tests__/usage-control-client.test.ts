@@ -22,7 +22,6 @@ describe('remote usage billing errors', () => {
       mode: 'remote',
       remoteApiBaseUrl: 'http://billing.test',
       creditControlToken: 'service-token',
-      usageBillingMode: 'realtime',
     }, async () => new Response(JSON.stringify({
       error: 'Billing request failed',
       traceId: 'billing-trace-1',
@@ -46,7 +45,6 @@ describe('remote usage billing errors', () => {
       mode: 'remote',
       remoteApiBaseUrl: 'http://billing.test',
       creditControlToken: 'service-token',
-      usageBillingMode: 'realtime',
     }, async () => new Response(JSON.stringify({
       error: 'Invalid request',
       message: 'invalid usage',

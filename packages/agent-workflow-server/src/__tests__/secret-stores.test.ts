@@ -36,7 +36,7 @@ describe('local secret persistence', () => {
       name: 'Model',
       provider: 'openai-compatible',
       apiKey: 'generated-model-secret',
-      models: { balanced: 'model' },
+      model: 'model',
     })
     saveModelConfigsToStore({ dataDir })
     const mcp = upsertMcpServer({
@@ -63,7 +63,7 @@ describe('local secret persistence', () => {
       name: 'Model',
       provider: 'openai-compatible',
       apiKey: 'generated-model-secret',
-      models: { balanced: 'model' },
+      model: 'model',
     })
     saveModelConfigsToStore({ dataDir })
     updateModelConfig(model.id, { name: 'Renamed' })

@@ -98,7 +98,7 @@ test('local and service-backed platform config require the designated login, nev
   try {
     saveLocalImageConfig(root, config)
     login(root, 'member')
-    const billing = { mode: 'remote' as const, usageBillingMode: 'realtime' as const, remoteApiBaseUrl: 'https://fixture.service', creditControlToken: 'fixture' }
+    const billing = { mode: 'remote' as const, remoteApiBaseUrl: 'https://fixture.service', creditControlToken: 'fixture' }
     await expect(loadRuntimeImageConfig(root, { remote: false, billing })).rejects.toMatchObject({ code: 'subscription-login-unavailable' })
     login(root, 'administrator')
     expect(await loadRuntimeImageConfig(root, { remote: false, billing })).toEqual(config)

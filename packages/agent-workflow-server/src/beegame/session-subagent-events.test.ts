@@ -32,48 +32,40 @@ test('BGS child events track active work and close only the matching child', asy
 test('child messages and input streams preserve ownership without consuming the parent text cursor', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-child-events-'))
   const manager = new BeeGameSessionManager({ start: async () => ({ stop() {}, async submit({ onMessage }) {
-    const emit = (event: Record<string, unknown>) => onMessage({ type: 'stream_event', event })
-    await emit({ type: 'message_start', message: { id: 'parent-message' } })
-    await emit({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
-    await emit({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Parent ' } })
-    await onMessage({ type: 'assistant', parent_tool_use_id: 'child-owner', message: {
-      id: 'child-message', content: [{ type: 'text', text: 'Child only' }],
-    } })
-    await onMessage({ type: 'stream_event', parent_tool_use_id: 'child-owner', event: {
-      type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'child-read', name: 'Read' },
-    } })
-    await onMessage({ type: 'tool_progress', parent_tool_use_id: 'child-owner', tool_use_id: 'child-bash',
-      tool_name: 'Bash', elapsed_time_seconds: 120 })
-    await onMessage({ type: 'system', subtype: 'compact_boundary', parent_tool_use_id: 'child-owner',
-      compact_metadata: { trigger: 'auto', pre_tokens: 120000 } })
-    await emit({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'answer' } })
-    await onMessage({ type: 'assistant', message: { id: 'parent-message', content: [{ type: 'text', text: 'Parent answer' }] } })
-    await onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+    await onMessage({ type: 'runtime_event', eventType: 'assistant.partial', text: 'Parent ', assistantBlockId: 'parent-message' })
+    await onMessage({ type: 'runtime_event', eventType: 'assistant.message', text: 'Child only',
+      parentToolUseID: 'child-owner', assistantBlockId: 'child-message' })
+    await onMessage({ type: 'runtime_event', eventType: 'tool.started', text: 'Read',
+      parentToolUseID: 'child-owner', toolUseID: 'child-read', toolName: 'Read' })
+    await onMessage({ type: 'runtime_event', eventType: 'tool.progress', text: 'Working',
+      parentToolUseID: 'child-owner', toolUseID: 'child-shell', toolName: 'Shell' })
+    await onMessage({ type: 'runtime_event', eventType: 'system.status', text: 'Context compacted',
+      subtype: 'compact_boundary' })
+    await onMessage({ type: 'runtime_event', eventType: 'assistant.partial', text: 'answer', assistantBlockId: 'parent-message' })
+    await onMessage({ type: 'runtime_event', eventType: 'assistant.message', text: '.', assistantBlockId: 'parent-message' })
   } }) }, root)
   try {
     const session = manager.start({ workspacePath: join(root, 'workspace'), projectId: 'child-test', userId: 'test' })
     await manager.send(session.id, 'Offline fixture')
-    for (let n = 0; n < 200 && !manager.events(session.id).some(e => e.type === 'result'); n++) await Bun.sleep(5)
+    await manager.waitForSessionIdle(session.id)
     const events = manager.events(session.id)
     const child = events.find(e => e.text === 'Child only')!
-    expect(child.payload).toMatchObject({ parent_tool_use_id: 'child-owner', message: { id: 'child-message' } })
-    expect(child.payload).not.toHaveProperty('assistantBlockId')
-    expect(events.find(e => e.text === 'Read input streaming')?.payload).toHaveProperty('parentToolUseID', 'child-owner')
-    expect(events.find(e => e.type === 'tool.progress' && e.payload?.toolUseID === 'child-bash')?.payload)
-      .toMatchObject({ toolName: 'Bash', elapsed_time_seconds: 120, parentToolUseID: 'child-owner' })
-    expect(events.find(e => e.payload?.subtype === 'compact_boundary')?.payload)
-      .toMatchObject({ parent_tool_use_id: 'child-owner', compact_metadata: { pre_tokens: 120000 } })
+    expect(child.payload).toMatchObject({ parentToolUseID: 'child-owner', assistantBlockId: 'child-message' })
+    expect(events.find(e => e.payload?.toolUseID === 'child-read')?.payload).toHaveProperty('parentToolUseID', 'child-owner')
+    expect(events.find(e => e.type === 'tool.progress')?.payload)
+      .toMatchObject({ toolName: 'Shell', parentToolUseID: 'child-owner' })
+    expect(events.find(e => e.payload?.subtype === 'compact_boundary')?.text).toBe('Context compacted')
     const parent = events.filter(e => e.type === 'assistant.partial')
     expect(parent.map(e => e.text)).toEqual(['Parent ', 'answer'])
     expect(new Set(parent.map(e => e.payload?.assistantBlockId)).size).toBe(1)
-    expect(events.find(e => e.text === 'Parent answer')?.payload?.assistantBlockId).toBe(parent[0]!.payload?.assistantBlockId)
+    expect(events.find(e => e.text === '.')?.payload?.assistantBlockId).toBe(parent[0]!.payload?.assistantBlockId)
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
 test('child permission records retain owner and close on allow, deny and cancellation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-child-approval-'))
   const manager = new BeeGameSessionManager({ start: async () => ({ stop() {}, async submit(turn) {
-    await turn.onMessage({ type: 'system', subtype: 'task_started', task_id: 'native-child', tool_use_id: 'child-owner', task_type: 'local_agent' })
+    await turn.onMessage({ type: 'runtime_event', eventType: 'system.status', childThreadId: 'native-child', childStatus: 'running', parentToolUseID: 'child-owner' })
     for (const toolUseID of ['allowed', 'denied', 'cancelled']) await turn.requestPermission({
       toolUseID, agentId: 'native-child', toolName: 'Bash', input: { command: 'bun test' }, message: 'Approval reason',
     })

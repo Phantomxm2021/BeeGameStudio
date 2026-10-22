@@ -6,7 +6,7 @@ The frontend is intentionally thin:
 
 - Supabase Auth owns user sessions.
 - Supabase RLS/RPC owns durable SaaS data, roles, credits, and permissions.
-- The BeeGame runtime host owns local execution only: agent sessions, filesystem access, previews, permissions, and transcript streaming. Live project events use authenticated SSE with cursor-based polling fallback for older or unavailable hosts.
+- The BeeGame runtime host owns execution and trusted V3 persistence: agent sessions, filesystem access, previews, permissions, and transcript streaming. Live project events use authenticated SSE with cursor-based polling fallback for older or unavailable hosts.
 - The frontend must not rely on a shared production auth token.
 
 ## Development
@@ -39,10 +39,10 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 Optional:
 
 ```env
-VITE_API_BASE_URL=http://127.0.0.1:62175
+VITE_API_BASE_URL=http://127.0.0.1:62174
 ```
 
-`VITE_API_AUTH_TOKEN` is reserved for dev/offline diagnostics. Production builds ignore it unless `VITE_BEEGAME_ALLOW_DEV_AUTH_TOKEN=1` is explicitly set.
+`VITE_API_AUTH_TOKEN` is reserved for dev/offline diagnostics. Production builds ignore it.
 
 Do not place service-role keys in frontend environment files.
 

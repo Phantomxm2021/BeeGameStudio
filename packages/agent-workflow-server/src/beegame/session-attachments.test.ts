@@ -3,43 +3,37 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, symlink } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import { extractNativeToolImages, materializeBeeGameAttachments, preferOriginalReadImage, prepareBeeGamePromptInput } from './session-manager'
+import { BeeGameSessionManager, materializeBeeGameAttachments, prepareBeeGamePromptInput } from './session-manager'
 import { readChatAttachment } from './chat-attachments'
 
-test('captures actual tool image bytes, not arbitrary paths or another tool result', () => {
-  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' } }
-  const message = { type: 'user', message: { content: [
-    { type: 'tool_result', tool_use_id: 'screenshot', content: [image, { type: 'text', text: '/private/secret.png' }] },
-    { type: 'tool_result', tool_use_id: 'other', content: [image] },
-  ] } }
-  expect(extractNativeToolImages(message, 'screenshot')).toEqual([{ type: 'image', mediaType: 'image/png', data: 'aW1hZ2U=' }])
-  expect(extractNativeToolImages(message, 'missing')).toEqual([])
-})
-
-test('Chat stores the original project image for a completed Read, not its model-sized preview', async () => {
+test('BGS image events snapshot project images and reject outside paths, symlinks and oversized files', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-image-preview-test-'))
   const outside = await mkdtemp(join(tmpdir(), 'beegame-image-outside-test-'))
+  const original = await sharp({ create: { width: 1536, height: 1024, channels: 4, background: '#17212c' } }).png().toBuffer()
+  const source = join(workspace, 'board.png'), outsideSource = join(outside, 'outside.png')
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    for (const imagePath of [source, outsideSource, 'outside.png', 'oversized.png'])
+      await turn.onMessage({ type: 'runtime_event', eventType: 'tool.completed', text: imagePath, imagePath })
+  } } } }, join(workspace, 'sessions'))
   try {
-    const source = join(workspace, 'board.png')
-    const original = await sharp({ create: { width: 1536, height: 1024, channels: 4, background: '#17212c' } }).png().toBuffer()
-    const preview = await sharp(original).resize(384, 256).png().toBuffer()
-    const images = [{ type: 'image' as const, mediaType: 'image/png' as const, data: preview.toString('base64') }]
     await writeFile(source, original)
-    const display = await preferOriginalReadImage(workspace, { toolName: 'Read', input: { file_path: source } }, images)
-    expect(Buffer.compare(Buffer.from(display[0]!.data, 'base64'), original)).toBe(0)
-    const saved = await materializeBeeGameAttachments(workspace, display)
-    const response = await readChatAttachment(workspace, saved[0]!.storageId)
-    expect(await sharp(Buffer.from(await response.arrayBuffer())).metadata()).toMatchObject({ width: 1536, height: 1024 })
-
-    const outsideSource = join(outside, 'outside.png')
     await writeFile(outsideSource, original)
     await symlink(outsideSource, join(workspace, 'outside.png'))
-    expect(await preferOriginalReadImage(workspace, { toolName: 'Read', input: { file_path: outsideSource } }, images)).toBe(images)
-    expect(await preferOriginalReadImage(workspace, { toolName: 'Read', input: { file_path: join(workspace, 'outside.png') } }, images)).toBe(images)
-    expect(await preferOriginalReadImage(workspace, { toolName: 'Bash', input: { file_path: source } }, images)).toBe(images)
-    await writeFile(source, Buffer.concat([original, Buffer.alloc(10 * 1024 * 1024)]))
-    expect(await preferOriginalReadImage(workspace, { toolName: 'Read', input: { file_path: source } }, images)).toBe(images)
+    await writeFile(join(workspace, 'oversized.png'), Buffer.concat([original, Buffer.alloc(10 * 1024 * 1024)]))
+    const session = manager.start({ workspacePath: workspace, userId: 'fixture' })
+    await manager.send(session.id, 'Offline image fixture')
+    await manager.waitForSessionIdle(session.id)
+    const events = manager.events(session.id).filter(event => event.type === 'tool.completed')
+    expect(events).toHaveLength(4)
+    const attachments = events[0]!.payload?.attachments as Array<{ storageId: string }>
+    expect(attachments).toHaveLength(1)
+    const response = await readChatAttachment(workspace, attachments[0]!.storageId)
+    const saved = Buffer.from(await response.arrayBuffer())
+    expect(saved.equals(original)).toBe(true)
+    expect(await sharp(saved).metadata()).toMatchObject({ width: 1536, height: 1024 })
+    expect(events.slice(1).every(event => !event.payload?.attachments)).toBe(true)
   } finally {
+    await manager.dispose()
     await rm(workspace, { recursive: true, force: true })
     await rm(outside, { recursive: true, force: true })
   }

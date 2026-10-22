@@ -8,7 +8,7 @@ const input = { projectId: 'project', requestId: 'image', digest: 'digest', acti
 test('remote billing preserves unresolved original request identity and rejects contradictory receipts', async () => {
   const receipt = {created:false,state:'reserved',blockedByRequestId:'original',reservedCreditsMicro:100,chargedCreditsMicro:0,metadata:{}}
   let actual: Record<string, unknown> = receipt
-  const client=createImageBillingClient({mode:'remote',usageBillingMode:'realtime',remoteApiBaseUrl:'http://local',creditControlToken:'test'},
+  const client=createImageBillingClient({mode:'remote',remoteApiBaseUrl:'http://local',creditControlToken:'test'},
     async()=>Response.json(actual))
   expect(await client.apply('user',input)).toEqual(receipt)
   for(const override of [{created:true},{state:'settled'},{blockedByRequestId:''}]) {
@@ -23,7 +23,7 @@ test('image billing validates integer amounts and never exposes service errors o
   expect(validImageBillingInput({ ...input, amountCreditsMicro: -1 })).toBe(false)
   expect(validImageBillingInput({ ...input, projectBudgetCreditsMicro: 99 })).toBe(false)
   let calls = 0
-  const client = createImageBillingClient({ mode: 'remote', usageBillingMode: 'realtime', remoteApiBaseUrl: 'http://local', creditControlToken: 'private' }, async (_url, init) => {
+  const client = createImageBillingClient({ mode: 'remote', remoteApiBaseUrl: 'http://local', creditControlToken: 'private' }, async (_url, init) => {
     calls++; expect(new Headers(init?.headers).get('x-beegame-credit-control-token')).toBe('private')
     return new Response('private upstream error', { status: 503 })
   })
@@ -35,7 +35,7 @@ test('image billing route requires host service credential, not user authorizati
   const app = new Hono()
   let calls = 0
   registerBeeGameUsageControlRoutes(app, {
-    billingConfig: { mode: 'server', usageBillingMode: 'realtime', creditControlToken: 'host-secret' },
+    billingConfig: { mode: 'server', creditControlToken: 'host-secret' },
     dashboardRepository: { applyImageBilling: async (userId, received) => {
       calls++; expect(userId).toBe('user'); expect(received.requestId).toBe('image')
       return { created: true, state: 'reserved', reservedCreditsMicro: 100, chargedCreditsMicro: 0, metadata: {} }

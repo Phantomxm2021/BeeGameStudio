@@ -51,7 +51,12 @@ is injected into `beegame-runtime` and `beegame-skills`; the runtime host uses i
 only for internal enabled-skill materialization requests to `beegame-skills`.
 
 Do not put Supabase service-role keys or Stripe secrets in
-`docker/.env.production`. The runtime host runs in `BEEGAME_BILLING_MODE=remote`
+`docker/.env.production`, which is shared by multiple services. The trusted V3
+persistence host requires `BEEGAME_SUPABASE_SERVICE_ROLE_KEY`; supply it only
+to `beegame-runtime` through a runtime-specific environment override. Never
+forward it to frontend builds or native model processes. Apply
+`supabase/migrations/20261022010000_single_runtime_model.sql` before deploying
+the single-model runtime. The runtime host runs in `BEEGAME_BILLING_MODE=remote`
 and calls the billing backend through the internal Compose URL
 `http://beegame-billing:62175`.
 
@@ -83,8 +88,8 @@ the repository root:
 npm run beegame:dev
 ```
 
-It starts frontend, runtime host, billing backend, and skills backend together,
-auto-selects free ports, and injects the local service URLs into each process.
+It starts all five services on their fixed ports and injects the local service
+URLs into each process. Startup fails if a required port is already in use.
 
 When debugging billing only, create `docker/.env.billing` and run:
 

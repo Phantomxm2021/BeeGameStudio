@@ -14,7 +14,7 @@ import {
   validateModelAccess,
   type ModelAuthMethod,
   type ModelProviderKind,
-  type ModelTierMap,
+  readStoredModelSelection,
   type PublicModelConfig,
 } from '@bee-game-studio/agent-workflow'
 import {
@@ -38,7 +38,7 @@ type Connection = {
   secret?: string
   endpoint?: string
   baseUrl?: string
-  models?: ModelTierMap
+  model?: string
   disabled?: boolean
 }
 type Connections = {
@@ -91,7 +91,7 @@ export function personalModelConfig(
       : connection?.baseUrl
         ? { baseUrl: connection.baseUrl }
         : {}),
-    models: connection?.models ?? go?.defaults ?? {},
+    model: connection?.model ?? go?.model,
     apiKeyPreview: '',
     isDefault: preferredModelId(root) === id,
     createdAt: now,
@@ -111,10 +111,7 @@ export function personalModelAvailable(
     status.method === config.authMethods?.[0] &&
     (id === PERSONAL_CHATGPT_ID
       ? status.chatgptConnected
-      : status.hasKey &&
-        !!config.models.fast &&
-        !!config.models.balanced &&
-        !!config.models.strong)
+      : status.hasKey && !!config.model)
   )
 }
 
@@ -126,6 +123,10 @@ function read(root: string): Connections {
   const path = file(root)
   if (!existsSync(path)) return { connections: {} }
   const state = JSON.parse(readFileSync(path, 'utf8')) as Connections
+  for (const connection of Object.values(state.connections)) {
+    connection.model = readStoredModelSelection(connection)
+    delete (connection as Connection & { models?: unknown }).models
+  }
   const go = state.connections[OPENCODE_GO_ID]
   // Correct connections saved by the initial Go integration, preserving their
   // encrypted key only when it is bound to that exact previous official route.
@@ -175,18 +176,9 @@ function validateByokUrl(value: string) {
     )
   return url.toString().replace(/\/$/, '')
 }
-function validateByokModels(models: ModelTierMap): ModelTierMap {
-  if (
-    ['fast', 'balanced', 'strong'].some(
-      tier => !models[tier as keyof ModelTierMap]?.trim(),
-    )
-  )
-    throw new Error('Enter all three model tiers')
-  return {
-    fast: models.fast!.trim(),
-    balanced: models.balanced!.trim(),
-    strong: models.strong!.trim(),
-  }
+function validateByokModel(model: string): string {
+  if (!model.trim()) throw new Error('Enter a model')
+  return model.trim()
 }
 export function hasChatGPTAccount(root: string) {
   try {
@@ -211,7 +203,7 @@ export function connectionStatus(root: string, config: PublicModelConfig) {
     ...(connection?.secret
       ? {
           baseUrl: connection.baseUrl ?? config.baseUrl,
-          models: connection.models ?? config.models,
+          model: connection.model ?? config.model,
           apiProtocol: connection.apiProtocol ?? config.apiProtocol,
         }
       : {}),
@@ -227,7 +219,7 @@ export function saveConnection(
   preferred = false,
   byok?: {
     baseUrl?: string
-    models?: ModelTierMap
+    model?: string
     apiProtocol?: import('@bee-game-studio/agent-workflow').ModelApiProtocol
   },
 ) {
@@ -242,16 +234,16 @@ export function saveConnection(
       (byok?.baseUrl !== undefined && byok.baseUrl !== profile.baseUrl)
     )
       throw new Error('Use the official OpenCode Go endpoint')
-    const models = validateByokModels(byok?.models ?? config.models)
+    const model = validateByokModel(byok?.model ?? config.model ?? '')
     validateOpenCodeGoConfig({
       provider: config.provider,
       baseUrl: profile.baseUrl,
-      models,
+      model,
       authMethods: ['byok'],
     })
     byok = {
       baseUrl: profile.baseUrl,
-      models,
+      model,
       apiProtocol:
         config.provider === 'anthropic-compatible'
           ? 'anthropic-messages'
@@ -275,10 +267,10 @@ export function saveConnection(
     method === 'byok' && byok?.baseUrl !== undefined
       ? validateByokUrl(byok.baseUrl.trim())
       : previous?.baseUrl
-  const models =
-    method === 'byok' && byok?.models !== undefined
-      ? validateByokModels(byok.models)
-      : previous?.models
+  const model =
+    method === 'byok'
+      ? validateByokModel(byok?.model ?? previous?.model ?? config.model ?? '')
+      : previous?.model
   const secret =
     method === 'byok'
       ? key?.trim()
@@ -302,7 +294,7 @@ export function saveConnection(
       method === 'byok' ? endpoint(config, baseUrl) : previous?.endpoint,
     ...(secret ? { secret } : {}),
     ...(baseUrl ? { baseUrl } : {}),
-    ...(models ? { models } : {}),
+    ...(model ? { model } : {}),
     apiProtocol,
   }
   if (preferred) state.defaultModelId = config.id
@@ -331,9 +323,6 @@ const AUTH_ENV = [
   'OPENAI_BASE_URL',
   'OPENAI_AUTH_MODE',
   'BEEGAME_MODEL',
-  'BGS_DEFAULT_FAST_MODEL',
-  'BGS_DEFAULT_BALANCED_MODEL',
-  'BGS_DEFAULT_STRONG_MODEL',
   'BEEGAME_API_PROTOCOL',
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
@@ -397,8 +386,8 @@ export function resolveModelConnection(
         method === 'byok'
           ? (state?.apiProtocol ?? config.apiProtocol)
           : 'responses',
-      models:
-        method === 'byok' ? (state?.models ?? config.models) : config.models,
+      model:
+        method === 'byok' ? (state?.model ?? config.model) : config.model,
     }).env
     if (method === 'chatgpt-subscription') {
       env.OPENAI_AUTH_MODE = 'chatgpt'
@@ -410,7 +399,6 @@ export function resolveModelConnection(
     ...Object.fromEntries(AUTH_ENV.map(key => [key, ''])),
     ...env,
     BGS_MODEL_CONNECTION_RESOLVED: '1',
-    BGS_MODEL_AUTH_METHOD: method,
     BEEGAME_MODEL_TYPE:
       config.provider === 'anthropic-compatible'
         ? 'anthropic'

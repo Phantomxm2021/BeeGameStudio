@@ -807,13 +807,6 @@ function validatedEnumList(
   return values
 }
 
-function validatedEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T {
-  if (typeof value !== 'string' || !allowed.includes(value as T)) {
-    throw new ResourceRequestValidationError(`${label} is unsupported`)
-  }
-  return value as T
-}
-
 function assertElementUsageTags(body: Record<string, unknown>): void {
   if (Object.hasOwn(body, 'usageTagsMode') && !['inherit', 'override', 'manual-only'].includes(String(body.usageTagsMode))) {
     throw new ResourceRequestValidationError('Element usageTagsMode is unsupported')

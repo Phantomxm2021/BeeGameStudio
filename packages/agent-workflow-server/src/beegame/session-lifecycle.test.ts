@@ -91,7 +91,7 @@ test('shutdown drains detached intake jobs through final persistence before clos
   const snapshot = exportModelConfigSnapshot()
   const cleanups: Array<() => void | Promise<void>> = []
   try {
-    const model = createModelConfig('owner', { name: 'Offline fixture', provider: 'openai-compatible', apiKey: 'synthetic', models: { balanced: 'fixture' } })
+    const model = createModelConfig('owner', { name: 'Offline fixture', provider: 'openai-compatible', apiKey: 'synthetic', model: 'fixture' })
     const app = createAgentWorkflowApp({ dashboardDataRoot: root, defaultWorkspacePath: root, modelConfigStore: false,
       skillsConfig: false, workflowV3Store: false, currentUser: { id: 'owner', role: 'owner' }, registerCleanup: fn => cleanups.push(fn),
       modelRuntimeHost: { async generate() { throw Error('Unexpected legacy call') }, async generateWithUsage() {

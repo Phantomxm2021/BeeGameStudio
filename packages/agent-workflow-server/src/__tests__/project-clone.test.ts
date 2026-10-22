@@ -24,12 +24,12 @@ async function fixture() {
       input.onNativeSessionId?.(nativeId)
       return { stop() {}, async submit(turn) {
         submissions.push(JSON.stringify(turn.prompt))
-        await turn.onMessage({ type: 'result', subtype: 'success', session_id: nativeId, result: 'Local simulation' })
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Local simulation' })
       } }
     } },
   })
   const post = (url: string, body: unknown = {}) => app.request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-  await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })
+  await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake', model: 'fake', isDefault: true })
   expect((await post('/api/projects', { id: 'source', name: 'Original', root_path: workspace, created_at: 1 })).status).toBe(200)
   const brief = { kind: 'confirmed_build_brief', idea: 'Existing game', selected_option: {title: 'Selected'},
     settings: {engine: 'Godot', platform: 'Desktop', orientation: 'Landscape'},

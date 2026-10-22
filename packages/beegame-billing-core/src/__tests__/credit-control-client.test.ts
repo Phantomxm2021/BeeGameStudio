@@ -13,7 +13,6 @@ describe('remote usage billing client', () => {
     const client = createRemoteUsageBillingClient(
       {
         mode: 'remote',
-        usageBillingMode: 'realtime',
         remoteApiBaseUrl: 'http://127.0.0.1:62175',
         creditControlToken: 'service-token',
       },
@@ -41,7 +40,6 @@ describe('remote usage billing client', () => {
     const client = createRemoteUsageBillingClient(
       {
         mode: 'remote',
-        usageBillingMode: 'realtime',
         remoteApiBaseUrl: 'http://127.0.0.1:62175',
         creditControlToken: 'service-token',
       },
@@ -75,7 +73,6 @@ describe('remote usage billing client', () => {
     const client = createRemoteUsageBillingClient(
       {
         mode: 'remote',
-        usageBillingMode: 'realtime',
         remoteApiBaseUrl: 'http://127.0.0.1:62175/',
         creditControlToken: 'service-token',
       },

@@ -5,14 +5,6 @@ const TAU=Math.PI*2,PI=Math.PI;
 const dpr=()=>Math.min(window.devicePixelRatio||1,2.5);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function hexToRgb(h){h=h.replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');const n=parseInt(h,16);return[n>>16&255,n>>8&255,n&255]}
-function rgba(h,a){const[r,g,b]=hexToRgb(h);return`rgba(${r},${g},${b},${a})`}
-/* couleur complémentaire (teinte + 180°), clarté et saturation recalées pour rester vive ; les neutres prennent un rose vif */
-function complement(h){let[r,g,b]=hexToRgb(h).map(v=>v/255);const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let hu=0;
-  if(d<.12)return'#FF5AA5';
-  hu=mx===r?((g-b)/d)%6:mx===g?(b-r)/d+2:(r-g)/d+4;hu=(hu*60+180+360)%360;
-  const sat=.78,l=.58,c=(1-Math.abs(2*l-1))*sat,x=c*(1-Math.abs((hu/60)%2-1)),m=l-c/2;
-  const[a1,b1,c1]=hu<60?[c,x,0]:hu<120?[x,c,0]:hu<180?[0,c,x]:hu<240?[0,x,c]:hu<300?[x,0,c]:[c,0,x];
-  return'#'+[a1,b1,c1].map(v=>Math.round((v+m)*255).toString(16).padStart(2,'0')).join('')}
 function lum(h){const f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};const[r,g,b]=hexToRgb(h);return .2126*f(r)+.7152*f(g)+.0722*f(b)}
 function ell(c,x,y,rx,ry,rot=0){c.beginPath();c.ellipse(x,y,Math.max(rx,1e-4),Math.max(ry,1e-4),rot,0,TAU)}
 function rrect(c,x,y,w,h,r){r=Math.max(0,Math.min(r,w/2,h/2));c.beginPath();if(c.primRect){c.primRect(x,y,w,h,r);return}c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.arc(x+w-r,y+r,r,-PI/2,0);c.lineTo(x+w,y+h-r);c.arc(x+w-r,y+h-r,r,0,PI/2);c.lineTo(x+r,y+h);c.arc(x+r,y+h-r,r,PI/2,PI);c.lineTo(x,y+r);c.arc(x+r,y+r,r,PI,PI*1.5);c.closePath()}
@@ -71,21 +63,7 @@ const EYES=[
   {id:'squint',label:'> <',gap:.28},{id:'wink',label:'Wink',gap:.22},
 ];
 const BROWS=[{id:'none',label:'None'},{id:'flat',label:'Straight'},{id:'angry',label:'Angry'},{id:'worried',label:'Worried'},{id:'sceptic',label:'Skeptical'}];
-const MOUTHS=[{id:'none',label:'None'},{id:'smile',label:'Smile'},{id:'open',label:'Open'},{id:'o',label:'Small o'},{id:'flat',label:'Neutral'}];
-/* roue : couronne extérieure = teintes vives (dans l'ordre du cercle chromatique), couronne intérieure = neutres et pastels */
-const PALETTE=[
-  {hex:'#8A5A3A',label:'Hazel',ring:0},{hex:'#EE7433',label:'Orange',ring:0},{hex:'#FFC20E',label:'Sun',ring:0},{hex:'#A8D13B',label:'Lime',ring:0},
-  {hex:'#5CCB77',label:'Mint',ring:0},{hex:'#1ED8C0',label:'Lagoon',ring:0},{hex:'#3F95F5',label:'Sky',ring:0},{hex:'#2F6BF0',label:'Royal blue',ring:0},
-  {hex:'#9966FF',label:'Lilac',ring:0},{hex:'#8844EE',label:'Violet',ring:0},{hex:'#FF5AA5',label:'Pink',ring:0},{hex:'#FF5A5A',label:'Tomato',ring:0},
-  {hex:'#E4E4E1',label:'Chalk',ring:1},{hex:'#F7B8CF',label:'Powder pink',ring:1},{hex:'#B07350',label:'Leather',ring:1},
-  {hex:'#161618',label:'Ink',ring:1},{hex:'#8E8E8E',label:'Grey',ring:1},{hex:'#BFE0F5',label:'Pale blue',ring:1},
-];
 const INKS=[{id:'auto',label:'Auto'},{id:'dark',label:'Black'},{id:'light',label:'White'}];
-const STATES=[
-  {id:'idle',label:'Idle'},{id:'listen',label:'Listening'},{id:'think',label:'Thinking',look:[.8,-.9]},{id:'write',label:'Writing',look:[.1,.9]},
-  {id:'success',label:'Success',hop:1},{id:'alert',label:'Alert'},{id:'error',label:'Error',shake:1},{id:'sleep',label:'Asleep',slow:1},
-];
-const STATUS_COL={alert:'#FFA42B',error:'#F2545B'};
 const DARK='#141416',WHITE='#FFFFFF',FACE=1.45;
 
 const shapeOf=o=>SHAPES.find(s=>s.id===o.shape)||SHAPES[0];

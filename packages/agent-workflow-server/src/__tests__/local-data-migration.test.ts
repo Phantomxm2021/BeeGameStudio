@@ -48,8 +48,10 @@ describe('local data migration', () => {
       expect.objectContaining({
         ownerId: 'dashboard-local',
         apiKey: 'sk-local-secret',
+        model: 'balanced-model',
       }),
     ])
+    expect(data.modelConfigs[0]).not.toHaveProperty('models')
     expect(data).not.toHaveProperty('webTools')
     expect(readFileSync(retiredPath, 'utf8')).toBe(retiredBytes)
     expect(data.mcpServers).toEqual([

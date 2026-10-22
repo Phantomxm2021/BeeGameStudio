@@ -6,9 +6,7 @@ export function assertSmokeRuntimeEnv(
     modelConfigOwnerId?: string
   } = {},
 ): void {
-  const model =
-    stringField(env.BEEGAME_MODEL) ||
-    stringField(env.BGS_DEFAULT_BALANCED_MODEL)
+  const model = stringField(env.BEEGAME_MODEL)
   if (
     model &&
     ['OPENAI', 'ANTHROPIC', 'GEMINI', 'GROK'].some(

@@ -31,7 +31,6 @@ describe('resource model config resolver', () => {
             BEEGAME_API_PROTOCOL: 'responses',
             OPENAI_BASE_URL: 'https://model.test',
             OPENAI_API_KEY: 'backend-secret',
-            BGS_DEFAULT_BALANCED_MODEL: 'balanced-model',
             BEEGAME_MODEL: 'balanced-model',
           },
         },

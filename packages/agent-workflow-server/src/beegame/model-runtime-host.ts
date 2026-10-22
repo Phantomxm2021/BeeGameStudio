@@ -139,7 +139,6 @@ const MODEL_RUNTIME_TRANSPORT_ENV_KEYS = [
 export function getModelRuntimeWorkerEnvironment(): Record<string, string> {
   return {
     ...getSafeRuntimeProcessEnvironment(),
-    BGS_PROVIDER_MANAGED_BY_HOST: '1',
     ...(process.env.BEEGAME_BGS_PATH ? { BEEGAME_BGS_PATH: process.env.BEEGAME_BGS_PATH } : {}),
     ...Object.fromEntries(
       MODEL_RUNTIME_TRANSPORT_ENV_KEYS.flatMap(key => {
