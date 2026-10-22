@@ -77,8 +77,9 @@ test.skipIf(process.env.BGS_DESIGN_BROWSER !== '1')('published design entry meas
   const api = openPreviewTestAccess({ start: async () => ({ status: 'idle' }), status: () => ({ status: 'idle' }), stop() {} })
   try {
     await mkdir(join(root, '.beegame/delivery'), { recursive: true })
-    for (const [name, body] of Object.entries(await contentConsumerDistribution()))
-      await writeFile(join(root, '.beegame/delivery', name), body)
+    const consumer = await contentConsumerDistribution()
+    for (const name of ['content-consumer.mjs', 'NOTICE.md'])
+      await writeFile(join(root, '.beegame/delivery', name), consumer[name]!)
     await writeFile(join(root, '.beegame/delivery/inspect-design.mjs'),
       await readFile(new URL('./design-browser-inspection.mjs', import.meta.url)))
     const ui = uiLayoutFixture()

@@ -16,8 +16,9 @@ test.skipIf(process.env.BGS_DESIGN_BROWSER !== '1')('fixed browser entry decodes
   let revoke: (() => Promise<void>) | undefined
   try {
     await mkdir(join(root, '.beegame/delivery'), { recursive: true })
-    for (const [name, body] of Object.entries(await contentConsumerDistribution()))
-      await writeFile(join(root, '.beegame/delivery', name), body)
+    const consumer = await contentConsumerDistribution()
+    for (const name of ['content-consumer.mjs', 'NOTICE.md'])
+      await writeFile(join(root, '.beegame/delivery', name), consumer[name]!)
     await writeFile(join(root, '.beegame/delivery/inspect-design.mjs'),
       await readFile(new URL('./design-browser-inspection.mjs', import.meta.url)))
     await mkdir(join(root, 'content/ui'), { recursive: true }); await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
