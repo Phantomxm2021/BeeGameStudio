@@ -1,4 +1,3 @@
-import { strictObject, string, unknown } from 'zod/v4'
 import { TILEMAP_AUTHORING_CONTRACT } from './tilemap-authoring-contract'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -6,7 +5,6 @@ import { CONTENT_CHECKER_ENTRY, CONTENT_BINDING_ENTRY, MEDIA_PRODUCTION_ENTRY, R
 import { CONTENT_COORDINATE_CONTRACT, UI_ANCHORS, UI_PAINT_PHASES } from '../../../scene-editor/src/content-coordinates'
 import { CONTENT_RUNTIME_CONTRACT } from './content-runtime-contract'
 import { contentConsumerDistribution } from './game-content-consumer-cli'
-import type { BeeGameAssetManifest } from './asset-contracts'
 import { PROJECT_GUIDE_TEMPLATE } from './workflow-v3/project-guide'
 import {
   BEEGAME_CONTENT_DOCUMENT_SCHEMA,
@@ -21,9 +19,6 @@ import {
   BEEGAME_UI_NODE_ROLES,
 } from './game-content-package'
 
-const digest = string().regex(/^[a-f0-9]{64}$/)
-
-export const CONTENT_AUTHORING_CONTRACT_PATH = '.beegame/delivery/content-contract.json'
 export const CONTENT_FORMAT_PATH = '.beegame/delivery/content-format.json'
 export const CONTENT_CHECKER_PATH = '.beegame/delivery/check-content.mjs'
 export const CONTENT_CONSUMER_PATH = '.beegame/delivery/content-consumer.mjs'
@@ -39,27 +34,6 @@ export async function materializeContentCheckerEntry(workspacePath: string) {
   await writeFile(join(workspacePath, '.beegame/delivery/edit-drafts.mjs'), DRAFT_EDITS_ENTRY, 'utf8')
   await writeFile(join(workspacePath, '.beegame/delivery/compose-drafts.mjs'), COMPOSE_DRAFT_ENTRY, 'utf8')
 }
-
-/** Layout checks consume content authored from selected designs and resources. */
-export const DESIGN_CALCULATION_INSTRUCTION = `During document authoring, define gameplay, UI actions/navigation and spatial requirements in prose/sketches; do not create content/ui or content/scenes JSON yet. First produce or select actual complete-screen UI and Scene/prop visual designs, save and Read the pictures; report selected paths with the existing implementation progress. Obtain and inspect the resources needed by the content being authored; unrelated planned resources need not block it. Then author ui-screen/ui-hud files in content/ui and scene-2d/scene-3d files in content/scenes, with actual resource, action and state bindings. Preserve selected composition and gameplay space using layout relationships and actual asset metrics, not screenshot-traced coordinates. Register actual sources in content/index.json. Preserve existing owner-document links; design documents need not be rewritten to enumerate each later file. Use CheckUiLayouts for saved UI geometry; detailsFor also reads the selected file’s authored nodes (text, style, actions and bindings) once alongside its coordinates. Use CheckSceneLayouts for saved Scene structure/static 2D Camera-reference geometry; actual UI game-view framing uses CheckUiLayouts with layoutCamera. Native Edit changes the same sources before rechecking. Standalone CLI checks remain available through the supplied check-content entry. Then use CheckResourcesAndBindings for actual registered files and saved UI/Scene resource references; detailsFor expands current binding operands without narrowing checks. Runtime action/state wiring remains unverified. Existing package checks remain available. Reconcile the technical interfaces for this content before consuming it; later content can remain planned. Record normal delivered-file facts in the Manifest and existing progress record, without reopening locked design documents. Reuse the same files for corrections. These read-only checks do not establish visual quality, complete state coverage, font fit, traversal, interaction or XR comfort.`
-
-/** Existing geometry tools remain available without prescribing early JSON. */
-export const SPATIAL_CALCULATION_INSTRUCTION = `Spatial calculation entry (run from the project root): bun ${CONTENT_CHECKER_PATH} --help describes commands and return shapes; ${CONTENT_FORMAT_PATH} describes fields. For new work, use these tools after actual visual design selection and corresponding resource preparation, when authoring UI/Scene JSON. Existing saved content can be inspected or repaired in place. --layout-draft workspace-relative-file width height inspects an existing UI or 2D Scene source without a content index; --camera-draft inspects Camera framing; registered content uses --layout content-relative-file width height. The word draft describes input completeness, not permission to create layout before visual design.
-UI_UX_SPEC owns UI relationships; content/index.json registers actual content/ui sources. Include relevant active overlays/expanded states; root data.layoutUnderlay {path,clearance:"preserve"|"allow-cover"} and layoutOcclusion express the designed coexistence policy without copied rectangles. Root data.orientation, referenceResolution, targetViewports and minimumControlSize express confirmed support conditions. Use containers, padding and child constraints. The game-view allocation and root data.layoutCamera {nodeId,path} link to the same authored Scene/Camera; an array supports multiple Scenes. Do not duplicate camera values or offsets. --design-layouts checks declared sizes; --review-layouts additionally checks saved Scene structure and existing owner links; later files need no new prose links. Recheck affected inputs, not unchanged results.
-Scene design owns placement, collision and Camera. For fixed 2D visibility requirements, settings.requiredVisibleNodeIds identifies required nodes/groups; inspect them in the UI's resolved game-view. Camera framing alone does not prove Scene visibility. Preserve design decisions when binding resources; actual image dimensions, pivots/cropping, fonts and TileSet bounds inform checks. Missing bounds remain unverified; --draft can defer unavailable TileSet bounds, never certify visibility or waive required resources. Do not invent proxy nodes, drop requirements or duplicate sources to silence errors. For static top-left 2D reference-plane UI, use uiLayoutContract.cameraReferencePlane and the same connected source, not per-device projection tables.
-Correct conflicting design/resource inputs in their owning sources within authorization. Inspect complete rendered Scene/UI, text and interaction in the actual runtime. Geometry is not visual acceptance, gameplay occlusion, 3D visibility or XR comfort; report unmeasured properties honestly. These commands do not produce resources or implement the game.`
-
-const inputSchema = strictObject({
-    documentRevision: digest,
-    assetManifestRevision: digest,
-    manifest: unknown(),
-  })
-
-export type SceneUiContentAuthoringInput = Readonly<{
-  documentRevision: string
-  assetManifestRevision: string
-  manifest: BeeGameAssetManifest
-}>
 
 /** Design-time format is not the later project-specific authority snapshot. */
 export async function materializeSceneUiFormat(workspacePath: string) {
@@ -78,71 +52,6 @@ export async function materializeSceneUiFormat(workspacePath: string) {
   for (const [name, body] of Object.entries(await contentConsumerDistribution()))
     await writeFile(join(workspacePath, dirname(CONTENT_CONSUMER_PATH), name), body, 'utf8')
   await writeFile(join(workspacePath, DESIGN_INSPECTOR_PATH), await readFile(new URL('./design-browser-inspection.mjs', import.meta.url)), 'utf8')
-}
-
-/** Keep large reference material in a readable file, not in every model request. */
-export async function materializeSceneUiAuthoringContract(workspacePath: string, task: SceneUiContentAuthoringAuthority) {
-  const authoringContractPath = CONTENT_AUTHORING_CONTRACT_PATH
-  const target = join(workspacePath, authoringContractPath)
-  await mkdir(dirname(target), { recursive: true })
-  const inputs = {
-    documentRevision: task.contract.documentRevision,
-    assetManifestRevision: task.contract.assetManifestRevision,
-    authoringContractPath,
-    assetManifestPath: 'assets/asset-manifest.json',
-    validationCommand: `bun ${CONTENT_CHECKER_PATH}`,
-    inspectionCommand: 'bun .beegame/delivery/bind-content.mjs --inspect content/ui/FILE.json content/scenes/FILE.json',
-    layoutInspectionCommand: `bun ${CONTENT_CHECKER_PATH} --design-layouts --report`,
-    revisionUsage: 'New indexes need no revision hashes. Supplied legacy tags remain compatibility metadata, not design or runtime approval.',
-  }
-  await materializeSceneUiFormat(workspacePath)
-  // Project-specific revision inputs are not another copy of the format reference.
-  // Keep the existing index example/digests, with all supported fields in one file.
-  await writeFile(target, JSON.stringify({ index: task.contract.output.format.index,
-    formatReference: CONTENT_FORMAT_PATH, inputs }, null, 2) + '\n')
-  return inputs
-}
-
-export type SceneUiContentAuthoringAuthority = Readonly<{
-  contract: Readonly<{
-    documentRevision: string
-    assetManifestRevision: string
-    assetManifest: BeeGameAssetManifest
-    output: Readonly<{
-      root: typeof BEEGAME_CONTENT_ROOT
-      index: typeof BEEGAME_CONTENT_INDEX
-      packageSchema: typeof BEEGAME_CONTENT_PACKAGE_SCHEMA
-      documentSchema: typeof BEEGAME_CONTENT_DOCUMENT_SCHEMA
-      kinds: readonly ['scene-2d', 'scene-3d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx']
-      format: Readonly<Record<string, unknown>>
-    }>
-  }>
-}>
-
-/**
- * Build the complete authority for one normal direct CLI turn.  This function
- * deliberately says what must be produced, not how the Agent must work.
- */
-export function buildSceneUiContentAuthoringAuthority(
-  input: SceneUiContentAuthoringInput,
-): SceneUiContentAuthoringAuthority {
-  const parsed = inputSchema.parse(structuredClone(input))
-  const format = sceneUiContentFormat()
-  const contract = {
-    documentRevision: parsed.documentRevision,
-    assetManifestRevision: parsed.assetManifestRevision,
-    assetManifest: parsed.manifest as BeeGameAssetManifest,
-    output: {
-      root: BEEGAME_CONTENT_ROOT,
-      index: BEEGAME_CONTENT_INDEX,
-      packageSchema: BEEGAME_CONTENT_PACKAGE_SCHEMA,
-      documentSchema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
-      kinds: ['scene-2d', 'scene-3d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx'],
-      format: { ...format, index: { ...format.index,
-        documentRevision: parsed.documentRevision, assetManifestRevision: parsed.assetManifestRevision } },
-    },
-  } as const
-  return Object.freeze({ contract })
 }
 
 /** Public, executable author inputs. The UI/index pair is a complete resource-

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { artifactDigest, inspectDesignAcceptance, readRuntimeAcceptanceReport, runtimeEvidenceIsCurrent } from './runtime-acceptance'
+import { artifactDigest, inspectDesignAcceptance, readRuntimeAcceptanceReport } from './runtime-acceptance'
 import { projectFiles, projectDependencies, AGENT_EVIDENCE_DIRECTORY } from './workflow-v3/editable-project'
 import { designRequirementChecksFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
+import { versionsMatch } from './workflow-v3/checks'
 import { DESIGN_ACCEPTANCE_PATH } from './design-handoff'
-import { bundleAcceptanceChecker } from './acceptance-check-bundle'
 
 let root: string
 const directory = '.beegame/tmp/preview-test-fixture'
@@ -57,23 +57,18 @@ test.each([
   const result = (await inspect())!
   expect(result).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
   expect(result.summary).toContain('execution did not succeed')
-  expect(await runtimeEvidenceIsCurrent(root, [result], identity)).toBe(false)
-  // Also reject an old saved PASS, without relying on the report reader having run first.
-  expect(await runtimeEvidenceIsCurrent(root, [{ ...result, status: 'passed' }], identity)).toBe(false)
 })
 
-test.each(['source', 'script', 'build', 'added', 'removed', 'dependencies'] as const)('expired %s invalidates both fresh and saved acceptance', async change => {
+test.each(['source', 'script', 'build', 'added', 'removed', 'dependencies'] as const)('expired %s invalidates the saved report through the formal reader', async change => {
   await saveReceipt(await receipt()); await saveReport()
   const accepted = (await inspect())!
   expect(accepted.status).toBe('passed')
-  expect(await runtimeEvidenceIsCurrent(root, [accepted], identity)).toBe(true)
   if (change === 'removed') await rm(join(root, 'game.js'))
   else if (change === 'dependencies') {
     await mkdir(join(root, 'node_modules/test'), { recursive: true })
     await writeFile(join(root, 'node_modules/test/index.js'), 'Synthetic changed dependency')
   } else await writeFile(join(root, { source: 'game.js', script: 'tests/check.mjs', build: 'dist/game.js', added: 'extra.js' }[change]), 'Changed')
   expect((await inspect())!.summary).toContain('Tested inputs changed')
-  expect(await runtimeEvidenceIsCurrent(root, [accepted], identity)).toBe(false)
 })
 
 test('missing snapshots and changed boundaries remain unverified even if the summary flag says unchanged', async () => {
@@ -88,9 +83,7 @@ test('missing snapshots and changed boundaries remain unverified even if the sum
   }
   await saveReceipt(valid)
   for (const changed of [{ ...identity, runId: 'another-run' }, { ...identity, requirementsRevision: 'new-request' }]) {
-    const accepted = (await inspect())!
     expect((await readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH, { executionIdentity: changed }))!.summary).toContain('Run or requirements identity changed')
-    expect(await runtimeEvidenceIsCurrent(root, [accepted], changed)).toBe(false)
   }
 })
 
@@ -99,10 +92,10 @@ test.each([receiptPath, stdout, stderr, './' + stdout])('receipt and log citatio
   const accepted = (await inspect())!
   expect(accepted.status).toBe('passed')
   expect(accepted.evidence.map(file => file.path)).toEqual(expect.arrayContaining([receiptPath, stdout, stderr]))
-  expect(await runtimeEvidenceIsCurrent(root, [accepted], identity)).toBe(true)
   expect(await inspectDesignAcceptance(root, false, false, identity)).toMatchObject({ valid: true, quality: 'unverified' })
+  expect(await versionsMatch(root, accepted.evidence)).toBe(true)
   await writeFile(join(root, stderr), 'Rewritten output')
-  expect(await runtimeEvidenceIsCurrent(root, [accepted], identity)).toBe(false)
+  expect(await versionsMatch(root, accepted.evidence)).toBe(false)
   await saveReceipt({ ...await receipt(), status: 'timed-out', exitCode: null })
   expect((await inspect())!.status).toBe('blocked')
 })
@@ -115,7 +108,6 @@ test('diagnostic failed history and honest failed reports remain retainable with
   await saveReport(receiptPath, [historical])
   const accepted = (await inspect())!
   expect(accepted.status).toBe('passed')
-  expect(await runtimeEvidenceIsCurrent(root, [accepted], identity)).toBe(true)
   await saveReport(historical, [], 'failed')
   expect((await inspect())!.status).toBe('failed')
 })
@@ -133,7 +125,7 @@ test('missing or aliased receipt/log cannot be used as a successful observation'
   expect((await inspect())!.summary).toContain('paths do not match')
 })
 
-test('a real local test receipt is accepted read-only after execution stops; bundled CLI rejects stale inputs', async () => {
+test('a real local test receipt is accepted read-only after execution stops; acceptance rejects stale inputs', async () => {
   const script = 'tests/check.mjs'
   await writeFile(join(root, script), `import {appendFileSync} from 'node:fs'; appendFileSync('reports/calls.txt','once'); console.log('Synthetic assertion');`)
   const snapshot = await inputs(), capability = join(root, '.beegame/test-capability.json')
@@ -151,16 +143,10 @@ test('a real local test receipt is accepted read-only after execution stops; bun
   await saveReport(result.reportPath)
   const accepted = (await inspect())!
   expect(accepted.status).toBe('passed')
-  expect(await runtimeEvidenceIsCurrent(root, [accepted], identity)).toBe(true)
-  const cli = join(root, '.beegame/check-acceptance.mjs')
-  await writeFile(cli, await bundleAcceptanceChecker())
-  const read = () => Bun.spawnSync([process.execPath, cli, DESIGN_ACCEPTANCE_PATH], { cwd: root })
-  const initial = read()
-  expect(initial.exitCode, initial.stderr.toString() + initial.stdout.toString()).toBe(0)
   await writeFile(join(root, 'game.js'), 'changed source')
-  const stale = read()
-  expect(stale.exitCode).toBe(1)
-  expect(JSON.parse(stale.stdout.toString()).diagnostic.message).toContain('Tested inputs changed')
+  const stale = (await inspect())!
+  expect(stale).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
+  expect(stale.diagnostic?.message).toContain('Tested inputs changed')
   expect(await readFile(join(root, 'reports/calls.txt'), 'utf8')).toBe('once')
 })
 
@@ -176,7 +162,6 @@ test.each([receiptPath,stdout,stderr])('an evidence alias still checks the actua
   const result=(await inspect())!
   expect(result.status).toBe('passed')
   expect(result.evidence.map(file=>file.path)).toEqual(expect.arrayContaining([alias,receiptPath,stdout,stderr]))
-  expect(await runtimeEvidenceIsCurrent(root,[result],identity)).toBe(true)
   await saveReceipt({...await receipt(),exitCode:1})
-  expect(await runtimeEvidenceIsCurrent(root,[result],identity)).toBe(false)
+  expect((await inspect())!.status).toBe('blocked')
 })

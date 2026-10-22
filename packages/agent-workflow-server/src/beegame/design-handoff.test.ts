@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, writeFile, rm, rename, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkDesignHandoff, checkDesignHandoffDraft, designCalculationFiles, designSupportingFiles, designDocumentVersion, designHandoffPath, isHigherDocumentVersion,
-  readDesignAcceptanceRequirements, snapshotDesignDocuments, finalizeDesignDocuments, changedDesignSections, designReviewReadScope, designReviewIndexes,
+import { checkDesignHandoff, checkDesignHandoffDraft, designCalculationFiles, designSupportingFiles, designDocumentVersion, designHandoffPath,
+  readDesignAcceptanceRequirements, snapshotDesignDocuments, finalizeDesignDocuments, designReviewIndexes,
   DESIGN_HANDOFF_INSTRUCTION, readDesignImplementationChecklist, type DesignDocument } from './design-handoff'
 import { designDocumentFixture, designHandoffFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
 import { checkDesignDocumentReferences } from './design-document-references'
@@ -172,27 +172,10 @@ test('heading normalization includes task and retained-evidence pointers without
   expect(checkDesignHandoffDraft(workspace, name).valid).toBe(false)
 }))
 
-test('targeted verification uses actual edits, includes registered consumer clauses and falls back on moved headings', () => fixture(async workspace => {
-  const path = join(workspace, 'docs/GDD.md')
-  const original = (await readFile(path, 'utf8')).replace('# Design', '# GDD\n## Design') + '\n## Other clause\nOriginal\n'
-  await writeFile(path, original)
-  const before = snapshotDesignDocuments(workspace, ['GDD.md'])
-  await writeFile(path, original.replace('Original', 'Changed'))
-  expect(changedDesignSections(workspace, before)).toEqual({ 'GDD.md': ['Other clause'] })
-  const scope = designReviewReadScope(workspace, ['GDD.md'], [], changedDesignSections(workspace, before))
-  expect(scope['GDD.md']).toContain('Other clause')
-  expect(scope['GDD.md']).not.toContain('Design')
-  await writeFile(path, original.replace('## Other clause', '## Moved heading'))
-  expect(changedDesignSections(workspace, before)).toEqual({ 'GDD.md': null })
-}))
-
-test('a located note correction does not select all owner outcomes or technical tasks', () => fixture(async workspace => {
+test('an explicit note-only index scope excludes unrelated outcomes and technical tasks', () => fixture(async workspace => {
   const body = (await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).replace('# Design', '# GDD\n## Design')
   await writeFile(join(workspace, 'docs/GDD.md'), body + '\n## Publication note\nA non-rule note.\n')
-  const finding: any = { id: 'note', documents: ['GDD.md'], sources: [{ document: 'GDD.md', section: 'Publication note' }] }
-  const scope = designReviewReadScope(workspace, ['GDD.md', 'TECHNICAL_DESIGN.md'], [finding])
-  expect(scope['GDD.md']).toEqual(['Publication note'])
-  expect(scope['TECHNICAL_DESIGN.md']).toEqual([])
+  const scope = { 'GDD.md': ['Publication note'], 'TECHNICAL_DESIGN.md': [] }
   const indexes = designReviewIndexes(workspace, ['GDD.md', 'TECHNICAL_DESIGN.md'], scope)
   expect(indexes[0]).toMatchObject({ outputs: [] })
   expect(indexes[1]).toMatchObject({ implementationItems: [] })
@@ -230,23 +213,6 @@ test('source Read locations merge nested/adjacent ranges and refresh from the re
   await writeFile(path, body.replace('Intro', 'Intro\r\nNew intro.'))
   expect(designReviewIndexes(workspace, ['GDD.md'], scope)[0])
     .toMatchObject({ sourceReads: [{ file_path: 'docs/GDD.md', offset: 5, limit: 6 }] })
-}))
-
-test('a changed outcome selects its acceptance and exact task consumers, not other task requirements', () => fixture(async workspace => {
-  const gdd = designHandoffFixture('GDD.md')
-  gdd.outputs[0]!.section = 'Rule'
-  gdd.outputs[0]!.acceptance!.section = 'Check rule'
-  await writeDesignDocumentFixture(workspace, 'GDD.md', gdd,
-    '# GDD\n- Version: v1.0\n## Rule\nActual rule.\n## Check rule\nExpected result.\n## Other\nUnrelated.\n')
-  const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
-  tech.implementationItems![0]!.section = 'Rule task'
-  tech.implementationItems![1]!.section = 'Other task'
-  await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', tech,
-    designDocumentFixture('TECHNICAL_DESIGN.md') + '\n## Rule task\nConsume Rule.\n## Other task\nOther work.\n')
-  const scope = designReviewReadScope(workspace, ['GDD.md', 'TECHNICAL_DESIGN.md'], [], { 'GDD.md': ['Rule'] })
-  expect(scope['GDD.md']).toEqual(['Rule', 'Check rule'])
-  expect(scope['TECHNICAL_DESIGN.md']).toEqual(['Rule task'])
-  expect(designReviewReadScope(workspace, ['GDD.md'], [], { 'GDD.md': null })['GDD.md']).toBeNull()
 }))
 
 test('owned draft checking does not require outcome registration or sibling delivery', () => fixture(async (workspace, put) => {
@@ -445,12 +411,8 @@ test('explicit prose references remain independently checked after consumes is r
   await writeFile(join(workspace, 'docs/GDD.md'), designDocumentFixture('GDD.md') + '\n[Missing source](UNASSIGNED_DESIGN.md)\n')
   expect(checkDesignDocumentReferences(workspace, 'GDD.md').valid).toBe(false)
 }))
-test('numeric document version comparison stays available for released-baseline guards', () => {
+test('document version parsing accepts numeric metadata and rejects duplicate headers', () => {
   expect(designDocumentVersion('# Design\n- 版本：v1.9.2\n')).toBe('1.9.2')
-  expect(isHigherDocumentVersion('1.10', '1.9.2')).toBe(true)
-  expect(isHigherDocumentVersion('1.0.1', '1.0')).toBe(true)
-  expect(isHigherDocumentVersion('1.0.0', '1.0')).toBe(false)
-  expect(isHigherDocumentVersion('0.9', '1.0')).toBe(false)
   expect(() => designDocumentVersion('- Version: v1.0\n- Version: v1.1')).toThrow('handoff.mjs --design finalize DOCUMENT.md')
 })
 test('first completed author write gets host metadata without needing version or hash double-entry', () => fixture(async workspace => {

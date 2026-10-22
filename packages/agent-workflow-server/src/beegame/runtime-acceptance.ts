@@ -381,27 +381,3 @@ function blocked(error: unknown): RuntimeAcceptance {
     summary: `Invalid runtime acceptance record: ${detail}`,
     environment: 'not-established', evidence: [] }
 }
-
-export async function runtimeEvidenceIsCurrent(workspace: string, reports: RuntimeAcceptance[], executionIdentity?: ExecutionIdentity): Promise<boolean> {
-  if (!reports.length) return false
-  try {
-    for (const report of reports) {
-      if (report.scope === 'request' || report.status !== 'passed' || !report.summary?.trim() || !report.environment?.trim() || !report.evidence?.length) return false
-      if (deliveryLimitation(report)) return false
-      if (await contentBindingLimitation(workspace, report.verification, report.evidence.map(file => file.path))) return false
-      if (await designRequirementLimitation(workspace, report.verification, report.evidence.map(file => file.path))) return false
-      const previewEvidence = await previewEvidenceLimitation(workspace, report.verification, report.evidence.map(file => file.path), executionIdentity)
-      if (previewEvidence.diagnostic || previewEvidence.evidencePaths.some(path => !report.evidence.some(file => file.path === path))) return false
-      if (report.verification?.designRevision) {
-        const design = checkDesignHandoff(workspace,PROJECT_DOCUMENTS)
-        if (!design.valid || design.revision !== report.verification.designRevision) return false
-      }
-      if (!report.artifacts?.length) return false
-      for (const artifact of report.evidence)
-        if (await artifactDigest(workspace, artifact.path) !== artifact.sha256) return false
-      for (const artifact of report.artifacts)
-        if (await artifactDigest(workspace, artifact.path, true) !== artifact.sha256) return false
-    }
-    return true
-  } catch { return false }
-}

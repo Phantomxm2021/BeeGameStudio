@@ -7,7 +7,6 @@ import {
   BeeGameSessionManager,
   type BeeGameSessionRunner,
 } from '../beegame/session-manager'
-import { publishProjectArtifacts } from '../beegame/project-artifact-store'
 
 const roots: string[] = []
 
@@ -67,26 +66,32 @@ describe('active BeeGame session artifact reads', () => {
       userId: 'owner-1',
     })
 
-    const beforePublish = await manager.readArtifact(session.id, path)
-    expect(beforePublish).toEqual({ path, content: canonical })
+    const beforeSnapshot = await manager.readArtifact(session.id, path)
+    expect(beforeSnapshot).toEqual({ path, content: canonical })
 
-    await publishProjectArtifacts({
-      workspacePath,
-      ownerId: 'owner-1',
-      projectId: 'project_beegame_active',
-      publicationId: 'publication-current',
-      documents: [document(path, published)],
-    })
-    // Publishing materializes the application snapshot once. Subsequent
-    // canonical edits must remain authoritative for direct manager callers.
-    await writeFile(join(workspacePath, path), canonical, 'utf8')
+    // Synthetic legacy records live only in this temporary workspace.
+    const artifacts = join(workspacePath, '.beegame/artifacts')
+    const payload = { version: 1, ownerId: 'owner-1', projectId: 'project_beegame_active',
+      publicationId: 'publication-current', documents: [document(path, published)] }
+    const snapshotDigest = createHash('sha256').update(JSON.stringify(payload)).digest('hex')
+    await mkdir(join(artifacts, 'snapshots'), { recursive: true })
+    await writeFile(join(artifacts, 'snapshots', snapshotDigest + '.json'), JSON.stringify({ ...payload, snapshotDigest }))
+    await writeFile(join(artifacts, 'current.json'), JSON.stringify({ version: 1, ownerId: payload.ownerId,
+      projectId: payload.projectId, publicationId: payload.publicationId, snapshotDigest }))
+    await writeFile(join(artifacts, 'materialization.json'), JSON.stringify({ version: 1,
+      publicationId: payload.publicationId, snapshotDigest, token: 'a'.repeat(64) }))
 
     expect(await manager.readArtifact(session.id, path)).toEqual({
       path,
       content: canonical,
     })
 
-    const archive = await manager.createProjectPackage(session.id)
+    for (const identity of [{ ownerId: 'other-owner', projectId: 'project_beegame_active' },
+      { ownerId: 'owner-1', projectId: 'other-project' }])
+      await expect(manager.createProjectPackage(session.id, undefined, identity)).rejects.toThrow('identity does not match')
+
+    const archive = await manager.createProjectPackage(session.id, undefined,
+      { ownerId: 'owner-1', projectId: 'project_beegame_active' })
     const entries = readStoredZipEntries(archive.data)
     expect(entries.get(path)).toBe(canonical)
     expect([...entries.keys()].some(entry => entry.startsWith('.beegame/artifacts/'))).toBe(false)

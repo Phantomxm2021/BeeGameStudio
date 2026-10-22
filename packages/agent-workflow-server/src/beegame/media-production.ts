@@ -224,8 +224,8 @@ export async function produceMedia(workspace: string, value: unknown, suppliedSh
   }
 }
 
-export const MEDIA_HELP = `Usage: bun .beegame/delivery/media.mjs request.json
-Run from the project root. Inputs are project-relative. Outputs are new assets/*.png (and atlas *.json); existing files are never overwritten. Use a new version path for replacements, then update registration explicitly. Batch failures list retained successful files; rerun only unfinished jobs.
+export const MEDIA_HELP = `Usage: bun <current-tools-directory>/media.mjs request.json
+Replace <current-tools-directory> with the current BGS tools directory supplied in the project context. Run from the project root. Inputs are project-relative. Outputs are new assets/*.png (and atlas *.json); existing files are never overwritten. Use a new version path for replacements, then update registration explicitly. Batch failures list retained successful files; rerun only unfinished jobs.
 Read-only measurement example:
 {"operation":"inspect","inputs":[{"input":"assets/sheet.png"},{"input":"assets/sheet.png","crop":{"left":10,"top":20,"width":100,"height":80}}],"alphaThreshold":0}
 Decodes existing images/regions without creating or changing files. Reports alpha bounds in original decoded source pixels and visible pixels on each region edge. Threshold 0 counts every nonzero alpha, including soft shadows; another threshold changes the measurement, not quality. A bound can include multiple objects; a selected region can omit artwork. This does not select objects, certify complete coverage, align states or prove filtering safety. Inspect the whole sheet and every intended frame; keep uncertain identity/bounds unresolved instead of guessing.

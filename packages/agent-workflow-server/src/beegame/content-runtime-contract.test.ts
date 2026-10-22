@@ -1,16 +1,15 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bundleAcceptanceChecker } from './acceptance-check-bundle'
-import { readRuntimeAcceptanceReport } from './runtime-acceptance'
+import { DESIGN_ACCEPTANCE_PATH } from './design-handoff'
+import { inspectDesignAcceptance } from './runtime-acceptance'
 
 test('local acceptance check uses delivery validation without a browser', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'bgs-acceptance-format-'))
   try {
-    const script = join(directory, 'check-acceptance.mjs')
-    const reportPath = join(directory, 'acceptance.json')
-    await writeFile(script, await bundleAcceptanceChecker())
+    const reportPath = join(directory, DESIGN_ACCEPTANCE_PATH)
+    await mkdir(join(directory, '.beegame/delivery'), { recursive: true })
     await writeFile(join(directory, 'evidence.png'), 'evidence')
     await writeFile(join(directory, 'dist'), 'tested build')
     const check = {
@@ -25,28 +24,23 @@ test('local acceptance check uses delivery validation without a browser', async 
     }
     const run = async (report: unknown) => {
       await writeFile(reportPath, JSON.stringify(report))
-      const result = Bun.spawnSync([process.execPath, script, 'acceptance.json'], { cwd: directory })
-      expect(JSON.parse(result.stdout.toString()).diagnostic).toEqual((await readRuntimeAcceptanceReport(directory, 'acceptance.json'))?.diagnostic)
-      return result
+      return inspectDesignAcceptance(directory)
     }
     const misplaced = await run({ ...base, contentChecks: [check] })
-    expect(misplaced.exitCode).toBe(1)
-    expect(misplaced.stdout.toString()).toContain('contentChecks must be inside verification.contentChecks')
+    expect(misplaced.valid).toBe(false)
+    expect(misplaced.diagnostic?.message).toContain('contentChecks must be inside verification.contentChecks')
 
     const wrongProperty = await run({ ...base, verification: { ...base.verification,
       contentChecks: [{ ...check, property: 'transform' }] } })
-    expect(wrongProperty.exitCode).toBe(1)
-    expect(wrongProperty.stdout.toString()).toContain('report-invalid')
+    expect(wrongProperty).toMatchObject({ valid: false, diagnostic: { category: 'report-invalid' } })
 
     const valid = await run(base)
-    expect(valid.exitCode).toBe(0)
-    expect(valid.stdout.toString()).toContain('does not independently certify gameplay')
+    expect(valid).toMatchObject({ valid: true, status: 'passed', quality: 'unverified' })
     const missingEvidence = await run({ ...base, evidencePaths: ['missing.png'] })
-    expect(missingEvidence.exitCode).toBe(1)
-    expect(missingEvidence.stdout.toString()).toContain('report-invalid')
+    expect(missingEvidence).toMatchObject({ valid: false, diagnostic: { category: 'report-invalid' } })
     const incomplete = await run({ ...base, verification: { ...base.verification, unverified: ['Not tested'] } })
-    expect(incomplete.stdout.toString()).toContain('verification-incomplete')
+    expect(incomplete).toMatchObject({ valid: false, diagnostic: { category: 'verification-incomplete' } })
     const failed = await run({ ...base, verification: { ...base.verification, knownIssues: ['Broken input'] } })
-    expect(failed.stdout.toString()).toContain('product-failed')
+    expect(failed).toMatchObject({ valid: false, diagnostic: { category: 'product-failed' } })
   } finally { await rm(directory, { recursive: true, force: true }) }
 })

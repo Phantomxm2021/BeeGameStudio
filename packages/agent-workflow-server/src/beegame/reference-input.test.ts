@@ -2,12 +2,12 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 import { checkDesignHandoff, DESIGN_ACCEPTANCE_PATH } from './design-handoff'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
 import { designRequirementChecksFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
-import { inspectDesignAcceptance, readRuntimeAcceptanceReport, runtimeEvidenceIsCurrent } from './runtime-acceptance'
+import { versionsMatch } from './workflow-v3/checks'
+import { inspectDesignAcceptance, readRuntimeAcceptanceReport } from './runtime-acceptance'
 
 test.each(['none','partial','complete'] as const)('reference pictures are inputs, not an AI-source delivery gate: %s documents',async kind=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-reference-input-'))
@@ -50,17 +50,14 @@ test.each(['none','partial','complete'] as const)('reference pictures are inputs
     const accepted=(await readRuntimeAcceptanceReport(root,DESIGN_ACCEPTANCE_PATH))!
     expect(accepted.status).toBe('passed')
     expect(await inspectDesignAcceptance(root,kind==='complete')).toMatchObject({valid:true,quality:'unverified'})
-    const cli=Bun.spawnSync([process.execPath,fileURLToPath(new URL('./acceptance-check-cli.ts',import.meta.url))],{cwd:root})
-    expect(cli.exitCode).toBe(0)
-    expect(JSON.parse(cli.stdout.toString()).valid).toBe(true)
     await writeFile(join(root,picture),await sharp({create:{width:8,height:8,channels:4,background:'blue'}}).png().toBuffer())
     expect(checkDesignHandoff(root,documents).revision).toBe(revision)
-    expect(await runtimeEvidenceIsCurrent(root,[accepted])).toBe(true)
+    expect(await versionsMatch(root,accepted.evidence)).toBe(true)
     // Ordinary retained evidence still binds its bytes if explicitly submitted.
     await writeFile(join(root,DESIGN_ACCEPTANCE_PATH),JSON.stringify({...report,evidencePaths:['observed.txt',picture]}))
     const evidenceBound=(await readRuntimeAcceptanceReport(root,DESIGN_ACCEPTANCE_PATH))!
     expect(evidenceBound.status).toBe('passed')
     await writeFile(join(root,picture),bytes)
-    expect(await runtimeEvidenceIsCurrent(root,[evidenceBound])).toBe(false)
+    expect(await versionsMatch(root,evidenceBound.evidence)).toBe(false)
   } finally {await rm(root,{recursive:true,force:true})}
 })

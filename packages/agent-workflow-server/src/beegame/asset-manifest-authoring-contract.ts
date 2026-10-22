@@ -1,7 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
 import { TILEMAP_AUTHORING_CONTRACT } from './tilemap-authoring-contract'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import {
   BEEGAME_RESOURCE_ROOTS,
   CURRENT_ASSET_MANIFEST_VERSION,
@@ -10,16 +7,6 @@ import {
   type BeeGameProjectResourceSource,
 } from './asset-contracts'
 import { RESOURCE_DIMENSIONS, RESOURCE_ASSET_KINDS, RESOURCE_SOURCE_KINDS, RESOURCE_LIBRARY_USAGE } from '@bee-game-studio/beegame-resource-core'
-
-/**
- * This is an author-facing project artifact, not a second validator or a
- * workflow protocol.  It makes the same registry interface that the host
- * reads visible to an ordinary CLI turn before that turn writes resources.
- */
-export const ASSET_MANIFEST_AUTHORING_CONTRACT_PATH =
-  'assets/manifest/CONTRACT.md' as const
-export const ASSET_MANIFEST_VALIDATION_COMMAND = 'bun assets/manifest/check.mjs' as const
-let checkerBundle: Promise<string> | undefined
 
 export const assetSourceAuthoringExamples = {
   'resource-library': {
@@ -40,16 +27,6 @@ export const assetSourceAuthoringExamples = {
     filename: 'example.png',
   },
 } satisfies Record<BeeGameProjectResourceSource['type'], BeeGameProjectResourceSource>
-
-function bundledResourceChecker(): Promise<string> {
-  return checkerBundle ??= Bun.build({
-    entrypoints: [fileURLToPath(new URL('./resource-validation-cli.ts', import.meta.url))],
-    target: 'bun', format: 'esm', minify: true,
-  }).then(async build => {
-    if (!build.success) throw new Error(`Cannot publish resource checker: ${build.logs.join('\n')}`)
-    return build.outputs[0]!.text()
-  })
-}
 
 export function assetManifestAuthoringExamples(): {
   canonical: BeeGameAssetManifest
@@ -114,19 +91,6 @@ export function assetManifestAuthoringExamples(): {
   }
 }
 
-export async function materializeAssetManifestAuthoringContract(
-  workspacePath: string,
-): Promise<string> {
-  const path = join(workspacePath, ASSET_MANIFEST_AUTHORING_CONTRACT_PATH)
-  await mkdir(dirname(path), { recursive: true })
-  // Bundle the existing host checker, not a second implementation. The agent
-  // runs a project-local command without access to BGS source directories.
-  await writeFile(join(dirname(path), 'check.mjs'),
-    `// Generated validator: run this file; authoring rules are in CONTRACT.md.\n${await bundledResourceChecker()}`, 'utf8')
-  await writeFile(path, renderAssetManifestAuthoringContract(), 'utf8')
-  return ASSET_MANIFEST_AUTHORING_CONTRACT_PATH
-}
-
 export function renderAssetManifestAuthoringContract(section: 'registration' | 'atlas' | 'tilemap' | 'full' = 'full'): string {
   const examples = assetManifestAuthoringExamples()
   const json = (value: unknown) => JSON.stringify(value, null, 2)
@@ -156,7 +120,7 @@ Use --contract full for source fields, enums and saved registry examples; --cont
 Named atlas entries must use \`frames: { "idle": { "frame": { "x": 0, "y": 0, "w": 32, "h": 32 } } }\`.
 Use an image and same-basename JSON sidecar in file_paths. Flat rectangles, rotated and trimmed entries are not supported.
 Every rectangle must fit inside the actual image dimensions. Render the full atlas before registering it; do not clamp rectangles to conceal cropped artwork.
-Run the resource checker after generating assets. Editors and Agent-written game code consume this data; the Agent owns target-engine mapping, not a BGS game runtime.`
+Register the inspected files with the supplied resources.mjs entry; --contract registration describes its input. Editors and Agent-written game code consume this data; the Agent owns target-engine mapping, not a BGS game runtime.`
   const tilemap = `## Optional rectangular TileSet data\n\n${json(TILEMAP_AUTHORING_CONTRACT)}\n`
   if (section === 'registration') return registration
   if (section === 'atlas') return atlas
@@ -258,15 +222,20 @@ ${tilemap}
 
 ## Check the actual delivery interface
 
-From the project root, run \`${ASSET_MANIFEST_VALIDATION_COMMAND}\` when useful.
-The generated \`check.mjs\` is executable code, not an authoring document; use
-this CONTRACT.md for the format instead of reading the bundled checker. This
-is the host's own read-only checker, bundled into the project. Exit 0 means
-the resource interface passes; exit 1 returns specific issues. It checks registry
-readability, required bindings, files, hashes and the confirmed sourcing policy.
-It does not certify artistic or gameplay quality and does not require another
-agent. If correcting an existing delivery, retain usable assets and address the
-reported issues rather than recreating everything.
+Keep the project root as cwd and prefix tool filenames with the current BGS
+tools directory supplied in the project context. Read formats with
+\`bun <current-tools-directory>/resources.mjs --contract full\` or select
+\`registration\`, \`atlas\`, or \`tilemap\` as needed.
+
+After saving content/index.json and its content files, use
+\`bun <current-tools-directory>/check-content.mjs --current\` to check saved
+content and resource references. This command requires a content index.
+The host's measurement checks inspect registered resource structures even when
+no content index exists. Registration and --list do not certify complete
+resource delivery; --list only reads saved registration records.
+These checks do not certify artistic or gameplay quality or target-runtime
+consumption. If correcting an existing delivery, retain usable assets and
+address the reported issues rather than recreating everything.
 
 Use only relevant fields. Preserve the exact index/module separation above;
 the host reads the completed registry after this turn finishes.

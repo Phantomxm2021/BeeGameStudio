@@ -1,10 +1,9 @@
 import { expect, test } from 'bun:test'
-import { access, mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { access, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
-import { checkDesignHandoff, checkDesignHandoffDraft, designHandoffPath, designImplementationRevisionDocuments, designSupportingFiles, designReviewIndexes,
+import { checkDesignHandoff, checkDesignHandoffDraft, designHandoffPath, designReviewIndexes,
   finalizeDesignDocuments, readDesignAcceptanceRequirements, readDesignImplementationChecklist, snapshotDesignDocuments } from './design-handoff'
 import { designDocumentFixture, designHandoffFixture, designRequirementChecksFixture, writeDesignDocumentFixture,
   writeDesignDocumentsFixture } from './fixtures/layout-fixture'
@@ -52,31 +51,53 @@ test('task view preserves eight owners and both decision and acceptance pointers
   expect(checklist.items[0]!.requirements.find(ref => ref.document === 'AUDIO_DESIGN.md')).toMatchObject({
     sourceSection: 'Design', acceptanceSection: 'Listen to actual playback', method: 'inspection' })
   expect(checklist.globalSources).toHaveLength(8)
-  expect(checklist.limitation).toContain('not proof')
+  expect(checklist.limitation).toContain('completeness, implementation and quality remain unverified')
   expect(JSON.stringify(checklist)).not.toContain('Synthetic expected sound')
   expect(await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')).toBe(before)
   expect(designReviewIndexes(workspace, ['TECHNICAL_DESIGN.md'])[0]).toMatchObject({ implementationItems: tech.implementationItems })
 }))
 
+test.each(['absent', 'empty', 'uncovered'] as const)('optional task mapping remains readable without hiding acceptance sources: %s', kind => fixture(async workspace => {
+  const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
+  if (kind === 'absent') delete tech.implementationItems
+  if (kind === 'empty') tech.implementationItems = []
+  if (kind === 'uncovered') tech.implementationItems!.shift()
+  await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', tech)
+  const paths = PROJECT_DOCUMENTS.flatMap(name => ['docs/' + name, designHandoffPath(name)])
+  const before = await Promise.all(paths.map(path => readFile(join(workspace, path), 'utf8')))
+  expect(checkDesignHandoff(workspace, PROJECT_DOCUMENTS)).toMatchObject({ valid: true, issues: [] })
+  const checklist = readDesignImplementationChecklist(workspace)
+  expect(checklist.globalSources).toEqual(PROJECT_DOCUMENTS.map(name => 'docs/' + name))
+  expect(checklist.items.map(item => item.id)).toEqual((tech.implementationItems ?? []).map(item => item.id))
+  if (kind === 'uncovered') {
+    expect(checklist.items.flatMap(item => item.requirements).some(ref => ref.document === 'GDD.md' && ref.id === 'play')).toBe(false)
+  } else {
+    expect(checklist.documents).toHaveLength(1)
+    const document = checklist.documents![0]!
+    expect(document).toMatchObject({ document: 'TECHNICAL_DESIGN.md' })
+    if (!('sections' in document)) throw Error('Expected readable technical document sections')
+    expect(document.sections.length).toBeGreaterThan(0)
+    expect(checklist.limitation).toContain('An empty task index does not mean work is complete')
+  }
+  expect(readDesignAcceptanceRequirements(workspace)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ document: 'GDD.md', id: 'play', outputSection: 'Design' }),
+  ]))
+  expect(await Promise.all(paths.map(path => readFile(join(workspace, path), 'utf8')))).toEqual(before)
+}))
+
 test.each([
-  ['absent', 'implementationItems is missing or empty'],
-  ['empty', 'implementationItems is missing or empty'],
   ['duplicate-task', 'duplicate implementation item ID'],
   ['absent-section', 'implementation item fixture-GDD references an absent section'],
   ['unknown-output', 'references missing requirement GDD.md#invented'],
   ['duplicate-ref', 'duplicate requirement GDD.md#play'],
   ['empty-refs', 'implementationItems'],
-  ['uncovered', 'GDD.md#play has no implementation item'],
 ] as const)('final design rejects %s task fault instead of relying on an author Todo', (fault, message) => fixture(async workspace => {
   const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
-  if (fault === 'absent') delete tech.implementationItems
-  if (fault === 'empty') tech.implementationItems = []
   if (fault === 'duplicate-task') tech.implementationItems!.push(tech.implementationItems![0]!)
   if (fault === 'absent-section') tech.implementationItems![0]!.section = 'Absent'
   if (fault === 'unknown-output') tech.implementationItems![0]!.requirementRefs[0]!.id = 'invented'
   if (fault === 'duplicate-ref') tech.implementationItems![0]!.requirementRefs.push(tech.implementationItems![0]!.requirementRefs[0]!)
   if (fault === 'empty-refs') tech.implementationItems![0]!.requirementRefs = []
-  if (fault === 'uncovered') tech.implementationItems!.shift()
   await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', tech)
   const before = await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')
   const check = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
@@ -86,14 +107,18 @@ test.each([
   expect(await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')).toBe(before)
 }))
 
-test('a professional requirement without acceptance cannot disappear from the execution checklist', () => fixture(async workspace => {
+test('a task reference to a requirement without acceptance blocks checklist and acceptance reads', () => fixture(async workspace => {
   const audio = designHandoffFixture('AUDIO_DESIGN.md')
   delete audio.outputs[0]!.acceptance
   await writeDesignDocumentFixture(workspace, 'AUDIO_DESIGN.md', audio)
-  const issues = checkDesignHandoff(workspace, PROJECT_DOCUMENTS).issues
-  expect(issues.join('; ')).toContain('AUDIO_DESIGN.md: output ready needs an acceptance section')
-  expect(issues.join('; ')).toContain('AUDIO_DESIGN.md#ready has no acceptance section')
-  expect(() => readDesignAcceptanceRequirements(workspace)).toThrow()
+  const paths = [designHandoffPath('AUDIO_DESIGN.md'), designHandoffPath('TECHNICAL_DESIGN.md')]
+  const before = await Promise.all(paths.map(path => readFile(join(workspace, path), 'utf8')))
+  const check = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
+  expect(check.valid).toBe(false)
+  expect(check.issues.join('; ')).toContain('TECHNICAL_DESIGN.md: implementation item fixture-AUDIO_DESIGN requirement AUDIO_DESIGN.md#ready has no acceptance section')
+  expect(() => readDesignAcceptanceRequirements(workspace)).toThrow('AUDIO_DESIGN.md#ready has no acceptance section')
+  expect(() => readDesignImplementationChecklist(workspace)).toThrow('AUDIO_DESIGN.md#ready has no acceptance section')
+  expect(await Promise.all(paths.map(path => readFile(join(workspace, path), 'utf8')))).toEqual(before)
 }))
 
 test('only final technical index owns task organization, not a second sibling plan', () => fixture(async workspace => {
@@ -128,14 +153,25 @@ test('task view preserves explicit dependency order and does not invent legacy i
   expect(view.items.find(item => item.id === legacy!.id)).not.toHaveProperty('dependsOn')
 }))
 
-test('unfinished technical baseline and legacy index remain readable but not final checklist-certified', () => fixture(async workspace => {
+test('a legacy technical index without tasks passes source checks without certifying completeness', () => fixture(async workspace => {
   const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
   delete tech.implementationItems
   await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', tech)
   const before = await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')
   expect(checkDesignHandoff(workspace, ['TECHNICAL_DESIGN.md'], { technicalBaseline: true }).valid).toBe(true)
   expect(checkDesignHandoff(workspace, PROJECT_DOCUMENTS, { technicalBaseline: true }).valid).toBe(true)
-  expect(checkDesignHandoff(workspace, PROJECT_DOCUMENTS).valid).toBe(false)
+  const check = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
+  expect(check.valid).toBe(true)
+  expect(check.note).toContain('do not establish design completeness, semantic quality or acceptance')
+  const checklist = readDesignImplementationChecklist(workspace)
+  expect(checklist.items).toEqual([])
+  expect(checklist.documents![0]).toMatchObject({ document: 'TECHNICAL_DESIGN.md' })
+  // Optional task metadata does not make missing design sources acceptable.
+  await rm(join(workspace, 'docs/GDD.md'))
+  const missing = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
+  expect(missing.valid).toBe(false)
+  expect(missing.issues.join('; ')).toContain('GDD.md')
+  expect(() => readDesignImplementationChecklist(workspace)).toThrow('GDD.md')
   expect(await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')).toBe(before)
 }))
 
@@ -158,39 +194,4 @@ test('task IDs and associations participate in existing versions and invalidate 
   expect(readDesignImplementationChecklist(workspace).designRevision).not.toBe(before.designRevision)
   expect((await readRuntimeAcceptanceReport(workspace, reportPath))?.summary).toContain('Requirement source changed: TECHNICAL_DESIGN.md#ready')
   expect(JSON.parse(await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')).documentVersion).toBe('1.1')
-}))
-
-test('related task consumer joins an exact revision scope, unrelated documents do not', () => fixture(async workspace => {
-  expect(designImplementationRevisionDocuments(workspace, ['AUDIO_DESIGN.md']))
-    .toEqual(['AUDIO_DESIGN.md', 'TECHNICAL_DESIGN.md'])
-  const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
-  tech.implementationItems = tech.implementationItems!.filter(item => item.requirementRefs[0]!.document === 'GDD.md')
-  await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', tech)
-  expect(designImplementationRevisionDocuments(workspace, ['ART_DIRECTION.md'])).toEqual(['ART_DIRECTION.md'])
-  expect(designImplementationRevisionDocuments(workspace, ['GDD.md', 'GDD.md']))
-    .toEqual(['GDD.md', 'TECHNICAL_DESIGN.md'])
-}))
-
-test('retained calculation scope follows chained inputs but not unrelated or malformed records', () => fixture(async workspace => {
-  await mkdir(join(workspace, 'docs/calc'), { recursive: true })
-  const retain = async (owner: 'BALANCE_DESIGN.md' | 'AUDIO_DESIGN.md' | 'ART_DIRECTION.md', id: string, input: string) => {
-    const model = `docs/calc/${id}.mjs`, output = `docs/calc/${id}.md`, body = '# Synthetic calculation\n'
-    await writeFile(join(workspace, model), 'export const fixture = true')
-    const record = { outputDigest: createHash('sha256').update(body).digest('hex'), sources: [model, input].map(path =>
-      [path, { digest: 'a'.repeat(64), scope: 'exact-bytes' }]) }
-    await writeFile(join(workspace, output), body + '\n<!-- bgs-calculation-v1:' + Buffer.from(JSON.stringify(record)).toString('base64') + ' -->\n')
-    await writeFile(join(workspace, 'docs', owner), (await readFile(join(workspace, 'docs', owner), 'utf8')) + `\n[Result](calc/${id}.md)\n`)
-    return output
-  }
-  const first = await retain('BALANCE_DESIGN.md', 'first', 'content/scenes/level.json')
-  await retain('AUDIO_DESIGN.md', 'second', first)
-  const unrelated = await retain('ART_DIRECTION.md', 'unrelated', 'docs/GDD.md')
-  const scope = designImplementationRevisionDocuments(workspace, ['LEVEL_SCENE_DESIGN.md'])
-  expect(scope).toEqual(['LEVEL_SCENE_DESIGN.md', 'TECHNICAL_DESIGN.md', 'BALANCE_DESIGN.md', 'AUDIO_DESIGN.md'])
-  expect(designSupportingFiles(workspace, scope)).toContain('docs/calc/second.mjs')
-  expect(designSupportingFiles(workspace, scope)).not.toContain(unrelated)
-  // Changed appendix bytes cannot expand permissions using its invalidated record.
-  await writeFile(join(workspace, first), 'tampered\n' + await readFile(join(workspace, first), 'utf8'))
-  expect(designImplementationRevisionDocuments(workspace, ['LEVEL_SCENE_DESIGN.md']))
-    .toEqual(['LEVEL_SCENE_DESIGN.md', 'TECHNICAL_DESIGN.md'])
 }))

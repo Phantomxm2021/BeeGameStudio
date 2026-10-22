@@ -10,7 +10,6 @@ import { fromMarkdown } from 'mdast-util-from-markdown'
 import { array, enum as enumeration, literal, object, string, unknown } from 'zod'
 import type { z } from 'zod'
 import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
-import { designFindingSourceIssues, type DesignFinding } from '@bee-game-studio/agent-workflow/design-review-result'
 import { parseBeeGameContentDocument, parseBeeGameContentIndex, sceneDesignSource, BEEGAME_UI_ASSET_BACKED_ROLES, uiDesignData } from './game-content-schema'
 export { designReviewResultSchema, type DesignReviewStep, type DesignReviewResult, type DesignFinding } from '@bee-game-studio/agent-workflow/design-review-result'
 
@@ -188,13 +187,6 @@ export function designDocumentVersion(body: string): string {
   const version = versions[0]![1]!
   if (version.split('.').some(n => !Number.isSafeInteger(Number(n)))) throw new Error('Invalid document version')
   return version
-}
-export function isHigherDocumentVersion(current: string, previous: string) {
-  const a = current.split('.').map(Number), b = previous.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0)
-  }
-  return false
 }
 /** Exact owned calculation/layout outputs for scoped writes and versioning.
  * Reference pictures are read through the native Read tool, like documents;
@@ -823,107 +815,6 @@ export function readDesignImplementationChecklist(workspace: string) {
     })),
     limitation: 'Saved sources and optional existing task pointers only. An empty task index does not mean work is complete. Plan from the original documents; completeness, implementation and quality remain unverified without actual checks.' }
 }
-/** An explicitly revised owner may affect its existing task consumer. The
- * exact technical document/index enter the same revision scope, not all docs. */
-export function designImplementationRevisionDocuments(workspace: string, documents: readonly DesignDocument[]) {
-  const scope = [...new Set(documents)]
-  const supporting = new Map<DesignDocument, readonly string[]>(PROJECT_DOCUMENTS.map(name => {
-    try { return [name, designSupportingFiles(workspace, [name])] as const }
-    catch { return [name, []] as const }
-  }))
-  // A correction can invalidate another owner's retained calculation. Follow
-  // existing recorded inputs before dispatch, including chained appendices;
-  // no model-selected dependency list and no blanket document grant.
-  let previousSize: number
-  do {
-    previousSize = scope.length
-    if (!scope.includes('TECHNICAL_DESIGN.md')) try {
-      const { handoff } = documentHandoff(workspace, 'TECHNICAL_DESIGN.md', readRetained(workspace, 'docs/TECHNICAL_DESIGN.md').toString('utf8'))
-      if (handoff.implementationItems?.some(item => item.requirementRefs.some(ref => scope.includes(ref.document))))
-        scope.push('TECHNICAL_DESIGN.md')
-    } catch { /* Malformed task sources have their own structural repair diagnostic. */ }
-    const changedInputs = new Set(scope.flatMap(name => [`docs/${name}`, designHandoffPath(name), ...supporting.get(name) ?? []]))
-    for (const [name, files] of supporting) {
-      if (scope.includes(name)) continue
-      if (files.some(file => {
-        if (!file.startsWith('docs/calc/') || !file.endsWith('.md')) return false
-        try { return readCalculationInputs(workspace, file).some(input => changedInputs.has(input)) }
-        catch { return false } // Unrecorded/malformed evidence cannot establish dependencies.
-      })) scope.push(name)
-    }
-  } while (scope.length !== previousSize)
-  return scope
-}
-export function designReviewSourceHeadings(workspace: string, documents: readonly string[]): Record<string, string[]> {
-  const result: Record<string, string[]> = {}
-  for (const name of documents) {
-    if (!PROJECT_DOCUMENTS.some(document => document === name)) continue
-    try { result[name] = [...documentStructure(readRetained(workspace, `docs/${name}`).toString('utf8')).headings] }
-    catch { /* Missing/unreadable sources remain unavailable, not fabricated headings. */ }
-  }
-  return result
-}
-
-/** Host locations from findings, registered outcomes and actual revision changes. */
-export function designReviewReadScope(workspace: string, documents: readonly string[], findings: readonly DesignFinding[],
-  changed: Record<string, string[] | null> = {}): Record<string, string[] | null> {
-  const scope: Record<string, string[] | null> = {}
-  const sources = findings.filter(finding => finding.documents.some(name => documents.includes(name)) ||
-    finding.sources.some(source => documents.includes(source.document))).flatMap(finding => finding.sources)
-  const names = [...new Set([...documents, ...sources.map(source => source.document)])]
-  const indexes = designReviewIndexes(workspace, names)
-  const affectedOutputs = new Set<string>()
-  const located = sources.length > 0 || Object.keys(changed).length > 0
-  for (const name of names) {
-    const index = indexes.find(index => index.document === name)
-    const own = index && 'outputs' in index ? index : undefined
-    const headings = new Set([...sources.filter(source => source.document === name).map(source => source.section), ...changed[name] ?? []])
-    let sections: ReturnType<typeof designDocumentSections> = []
-    try { sections = designDocumentSections(readRetained(workspace, 'docs/' + name).toString('utf8')) } catch { /* Full-source diagnostic below. */ }
-    // Unknown/moved sources and unlocated structural failures retain full reads.
-    // Permission to edit a consumer alone does not require all its output clauses.
-    if (!own || !sections.length || changed[name] === null || !located ||
-        [...headings].some(heading => sections.filter(section => section.heading === heading).length !== 1)) {
-      scope[name] = null
-      for (const output of own?.outputs ?? []) affectedOutputs.add(name + '#' + output.id)
-      continue
-    }
-    const selected = sections.filter(section => headings.has(section.heading))
-    const overlaps = (heading: string) => sections.some(section => section.heading === heading &&
-      selected.some(source => source.start <= section.end && section.start <= source.end))
-    for (const output of own.outputs) {
-      if (!overlaps(output.section) && !(output.acceptance && overlaps(output.acceptance.section))) continue
-      affectedOutputs.add(name + '#' + output.id)
-      headings.add(output.section)
-      if (output.acceptance) headings.add(output.acceptance.section)
-    }
-    // [] means no initial mandatory clauses, not a whole-file read. Actual
-    // edits outside this selection are still detected at the native stop check.
-    scope[name] = [...headings]
-  }
-  for (const index of indexes) {
-    if (!('outputs' in index) || scope[index.document] === null) continue
-    for (const item of index.implementationItems ?? [])
-      if (item.requirementRefs.some(ref => affectedOutputs.has(ref.document + '#' + ref.id)))
-        scope[index.document] = [...new Set([...scope[index.document] ?? [], item.section])]
-  }
-  return scope
-}
-
-export function changedDesignSections(workspace: string, before: DesignDocumentSnapshot): Record<string, string[] | null> {
-  const changes: Record<string, string[] | null> = {}
-  for (const [name, previous] of Object.entries(before.documents)) {
-    const current = materialDocument(workspace, name as DesignDocument)
-    if (current.contentHash === previous!.contentHash) continue
-    if (!previous!.sections || !current.sections ||
-        Object.keys(previous!.sections).join('\n') !== Object.keys(current.sections).join('\n')) {
-      changes[name] = null; continue
-    }
-    changes[name] = Object.keys(current.sections).filter(heading => current.sections![heading] !== previous!.sections![heading])
-  }
-  return changes
-}
-
 /** Current pointers only, not another authority or semantic verdict. This
  * replaces serial metadata reads; the reviewer still reads the saved prose
  * and actual evidence. Malformed indexes retain the host's revision path. */
@@ -960,9 +851,4 @@ export function designReviewIndexes(workspace: string, documents: readonly strin
         evidence: full || selected.length ? handoff.evidence.map(({ sha256: _hash, ...source }) => source) : [] }
     } catch { return { document: name, unavailable: 'Index unavailable/malformed; use the host structural revision scope, not invented pointers.' } }
   })
-}
-
-/** Locations are checkable; the finding's semantic merit is not. */
-export function checkDesignFindingSources(workspace: string, findings: DesignFinding[]) {
-  return designFindingSourceIssues(findings, designReviewSourceHeadings(workspace, findings.flatMap(f => f.sources.map(s => s.document))))
 }

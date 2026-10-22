@@ -9,7 +9,7 @@ test('discovers new IDs by protocol without including Responses, Google, removed
     expect(init?.headers).not.toHaveProperty('Authorization')
     return goCatalogResponse(String(url))
   })
-  const catalog = await fetchOpenCodeGoModels(get as typeof fetch)
+  const catalog = await fetchOpenCodeGoModels(Object.assign(get, { preconnect: () => {} }))
   for (const provider of ['anthropic-compatible', 'openai-compatible'] as const)
     expect(catalog[provider]).toEqual([...goModelCatalog[provider]].sort())
   expect(get).toHaveBeenCalledTimes(2)

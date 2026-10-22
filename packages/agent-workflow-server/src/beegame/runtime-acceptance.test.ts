@@ -4,10 +4,10 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readRuntimeAcceptanceReport, runtimeEvidenceIsCurrent, inspectDesignAcceptance } from './runtime-acceptance'
-import { bundleAcceptanceChecker } from './acceptance-check-bundle'
+import { readRuntimeAcceptanceReport, inspectDesignAcceptance } from './runtime-acceptance'
 import { designDocumentFixture, designHandoffFixture, designRequirementChecksFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 import { checkDesignHandoff, DESIGN_ACCEPTANCE_PATH, designHandoffPath, finalizeDesignDocuments, snapshotDesignDocuments } from './design-handoff'
+import { versionsMatch } from './workflow-v3/checks'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
 
 async function registerDesignFixture(root: string) {
@@ -48,16 +48,11 @@ test.each([
     // Source files can remain supporting attachments; the actual checks cite observations.
     const accepted = (await readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH))!
     expect(accepted.status).toBe('passed')
-    expect(await runtimeEvidenceIsCurrent(root, [accepted])).toBe(true)
     report.verification.contentChecks[0]!.evidencePaths = [support]
     await save()
     const invalid = (await readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH))!
     expect(invalid).toMatchObject({ status: 'blocked', diagnostic: { category: 'report-invalid' } })
     expect(invalid.summary).toContain('runtime observation, not authored content')
-    // A retained PASS must obey the same rule, even without rereading its report.
-    expect(await runtimeEvidenceIsCurrent(root, [{ ...accepted, verification: {
-      ...accepted.verification!, contentChecks: report.verification.contentChecks as any,
-    } }])).toBe(false)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -89,7 +84,6 @@ test('design-led acceptance still checks document coverage and revision without 
     const doc=join(root,'docs/UI_UX_SPEC.md')
     await writeFile(doc,await readFile(doc,'utf8')+'\nChanged decision.\n')
     expect((await inspectDesignAcceptance(root,true)).summary).toContain('revision is missing or changed')
-    expect(await runtimeEvidenceIsCurrent(root,[accepted!])).toBe(false)
     await rm(join(root,'docs/AUDIO_DESIGN.md'))
     expect((await inspectDesignAcceptance(root,true)).summary).toContain('incomplete')
   } finally { await rm(root,{recursive:true,force:true}) }
@@ -120,7 +114,7 @@ test('design acceptance binds the actual runtime registry to owner sources and r
     const accepted=await readRuntimeAcceptanceReport(root,DESIGN_ACCEPTANCE_PATH,{requireDesignRevision:true,requireEditableContent:true})
     expect(accepted?.status).toBe('passed')
     await rm(join(root,'content/index.json'))
-    expect(await runtimeEvidenceIsCurrent(root,[accepted!])).toBe(false)
+    expect((await inspectDesignAcceptance(root,true,true)).valid).toBe(false)
     await registerDesignFixture(root)
     // Both files are valid, but only one is the actual runtime source.
     await writeFile(join(root,'content/ui/actual.json'),await readFile(join(root,'content/ui/menu.json')))
@@ -252,20 +246,10 @@ test('reported indexed checks bind actual evidence and sources without requiring
     })).summary).toContain('not its design source')
     const accepted = await read()
     expect(accepted.status).toBe('passed')
-    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(true)
-    const checker = join(workspace, 'check-acceptance.mjs')
-    await writeFile(checker, await bundleAcceptanceChecker())
-    const checkReport = () => Bun.spawnSync([process.execPath, checker, 'acceptance.json'], { cwd: workspace })
-    expect(checkReport().exitCode).toBe(0)
-    expect(await runtimeEvidenceIsCurrent(workspace, [{ ...accepted, verification: {
-      ...accepted.verification!, requirementChecks: [],
-    } }])).toBe(true)
     await writeFile(join(workspace, 'docs/GDD.md'), originalGdd.replace('Fixture decision.', 'Changed decision.'))
-    const staleReport = checkReport()
-    expect(staleReport.exitCode).toBe(1)
-    expect(JSON.parse(staleReport.stdout.toString()).diagnostic.category).toBe('verification-incomplete')
-    expect((await read()).summary).toContain('Requirement source changed')
-    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(false)
+    const staleReport = (await readRuntimeAcceptanceReport(workspace, 'acceptance.json'))!
+    expect(staleReport).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
+    expect(staleReport.summary).toContain('Requirement source changed')
     const updated = designHandoffFixture('GDD.md')
     updated.outputs.push({ ...updated.outputs[0]!, id: 'outcome' })
     await writeDesignDocumentFixture(workspace, 'GDD.md', updated)
@@ -371,7 +355,6 @@ test('a readable UI JSON and browser screenshot do not certify that its layout i
     expect((await read([{ ...check, evidencePaths: ['unrecorded.txt'] }]))?.summary).toContain('evidencePaths')
     const accepted = (await read([check]))!
     expect(accepted.status).toBe('passed')
-    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(true)
     const menuPath = join(workspace, 'content/ui/menu.json')
     const originalMenu = await readFile(menuPath, 'utf8')
     const invalidMenu = JSON.parse(originalMenu)
@@ -384,17 +367,14 @@ test('a readable UI JSON and browser screenshot do not certify that its layout i
     const registryPath = join(workspace, 'content/index.json')
     const registry = await readFile(registryPath, 'utf8')
     await rm(registryPath)
-    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(false)
     const absentRegistry = await read([check])
     expect(absentRegistry?.status).toBe('blocked')
     expect(absentRegistry?.summary).toContain('content/index.json')
     await writeFile(registryPath, registry)
-    // Historical PASS objects cannot bypass the new consumption coverage check.
-    expect(await runtimeEvidenceIsCurrent(workspace, [{ ...accepted, verification: {
-      ...accepted.verification!, contentChecks: undefined,
-    } }])).toBe(false)
+    expect((await read())?.status).toBe('blocked')
+    expect(await versionsMatch(workspace, accepted.evidence)).toBe(true)
     await writeFile(join(workspace, 'browser.txt'), 'changed evidence')
-    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(false)
+    expect(await versionsMatch(workspace, accepted.evidence)).toBe(false)
     // Ordinary analysis/fix responses are not made into full delivery acceptance.
     await writeFile(join(workspace, 'acceptance.json'), JSON.stringify({ ...base, scope: 'request' }))
     expect((await readRuntimeAcceptanceReport(workspace, 'acceptance.json'))?.status).toBe('passed')
@@ -434,24 +414,18 @@ test('consumption evidence covers every registered UI/Scene/resource file and ea
     }
     const accepted = await read(checks)
     expect(accepted.status).toBe('passed')
-    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(true)
     for (const omitted of checks.filter(c => c.document.includes('b.json'))) {
       const partial = checks.filter(c => c !== omitted)
       const report = await read(partial)
       expect(report.status).toBe('blocked')
       expect(report.diagnostic?.category).toBe('verification-incomplete')
       expect(report.summary).toContain(omitted.document)
-      expect(await runtimeEvidenceIsCurrent(workspace, [{ ...accepted, verification: { ...accepted.verification!, contentChecks: partial as any } }])).toBe(false)
     }
     const report = await read(checks.filter(c => !c.document.includes('b.json')))
     expect(report.summary).toContain('ui-layout (content/ui/b.json)')
     expect(report.summary).toContain('scene-layout (content/b.json)')
     expect(report.summary).toContain('resource-binding (content/b.json)')
-    const script = join(workspace, 'check.mjs')
-    await writeFile(script, await bundleAcceptanceChecker())
-    const run = Bun.spawnSync([process.execPath, script, 'acceptance.json'], { cwd: workspace })
-    expect(run.exitCode).toBe(1)
-    expect(JSON.parse(run.stdout.toString())).toMatchObject({ diagnostic: report.diagnostic, publishReadiness: 'not-checked' })
+    expect(report).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
@@ -491,16 +465,11 @@ test.each(['scene-2d', 'scene-3d'] as const)('%s resource and geometry verificat
       expect((await read([scene, map, resource]))?.status).toBe('passed')
     } else {
       expect((await read([scene, resource]))?.status).toBe('passed')
+      const source = await readFile(join(workspace, 'content/world.json'), 'utf8')
       const report = await read([scene, map, resource])
+      expect(report?.status).toBe('blocked')
       expect(report?.summary).toContain('without a Tilemap')
       expect(report?.diagnostic?.category).toBe('report-invalid')
-      const script = join(workspace, 'check.mjs')
-      await writeFile(script, await bundleAcceptanceChecker())
-      const source = await readFile(join(workspace, 'content/world.json'), 'utf8')
-      const run = Bun.spawnSync([process.execPath, script, 'acceptance.json'], { cwd: workspace })
-      expect(run.exitCode).toBe(1)
-      expect(JSON.parse(run.stdout.toString())).toMatchObject({ diagnostic: report?.diagnostic,
-        check: 'report-content-evidence', publishReadiness: 'not-checked' })
       expect(await readFile(join(workspace, 'content/world.json'), 'utf8')).toBe(source)
     }
   } finally { await rm(workspace, { recursive: true, force: true }) }

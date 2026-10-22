@@ -1,17 +1,32 @@
 import { expect, test } from 'bun:test'
-import { parseNativeTerminalTaskNotification } from './native-task-notification'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { BeeGameSessionManager } from './session-manager'
 
-test('reads structured task lifecycle without interpreting result language', () => {
-  const message = { type: 'system', subtype: 'task_notification', task_id: 'a1',
-    tool_use_id: 'resume-2', status: 'completed', summary: '検証済み / 완료' }
-  expect(parseNativeTerminalTaskNotification({ value: JSON.stringify(message) }))
-    .toEqual({ key: 'resume-2', taskId: 'a1', toolUseId: 'resume-2', status: 'completed', result: message.summary })
-  expect(parseNativeTerminalTaskNotification({ value: 'irrelevant', message })?.status).toBe('completed')
-  expect(parseNativeTerminalTaskNotification({ value: 'completed 検証済み' })).toBeUndefined()
-  expect(parseNativeTerminalTaskNotification({ value: JSON.stringify({ ...message, subtype: 'task_started' }) })).toBeUndefined()
-})
-
-test('retains native XML notification support', () => {
-  expect(parseNativeTerminalTaskNotification({ value: '<task-id>a1</task-id><status>failed</status><result>not complete</result>' }))
-    .toEqual({ key: 'a1', taskId: 'a1', status: 'failed', result: 'not complete' })
+test('session lifecycle uses structured task status without interpreting notification text', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-task-notification-'))
+  const manager = new BeeGameSessionManager({ start: async options => ({ stop() {}, async submit(turn) {
+    const notify = (subtype: string, taskId: string, status?: string) => options.onNativeTaskNotification?.({
+      value: 'completed 検証済み / 완료',
+      message: { type: 'system', subtype, task_id: taskId, tool_use_id: taskId + '-tool',
+        ...(status ? { status } : {}), summary: '検証済み / 완료' },
+    })
+    notify('task_started', 'other')
+    for (const status of ['completed', 'failed', 'stopped', 'killed']) {
+      notify('task_started', status)
+      notify('task_notification', status, 'unrecognized')
+      expect(manager.runtimeSnapshot(options.sessionId)?.activeSubagentToolUseIds).toEqual(['other-tool', status + '-tool'])
+      notify('task_notification', status, status)
+      notify('task_progress', status)
+      expect(manager.runtimeSnapshot(options.sessionId)?.activeSubagentToolUseIds).toEqual(['other-tool'])
+    }
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Offline fixture complete' })
+  } }) }, root)
+  try {
+    const session = manager.start({ workspacePath: join(root, 'workspace'), projectId: 'fixture', userId: 'test' })
+    await manager.send(session.id, 'Offline fixture')
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id)?.activeSubagentToolUseIds).toEqual(['other-tool'])
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })

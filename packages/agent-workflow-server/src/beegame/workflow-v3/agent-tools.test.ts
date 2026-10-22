@@ -339,6 +339,12 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
           stdout: 'pipe', stderr: 'pipe' })
       const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
       expect(code, out + err).toBe(0)
+      if (name === 'bind-content') {
+        expect(out).toContain('current BGS tools directory supplied in the project context')
+        expect(out).toContain('bun <current-tools-directory>/bind-content.mjs --inspect')
+        expect(out).toContain('bun <current-tools-directory>/bind-content.mjs --current')
+        expect(out).not.toContain('.beegame/delivery/')
+      }
     }
     const consumerHelp=await command(root,tools.directory,'consumer.mjs','--help')
     expect(consumerHelp.code).toBe(0)
@@ -363,8 +369,20 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect((await command(root, tools.directory, 'check-content.mjs', '--check-drafts', 'menu.json')).code).toBe(0)
     const layout = await command(root, tools.directory, 'check-content.mjs', '--layout-draft', 'menu.json', '960', '540')
     expect(layout.code, layout.stdout).toBe(0); expect(JSON.parse(layout.stdout).scope).toContain('draft')
-    expect((await command(root, tools.directory, 'resources.mjs', '--contract')).stdout).toContain('Asset Manifest authoring contract')
-    expect((await command(root, tools.directory, 'media.mjs', '--help')).code).toBe(0)
+    const resourceContract = await command(root, tools.directory, 'resources.mjs', '--contract')
+    expect(resourceContract.code, resourceContract.stderr).toBe(0)
+    expect(resourceContract.stdout).toContain('Asset Manifest authoring contract')
+    expect(resourceContract.stdout).toContain('current BGS\ntools directory')
+    expect(resourceContract.stdout).toContain('check-content.mjs --current')
+    expect(resourceContract.stdout).toContain('This command requires a content index.')
+    expect(resourceContract.stdout).not.toContain('assets/manifest/check.mjs')
+    expect(resourceContract.stdout).not.toContain('CONTRACT.md')
+    await expect(access(join(root, 'assets'))).rejects.toThrow()
+    const mediaHelp = await command(root, tools.directory, 'media.mjs', '--help')
+    expect(mediaHelp.code, mediaHelp.stderr).toBe(0)
+    expect(mediaHelp.stdout).toContain('current BGS tools directory supplied in the project context')
+    expect(mediaHelp.stdout).toContain('bun <current-tools-directory>/media.mjs request.json')
+    expect(mediaHelp.stdout).not.toContain('.beegame/delivery/')
     for (const name of ['check-content.mjs', 'media.mjs', 'resources.mjs', 'bind-content.mjs']) {
       const wrongRuntime = Bun.spawn([Bun.which('node')!, join(root,tools.directory,name), '--help'], {
         cwd: root, env: { PATH: process.env.PATH, BEEGAME_CONTENT_CHECKER_MODULE: 'file:///absent-fixture.mjs' },

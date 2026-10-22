@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
-import { auditBeeGameContentPackage, BEEGAME_SCENE_MODEL, loadBeeGameContentFileListForEditing } from './game-content-package'
+import { readContentView } from './workflow-v3/content-view'
+import { auditBeeGameContentPackage, BEEGAME_SCENE_MODEL } from './game-content-package'
 import { contentDocumentSchema } from './game-content-schema'
 import { CONTENT_DRAFT_EXAMPLES } from './scene-ui-content-authoring'
 
@@ -155,21 +156,21 @@ describe('Unity-style Game Content scene contract', () => {
     expect(deferredEntry.issues.join(' ')).toContain('entryScene must use startup loadPhase')
   })
 
-  it('loads file metadata without returning document bodies', () => {
+  it('loads file metadata without returning document bodies', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'beegame-content-file-list-')); workspaces.push(workspace)
     mkdirSync(join(workspace, 'content/scenes'), { recursive: true })
     writeFileSync(join(workspace, 'content/index.json'), JSON.stringify({
       schema: 'beegame-content-package.v2', id: 'test', dimension: '2d', documentRevision: HASH,
       assetManifestRevision: HASH, entryScene: 'scene', files: ['scenes/scene.json'], sceneModel: BEEGAME_SCENE_MODEL,
+      documents: [{ path: 'scenes/scene.json', id: 'scene', kind: 'scene-2d', loadPhase: 'startup' }],
     }))
     writeFileSync(join(workspace, 'content/scenes/scene.json'), JSON.stringify({
       schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
       data: { nodes: [{ id: 'root', data: { large: 'document body' } }] },
     }))
 
-    const result = loadBeeGameContentFileListForEditing(workspace, {
-      documentRevision: HASH, assetManifestRevision: HASH, manifest,
-    })
+    const result = await readContentView(workspace, true)
+    if (result.state !== 'draft') throw Error('Expected registered content metadata')
 
     expect(result.documents).toEqual([
       { path: 'scenes/scene.json', revision: expect.any(String), id: 'scene', kind: 'scene-2d' },
