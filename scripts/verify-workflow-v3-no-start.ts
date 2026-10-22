@@ -9,9 +9,14 @@ import {createRun} from '../packages/agent-workflow-server/src/beegame/workflow-
 import {createAgentGoalExecutor} from '../packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal'
 import {BeeGameSessionManager} from '../packages/agent-workflow-server/src/beegame/session-manager'
 
-// Explicit remote persistence acceptance only. Simulated native lifecycle;
-// actual CLI/debug are separately covered by no-start-debug.test.ts. No model,
-// schema/account changes, existing project artifacts or engine selection.
+// Explicit remote persistence acceptance with a simulated native lifecycle.
+// Creates synthetic remote project/workflow records and temporary local fixtures;
+// no model calls, schema/account changes or changes to existing project artifacts.
+// Local executor no-start/idempotency and original-host recovery coverage:
+// packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts.
+// Durable host-exit/restart recovery coverage:
+// packages/agent-workflow-server/src/beegame/workflow-v3/host-exit-receipt.test.ts.
+// This script does not exercise the native CLI or Debug UI.
 const args=process.argv.slice(2)
 if(args.length!==5 || args[0]!=='--apply' || args[1]!=='--env-file' || args[3]!=='--source-project')
   throw Error('Usage: bun scripts/verify-workflow-v3-no-start.ts --apply --env-file PATH --source-project OWNED_ID')
