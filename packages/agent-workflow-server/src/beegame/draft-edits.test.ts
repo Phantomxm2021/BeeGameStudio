@@ -3,8 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applyDraftEdits } from './draft-edits'
-import { materializeSceneUiFormat } from './scene-ui-content-authoring'
-import { sharedContentChecker } from './content-checker-runtime'
+import { sharedContentChecker, DRAFT_EDITS_ENTRY } from './content-checker-runtime'
 
 async function fixture(run: (root: string) => unknown) {
   const root = mkdtempSync(join(tmpdir(), 'bgs-draft-edits-'))
@@ -78,7 +77,8 @@ test.skipIf(process.getuid?.() === 0)('commit failure reports already written an
 }))
 
 test('materialized helper uses the shared runtime; a bad request exits failed without editing', () => fixture(async root => {
-  await materializeSceneUiFormat(root)
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/delivery/edit-drafts.mjs'), DRAFT_EDITS_ENTRY)
   const runtime = await sharedContentChecker()
   writeFileSync(join(root, 'request.json'), JSON.stringify([edit('docs/TECHNICAL_DESIGN.md', 'Pending.', 'Connected.')]))
   for (const success of [true, false]) {
@@ -91,7 +91,8 @@ test('materialized helper uses the shared runtime; a bad request exits failed wi
 }))
 
 test('inline CLI applies multiple exact edits without a request file, preserving literal shell-sensitive text', () => fixture(async root => {
-  await materializeSceneUiFormat(root)
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/delivery/edit-drafts.mjs'), DRAFT_EDITS_ENTRY)
   const runtime = await sharedContentChecker()
   const request = [edit('docs/TECHNICAL_DESIGN.md', 'Pending.', 'Connected: $& `literal` "quotes".'),
     edit('content/ui/menu.json', 'Play', 'Start')]

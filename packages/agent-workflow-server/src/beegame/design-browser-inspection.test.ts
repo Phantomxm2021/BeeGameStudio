@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { materializeSceneUiFormat, DESIGN_INSPECTOR_PATH } from './scene-ui-content-authoring'
+import { contentConsumerDistribution } from './game-content-consumer-cli'
 import { uiLayoutFixture } from './fixtures/layout-fixture'
 import { sharedPlaywright } from './shared-playwright'
 import { openPreviewTestAccess } from './preview-test-access'
@@ -76,14 +76,18 @@ test.skipIf(process.env.BGS_DESIGN_BROWSER !== '1')('published design entry meas
   const root = await mkdtemp(join(tmpdir(), 'bgs-design-inspection-browser-'))
   const api = openPreviewTestAccess({ start: async () => ({ status: 'idle' }), status: () => ({ status: 'idle' }), stop() {} })
   try {
-    await materializeSceneUiFormat(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    for (const [name, body] of Object.entries(await contentConsumerDistribution()))
+      await writeFile(join(root, '.beegame/delivery', name), body)
+    await writeFile(join(root, '.beegame/delivery/inspect-design.mjs'),
+      await readFile(new URL('./design-browser-inspection.mjs', import.meta.url)))
     const ui = uiLayoutFixture()
     Object.assign(ui.data.nodes[1], { text: 'Play', style: { fontSize: 20, lineHeight: 28 } })
     await writeFile(join(root, 'ui.json'), JSON.stringify(ui))
     await writeFile(join(root, 'samples.json'), JSON.stringify({ play: ['Longest legal label'] }))
     await writeFile(join(root, 'composition.html'), '<!doctype html><body style="background:#123456"><main>Authored design fixture</main></body>')
     const run = async (...args: string[]) => {
-      const child = Bun.spawn(['node', DESIGN_INSPECTOR_PATH, 'ui.json', '960', '540', '--preview-api', api.baseUrl,
+      const child = Bun.spawn(['node', '.beegame/delivery/inspect-design.mjs', 'ui.json', '960', '540', '--preview-api', api.baseUrl,
         '--font', 'Arial', ...args], { cwd: root, env: { ...process.env, BEEGAME_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl },
         stdout: 'pipe', stderr: 'pipe' })
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])

@@ -4,8 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { formatLayoutReport, retainLayoutReport } from './layout-report'
 import { writeDesignDocumentsFixture, uiLayoutFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
-import { materializeSceneUiFormat } from './scene-ui-content-authoring'
-import { sharedContentChecker } from './content-checker-runtime'
+import { sharedContentChecker, CONTENT_CHECKER_ENTRY } from './content-checker-runtime'
 import { writeFileSync } from 'node:fs'
 
 test('report groups identical failures without dropping scenes, geometry, conditions or unmatched issues', () => {
@@ -74,7 +73,8 @@ test('actual materialized CLI report preserves failure exit, raw coverage and au
   const root = mkdtempSync(join(tmpdir(), 'bgs-readable-layout-cli-'))
   try {
     await writeDesignDocumentsFixture(root)
-    await materializeSceneUiFormat(root)
+    mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+    writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
     const runtime = await sharedContentChecker()
     for (const [height, expected] of [[28, 1], [52, 0]] as const) {
       const path = join(root, 'content/ui/menu.json'), body = JSON.stringify(uiLayoutFixture(height))
@@ -98,7 +98,8 @@ test('Scene CLI report covers all sources and unique viewports without agent-sid
   const root = mkdtempSync(join(tmpdir(), 'bgs-readable-scene-cli-'))
   try {
     await writeDesignDocumentsFixture(root)
-    await materializeSceneUiFormat(root)
+    mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+    writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
     const runtime = await sharedContentChecker()
     for (const body of ['{', JSON.stringify(sceneLayoutFixture())]) {
       writeFileSync(join(root, 'content/scenes/level.json'), body)

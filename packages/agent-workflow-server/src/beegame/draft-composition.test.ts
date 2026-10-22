@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { mkdtempSync, rmSync, readFileSync, mkdirSync, symlinkSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, symlinkSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { composeDraft, createComposedDrafts } from './draft-composition'
@@ -7,8 +7,7 @@ import { sceneLayoutFixture, uiLayoutFixture } from './fixtures/layout-fixture'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import { inspectUiLayout, summarizeUiLayoutInspection } from '../../../scene-editor/src/ui-layout-inspection'
 import { runGameContentCommand } from './game-content-validation-cli'
-import { materializeSceneUiFormat } from './scene-ui-content-authoring'
-import { sharedContentChecker } from './content-checker-runtime'
+import { sharedContentChecker, COMPOSE_DRAFT_ENTRY } from './content-checker-runtime'
 
 function menu(): any {
   const draft = uiLayoutFixture()
@@ -73,7 +72,9 @@ test('batch preflight and path checks do not overwrite any existing draft', () =
   expect(() => createComposedDrafts(root, [{ file: 'content/scenes/a.json', document: scene() }])).toThrow('symlink')
 }))
 test('actual materialized CLI accepts one inline batch, no request file or paid service', () => fixture(async root => {
-  await materializeSceneUiFormat(root); const runtime = await sharedContentChecker()
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/delivery/compose-drafts.mjs'), COMPOSE_DRAFT_ENTRY)
+  const runtime = await sharedContentChecker()
   const child = Bun.spawn([process.execPath, '.beegame/delivery/compose-drafts.mjs', '--json', JSON.stringify([
     { file: 'content/ui/menu.json', document: menu() }, { file: 'content/scenes/map.json', document: scene() },
   ])], { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })

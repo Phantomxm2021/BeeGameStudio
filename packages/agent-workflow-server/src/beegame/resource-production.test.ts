@@ -6,8 +6,7 @@ import { createHash } from 'node:crypto'
 import { produceResources, mergeRegistrationRequests, listRegisteredResources, RESOURCE_HELP } from './resource-production'
 import { assetManifestAuthoringExamples, renderAssetManifestAuthoringContract } from './asset-manifest-authoring-contract'
 import { readBeeGameAssetManifest } from './asset-contracts'
-import { materializeContentCheckerEntry } from './scene-ui-content-authoring'
-import { sharedContentChecker } from './content-checker-runtime'
+import { sharedContentChecker, RESOURCE_PRODUCTION_ENTRY } from './content-checker-runtime'
 import { sharedSharp } from './shared-sharp'
 import sharp from 'sharp'
 
@@ -44,7 +43,8 @@ test('atlas output supplies exact registration paths and merges through the real
     expect(() => mergeRegistrationRequests([{ operation: 'register', resources: [] }])).toThrow('Empty registration')
     const manifest = await readBeeGameAssetManifest(root)
     expect(manifest.resources.find(resource => resource.id === item.id)!.local_file_hashes![request.output]).toBeTruthy()
-    await materializeContentCheckerEntry(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, '.beegame/delivery/resources.mjs'), RESOURCE_PRODUCTION_ENTRY)
     const ownerRequest = 'owner-registration.json'
     await writeFile(join(root, ownerRequest), JSON.stringify({ operation: 'register', resources: [{ ...prepared.resources[0], id: 'another' }],
       projectTarget: fixture.project_target, requirements: fixture.requirements }))
@@ -245,7 +245,8 @@ test('batch registration computes hashes, preserves web provenance and leaves re
 test('materialized resource CLI exposes real capabilities and renders without installing dependencies', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-resource-entry-'))
   try {
-    await materializeContentCheckerEntry(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, '.beegame/delivery/resources.mjs'), RESOURCE_PRODUCTION_ENTRY)
     const env = { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl }
     const capabilities = Bun.spawn([process.execPath, '.beegame/delivery/resources.mjs', '--capabilities'], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' })
     const value = JSON.parse(await new Response(capabilities.stdout).text())
@@ -265,7 +266,8 @@ test('materialized resource CLI exposes real capabilities and renders without in
 test('resource CLI preserves native manifest issues instead of request: undefined', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-resource-diagnostic-'))
   try {
-    await materializeContentCheckerEntry(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, '.beegame/delivery/resources.mjs'), RESOURCE_PRODUCTION_ENTRY)
     const fixture = assetManifestAuthoringExamples().canonical
     const item = fixture.resources[0]!
     await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
@@ -301,7 +303,8 @@ test('missing project target points to the supplied contract, not an absent save
 test('compact registration reference is executable and CLI topics remain available without writing', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-registration-help-'))
   try {
-    await materializeContentCheckerEntry(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, '.beegame/delivery/resources.mjs'), RESOURCE_PRODUCTION_ENTRY)
     const env = { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl }
     const run = async (...args: string[]) => {
       const child = Bun.spawn([process.execPath, '.beegame/delivery/resources.mjs', ...args], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' })
@@ -345,7 +348,8 @@ test('registration input distinguishes generated provenance and reports exact we
     expect(example.resources[0]).not.toHaveProperty('source')
     expect(mergeRegistrationRequests([example]).resources[0]).toEqual(example.resources[0])
 
-    await materializeContentCheckerEntry(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, '.beegame/delivery/resources.mjs'), RESOURCE_PRODUCTION_ENTRY)
     const fixture = assetManifestAuthoringExamples().canonical, item = fixture.resources[0]!
     await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
     await writeFile(join(root, item.root_path), '{}')

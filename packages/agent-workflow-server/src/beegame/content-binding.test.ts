@@ -9,7 +9,6 @@ import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contr
 import { designSupportingBytesDigest } from './design-handoff'
 import { writeBeeGameAssetManifest } from './asset-contracts'
 import { uiLayoutFixture, sceneLayoutFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
-import { materializeSceneUiFormat } from './scene-ui-content-authoring'
 import { sharedContentChecker, CONTENT_BINDING_ENTRY } from './content-checker-runtime'
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
 
@@ -145,7 +144,8 @@ test('materialized binding CLI returns hashes and identities directly before any
     await mkdir(join(root, 'content/ui'), { recursive: true })
     const file = 'content/ui/menu.json', body = JSON.stringify(uiLayoutFixture())
     await writeFile(join(root, file), body)
-    await materializeSceneUiFormat(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, '.beegame/delivery/bind-content.mjs'), CONTENT_BINDING_ENTRY)
     const runtime = await sharedContentChecker()
     for (const paths of [[file], [file, 'content/ui/missing.json']]) {
       const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/bind-content.mjs'), '--inspect', ...paths],

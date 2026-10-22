@@ -1,10 +1,6 @@
 import { TILEMAP_AUTHORING_CONTRACT } from './tilemap-authoring-contract'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { CONTENT_CHECKER_ENTRY, CONTENT_BINDING_ENTRY, MEDIA_PRODUCTION_ENTRY, RESOURCE_PRODUCTION_ENTRY, DRAFT_EDITS_ENTRY, COMPOSE_DRAFT_ENTRY } from './content-checker-runtime'
 import { CONTENT_COORDINATE_CONTRACT, UI_ANCHORS, UI_PAINT_PHASES } from '../../../scene-editor/src/content-coordinates'
 import { CONTENT_RUNTIME_CONTRACT } from './content-runtime-contract'
-import { contentConsumerDistribution } from './game-content-consumer-cli'
 import { PROJECT_GUIDE_TEMPLATE } from './workflow-v3/project-guide'
 import {
   BEEGAME_CONTENT_DOCUMENT_SCHEMA,
@@ -18,41 +14,6 @@ import {
   BEEGAME_UI_ASSET_BACKED_ROLES,
   BEEGAME_UI_NODE_ROLES,
 } from './game-content-package'
-
-export const CONTENT_FORMAT_PATH = '.beegame/delivery/content-format.json'
-export const CONTENT_CHECKER_PATH = '.beegame/delivery/check-content.mjs'
-export const CONTENT_CONSUMER_PATH = '.beegame/delivery/content-consumer.mjs'
-export const DESIGN_INSPECTOR_PATH = '.beegame/delivery/inspect-design.mjs'
-
-/** Refresh this BGS-owned entry on resumed turns as well as new authoring. */
-export async function materializeContentCheckerEntry(workspacePath: string) {
-  await mkdir(dirname(join(workspacePath, CONTENT_CHECKER_PATH)), { recursive: true })
-  await writeFile(join(workspacePath, CONTENT_CHECKER_PATH), CONTENT_CHECKER_ENTRY, 'utf8')
-  await writeFile(join(workspacePath, '.beegame/delivery/bind-content.mjs'), CONTENT_BINDING_ENTRY, 'utf8')
-  await writeFile(join(workspacePath, '.beegame/delivery/media.mjs'), MEDIA_PRODUCTION_ENTRY, 'utf8')
-  await writeFile(join(workspacePath, '.beegame/delivery/resources.mjs'), RESOURCE_PRODUCTION_ENTRY, 'utf8')
-  await writeFile(join(workspacePath, '.beegame/delivery/edit-drafts.mjs'), DRAFT_EDITS_ENTRY, 'utf8')
-  await writeFile(join(workspacePath, '.beegame/delivery/compose-drafts.mjs'), COMPOSE_DRAFT_ENTRY, 'utf8')
-}
-
-/** Design-time format is not the later project-specific authority snapshot. */
-export async function materializeSceneUiFormat(workspacePath: string) {
-  const format = structuredClone(sceneUiContentFormat()) as Record<string, any>
-  format.layoutDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-file width height`
-  format.sceneLayoutBatchInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --scene-layouts --report`
-  format.designLayoutInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --design-layouts --report`
-  format.designLayoutDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --design-layouts --draft --report`
-  format.reviewLayoutInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --review-layouts --report`
-  format.cameraDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --camera-draft workspace-relative-camera-file width height`
-  format.layoutCameraInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-ui-file host-width host-height --game-view node-id --camera workspace-relative-camera-file`
-  await mkdir(dirname(join(workspacePath, CONTENT_FORMAT_PATH)), { recursive: true })
-  await writeFile(join(workspacePath, CONTENT_FORMAT_PATH), JSON.stringify(format, null, 2) + '\n')
-  // Design geometry tool; no Manifest/index prerequisite or additional Agent turn.
-  await materializeContentCheckerEntry(workspacePath)
-  for (const [name, body] of Object.entries(await contentConsumerDistribution()))
-    await writeFile(join(workspacePath, dirname(CONTENT_CONSUMER_PATH), name), body, 'utf8')
-  await writeFile(join(workspacePath, DESIGN_INSPECTOR_PATH), await readFile(new URL('./design-browser-inspection.mjs', import.meta.url)), 'utf8')
-}
 
 /** Public, executable author inputs. The UI/index pair is a complete resource-
  * free package; the Scene is an unbound draft, not delivered artwork. */

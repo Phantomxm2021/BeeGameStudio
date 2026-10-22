@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from './asset-contracts'
-import { materializeSceneUiFormat, DESIGN_INSPECTOR_PATH } from './scene-ui-content-authoring'
+import { contentConsumerDistribution } from './game-content-consumer-cli'
 import { uiLayoutFixture } from './fixtures/layout-fixture'
 import { projectExecutionAccess } from './project-execution-access'
 import { publishProjectPreviewCapability } from './project-preview-capability'
@@ -15,7 +15,11 @@ test.skipIf(process.env.BGS_DESIGN_BROWSER !== '1')('fixed browser entry decodes
   const api = openPreviewTestAccess({ start: async () => ({ status: 'idle' }), status: () => ({ status: 'idle' }), stop() {} })
   let revoke: (() => Promise<void>) | undefined
   try {
-    await materializeSceneUiFormat(root)
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    for (const [name, body] of Object.entries(await contentConsumerDistribution()))
+      await writeFile(join(root, '.beegame/delivery', name), body)
+    await writeFile(join(root, '.beegame/delivery/inspect-design.mjs'),
+      await readFile(new URL('./design-browser-inspection.mjs', import.meta.url)))
     await mkdir(join(root, 'content/ui'), { recursive: true }); await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
     const sharp = (await import('sharp')).default
     await writeFile(join(root, 'assets/runtime/example/atlas.png'), await sharp({ create: { width: 8, height: 4, channels: 4, background: '#ff0000' } }).png().toBuffer())
@@ -35,7 +39,7 @@ test.skipIf(process.env.BGS_DESIGN_BROWSER !== '1')('fixed browser entry decodes
     const access = await projectExecutionAccess({ workspacePath: root, sessionId: 'browser-test', environment: {} })
     revoke = await publishProjectPreviewCapability(root, 'browser-test', api.baseUrl)
     const run = async (...args: string[]) => {
-      const child = Bun.spawn(['node', DESIGN_INSPECTOR_PATH, ...args], { cwd: root,
+      const child = Bun.spawn(['node', '.beegame/delivery/inspect-design.mjs', ...args], { cwd: root,
         env: { ...process.env, ...access.environment }, stdout: 'pipe', stderr: 'pipe' })
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
       return { code, stdout, stderr }

@@ -9,7 +9,7 @@ import { parseBeeGameContentIndex, type BeeGameContentPackage } from './game-con
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import type { inspectUiLayout } from '../../../scene-editor/src/ui-layout-inspection'
-import { materializeSceneUiFormat } from './scene-ui-content-authoring'
+import { sceneUiContentFormat } from './scene-ui-content-authoring'
 import { PREVIEW_ENVIRONMENT } from '@bee-game-studio/agent-workflow/preview-environment'
 import { CONTENT_CONSUMER_API } from './game-content-consumer-cli'
 import { CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
@@ -209,7 +209,8 @@ test('checker bundle retains English validation but no unused Zod locales', asyn
 
 test('project checker entry exposes no implementation and fails explicitly without its BGS runtime', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-checker-entry-')); roots.push(root)
-  await materializeSceneUiFormat(root)
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
   const path = join(root, '.beegame/delivery/check-content.mjs')
   expect(readFileSync(path, 'utf8')).toBe(CONTENT_CHECKER_ENTRY)
   expect(CONTENT_CHECKER_ENTRY).not.toContain('base64')
@@ -230,7 +231,8 @@ test('materialized Review geometry command fails saved errors and passes correct
   mkdirSync(join(root, 'docs'))
   writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
   await writeDesignDocumentFixture(root, 'LEVEL_SCENE_DESIGN.md')
-  await materializeSceneUiFormat(root)
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
   const runtime = await sharedContentChecker()
   for (const [height, valid] of [[28, false], [52, true]] as const) {
     const path = join(root, 'content/ui/menu.json'), source = JSON.stringify(uiLayoutFixture(height))
@@ -248,7 +250,6 @@ test('materialized Review geometry command fails saved errors and passes correct
 test('draft geometry checks targets without unfinished prose; final Review still requires linked sources', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-draft-geometry-cli-')); roots.push(root)
   mkdirSync(join(root, 'content/ui'), { recursive: true })
-  await materializeSceneUiFormat(root)
   const path = join(root, 'content/ui/menu.json'), ui = uiLayoutFixture()
   // The format's responsive shape is consumed at node level by the real schema.
   const format = runGameContentCommand(root, ['--format', 'uiDocument']) as any
@@ -303,8 +304,13 @@ test('Editor and Preview contracts share a selective read-only entry without con
 
 test('format entry reads one actual contract section without full Content or resource prerequisites', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-format-section-')); roots.push(root)
-  await materializeSceneUiFormat(root)
-  const path = join(root, '.beegame/delivery/content-format.json'), before = readFileSync(path, 'utf8')
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
+  const path = join(root, '.beegame/delivery/content-format.json')
+  writeFileSync(path, JSON.stringify({ ...sceneUiContentFormat(),
+    layoutDraftInspectionCommand: 'bun .beegame/delivery/check-content.mjs --layout-draft workspace-relative-file width height',
+  }))
+  const before = readFileSync(path, 'utf8')
   const format = JSON.parse(before)
   expect(format).not.toHaveProperty('layoutDraftAppendixCommand')
   expect(runGameContentCommand(root, ['--format'])).toMatchObject({ ok: true, sections: [...Object.keys(format), 'preview'] })
@@ -352,7 +358,6 @@ test('format entry reads one actual contract section without full Content or res
 test('published linked UI and Tilemap examples run through real draft checks without production assets', async () => {
   await initializeUiLayout()
   const root = mkdtempSync(join(tmpdir(), 'bgs-connected-format-')); roots.push(root)
-  await materializeSceneUiFormat(root)
   mkdirSync(join(root, 'content/scenes'), { recursive: true })
   mkdirSync(join(root, 'content/ui'), { recursive: true })
   const tilemap = (runGameContentCommand(root, ['--format', 'tilemap']) as any).values.tilemap.examples.scene
@@ -489,7 +494,8 @@ test('design appendix comes from actual shared geometry, preserves sources and n
   if (!('bounds' in play)) throw Error('Expected UI bounds')
   expect(appendix).toContain(JSON.stringify(play.bounds))
   expect(readFileSync(path, 'utf8')).toBe(original)
-  await materializeSceneUiFormat(root)
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
   const runtime = await sharedContentChecker()
   const child = Bun.spawn([process.execPath, join(root,'.beegame/delivery/check-content.mjs'), ...args, '--appendix'],
     { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
@@ -591,7 +597,8 @@ test('compact Scene diagnostics retain clipping and unknown geometry, including 
 
 test('large detailed layout JSON survives a slow stdout pipe including failed checks', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-layout-pipe-')); roots.push(root)
-  await materializeSceneUiFormat(root)
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
   mkdirSync(join(root, 'content/ui'), { recursive: true })
   const source = uiLayoutFixture(28) as any
   source.data.nodes.push(...Array.from({ length: 500 }, (_, i) => ({
