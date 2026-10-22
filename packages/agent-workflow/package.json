@@ -8,7 +8,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./opencode-go": "./src/opencode-go.ts",
-    "./native-diagnostics": "./src/native-diagnostics.ts",
     "./native-response-trace": "./src/native-response-trace.ts",
     "./subagent-activity": "./src/subagent-activity.ts",
     "./design-review-result": "./src/design-review-result.ts",

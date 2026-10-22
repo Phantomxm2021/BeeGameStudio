@@ -160,8 +160,8 @@ test('handoff sends reference reading to native Read without a visual certificat
     const design = openDesignActions(root)
     const help = await design('help', [], undefined, true) as any
     expect(help.instruction).toContain('Read selected reference pictures')
-    expect(help.instruction).toContain('Unproduced inputs remain planned')
-    expect(help.instruction).toContain('reconcile actual resources and Editor data in their owning documents before implementation')
+    expect(help.instruction).toContain('Keep later inputs planned')
+    expect(help.instruction).toContain('reconcile the interfaces and inputs needed for the current part before locking')
     expect(help.instruction).toContain('including the technical approach and necessary implementation guidance in TECHNICAL_DESIGN.md')
     expect(help.instruction).toContain('BGS does not require output indexes, task graphs or coverage mappings')
     expect(help.instruction).not.toContain('Technical notes before these inputs are drafts')

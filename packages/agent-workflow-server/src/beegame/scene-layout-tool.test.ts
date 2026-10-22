@@ -8,7 +8,6 @@ import { prepareNativeMcpConfig } from './native-mcp-config'
 import { sceneLayoutFixture, uiLayoutFixture } from './fixtures/layout-fixture'
 import { runGameContentCommand } from './game-content-validation-cli'
 import { writeBeeGameAssetManifest, type BeeGameAssetManifest } from './asset-contracts'
-import { applyDraftEdits } from './draft-edits'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -39,7 +38,7 @@ function text(result: Awaited<ReturnType<Client['callTool']>>) {
   return (result.content as Array<{ text?: string }>).map(c => c.text ?? '').join('\n')
 }
 
-test('native Scene tool reports actual hierarchy and Camera coordinates read-only, and sees exact source edits', async () => {
+test('native Scene tool reports actual hierarchy and Camera coordinates read-only, and sees saved source edits', async () => {
   const { root, scene, save } = fixture()
   scene.data.nodes.push({ id: 'optional', transform: { position: [3000, 0, 0] }, components: [
     { id: 'optional-visual', type: 'sprite-renderer', data: { color: '#fff', size: [20, 20] } },
@@ -67,9 +66,8 @@ test('native Scene tool reports actual hierarchy and Camera coordinates read-onl
     expect(text(details)).toContain(JSON.stringify(expected.inspections[0].nodes.find((n: any) => n.id === 'actor').screenBounds))
     expect(readFileSync(join(root, 'content/scenes/level.json'))).toEqual(before)
     expect(readdirSync(root, { recursive: true })).toEqual(files)
-    expect(applyDraftEdits(root, [{ file: 'content/scenes/level.json', replacements: [
-      { old: '"orthographicSize": 2.7', new: '"orthographicSize": 5.4' },
-    ] }]).valid).toBe(true)
+    scene.data.nodes[0].components[0].data.orthographicSize = 5.4
+    save('content/scenes/level.json', scene)
     const changed = await access.client.callTool({ name: 'CheckSceneLayouts', arguments: { detailsFor: 'content/scenes/level.json' } })
     expect(changed.isError).toBe(false)
     expect(text(changed)).toContain('"orthographicSize":5.4')
@@ -94,9 +92,8 @@ test('Camera-reference success cannot substitute for actual UI allocation; norma
     const narrow = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })
     expect(narrow.isError).toBe(true)
     expect(text(narrow)).toContain('Scene required visibility failed: actor')
-    expect(applyDraftEdits(root, [{ file: 'content/scenes/level.json', replacements: [
-      { old: '"orthographicSize": 2.7', new: '"orthographicSize": 5.4' },
-    ] }]).valid).toBe(true)
+    scene.data.nodes[0].components[0].data.orthographicSize = 5.4
+    save('content/scenes/level.json', scene)
     expect((await access.client.callTool({ name: 'CheckSceneLayouts', arguments: {} })).isError).toBe(false)
     expect((await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })).isError).toBe(false)
   } finally { await access.close() }

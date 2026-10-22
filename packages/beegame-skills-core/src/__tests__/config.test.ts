@@ -5,15 +5,15 @@ describe('BeeGame skills config', () => {
   test('requires user skill synchronization by default in production', () => {
     expect(resolveBeeGameSkillsConfig({
       NODE_ENV: 'production',
-      BEEGAME_SKILLS_SERVICE_URL: 'https://skills.example.invalid',
-    })).toMatchObject({ required: true })
+      BEEGAME_SKILLS_API_BASE_URL: 'https://skills.example.invalid',
+    })).toMatchObject({ required: true, apiBaseUrl: 'https://skills.example.invalid' })
   })
 
   test('keeps local development resilient unless strict synchronization is requested', () => {
     expect(resolveBeeGameSkillsConfig({
       NODE_ENV: 'development',
-      BEEGAME_SKILLS_SERVICE_URL: 'http://127.0.0.1:62176',
-    })).toMatchObject({ required: false })
+      BEEGAME_SKILLS_API_BASE_URL: 'http://127.0.0.1:62176',
+    })).toMatchObject({ required: false, apiBaseUrl: 'http://127.0.0.1:62176' })
   })
 
   test('honors an explicit synchronization policy in every environment', () => {

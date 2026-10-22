@@ -1,7 +1,5 @@
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 export { runContentBindingCli } from './content-binding'
-export { runDraftEditsCli } from './draft-edits'
-export { runComposeDraftCli } from './draft-composition'
 import { readDesignSections, reviewSourceSnapshot } from './design-source-reading'
 import { sceneUiContentFormat } from './scene-ui-content-authoring'
 export { CONTENT_DRAFT_EXAMPLES } from './scene-ui-content-authoring'

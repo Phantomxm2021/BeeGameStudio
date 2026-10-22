@@ -23,8 +23,6 @@ export const CURRENT_CONTENT_CHECKER_ENTRY = CONTENT_CHECKER_ENTRY
 export const CONTENT_BINDING_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'binding entry').replace('runGameContentCli', 'runContentBindingCli').replace('runGameContentCli', 'runContentBindingCli')
 export const MEDIA_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'media entry').replaceAll('runGameContentCli', 'runMediaProductionCli')
 export const RESOURCE_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'resource entry').replaceAll('runGameContentCli', 'runResourceProductionCli')
-export const DRAFT_EDITS_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'draft editing entry').replaceAll('runGameContentCli', 'runDraftEditsCli')
-export const COMPOSE_DRAFT_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'draft composition entry').replaceAll('runGameContentCli', 'runComposeDraftCli')
 export function sharedContentChecker(): Promise<{ root: string; path: string; moduleUrl: string; uiLayoutToolPath: string }> {
   return checker ??= (async () => {
     // Build in a fresh process: repeated in-process Bun builds can misresolve
