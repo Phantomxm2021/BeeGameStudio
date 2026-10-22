@@ -256,9 +256,8 @@ const actions = {
     const measured=await request('/workflow-v3/agent/measurements/'+encodeURIComponent(source.measurementId));
     if(!measured.freshness.current)throw Error('该构建已非当前版本；保留原观察，重新核对实际版本，不自动重绑');
     el('message-text').value='请核查这份实际构建观察。它是用户观察，不是已证实缺陷；是否修改以本次消息授权为准。\n'+pretty({...source,steps:body.steps,expected:body.expected,observed:body.observed});
-    // Preparing a draft never authorizes repair or dispatches a model. The user
-    // chooses discuss/work/change and prepares the version-bound message.
-    el('message-intent').value='discuss';messageRequest=undefined;
+    // Preparing an ordinary chat draft does not dispatch a model.
+    el('message-intent').value='message';messageRequest=undefined;
     return {prepared:'native-message-draft',dispatched:false,source};
   },
   content: async () => {

@@ -64,7 +64,7 @@ try {
   observation.steps='Open the measured page';observation.expected='Target 3 for the original request';observation.observed='Target 3 is displayed';
   await page.locator('#observation-json').fill(JSON.stringify(observation));await click('observation-message');
   assert.equal((await result()).dispatched,false);
-  assert.equal(await page.locator('#message-intent').inputValue(),'discuss');
+  assert.equal(await page.locator('#message-intent').inputValue(),'message');
   assert.match(await page.locator('#message-text').inputValue(),new RegExp(firstMeasurement.id));
   assert.equal((await api('workflow-v3')).run.agentTurns.length,1,'observation drafts must not dispatch or publish Tasks');
   observation.artifactSha256='changed';await page.locator('#observation-json').fill(JSON.stringify(observation));
@@ -115,12 +115,13 @@ try {
     await page.locator('#message-intent').selectOption(intent);await page.locator('#message-text').fill(text);
     await click('prepare-message');
   };
-  await prepareMessage('discuss','Explain the existing target; do not modify the project');
+  await prepareMessage('message','Explain the existing target; do not modify the project');
   await click('submit-message',true);const discussion=await result();
   const discussed=await waitTurn(2);
-  assert.equal(discussed.requirements.revision,run.requirements.revision);
+  assert.notEqual(discussed.requirements.revision,run.requirements.revision);
+  assert.equal(discussed.agentTurns[1].message.intent,'message');
   await click('submit-message',true);assert.equal((await result()).turn.attemptId,discussion.turn.attemptId);
-  await click('content');const editable=await result();assert.equal(editable.readOnly,false);assert.equal(editable.editing.planRevision,0);
+  await click('content');const editable=await result();assert.equal(editable.readOnly,false);assert.equal(editable.editing.planRevision,discussed.planRevision);
   await page.locator('#document').selectOption('ui/menu.json');
   const ui=JSON.parse(await page.locator('#document-json').inputValue());ui.data.nodes[1].layout.size[1]=64;
   await page.locator('#document-json').fill(JSON.stringify(ui));await click('save');
@@ -142,7 +143,7 @@ try {
   await page.locator('#document-json').fill(JSON.stringify(scene));await click('save');
   const edited=(await api('workflow-v3')).run;
   assert.equal(edited.agentTurns.length,2,'editor does not dispatch a model');assert.equal(['plans','tasks','attempts'].some(key=>key in edited),false);
-  assert.equal(edited.sourceEdits.length,2);assert.equal(edited.requirements.revision,run.requirements.revision,'source save does not silently rewrite requirements');
+  assert.equal(edited.sourceEdits.length,2);assert.equal(edited.requirements.revision,discussed.requirements.revision,'source save does not silently rewrite requirements');
   await prepareMessage('change','Change target from three to four; preserve the explicitly saved UI height 64 and scene x=30, update the rule check, rebuild and measure, preserving notes');
   await click('submit-message',true);const changed=await waitTurn(3);
   await page.locator('#evidence-path').fill('README.md');await click('read-evidence');
@@ -151,7 +152,7 @@ try {
   assert.notEqual(changedEvidence.requirements.revision,evidence.requirements.revision);
   assert.equal(changedEvidence.source.utf8ContentSha256,evidence.source.utf8ContentSha256,'unrelated record preserved');
   assert.equal(changedEvidence.acceptance,'unverified','unchanged report is not acceptance of new requirements');
-  assert.notEqual(changed.requirements.revision,run.requirements.revision);assert.equal(changed.requirementChanges.length,1);
+  assert.notEqual(changed.requirements.revision,discussed.requirements.revision);assert.equal(changed.requirementChanges.length,2);
   const previousMeasurement=await api('workflow-v3/agent/measurements/'+firstMeasurement.id);
   assert.equal(previousMeasurement.freshness.current,false);
   assert.ok(changed.agentTurns[2].measurements?.length,JSON.stringify((await api('workflow-v3/events')).events.filter(e=>e.type==='tool.completed'||e.type==='tool.failed').slice(-6)));
@@ -206,7 +207,7 @@ try {
   await click('read-measurement');assert.equal((await result()).freshness.current,true);
   await click('submit-message',true);assert.equal((await result()).turn.attemptId,maintained.agentTurns[5].attemptId);
   await page.locator('#message-context').selectOption('resume');
-  await prepareMessage('discuss','Explain the maintained project without changing anything');
+  await prepareMessage('message','Explain the maintained project without changing anything');
   await click('submit-message',true);const focusedDiscussion=await waitTurn(7);
   assert.equal(focusedDiscussion.agentTurns[6].nativeSessionId,maintained.agentTurns[5].nativeSessionId);
   assert.deepEqual(errors,[]);

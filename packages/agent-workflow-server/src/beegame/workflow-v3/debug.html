@@ -48,7 +48,7 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 </section>
 <section>
 <h2>同工程原生消息</h2>
-<label>本次授权<select id="message-intent"><option value="discuss">只讨论，不授权修改</option><option value="work">按现有目标检查／修复，不变更需求</option><option value="change">明确变更需求并修改</option><option value="continue">继续最近中断的工作</option></select></label>
+<label>本次消息<select id="message-intent"><option value="message">普通聊天</option><option value="work">按现有目标检查／修复，不变更需求</option><option value="change">明确变更需求并修改</option><option value="continue">继续最近中断的工作</option></select></label>
 <label>执行上下文<select id="message-context"><option value="resume">保留当前原生上下文（默认）</option><option value="focused">聚焦上下文（work／change／continue；须已确认退出）</option></select></label>
 <p>聚焦模式保留工程和 Chat、当前需求、原始用户请求及已记录 Question 答复；不传旧模型／工具历史或已加载 Skill 正文。依赖旧讨论里的隐含决定时请选择保留上下文。不会替换中断续作、重发目标、继承旧权限或自动追加执行。</p>
 <label>用户消息<textarea id="message-text" aria-label="同工程用户消息" spellcheck="false"></textarea></label>
@@ -91,7 +91,7 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <button id="prepare-observation">从当前 Preview 准备问题草稿</button>
 <textarea id="observation-json" aria-label="Preview 观察 JSON" spellcheck="false"></textarea>
 <button id="observation-message">自主 Run：转入同工程消息草稿（不执行）</button>
-<p>观察草稿绑定实际测量和构建指纹，默认只讨论。填写操作步骤、预期与实际表现；它不是已证实缺陷。确认后通过同工程消息交给 Agent，修改后重新构建和测量。</p>
+<p>观察草稿绑定实际测量和构建指纹。填写操作步骤、预期与实际表现；它不是已证实缺陷。确认后通过普通聊天交给 Agent，修改后重新构建和测量。</p>
 </section>
 <section><h2>最近响应／失败诊断</h2><p id="status" role="status">未发起请求</p><pre id="result"></pre></section>
 <script src="/debug/workflow-v3/client.js"></script>

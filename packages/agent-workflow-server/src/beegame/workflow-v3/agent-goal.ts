@@ -32,14 +32,14 @@ export const agentGoalSchema = z.object({
 export const agentMessageSchema = z.object({
   requestKey:z.string().trim().min(1),runId:z.string().min(1),chatSessionId:z.string().min(1),
   expectedVersion:z.number().int().positive(),requirementsRevision:z.string().min(1),
-  intent:z.enum(['message','discuss','work','change','continue']).default('message'),text:z.string().trim(),
+  intent:z.enum(['message','work','change','continue']).default('message'),text:z.string().trim(),
   attachments:z.array(z.unknown()).max(8).optional(),
   continuationOf:z.string().min(1).optional(),
   contextMode:z.enum(['resume','focused']).optional(),
 }).strict().refine(value=>Boolean(value.text || value.attachments?.length),
   {message:'A message needs text or an attachment'}).refine(value=>value.intent==='continue' ? Boolean(value.continuationOf) : value.continuationOf===undefined,
   {message:'Only explicit continuation requires continuationOf'}).refine(value=>value.contextMode!=='focused'||['work','change','continue'].includes(value.intent),
-  {message:'Focused execution requires work, change or continuation, not discussion'})
+  {message:'Focused execution requires work, change or continuation'})
 
 // Business data and authorization contracts only. Execution methods stay in Skills.
 const professionalContextParagraphs = [
@@ -57,8 +57,7 @@ export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVers
   ...(requiresBgsEditableContent(run) ? [editableWebDeliveryContext] : []),
 ].join('\n')
 export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run['sourceEdits']> = []): string {
-  return [...(message.intent==='discuss' ? ['This request authorizes discussion only, without changes or execution.'] : []),
-    ...(edits.length ? ['User-authorized source saves since the preceding native turn:\n'+
+  return [...(edits.length ? ['User-authorized source saves since the preceding native turn:\n'+
     JSON.stringify([...new Map(edits.map(e=>[e.sourceEdit.path,{path:e.sourceEdit.path,status:e.sourceEdit.status}])).values()])] : []),
     'User message:\n'+message.text].join('\n\n')
 }
@@ -122,7 +121,8 @@ export function focusedExecutionFacts(run: Run, events: Awaited<ReturnType<typeo
     // The literal current requirements are supplied once through bgsConfirmedBrief.
     requirements,
     // Message/change text already belongs to requirements; old work/continue
-    // requests are execution history. Discussion may hold otherwise unsaved choices.
+    // requests are execution history. Legacy discuss records may hold choices
+    // absent from requirements; retain their original text when reading history.
     priorUserRequests:run.agentTurns!.slice(0,-1).flatMap(t=>t.message?.intent==='discuss'?[{requestKey:t.requestKey,intent:t.message.intent,text:t.message.text}]:[]),
     otherUserMessages,
     answeredQuestions,
@@ -278,8 +278,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         },
         // The BGS adapter delivers this context through turn/start's application
         // slot, so resumed threads receive current capabilities and host facts.
-        // Project conventions/navigation are one current file snapshot, including
-        // discussion; production capabilities stay scoped to authorized work.
+        // Project conventions/navigation are one current file snapshot.
         prepareTurn:async ()=>{
           const savedGuide=await readProjectGuide(run.workspacePath)
           const guide=projectGuideContext(savedGuide)
@@ -296,7 +295,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
             authorized_user_changes:pendingChanges.filter(item=>item.intent==='change').map(({requestKey,text})=>({requestKey,text})),
             user_messages:pendingChanges.filter(item=>item.intent==='message').map(({requestKey,text})=>({requestKey,text})),
           }):''
-          if(turn.message?.intent==='discuss')return {systemContext:guide,...(confirmedChanges?{turnContext:confirmedChanges}: {})}
           tools=await openAgentTools({ workspacePath:run.workspacePath, constraints:run.requirements.constraints,
             requireEditableContent:requiresBgsEditableContent(run),
             sessionId:session.id,openPreview:options.openPreview ? async ()=>preview=await options.openPreview!() : undefined,

@@ -21,6 +21,8 @@ test('debug page is absent by default and cannot expose a shell on public hosts'
   expect(await response.text()).toContain('仅当前页内存')
   const page=await (await enabled.request('http://localhost/debug/workflow-v3')).text()
   expect(page).toContain('Preview 观察 → 同工程消息')
+  expect(page).toContain('<option value="message">普通聊天</option>')
+  expect(page).not.toContain('value="discuss"')
   expect(page).not.toContain('旧 Task 兼容入口')
   expect(page).not.toContain('需要修复时自行选择“明确变更需求并修改”')
   // Serving an inert shell adds no API, credentials or execution authority.

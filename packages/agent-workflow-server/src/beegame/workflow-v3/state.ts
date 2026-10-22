@@ -146,6 +146,7 @@ export type SourceEdit = {
 }
 export type AgentMessage = {
   requestKey: string; runId: string; chatSessionId: string; expectedVersion: number;
+  // Persisted history can contain discuss; the request schema no longer accepts it.
   requirementsRevision: string; intent: 'message' | 'discuss' | 'work' | 'change' | 'continue'; text: string;
   attachmentDigests?: Array<{ filename: string; mediaType: string; sha256: string }>;
   continuationOf?: string;

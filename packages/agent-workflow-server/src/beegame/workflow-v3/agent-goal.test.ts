@@ -112,7 +112,7 @@ test('ended native goal exposes independent host evidence, never author acceptan
   } finally {await f.close()}
 })
 
-test('image bridge binds real goal owner/project, never opens for discussion or duplicate intake',async()=>{
+test('image bridge binds real goal owner/project and never opens for duplicate intake',async()=>{
   const calls:any[]=[];let closes=0
   const f=await fixture('normal',false,undefined,undefined,value=>{
     calls.push(value);return {endpoint:'http://127.0.0.1:1/synthetic-image',instruction:'not a generation',
@@ -125,28 +125,32 @@ test('image bridge binds real goal owner/project, never opens for discussion or 
     expect(closes).toBe(1)
     await f.call('/agent/goal','POST',f.body);expect(calls).toHaveLength(1)
     const make=(intent:string)=>({requestKey:intent,runId:run.id,chatSessionId:run.chatSessionId,expectedVersion:run.version,
-      requirementsRevision:run.requirements.revision,intent,text:intent==='discuss'?'Explain current game':'Change a color'})
-    await f.call('/agent/messages','POST',make('discuss'));run=await f.wait(r=>Boolean(r.agentTurns![1]?.finishedAt))
-    expect(calls).toHaveLength(1)
-    await f.call('/agent/messages','POST',make('change'));await f.wait(r=>Boolean(r.agentTurns![2]?.finishedAt))
+      requirementsRevision:run.requirements.revision,intent,text:'Change a color'})
+    await f.call('/agent/messages','POST',make('change'));await f.wait(r=>Boolean(r.agentTurns![1]?.finishedAt))
     expect(calls).toHaveLength(2);expect(calls[1].visualHandoffVersion).toBe(1);expect(closes).toBe(2)
   }finally{await f.close()}
 })
 
-test('default Chat message uses the database-authorized requirement-change event',async()=>{
+test('ordinary Chat preserves discussion text and rejects the retired discuss mode without dispatch',async()=>{
   const f=await fixture()
   try {
     await f.call('/agent/goal','POST',f.body)
     const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    const response=await f.call('/agent/messages','POST',{
+    const message={
       requestKey:'ordinary-chat-1',runId:run.id,chatSessionId:run.chatSessionId,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,
       text:'Which checks passed? Do not change files.',
-    })
+    }
+    expect((await f.call('/agent/messages','POST',{...message,intent:'discuss'})).status).toBe(400)
+    expect(f.submissions).toHaveLength(1)
+    expect((await f.store.read(run.projectId,run.ownerId))?.version).toBe(run.version)
+    const response=await f.call('/agent/messages','POST',message)
     expect(response.status).toBe(202)
     const after=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(after.requirementChanges).toHaveLength(1)
     expect(after.agentTurns?.[1]?.message?.intent).toBe('message')
+    expect(f.submissions[1]!.prompt).toBe('User message:\n'+message.text)
+    expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
     expect(f.events.filter(event=>event==='requirements.changed')).toHaveLength(1)
   }finally{await f.close()}
 })
@@ -434,7 +438,7 @@ test('goal and follow-ups leave catalog reads to the Agent and preserve user sou
     expect(initial).toContain('Honor explicit resource sources and usage rights')
     expect(JSON.parse(run.requirements.text)).toEqual(f.body.brief)
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
-    for(const intent of ['discuss','work','change'] as const) {
+    for(const intent of ['work','change'] as const) {
       const turnCount=run.agentTurns!.length
       expect((await f.call('/agent/messages','POST',{requestKey:'followup-'+intent,runId:run.id,
         chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
@@ -443,27 +447,26 @@ test('goal and follow-ups leave catalog reads to the Agent and preserve user sou
       expect(JSON.stringify(f.submissions[turnCount]!.prompt)).not.toContain('Initial built-in resource catalog')
     }
     expect(calls).toHaveLength(0)
-    expect(f.submissions).toHaveLength(4)
+    expect(f.submissions).toHaveLength(3)
   }finally{await f.close();upstream.stop(true)}
 })
 
-test('same-project discussion/change reuse native history; one CAS changes revision, duplicates never dispatch again',async()=>{
+test('same-project work/change reuse native history; one CAS changes revision, duplicates never dispatch again',async()=>{
   const f=await fixture()
   try {
     await f.call('/agent/goal','POST',f.body)
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    const message=(key:string,intent:'discuss'|'change',text:string)=>({requestKey:key,runId:run.id,
+    const message=(key:string,intent:'work'|'change',text:string)=>({requestKey:key,runId:run.id,
       chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent,text})
-    const original=structuredClone(run.requirements),discussion=message('discuss-1','discuss','Explain the existing rules; do not change them')
-    expect((await f.call('/agent/messages','POST',discussion)).status).toBe(202)
+    const original=structuredClone(run.requirements),work=message('work-1','work','Inspect the existing rules; do not change them')
+    expect((await f.call('/agent/messages','POST',work)).status).toBe(202)
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(run.requirements).toEqual(original);expect(run.requirementChanges).toBeUndefined()
     expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
     expect(f.starts[1].env.BEEGAME_CONFIG_DIR).toBe(f.starts[0].env.BEEGAME_CONFIG_DIR)
-    expect(String(f.submissions[1]!.prompt)).toContain('discussion only, without changes or execution')
+    expect(String(f.submissions[1]!.prompt)).toContain(work.text)
     expect(JSON.stringify(f.submissions[1]!.prompt)).not.toContain('GDD.md')
     expect(f.starts[1].systemContext).not.toContain('Professional coverage:')
-    expect(f.starts[1].systemContext).not.toContain('Current BGS tools directory')
     expect(f.starts[1].systemContext).toContain('No root project guide exists')
     const change=message('change-1','change','Change the target to four, preserve unrelated notes and rerun the rule test')
     const [a,b]=await Promise.all([f.call('/agent/messages','POST',change),f.call('/agent/messages','POST',change)])
@@ -478,7 +481,7 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect((await f.call('/agent/messages','POST',change)).status).toBe(202)
     expect((await f.call('/agent/messages','POST',{...change,text:'Another change'})).status).toBe(409)
     expect((await f.call('/agent/messages','POST',{...change,requestKey:'stale-change'})).status).toBe(409)
-    expect((await f.call('/agent/messages','POST',{...message('wrong-chat','discuss','Question'),chatSessionId:'foreign'})).status).toBe(400)
+    expect((await f.call('/agent/messages','POST',{...message('wrong-chat','work','Question'),chatSessionId:'foreign'})).status).toBe(400)
     // Original intake stays idempotent even after requirement revisions.
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     expect(f.submissions).toHaveLength(3)
@@ -569,7 +572,7 @@ test('first follow-up preserves requirements and resumes native history unless f
   }finally{await f.close()}
 })
 
-test('project guide refreshes at the next turn, including discussion, without repeating user history or changing requirements',async()=>{
+test('project guide refreshes at the next work turn without repeating user history or changing requirements',async()=>{
   const f=await fixture()
   try {
     const file=join(f.root,'AGENTS.md'),first='# Project navigation\nGUIDE_ROUTE_ONE\nRun: existing actual command\n'+
@@ -598,20 +601,16 @@ test('project guide refreshes at the next turn, including discussion, without re
     expect(f.starts[1].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
     expect(await readFile(file,'utf8')).toBe(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO'))
     expect(f.starts[1].systemContext).not.toContain('GUIDE_ROUTE_ONE')
-    await send('discuss','guide-discuss')
-    expect(f.starts[2].systemContext).not.toContain('GUIDE_ROUTE_TWO')
-    expect(f.starts[2].systemContext).toContain(digest(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO')))
-    expect(f.starts[2].systemContext).not.toContain('Professional coverage:')
     await writeFile(file, PROJECT_WORKING_CONVENTIONS)
     await send('work', 'guide-current')
-    expect(f.starts[3].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
-    expect(f.starts[3].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
+    expect(f.starts[2].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
+    expect(f.starts[2].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
     expect(await readFile(file, 'utf8')).toBe(PROJECT_WORKING_CONVENTIONS)
     await rm(file);await send('work','guide-missing')
-    expect(f.starts[4].systemContext).toContain('No root project guide exists')
-    expect(f.starts[4].systemContext).not.toContain('GUIDE_ROUTE_TWO')
-    expect(f.starts[4].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
-    expect(f.starts[4].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
+    expect(f.starts[3].systemContext).toContain('No root project guide exists')
+    expect(f.starts[3].systemContext).not.toContain('GUIDE_ROUTE_TWO')
+    expect(f.starts[3].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
+    expect(f.starts[3].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
     expect(run.requirements).toEqual(requirements)
     expect(run.requirementChanges).toBeUndefined()
     expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
@@ -626,7 +625,7 @@ test('focused work is explicit and retains Chat/sources but does not resume the 
     const original=structuredClone(run.requirements),chat=run.chatSessionId,native=run.agentTurns![0]!.nativeSessionId
     const make=(key:string,intent:string,mode?:string)=>({requestKey:key,runId:run.id,chatSessionId:chat,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent,text:'Specific existing work',...(mode?{contextMode:mode}:{})})
-    expect((await f.call('/agent/messages','POST',make('invalid-discuss','discuss','focused'))).status).toBe(400)
+    expect((await f.call('/agent/messages','POST',make('invalid-message','message','focused'))).status).toBe(400)
     const request=make('focused-work','work','focused')
     expect((await f.call('/agent/messages','POST',request)).status).toBe(202)
     run=await f.wait(r=>r.agentTurns!.at(-1)!.requestKey==='focused-work'&&Boolean(r.agentTurns!.at(-1)!.finishedAt))
@@ -744,7 +743,28 @@ test('goal settlement leaves the project guide unchanged after native source wri
   }finally{await f.close()}
 })
 
-test('focused facts retain literal user decisions and answered Questions, never tool history or permission grants',()=>{
+test('local and remote stores read saved discuss messages without rewriting their history',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-legacy-discuss-'))
+  try {
+    const run=createRun({projectId:'legacy',ownerId:'owner',workspacePath:root,chatSessionId:'chat',
+      requestKey:'goal',text:'Original requirements',constraints:{},ids:['goal']})
+    const message={requestKey:'old-discussion',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:1,requirementsRevision:run.requirements.revision,intent:'discuss' as const,text:'Keep the blue option'}
+    run.agentTurns=[{attemptId:'old-turn',requestKey:message.requestKey,sessionId:run.chatSessionId,
+      workerId:'old-worker',fence:1,status:'ended',startedAt:run.createdAt,finishedAt:run.createdAt,message}]
+    const local=createLocalWorkflowStore(root)
+    await local.commit(run.projectId,run.ownerId,0,run,'legacy.fixture')
+    const remote=createRemoteWorkflowStore({url:'https://fixture.invalid',serviceKey:'synthetic',
+      fetchImpl:async()=>Response.json(run)})
+    for(const store of [local,remote]) {
+      const restored=await store.read(run.projectId,run.ownerId)
+      expect(restored).toEqual(run)
+      expect(restored?.agentTurns?.[0]?.message).toEqual(message)
+    }
+  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('focused facts retain legacy discuss records and answered Questions, never tool history or permission grants',()=>{
   const requirements={text:JSON.stringify({idea:'CONFIRMED_GOAL',
     user_messages:[{requestKey:'saved-message',text:'Keep the selected theme'}],
     authorized_user_changes:[{requestKey:'saved-change',text:'Use keyboard controls'}]}),revision:'rev',constraints:{},ids:['goal'],sha256:'fixture-sha'}
@@ -853,7 +873,7 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).not.toContain('computed equal-cell grid')
     expect(prompt.length).toBeLessThan(7000)
   }
-  for(const intent of ['message','change','continue','discuss'] as const) {
+  for(const intent of ['message','change','continue'] as const) {
     const prompt=agentMessagePrompt({...message,intent})
     expect(prompt).not.toContain('eight documents')
     expect(prompt).not.toContain('full design or resource-production cycle')
@@ -1040,7 +1060,7 @@ test('native pause/cleanup revokes resource access before releasing its workspac
   }finally{await f.close()}
 })
 
-test('Preview is bound by the route; discussion and duplicate intake never open it; pause drains before unlock',async()=>{
+test('Preview is bound by the route; duplicate intake never opens it; pause drains before unlock',async()=>{
   const calls:any[]=[];let release!:()=>void,closing=false
   const drain=new Promise<void>(resolve=>{release=resolve})
   const f=await fixture('normal',false,undefined,value=>{
@@ -1054,12 +1074,10 @@ test('Preview is bound by the route; discussion and duplicate intake never open 
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
     expect(calls[0]).toMatchObject({workspacePath:f.root,sessionId:run.chatSessionId,user:{id:'owner'}})
     await f.call('/agent/goal','POST',f.body);expect(calls).toHaveLength(1)
-    const msg=(key:string,intent:'discuss'|'change')=>({requestKey:key,runId:run.id,chatSessionId:run.chatSessionId,
+    const msg=(key:string,intent:'change')=>({requestKey:key,runId:run.id,chatSessionId:run.chatSessionId,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent,text:'Synthetic message'})
-    await f.call('/agent/messages','POST',msg('discussion','discuss'))
-    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt));expect(calls).toHaveLength(1)
     closing=false;f.setMode('wait');await f.call('/agent/messages','POST',msg('change','change'))
-    await f.wait(()=>f.submissions.length===3)
+    await f.wait(()=>f.submissions.length===2)
     let stopFinished=false
     const stopping=Promise.resolve(f.call('/stop','POST')).then(response=>{stopFinished=true;return response})
     await f.wait(()=>closing)
@@ -1070,7 +1088,7 @@ test('Preview is bound by the route; discussion and duplicate intake never open 
     expect((await stopping).status).toBe(202)
     expect((await resuming).status).toBe(200)
     run=(await f.store.read('goal-project','owner'))!
-    expect(run.writer).toBeUndefined();expect(run.agentTurns![2]!.status).toBe('interrupted')
+    expect(run.writer).toBeUndefined();expect(run.agentTurns![1]!.status).toBe('interrupted')
     expect(calls).toHaveLength(2)
   }finally{release();await f.close()}
 })
@@ -1174,7 +1192,7 @@ test('a repeated native message survives database-style key reordering without a
     await f.call('/agent/goal','POST',f.body)
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
     const message={requestKey:'db-order-message',runId:run.id,chatSessionId:run.chatSessionId,
-      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'discuss' as const,text:'Synthetic discussion'}
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'message' as const,text:'Synthetic question'}
     await f.call('/agent/messages','POST',message)
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     const duplicate=await executor.message(reverseKeys(run),message,{})
@@ -1465,7 +1483,7 @@ test('new and resumed goals retain requested scope while Agent selects Skills; f
     expect(agentGoalPrompt(other as Run)).not.toStartWith('/')
     expect(agentGoalPrompt(other as Run)).not.toContain('$game-creative-director-expert')
   }
-  for(const intent of ['message','work','continue','discuss','change'] as const)
+  for(const intent of ['message','work','continue','change'] as const)
     expect(agentMessagePrompt({intent,text:'继续处理'} as any)).not.toContain('/bgs-builtins:')
 })
 
