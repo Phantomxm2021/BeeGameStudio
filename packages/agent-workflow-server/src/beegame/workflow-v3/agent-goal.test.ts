@@ -10,12 +10,13 @@ import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProf
 import { createRun, digest, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
-import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS, PRODUCTION_DEPENDENCIES } from './project-guide'
+import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS, VISUAL_REFERENCE_EXPECTATIONS, PRODUCTION_DEPENDENCIES } from './project-guide'
 import { createAgentMeasurement } from './agent-measurement'
 import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
 import { readContentView } from './content-view'
 import { createV3Executor } from './execution'
 import { designBaselineIssue } from './design-baseline'
+import { projectPreviewCapabilityPath } from '../project-preview-capability'
 
 test('only explicit change releases the implementation baseline; exact visual saves retain scoped authority across work/messages',async()=>{
   const f=await fixture('wait'),editor=createV3Executor({store:f.store,sessions:f.sessions})
@@ -571,15 +572,16 @@ test('first follow-up preserves requirements and resumes native history unless f
 test('project guide refreshes at the next turn, including discussion, without repeating user history or changing requirements',async()=>{
   const f=await fixture()
   try {
-    const file=join(f.root,'AGENTS.md'),first='# Project navigation\nGUIDE_ROUTE_ONE\nRun: existing actual command\n'+PROJECT_WORKING_CONVENTIONS+'\n'
+    const file=join(f.root,'AGENTS.md'),first='# Project navigation\nGUIDE_ROUTE_ONE\nRun: existing actual command\n'+
+      PROJECT_WORKING_CONVENTIONS+'\n'
     await writeFile(file,first)
     await f.call('/agent/goal','POST',f.body);let run=await f.wait(r=>Boolean(r.agentTurns![0]?.finishedAt))
     const requirements=structuredClone(run.requirements)
     expect(f.starts[0].systemContext).not.toContain('GUIDE_ROUTE_ONE')
     expect(f.starts[0].systemContext).not.toContain(PROJECT_WORKING_CONVENTIONS)
     expect(f.starts[0].systemContext).not.toContain('## Required design dependencies')
-    expect(f.starts[0].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
     expect(f.starts[0].systemContext).toContain('Follow applicable project working conventions within current user authorization')
+    expect(f.starts[0].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
     expect(await readFile(file,'utf8')).toBe(first)
     expect(JSON.stringify(f.submissions[0].prompt)).not.toContain('GUIDE_ROUTE_ONE')
     const send=async(intent:string,key:string)=>{
@@ -593,16 +595,23 @@ test('project guide refreshes at the next turn, including discussion, without re
     expect(f.starts[1].systemContext).toContain(digest(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO')))
     expect(f.starts[1].systemContext).not.toContain(PROJECT_WORKING_CONVENTIONS)
     expect(f.starts[1].systemContext).not.toContain('## Required design dependencies')
+    expect(f.starts[1].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
     expect(await readFile(file,'utf8')).toBe(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO'))
     expect(f.starts[1].systemContext).not.toContain('GUIDE_ROUTE_ONE')
     await send('discuss','guide-discuss')
     expect(f.starts[2].systemContext).not.toContain('GUIDE_ROUTE_TWO')
     expect(f.starts[2].systemContext).toContain(digest(first.replace('GUIDE_ROUTE_ONE','GUIDE_ROUTE_TWO')))
     expect(f.starts[2].systemContext).not.toContain('Professional coverage:')
-    await rm(file);await send('work','guide-missing')
-    expect(f.starts[3].systemContext).toContain('No root project guide exists')
-    expect(f.starts[3].systemContext).not.toContain('GUIDE_ROUTE_TWO')
+    await writeFile(file, PROJECT_WORKING_CONVENTIONS)
+    await send('work', 'guide-current')
+    expect(f.starts[3].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
     expect(f.starts[3].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
+    expect(await readFile(file, 'utf8')).toBe(PROJECT_WORKING_CONVENTIONS)
+    await rm(file);await send('work','guide-missing')
+    expect(f.starts[4].systemContext).toContain('No root project guide exists')
+    expect(f.starts[4].systemContext).not.toContain('GUIDE_ROUTE_TWO')
+    expect(f.starts[4].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
+    expect(f.starts[4].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
     expect(run.requirements).toEqual(requirements)
     expect(run.requirementChanges).toBeUndefined()
     expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
@@ -898,6 +907,30 @@ for(const historyState of ['missing','empty'] as const) test(historyState+' save
     expect(f.submissions).toHaveLength(1);expect((await f.store.read(run.projectId,run.ownerId))!.requirements).toEqual(run.requirements)
   }finally{await f.close()}
 })
+test('restoring an older project transcript reports history mismatch without changing or replaying the native run',async()=>{
+  const f=await fixture()
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    const transcript=f.sessions.metadata(run.chatSessionId)!.transcriptPath
+    const backup=await readFile(transcript,'utf8')
+    const message=(key:string,text:string)=>({requestKey:key,runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'message',text})
+    expect((await f.call('/agent/messages','POST',message('second-turn','Continue the authorized work'))).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(run.agentTurns![1].nativeSessionId).toBe(run.agentTurns![0].nativeSessionId)
+    expect((await readFile(transcript,'utf8'))).toContain(run.agentTurns![1].turnId!)
+    // Simulate restoring project files only; the authoritative Run retains turn two.
+    await writeFile(transcript,backup)
+    const result=await f.call('/agent/messages','POST',message('after-restore','Continue'))
+    expect(result.status).toBe(409)
+    expect(await result.json()).toMatchObject({code:'conversation-history-mismatch',
+      error:expect.stringContaining('restoring files does not roll back workflow or native conversation history')})
+    expect(f.submissions).toHaveLength(2)
+    expect(await f.store.read(run.projectId,run.ownerId)).toEqual(run)
+    expect(await readFile(transcript,'utf8')).toBe(backup)
+  }finally{await f.close()}
+})
 test('reconstructed worker resumes persisted native UUID and pause intent without replaying the original goal',async()=>{
   const f=await fixture('wait'),starts:any[]=[],submissions:BeeGameSessionSubmitInput[]=[]
   const sessions=new BeeGameSessionManager({async start(input){starts.push(input);input.onNativeSessionId?.(input.resumeSessionId!);return {
@@ -996,13 +1029,10 @@ test('pause cancels real turn; resume only clears user pause, never restarts wor
 test('native pause/cleanup revokes resource access before releasing its workspace writer',async()=>{
   const f=await fixture('wait',false,'https://unused-library.invalid')
   try {
-    await f.call('/agent/goal','POST',f.body);await f.wait(()=>f.submissions.length===1)
-    const context=f.starts[0].systemContext
-    const directory=JSON.parse(context.match(/Current BGS tools directory \(relative to project root\): ("[^"]+")/)![1]!)
-    const path=join(directory,'assets.mjs')
-    const source=await readFile(join(f.root,path),'utf8')
-    const config=JSON.parse(source.split('\n')[0]!.slice('const TOOL_CONFIG = '.length))
-    const url=config.libraryBaseUrl+'/api/resource-search'
+    await f.call('/agent/goal','POST',f.body);const run=await f.wait(()=>f.submissions.length===1)
+    const capabilityFile=projectPreviewCapabilityPath(f.root,run.chatSessionId,'assets')
+    const config=JSON.parse(await readFile(capabilityFile,'utf8'))
+    const url=config.assets.libraryBaseUrl+'/api/resource-search'
     expect((await fetch(url)).status).toBe(503) // no user token; upstream never called
     await f.call('/stop','POST');await f.wait(r=>Boolean(r.agentTurns![0]!.finishedAt))
     await expect(fetch(url)).rejects.toThrow()

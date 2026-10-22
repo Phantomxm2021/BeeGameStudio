@@ -14,17 +14,25 @@ function serialized<T>(path: string, action: () => Promise<T>): Promise<T> {
   void work.finally(() => { if (pending.get(path) === work) pending.delete(path) }).catch(() => {})
   return work
 }
-export function projectPreviewCapabilityPath(workspace: string, sessionId: string, purpose: 'preview' | 'measurement' = 'preview') {
+export function projectPreviewCapabilityPath(workspace: string, sessionId: string, purpose: 'preview' | 'measurement' | 'assets' = 'preview') {
   directory ??= realpathSync(mkdtempSync(join(tmpdir(), 'beegame-preview-access-')))
-  return join(directory, createHash('sha256').update(JSON.stringify([realpathSync(workspace), sessionId])).digest('hex') + (purpose === 'preview' ? '' : '-measurement') + '.json')
+  return join(directory, createHash('sha256').update(JSON.stringify([realpathSync(workspace), sessionId])).digest('hex') + (purpose === 'preview' ? '' : '-' + purpose) + '.json')
 }
 
 export async function publishProjectPreviewCapability(workspace: string, sessionId: string, apiUrl: string, purpose: 'preview' | 'measurement' = 'preview') {
+  return publishCapability(workspace, sessionId, purpose, { apiUrl })
+}
+
+export async function publishProjectAssetCapabilities(workspace: string, sessionId: string, assets: { libraryBaseUrl?: string; imageEndpoint?: string }) {
+  return publishCapability(workspace, sessionId, 'assets', { assets })
+}
+
+async function publishCapability(workspace: string, sessionId: string, purpose: 'preview' | 'measurement' | 'assets', value: object) {
   workspace = realpathSync(workspace)
   const path = projectPreviewCapabilityPath(workspace, sessionId, purpose), executionId = randomUUID()
   const temporary = path + '.' + executionId
   await serialized(path, async () => { try {
-    await writeFile(temporary, JSON.stringify({ version: 1, workspace, sessionId, executionId, apiUrl }), { flag: 'wx', mode: 0o600 })
+    await writeFile(temporary, JSON.stringify({ version: 1, workspace, sessionId, executionId, ...value }), { flag: 'wx', mode: 0o600 })
     await rename(temporary, path)
   } finally { await unlink(temporary).catch(() => {}) } })
   return () => serialized(path, async () => {

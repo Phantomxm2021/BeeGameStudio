@@ -83,25 +83,19 @@ export function compileUiReferenceBoard(request, screenOrientation) {
     y: y0 + Math.floor(index / best.columns) * (panelHeight + gap),
     width: panelWidth, height: panelHeight,
   }))
-  const fixed = value => Number(value.toFixed(2))
   const prompt = [
-    'Create a UI reference board of complete in-game screens using the fixed equal-cell grid below.',
+    'Create a visual reference board of complete in-game screens showing composition, hierarchy and shared visual style.',
     `Canvas: ${best.width} x ${best.height} pixels. Grid: ${best.columns} columns x ${best.rows} rows. ` +
       `${count} occupied cells, ${best.empty} unused cells. Read cells left-to-right, top-to-bottom.`,
-    `Every occupied cell has the same ${fixed(panelWidth)} x ${fixed(panelHeight)} pixel screen frame, ` +
-      `preserving the project reference viewport ratio ${width}:${height}. Coordinates use the canvas top-left origin. ` +
-      `Horizontal and vertical gutters are ${gap}px; outer margins are at least ${margin}px.`,
-    'Use each specified rectangle as the complete screen boundary. Keep the scene and its HUD inside it. ' +
-      'Do not crop or stretch screens, merge cells, enlarge a hero panel, add inset panels, or add a separate controls/props strip. ' +
-      'Leave unused cells and outside margins blank. Screen ids are mapping labels, not extra UI text.',
-    'The style and screen descriptions below describe content inside cells only; they must not change this board geometry.',
+    `Use similarly sized, separated screen panels preserving the project reference viewport ratio ${width}:${height}. ` +
+      'Keep each complete scene and its HUD together and readable. Leave unused cells blank. Screen ids identify states, not extra UI text.',
+    'Viewport and content dimensions describe logical design proportions, not literal output pixels; scale them together to fit each panel. ' +
+      'Prioritize readable layout and recognizable states over pixel-exact coordinates, grid counts or lettering. Exact values remain in the design documents and implementation.',
     'Shared visual style: ' + spec.style.trim(),
     ...panels.map((panel, index) =>
       `Cell ${index + 1}, row ${panel.row}, column ${panel.column}, id ${JSON.stringify(panel.id)}: ` +
-      `rectangle x=${fixed(panel.x)}, y=${fixed(panel.y)}, width=${fixed(panel.width)}, height=${fixed(panel.height)}.\n` +
-      'Complete screen content: ' + spec.screens[index].description.trim()),
-    'Preserve the fixed equal-size screen grid and the project screen ratio in every panel. ' +
-      'This board communicates UI layout and visual direction; it is not a transparent runtime sprite atlas.',
+      spec.screens[index].description.trim()),
+    'This is a visual reference, not a measured construction drawing or runtime sprite atlas.',
   ].join('\n\n')
   if (prompt.length > 32000) throw Error('UI reference prompt exceeds 32000 characters; shorten screen descriptions')
   const { uiReference: ignored, ...options } = request
@@ -109,7 +103,7 @@ export function compileUiReferenceBoard(request, screenOrientation) {
     request: { ...options, prompt, size: best.size, background: 'opaque', quality: request.quality ?? 'low' },
     layout: { canvas: { width: best.width, height: best.height }, viewport: { width, height },
       columns: best.columns, rows: best.rows, gap, emptyCells: best.empty, panels },
-    note: 'Computed prompt geometry only. Confirm the inventory against the project UI specification and inspect actual image framing, HUD coverage and readability; none is certified by this plan.',
+    note: 'Suggested arrangement only, not measured image geometry or pixel acceptance targets. Confirm the inventory against the project UI specification and inspect actual image framing, HUD coverage and readability; none is certified by this plan.',
   }
 }
 

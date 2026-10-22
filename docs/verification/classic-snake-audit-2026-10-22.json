@@ -1,0 +1,255 @@
+{
+  "auditedAt": "2026-10-22",
+  "mode": "read-only audit plus isolated pure-function/math checks; no model calls, no service changes, no Codex or project edits",
+  "project": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/classic-snake--1ac5d991bb76",
+  "session": "beegame_fcdd5b70b702435fb2f70ad92e599e92",
+  "sources": {
+    "nativeRollout": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/.runtime/app/bgs/sessions/2026/10/21/rollout-2026-10-21T23-38-38-01a15f1d-4ff1-76e1-89c1-bc3d33447e05.jsonl",
+    "bgsTranscript": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/classic-snake--1ac5d991bb76/transcripts/classic-snake-1ac5d991bb76__56e88129.jsonl",
+    "nativeSha256": "0582e998d68358fcad98b300130f41ddd4c577df8a60cc118a700c35e11ad192",
+    "transcriptSha256": "dd4a793a11f35b185222ac1a4ec44c240adf86946732e16690b7481d81a99b1e"
+  },
+  "scope": {
+    "confirmed": "eight design documents, necessary index, Agent self-check revisions; stop before visual assets/content/runtime/build/deploy",
+    "selectedPlatform": "Web",
+    "selectedEngine": "React",
+    "rootEntries": [
+      ".beegame",
+      "AGENTS.md",
+      "docs",
+      "logs",
+      "transcripts"
+    ],
+    "eightDocsBytes": 112763,
+    "documentHashes": {
+      "ART_DIRECTION.md": "4b4757c9409671daa27beb636b30a26fde620acca45c8336bc8bdb444ee3188f",
+      "ASSET_PLAN.md": "13cd7e29e2ae83635def5a98cc218d90497a8020fc010b6cffcd47a18e1d021c",
+      "AUDIO_DESIGN.md": "5c067c2d16ba1f13d01566da62128e62d30e222d925ed059a13b171f27396259",
+      "BALANCE_DESIGN.md": "ca92cce6333041b1b29ee9bc21a031b538a0be5ab91a1f3f69a9762d81ad2bf0",
+      "GDD.md": "11bca16e65a486773de64fa43a8e13327ff101852bdfc0deda786fadd6ef8c12",
+      "LEVEL_SCENE_DESIGN.md": "99c0c5b95651f0ba29172524d2adc3414c271ff42d72379553651ecb2908a030",
+      "README.md": "b1efe9b6e886cd381883036319ae5553dff48301d58d0165eeb9fe4fcf5e9198",
+      "SELF_CHECK.md": "599b2f19829fb611c8cb377584db1a288cba0ecca7ee92bc411e9fc609fdbc8a",
+      "TECHNICAL_DESIGN.md": "c2368045683090f512e97fe0adeba300b0e657dfb5640ce1df87ae93b953b5c0",
+      "UI_UX_SPEC.md": "d19e5e0daf77ee0b97c679e6392f704c6e8579172727fde65a262c357421d15a"
+    }
+  },
+  "usage": {
+    "model": "minimax-m3.1-flash-free",
+    "native": {
+      "input_tokens": 6068330,
+      "cached_input_tokens": 5892352,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 94572,
+      "reasoning_output_tokens": 42964,
+      "total_tokens": 6162902
+    },
+    "bgsFinal": {
+      "type": "usage",
+      "subtype": "native_accounting",
+      "nativeAccountingEpoch": "provider:0ffd0b65-57be-4958-857b-ac45012d704d",
+      "usage": {
+        "prompt_tokens": 175978,
+        "completion_tokens": 94572,
+        "cache_read_tokens": 5892352,
+        "cache_creation_tokens": 0,
+        "total_tokens": 6162902
+      },
+      "sessionUsage": {
+        "prompt_tokens": 175978,
+        "completion_tokens": 94572,
+        "cache_read_tokens": 5892352,
+        "cache_creation_tokens": 0,
+        "total_tokens": 6162902
+      }
+    },
+    "responses": 58,
+    "seconds": 803.436,
+    "phases": [
+      {
+        "name": "准备与能力查询",
+        "responses": 14,
+        "from": "2026-10-21T15:38:37.225Z",
+        "to": "2026-10-21T15:40:57.866Z",
+        "seconds": 140.641,
+        "tokens": {
+          "input_tokens": 617280,
+          "cached_input_tokens": 550912,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 13797,
+          "reasoning_output_tokens": 10370,
+          "total_tokens": 631077
+        }
+      },
+      {
+        "name": "八文档初稿",
+        "responses": 10,
+        "from": "2026-10-21T15:40:57.866Z",
+        "to": "2026-10-21T15:47:24.335Z",
+        "seconds": 386.469,
+        "tokens": {
+          "input_tokens": 807664,
+          "cached_input_tokens": 760320,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 52389,
+          "reasoning_output_tokens": 19946,
+          "total_tokens": 860053
+        }
+      },
+      {
+        "name": "初稿后检查修订、索引、自查记录及收尾",
+        "responses": 34,
+        "from": "2026-10-21T15:47:24.335Z",
+        "to": "2026-10-21T15:52:00.661Z",
+        "seconds": 276.326,
+        "tokens": {
+          "input_tokens": 4643386,
+          "cached_input_tokens": 4581120,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 28386,
+          "reasoning_output_tokens": 12648,
+          "total_tokens": 4671772
+        }
+      }
+    ],
+    "cacheShareOfTotal": 0.956100226808734,
+    "reasoningSubsetOfOutput": true,
+    "currencyCost": "not established; cached inputs are not new generated content or equivalent-price tokens",
+    "firstInputTokens": 22599,
+    "lastInputTokens": 154157,
+    "lateReferenceAndReportingWindow": {
+      "responses": 22,
+      "native": {
+        "input_tokens": 3145331,
+        "cached_input_tokens": 3111680,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 15440,
+        "reasoning_output_tokens": 5143,
+        "total_tokens": 3160771
+      },
+      "scope": "mixed reference checks, GDD renumbering, edits, README/SELF_CHECK and final goal/completion; not all waste"
+    }
+  },
+  "confirmed": [
+    {
+      "id": "C1",
+      "finding": "BGS accounting reconciles with native usage. One BGS turn; no timeout, compaction or host continuation retry explains the growth. Most cost follows completion of all eight initial drafts.",
+      "evidence": "58 unique provider response usage updates; 34 post-draft responses cost 4671772 total tokens."
+    },
+    {
+      "id": "C2",
+      "finding": "Previous tool-output budget and navigation repairs are active. Skill batches over 10000 bytes are retained without native truncation markers; actual resource/layout/API queries were used.",
+      "limitation": "Does not prove semantic understanding, quality, or causal cost improvement. A larger retained context can increase later cached input; rolling back correct delivery would mask the actual issue."
+    },
+    {
+      "id": "B1",
+      "kind": "BGS integration boundary/observability defect",
+      "finding": "Native persistent goal feature remains enabled alongside BGS task lifecycle; Agent created a native goal. Native goal uses uncached input plus output only, starting after task preparation. Completion report told Agent to report goal usage/time, producing 194413 tokens/11 minutes against BGS total6162902/803.436seconds.",
+      "code": [
+        "packages/agent-workflow-server/src/bgs/runner.ts:138",
+        "packages/agent-workflow-server/src/bgs/runner.ts:320",
+        "vendor/bgs/bgs-rs/ext/goal/src/accounting.rs:570",
+        "vendor/bgs/bgs-rs/ext/goal/src/tool.rs:529",
+        "vendor/bgs/bgs-rs/features/src/lib.rs:1896"
+      ],
+      "nativeEvents": "thread/goal/updated is emitted upstream but has no BGS projection handler; native goal tool lifecycle errors are absent in Chat.",
+      "effect": "Conflicting task/status/accounting surfaces; no evidence it caused the 34-response review loop or any continuation this run.",
+      "minimalPlan": "For BGS-managed workflow sessions, evaluate disabling existing features.goals through BGS config, keeping BGS automatic continuation. Verify new/resumed sessions locally; do not change native code, add a second goal manager, or rewrite assistant text."
+    },
+    {
+      "id": "A1",
+      "kind": "Agent work organization and false-positive review",
+      "finding": "Multiple serial small edits, grep/read passes and repeated reference scripts run in the same growing history. SELF_CHECK contains unsupported closure claims and false positives. Existing Skills already reject mandatory extra reports/review chains and require material evidence; no BGS review-loop/gate found here.",
+      "example": "F9 calls original task dependencies cyclic, but original table is acyclic; F7 treats compact as unable to show fallback message although enabled overrides support this. A targeted correction is not necessarily wrong, but these stated reasons are unsupported."
+    },
+    {
+      "id": "A2",
+      "kind": "Agent tool misuse, not confirmed BGS permission/edit bug",
+      "finding": "Malformed workdir is present in native tool arguments; two atomic EditProjectFile failures are zero-match old strings; bridge rejects unknown update_plan.",
+      "planCaution": "Persisted base instructions mention update_plan, but native source strips its guidance from request copies when disabled. No raw outgoing request captured, so persisted text alone cannot establish an effective prompt/tool mismatch. Do not add a blind alias or enable tools merely to silence this failed call."
+    }
+  ],
+  "qualityFindings": [
+    {
+      "id": "Q1",
+      "severity": "material",
+      "source": "docs/TECHNICAL_DESIGN.md:276",
+      "finding": "resolveUiNodesForViewport is described as returning bounds; actual API returns allocated local layout. Existing consumer --api explicitly distinguishes it from inspectUiLayout.",
+      "attribution": "Agent misused an available, read contract; no missing query entrance demonstrated."
+    },
+    {
+      "id": "Q2",
+      "severity": "material",
+      "source": "docs/LEVEL_SCENE_DESIGN.md:59; docs/UI_UX_SPEC.md:46",
+      "finding": "696x456 camera reference, orthographicSize9.5 and keep-height in declared1280x632 game-view project the board to964.63x632, contradicting promised696x456 and88vertical margins.",
+      "attribution": "Design/contract interpretation error, not failure of projection math. Local check uses the actual shared projection function, no project mutation."
+    },
+    {
+      "id": "Q3",
+      "severity": "material",
+      "source": "docs/BALANCE_DESIGN.md:143",
+      "finding": "Five and ten fruit targets both claim1320ms/18.5s. Under documented pre-eat timing, five sum710ms/9.94s and ten1320ms/18.48s.",
+      "attribution": "Agent arithmetic error; no game-specific BGS rule proposed."
+    },
+    {
+      "id": "Q4",
+      "severity": "material",
+      "source": "docs/SELF_CHECK.md:66",
+      "finding": "Claims all numerical/semantic conflicts resolved despite Q1-Q3 and remaining contradictory clauses.",
+      "attribution": "Agent review overclaim; document delivered does not mean quality verified. BGS supplied evidence explicitly labels quality unverified."
+    },
+    {
+      "id": "Q5",
+      "severity": "material",
+      "source": "docs/UI_UX_SPEC.md:220; docs/TECHNICAL_DESIGN.md:249",
+      "finding": "UI blur/focus table has no source-state restriction and resumes PLAYING; implementation contract restricts this transition to PLAYING/blurPaused. Needs coherent scope before implementation."
+    },
+    {
+      "id": "Q6",
+      "severity": "material",
+      "source": "docs/GDD.md:9.1/9.2; docs/AUDIO_DESIGN.md:3/4.3; docs/ART_DIRECTION.md:2/7",
+      "finding": "New-record indicator mandatory vs optional; music only PLAYING vs starts READY; integer-only scaling vs110%/125% effects and k=.75 host scaling. These are unresolved document conflicts, not proven runtime failures."
+    },
+    {
+      "id": "Q7",
+      "severity": "navigation",
+      "source": "docs/TECHNICAL_DESIGN.md:337",
+      "finding": "CheckScenes/CheckResources are not current tool names; exposed tools are CheckSceneLayouts/CheckResourcesAndBindings."
+    }
+  ],
+  "localVerification": {
+    "modelCalls": 0,
+    "projectWrites": 0,
+    "actualSharedCameraResult": {
+      "scale": 1.3859649122807018,
+      "boardWidth": 964.6315789473684,
+      "boardHeight": 632
+    },
+    "actualUiResult": {
+      "hasBounds": false,
+      "compactMessageEnabledAt800WithBreakpoint959": true
+    },
+    "balance": {
+      "fiveFruit": {
+        "sumMs": 710,
+        "seconds": 9.94
+      },
+      "tenFruit": {
+        "sumMs": 1320,
+        "seconds": 18.48
+      }
+    },
+    "notRuntimeAcceptance": true
+  },
+  "auditedPlan": [
+    "First remove overlapping native-goal lifecycle in BGS-owned workflows using the existing feature switch, after local new/resume config tests. Keep BGS automatic continuation and accounting; no promise of large token reduction.",
+    "Keep current correct output budget and contract query entrances. Do not restore truncation as a cost cap, add mandatory review rounds or make game semantics into BGS rules.",
+    "Treat drafting, review and cost as separate outcomes. Existing Skills already cover checks and proportionality; this evidence does not justify adding more instructions or claiming autonomous self-review is reliable.",
+    "For cost reduction, assess the length and breadth of the requested documents against actual downstream decisions and remove repetitive prose in existing guidance only where a mandatory source requirement can be demonstrated. No arbitrary token target or hard stop is validated by this audit.",
+    "Investigate update_plan only with local captured request/tool schema reproduction if pursued; session metadata alone is insufficient."
+  ],
+  "implementationFollowup": {
+    "record": "docs/verification/bgs-native-goal-boundary-repair-2026-10-22.json",
+    "clarification": "Earlier wording that BGS has its own automatic continuation loop was imprecise. workflow-v3/agent-goal.ts explicitly has no automatic model retries or stage advancement. Existing in-turn execution and explicit follow-up/resume remain. This change disables native persistent-goal continuation, not a duplicate BGS retry implementation."
+  }
+}

@@ -301,7 +301,8 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(tools.turnContext).not.toContain('React/Canvas does not waive promised editable data') // responsibility remains in the production system slot
     expect(tools.turnContext).toContain('Tool availability is not runtime consumption or quality evidence')
     expect(tools.systemContext).toContain('consumer.mjs')
-    expect(tools.systemContext).toContain('check-content.mjs --format')
+    expect(tools.systemContext).toContain('bun check-content.mjs --format uiLayoutContract')
+    expect(tools.systemContext).toContain('bun resources.mjs --contract registration')
     expect(tools.turnContext).not.toContain('consumer.mjs')
     expect(tools.turnContext).not.toContain('Native bgs-ui-layout reads:')
     expect(tools.turnContext).not.toContain('detailsFor:')
@@ -317,6 +318,17 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(JSON.parse(contracts.stdout)).toMatchObject({
       ok: true, values: { preview: { environment: { origin: 'opaque' }, runtimeVerified: false, quality: 'unverified' } },
     })
+    const layoutContract = await command(root, located, 'check-content.mjs', '--format', 'uiLayoutContract')
+    expect(layoutContract.code, layoutContract.stderr).toBe(0)
+    const layoutReference = JSON.parse(layoutContract.stdout).values.uiLayoutContract
+    expect(layoutReference.model).toContain('before measurement/rendering')
+    expect(layoutReference.responsive).toContain('width <= root data.compactMaxWidth')
+    const registration = await command(root, located, 'resources.mjs', '--contract', 'registration')
+    expect(registration.code, registration.stderr).toBe(0)
+    expect(registration.stdout).toContain('root_path')
+    expect(registration.stdout).toContain('file_paths')
+    expect(registration.stdout).toContain('status, timestamps and registry modules are computed')
+    for (const path of ['assets', 'content', 'docs']) await expect(access(join(root, path))).rejects.toThrow()
     // Execute the runtime advertised by navigation, not the test helper's Bun
     // default: a missing/wrong runtime used to send these entries through Node.
     for (const name of ['resources', 'bind-content']) {
@@ -507,7 +519,7 @@ test('a chosen consumer copy remains buildable without the temporary host tools'
     expect(publicationHelp.stdout).toContain('every registered resource file_paths entry and dependency local_path')
     expect(publicationHelp.stdout).toContain('required licenses')
     expect(publicationHelp.stdout).toContain('another packaging manifest')
-    const assetHelp = await command(root,tools.directory,'assets.mjs','--help')
+    const assetHelp = await command(root,tools.directory,'assets.mjs','generate','--help')
     expect(assetHelp.code,assetHelp.stderr).toBe(0)
     expect(assetHelp.stdout).toContain('purpose: reference|experiment|production')
     expect(assetHelp.stdout).toContain('existing Manifest requirementIds')
@@ -573,7 +585,7 @@ test('consumer compatibility is batched/read-only and installation never overwri
       projection: 'orthographic', framing: 'keep-height', halfWidth: 5, halfHeight: 5,
       rect: { x: 0, y: 0, width: 480, height: 480 },
     })
-    // The actual capability table must fit one native Shell result (~10k chars).
+    // Keep the capability table compact even with a larger native output budget.
     expect(api.stdout.length).toBeLessThan(10_000)
     const doc={schema:'beegame-content.v1',id:'menu',kind:'ui-screen',assetRefs:[],data:{rootId:'root',nodes:[
       {id:'root',role:'screen-root'}, {id:'text',parentId:'root',role:'text',text:'Go',style:{align:'left',fontSize:18},layout:{size:[80,30]}},
@@ -1001,3 +1013,56 @@ test('new projects do not prepare or advertise a calculation appendix helper', a
     await expect(access(join(root, '.beegame/delivery/calculators'))).rejects.toThrow()
   } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
 })
+
+test('a retained asset entry uses current image and library bridges across three turns', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-assets-turns-')))
+  let catalogs = 0, quotes = 0, generated = 0
+  const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    catalogs++
+    return Response.json({ items: [{ packId: 'fixture' }] })
+  } })
+  const env = { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: projectPreviewCapabilityPath(root, 'fixture', 'assets') }
+  const entries: string[] = []
+  let active: Awaited<ReturnType<typeof openAgentTools>> | undefined
+  const run = async (entry: string, ...args: string[]) => {
+    const child = Bun.spawn([process.execPath, entry, ...args], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' })
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+    return { code, stdout, stderr }
+  }
+  try {
+    for (let turn = 0; turn < 3; turn++) {
+      active = await openAgentTools({ workspacePath: root, sessionId: 'fixture', getAuthToken: () => 'fixture-token',
+        libraryBaseUrl: upstream.url.origin, openImage: () => {
+          const bridge = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+            if (request.method === 'GET') { quotes++; return Response.json({ available: true, turn }) }
+            generated++; return new Response('fixture bytes', { headers: { 'content-type': 'image/png' } })
+          } })
+          return { endpoint: bridge.url.origin + '/image', instruction: 'Local fixture', close: async () => { bridge.stop(true) } }
+        } })
+      entries.push(join(root, active.directory, 'assets.mjs'))
+      const source = await readFile(entries.at(-1)!, 'utf8')
+      expect(source.split('\n')[0]).not.toContain('127.0.0.1')
+      // Simulate a compact handoff retaining only the first tool path and current native environment.
+      const quote = await run(entries[0]!, 'cost')
+      expect(quote.code, quote.stderr).toBe(0)
+      expect(JSON.parse(quote.stdout).turn).toBe(turn)
+      const catalog = await run(entries[0]!, 'catalog')
+      expect(catalog.code, catalog.stderr).toBe(0)
+      expect(JSON.parse(catalog.stdout).items[0].packId).toBe('fixture')
+      if (turn === 2) {
+        await writeFile(join(root, 'request.json'), JSON.stringify({ requestId: 'fixture-attempt', purpose: 'reference', prompt: 'Fixture' }))
+        const result = await run(entries[0]!, 'generate', 'request.json', 'assets/result.png')
+        expect(result.code, result.stderr).toBe(0)
+      }
+      await active.close()
+      const expired = await run(entries[0]!, 'cost')
+      expect(expired.code).toBe(1)
+      expect(expired.stderr).toContain('ASSET_CAPABILITY_EXPIRED')
+      expect((await run(entries[0]!, '--help')).code).toBe(0)
+    }
+    expect(new Set(entries).size).toBe(3)
+    expect(catalogs).toBe(3)
+    expect(quotes).toBe(4)
+    expect(generated).toBe(1)
+  } finally { await active?.close(); upstream.stop(true); await rm(root, { recursive: true, force: true }) }
+}, 30000)

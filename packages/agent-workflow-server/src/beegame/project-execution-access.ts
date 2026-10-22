@@ -84,6 +84,7 @@ export async function projectExecutionAccess(input: {
     throw new Error('Native output directory must not resolve through a link')
   const previewCapability = projectPreviewCapabilityPath(root, input.sessionId)
   const measurementCapability = projectPreviewCapabilityPath(root, input.sessionId, 'measurement')
+  const assetCapability = projectPreviewCapabilityPath(root, input.sessionId, 'assets')
   const templates = resolve(temporary, 'git-templates')
   await mkdir(templates, { recursive: true, mode: 0o700 })
   if (await realpath(temporary) !== temporary || await realpath(templates) !== templates)
@@ -110,6 +111,7 @@ export async function projectExecutionAccess(input: {
     BEEGAME_PREVIEW_TEST_MODULE: previewClient.href,
     BEEGAME_PREVIEW_CAPABILITY_FILE: previewCapability,
     BEEGAME_MEASUREMENT_CAPABILITY_FILE: measurementCapability,
+    BEEGAME_ASSET_CAPABILITY_FILE: assetCapability,
     BEEGAME_CONTENT_CHECKER_MODULE: checker.moduleUrl,
     BEEGAME_SHARP_MODULE: sharp?.moduleUrl ?? '',
     BEEGAME_FONT_MODULE: font?.moduleUrl ?? '',
@@ -119,7 +121,7 @@ export async function projectExecutionAccess(input: {
     '/System', '/Library/Apple', '/Library/Developer', '/dev', '/opt/homebrew',
     // Bun's module resolver needs directory access even for one bundled .mjs.
     // This private directory contains only the checker, no server/dependencies.
-    await realpath(process.execPath), nativeOutput, previewClientPath, previewCapability, measurementCapability, checker.root,
+    await realpath(process.execPath), nativeOutput, previewClientPath, previewCapability, measurementCapability, assetCapability, checker.root,
     ...(playwright ? [playwright.root] : []), ...(sharp?.roots ?? []), ...(font?.roots ?? [])]
   if (process.platform === 'darwin') {
     const developer = await realpath('/var/select/developer_dir').catch(() => undefined)

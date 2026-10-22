@@ -8,7 +8,7 @@ import { ImageServiceError } from './service'
 import { createImagePromptRecord } from './prompt-record'
 import { ImageConfigurationError } from './runtime-config'
 import { ImageReferenceError, readProjectReferenceImage } from './reference-image'
-import { CREDIT_FACE_VALUE_PER_USD, fixedImageChargeCreditsMicro } from './pricing'
+import { fixedImageChargeCreditsMicro } from './pricing'
 import { compileUiReferenceBoard, compileUiAssetSheet } from './ui-reference-board.mjs'
 
 const generation = z.object({
@@ -89,14 +89,12 @@ export function openImageGenerationAccess(input: {
             ? fixedPlatform && config.responseModel && config.subscriptionOwnerId && quotedCreditsMicro !== null
             : config.apiKey && (input.source === 'byok' || (config.billing && (!fixedPlatform || quotedCreditsMicro !== null)))))
           return Response.json({ available,
-            provider: config.provider, model: config.model, quality: requestedQuality, size,
+            quality: requestedQuality, size, fixedPrice: fixedPlatform,
             referenceImageSupported: config.provider === 'cloudflare',
             ...(config.provider === 'cloudflare' || sharedSubscription ? { availableSizes: ['1024x1024', '1024x1536', '1536x1024'] } : {}),
             ...(config.provider === 'cloudflare' || sharedSubscription ? { quotedCreditsMicro,
               ...(config.billing && quotedCreditsMicro === null ? { unavailableReason: 'No fixed Credit price configured for this quality and size' } : {}) } : {}),
             maxRequestCredits: input.source === 'byok' || subscription ? null : config.billing?.maxRequestCredits ?? null,
-            creditFaceValuePerUsd: CREDIT_FACE_VALUE_PER_USD,
-            modelPriceMultiplier: input.source === 'byok' || subscription || sharedSubscription ? null : config.billing?.markupMultiplier ?? null,
             billingSource: subscription ? 'subscription' : input.source === 'byok' ? 'external' : 'platform',
             ...(subscription || sharedSubscription ? { upstreamQuotaSource: sharedSubscription ? 'platform-subscription' : 'personal-subscription',
               upstreamAvailability: 'unverified', dailyImagesRemaining: null } : {}) },
@@ -190,19 +188,19 @@ export function openImageGenerationAccess(input: {
     endpoint,
     instruction: [
       input.source === 'chatgpt-subscription'
-        ? 'Optional AI image generation uses the existing ChatGPT subscription login. This endpoint capability is not yet verified by a real generation. Subscription quota may be consumed; platform image Credits are not charged. No daily image count is promised.'
+        ? 'Optional AI image generation uses the configured subscription login. This endpoint capability is not yet verified by a real generation. Subscription quota may be consumed; platform image Credits are not charged. No daily image count is promised.'
       : input.source === 'byok'
         ? 'Optional AI image generation uses the user-owned provider key. The provider bills the user directly; platform image Credits are not charged. Agent chooses whether, when and what to generate.'
         : 'Optional AI image generation uses platform credentials and Credits billing held by the host. Agent chooses whether, when and what to generate.',
       ...(input.requiredQuality ? [`For this delivery milestone, image quality is ${input.requiredQuality}; other quality requests are unavailable.`] : []),
       input.source === 'byok' || input.source === 'chatgpt-subscription'
         ? 'Use the optional project asset command described in the current project context. Its cost command shows availability, not the external provider price. Reuse one stable requestId for recovery; only an intentionally different artwork gets a new ID. Non-2xx responses are not images.'
-        : 'Use the optional project asset command described in the current project context. Its cost command shows availability and, for Cloudflare or a shared ChatGPT subscription, the exact fixed Credit price for the requested quality and size. Shared subscription availability is unverified; its quota is shared, not a promised daily allowance. Generate displays the fixed price before reserving the same amount. Reuse one stable requestId for recovery; only an intentionally different artwork gets a new ID. Non-2xx responses are not images.',
-      'Cloudflare GPT Image 2.5 Flare can generate a new image or edit a reference image. Its documented background options are auto, opaque and transparent; choose per asset rather than treating transparency as mandatory. It supports low, medium, high, xhigh, max or auto quality and 1024x1024, 1024x1536, 1536x1024 or auto size. This BGS capability outputs PNG and accepts at most one project reference image; the configured price and milestone may restrict quality and size. Inspect the returned image, including actual alpha when transparency matters; the model does not supply reliable atlas frame coordinates. Official provider details: https://developers.cloudflare.com/ai/models/openai/gpt-image-2.5-flare/',
+        : 'Use the optional project asset command described in the current project context. Its cost command shows availability and, for fixed-price image generation, the exact fixed Credit price for the requested quality and size. Shared subscription availability is unverified; its quota is shared, not a promised daily allowance. Generate displays the fixed price before reserving the same amount. Reuse one stable requestId for recovery; only an intentionally different artwork gets a new ID. Non-2xx responses are not images.',
+      'BGS image generation outputs PNG and accepts at most one project reference image when the cost response reports referenceImageSupported. Query availability, supported sizes and the price for the intended request; use assets.mjs generate --help for parameters. Internal routing and quality identifiers are tool parameters, not user-facing status text. Report the image result and relevant cost without repeating provider, model or quality configuration.',
       'For image editing, you may pass an existing project-relative PNG under assets/ as referenceImagePath; no visual board is required. The provider must support reference images; the cost command reports availability. Do not submit host paths or regenerate an unknown paid attempt.',
       'The host records requests and billing source in assets/ai-generation-prompts.md; no manual maintenance is needed. Register only the actual selected file and hash in the Manifest.',
       'New image requests declare purpose: reference, experiment or production. Production requests include existing Manifest requirementIds for compatible bitmap parts, including textures used in 3D/XR. References/experiments carry no requirementIds and do not complete runtime resources. A PNG cannot supply a model, rig, animation behavior or device interaction. Old paid requests remain recoverable without new metadata; these fields never change billing identity.',
-      'UI reference boards use uiReference; design-linked runtime skins use uiAssets with referenceImagePath. Both structured inputs are documented by assets.mjs --help and compiled by the host. ui-board-plan and ui-assets-plan inspect requests without generation or billing; submit the same structured input after quoting its chosen canvas. Production skins still need inspected alpha/bounds and measured named atlas frames; requested grid cells are not generated frame coordinates.',
+      'Image request examples and quoting: assets.mjs generate --help. UI reference boards use uiReference; design-linked runtime skins use uiAssets with referenceImagePath (ui-assets-plan --help). Both are compiled by the host. ui-board-plan and ui-assets-plan inspect requests without generation or billing; submit the same structured input after quoting its chosen canvas. Production skins still need inspected alpha/bounds and measured named atlas frames; requested grid cells are not generated frame coordinates.',
     ].join('\n'),
     close() {
       closed = true

@@ -19,7 +19,7 @@ let loadMoreProjects = vi.fn();
 const { getCreditSummary } = vi.hoisted(() => ({
   getCreditSummary: vi.fn(),
 }));
-const { getProjectPage } = vi.hoisted(() => ({ getProjectPage: vi.fn() }));
+const { getProjectPage, cloneProject, loadProjects } = vi.hoisted(() => ({ getProjectPage: vi.fn(), cloneProject: vi.fn(), loadProjects: vi.fn() }));
 const motionPreferences = vi.hoisted(() => ({ reduced: false }));
 
 vi.mock('motion/react', async importOriginal => {
@@ -29,7 +29,7 @@ vi.mock('motion/react', async importOriginal => {
 
 vi.mock('../../../services/api', async () => {
   const actual = await vi.importActual<typeof import('../../../services/api')>('../../../services/api');
-  return { ...actual, api: { ...actual.api, getProjectPage } };
+  return { ...actual, api: { ...actual.api, getProjectPage, cloneProject } };
 });
 
 vi.mock('../../../store/projectStore', () => ({
@@ -42,6 +42,7 @@ vi.mock('../../../store/projectStore', () => ({
     deleteProject,
     deleteProjects,
     loadMoreProjects,
+    loadProjects,
   }),
 }));
 
@@ -72,12 +73,41 @@ describe('ProjectHistoryModal permissions', () => {
     deleteProjects = vi.fn().mockResolvedValue({ deletedIds: [], failedIds: [] });
     loadMoreProjects = vi.fn().mockResolvedValue(undefined);
     getProjectPage.mockReset();
+    cloneProject.mockReset();
+    loadProjects.mockReset().mockResolvedValue(undefined);
     getCreditSummary.mockReset();
     getCreditSummary.mockResolvedValue({
       entriesCount: 3,
       consumedCredits: 7,
       weightedTokens: 70_000,
     });
+  });
+
+  it('clones from history and opens only the returned project without sending a task', async () => {
+    const onSelectProject = vi.fn(), onClose = vi.fn();
+    let resolveClone!: (value: {id: string}) => void;
+    cloneProject.mockReturnValue(new Promise(resolve => { resolveClone = resolve; }));
+    render(<ProjectHistoryModal isOpen lang="en" onClose={onClose} onSelectProject={onSelectProject} />);
+    fireEvent.click(screen.getByLabelText('More actions Snake Game'));
+    fireEvent.click(screen.getByRole('button', {name: 'Clone Project'}));
+    expect(cloneProject).toHaveBeenCalledWith('project-1', 'en');
+    expect(onSelectProject).not.toHaveBeenCalled();
+    expect(screen.getByText('Cloning project files; no Agent task will start.')).toBeInTheDocument();
+    await act(async () => resolveClone({id: 'new-copy'}));
+    await waitFor(() => expect(onSelectProject).toHaveBeenCalledWith('new-copy'));
+    expect(loadProjects).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the original project openable when cloning fails', async () => {
+    const onSelectProject = vi.fn();
+    cloneProject.mockRejectedValue(new Error('Wait for the source project to stop'));
+    render(<ProjectHistoryModal isOpen lang="en" onClose={vi.fn()} onSelectProject={onSelectProject} />);
+    fireEvent.click(screen.getByLabelText('More actions Snake Game'));
+    fireEvent.click(screen.getByRole('button', {name: 'Clone Project'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wait for the source project to stop');
+    expect(onSelectProject).not.toHaveBeenCalled();
+    expect(screen.getByText('Snake Game')).toBeInTheDocument();
   });
 
   it('shows delete action for projects in the current account history', () => {

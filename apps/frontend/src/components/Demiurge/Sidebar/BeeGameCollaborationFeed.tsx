@@ -21,6 +21,7 @@ import { Drawer } from '../../beui/registry/components/motion/drawer';
 import { AnimatedBadge, type AnimatedBadgeStatus } from '../../beui/registry/components/motion/animated-badge';
 import { Loader } from '../../beui/registry/components/motion/loader';
 import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
+import { redactImageConfigurationForDisplay } from '../../../utils/imageConfigurationDisplay';
 import { activityToolKind, type ActivityToolKind } from '../../../utils/toolActivitySummary';
 import { useSmoothStreamText } from '../../../hooks/useSmoothStreamText';
 import { ArtifactCard } from './ArtifactCard';
@@ -77,6 +78,7 @@ type ToolFeedMessage = ChatDisplayMessage & {
 };
 
 type NormalizedTool = {
+    attachments?: ChatDisplayMessage['attachments'];
     subagentActivity?: ChatDisplayMessage['subagentActivity'];
     completionReason?: ChatDisplayMessage['completionReason'];
     id: string;
@@ -127,7 +129,7 @@ const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
         message.taskKind === 'session_lifecycle' || raw.task_kind === 'session_lifecycle';
 };
 
-const displayText = (value: string): string => shortenAbsolutePathsForDisplay(value);
+const displayText = (value: string): string => shortenAbsolutePathsForDisplay(redactImageConfigurationForDisplay(value));
 
 const getToolKind = (toolName?: string): ToolKind => activityToolKind(toolName || '');
 
@@ -167,6 +169,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         subagentTrace: message.subagentTrace,
         subagentActivity: message.subagentActivity,
         input: message.toolInput ?? message.tool_input,
+        attachments: message.attachments,
     };
 };
 
@@ -222,6 +225,7 @@ const mergeToolPart = (
                 exitCode: tool.exitCode ?? current.exitCode,
                 durationMs: tool.durationMs ?? current.durationMs,
                 input: tool.input ?? current.input,
+                attachments: tool.attachments ?? current.attachments,
                 status: tool.status === 'running' ? current.status : tool.status,
             },
             timestamp: Math.max(existing.part.timestamp, tool.timestamp),
@@ -689,8 +693,20 @@ function toolActivityState(tool: NormalizedTool) {
 
 function ToolActivity({ tool, lang }: { tool: NormalizedTool; lang: Language }) {
     const { state, duration } = toolActivityState(tool);
-    return <ToolActivityRow id={tool.id} name={tool.name} input={tool.input} detail={tool.detail}
+    const row = <ToolActivityRow id={tool.id} name={tool.name} input={tool.input} detail={tool.detail}
         state={state} duration={duration} lang={lang} />;
+    const images = tool.status === 'completed' ? (tool.attachments || []).filter(attachment => attachment.type === 'image') : [];
+    if (!images.length) return row;
+    return <details className="chat-image-activity">
+        <summary>
+            {row}
+            <ChevronDown size={14} aria-hidden="true" className="chat-image-activity-chevron" />
+        </summary>
+        <div className="chat-image-gallery chat-image-gallery--tools" data-count={images.length}
+            role="group" aria-label={lang === 'zh' ? '图片' : 'Images'}>
+            {images.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}
+        </div>
+    </details>;
 }
 
 function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang, streamingMessageId, onOpenSubagent, onPreviewArtifact }: {

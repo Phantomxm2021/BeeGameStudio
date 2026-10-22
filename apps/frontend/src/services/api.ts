@@ -517,6 +517,8 @@ export const api = {
 
   getProjectPage: (offset: number, search = '') => beeGameAdapter.getProjectPage(offset, search),
 
+  cloneProject: (projectId: string, language: string) => beeGameAdapter.cloneProject(projectId, language),
+
   getProjectMetadata: (projectId: string) => beeGameAdapter.getProjectMetadata(projectId),
 
   bootstrapProjectFromBrief: (

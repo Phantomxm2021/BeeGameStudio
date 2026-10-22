@@ -18,6 +18,24 @@ vi.mock('img-fx', async () => {
 
 const CHECKLIST_TURN_ID = 'beegame-turn-beegame_191b560f8a9046b18e1efed2fafa8f07-1';
 
+it('filters image configuration in live and restored assistant text without rewriting user input or source messages', () => {
+  const content = '沿用 cloudflare / gpt-image-2.5-flare / low；报价 4 Credits。';
+  const message: ChatDisplayMessage = { id: 'image-routing', sender: 'beegame', type: 'text', content, timestamp: 1000 };
+  const { container, rerender } = render(<BeeGameCollaborationFeed messages={[message]} isLoading streamingMessageId={message.id} />);
+  expect(container).not.toHaveTextContent(/cloudflare|gpt-image-2.5-flare|\/ low/);
+  for (const partial of ['沿用 cloudflare', '沿用 cloudflare / gpt-image', content]) {
+    rerender(<BeeGameCollaborationFeed messages={[{ ...message, content: partial }]} isLoading streamingMessageId={message.id} />);
+    expect(container).not.toHaveTextContent(/cloudflare|gpt-image/);
+  }
+  rerender(<BeeGameCollaborationFeed messages={[message]} />);
+  expect(container).toHaveTextContent('BGS Image');
+  expect(container).toHaveTextContent('4 Credits');
+  expect(container).not.toHaveTextContent(/cloudflare|gpt-image-2.5-flare|\/ low/);
+  expect(message.content).toBe(content);
+  rerender(<BeeGameCollaborationFeed messages={[{ ...message, sender: 'user' }]} />);
+  expect(container).toHaveTextContent('cloudflare / gpt-image-2.5-flare / low');
+});
+
 // Detail assertions explicitly opt in by expanding the user-facing disclosure.
 const renderWithActivitiesExpanded: typeof render = (...args) => {
   const result = render(...args);
@@ -678,13 +696,88 @@ it('immediately replaces the selected user bubble with the BeUI editor and submi
   expect(onCancelEdit).toHaveBeenCalledOnce();
 });
 const IMPLEMENTATION_TURN_ID = 'beegame-turn-beegame_0889307bbd6142f186543e33306e9b01-1';
-it('keeps raw tool screenshots out of the execution list', () => {
-  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[{ id: 'screenshot', sender: 'beegame', content: 'Read', timestamp: Date.now(),
+it('expands a tool record to show its image and opens the full image', async () => {
+  const { container } = render(<BeeGameCollaborationFeed messages={[{ id: 'screenshot', sender: 'beegame', content: 'Read', timestamp: Date.now(),
     type: 'tool', toolName: 'Read', toolUseId: 'read-image', toolStatus: 'completed',
     attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'screenshot.png' }],
   }]} />);
-  expect(screen.getByRole('group', { name: 'Read', exact: true })).toHaveAccessibleDescription('Completed');
+  const details = screen.getByRole('button', { name: /^Execution details/ });
+  expect(details).toHaveAttribute('aria-expanded', 'false');
   expect(screen.queryByRole('img', { name: 'screenshot.png' })).not.toBeInTheDocument();
+  fireEvent.click(details);
+  const row = screen.getByRole('group', { name: 'Read', exact: true });
+  expect(row).toHaveAccessibleDescription('Completed');
+  const record = row.closest('details')!;
+  expect(record).not.toHaveAttribute('open');
+  expect(screen.getByAltText('screenshot.png')).not.toBeVisible();
+  fireEvent.click(record.querySelector('summary')!);
+  expect(record).toHaveAttribute('open');
+  const image = screen.getByRole('img', { name: 'screenshot.png' });
+  await waitFor(() => expect(image).toBeVisible());
+  expect(record).toContainElement(image);
+  expect(container.querySelector('[data-variant="timeline"]')).toContainElement(image);
+  fireEvent.load(image);
+  fireEvent.click(screen.getByRole('button', { name: 'Enlarge image: screenshot.png' }));
+  expect(await screen.findByRole('dialog')).toContainElement(screen.getAllByRole('img', { name: 'screenshot.png' }).at(-1)!);
+  fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+  fireEvent.click(record.querySelector('summary')!);
+  expect(record).not.toHaveAttribute('open');
+  expect(screen.getByAltText('screenshot.png')).not.toBeVisible();
+});
+
+it('shows image attachments once after live tool completion and retains them through later progress and a final reply', () => {
+  const start: ChatDisplayMessage = { id: 'image-start', sender: 'beegame', type: 'tool', content: '',
+    timestamp: 1000, turnId: 'images', toolName: 'imageView', toolUseId: 'image-call', toolStatus: 'running' };
+  const end: ChatDisplayMessage = { ...start, id: 'image-end', timestamp: 2000, toolStatus: 'completed',
+    attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'design.png' }] };
+  const progress: ChatDisplayMessage = { ...start, id: 'image-progress', timestamp: 3000 };
+  const final: ChatDisplayMessage = { id: 'image-final', sender: 'beegame', content: 'Design ready.',
+    timestamp: 4000, turnId: 'images' };
+  const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[start]} isLoading />);
+  expect(screen.queryByRole('img', { name: 'design.png' })).not.toBeInTheDocument();
+  rerender(<BeeGameCollaborationFeed messages={[start, end]} isLoading />);
+  const record = screen.getByRole('group', { name: 'imageView' }).closest('details')!;
+  expect(record).not.toHaveAttribute('open');
+  fireEvent.click(record.querySelector('summary')!);
+  expect(screen.getAllByRole('img', { name: 'design.png' })).toHaveLength(1);
+  rerender(<BeeGameCollaborationFeed messages={[start, end, progress, final]} />);
+  expect(screen.getAllByRole('img', { name: 'design.png' })).toHaveLength(1);
+  expect(screen.getByRole('button', { name: /^Execution details/ })).toHaveAttribute('aria-expanded', 'true');
+});
+
+it('restores native image previews through transcript projection without exposing failed tool attachments', async () => {
+  const messages = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('image-project', [
+    { id: 1, sessionId: 'main', turnId: 'image-turn', type: 'tool.completed', text: 'imageView',
+      createdAt: '2026-01-01T00:00:01Z', payload: { toolName: 'imageView', toolUseID: 'saved-image',
+        attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'restored.png' }] } },
+    { id: 2, sessionId: 'main', turnId: 'image-turn', type: 'tool.failed', text: 'imageView',
+      createdAt: '2026-01-01T00:00:02Z', payload: { toolName: 'imageView', toolUseID: 'failed-image',
+        attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'failed.png' }] } },
+  ])));
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} />);
+  const record = container.querySelector('details')!;
+  fireEvent.click(record.querySelector('summary')!);
+  await waitFor(() => expect(screen.getByRole('img', { name: 'restored.png' })).toBeVisible());
+  expect(screen.queryByRole('img', { name: 'failed.png' })).not.toBeInTheDocument();
+  expect(container.querySelectorAll('details')).toHaveLength(1);
+});
+
+it('keeps generated and viewed images in their own tool records', async () => {
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
+    { id: 'view-image', sender: 'beegame', type: 'tool', content: '', timestamp: 1000, turnId: 'images',
+      toolName: 'imageView', toolStatus: 'completed',
+      attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'reference.png' }] },
+    { id: 'generate-image', sender: 'beegame', type: 'tool', content: '', timestamp: 2000, turnId: 'images',
+      toolName: 'Shell', toolStatus: 'completed', toolInput: { description: 'Generate image' },
+      attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'generated.png' }] },
+  ]} />);
+  const records = container.querySelectorAll('details');
+  expect(records).toHaveLength(2);
+  fireEvent.click(records[1].querySelector('summary')!);
+  await waitFor(() => expect(within(records[1]).getByRole('img', { name: 'generated.png' })).toBeVisible());
+  expect(screen.getByAltText('reference.png')).not.toBeVisible();
+  fireEvent.click(records[0].querySelector('summary')!);
+  expect(within(records[0]).getByRole('img', { name: 'reference.png' })).toBeVisible();
 });
 const FAILURE_TURN_ID = 'beegame-turn-beegame_bcc8df40769c4754895fac37064035d5-1';
 const CHECKLIST_MIXED_MESSAGE_ID = '021789434990692846a816464a9af9c0791e0f68a2ce03cbd3227';

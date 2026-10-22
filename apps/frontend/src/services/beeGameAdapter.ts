@@ -522,6 +522,10 @@ export const beeGameAdapter = {
     return getJson<{ items: Project[]; hasMore: boolean; total: number | null }>(`/api/projects/page?${query}`)
   },
 
+  async cloneProject(projectId: string, language: string): Promise<Project> {
+    return postJson<Project>(`/api/projects/${encodeURIComponent(projectId)}/clone`, { language })
+  },
+
   async getProjectMetadata(projectId: string): Promise<Project> {
     return getJson<Project>(`/api/projects/${encodeURIComponent(projectId)}/metadata`)
   },

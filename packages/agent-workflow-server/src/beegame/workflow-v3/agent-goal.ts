@@ -374,7 +374,9 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     if (run.paused) throw new WorkflowError('run-paused','Explicitly resume before dispatch')
     if (run.writer || input.sessions.hasActiveProjectTurn(run.ownerId,run.projectId,run.workspacePath))
       throw new WorkflowError('workspace-busy','Wait for the existing writer')
-    if(message) {
+    if(message && !run.agentTurns.length && (message.intent==='continue' || message.contextMode==='focused'))
+      throw new WorkflowError('invalid-continuation','This project has not executed yet; send a new task instead of resuming a turn',400)
+    if(message && run.agentTurns.length) {
       const previous=run.agentTurns.at(-1)
       // Native failure is not a live writer. Explicit fresh work may inspect
       // its retained outcomes after proven exit; continuation can explicitly
@@ -394,13 +396,18 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       // Missing/corrupt history must not silently start a new conversation.
       try {
         const history=await readSessionTranscriptFromDisk(run.chatSessionId,run.workspacePath)
+        if(previous.nativeSessionId && !history.length)
+          throw new Error('Saved project Chat history is empty')
         if(previous.nativeSessionId ? !history.some(e=>e.type==='user.message' && (!previous.turnId || e.turnId===previous.turnId)) :
             history.some(e=>e.type==='user.message' || e.type==='assistant.message' || e.type==='tool.started'))
-          throw new Error('Saved conversation does not cover the previous native turn')
+          throw new WorkflowError('conversation-history-mismatch',
+            'Project Chat history does not cover the latest saved execution. The project directory may have been restored from an older backup; restoring files does not roll back workflow or native conversation history. Reconcile the histories before continuing; no automatic restart or replay.',409)
         if(history.some(e=>e.sessionId && e.sessionId!==run.chatSessionId))
-          throw new Error('Saved conversation does not cover the previous native turn')
+          throw new WorkflowError('conversation-history-mismatch',
+            'Project Chat history belongs to a different session than the saved workflow. Reconcile the histories before continuing; no automatic restart or replay.',409)
       }
       catch(error) {
+        if(error instanceof WorkflowError)throw error
         // A proven first no-start request may have no native history yet.
         // Any other missing/corrupt history remains a failure, not a fresh start.
         if(!(previous.notStarted===true && !previous.nativeSessionId && (error as NodeJS.ErrnoException).code==='ENOENT'))

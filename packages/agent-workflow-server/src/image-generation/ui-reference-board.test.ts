@@ -67,6 +67,21 @@ test('canvas/grid choice follows ratio and list length, not screen names or a pr
   }
 })
 
+test('reference prompts preserve design content without imposing pixel coordinates; production keeps its cell data', () => {
+  const input = request(1440, 900, 4)
+  input.uiReference.style = 'Design viewport 1440x900; borders 8px; warm colors'
+  const before = structuredClone(input), plan = compileUiReferenceBoard(input)
+  expect(input).toEqual(before)
+  expect(plan.request.prompt).toContain(input.uiReference.style)
+  for (const screen of input.uiReference.screens) expect(plan.request.prompt).toContain(screen.description)
+  expect(plan.request.prompt).toContain('logical design proportions, not literal output pixels')
+  expect(plan.request.prompt).not.toMatch(/rectangle x=|pixel screen frame|fixed equal-cell|gutters are \d+px/)
+  const skins = compileUiAssetSheet({ requestId: 'control-skins', purpose: 'production', requirementIds: ['controls'], referenceImagePath: 'assets/reference/design.png',
+    uiAssets: { elements: [{ id: 'control', description: 'Selected control skin', width: 240, height: 60 }] } })
+  expect(skins.request.prompt).toContain(JSON.stringify(skins.layout.panels[0]))
+  expect(skins.request).toMatchObject({ background: 'transparent', quality: 'low' })
+})
+
 test('missing evidence and model-specified board geometry are rejected', () => {
   const valid = request(1280, 720, 3)
   for (const uiReference of [null, {}, { ...valid.uiReference, viewport: { width: 0, height: 720 } },

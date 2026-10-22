@@ -6,7 +6,7 @@ import { CURRENT_CONTENT_CHECKER_ENTRY, CONTENT_BINDING_ENTRY, MEDIA_PRODUCTION_
 import { writeProjectAssetCommand } from '../project-asset-command'
 import { openResourceLibraryAccess } from '../resource-library-access'
 import type { openPreviewTestAccess } from '../preview-test-access'
-import { publishProjectPreviewCapability } from '../project-preview-capability'
+import { publishProjectAssetCapabilities, publishProjectPreviewCapability } from '../project-preview-capability'
 import type { createAgentMeasurement } from './agent-measurement'
 import type { openImageGenerationAccess } from '../../image-generation/access'
 import { contentConsumerDistribution, contentConsumerCommand, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
@@ -118,6 +118,7 @@ export async function openAgentTools(input: {
   let library: ReturnType<typeof openResourceLibraryAccess> | undefined
   let preview: AgentPreviewAccess | undefined
   let image: AgentImageAccess | undefined
+  let revokeAssets: (() => Promise<void>) | undefined
   let revokePreview: (() => Promise<void>) | undefined
   let closing: Promise<void> | undefined
   let measurementServer: ReturnType<typeof Bun.serve> | undefined
@@ -126,13 +127,17 @@ export async function openAgentTools(input: {
     // Revoke lookup first; drain actual browser/process cleanup before returning
     // the writer. Delayed old-turn revocation is identity-safe.
     try {
-      try {await revokeMeasurement?.()} finally {
-        measurementServer?.stop(true)
-        await input.measurement?.close()
-      }
+      await revokeAssets?.()
     } finally {
-      try { await revokePreview?.() }
-      finally { try { await preview?.close() } finally { try {await image?.close()} finally {library?.close()} } }
+      try {
+        try {await revokeMeasurement?.()} finally {
+          measurementServer?.stop(true)
+          await input.measurement?.close()
+        }
+      } finally {
+        try { await revokePreview?.() }
+        finally { try { await preview?.close() } finally { try {await image?.close()} finally {library?.close()} } }
+      }
     }
   })()
   let libraryState = 'Built-in resource library is not configured for this session.'
@@ -258,9 +263,13 @@ export async function openAgentTools(input: {
         'else if(args.length===1 && args[0]==="--help")console.log('+JSON.stringify('Preview: --snapshot development|production <width> <height> (first-load diagnostic); --run <project-test.mjs> [args...] (one existing playtest); --inspect <execution.json> (read retained evidence); --client (helper API).\nOptional diagnostics: --keyboard-sample <JSON> {startSelector?,readySelector,key,holdMs,observeMs,viewport?}; --countdown-blur-sample <JSON> {startSelector,countdownSelector,playingSelector,countdownMs,observeMs?,viewport?}; --sprite-sample <sheet.png> <atlas.json> <frame-ms> <frame-id> ...; --sprite-capture.\n--snapshot captures the actual first-load viewport and runtime error counts into a unique .beegame/tmp/preview-snapshot-* directory, without a project test script. This is a visual diagnostic, not a pass, playtest or freshness receipt. --run executes once with Node, retaining stdout/stderr and execution.json, with a five-minute execution budget and no retries. Catchable interruption/timeout is retained as non-success; hard termination can leave an unfinished receipt, never a pass. --inspect reads source freshness and supplied-tool identity separately without executing it; legacy/missing tool identity and actual browser environment remain unverified. Exit code is not test quality; scripts choose assertions and use the existing helper for current access.\nPreview environment: '+JSON.stringify(PREVIEW_ENVIRONMENT)+'\n'+preview.instruction)+');\n'+
         'else {console.error("Use --help, --countdown-blur-sample <JSON>, --keyboard-sample <JSON>, --snapshot <mode> <width> <height>, --client, or --run <project-test.mjs> [args...]");process.exitCode=1;}\n', { flag: 'wx', mode: 0o600 })
     }
-    await writeProjectAssetCommand(resolve(directory, 'assets.mjs'), {
+    const assets = {
       ...(library ? { libraryBaseUrl: library.baseUrl } : {}),
-      ...(image ? {imageEndpoint:image.endpoint} : {}),
+      ...(image ? { imageEndpoint: image.endpoint } : {}),
+    }
+    if (input.sessionId) revokeAssets = await publishProjectAssetCapabilities(root, input.sessionId, assets)
+    await writeProjectAssetCommand(resolve(directory, 'assets.mjs'), {
+      ...(input.sessionId ? { sessionId: input.sessionId } : assets),
       mediaCommand: 'bun ' + JSON.stringify(entry('media.mjs')),
     })
     const { platform, inputs, orientation, dimension } = input.constraints ?? {}
@@ -283,7 +292,7 @@ export async function openAgentTools(input: {
       // Keep the locator outside compactable message history. Capabilities
       // still expire normally; this is only the current turn's tool location.
       systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
-        'Read contracts as needed: bun check-content.mjs --format [SECTION ...] (Editor fields or preview); bun consumer.mjs --api (optional runtime). Other entries use --help: bun assets.mjs (sourcing), bun resources.mjs (registration), bun bind-content.mjs (bindings), bun media.mjs (processing)'+
+        'Read contracts as needed: bun check-content.mjs --format uiLayoutContract (layout; --format lists sections); bun resources.mjs --contract registration (resource fields); bun consumer.mjs --api (optional runtime). --help: bun assets.mjs, bun bind-content.mjs, bun media.mjs'+
         (input.measurement ? '; node measure.mjs, node handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
         (input.measurement ? 'Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Plain documents need no index or finalization. ' : ''),
@@ -291,7 +300,7 @@ export async function openAgentTools(input: {
         libraryState,
         ...(!preview ? ['Managed browser Preview is unavailable; native tools remain available.'] : []),
         ...(preview ? ['Preview uses a sandboxed opaque iframe: native browser storage can fail. Contract: check-content.mjs --format preview. Browser commands: preview.mjs --help.'] : []),
-        image ? 'Image generation is configured, not yet verified available; assets.mjs --help provides usage and quoting.' : 'No AI image bridge is configured for this turn.',
+        image ? 'Image generation is configured, not yet verified available; assets.mjs generate --help provides request examples, quoting and reference-image revisions; ui-assets-plan --help covers runtime skins.' : 'No AI image bridge is configured for this turn.',
         'Credentials stay in BGS. Tool availability is not runtime consumption or quality evidence.',
       ].join('\n'),
       // Retain tiny adapters as execution evidence, not game deliverables.

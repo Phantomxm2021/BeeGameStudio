@@ -33,6 +33,8 @@ test('missing optional clients do not block project tools or grant fallback host
       assert.equal(permissions[':slash_tmp'], 'deny');
       assert.equal(permissions[join(root, 'docs/GDD.md')], 'read');
       assert.equal(permissions[root], 'write');
+      assert.equal(permissions[access.environment.BEEGAME_ASSET_CAPABILITY_FILE], 'read');
+      assert.notEqual(access.environment.BEEGAME_ASSET_CAPABILITY_FILE, access.environment.BEEGAME_PREVIEW_CAPABILITY_FILE);
       tools = await openAgentTools({workspacePath:root,sessionId:'fixture',getAuthToken:()=>undefined,
         openPreview:()=>({baseUrl:'http://127.0.0.1:1',instruction:'Synthetic inactive preview',close:async()=>{}})});
       const cli = Bun.spawn([process.execPath,join(root,tools.directory,'preview.mjs'),'--client'], {

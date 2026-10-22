@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-22",
+  "scope": "BGS-managed runtime configuration and local regressions only",
+  "productionChange": {
+    "file": "packages/agent-workflow-server/src/bgs/runner.ts",
+    "setting": "features.goals=false",
+    "reason": "BGS owns assignment scope and accounting; native goals expose a separate completion/usage time window and optional autonomous continuation. Disable the existing feature instead of adding a second goal/status projection.",
+    "appliesTo": "BGS app-server startup overrides, used for new and resumed threads and provider-independent BGS sessions",
+    "unchanged": [
+      "native CLI sources",
+      "project artifacts",
+      "normal in-turn tool execution",
+      "user-authorized continuation",
+      "BGS usage accounting",
+      "design workflow and Editor contracts",
+      "tool-output token budget",
+      "unrelated native features"
+    ]
+  },
+  "clarification": "Earlier wording that BGS has its own automatic continuation loop was imprecise. workflow-v3/agent-goal.ts explicitly has no automatic model retries or stage advancement. Existing in-turn execution and explicit follow-up/resume remain. This change disables native persistent-goal continuation, not a duplicate BGS retry implementation.",
+  "tests": [
+    {
+      "suite": "goals.native.test.ts",
+      "passed": 1,
+      "checks": [
+        "real CLI with no turn/start",
+        "new thread rejects goal operations",
+        "seed retained paused goal with positive-control feature enabled",
+        "resume succeeds with goals disabled",
+        "no goal snapshot or turn-start notification on resume",
+        "retained goal remains readable when test-only feature re-enabled"
+      ],
+      "limit": "Retained paused goal tested; no real active user goal or model used."
+    },
+    {
+      "suite": "output-budget.integration.test.ts",
+      "passed": 1,
+      "checks": [
+        "real CLI with loopback-only scripted Responses",
+        "new and resumed requests omit create_goal/update_goal/get_goal tools",
+        "normal command tool execution and final completion still work",
+        "bounded ASCII/UTF8/JSON output and per-call smaller cap preserved"
+      ],
+      "modelCalls": 0
+    },
+    {
+      "suite": "runner.test.ts and agent-tools.test.ts",
+      "passed": 68,
+      "skipped": 3,
+      "checks": [
+        "usage and history recovery",
+        "tool lifecycle and permission boundaries",
+        "contract navigation"
+      ],
+      "skippedReason": "Opt-in real-browser tests not needed for config change"
+    },
+    {
+      "suite": "agent-goal.test.ts",
+      "passed": 62,
+      "checks": [
+        "one authorized workflow dispatch",
+        "preserved scope, explicit continuation and pause",
+        "no automatic replay",
+        "delivery remains distinct from acceptance"
+      ],
+      "fixtureRepair": "Two exact-string assertions still expected old tool navigation; synchronized with current navigation, without loosening scope assertions."
+    }
+  ],
+  "checks": {
+    "rootProductionTsc": "passed: node_modules/.bin/tsc --noEmit -p tsconfig.json",
+    "packageWideTsc": "Fails in unchanged pre-existing test files (obsolete fields, fetch mocks and JS declarations); no errors reported for files changed in this task. Not fixed out of scope.",
+    "gitDiffCheck": "passed",
+    "localModelCalls": 0,
+    "serviceRestarts": 0,
+    "testProjectWrites": 0
+  },
+  "guidanceReview": {
+    "files": [
+      ".beegame/skills/bgs-game-skills/game-design-check/SKILL.md",
+      ".beegame/skills/bgs-game-skills/evidence-before-completion/SKILL.md"
+    ],
+    "result": "Existing guidance already disallows mandatory extra reports/review chains and asks for grouped corrections/independent reads. No source requirement demonstrated for the case-specific review loop; no new rule or Skill rewrite made."
+  },
+  "limits": [
+    "No claim that this removes the 4.67M-token post-draft review cost or fixes document quality.",
+    "Existing assistant text/history and native goal records are not rewritten.",
+    "No production service restart or real project rerun. New process configuration takes effect when the updated BGS server code is loaded; already-running processes are not changed."
+  ],
+  "verificationEnvironment": "Default sandbox blocked loopback listen; integration and runner fixtures ran under approved escalation restricted by test resolver to local scripted endpoints. Native goal lifecycle test ran in sandbox. No provider model generation used."
+}

@@ -136,7 +136,7 @@ test('protected-file tool cannot write outside the game', async () => {
   finally { await f.close() }
 }, 30_000)
 
-test.each(['../outside.md', 'absolute-sibling', 'docs/GDD.mdd', 'src/example.js'])(
+test.each(['../outside.md', 'absolute-sibling', 'docs/GDD.mdd', 'src/example.js', 'docs/README.md'])(
   'protected-file path diagnostics reject without authorizing writes: %s', async input => {
   const f = await fixture()
   try {
@@ -149,6 +149,8 @@ test.each(['../outside.md', 'absolute-sibling', 'docs/GDD.mdd', 'src/example.js'
     } else {
       expect(text).toContain('Path is not a BGS protected design record or AGENTS.md')
       expect(text).toContain('Check file_path')
+      expect(text).toContain('use exec_command with project-local file operations')
+      expect(text).toContain('does not deny ordinary workspace writes')
     }
     expect(await Bun.file(resolve(f.workspace, path)).exists()).toBe(false)
     expect(f.questions).toHaveLength(0)

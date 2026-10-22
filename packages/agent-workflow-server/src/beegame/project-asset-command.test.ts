@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
+import { compileUiReferenceBoard } from '../image-generation/ui-reference-board.mjs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -24,6 +26,45 @@ async function run(cwd: string, script: string, ...args: string[]) {
   return { stdout, stderr, code }
 }
 
+test('asset tools stay with the loaded host after disk updates and refresh in a new process', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-tool-host-version-'))
+  try {
+    const commands = join(root, 'beegame'), images = join(root, 'image-generation')
+    await mkdir(commands); await mkdir(images)
+    for (const name of ['project-asset-command.ts', 'project-asset-cli.mjs'])
+      await copyFile(new URL('./' + name, import.meta.url), join(commands, name))
+    const compilerPath = join(images, 'ui-reference-board.mjs')
+    await copyFile(new URL('../image-generation/ui-reference-board.mjs', import.meta.url), compilerPath)
+    const moduleUrl = pathToFileURL(join(commands, 'project-asset-command.ts')).href
+    const loadedHost = await import(moduleUrl)
+    const loadedCompiler = await import(pathToFileURL(compilerPath).href)
+    const input = { requestId: 'version-fixture', purpose: 'reference', uiReference: { viewport: { width: 800, height: 600 },
+      style: 'Shared project style', screens: [{ id: 'play', description: 'Complete scene and HUD' }] } }
+    await writeFile(join(root, 'request.json'), JSON.stringify(input))
+    const cliPath = join(commands, 'project-asset-cli.mjs')
+    await writeFile(cliPath, (await readFile(cliPath, 'utf8')) + '\n// NEXT_CLI_VERSION\n')
+    await writeFile(compilerPath, (await readFile(compilerPath, 'utf8'))
+      .replace('Create a visual reference board', 'NEXT_COMPILER_VERSION'))
+    // A running host must keep both old sources, even for tools written after the update.
+    const script = join(root, 'running-host.mjs')
+    await loadedHost.writeProjectAssetCommand(script, {})
+    expect(await readFile(script, 'utf8')).not.toContain('NEXT_CLI_VERSION')
+    const result = await run(root, script, 'ui-board-plan', 'request.json')
+    expect(result.code, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual(loadedCompiler.compileUiReferenceBoard(input))
+    // A fresh host picks up both updated sources without mutating the running process.
+    const restart = join(root, 'fresh-host.mjs'), freshScript = join(root, 'fresh-tools.mjs')
+    await writeFile(restart, `import { writeProjectAssetCommand } from ${JSON.stringify(moduleUrl)};
+      await writeProjectAssetCommand(${JSON.stringify(freshScript)}, {});`)
+    const started = await run(root, restart)
+    expect(started.code, started.stderr).toBe(0)
+    expect(await readFile(freshScript, 'utf8')).toContain('NEXT_CLI_VERSION')
+    const fresh = await run(root, freshScript, 'ui-board-plan', 'request.json')
+    expect(fresh.code, fresh.stderr).toBe(0)
+    expect(JSON.parse(fresh.stdout).request.prompt).toContain('NEXT_COMPILER_VERSION')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test('UI board CLI plans offline, quotes the computed canvas and submits structured inventory', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-ui-board-'))
   const received: unknown[] = []
@@ -43,15 +84,31 @@ test('UI board CLI plans offline, quotes the computed canvas and submits structu
     await writeProjectAssetCommand(script, {})
     const help = await run(root, script, '--help')
     expect(help.code).toBe(0)
-    expect(help.stdout).toContain('complete game-screen design boards replace prompt with uiReference:')
-    expect(help.stdout).toContain('one complete game screen including its Scene and HUD, shared by UI and Scene design')
+    expect(help.stdout).toContain('generate --help')
+    const imageHelp = await run(root, script, 'generate', '--help')
+    expect(imageHelp.code).toBe(0)
+    expect(imageHelp.stdout).toContain('complete game-screen design boards replace prompt with uiReference')
+    expect(imageHelp.stdout).not.toContain('register needs with resources: []')
+    const [example, revision] = imageHelp.stdout.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line))
+    expect(revision).toMatchObject({ referenceImagePath: 'assets/reference/selected.png', quality: 'low' })
+    await writeFile(file, JSON.stringify(example))
+    const examplePlan = await run(root, script, 'ui-board-plan', file)
+    expect(examplePlan.code).toBe(0)
+    expect(JSON.parse(examplePlan.stdout).request).toMatchObject({ quality: 'low', background: 'opaque' })
+    await writeFile(file, JSON.stringify(input))
+    for (const command of ['cost', 'ui-board-plan', 'ui-assets-plan']) {
+      const result = await run(root, script, command, '--help')
+      expect(result.code).toBe(0)
+      if (command === 'ui-assets-plan') expect(result.stdout).toContain('register needs with resources: []')
+    }
     expect(received).toEqual([])
     const planned = await run(root, script, 'ui-board-plan', file)
     expect(planned.code).toBe(0)
     const plan = JSON.parse(planned.stdout)
+    expect(plan).toEqual(compileUiReferenceBoard(input))
     expect(plan.layout).toMatchObject({ columns: 3, rows: 1 })
     expect(plan.request).toMatchObject({ size: '1536x1024', quality: 'low', background: 'opaque' })
-    expect(plan.request.prompt).toContain('Keep the scene and its HUD inside it')
+    expect(plan.request.prompt).toContain('Keep each complete scene and its HUD together and readable')
     expect(received).toEqual([])
     await writeProjectAssetCommand(script, { imageEndpoint: `http://127.0.0.1:${server.port}/generate` })
     await writeFile(file, JSON.stringify({ ...input, uiReference: { ...input.uiReference, columns: 2 } }))
@@ -451,3 +508,72 @@ test('catalog lists are compact while details, selection IDs and pagination rema
     expect(received).toHaveLength(5)
   } finally {server.stop(true);await rm(root,{recursive:true,force:true})}
 })
+
+test('managed asset commands reject absent or mismatched access and pin a paid attempt to one bridge', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-assets-access-'))
+  const workspace = await realpath(root)
+  const script = join(root, 'assets.mjs'), capabilityFile = join(root, 'current.json')
+  let oldPosts = 0, newRequests = 0, mode = 'replace'
+  const replacement = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    newRequests++; return Response.json({ available: true })
+  } })
+  const capability = (endpoint: string) => ({ version: 1, workspace, sessionId: 'fixture', executionId: 'execution', assets: { imageEndpoint: endpoint } })
+  const bridge = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request, server) {
+    if (request.method === 'GET') {
+      if (mode === 'http-error') return Response.json({ error: 'fixture upstream rejected' }, { status: 503 })
+      await writeFile(capabilityFile, JSON.stringify(capability(replacement.url.origin)))
+      return Response.json({ available: true })
+    }
+    oldPosts++
+    server.stop(true) // Simulate a lost response after the request reached the bridge.
+    return new Response('unreachable')
+  } })
+  const invoke = async (path: string | undefined, ...args: string[]) => {
+    const env = { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: path }
+    const child = Bun.spawn([process.execPath, script, ...args], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' })
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+    return { code, stdout, stderr }
+  }
+  const save = (value: unknown) => writeFile(capabilityFile, JSON.stringify(value))
+  try {
+    await writeProjectAssetCommand(script, { sessionId: 'fixture' })
+    expect((await invoke(undefined, 'cost')).stderr).toContain('ASSET_CAPABILITY_MISSING')
+    expect((await invoke(capabilityFile, 'cost')).stderr).toContain('ASSET_CAPABILITY_EXPIRED')
+    expect((await invoke(capabilityFile, 'generate', '--help')).code).toBe(0)
+    const valid = capability(bridge.url.origin)
+    for (const invalid of [{ ...valid, sessionId: 'another-session' }, { ...valid, workspace: root + '/another-project' },
+      { ...valid, assets: { imageEndpoint: 'https://example.com/image' } }, { ...valid, executionId: '' }]) {
+      await save(invalid)
+      expect((await invoke(capabilityFile, 'cost')).stderr).toContain('ASSET_CAPABILITY_MISMATCH')
+    }
+    await save({ ...valid, assets: {} })
+    expect((await invoke(capabilityFile, 'cost')).stderr).toContain('AI image generation is unavailable for this turn')
+    await save(valid)
+    mode = 'http-error'
+    const upstreamFailure = await invoke(capabilityFile, 'cost')
+    expect(upstreamFailure.stderr).toContain('Capability HTTP 503')
+    expect(upstreamFailure.stderr).not.toContain('ASSET_BRIDGE_UNREACHABLE')
+    mode = 'replace'
+    await writeFile(join(root, 'request.json'), JSON.stringify({ requestId: 'original-attempt', purpose: 'reference', prompt: 'Fixture' }))
+    const result = await invoke(capabilityFile, 'generate', 'request.json', 'assets/result.png')
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('ASSET_REQUEST_OUTCOME_UNKNOWN')
+    expect(result.stderr).toContain('requestId=original-attempt')
+    expect(oldPosts).toBe(1)
+    expect(newRequests).toBe(0)
+    await expect(readFile(join(root, 'assets/result.png'))).rejects.toThrow()
+    // A fresh host may publish a different private path: the retained entry uses its current environment.
+    const restarted = join(root, 'restarted.json')
+    await writeFile(restarted, JSON.stringify(capability(replacement.url.origin)))
+    expect((await invoke(restarted, 'cost')).code).toBe(0)
+    expect(newRequests).toBe(1)
+    await save(valid)
+    expect((await invoke(capabilityFile, 'cost')).stderr).toContain('ASSET_BRIDGE_UNREACHABLE')
+    // Even legacy direct configuration must not override an explicitly supplied expired capability.
+    const legacy = join(root, 'legacy.mjs')
+    await writeProjectAssetCommand(legacy, { imageEndpoint: replacement.url.origin })
+    await copyFile(legacy, script)
+    expect((await invoke(join(root, 'missing.json'), 'cost')).stderr).toContain('ASSET_CAPABILITY_EXPIRED')
+    expect(newRequests).toBe(1)
+  } finally { bridge.stop(true); replacement.stop(true); await rm(root, { recursive: true, force: true }) }
+}, 30000)

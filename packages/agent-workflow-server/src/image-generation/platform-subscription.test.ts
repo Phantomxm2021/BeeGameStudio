@@ -187,7 +187,7 @@ test('asset CLI shows the shared fixed price and refuses a missing quote before 
   const root = mkdtempSync(join(tmpdir(), 'platform-image-cli-')), png = await bytes()
   let calls = 0, price: number | null = null
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
-    if (request.method === 'GET') return Response.json({ provider: 'chatgpt-subscription', billingSource: 'platform', available: true, quotedCreditsMicro: price })
+    if (request.method === 'GET') return Response.json({ fixedPrice: true, billingSource: 'platform', available: true, quotedCreditsMicro: price })
     calls++
     return new Response(new Uint8Array(png), { headers: { 'content-type': 'image/png', 'x-image-credits-micro': String(price) } })
   } })

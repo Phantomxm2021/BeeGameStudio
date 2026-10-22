@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { createPortal } from 'react-dom';
-import { Check, Gamepad2, LoaderCircle, MoreHorizontal, Search, Trash2 } from 'lucide-react';
+import { Copy, Check, Gamepad2, LoaderCircle, MoreHorizontal, Search, Trash2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
@@ -59,6 +59,9 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
       loadMoreProjects: state.loadMoreProjects,
     })),
   );
+  const [cloningProjectId, setCloningProjectId] = useState<string | null>(null);
+  const cloningRef = useRef(false);
+  const [cloneError, setCloneError] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
@@ -87,7 +90,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
   const hasSearch = Boolean(searchQuery.trim());
   const visibleProjects = useMemo(() => hasSearch ? searchResults : projects, [hasSearch, searchResults, projects]);
   const allLoadedSelected = visibleProjects.length > 0 && visibleProjects.every(project => selectedIds.has(project.id));
-  const deletionPending = isBatchDeleting || Boolean(deletingProjectId);
+  const deletionPending = isBatchDeleting || Boolean(deletingProjectId) || Boolean(cloningProjectId);
 
   useEffect(() => {
     // Keep the outgoing contents intact. Reset only on the next opening,
@@ -227,6 +230,25 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
     setActiveMenuId(null);
     setMenuPosition(null);
     setConfirmingDeleteId(null);
+  };
+
+  const handleClone = async (id: string) => {
+    if (cloningRef.current || deletionPending) return;
+    cloningRef.current = true;
+    setCloningProjectId(id);
+    setCloneError(null);
+    closeMenu();
+    try {
+      const project = await api.cloneProject(id, lang);
+      await loadProjects();
+      onSelectProject(project.id);
+      onClose();
+    } catch (error) {
+      setCloneError(error instanceof Error ? error.message : t.historyCloneFailed);
+    } finally {
+      cloningRef.current = false;
+      setCloningProjectId(null);
+    }
   };
 
   const handleDelete = async (event: React.MouseEvent, id: string) => {
@@ -585,6 +607,8 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
           </motion.div>
         ) : null}
         </AnimatePresence>
+        {cloningProjectId ? <p role="status" className="type-footnote mt-3 text-muted-foreground">{t.historyCloning}</p> : null}
+        {cloneError ? <p role="alert" className="type-footnote mt-3 text-destructive">{cloneError}</p> : null}
         {deleteResult ? <p role={deleteResult.failed ? 'alert' : 'status'} className={`type-footnote relative z-10 mt-3 ${deleteResult.failed ? 'text-destructive' : 'text-muted-foreground'}`}>
           {(deleteResult.failed ? t.historyDeleteFailed : t.historyDeleteSucceeded)
             .replace('{{deleted}}', String(deleteResult.deleted)).replace('{{failed}}', String(deleteResult.failed))}
@@ -611,8 +635,13 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               onPointerDown={event => event.stopPropagation()}
               className="bg-background fixed z-[260] min-w-[150px] overflow-hidden rounded-lg p-1.5 text-foreground shadow-lg"
             >
+              <button type="button" disabled={deletionPending} onClick={() => void handleClone(activeProject.id)}
+                className="type-footnote flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left hover:bg-muted disabled:opacity-40">
+                <Copy className="h-3.5 w-3.5" />{t.historyClone}
+              </button>
               <button
                 type="button"
+                disabled={deletionPending}
                 onClick={event => handleDelete(event, activeProject.id)}
                 className={`type-footnote flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
                   confirmingDeleteId === activeProject.id

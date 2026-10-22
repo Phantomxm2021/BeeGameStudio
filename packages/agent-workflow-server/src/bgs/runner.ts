@@ -20,7 +20,7 @@ import { getBuiltinSkillsDirectory } from '@bee-game-studio/beegame-skills-core/
 
 const protectedWriteTools: RpcObject[] = ['WriteProjectFile', 'EditProjectFile'].map(name => ({ type: 'function', name,
   description: name === 'WriteProjectFile'
-    ? 'Write a BGS protected design record or AGENTS.md through the host permission authority. Ordinary files use native BGS tools.'
+    ? 'Write a BGS protected design record or AGENTS.md through the host permission authority. Ordinary project files use exec_command with project-local file operations.'
     : 'Edit a BGS protected design record or AGENTS.md through host permission. Use old_string/new_string for one replacement, or edits for multiple non-overlapping replacements against the same original file. All must match uniquely; one failure saves nothing.',
   inputSchema: { type: 'object', properties: { file_path: { type: 'string' },
     ...(name === 'WriteProjectFile' ? { content: { type: 'string' } }
@@ -142,6 +142,13 @@ export function bgsProviderConfig(env: Record<string, string>): Record<string, u
     throw Error('ChatGPT credentials cannot be sent to a custom model endpoint')
   return {
     ...(model ? { model } : {}),
+    // BGS owns task scope and usage reporting. A second native goal
+    // lifecycle would expose a different budget/time window to the Agent.
+    'features.goals': false,
+    // Unknown model slugs default to only 10,000 bytes. Use the native exec
+    // token budget so ordinary Skill/contract reads survive that fallback;
+    // oversized output and smaller per-call requests remain bounded by CLI.
+    tool_output_token_limit: 10_000,
     ...(env.OPENAI_AUTH_MODE === 'chatgpt' ? {} : {
       model_provider: 'bgs', model_providers: { bgs: { name: 'BGS model connection',
         base_url: custom || 'https://api.openai.com/v1', env_key: 'OPENAI_API_KEY',
@@ -191,7 +198,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       profile[join(home, 'skills')] = 'read'
       const instructions = [BEEGAME_USER_RESPONSE_SCOPE, input.language && responseLanguageInstruction(input.language),
         'Use WriteProjectFile or EditProjectFile for these host-protected paths relative to the project root: ' + JSON.stringify(access.protectedPaths.map(path => relative(access.root, path))) +
-        '. Shell and apply_patch cannot modify them. A design lock is enforced by BGS; never bypass a rejection.', mcp.context,
+        '. Shell cannot modify these protected paths. For ordinary project files, use exec_command with project-local file operations. Only use apply_patch if it is listed as an available tool; do not assume a shell executable exists. A design lock is enforced by BGS; never bypass a rejection.', mcp.context,
         access.unavailable.length ? 'BGS host components unavailable: ' + access.unavailable.join('; ') +
           '. Unrelated work can continue; dependent inspections remain unavailable and unverified.' : '',
       ].filter(Boolean).join('\n\n')
@@ -422,7 +429,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
         if (!args || typeof args.file_path !== 'string') throw Error('file_path is required')
         const path = resolve(this.access.root, args.file_path)
         if (!inside(this.access.root, path)) throw Error('Path is outside the project workspace. Check file_path; use a project-relative path inside the current project.')
-        if (!this.access.protectedPaths.includes(path)) throw Error('Path is not a BGS protected design record or AGENTS.md. Check file_path for typos; ordinary project files use native BGS file tools.')
+        if (!this.access.protectedPaths.includes(path)) throw Error('Path is not a BGS protected design record or AGENTS.md. Check file_path for typos. For an intentional ordinary project file, use exec_command with project-local file operations. This rejection does not deny ordinary workspace writes.')
         const request = { toolUseID: p.callId, toolName: p.tool === 'WriteProjectFile' ? 'Write' : 'Edit', input: args,
           message: 'Change a BGS protected project file' }
         const decision = await this.permission(request)

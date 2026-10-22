@@ -8,7 +8,8 @@ import { registerV3Routes } from './beegame/workflow-v3/routes'
 import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
 import { createMeasuredPreview, type MeasuredPreviewManager, type CandidatePreview } from './beegame/workflow-v3/measured-preview'
 import { createPreviewStorageStore } from './beegame/preview-storage-store'
-import { WorkflowError } from './beegame/workflow-v3/state'
+import { WorkflowError, createRun } from './beegame/workflow-v3/state'
+import { copyProjectForClone } from './beegame/project-clone'
 import { projectExecutionTime } from './beegame/workflow-v3/execution-time'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, type WorkflowStore } from './beegame/workflow-v3/store'
 import { normalizeRuntimeEnvironment } from '@bee-game-studio/agent-workflow/runtime-environment'
@@ -705,7 +706,7 @@ export function createAgentWorkflowApp(
     // lifecycle cleanup, not legacy scheduling; its handler verifies ownership.
     const isProjectDeletion = c.req.method === 'DELETE' && tail === ''
     if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !tail.startsWith('workflow-v3') &&
-        !isProjectDeletion && tail !== 'session/ensure' && !(c.req.method === 'PUT' && tail === 'game-content/document') && !tail.startsWith('permissions/')) {
+        !isProjectDeletion && !(c.req.method === 'POST' && tail === 'clone') && tail !== 'session/ensure' && !(c.req.method === 'PUT' && tail === 'game-content/document') && !tail.startsWith('permissions/')) {
       try { await v3Routes.assertLegacy(c.req.param('id')!, getCurrentUser(c.req.raw).id, c.req.raw) }
       catch (error) {
         if (error instanceof WorkflowError) return c.json({ error: error.message, code: error.code }, error.status)
@@ -2054,6 +2055,90 @@ export function createAgentWorkflowApp(
         )
       }
       return tracedRouteError(c, 'project.create', err)
+    }
+  })
+
+  app.post('/api/projects/:id/clone', async c => {
+    const user = getCurrentUser(c.req.raw)
+    for (const permission of ['project.read', 'project.create'] as const) {
+      const forbidden = requirePermission(user, permission)
+      if (forbidden) return c.json(forbidden, 403)
+    }
+    if (!v3Store) return c.json({ error: 'V3 workflow storage is not configured' }, 503)
+    let workspacePath: string | undefined, sessionId: string | undefined, projectId: string | undefined
+    try {
+      const source = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!source?.root_path) return c.json({ error: 'Project not found' }, 404)
+      const sourcePath = await realpath(await resolveSessionWorkspacePath(source.root_path, options.defaultWorkspacePath))
+      await resolveSessionWorkspacePath(sourcePath, options.defaultWorkspacePath)
+      const sourceRun = await v3Store.read(source.id, user.id)
+      if (!sourceRun || !Array.isArray(sourceRun.agentTurns))
+        throw new WorkflowError('clone-requirements-unavailable', 'This project has no readable confirmed requirements to clone')
+      if (await realpath(sourceRun.workspacePath) !== sourcePath)
+        throw new WorkflowError('workspace-changed', 'Project workspace differs from its saved workflow')
+      const assertIdle = () => {
+        if (sourceRun.writer || beeGameSessions.hasActiveProjectTurn(user.id, source.id, sourcePath))
+          throw new WorkflowError('workspace-busy', 'Wait for the source project to stop before cloning')
+      }
+      assertIdle()
+      const brief = JSON.parse(sourceRun.requirements.text)
+      if (!isObject(brief) || brief.kind !== 'confirmed_build_brief' || !isObject(brief.settings))
+        throw new WorkflowError('clone-requirements-unavailable', 'Confirmed project settings are unavailable')
+      // Old task messages must not become instructions in the new conversation.
+      delete brief.user_messages
+      // File reuse is not conversation continuation or inherited acceptance.
+      // Preserve facts only: the Agent still resolves the user's next assignment.
+      brief.project_source = { type: 'clone', source_project_id: source.id, source_project_name: source.name,
+        conversation_history: 'not_copied', execution_state: 'not_inherited', quality: 'unverified' }
+      const body = await readOptionalJson(c.req.raw)
+      const name = source.name + (body.language === 'zh' || body.language === 'zh-TW' ? ' 副本' : ' Copy')
+      projectId = 'project_' + randomUUID()
+      workspacePath = await createManagedProjectWorkspacePath({ defaultWorkspacePath: options.defaultWorkspacePath,
+        userId: user.id, projectName: name, projectId })
+      await copyProjectForClone(sourcePath, workspacePath)
+      assertIdle()
+      if ((await v3Store.read(source.id, user.id))?.version !== sourceRun.version)
+        throw new WorkflowError('clone-source-changed', 'Project execution changed while cloning; no copy was retained')
+      const sourceSession = beeGameSessions.metadata(sourceRun.chatSessionId) ??
+        (await dashboardRepository.listProjectSessions(c.req.raw, user, source.id)).find(s => s.id === sourceRun.chatSessionId)
+      const savedModelId = sourceSession?.modelConfigId ?? source.runtime_snapshot?.model_config_id
+      const retainedModelId = savedModelId && await dashboardRepository.modelConfigExists(c.req.raw, user, savedModelId)
+        ? savedModelId : undefined
+      const configs = retainedModelId ? [] : await dashboardRepository.listModelConfigs(c.req.raw, user)
+      const modelConfigId = retainedModelId ?? configs.find(config => config.isDefault)?.id ?? configs[0]?.id
+      const project = await dashboardRepository.upsertProject(c.req.raw, user, {
+        id: projectId, name, root_path: workspacePath, created_at: Date.now(),
+        runtime_snapshot: { phase_name: 'idle', workflow_protocol: 'bgs.workflow.v3',
+          ...(modelConfigId ? {model_config_id: modelConfigId} : {}), updated_at: Date.now() },
+      })
+      // start() allocates an idle Chat only; no runner or model is called until a message is sent.
+      const session = beeGameSessions.start({ workspacePath, projectId, userId: user.id,
+        ...(modelConfigId ? {modelConfigId} : {}),
+        ...(isBeeGameSessionLanguage(brief.agent_response_language) ? {language: brief.agent_response_language} : {}),
+        userDataRoot: getCurrentUserDataRoot(c.req.raw) })
+      sessionId = session.id
+      await dashboardRepository.upsertSessionMetadata(c.req.raw, user, beeGameSessions.metadata(sessionId))
+      const run = createRun({ projectId, ownerId: user.id, workspacePath, chatSessionId: sessionId,
+        requestKey: projectId, text: JSON.stringify(brief), constraints: sourceRun.requirements.constraints,
+        ids: sourceRun.requirements.ids })
+      await v3Store.commit(projectId, user.id, 0, run, 'agent.goal-confirmed')
+      return c.json(project, 201)
+    } catch (error) {
+      // All paths/identities here were newly allocated by this request, never supplied by the caller.
+      const cleanup: Promise<unknown>[] = []
+      if (sessionId) {
+        const metadata = beeGameSessions.metadata(sessionId)
+        cleanup.push(beeGameSessions.delete(sessionId),
+          dashboardRepository.deleteSessionMetadata(c.req.raw, user, metadata, sessionId))
+      }
+      if (projectId) cleanup.push(dashboardRepository.deleteProject(c.req.raw, user, projectId))
+      if (workspacePath) cleanup.push(rm(workspacePath, {recursive: true, force: true}))
+      if ((await Promise.allSettled(cleanup)).some(result => result.status === 'rejected'))
+        return c.json({error: 'Clone failed and cleanup was incomplete for ' + projectId, code: 'clone-cleanup-failed'}, 503)
+      if (error instanceof WorkflowError) return c.json({ error: error.message, code: error.code }, error.status)
+      if (error instanceof ProjectQuotaExceededError)
+        return c.json({error: error.message, code: 'PROJECT_QUOTA_EXCEEDED', limit: error.limit, projectCount: error.projectCount}, 429)
+      return tracedRouteError(c, 'project.clone', error)
     }
   })
 

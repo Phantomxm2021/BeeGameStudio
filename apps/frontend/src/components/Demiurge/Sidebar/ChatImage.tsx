@@ -1,7 +1,7 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ImageGenerationHandle } from 'img-fx';
-import { ImageOff, X } from 'lucide-react';
+import { Expand, ImageOff, X } from 'lucide-react';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '../../ui/dialog';
 import './ChatImage.css';
 
@@ -40,7 +40,8 @@ export function ChatImage({ src, alt, pending = false, error = false, lang = 'en
     return <span className="chat-image-card">
         <Dialog open={open} onOpenChange={setOpen}>
             <button type="button" className="chat-image-thumbnail" aria-label={`${label}: ${alt}`}
-                disabled={!src || unavailable || loading} onClick={() => setOpen(true)} aria-busy={loading}>
+                disabled={!src || unavailable || loading} onClick={() => setOpen(true)} aria-busy={loading}
+                data-loaded={!loading && !unavailable}>
                 {loading && <span data-slot="skeleton" role="status" aria-label={lang === 'zh' ? '图片加载中' : 'Loading image'} className="chat-image-skeleton" />}
                 {src && !unavailable && animateReveal ? <ImageEffectBoundary key={src} fallback={<img src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="max-w-full object-contain" onError={() => setFailed(true)} />}>
                     <Suspense fallback={<span data-slot="skeleton" role="status" aria-label={lang === 'zh' ? '图片加载中' : 'Loading image'} className="chat-image-skeleton" />}>
@@ -48,11 +49,16 @@ export function ChatImage({ src, alt, pending = false, error = false, lang = 'en
                     </Suspense>
                 </ImageEffectBoundary> : image}
                 {unavailable && <span className="chat-image-error"><ImageOff size={24} />{lang === 'zh' ? '图片不可用' : 'Image unavailable'}</span>}
+                {!loading && !unavailable && <span className="chat-image-expand" aria-hidden="true"><Expand size={13} /></span>}
             </button>
-            <DialogContent className="!max-w-[min(1100px,94vw)] !p-3">
+            <DialogContent className="chat-image-lightbox !max-w-[min(1120px,94vw)] !border-0 !bg-transparent !p-0 !shadow-none"
+                backdropProps={{ className: '!bg-black/80 !backdrop-blur-sm' }}>
                 <DialogTitle className="sr-only">{alt}</DialogTitle>
-                <DialogClose className="absolute right-3 top-3 grid size-8 place-items-center rounded-full border border-border bg-background/90 p-1 text-foreground shadow-sm hover:bg-accent" aria-label={lang === 'zh' ? '关闭预览' : 'Close preview'}><X size={16} /></DialogClose>
-                {src && <img src={src} alt={alt} referrerPolicy="no-referrer" className="mt-3 max-h-[80dvh] w-full object-contain" />}
+                <div className="chat-image-lightbox-bar">
+                    <span>{lang === 'zh' ? '图片预览' : 'Image preview'}</span>
+                    <DialogClose className="chat-image-lightbox-close" aria-label={lang === 'zh' ? '关闭预览' : 'Close preview'}><X size={17} /></DialogClose>
+                </div>
+                {src && <img src={src} alt={alt} referrerPolicy="no-referrer" className="chat-image-lightbox-image" />}
             </DialogContent>
         </Dialog>
     </span>;
