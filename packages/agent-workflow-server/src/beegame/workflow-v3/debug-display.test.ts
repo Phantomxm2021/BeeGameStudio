@@ -10,6 +10,7 @@ import {sharedPlaywright} from '../shared-playwright'
 for(const delayedFulfillment of [false,true])test('independent debug pages events and pauses with '+
   (delayedFulfillment?'a late completed read':'an aborted stalled read'),async()=>{
   const app=new Hono(),browser=createPreviewTestBrowser()
+  const mutations:string[]=[]
   let child:ReturnType<typeof Bun.spawn>|undefined,release!:()=>void,reads=0,stops=0
   const stalled=new Promise<void>(resolve=>{release=resolve})
   const run=createRun({projectId:'p',ownerId:'owner',workspacePath:'/private/tmp/synthetic-debug-only',
@@ -23,6 +24,7 @@ for(const delayedFulfillment of [false,true])test('independent debug pages event
   registerV3DebugPage(app,true)
   app.use('/api/*',async(c,next)=>{
     if(c.req.header('Authorization')!=='Bearer synthetic-owner')return c.json({error:'Unauthorized'},401)
+    if(c.req.method!=='GET')mutations.push(c.req.method+' '+c.req.path)
     await next()
   })
   app.get('/api/projects/p/workflow-v3',async c=>{
@@ -40,6 +42,18 @@ for(const delayedFulfillment of [false,true])test('independent debug pages event
     questions:[{toolUseID:'synthetic-question',attemptId:'synthetic-active',canAnswer:true,
       input:{questions:[{question:'Synthetic only?',options:[],multiSelect:false}]}}]}))
   app.post('/fixture/release',c=>{release();return c.json({released:true})})
+  const previewServer=Bun.serve({hostname:'127.0.0.1',port:0,
+    fetch:()=>new Response('<p id="synthetic-preview">Synthetic preview</p>',{headers:{'Content-Type':'text/html'}})})
+  app.post('/api/projects/p/workflow-v3/preview',async c=>{
+    const selection=await c.req.json()
+    expect(selection).toEqual({measurementId:'older-success',requirementsRevision:run.requirements.revision})
+    return c.json({preview:{id:'synthetic-preview',runId:run.id,measurementId:selection.measurementId,
+      artifact:{sha256:'a'.repeat(64)},url:previewServer.url.href}})
+  })
+  app.get('/api/projects/p/workflow-v3/agent/measurements/older-success',c=>c.json({freshness:{current:true}}))
+  app.get('/api/projects/p/artifacts',c=>c.req.query('path')==='README.md'
+    ?c.json({content:'Synthetic saved evidence'})
+    :c.json({error:'Not found'},404))
   const server=Bun.serve({hostname:'127.0.0.1',port:0,idleTimeout:0,fetch:app.fetch})
   try {
     const {endpoint}=await browser.start(),node=Bun.which('node')!
@@ -52,6 +66,7 @@ for(const delayedFulfillment of [false,true])test('independent debug pages event
     clearTimeout(timeout)
     expect(exit,error).toBe(0)
     expect(JSON.parse(output)).toMatchObject({passed:true,finalVersion:2,paused:true})
-    expect(stops).toBe(1);expect(reads).toBe(3);expect(events).toHaveLength(90000)
-  }finally{release();if(child?.exitCode===null){child.kill();await child.exited}server.stop(true);await browser.close()}
+    expect(stops).toBe(1);expect(reads).toBe(6);expect(events).toHaveLength(90000)
+    expect(mutations).toEqual(['POST /api/projects/p/workflow-v3/stop','POST /api/projects/p/workflow-v3/preview'])
+  }finally{release();if(child?.exitCode===null){child.kill();await child.exited}server.stop(true);previewServer.stop(true);await browser.close()}
 },45000)

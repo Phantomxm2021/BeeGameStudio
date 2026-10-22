@@ -49,6 +49,40 @@ try {
   assert.equal(run.version,initialVersion+1);assert.ok(run.paused);
   assert.equal(await page.locator('#status').innerText(),'完成 stop','Late read must not replace stop status');
   assert.equal(await page.locator('#question option').count(),0,'Paused/stale questions cannot remain displayed as answerable');
+  // Preview observations prepare an ordinary message draft without dispatching.
+  await page.locator('#measurement').selectOption('older-success');await click('preview');
+  await page.locator('#preview-frame').contentFrame().locator('#synthetic-preview').waitFor();
+  await click('prepare-observation');
+  const observation=JSON.parse(await page.locator('#observation-json').inputValue());
+  assert.equal(observation.measurementId,'older-success');
+  assert.equal(observation.requirementsRevision,run.requirements.revision);
+  assert.equal(observation.artifactSha256,'a'.repeat(64));
+  Object.assign(observation,{steps:'Open the preview',expected:'Synthetic preview',observed:'Synthetic preview is displayed'});
+  await page.locator('#observation-json').fill(JSON.stringify(observation));
+  await page.locator('#message-intent').selectOption('change');await click('observation-message');
+  result=JSON.parse(await page.locator('#result').innerText());
+  assert.equal(result.dispatched,false);
+  assert.equal(await page.locator('#message-intent').inputValue(),'message');
+  const draft=await page.locator('#message-text').inputValue();
+  assert.match(draft,/older-success/);
+  assert.equal(result.source.artifactSha256,observation.artifactSha256);
+  observation.artifactSha256='changed';await page.locator('#observation-json').fill(JSON.stringify(observation));
+  await page.locator('#observation-message').click();
+  await page.waitForFunction(()=>!document.getElementById('observation-message').disabled);
+  assert.match(await page.locator('#status').innerText(),/来源已改变/);
+  assert.equal(await page.locator('#message-text').inputValue(),draft,'Rejected source changes must preserve the original draft');
+  // Evidence stays read-only and a failed read clears the prior displayed result.
+  await page.locator('#evidence-path').fill('README.md');await click('read-evidence');
+  result=JSON.parse(await page.locator('#result').innerText());
+  assert.equal(result.requirements.revision,run.requirements.revision);
+  assert.equal(result.source.content,'Synthetic saved evidence');
+  assert.match(result.source.utf8ContentSha256,/^[a-f0-9]{64}$/);
+  assert.equal(result.acceptance,'unverified');assert.equal(result.recordedTurns.length,run.agentTurns.length);
+  await page.locator('#evidence-path').fill('missing-report.md');await page.locator('#read-evidence').click();
+  await page.waitForFunction(()=>!document.getElementById('read-evidence').disabled);
+  assert.match(await page.locator('#status').innerText(),/HTTP 404/);
+  assert.equal(await page.locator('#result').innerText(),'','Failed reads must not leave old evidence displayed');
+  assert.deepEqual(JSON.parse(await page.locator('#run').innerText()).run,run);
   console.log(JSON.stringify({passed:true,finalVersion:run.version,paused:Boolean(run.paused)}));
   await context.close();
 }finally{await browser.close();}
