@@ -2,12 +2,15 @@ import { test, expect } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import { writeBeeGameAssetManifest, type BeeGameAssetManifest } from '../asset-contracts'
 import { auditAssetContract } from '../asset-contract-audit'
 import { sceneLayoutFixture, uiLayoutFixture } from '../fixtures/layout-fixture'
 import { runContentCheck } from './content-checks'
 import { measurementSummary } from './agent-measurement'
+import { checkIsCurrent } from './checks'
+import { CHECK_VERSIONS } from './check-versions'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(),'bgs-resource-structure-'))
@@ -54,6 +57,42 @@ test('static PNG texture can serve 3D without mandatory animation; all registere
     expect(missing.status).toBe('failed')
     expect(missing.observation).toContain('unbound-rig')
     expect(missing.coverage?.assetContract?.requirements.map(row=>row.id)).toEqual(['surface','unbound-rig'])
+  }finally{await f.close()}
+})
+
+test('atlas structure reaches resource diagnostics with both file identities, but does not certify animation or old receipts',async()=>{
+  const f=await fixture()
+  try {
+    const profile=f.manifest.requirements[0]!.acquisition_profile,resource=f.manifest.resources[0]!
+    profile.asset_kinds=['image'];profile.capabilities=['atlas']
+    resource.asset_kind='image';resource.capabilities=['atlas']
+    const metadata='assets/runtime/surface.json'
+    resource.file_paths.push(metadata)
+    await writeFile(join(f.root,metadata),JSON.stringify({frames:{region:{frame:{x:0,y:0,w:2,h:2}}}}))
+    const hashes=Object.fromEntries(await Promise.all(resource.file_paths.map(async path=>
+      [path,createHash('sha256').update(await readFile(join(f.root,path))).digest('hex')])))
+    resource.local_file_hashes=hashes
+    await f.save()
+    const check=await runContentCheck(f.root,'content-resources',{expectedOutputs:[]},[],{})
+    expect(check.status,check.observation).toBe('passed')
+    expect(check.version).toBe(CHECK_VERSIONS['content-resources'])
+    for(const path of resource.file_paths)
+      expect(check.inputs.find(input=>input.path===path)?.sha256).toBe(hashes[path])
+    expect(check.coverage?.assetContract?.requirements[0]?.structure?.observations.join(' '))
+      .toContain('1 named sprite frames verified')
+    expect(check.observation).toContain('Not runtime or whole-game semantic coverage')
+    expect(await checkIsCurrent(f.root,check)).toBe(true)
+    const previous={...check,version:'v3-content.4'},saved=JSON.stringify(previous)
+    expect(await checkIsCurrent(f.root,previous)).toBe(false)
+    expect(JSON.stringify(previous)).toBe(saved)
+
+    profile.capabilities=['atlas','frame-sequence'];resource.capabilities=['atlas','frame-sequence']
+    await f.save()
+    const unknown=await runContentCheck(f.root,'content-resources',{expectedOutputs:[]},[],{})
+    expect(unknown.status).toBe('unverified')
+    const observation=unknown.coverage?.assetContract?.requirements[0]?.structure?.observations.join(' ')
+    expect(observation).toContain('1 named sprite frames verified')
+    expect(observation).toContain('unverified capabilities/components [frame-sequence]')
   }finally{await f.close()}
 })
 

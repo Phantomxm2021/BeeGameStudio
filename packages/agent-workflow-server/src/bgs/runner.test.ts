@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { createBgsRunner, bgsUsage, bgsProviderConfig, editProtectedFileText, bgsApplicationContext } from './runner'
-import { BeeGameSessionManager, getLatestRuntimeUsage, type BeeGameEvent } from '../beegame/session-manager'
+import { BeeGameSessionManager, getLatestRuntimeUsage, type BeeGameEvent, type DashboardPermissionRequest } from '../beegame/session-manager'
 import * as browserCleanup from '../beegame/native-test-browser-cleanup'
 
 const resolveOutboundTarget: typeof import('@bee-game-studio/security-core').resolveApprovedOutboundTarget = async (value) => ({ url: new URL(value), addresses: ['93.184.216.34'],
@@ -225,18 +225,63 @@ test('BGS resumes Bgs history without double charging and does not resume legacy
   } finally {await manager.dispose();await rm(root,{recursive:true,force:true})}
 },30_000)
 
-test('Bgs protected edits obey the existing BGS design lock authority', async () => {
-  const root=await mkdtemp('/private/tmp/bgs-bgs-lock-'),workspace=join(root,'game')
-  await mkdir(join(workspace,'docs'),{recursive:true});await writeFile(join(workspace,'docs/GDD.md'),'original')
-  const manager=new BeeGameSessionManager(createBgsRunner({command,resolveOutboundTarget}),root,()=>({BEEGAME_CONFIG_DIR:join(root,'config'),OPENAI_API_KEY:'fixture-only'}))
-  try{
-    const session=manager.start({workspacePath:workspace,userId:'owner',projectId:'project'})
-    manager.setProjectDesignLocked(session.id,true)
-    await manager.sendWithDisplay(session.id,'write-design');await manager.waitForSessionIdle(session.id)
-    expect(await readFile(join(workspace,'docs/GDD.md'),'utf8')).toBe('original')
-    expect(manager.transcriptFacts(session.id).some(event=>event.payload?.reason==='project_design_locked')).toBe(true)
-  }finally{await manager.dispose();await rm(root,{recursive:true,force:true})}
-},30_000)
+test.each(['write', 'edit', 'denied', 'revoked', 'cancelled', 'instructions'] as const)(
+  'protected write rechecks preserve authority and audit results: %s', async mode => {
+  // The local stdio fixture creates no browsers or model requests.
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  const root = await mkdtemp('/private/tmp/bgs-write-recheck-'), workspace = join(root, 'game')
+  const path = join(workspace, mode === 'instructions' ? 'AGENTS.md' : 'docs/GDD.md')
+  await mkdir(join(workspace, 'docs'), { recursive: true })
+  await writeFile(path, 'original')
+  const requests: DashboardPermissionRequest[] = []
+  let sessionId = ''
+  const runner = createBgsRunner({ command, resolveOutboundTarget })
+  const manager = new BeeGameSessionManager({ async start(input) {
+    return runner.start({ ...input, requestPermission: async request => {
+      requests.push(request)
+      const pending = input.requestPermission!(request)
+      if (mode === 'instructions') manager.resolvePermission(sessionId, request.toolUseID, { behavior: 'allow', source: 'user' })
+      const decision = await pending
+      if (mode === 'revoked' && !request.phase) manager.setProjectDesignLocked(sessionId, true)
+      if (mode === 'cancelled' && request.phase === 'recheck') manager.stop(sessionId)
+      return decision
+    } })
+  } }, root, () => ({ BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only' }))
+  try {
+    sessionId = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' }).id
+    if (mode === 'denied') manager.setProjectDesignLocked(sessionId, true)
+    const allowed = ['write', 'edit', 'instructions'].includes(mode)
+    // Reusing the fixture call ID in a later turn must not suppress its initial receipt.
+    const turns = mode === 'write' || mode === 'edit' ? 2 : 1
+    for (let turn = 0; turn < turns; turn++) {
+      const prompt = mode === 'instructions' ? 'write-path:AGENTS.md' : mode === 'edit'
+        ? 'edit-design:' + JSON.stringify({ old_string: turn ? 'edited-0' : 'original', new_string: 'edited-' + turn }) : 'write-design'
+      await manager.sendWithDisplay(sessionId, prompt)
+      await manager.waitForSessionIdle(sessionId)
+    }
+    expect(manager.transcriptFacts(sessionId).filter(event => event.type === 'turn.failed')).toEqual([])
+    expect(requests.map(request => request.phase ?? 'initial')).toEqual(
+      Array.from({ length: turns }, () => mode === 'denied' || mode === 'instructions' ? ['initial'] as const : ['initial', 'recheck'] as const).flat())
+    expect(await readFile(path, 'utf8')).toBe(allowed ? mode === 'edit' ? 'edited-1' : 'Authorized design' : 'original')
+    const events = manager.transcriptFacts(sessionId)
+    const resolved = events.filter(event => event.type === 'permission.resolved')
+    expect(resolved.map(event => event.payload?.decision)).toEqual(mode === 'revoked' ? ['allow', 'deny'] :
+      Array(turns).fill(mode === 'denied' ? 'deny' : 'allow'))
+    expect(resolved.every(event => event.payload?.toolUseID === 'write-design')).toBe(true)
+    expect(events.filter(event => event.type === 'permission.requested')).toHaveLength(mode === 'instructions' ? 1 : 0)
+    if (mode === 'revoked' || mode === 'denied') {
+      expect(resolved.at(-1)?.payload).toMatchObject({ reason: 'project_design_locked',
+        ...(mode === 'revoked' ? { phase: 'recheck' } : {}) })
+      const failure = events.find(event => event.type === 'assistant.message' && event.text.includes('Write rejected'))
+      expect(failure?.text).toContain(String(resolved.at(-1)?.payload?.message))
+    }
+    if (mode === 'cancelled') expect(events.some(event => event.type === 'session.stopped')).toBe(true)
+  } finally {
+    await manager.dispose()
+    await rm(root, { recursive: true, force: true })
+    cleanup.mockRestore()
+  }
+}, 30_000)
 
 test('required Bgs skill selection fails clearly when absent and accepts a real catalog entry', async () => {
   const missing=await fixture()

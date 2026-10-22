@@ -376,6 +376,8 @@ export type DashboardPermissionRequest = {
   toolName: string
   message: string
   input: Record<string, unknown>
+  /** Host-only write recheck metadata; never read from model tool arguments. */
+  phase?: 'recheck'
   permissionSuggestions?: Record<string, unknown>[]
   decisionReason?: string
   blockedPath?: string
@@ -1867,7 +1869,11 @@ export class BeeGameSessionManager {
       request,
     )
     if (projectFileAccess) {
-      this.append(
+      // Re-evaluate live authority, but do not repeat an unchanged automatic
+      // write approval. A denial must remain visible even after an earlier allow.
+      const repeatedApproval = request.phase === 'recheck' && isFileMutationTool(request.toolName) &&
+        projectFileAccess.behavior === 'allow'
+      if (!repeatedApproval) this.append(
         record,
         'permission.resolved',
         `${request.toolName}: ${projectFileAccess.behavior}`,
@@ -1877,6 +1883,7 @@ export class BeeGameSessionManager {
           toolName: request.toolName,
           ...(request.agentId ? { agentId: request.agentId } : {}),
           decision: projectFileAccess.behavior,
+          ...(request.phase ? { phase: request.phase } : {}),
           scope: 'once',
           autoApproved: projectFileAccess.behavior === 'allow',
           autoDenied: projectFileAccess.behavior === 'deny',

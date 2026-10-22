@@ -244,7 +244,7 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
         (resource.asset_kind === 'sprite-atlas' && obligation.assetKinds.includes('sprite')))
       const atlasSprites = candidates.map(resource => resource.asset_kind === 'sprite-atlas' &&
         !obligation.assetKinds?.includes('sprite-atlas') && obligation.assetKinds?.includes('sprite')
-        ? inspectAtlasSprites(resource, resources.find(row => row.id === resource.id)!) : undefined)
+        ? inspectNamedAtlas(resource, resources.find(row => row.id === resource.id)!) : undefined)
       const declarations = candidates.map((resource, index) => candidateCoversObligation({
         assetKind: atlasSprites[index]?.status === 'passed' ? 'sprite' : resource.asset_kind,
         usageTags: resource.usage_tags ?? [], capabilities: resource.capabilities ?? [],
@@ -294,23 +294,23 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
   }
 }
 
-/** A container can supply sprites only through inspected, registered named frames.
+/** Atlas structure requires inspected, registered named frames.
  * This local evidence does not change the resource kind or catalog matching. */
-function inspectAtlasSprites(resource: BeeGameProjectResource, audit: AssetResourceAudit) {
+function inspectNamedAtlas(resource: BeeGameProjectResource, audit: AssetResourceAudit) {
   if (audit.issues.length) return { status: 'failed', reason: resource.id+': invalid local files: '+audit.issues.join('; ') } as const
   if (resource.provisional || resource.status !== 'verified')
     return { status: 'unverified', reason: resource.id+': provisional or unavailable atlas evidence' } as const
   const image = audit.fileEvidence.find(file => file.path === resource.root_path && file.path.toLowerCase().endsWith('.png'))
   const atlas = audit.fileEvidence.find(file => file.facts.atlasImage === image?.path && Number(file.facts.namedFrameCount) > 0)
   if (!image || !atlas)
-    return { status: 'failed', reason: resource.id+': sprite requires a registered PNG and sibling .json or .atlas.json metadata with nonempty named frames inside the image' } as const
+    return { status: 'failed', reason: resource.id+': named atlas requires a registered PNG and sibling .json or .atlas.json metadata with nonempty named frames inside the image' } as const
   if (!resource.local_file_hashes?.[image.path] || !resource.local_file_hashes?.[atlas.path])
     return { status: 'unverified', reason: resource.id+': recorded hashes are missing for the atlas image or metadata' } as const
   return { status: 'passed', reason: resource.id+': '+atlas.facts.namedFrameCount+' named sprite frames verified in '+atlas.path+' against '+image.path } as const
 }
 
 function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourceAudit, obligation: ResourceCoverageObligation,
-  atlasSprites?: ReturnType<typeof inspectAtlasSprites>) {
+  atlasSprites?: ReturnType<typeof inspectNamedAtlas>) {
   if (atlasSprites && atlasSprites.status !== 'passed') return atlasSprites
   if (audit.issues.length) return { status: 'failed', reason: resource.id+': invalid local files' } as const
   if (resource.provisional || resource.status !== 'verified' || !audit.fileEvidence.length)
@@ -321,8 +321,14 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
   if (obligation.assetKinds?.length && !obligation.assetKinds.some(value => value === kind))
     return { status: 'unverified', reason: resource.id+': no compatible declared resource kind' } as const
   const png = !!facts.width && !!facts.height && root?.path.toLowerCase().endsWith('.png')
+  let atlas: ReturnType<typeof inspectNamedAtlas> | undefined = atlasSprites
+  if (png && obligation.capabilities?.some(need => ['atlas', 'atlas-regions'].includes(need))) {
+    atlas ??= inspectNamedAtlas(resource, audit)
+    if (atlas.status !== 'passed') return atlas
+  }
   const gltf = typeof facts.meshCount === 'number'
   let unknown = Boolean(facts.externalReferences), contradiction = false
+  const unverifiedNeeds: string[] = []
   if (obligation.assetKinds?.length) {
     if (png) {
       if (!['image','texture','sprite','sprite-sheet','sprite-atlas'].includes(kind)) contradiction = true
@@ -337,6 +343,7 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
     'contains-materials':'materialCount','contains-textures':'embeddedTextureCount','morph-targets':'morphTargetCount',
     mesh:'meshCount',skeleton:'skinCount','animation-clip':'animationCount',material:'materialCount',texture:'embeddedTextureCount'}
   for (const need of [...(obligation.capabilities ?? []), ...(obligation.embeddedKinds ?? [])]) {
+    if (['atlas', 'atlas-regions'].includes(need) && atlas?.status === 'passed') continue
     const count = counts[need]
     if (count && gltf) {
       if (!Number(facts[count])) {
@@ -344,14 +351,16 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
         if (need === 'contains-textures' && facts.externalReferences) unknown = true
         else contradiction = true
       }
-    } else unknown = true
+    } else { unknown = true; unverifiedNeeds.push(need) }
   }
   if (obligation.relationKinds?.length) unknown = true
   // An atlas's named rectangles establish addressing, never a timed sequence.
   // Unsupported facts stay unknown, including animation timing/rig compatibility.
   return { status: contradiction ? 'failed' : unknown ? 'unverified' : 'passed',
-    reason: (atlasSprites ? atlasSprites.reason+'; ' : resource.id+': ')+(contradiction ? 'required components absent from inspected root' :
-      unknown ? 'required facts are not established by supported file inspection' : 'structural file/header facts only; runtime use/quality unverified') } as const
+    reason: (atlas ? atlas.reason+'; ' : resource.id+': ')+(contradiction ? 'required components absent from inspected root' :
+      unknown ? 'required facts are not established by supported file inspection'+
+        (unverifiedNeeds.length ? '; unverified capabilities/components ['+unverifiedNeeds.join(', ')+']' : '')
+        : 'structural file/header facts only; runtime use/quality unverified') } as const
 }
 
 function projectFile(workspace: string, filePath: string): string | undefined {

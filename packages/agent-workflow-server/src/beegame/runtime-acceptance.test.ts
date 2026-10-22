@@ -56,6 +56,25 @@ test.each([
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
+test.each(['passed','blocked','failed'] as const)('top-level designRevision is rejected without rewriting a %s report',async status=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-report-revision-location-'))
+  try {
+    await mkdir(join(root,'.beegame/delivery'),{recursive:true})
+    for(const nested of [false,true]) {
+      const report={scope:'delivery',status,summary:'Synthetic report',environment:'Offline fixture',evidencePaths:[],
+        designRevision:'a'.repeat(64),verification:{target:'deployment',observation:'target-runtime',
+          knownIssues:[],unverified:['Retain this observation gap'],...(nested?{designRevision:'a'.repeat(64)}:{})}}
+      const text=JSON.stringify(report)
+      await writeFile(join(root,DESIGN_ACCEPTANCE_PATH),text)
+      const inspected=await inspectDesignAcceptance(root,true)
+      expect(inspected.valid).toBe(false)
+      expect(inspected.diagnostic?.category).toBe('report-invalid')
+      expect(inspected.diagnostic?.message).toBe('designRevision must be inside verification.designRevision, not at the report top level')
+      expect(await readFile(join(root,DESIGN_ACCEPTANCE_PATH),'utf8')).toBe(text)
+    }
+  } finally {await rm(root,{recursive:true,force:true})}
+})
+
 test('design-led acceptance still checks document coverage and revision without an image gate',async()=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-design-led-acceptance-'))
   try {
@@ -75,7 +94,25 @@ test('design-led acceptance still checks document coverage and revision without 
     expect(accepted?.status).toBe('passed')
     expect(await inspectDesignAcceptance(root,true)).toMatchObject({valid:true,quality:'unverified'})
     await save({...report,verification:{...report.verification,designRevision:undefined}})
-    expect((await inspectDesignAcceptance(root,true)).summary).toContain('revision is missing')
+    const missing=await inspectDesignAcceptance(root,true)
+    expect(missing.diagnostic?.category).toBe('verification-incomplete')
+    expect(missing.summary).toContain('verification.designRevision is missing')
+    expect(missing.summary).toContain('read-only --design baseline: revision')
+    expect(missing.summary).not.toContain('changed')
+    await save({...report,verification:{...report.verification,designRevision:'not-a-hash'}})
+    const malformed=await inspectDesignAcceptance(root,true)
+    expect(malformed.diagnostic?.category).toBe('report-invalid')
+    expect(malformed.summary).toContain('verification.designRevision')
+    for(const status of ['blocked','failed'] as const) {
+      await save({...report,status,verification:{...report.verification,designRevision:undefined,unverified:['Unobserved scenario']}})
+      const draft=await inspectDesignAcceptance(root,true)
+      expect(draft.status).toBe(status)
+      expect(draft.verification?.designRevision).toBeUndefined()
+      expect(draft.verification?.unverified).toEqual(['Unobserved scenario'])
+    }
+    await save({...report,verification:{...report.verification,unverified:['Unobserved scenario']}})
+    expect(await inspectDesignAcceptance(root,true)).toMatchObject({valid:false,status:'blocked',quality:'unverified',
+      verification:{unverified:['Unobserved scenario']}})
     await save({...report,verification:{...report.verification,requirementChecks:report.verification.requirementChecks.slice(1)}})
     expect(await inspectDesignAcceptance(root,true)).toMatchObject({ valid: true, quality: 'unverified' })
     await save({...report,verification:{...report.verification,requirementChecks:[...report.verification.requirementChecks,report.verification.requirementChecks[0]]}})
@@ -83,7 +120,11 @@ test('design-led acceptance still checks document coverage and revision without 
     await save(report)
     const doc=join(root,'docs/UI_UX_SPEC.md')
     await writeFile(doc,await readFile(doc,'utf8')+'\nChanged decision.\n')
-    expect((await inspectDesignAcceptance(root,true)).summary).toContain('revision is missing or changed')
+    const changed=await inspectDesignAcceptance(root,true)
+    expect(changed.diagnostic?.category).toBe('verification-incomplete')
+    expect(changed.summary).toContain('verification.designRevision does not match the current design revision')
+    expect(changed.summary).toContain('revalidate affected evidence')
+    expect(changed.summary).not.toContain('missing')
     await rm(join(root,'docs/AUDIO_DESIGN.md'))
     expect((await inspectDesignAcceptance(root,true)).summary).toContain('incomplete')
   } finally { await rm(root,{recursive:true,force:true}) }

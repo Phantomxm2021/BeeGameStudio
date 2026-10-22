@@ -9,7 +9,7 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises'
-import { dirname, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 const catalogFilterKeys = ['packIds','dimensions','primaryCategories','categories','styles','gameTypes','packTags','usageTags','assetKinds','capabilities','formats']
 const catalogUsage = 'Catalog accepts structured filter arrays: '+catalogFilterKeys.join(', ')+
@@ -17,8 +17,10 @@ const catalogUsage = 'Catalog accepts structured filter arrays: '+catalogFilterK
   + ' Catalog returns compact items, total, facets and optional nextCursor. Use pack/element for selected metadata or append --details for full list items. readyElementCount counts technically browsable files, not proven matches. Empty usageTags means unclassified, not unavailable; inspect or audition before choosing a game role.'
 
 const atlasInputFormat = 'Atlas input: {"frames":{"name":{"x":0,"y":0,"w":32,"h":32}}}. Frame values are flat rectangles; nested {frame:{x,y,w,h}} is the output sidecar format, not input.'
+const workspaceUsage = 'Run from the project root: bun <current-tools-directory>/assets.mjs <command> [arguments]. Use the current BGS tools directory supplied in the project context as the script prefix; keep the project root as cwd. Relative JSON input paths and assets/ output paths are relative to the project root.'
 
 const usage = `Usage: bun <this-file> <command> [arguments]
+${workspaceUsage}
   catalog [request-json] [--details]      Browse library packs and available facets
   elements <pack-id> [request-json] [--details]  Browse a selected pack's elements
   pack <pack-id>                         Read license, version and pack metadata
@@ -41,6 +43,7 @@ ${catalogUsage}
 Commands are optional. You choose the source and asset design. No command updates the Manifest.`
 
 const imageUsage = `Image commands (prefix with bun <this-file>):
+${workspaceUsage}
   cost low <size>                        Read availability and price; no generation
   ui-board-plan <request.json>           Optional offline board layout and chosen size
   generate <request.json> <assets/path>  Submit the JSON file; output must be a new path under assets/
@@ -126,7 +129,8 @@ async function currentCapabilities() {
   let capability
   try { capability = JSON.parse(await readFile(path, 'utf8')) }
   catch { throw Error('ASSET_CAPABILITY_EXPIRED: The BGS resource connection is missing or unreadable. Use the current BGS turn; this does not establish provider availability.') }
-  if (capability?.version !== 1 || capability.workspace !== await realpath(process.cwd()) ||
+  if (capability?.version !== 1 || typeof capability.workspace !== 'string' ||
+      !isAbsolute(capability.workspace) || resolve(capability.workspace) !== capability.workspace ||
       typeof capability.sessionId !== 'string' || !capability.sessionId ||
       TOOL_CONFIG.sessionId && capability.sessionId !== TOOL_CONFIG.sessionId ||
       typeof capability.executionId !== 'string' || !capability.executionId ||
@@ -138,6 +142,13 @@ async function currentCapabilities() {
     try { url = new URL(endpoint) } catch { throw Error('ASSET_CAPABILITY_MISMATCH: Invalid resource endpoint.') }
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.search || url.hash)
       throw Error('ASSET_CAPABILITY_MISMATCH: Invalid resource endpoint.')
+  }
+  const cwd = await realpath(process.cwd())
+  if (cwd !== capability.workspace) {
+    const fromWorkspace = relative(capability.workspace, cwd)
+    if (fromWorkspace && fromWorkspace !== '..' && !fromWorkspace.startsWith('..' + sep) && !isAbsolute(fromWorkspace))
+      throw Error('ASSET_WORKSPACE_CWD: Current directory is a project subdirectory. Return to the current project root and invoke bun <current-tools-directory>/assets.mjs with the current BGS tools directory as the script prefix. No resource request was sent; this does not establish provider availability.')
+    throw Error('ASSET_CAPABILITY_MISMATCH: Resource connection belongs to another workspace/session or is invalid.')
   }
   return capability.assets
 }

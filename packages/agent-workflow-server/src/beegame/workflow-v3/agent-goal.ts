@@ -143,22 +143,38 @@ export async function agentTurnHandoffReason(run: Run, turn: AgentTurn) {
   if (record?.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
     const acceptance = await inspectDesignAcceptance(run.workspacePath,true,requiresBgsEditableContent(run),
       {runId:run.id,requirementsRevision:run.requirements.revision})
-    const counts = ['passed','failed','unverified'].map(status =>
-      status + '=' + acceptance.requirementChecks.filter(check=>check.status===status).length).join(', ')
-    acceptanceNote = ' Runtime report: ' + (acceptance.valid ? 'reported checks/version/evidence validated; ' : acceptance.summary + ' ') + counts +
-      '. Observation truth and visual/game quality are not host-certified.'
+    const verification = acceptance.verification
+    const counts = (checks: {status:string}[] | undefined) => checks?.length
+      ? ['passed','failed','unverified'].map(status => status + '=' + checks.filter(check=>check.status===status).length).join(', ')
+      : 'not provided (coverage unverified)'
+    // Report declarations and host measurements have different authority. Do
+    // not reproduce an author's optimistic summary as the host's conclusion.
+    // Keep counts and the full-report reference ahead of potentially long
+    // diagnostics; the host display retains only the first 800 characters.
+    acceptanceNote = '\n'+[
+      `Author report: scope=${acceptance.scope ?? 'not recorded'}; declared=${acceptance.declaredStatus ?? 'not recorded'}; checked=${acceptance.status}; delivery checks=${acceptance.valid ? 'passed' : 'not passed'}.`,
+      `Author-reported known issues: ${verification?.knownIssues.length ?? 'not provided'}; unverified items: ${verification?.unverified.length ?? 'not provided'}.`,
+      'Content checks: '+counts(verification?.contentChecks)+'.',
+      'Indexed requirement checks: '+counts(verification?.requirementChecks)+'.',
+      `Author details: ${acceptance.path}#verification. Empty declarations do not establish coverage; game quality remains unverified.`,
+      // A blocked/failed author's diagnostic repeats its summary. Only these
+      // branches contain a host validation error rather than that declaration.
+      ...(acceptance.diagnostic && (acceptance.diagnostic.category === 'report-invalid' || acceptance.declaredStatus === 'passed')
+        ? ['Report validation: '+acceptance.diagnostic.category+': '+acceptance.diagnostic.message] : []),
+    ].join('\n')
   }
   if(!record)return 'Native goal turn ended; execution completion is not acceptance. See saved files for the requested deliverables and unresolved work. No target-runtime measurement was recorded.'
   try {
     const freshness=await inspectAgentMeasurementInputs(run,record)
     const invalid=blockingRegisteredContentChecks(record)
-    return (freshness.current && invalid.length ? 'Native goal turn ended; registered Scene/UI checks need repair before delivery: '+
-      invalid.map(check=>check.id+' '+check.status).join(', ')+'. Inspect saved measurement findings; game-quality acceptance remains unverified.' :
-      freshness.current ? 'Native goal turn ended; measured inputs are current. Game-quality acceptance remains unverified.' :
-      'Native goal turn ended; '+freshness.code+': '+freshness.reason) + acceptanceNote
+    const status = freshness.current ? invalid.length ? 'registered Scene/UI checks need repair before delivery' : 'measured inputs are current' : freshness.code
+    const detail = freshness.current ? invalid.length
+      ? invalid.map(check=>check.id+' '+check.status).join(', ')+'. Inspect saved measurement findings; game-quality acceptance remains unverified.'
+      : 'Game-quality acceptance remains unverified.' : freshness.reason
+    return 'Native goal turn ended; '+status+'.'+acceptanceNote+'\nMeasurement details: '+detail
   } catch(error) {
-    return 'Native goal turn ended; measurement freshness could not be verified'+
-      (error instanceof WorkflowError ? ': '+error.message : '. Inspect current project inputs; no automatic retry.') + acceptanceNote
+    return 'Native goal turn ended; measurement freshness could not be verified.'+acceptanceNote+'\nMeasurement details: '+
+      (error instanceof WorkflowError ? error.message : 'Inspect current project inputs; no automatic retry.')
   }
 }
 

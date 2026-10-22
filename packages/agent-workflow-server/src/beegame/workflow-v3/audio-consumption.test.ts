@@ -2,6 +2,7 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, readFile, cp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import sharp from 'sharp'
 import { audioProbeWav } from './audio-consumption'
 import { checkIsCurrent } from './checks'
 import { runChecks } from './checker-test-driver'
@@ -9,8 +10,9 @@ import { taskSchema, type TaskSpec } from './state'
 import { sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
+import { CHECK_VERSIONS } from './check-versions'
 
-for (const mode of ['consume', 'uncapturable', 'invalid-contract', 'music', 'legacy-audio', 'loop-true', 'member', 'ignore-volume', 'ignore-loop', 'ignore-stop', 'fetch-only', 'wrong-member',
+for (const mode of ['consume', 'uncapturable', 'invalid-contract', 'invalid-atlas', 'music', 'legacy-audio', 'loop-true', 'member', 'ignore-volume', 'ignore-loop', 'ignore-stop', 'fetch-only', 'wrong-member',
   'missing-probe', 'missing-properties', 'stale-audio', 'silent-original', 'muted', 'not-audio', 'unrelated-error', 'decode-error', 'lazy-play', 'legacy-gap'] as const) {
   test('actual HTML audio consumes registered Scene binding: ' + mode, async () => {
     const root = await mkdtemp(join(tmpdir(), 'bgs-v3-audio-'))
@@ -26,6 +28,16 @@ for (const mode of ['consume', 'uncapturable', 'invalid-contract', 'music', 'leg
       await mkdir(join(root, 'assets/runtime/example'), {recursive:true})
       await writeFile(join(root, file), audioProbeWav(mode === 'silent-original'))
       await writeFile(join(root, member), audioProbeWav(false))
+      if (mode === 'invalid-atlas') {
+        // Audio preparation audits the whole resource contract, including an
+        // atlas whose missing named metadata now makes that contract invalid.
+        const atlas = 'assets/runtime/example/atlas.png'
+        await writeFile(join(root, atlas), await sharp({create:{width:2,height:2,channels:4,background:'#fff'}}).png().toBuffer())
+        manifest.requirements.push({id:'atlas',required:true,acquisition_profile:{
+          dimensions:['2D'],asset_kinds:['image'],styles:[],capabilities:['atlas']}})
+        manifest.resources.push({...structuredClone(resource),id:'atlas',fulfills:['atlas'],
+          root_path:atlas,file_paths:[atlas],asset_kind:'image',capabilities:['atlas']})
+      }
       await writeBeeGameAssetManifest(root, manifest)
       const indexBefore = await readFile(join(root, 'assets/asset-manifest.json'), 'utf8')
       const resourcePath = join(root, JSON.parse(indexBefore).modules.resources[0])
@@ -68,13 +80,15 @@ for (const mode of ['consume', 'uncapturable', 'invalid-contract', 'music', 'leg
         : ['ignore-volume','ignore-loop','ignore-stop','fetch-only','muted','unrelated-error','decode-error'].includes(mode) ? 'failed' : 'unverified'
       expect(result.status, result.observation).toBe(expected)
       // A legacy resource label does not satisfy a canonical audio-clip need.
-      if(mode==='invalid-contract'||mode==='legacy-audio')expect(result.observation).toContain('Saved audio resources invalid:')
+      if(mode==='invalid-contract'||mode==='invalid-atlas'||mode==='legacy-audio')expect(result.observation).toContain('Saved audio resources invalid:')
+      if(mode==='invalid-atlas')expect(result.observation).toContain('named atlas requires a registered PNG')
       if(mode==='uncapturable')expect(result.observation).toContain('Media activation/capture unsupported:')
       expect(await readFile(join(root, source), 'utf8')).toBe(body)
       expect(await readFile(join(root, selected))).toEqual(original)
       expect(await readFile(join(root, 'assets/asset-manifest.json'), 'utf8')).toBe(indexBefore)
       expect(await readFile(resourcePath, 'utf8')).toBe(resourceBefore)
       if (result.status === 'passed' && mode !== 'legacy-gap') {
+        expect(result.version).toBe(CHECK_VERSIONS['audio-data-consumption'])
         const observed = JSON.parse(result.observation).probes[0]
         expect(observed.before.signal.peak).toBeGreaterThan(.00001)
         expect(observed.silent.signal.peak).toBeLessThanOrEqual(.00001)
@@ -82,6 +96,9 @@ for (const mode of ['consume', 'uncapturable', 'invalid-contract', 'music', 'leg
         expect(observed.restored.playing.volume).toBe(scene.data.nodes[1].components[0].data.volume)
         expect(observed.restored.stopped.paused).toBe(true)
         expect(await checkIsCurrent(root,result)).toBe(true)
+        const old = {...result,version:'v3-html-audio-consumption.6'}, saved = JSON.stringify(old)
+        expect(await checkIsCurrent(root,old)).toBe(false)
+        expect(JSON.stringify(old)).toBe(saved)
         await writeFile(join(root,selected),'changed')
         expect(await checkIsCurrent(root,result)).toBe(false)
       }

@@ -164,8 +164,12 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
       ...(changes.checkInputs.length?['Saved check inputs or checker versions differ: '+changes.checkInputs.join(', ')]:[]),
       ...(consumptionBlocked?['Requested consumption checks have not passed: '+incomplete.join(', ')+'. Build/smoke observations remain separate from consumption evidence. Inspect actual failures and coverage; an unsupported probe does not mandate a renderer change or automatic retry.']:[]),
     ]
-    const inputChanges=Boolean(baselineIssue) || sourceSaveChanged || changedReports.length || changedSources.length || dependenciesChanged || buildOrArtifactChanged
+    const inputChanges=sourceSaveChanged || changedReports.length || changedSources.length || dependenciesChanged || buildOrArtifactChanged
     const code=!reasons.length ? 'current'
+      // Baseline eligibility is separate from saved input identity. Keep all
+      // reasons, but actual input drift must still be diagnosed as stale.
+      : baselineIssue && !inputChanges && (!requirementsChanged || pendingDiscussion)
+        ? (run.designBaseline ? 'design-baseline-changed' : 'design-baseline-missing')
       : consumptionBlocked && !inputChanges && (!requirementsChanged || pendingDiscussion) ? 'preview-unverified'
       : pendingDiscussion && !previewDiscussion ? 'discussion-confirmation-required' : 'measurement-stale'
     return {current:!reasons.length,code,changes,

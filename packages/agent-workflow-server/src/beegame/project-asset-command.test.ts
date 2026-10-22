@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { compileUiReferenceBoard } from '../image-generation/ui-reference-board.mjs'
 import { tmpdir } from 'node:os'
@@ -507,6 +507,73 @@ test('catalog lists are compact while details, selection IDs and pagination rema
     expect(JSON.parse((await run(root,script,'element','pack-1','item-1')).stdout)).toEqual({element:item})
     expect(received).toHaveLength(5)
   } finally {server.stop(true);await rm(root,{recursive:true,force:true})}
+})
+
+test('managed asset commands diagnose a subdirectory cwd without relaxing workspace or capability checks', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-assets-cwd-'))
+  const project = join(root, 'project'), sibling = join(root, 'project-other')
+  const tools = join(project, '.beegame/tmp/tools'), script = join(tools, 'assets.mjs')
+  const capabilityFile = join(root, 'current.json')
+  let requests = 0
+  const bridge = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    requests++; return Response.json({ available: true, items: [] })
+  } })
+  const invoke = async (cwd: string, args: string[]) => {
+    const child = Bun.spawn([process.execPath, script, ...args], {
+      cwd, env: { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: capabilityFile }, stdout: 'pipe', stderr: 'pipe',
+    })
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+    return { code, stdout, stderr }
+  }
+  try {
+    await mkdir(tools, { recursive: true }); await mkdir(sibling)
+    await writeProjectAssetCommand(script, { sessionId: 'fixture' })
+    const valid = { version: 1, workspace: await realpath(project), sessionId: 'fixture', executionId: 'execution',
+      assets: { libraryBaseUrl: bridge.url.origin, imageEndpoint: bridge.url.origin } }
+    // Help remains available even when there is no readable capability file.
+    for (const args of [['--help'], ['generate', '--help']]) {
+      const result = await invoke(tools, args)
+      expect(result.code, result.stderr).toBe(0)
+      expect(result.stdout.split('\n')[1]).toContain('Run from the project root: bun <current-tools-directory>/assets.mjs')
+      expect(result.stdout).toContain('Relative JSON input paths and assets/ output paths are relative to the project root')
+    }
+    await writeFile(capabilityFile, JSON.stringify(valid))
+    for (const args of [['cost'], ['catalog'], ['generate', 'missing.json', 'assets/result.png']]) {
+      const result = await invoke(tools, args)
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain('ASSET_WORKSPACE_CWD')
+      expect(result.stderr).toContain('Return to the current project root')
+      expect(result.stderr).toContain('No resource request was sent')
+      expect(result.stderr).toContain('does not establish provider availability')
+    }
+    await expect(readFile(join(tools, 'assets/result.png'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(project, 'assets/result.png'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const escape = join(project, 'escape')
+    await symlink(sibling, escape, 'dir')
+    for (const cwd of [root, sibling, escape]) {
+      const result = await invoke(cwd, ['cost'])
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain('ASSET_CAPABILITY_MISMATCH')
+      expect(result.stderr).not.toContain('ASSET_WORKSPACE_CWD')
+    }
+    // Invalid identity or endpoints must not become a misleading directory correction.
+    for (const invalid of [{ ...valid, sessionId: 'other' }, { ...valid, executionId: '' },
+      { ...valid, workspace: null }, { ...valid, workspace: 'project' },
+      { ...valid, assets: { imageEndpoint: 'https://example.com/image' } }]) {
+      await writeFile(capabilityFile, JSON.stringify(invalid))
+      const result = await invoke(tools, ['cost'])
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain('ASSET_CAPABILITY_MISMATCH')
+      expect(result.stderr).not.toContain('ASSET_WORKSPACE_CWD')
+    }
+    expect(requests).toBe(0)
+    await writeFile(capabilityFile, JSON.stringify(valid))
+    for (const command of ['cost', 'catalog']) {
+      const result = await invoke(project, [command])
+      expect(result.code, result.stderr).toBe(0)
+    }
+    expect(requests).toBe(2)
+  } finally { bridge.stop(true); await rm(root, { recursive: true, force: true }) }
 })
 
 test('managed asset commands reject absent or mismatched access and pin a paid attempt to one bridge', async () => {

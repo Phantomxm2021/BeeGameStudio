@@ -45,7 +45,7 @@ export async function captureDesignBaseline(run: Run): Promise<NonNullable<Run['
 }
 
 export function designBaselineIssue(run: Run, required = false): string | undefined {
-  if (!run.designBaseline) return required ? 'Implementation design baseline is missing; complete the existing implementation handoff before delivery.' : undefined
+  if (!run.designBaseline) return required ? 'Implementation design baseline is missing; complete the existing --design implementation handoff, then inspect the same saved measurement. This locks the design; --design baseline only reads it. A missing baseline alone does not require rebuilding; changed inputs still require remeasurement.' : undefined
   const check = checkDesignHandoff(run.workspacePath, PROJECT_DOCUMENTS, { digestVersion: run.designBaseline.digestVersion })
   try {
     if(!registryMatches(run))

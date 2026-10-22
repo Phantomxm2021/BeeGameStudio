@@ -178,15 +178,21 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
       throw new Error('contentChecks must be inside verification.contentChecks, not at the report top level')
     if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'requirementChecks' in raw)
       throw new Error('requirementChecks must be inside verification.requirementChecks, not at the report top level')
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'designRevision' in raw)
+      throw new Error('designRevision must be inside verification.designRevision, not at the report top level')
     const report = reportSchema.parse(raw)
     let limitation = report.scope !== 'request' && report.status === 'passed'
       ? deliveryLimitation(report) : undefined
     if (report.scope !== 'request' && report.status === 'passed' && !limitation &&
         (options.requireDesignRevision || report.verification?.designRevision !== undefined)) {
-      const design = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
-      if (!design.valid) limitation = diagnostic('verification-incomplete', 'Design handoff is incomplete: ' + design.issues.join('; '))
-      else if (report.verification?.designRevision !== design.revision)
-        limitation = diagnostic('verification-incomplete', 'Design revision is missing or changed; revalidate affected evidence against the current documents and layouts.')
+      if (report.verification?.designRevision === undefined)
+        limitation = diagnostic('verification-incomplete', 'verification.designRevision is missing; record the design version actually verified (existing implementation handoff: designRevision; read-only --design baseline: revision).')
+      else {
+        const design = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
+        if (!design.valid) limitation = diagnostic('verification-incomplete', 'Design handoff is incomplete: ' + design.issues.join('; '))
+        else if (report.verification.designRevision !== design.revision)
+          limitation = diagnostic('verification-incomplete', 'verification.designRevision does not match the current design revision; revalidate affected evidence before updating this field. Changing the hash alone does not establish verification.')
+      }
     }
     if (report.designIssues?.length && report.status === 'passed')
       limitation = diagnostic('product-failed', 'Design issues remain unresolved; a passed report cannot release them.')
@@ -234,6 +240,9 @@ export async function inspectDesignAcceptance(workspace: string, requireDesignRe
     declaredStatus:report?.declaredStatus,
     summary:report?.summary ?? 'No runtime acceptance report is recorded; runtime verification is unverified.',
     diagnostic:report?.diagnostic,
+    // Preserve author declarations, including absent coverage. An empty legacy
+    // requirement index cannot stand in for the report's unresolved items.
+    verification:report?.verification,
     requirementChecks:checks,
     evidence:report?.evidence ?? [],artifacts:report?.artifacts ?? [],
     quality:'unverified' as const,

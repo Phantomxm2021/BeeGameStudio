@@ -171,18 +171,74 @@ test('a verified named atlas supplies sprite structure without changing its regi
   expect(readBeeGameAssetManifestSync(workspace).requirements[0]!.acquisition_profile.asset_kinds).toEqual(['sprite'])
 })
 
+test.each(['atlas', 'atlas-regions'])('image capability %s consumes registered atlas evidence without changing declarations', async capability => {
+  const workspace = await spriteAtlasFixture(undefined, value => {
+    const profile = value.requirements[0]!.acquisition_profile
+    profile.asset_kinds = ['image']
+    if (capability === 'atlas-regions') profile.coverage = [{ asset_kinds: ['image'], capabilities: ['atlas-regions'] }]
+    else profile.capabilities = [capability]
+    value.resources[0]!.asset_kind = 'image'
+    value.resources[0]!.capabilities = [capability]
+  })
+  const before = JSON.stringify(readBeeGameAssetManifestSync(workspace))
+  const audit = auditAssetContract(workspace)
+  expect(audit.valid, audit.issues.join(' ')).toBe(true)
+  expect(audit.requirements[0]!.structure!.status).toBe('passed')
+  const observation = audit.requirements[0]!.structure!.observations.join(' ')
+  expect(observation).toContain('1 named sprite frames verified in assets/runtime/model.json against assets/runtime/model.png')
+  expect(observation).toContain('runtime use/quality unverified')
+  expect(JSON.stringify(readBeeGameAssetManifestSync(workspace))).toBe(before)
+})
+
+test.each(['missing metadata', 'missing image hash', 'missing metadata hash', 'bad hash', 'provisional',
+  'missing declaration', 'different declaration', 'unsupported root'])('atlas capability retains evidence boundaries: %s', async kind => {
+  const workspace = await spriteAtlasFixture(undefined, value => {
+    value.requirements[0]!.acquisition_profile.asset_kinds = ['image']
+    value.requirements[0]!.acquisition_profile.capabilities = ['atlas']
+    const resource = value.resources[0]!
+    resource.asset_kind = 'image'; resource.capabilities = ['atlas']
+    if (kind === 'missing metadata') {
+      resource.file_paths = [resource.root_path]
+      delete resource.local_file_hashes!['assets/runtime/model.json']
+    }
+    if (kind === 'missing image hash') delete resource.local_file_hashes![resource.root_path]
+    if (kind === 'missing metadata hash') delete resource.local_file_hashes!['assets/runtime/model.json']
+    if (kind === 'bad hash') resource.local_file_hashes!['assets/runtime/model.json'] = '0'.repeat(64)
+    if (kind === 'provisional') resource.provisional = true
+    if (kind === 'missing declaration') resource.capabilities = []
+    if (kind === 'different declaration') resource.capabilities = ['atlas-regions']
+    if (kind === 'unsupported root') resource.root_path = 'assets/runtime/model.json'
+  })
+  const audit = auditAssetContract(workspace)
+  const failed = kind === 'missing metadata' || kind === 'bad hash'
+  expect(audit.valid).toBe(!failed)
+  const structure = audit.requirements[0]!.structure!
+  expect(structure.status).toBe(failed ? 'failed' : 'unverified')
+  if (kind === 'missing image hash' || kind === 'missing metadata hash')
+    expect(structure.observations.join(' ')).toContain('recorded hashes are missing')
+  if (kind === 'missing declaration' || kind === 'different declaration')
+    expect(structure.observations.join(' ')).toContain('declared coverage incomplete')
+})
+
 test.each([
   ['empty atlas', { frames: {} }],
   ['unrecognized metadata', {}],
   ['unsupported rectangles', { frames: { orb: { x: 0, y: 0, w: 8, h: 8 } } }],
   ['overflow', { frames: { orb: { frame: { x: 15, y: 0, w: 8, h: 8 } } } }],
   ['rotated frame', { frames: { orb: { frame: { x: 0, y: 0, w: 8, h: 8 }, rotated: true } } }],
-])('sprite compatibility rejects %s even with matching recorded hashes', async (_, metadata) => {
-  const audit = auditAssetContract(await spriteAtlasFixture(metadata))
-  expect(audit.valid).toBe(false)
-  expect(audit.requirements[0]!.structure!.status).toBe('failed')
-  expect(audit.issues.join(' ')).toContain('expected kinds [sprite]')
-  expect(audit.issues.join(' ')).toContain('res-model (sprite-atlas)')
+])('sprite compatibility and image atlas capability reject %s even with matching recorded hashes', async (_, metadata) => {
+  for (const image of [false, true]) {
+    const audit = auditAssetContract(await spriteAtlasFixture(metadata, value => {
+      if (!image) return
+      value.requirements[0]!.acquisition_profile.asset_kinds = ['image']
+      value.requirements[0]!.acquisition_profile.capabilities = ['atlas']
+      value.resources[0]!.asset_kind = 'image'; value.resources[0]!.capabilities = ['atlas']
+    }))
+    expect(audit.valid).toBe(false)
+    expect(audit.requirements[0]!.structure!.status).toBe('failed')
+    expect(audit.issues.join(' ')).toContain('expected kinds ['+(image ? 'image' : 'sprite')+']')
+    expect(audit.issues.join(' ')).toContain('res-model ('+(image ? 'image' : 'sprite-atlas')+')')
+  }
 })
 
 test('atlas sprite compatibility retains metadata, hash and additional-capability checks', async () => {

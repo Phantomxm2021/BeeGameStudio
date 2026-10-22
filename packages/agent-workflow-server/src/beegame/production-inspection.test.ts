@@ -27,7 +27,7 @@ test.skipIf(process.env.BGS_DESIGN_BROWSER !== '1')('shared runtime decodes sele
     const resource = resources.find(item => path === '/assets/'+item.id+'.resource.json')
     if (resource) return Response.json(resource)
     if (path === '/assets/atlas.json') return Response.json({frames:{play:{frame:{x:0,y:0,w:4,h:4}}}})
-    if (path === '/assets/atlas.png') return new Response(image,{headers:{'content-type':'image/png'}})
+    if (path === '/assets/atlas.png') return new Response(new Uint8Array(image),{headers:{'content-type':'image/png'}})
     if (path.endsWith('.ttf')) return new Response(font,{headers:{'content-type':'font/ttf'}})
     if (path === '/assets/OFL.txt') return new Response('Synthetic supporting licence')
     return new Response('Missing',{status:404})

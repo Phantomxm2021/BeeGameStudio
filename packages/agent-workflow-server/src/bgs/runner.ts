@@ -436,8 +436,9 @@ class BgsRuntime implements BeeGameSessionRuntime {
         if (decision.behavior !== 'allow') throw Error(decision.message || 'BGS rejected this file change')
         // Finish the file operation synchronously after the last live authority
         // check so cancellation cannot release the writer mid-write.
-        const recheck = path === resolve(this.access.root, 'AGENTS.md') ? decision : await this.permission(request)
-        if (!current() || recheck.behavior !== 'allow') throw Error('File authorization changed')
+        const recheck = path === resolve(this.access.root, 'AGENTS.md') ? decision : await this.permission({ ...request, phase: 'recheck' })
+        if (recheck.behavior !== 'allow') throw Error(recheck.message || 'File authorization changed')
+        if (!current()) throw Error('File authorization changed')
         let ancestor = dirname(path)
         while (true) {
           let canonical: string | undefined

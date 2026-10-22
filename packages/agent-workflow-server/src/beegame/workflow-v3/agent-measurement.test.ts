@@ -25,13 +25,15 @@ import {createAgentWorkflowApp} from '../../app'
 import {writeBeeGameAssetManifest} from '../asset-contracts'
 import {DESIGN_ACCEPTANCE_PATH,checkDesignHandoff} from '../design-handoff'
 import {PROJECT_DOCUMENTS} from '../project-content-authority'
-import {artifactDigest} from '../runtime-acceptance'
+import {artifactDigest,inspectDesignAcceptance} from '../runtime-acceptance'
+import {projectRuntimeDisplayReason} from '../project-runtime-display'
 import {initializeProjectGuide} from './project-guide'
 import {CHECK_VERSIONS} from './check-versions'
 
 const JSZip=createRequire(import.meta.resolve('exceljs'))('jszip')
 const builder="import{cp,mkdir}from'node:fs/promises';await mkdir('dist',{recursive:true});await cp('src/index.html','dist/index.html');"
-async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditable=false) {
+async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditable=false,
+  initialDelivery:'playable-slice'|'design-led-first-version'='playable-slice') {
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-agent-measure-'))),workspace=join(root,'project')
   await mkdir(join(workspace,'src'),{recursive:true})
   await writeFile(join(workspace,'package.json'),JSON.stringify({scripts:{build:'bun build.mjs'}}))
@@ -40,7 +42,7 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditab
   await writeFile(join(workspace,'README.md'),'Merged eight-domain fixture; semantics not verified')
   const store=createLocalWorkflowStore(join(root,'host'))
   const run=createRun({projectId:'measure',ownerId:'owner',workspacePath:workspace,chatSessionId:'chat',requestKey:'goal',text:'Fixture',constraints:{},ids:['goal']})
-  if(requireEditable)run.creation={initialDelivery:'playable-slice',editableContent:true}
+  if(requireEditable || initialDelivery==='design-led-first-version')run.creation={initialDelivery,editableContent:requireEditable}
   const turn:AgentTurn={attemptId:crypto.randomUUID(),requestKey:'goal',sessionId:'chat',workerId:'worker',fence:1,status:'running',startedAt:new Date().toISOString(),requirementsRevision:run.requirements.revision}
   run.agentTurns=[...previousTurns,turn];run.fence=1;run.writer={attemptId:turn.attemptId,workerId:turn.workerId,fence:turn.fence}
   await store.commit(run.projectId,run.ownerId,0,run,'fixture')
@@ -58,6 +60,169 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditab
     async close(){await measurement.close();await rm(root,{recursive:true,force:true})}}
 }
 const request={requestKey:'measure-1',runtimeArtifact:'dist',reportPaths:['README.md']}
+
+test('author report coverage survives reads and turn summaries without overriding host measurement failure',async()=>{
+  const f=await fixture("throw Error('SYNTHETIC BUILD FAILURE')")
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    await writeFile(join(f.workspace,'content/index.json'),JSON.stringify({
+      schema:'beegame-content-package.v2',id:'fixture',dimension:'2d',sceneModel:'game-object-v2',
+      entryScene:'level',files:['ui/menu.json','scenes/level.json'],documents:[
+        {id:'menu',kind:'ui-screen',path:'ui/menu.json',loadPhase:'startup'},
+        {id:'level',kind:'scene-2d',path:'scenes/level.json',loadPhase:'startup'}]}))
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    await writeFile(join(f.workspace,'observed.txt'),'Synthetic author observation, not independent acceptance')
+    const report={scope:'delivery',status:'blocked',summary:'AUTHOR CLAIM: everything is complete',environment:'Offline fixture',
+      evidencePaths:['observed.txt'],artifactPaths:['src/index.html'],verification:{
+        target:'deployment' as const,observation:'target-runtime' as const,knownIssues:['Unresolved author-reported issue'],
+        unverified:Array.from({length:8},(_,i)=>'Unobserved scenario '+(i+1)+': '+'Detailed author observation. '.repeat(50).trim()),outsideScope:['Optional platform'],
+        designRevision:checkDesignHandoff(f.workspace,PROJECT_DOCUMENTS).revision,requirementChecks:[],
+        contentChecks:([{kind:'ui-layout',document:'content/ui/menu.json',nodeId:'play',property:'layout'},
+          {kind:'scene-layout',document:'content/scenes/level.json',nodeId:'board',property:'transform'}] as const).map(check=>({
+          ...check,change:'Synthetic change',expected:'Synthetic expected',observed:'Synthetic observed',
+          status:'passed' as const,evidencePaths:['observed.txt']}))}}
+    const save=()=>writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(report))
+    await save()
+    const inspected=await inspectDesignAcceptance(f.workspace,true)
+    expect(inspected).toMatchObject({valid:false,declaredStatus:'blocked',status:'blocked',quality:'unverified',
+      verification:report.verification})
+    // An honest blocked report is allowed through to an actual local build.
+    const measured=await f.measurement.measure({...request,reportPaths:[DESIGN_ACCEPTANCE_PATH]})
+    expect(measured.checks.find(check=>check.id==='build')?.status).toBe('failed')
+    expect(measured.checks.find(check=>check.id==='build')?.observation).toContain('SYNTHETIC BUILD FAILURE')
+    const saved=JSON.stringify(measured)
+    expect((await f.measurement.handoff()).acceptance.verification).toEqual(report.verification)
+    const reason=await agentTurnHandoffReason(await f.current(),f.turn)
+    expect(reason).toContain('declared=blocked; checked=blocked')
+    expect(reason).toContain('Author-reported known issues: 1; unverified items: 8')
+    expect(reason).toContain('Author details: '+DESIGN_ACCEPTANCE_PATH+'#verification')
+    expect(reason).toContain('Content checks: passed=2, failed=0, unverified=0')
+    expect(reason).toContain('Indexed requirement checks: not provided (coverage unverified)')
+    expect(reason).not.toContain(report.summary)
+    // Exercise the same bounded display used by the final host event. Long
+    // author lists remain available in full above without truncating counts.
+    const displayed=projectRuntimeDisplayReason(reason)!.detail
+    expect(displayed).toContain('unverified items: 8')
+    expect(displayed).toContain('Indexed requirement checks: not provided (coverage unverified)')
+    expect(displayed).toContain(DESIGN_ACCEPTANCE_PATH+'#verification')
+    expect(displayed).toContain('game quality remains unverified')
+
+    // A different author declaration can pass report rules without new runtime
+    // evidence. It must not change the saved build result or grant publication.
+    report.status='passed';report.verification.knownIssues=[];report.verification.unverified=[]
+    await save()
+    const handoff=await f.measurement.handoff()
+    expect(handoff.acceptance).toMatchObject({valid:true,declaredStatus:'passed',status:'passed',quality:'unverified'})
+    expect(handoff).toMatchObject({quality:'unverified',deliveryEligible:false})
+    expect(handoff.measurement?.checks.find(check=>check.id==='build')?.status).toBe('failed')
+    const updatedReason=await agentTurnHandoffReason(await f.current(),f.turn)
+    expect(updatedReason).toContain('declared=passed; checked=passed; delivery checks=passed')
+    expect(updatedReason).toContain('Author-reported known issues: 0; unverified items: 0')
+    expect(updatedReason).toContain('Empty declarations do not establish coverage')
+    expect(updatedReason).toContain('game quality remains unverified')
+    expect(updatedReason).not.toContain(report.summary)
+    const run=await f.settle()
+    expect(JSON.stringify(run.agentTurns![0]!.measurements![0])).toBe(saved)
+    for(const purpose of ['delivery','publication'] as const)
+      await expect(selectAgentMeasuredBuild(run,measured.id,false,purpose)).rejects.toMatchObject({code:'measurement-failed'})
+  } finally {await f.close()}
+},30000)
+
+test.each(['misplaced','missing','changed'] as const)('turn report diagnostic survives the bounded host display: %s revision',async kind=>{
+  const f=await fixture()
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({
+      scope:'delivery',status:'passed',summary:'AUTHOR CLAIM: everything passed',environment:'Offline fixture',
+      evidencePaths:['README.md'],artifactPaths:['src/index.html'],
+      ...(kind==='misplaced'?{designRevision:'0'.repeat(64)}:{}),
+      verification:{target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],
+        ...(kind==='changed'?{designRevision:'0'.repeat(64)}:{})},
+    }))
+    // A pending record exercises the failed/incomplete measurement prefix
+    // without running a build, browser or model.
+    f.turn.measurements=[{...request,id:crypto.randomUUID(),reportPaths:[DESIGN_ACCEPTANCE_PATH],
+      requirementsRevision:f.run.requirements.revision,startedAt:new Date().toISOString(),reports:[],checks:[]}]
+    const acceptance=await inspectDesignAcceptance(f.workspace,true)
+    expect(acceptance.diagnostic?.category).toBe(kind==='misplaced'?'report-invalid':'verification-incomplete')
+    expect(acceptance.diagnostic?.message).toContain(kind==='misplaced'?'not at the report top level':
+      kind==='missing'?'verification.designRevision is missing':'verification.designRevision does not match')
+    const reason=await agentTurnHandoffReason(f.run,f.turn)
+    const displayed=projectRuntimeDisplayReason(reason)!.detail
+    expect(displayed.length).toBeLessThanOrEqual(800)
+    expect(displayed).toContain('Native goal turn ended; preview-unverified.')
+    expect(reason).toContain('Measurement details: Measurement is incomplete or failed')
+    expect(displayed).toContain('Report validation: '+acceptance.diagnostic!.category+': '+acceptance.diagnostic!.message)
+    expect(displayed).toContain('unverified items: '+(kind==='misplaced'?'not provided':'0'))
+    expect(displayed).toContain('Indexed requirement checks: not provided (coverage unverified)')
+    expect(displayed).toContain(DESIGN_ACCEPTANCE_PATH+'#verification')
+    expect(displayed).toContain('game quality remains unverified')
+    expect(displayed).not.toContain('AUTHOR CLAIM')
+  } finally {await f.close()}
+})
+
+test('combined baseline, stale report and revision diagnostics preserve bounded coverage without relaxing publication',async()=>{
+  const f=await fixture(builder,[],false,'design-led-first-version')
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    const report={scope:'delivery',status:'blocked',summary:'AUTHOR CLAIM',environment:'Offline fixture',
+      evidencePaths:['README.md'],artifactPaths:['src/index.html'],verification:{
+        target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[]}}
+    const save=(value:unknown)=>writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(value))
+    await save(report)
+    const measured=await f.measurement.measure({...request,reportPaths:[DESIGN_ACCEPTANCE_PATH]})
+    expect(measured.error).toBeUndefined()
+    const saved=JSON.stringify(measured),run=await f.settle()
+    expect(run.designBaseline).toBeUndefined()
+    for(const kind of ['missing','changed','misplaced']) {
+      await save({...report,status:'passed',...(kind==='misplaced'?{designRevision:'0'.repeat(64)}:{}),
+        verification:{...report.verification,...(kind==='changed'?{designRevision:'0'.repeat(64)}:{})}})
+      const acceptance=await inspectDesignAcceptance(f.workspace,true)
+      const reason=await agentTurnHandoffReason(run,f.turn),displayed=projectRuntimeDisplayReason(reason)!.detail
+      expect(reason.length).toBeGreaterThan(800)
+      expect(displayed.length).toBeLessThanOrEqual(800)
+      expect(displayed).toContain('Native goal turn ended; measurement-stale.')
+      expect(displayed).toContain('Report validation: '+acceptance.diagnostic!.category+': '+acceptance.diagnostic!.message)
+      expect(displayed).toContain('Author-reported known issues: '+(kind==='misplaced'?'not provided':'0'))
+      expect(displayed).toContain('unverified items: '+(kind==='misplaced'?'not provided':'0'))
+      expect(displayed).toContain('Indexed requirement checks: not provided (coverage unverified)')
+      expect(displayed).toContain(DESIGN_ACCEPTANCE_PATH+'#verification')
+      expect(displayed).toContain('game quality remains unverified')
+      expect(displayed).not.toContain(report.summary)
+      expect(reason).toContain('Implementation design baseline is missing')
+      expect(reason).toContain('Reports changed or are missing: '+DESIGN_ACCEPTANCE_PATH)
+      for(const purpose of ['delivery','publication'] as const)
+        await expect(selectAgentMeasuredBuild(run,measured.id,false,purpose)).rejects.toMatchObject({code:'measurement-stale'})
+      expect(JSON.stringify((await f.current()).agentTurns![0]!.measurements![0])).toBe(saved)
+    }
+  } finally {await f.close()}
+},30000)
+
+test.each(['missing','invalid','no-verification'] as const)('turn report summary preserves absent coverage: %s',async kind=>{
+  const f=await fixture()
+  try {
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    if(kind!=='missing')await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),kind==='invalid' ? '{' :
+      JSON.stringify({scope:'delivery',status:'blocked',summary:'AUTHOR CLAIM: no defects',environment:'Offline fixture',evidencePaths:[]}))
+    const acceptance=await inspectDesignAcceptance(f.workspace,true)
+    expect(acceptance.verification).toBeUndefined()
+    expect(acceptance.valid).toBe(false)
+    expect(acceptance.status).toBe(kind==='missing'?'unverified':'blocked')
+    // A pending measurement only identifies the selected report; it does not
+    // invent a successful build or require running one to read the summary.
+    f.turn.measurements=[{...request,id:crypto.randomUUID(),reportPaths:[DESIGN_ACCEPTANCE_PATH],
+      requirementsRevision:f.run.requirements.revision,startedAt:new Date().toISOString(),reports:[],checks:[]}]
+    const reason=await agentTurnHandoffReason(f.run,f.turn)
+    expect(reason).toContain('Author-reported known issues: not provided')
+    expect(reason).toContain('unverified items: not provided')
+    expect(reason).toContain('Content checks: not provided (coverage unverified)')
+    expect(reason).not.toContain('unverified=0')
+    expect(reason).not.toContain('AUTHOR CLAIM')
+    if(kind==='invalid')expect(reason).toContain('Report validation: report-invalid:')
+  } finally {await f.close()}
+})
 
 test.each(['shape','json','evidence','missing'] as const)('invalid attached acceptance (%s) fails before build and the existing measurement CLI exits unsuccessfully',async kind=>{
   const f=await fixture("throw Error('BUILD MUST NOT RUN')")
@@ -551,6 +716,65 @@ test('Node test receipts retain before/after identities and inspect later drift 
   } finally {await tools.close();await f.close()}
 })
 
+test.each(['unchanged','source-and-report'] as const)('baseline eligibility stays separate from measurement identity: %s',async kind=>{
+  const f=await fixture(builder,[],false,'design-led-first-version')
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    const record=await f.measurement.measure(request),saved=JSON.stringify(record),live=await f.current()
+    expect(record.error).toBeUndefined()
+    expect(live.designBaseline).toBeUndefined()
+    // Isolate baseline selection from the independent active-writer gate.
+    const settled=structuredClone(live)
+    delete settled.writer
+    settled.agentTurns![0]!.status='ended'
+    settled.agentTurns![0]!.quiescedAt=new Date().toISOString()
+    for(const purpose of ['delivery','publication'] as const) {
+      const inputs=await inspectAgentMeasurementInputs(settled,record,undefined,purpose)
+      expect(inputs).toMatchObject({current:false,code:'design-baseline-missing',
+        changes:{requirements:false,authorizedSourceSave:false,sources:[],reports:[],dependencies:false,
+          buildOrArtifact:false,artifact:false,checkInputs:[]},evidence:{artifactMatches:true,exportableSourcesMatch:true}})
+      expect(inputs.reason).toContain('then inspect the same saved measurement')
+      expect(inputs.reason).toContain('--design baseline only reads it')
+      await expect(selectAgentMeasuredBuild(settled,record.id,false,purpose)).rejects.toMatchObject({code:'design-baseline-missing'})
+    }
+    expect((await selectAgentMeasuredBuild(settled,record.id,false,'preview')).measurement.id).toBe(record.id)
+    await expect(selectAgentMeasuredBuild(live,record.id,false,'publication')).rejects.toMatchObject({code:'workspace-busy'})
+    const ordinary=structuredClone(settled)
+    ordinary.creation={initialDelivery:'playable-slice',editableContent:false}
+    expect((await selectAgentMeasuredBuild(ordinary,record.id,false,'publication')).measurement.id).toBe(record.id)
+    expect((await f.current()).version).toBe(live.version) // Inspection does not create a baseline.
+
+    if(kind==='source-and-report') {
+      await writeFile(join(f.workspace,'src/index.html'),'<html>Changed source after measurement</html>')
+      await writeFile(join(f.workspace,'README.md'),'Changed report after measurement')
+      const stale=await inspectAgentMeasurementInputs(live,record)
+      expect(stale).toMatchObject({current:false,code:'measurement-stale',
+        changes:{sources:['README.md','src/index.html'],reports:['README.md']},evidence:{artifactMatches:true}})
+      expect(stale.reason).toContain('Implementation design baseline is missing')
+      expect(stale.reason).toContain('Reports changed or are missing: README.md')
+    }
+    await f.measurement.lockDesignBaseline()
+    const ready=await f.settle()
+    expect(JSON.stringify(ready.agentTurns![0]!.measurements![0])).toBe(saved)
+    for(const purpose of ['delivery','publication'] as const) {
+      const inputs=await inspectAgentMeasurementInputs(ready,record,undefined,purpose)
+      expect(inputs).toMatchObject({current:kind==='unchanged',code:kind==='unchanged'?'current':'measurement-stale'})
+      if(kind==='unchanged')expect((await selectAgentMeasuredBuild(ready,record.id,false,purpose)).measurement.id).toBe(record.id)
+      else await expect(selectAgentMeasuredBuild(ready,record.id,false,purpose)).rejects.toMatchObject({code:'measurement-stale'})
+    }
+    if(kind==='unchanged') {
+      // A conflicting saved baseline is also a policy blocker when the measured
+      // files match. Preview must not bypass an existing design lock.
+      const conflicting={...ready,designBaseline:{...ready.designBaseline!,revision:'0'.repeat(64)}}
+      for(const purpose of ['delivery','publication','preview'] as const) {
+        expect(await inspectAgentMeasurementInputs(conflicting,record,undefined,purpose))
+          .toMatchObject({current:false,code:'design-baseline-changed',evidence:{artifactMatches:true,exportableSourcesMatch:true}})
+        await expect(selectAgentMeasuredBuild(conflicting,record.id,false,purpose)).rejects.toMatchObject({code:'design-baseline-changed'})
+      }
+    }
+  } finally {await f.close()}
+},30000)
+
 test('source, report and artifact identity changes stay distinct without accepting a changed export or rerunning checks',async()=>{
   const f=await fixture()
   try {
@@ -1012,8 +1236,8 @@ test('handoff is read-only and returns current source bytes and newest interrupt
     const before=await f.current(),original=await readFile(join(f.workspace,'README.md'),'utf8')
     const help=await command(f.workspace,'--help')
     expect(help.code).toBe(0)
-    expect(help.stdout).toContain('--design help')
-    expect(help.stdout).toContain('describes document authoring')
+    expect(help.stdout).toContain('--design help --details')
+    expect(help.stdout).toContain('describes explicit source/index compatibility commands')
     const designHelp=await command(f.workspace,'--design','help')
     expect(designHelp.code).toBe(0)
     expect(JSON.parse(designHelp.stdout).instruction).toContain('BGS does not require output indexes')
@@ -1200,7 +1424,8 @@ test('native-turn capability records real build/report/smoke; dedup, export and 
     expect(record.checks.map((c:any)=>c.status)).toEqual(['passed','passed']);expect(record.quality).toBe('unverified')
     expect(record.checkScope.unmeasuredConsumptionChecks).toHaveLength(5)
     expect(record.freshness.current).toBe(true)
-    expect(record.note).toContain('not in measured source/report files')
+    expect(record.note).toContain('Receipt is saved in BGS')
+    expect(record.note).toContain('do not add its ID to measured source/report files')
     expect(record.reports[0].path).toBe('README.md')
     const live=await f.current()
     live.agentTurns![0]!.message={requestKey:'authorized-work',runId:live.id,chatSessionId:live.chatSessionId,
@@ -1360,7 +1585,9 @@ test('post-measure receipt edit is identified by read-only inspection; original 
     const authorizedTurn={...run.agentTurns![0]!,message:{requestKey:'authorized-work',runId:run.id,
       chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
       intent:'work' as const,text:'Measure the saved project'}}
-    expect(await agentTurnHandoffReason(run,authorizedTurn)).toContain('measurement-stale: Reports changed or are missing: README.md')
+    const reason=await agentTurnHandoffReason(run,authorizedTurn)
+    expect(reason).toContain('Native goal turn ended; measurement-stale.')
+    expect(reason).toContain('Reports changed or are missing: README.md')
     await expect(selectAgentMeasuredBuild(run,original.id)).rejects.toThrow('README.md')
     for(const kind of ['static','project'] as const)
       await expect(exportAgentMeasuredBuild(run,original.id,{read:f.current,busy:()=>false},kind)).rejects.toThrow('README.md')
