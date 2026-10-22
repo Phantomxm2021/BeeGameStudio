@@ -17,7 +17,7 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
   const sourceRequests: { paths: string[]; details: boolean }[] = []
   const unexpected = async () => { throw Error('Baseline must not execute other measurement operations') }
   const measurement: NonNullable<Parameters<typeof openAgentTools>[0]['measurement']> = {
-    async assertActive(write = false) { inspected.push(write) },
+    async assertActive(write = false) { inspected.push(write); return { runId: 'fixture', requirementsRevision: 'fixture' } },
     async close() {},
     authorizeDesignChange: unexpected,
     designFileChanges: () => ({scope: 'design-revision-files',attemptId: 'fixture',requestKey: 'fixture',status: 'unverified',files: []}),

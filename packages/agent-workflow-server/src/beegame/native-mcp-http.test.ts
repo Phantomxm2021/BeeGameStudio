@@ -8,7 +8,7 @@ test('HTTP MCP rejects unapproved stored endpoints before starting a relay', asy
   let checks = 0
   await expect(prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: JSON.stringify([
     { id: 'blocked', enabled: true, autoStart: true, scope: 'global', transport: 'http', url: 'http://127.0.0.1:9/mcp' },
-  ]) }, process.cwd(), undefined, undefined, { resolveOutboundTarget: async () => { checks++; return undefined } }))
+  ]) }, process.cwd(), undefined, undefined, { resolveOutboundTarget: async () => { checks++; return null } }))
     .rejects.toThrow('MCP endpoint is not permitted')
   expect(checks).toBe(1)
   await expect(prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: JSON.stringify([

@@ -738,7 +738,7 @@ test('goal settlement leaves the project guide unchanged after native source wri
 test('focused facts retain literal user decisions and answered Questions, never tool history or permission grants',()=>{
   const requirements={text:JSON.stringify({idea:'CONFIRMED_GOAL',
     user_messages:[{requestKey:'saved-message',text:'Keep the selected theme'}],
-    authorized_user_changes:[{requestKey:'saved-change',text:'Use keyboard controls'}]}),revision:'rev'}
+    authorized_user_changes:[{requestKey:'saved-change',text:'Use keyboard controls'}]}),revision:'rev',constraints:{},ids:['goal'],sha256:'fixture-sha'}
   const run={requirements,agentTurns:[
     {attemptId:'message',requestKey:'saved-message',message:{intent:'message',text:'Keep the selected theme'}},
     {attemptId:'change',requestKey:'saved-change',message:{intent:'change',text:'Use keyboard controls'}},
@@ -809,8 +809,9 @@ test.each([undefined,'# Custom navigation\nRun the saved command'])('goal dispat
 
 // Prompt contracts do not prove that a model read, understood or reproduced art.
 test.each([1, undefined] as const)('first-version deliverables do not become a follow-up production schedule: %s', visualHandoffVersion => {
-  const run={visualHandoffVersion,creation:{initialDelivery:'design-led-first-version',editableContent:true},
-    requirements:{text:'ORIGINAL_CONFIRMED_GOAL',constraints:{engine:'React',platform:'Web'}}} as Run
+  const run = createRun({ projectId: 'prompt', ownerId: 'owner', workspacePath: '/synthetic', chatSessionId: 'chat', requestKey: 'once', text: 'ORIGINAL_CONFIRMED_GOAL', constraints: { engine: 'React', platform: 'Web' }, ids: ['goal'] })
+  run.visualHandoffVersion = visualHandoffVersion
+  run.creation = { initialDelivery: 'design-led-first-version', editableContent: true }
   const first=agentProfessionalContextForRun(run), followup=agentProfessionalContextForRun(run,true)
   expect(first).toContain('design dependencies and professional methods in the project guide')
   expect(first).not.toContain('GDD.md,')
@@ -1317,7 +1318,8 @@ test('pause survives a simultaneous saved exit; rebasing does not execute a mode
 
 
 test('first and resumed goals retain professional coverage and design dependencies within the confirmed scope', () => {
-  const run={creation:{initialDelivery:'design-led-first-version',editableContent:true},requirements:{text:'CONFIRMED_GAME',constraints:{engine:'React',platform:'Web'}}} as Run
+  const run = createRun({ projectId: 'prompt', ownerId: 'owner', workspacePath: '/synthetic', chatSessionId: 'chat', requestKey: 'once', text: 'CONFIRMED_GAME', constraints: { engine: 'React', platform: 'Web' }, ids: ['goal'] })
+  run.creation = { initialDelivery: 'design-led-first-version', editableContent: true }
   for (const professional of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
     const prompt=PROJECT_WORKING_CONVENTIONS+'\n'+professional
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)

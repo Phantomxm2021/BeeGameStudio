@@ -28,9 +28,10 @@ function fixture() {
 }
 async function connect(root: string) {
   const prepared = await prepareNativeMcpConfig({}, root, conditions)
-  const config = JSON.parse(readFileSync(prepared.flags[1]!, 'utf8'))
+  const servers = prepared.config.mcp_servers as Record<string, ConstructorParameters<typeof StdioClientTransport>[0]>
+  expect(Object.keys(servers)).toEqual(['bgs-ui-layout'])
   const client = new Client({ name: 'offline-scene-test', version: '1' })
-  try { await client.connect(new StdioClientTransport(config.mcpServers['bgs-ui-layout'])) }
+  try { await client.connect(new StdioClientTransport(servers['bgs-ui-layout']!)) }
   catch (error) { await client.close(); await prepared.close(); throw error }
   return { client, close: async () => { await client.close(); await prepared.close() } }
 }

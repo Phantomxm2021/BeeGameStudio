@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DashboardRepository } from '../dashboard-repository'
-import { saveRuntimeSettingsConfig, resolveRuntimeFeatureSettings } from '../runtime-settings-store'
+import { resolveRuntimeFeatureSettings } from '../runtime-settings-store'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
 import { SupabaseRuntimeEnvClient } from '../supabase-runtime-env-client'
 import { upsertMcpServer } from '../mcp-servers-store'
@@ -116,10 +116,8 @@ describe('DashboardRepository Supabase boundaries', () => {
     const user = { id: 'owner-user', role: 'owner' as const }
 
     try {
-      saveRuntimeSettingsConfig(
-        { skillSearchEnabled: true },
-        { dataDir: userRoot },
-      )
+      await mkdir(userRoot, { recursive: true })
+      await writeFile(join(userRoot, 'runtime-settings.json'), JSON.stringify({ version: 1, config: { skillSearchEnabled: true } }))
 
       await expect(
         repository.loadRuntimeSettings(request, user),
@@ -143,12 +141,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     })
 
     try {
-      saveRuntimeSettingsConfig(
-        {
-            mcpSkillsEnabled: false,
-        },
-        { dataDir: dataRoot },
-      )
+      await writeFile(join(dataRoot, 'runtime-settings.json'), JSON.stringify({ version: 1, config: { mcpSkillsEnabled: false } }))
 
       const ownerAEnv = await repository.getRuntimeEnv(userARoot, 'owner-a')
       const ownerBEnv = await repository.getRuntimeEnv(userBRoot, 'owner-b')

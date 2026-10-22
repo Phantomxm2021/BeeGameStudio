@@ -9,14 +9,15 @@ const environment = { OPENAI_API_KEY: 'synthetic-provider-key', BEEGAME_API_PROT
 test('Responses endpoints require runtime outbound approval before opening a bridge', async () => {
   let checked = 0
   await expect(startProviderBridge(environment, {
-    onUsage() {}, resolveOutboundTarget: async () => { checked++; return undefined },
+    onUsage() {}, resolveOutboundTarget: async () => { checked++; return null },
   })).rejects.toThrow('not permitted')
   expect(checked).toBe(1)
 })
 
 test('Responses pins DNS, preserves native search and compaction, and rejects redirects', async () => {
   const calls: Array<{ path: string; authorization: string | null; beta: string | null; body: any }> = []
-  let redirected = 0, lookups = 0, usageCallbacks = 0
+  let redirected = 0, lookups = 0
+  const receipts: ProviderUsage[] = []
   const trap = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { redirected++; return new Response('unexpected') } })
   const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     const body = await request.json() as any
@@ -29,7 +30,7 @@ test('Responses pins DNS, preserves native search and compaction, and rejects re
   } })
   const baseUrl = `http://synthetic-provider.invalid:${upstream.port}/custom/v1`
   const bridge = await startProviderBridge({ ...environment, OPENAI_BASE_URL: baseUrl }, {
-    onUsage() { usageCallbacks++ }, resolveOutboundTarget: async value => ({ url: new URL(value), addresses: ['127.0.0.1'],
+    onUsage(usage) { receipts.push(usage) }, resolveOutboundTarget: async value => ({ url: new URL(value), addresses: ['127.0.0.1'],
       lookup: (_hostname, _options, callback) => { lookups++; callback(null, '127.0.0.1', 4) } }),
   })
   const send = (body: unknown, suffix = '') => fetch(bridge.baseUrl + '/responses' + suffix, {
@@ -48,10 +49,12 @@ test('Responses pins DNS, preserves native search and compaction, and rejects re
     const compressed = await send({ compressed: true })
     expect(await compressed.text()).toContain('response.completed')
     expect(compressed.headers.has('content-encoding')).toBe(false)
+    // Successful native Responses usage stays in native notifications.
+    expect(receipts).toHaveLength(0)
     expect((await send({ redirect: true })).status).toBe(502)
     expect(redirected).toBe(0)
-    // Usage stays in native Bgs notifications, rather than being charged twice.
-    expect(usageCallbacks).toBe(0)
+    expect(receipts).toEqual([{ input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
+      cache_creation_tokens: 0, total_tokens: 0, incomplete: true }])
   } finally { await bridge.close(); upstream.stop(true); trap.stop(true) }
 })
 

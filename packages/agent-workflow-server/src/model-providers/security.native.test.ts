@@ -47,7 +47,7 @@ nativeTest('native parallel image and command results form a valid Chat Completi
     if (fixtureError) throw fixtureError
     expect(requests).toBe(2)
   } catch (error) { throw fixtureError ?? error }
-  finally { await runtime?.dispose(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
+  finally { await runtime?.dispose?.(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 25_000)
 nativeTest('provider HTTP failures retain status without leaking upstream bodies or retrying', async () => {
   const root = await mkdtemp('/private/tmp/bgs-native-provider-http-'), game = join(root, 'game')
@@ -68,6 +68,7 @@ nativeTest('provider HTTP failures retain status without leaking upstream bodies
     await expect(runtime.submit({ prompt: 'Use this synthetic fixture.', signal: AbortSignal.timeout(15000),
       onMessage: () => {}, requestPermission: async () => ({ behavior: 'deny' }) })).rejects.toThrow()
     expect(requests).toBe(1)
+    if (!runtime.dispose) throw Error('Native runtime must support disposal')
     await runtime.dispose()
     runtime = undefined
     const sessions = join(root, 'private', 'bgs', 'sessions')
@@ -76,7 +77,7 @@ nativeTest('provider HTTP failures retain status without leaking upstream bodies
     expect(native.includes('HTTP 400')).toBe(true)
     expect(native.includes('upstream-private-body')).toBe(false)
     expect(native.includes('synthetic-provider-secret')).toBe(false)
-  } finally { await runtime?.dispose(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
+  } finally { await runtime?.dispose?.(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 25_000)
 for (const malformedSuffix of [false, true]) nativeTest('converted provider unknown calls are rejected without execution; changed streamed name=' + malformedSuffix, async () => {
   const root = await mkdtemp('/private/tmp/bgs-native-unknown-'), game = join(root, 'game')
@@ -110,7 +111,7 @@ for (const malformedSuffix of [false, true]) nativeTest('converted provider unkn
     expect(JSON.stringify(bodies[1].messages)).toContain('unsupported')
     expect(events.some(event => event.text?.includes('continuation completed'))).toBe(true)
     expect((await readdir(game)).filter(path => path !== '.beegame')).toEqual([])
-  } finally { await runtime?.dispose(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
+  } finally { await runtime?.dispose?.(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 25_000)
 nativeTest('official Bgs failure retains partial supplier usage through the runner and billing outbox', async () => {
   const root = await mkdtemp('/private/tmp/bgs-native-partial-'), game = join(root, 'game'), catalog = join(root, 'skills')

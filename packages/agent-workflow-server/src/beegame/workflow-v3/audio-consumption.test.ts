@@ -21,7 +21,7 @@ for (const mode of ['consume', 'uncapturable', 'invalid-contract', 'music', 'leg
       resource.root_path = file; resource.file_paths = [file, member]; resource.asset_kind = 'audio-clip'
       if(mode==='music')resource.asset_kind='music'
       if(mode==='legacy-audio')resource.asset_kind='audio'
-      manifest.requirements[0]!.acquisition_profile.asset_kinds = [mode==='legacy-audio'?'audio-clip':resource.asset_kind]
+      manifest.requirements[0]!.acquisition_profile.asset_kinds = [mode==='music'?'music':'audio-clip']
       if(mode==='invalid-contract')manifest.requirements[0]!.acquisition_profile.asset_kinds=['data']
       await mkdir(join(root, 'assets/runtime/example'), {recursive:true})
       await writeFile(join(root, file), audioProbeWav(mode === 'silent-original'))

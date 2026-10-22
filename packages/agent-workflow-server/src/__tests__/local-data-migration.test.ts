@@ -347,7 +347,7 @@ async function createLocalDashboardData(): Promise<string> {
     })}\n`,
     'utf8',
   )
-  saveRuntimeSettingsConfig({ skillSearchEnabled: true }, { dataDir })
+  saveRuntimeSettingsConfig({ resourceLibraryEnabled: false }, { dataDir })
   saveWebToolsConfig({
     webSearchAdapter: 'brave',
     braveApiKey: 'brave-local-secret',

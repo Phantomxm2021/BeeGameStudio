@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { createBgsRunner } from './runner'
 import { agentGoalPrompt, agentProfessionalContextForRun } from '../beegame/workflow-v3/agent-goal'
 import { PROJECT_GUIDE_TEMPLATE, projectGuideContext, readProjectGuide } from '../beegame/workflow-v3/project-guide'
-import type { Run } from '../beegame/workflow-v3/state'
+import { createRun } from '../beegame/workflow-v3/state'
 
 // Real CLI, synthetic local Responses server; no model or project artifacts.
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
@@ -35,8 +35,8 @@ localTest('native resume receives current BGS context as well as project instruc
   // Current host context was ~5.5 KB when the lost tools path was observed.
   // Use production contracts plus representative saved evidence, and a long
   // Chinese brief to exercise byte limits rather than ASCII character counts.
-  const run = { creation: { initialDelivery: 'design-led-first-version', editableContent: false },
-    requirements: { text: '', constraints: { engine: 'Godot', platform: 'Mobile' } } } as Run
+  const run = createRun({ projectId: 'prompt', ownerId: 'owner', workspacePath: '/synthetic', chatSessionId: 'chat', requestKey: 'once', text: 'Synthetic context fixture', constraints: { engine: 'Godot', platform: 'Mobile' }, ids: ['goal'] })
+  run.creation = { initialDelivery: 'design-led-first-version', editableContent: false }
   const longBrief = JSON.stringify({ kind: 'confirmed_build_brief', idea: '离线长度验证 🎮',
     settings: { engine: 'Godot', platform: 'Mobile', dimension: '2D', inputs: ['Touch'] },
     requirements: Array.from({ length: 90 }, (_, i) => ({ id: i, text: '保留用户明确要求的设计流程、交互体验与可编辑内容，具体安排由执行者自行决定。' })) })

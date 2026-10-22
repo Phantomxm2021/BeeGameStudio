@@ -56,7 +56,7 @@ test('reads legacy encoded audio without rewriting the manifest or relaxing new 
   const loaded = await readBeeGameAssetManifest(root)
   expect(loaded.resources[0]!.asset_kind).toBe('audio')
   expect(readBeeGameAssetManifestSync(root)).toEqual(loaded)
-  expect(toCanonicalBeeGameAssetManifest(loaded).resources[0]!.asset_kind).toBe('audio')
+  expect(toCanonicalBeeGameAssetManifest(loaded)).toMatchObject({ resources: [expect.objectContaining({ asset_kind: 'audio' })] })
   expect(await readFile(indexPath, 'utf8')).toBe(indexBefore)
   expect(await readFile(modulePath, 'utf8')).toBe(moduleBefore)
   legacy.root_path = 'assets/runtime/tone.json'

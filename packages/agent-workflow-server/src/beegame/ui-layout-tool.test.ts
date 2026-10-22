@@ -21,18 +21,17 @@ function fixture() {
 const conditions = { platform: 'Web', inputs: ['Touch'], orientation: 'Landscape', dimension: '2D' }
 async function connect(root: string) {
   const prepared = await prepareNativeMcpConfig({}, root, conditions)
-  expect(prepared.flags.filter(flag => flag.startsWith('--allowedTools')))
-    .toEqual(['--allowedTools=' + NATIVE_READ_TOOLS.map(name => 'mcp__bgs-ui-layout__' + name).join(',')])
-  const config = JSON.parse(readFileSync(prepared.flags[1]!, 'utf8'))
+  const servers = prepared.config.mcp_servers as Record<string, ConstructorParameters<typeof StdioClientTransport>[0]>
+  expect(Object.keys(servers)).toEqual(['bgs-ui-layout'])
   const client = new Client({ name: 'offline-layout-test', version: '1' })
-  try { await client.connect(new StdioClientTransport(config.mcpServers['bgs-ui-layout'])) }
+  try { await client.connect(new StdioClientTransport(servers['bgs-ui-layout']!)) }
   catch (error) { await client.close(); await prepared.close(); throw error }
   return { client, close: async () => { await client.close(); await prepared.close() } }
 }
 
 test('host tool is turn-scoped and cannot be replaced by an external MCP record', async () => {
   const { root } = fixture()
-  expect((await prepareNativeMcpConfig({}, root)).flags).toEqual([])
+  expect((await prepareNativeMcpConfig({}, root)).config).toEqual({})
   const external = { id: 'ui-layout', name: 'External', enabled: true, autoStart: true,
     scope: 'project', cwd: root, transport: 'stdio', command: process.execPath, args: ['never-run'] }
   await expect(prepareNativeMcpConfig({ [NATIVE_MCP_CONFIG_ENV]: JSON.stringify([external]) }, root, conditions))
@@ -77,7 +76,8 @@ test('native MCP exposes the read-only always-loaded tool and preserves host siz
     const summary = await access.client.callTool({ name: 'CheckUiLayouts', arguments: {} })
     expect(summary.isError).toBe(false)
     expect(text(summary)).toContain('PASS (reported scope only)')
-    expect(text(summary)).toContain('[844,390]')
+    expect(text(summary)).toContain('[960,540]')
+    expect(text(summary)).not.toContain('[844,390]')
     expect(text(summary)).toContain('sha256')
     expect(text(summary)).not.toContain('| Host bounds |')
     expect(text(summary)).not.toContain('Full result:')
@@ -85,7 +85,7 @@ test('native MCP exposes the read-only always-loaded tool and preserves host siz
     expect(detailed.isError).toBe(false)
     expect(text(detailed)).toContain('Host bounds')
     expect(text(detailed)).toContain('600 × 360')
-    expect(text(detailed)).toContain('844 × 390')
+    expect(text(detailed)).toContain('960 × 540')
     const expected = runGameContentCommand(root, ['--design-layouts', '--details'], conditions) as any
     expect(text(detailed)).toContain(JSON.stringify(expected.measurements[0].nodes.find((n: any) => n.id === 'play').bounds))
     expect(readFileSync(join(root, 'content/ui/menu.json'))).toEqual(before)
@@ -202,7 +202,7 @@ test('batch UI details share global facts, omit unselected summaries and retain 
       expect(body.split(label)).toHaveLength(2)
     for (const id of ['menu', 'pause']) {
       expect(body.split('## Saved node facts — content/ui/' + id + '.json')).toHaveLength(2)
-      for (const viewport of ['960 × 540', '600 × 360', '844 × 390'])
+      for (const viewport of ['960 × 540', '600 × 360'])
         expect(body).toContain('## content/ui/' + id + '.json — ' + viewport)
       const facts = (value: string) => value.split('## Saved node facts — content/ui/' + id + '.json\n\n')[1]!.split('\n')[0]!
       expect(JSON.parse(facts(body))).toEqual(JSON.parse(facts(id === 'menu' ? menu : pause)))

@@ -7,6 +7,9 @@ import { startProviderBridge } from './bridge'
 import { providerConfig } from './config'
 import { parseSse } from './response-stream'
 
+const mockFetch = (respond: () => Promise<Response>): typeof fetch =>
+  Object.assign(respond, { preconnect: () => {} })
+
 const signal = () => AbortSignal.timeout(5000)
 const base: ProviderConfig = {
   protocol: 'chat-completions',
@@ -70,7 +73,7 @@ for (const stream of [false, true]) test.each([
           cachedContentTokenCount: 4, ...(reasoning !== undefined ? { thoughtsTokenCount: reasoning } : {}) } }
   const reported: unknown[] = []
   const response = await requestProvider({ ...base, protocol }, { model: 'fixture', input: 'Synthetic question', stream },
-    (async () => sse([receipt])) as unknown as typeof fetch, signal(), usage => reported.push(usage))
+    mockFetch(async () => sse([receipt])), signal(), usage => reported.push(usage))
   let result: any
   if (stream) {
     for await (const event of parseSse(response)) {
@@ -95,7 +98,7 @@ test.each([-1, 9])('reasoning usage outside the reported output is rejected: %s'
   const receipt = { choices: [{ delta: { content: 'Fixture' }, finish_reason: 'stop' }],
     usage: { prompt_tokens: 12, completion_tokens: 8, completion_tokens_details: { reasoning_tokens: reasoning } } }
   await expect(requestProvider(base, { model: 'fixture', input: 'Synthetic question' },
-    (async () => sse([receipt])) as unknown as typeof fetch, signal())).rejects.toThrow('invalid token usage')
+    mockFetch(async () => sse([receipt])), signal())).rejects.toThrow('invalid token usage')
 })
 
 test('parallel tool images follow the complete result block without losing call associations or signed history', () => {
@@ -111,6 +114,7 @@ test('parallel tool images follow the complete result block without losing call 
       opaqueReasoning('chat-completions', raw), ...calls, ...outputs,
       { role: 'user', content: 'continue' },
     ] })
+    if (!('messages' in native.body)) throw Error('Expected chat messages')
     const messages = native.body.messages
     expect(messages.map((message: any) => message.role)).toEqual(['assistant', 'tool', 'tool', 'tool', 'user', 'user'])
     expect(messages[0]).toEqual(raw)
@@ -121,7 +125,9 @@ test('parallel tool images follow the complete result block without losing call 
     ])
     expect(messages[5].content).toEqual([{ type: 'text', text: 'continue' }])
     // History ending at a result block also flushes the image exactly once.
-    const end = nativeRequest(base, { model: 'fixture', input: [...calls, ...outputs] }).body.messages
+    const ending = nativeRequest(base, { model: 'fixture', input: [...calls, ...outputs] })
+    if (!('messages' in ending.body)) throw Error('Expected chat messages')
+    const end = ending.body.messages
     expect(end.map((message: any) => message.role)).toEqual(['assistant', 'tool', 'tool', 'tool', 'user'])
   }
 })
@@ -172,8 +178,9 @@ test('wire names preserve native Skill references and default namespaces; constr
     tool_calls: [{ id: 'old', type: 'function', function: { name: 'bgs_legacy_hash', arguments: '{}' } }] }
   const converted = nativeRequest(base, { tools: body.tools, input: [opaqueReasoning('chat-completions', legacy),
     { type: 'function_call_output', call_id: 'old', output: 'previous result' }] })
+  if (!('messages' in converted.body)) throw Error('Expected chat messages')
   expect(converted.body.messages[0]).toEqual(legacy)
-  expect(converted.body.tools[0].function.name).toBe('probe')
+  expect(converted.body.tools?.[0]).toHaveProperty('function.name', 'probe')
 })
 
 test('custom grammar calls retain the exact input and become custom_tool_call items', async () => {
@@ -189,7 +196,7 @@ test('custom grammar calls retain the exact input and become custom_tool_call it
     ],
   }
   const args = JSON.stringify({ input: '*** Begin Patch\n*** End Patch' })
-  const request = (async () =>
+  const request = mockFetch(async () =>
     sse([
       {
         choices: [
@@ -208,7 +215,7 @@ test('custom grammar calls retain the exact input and become custom_tool_call it
         ],
         usage: { prompt_tokens: 4, completion_tokens: 2 },
       },
-    ])) as typeof fetch
+    ]))
   const result = (await (
     await requestProvider(base, custom, request, signal())
   ).json()) as any
@@ -229,6 +236,7 @@ test('custom grammar calls retain the exact input and become custom_tool_call it
       },
     ],
   })
+  if (!('messages' in continuation.body)) throw Error('Expected chat messages')
   expect(continuation.body.messages).toMatchObject([
     { role: 'assistant', tool_calls: [{ function: { arguments: args } }] },
     { role: 'tool', tool_call_id: 'call_custom', content: 'Applied' },
@@ -246,7 +254,7 @@ for (const stream of [false, true]) test.each([
 ] as const)('%s completes without usage and retains an unknown receipt; stream=' + stream, async (protocol, chunks) => {
   const receipts: unknown[] = []
   const response = await requestProvider({ ...base, protocol }, { input: 'Synthetic', stream },
-    (async () => sse([...chunks])) as unknown as typeof fetch, signal(), usage => receipts.push(usage))
+    mockFetch(async () => sse([...chunks])), signal(), usage => receipts.push(usage))
   let result: any
   if (stream) {
     const events = []
@@ -265,10 +273,10 @@ for (const stream of [false, true]) test.each([
 
 test('tool calls complete without usage and retain their identity and arguments', async () => {
   const alias = mapTools(body.tools)[0]!.alias
-  const response = await requestProvider(base, { ...body, stream: true }, (async () => sse([
+  const response = await requestProvider(base, { ...body, stream: true }, mockFetch(async () => sse([
     { choices: [{ delta: { tool_calls: [{ index: 0, id: 'synthetic-call',
       function: { name: alias, arguments: '{"value":"fixture"}' } }] }, finish_reason: 'tool_calls' }] },
-  ])) as unknown as typeof fetch, signal())
+  ])), signal())
   const events = []
   for await (const event of parseSse(response)) events.push(event)
   const result = events.find(event => event.type === 'response.completed')?.response
@@ -278,31 +286,31 @@ test('tool calls complete without usage and retain their identity and arguments'
 })
 
 test('truncation stays incomplete and missing terminal events fail regardless of usage', async () => {
-  const incomplete = (async () =>
+  const incomplete = mockFetch(async () =>
     sse([
       {
         choices: [{ delta: { content: 'partial' }, finish_reason: 'length' }],
         usage: { prompt_tokens: 4, completion_tokens: 2 },
       },
-    ])) as typeof fetch
+    ]))
   const result = (await (
     await requestProvider(base, { input: 'Synthetic' }, incomplete, signal())
   ).json()) as any
   expect(result.status).toBe('incomplete')
   const noUsageTruncation = await requestProvider(base, { input: 'Synthetic' },
-    (async () => sse([{ choices: [{ delta: { content: 'partial' }, finish_reason: 'length' }] }])) as unknown as typeof fetch, signal())
+    mockFetch(async () => sse([{ choices: [{ delta: { content: 'partial' }, finish_reason: 'length' }] }])), signal())
   expect(await noUsageTruncation.json()).toMatchObject({ status: 'incomplete',
     incomplete_details: { reason: 'max_output_tokens' } })
   await expect(requestProvider(base, { input: 'Synthetic' },
-    (async () => sse([{ choices: [{ delta: { content: 'partial' } }] }])) as unknown as typeof fetch, signal()))
+    mockFetch(async () => sse([{ choices: [{ delta: { content: 'partial' } }] }])), signal()))
     .rejects.toThrow('terminal event')
-  const truncated = (async () =>
+  const truncated = mockFetch(async () =>
     sse([
       {
         choices: [{ delta: { content: 'partial' } }],
         usage: { prompt_tokens: 4, completion_tokens: 2 },
       },
-    ])) as typeof fetch
+    ]))
   await expect(
     requestProvider(base, { input: 'Synthetic' }, truncated, signal()),
   ).rejects.toThrow('terminal event')
@@ -310,12 +318,12 @@ test('truncation stays incomplete and missing terminal events fail regardless of
 
 test('stream failures use the terminal Response envelope recognized by native Bgs and redact arbitrary errors', async () => {
   for (const malformed of [false, true, 'timeout']) {
-    const request = (async () => malformed
+    const request = mockFetch(async () => malformed
       ? new Response(new ReadableStream({ start(controller) {
           controller.error(Object.assign(Error('PRIVATE_UPSTREAM_SECRET'),
             malformed === 'timeout' ? { code: 'UND_ERR_BODY_TIMEOUT' } : {}))
         } }))
-      : sse([{ choices: [{ delta: { content: 'partial' } }] }])) as typeof fetch
+      : sse([{ choices: [{ delta: { content: 'partial' } }] }]))
     const response = await requestProvider(base, { input: 'Synthetic', stream: true }, request, signal())
     const wire = await response.text()
     expect(wire).toContain('event: response.failed\n')
@@ -336,10 +344,10 @@ test('unknown-name diagnostics distinguish declared native names and stream dupl
     [toolAlias('probe', 'functions').repeat(2), 'repeated-name:probe'],
     ['PRIVATE_MODEL_OUTPUT', 'unmapped'],
   ]) {
-    const request = (async () => sse([{
+    const request = mockFetch(async () => sse([{
       choices: [{ delta: { tool_calls: [{ index: 0, id: 'call', function: { name, arguments: '{}' } }] },
         finish_reason: 'tool_calls' }], usage: { prompt_tokens: 4, completion_tokens: 2 },
-    }])) as typeof fetch
+    }]))
     const wire = await (await requestProvider(base, { ...body, stream: true }, request, signal())).text()
     expect(wire).toContain('bgs_provider_errors')
     expect(wire).toContain(classification!)
@@ -350,7 +358,7 @@ test('unknown-name diagnostics distinguish declared native names and stream dupl
 
 test('unknown tools become native rejection calls; provider failures and unsupported capabilities fail without replay', async () => {
   let calls = 0
-  const request = (async () => {
+  const request = mockFetch(async () => {
     calls++
     return sse([
       {
@@ -371,7 +379,7 @@ test('unknown tools become native rejection calls; provider failures and unsuppo
         usage: { prompt_tokens: 4, completion_tokens: 2 },
       },
     ])
-  }) as typeof fetch
+  })
   const failures: { callId: string; diagnostic: string }[] = []
   const result = await (await requestProvider(base, { ...body, input: 'Synthetic' }, request, signal(), undefined,
     (callId, diagnostic) => { failures.push({ callId, diagnostic }) })).json() as any
@@ -379,6 +387,7 @@ test('unknown tools become native rejection calls; provider failures and unsuppo
   expect(JSON.parse(result.output[0].arguments).error).toContain('unknown tool name')
   const continuation = nativeRequest(base, { ...body, input: [...result.output,
     { type: 'function_call_output', call_id: 'call', output: 'unsupported function name' }] })
+  if (!('messages' in continuation.body)) throw Error('Expected chat messages')
   expect(continuation.body.messages[0].tool_calls[0].function.name).toBe('unknown')
   expect(continuation.body).toMatchObject({ messages: [expect.anything(), { content: UNKNOWN_TOOL_FEEDBACK }] })
   expect(failures).toEqual([{ callId: 'call', diagnostic: expect.stringContaining(UNKNOWN_TOOL_FEEDBACK) }])
@@ -387,10 +396,10 @@ test('unknown tools become native rejection calls; provider failures and unsuppo
     requestProvider(
       base,
       { input: 'Synthetic' },
-      (async () =>
+      mockFetch(async () =>
         new Response('PRIVATE_UPSTREAM_SECRET', {
           status: 401,
-        })) as typeof fetch,
+        })),
       signal(),
     ),
   ).rejects.toThrow('401')
