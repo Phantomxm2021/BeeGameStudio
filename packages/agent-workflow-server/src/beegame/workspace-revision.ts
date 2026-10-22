@@ -33,13 +33,3 @@ export async function computeWorkspaceRevision(workspacePath: string): Promise<s
   }
   return hash.digest('hex')
 }
-
-/** Resolve a project artifact without allowing traversal outside its workspace. */
-export function resolveWorkspaceRelativePath(workspacePath: string, path: string): string | undefined {
-  if (!path.trim()) return undefined
-  const root = resolve(workspacePath)
-  const candidate = resolve(root, path)
-  const relativePath = relative(root, candidate)
-  if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${sep}`)) return undefined
-  return candidate
-}

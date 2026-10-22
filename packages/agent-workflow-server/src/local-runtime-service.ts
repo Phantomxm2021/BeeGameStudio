@@ -92,20 +92,6 @@ export async function createManagedProjectWorkspacePath(
   return resolve(workspacePath)
 }
 
-export async function assertSessionWorkspaceIsProjectDirectory(
-  workspacePath: string,
-  defaultWorkspacePath?: string,
-): Promise<void> {
-  const defaultWorkspace = resolve(
-    await getDefaultWorkspacePath({ defaultWorkspacePath }),
-  )
-  const resolvedWorkspace = resolve(workspacePath)
-  if (resolvedWorkspace !== defaultWorkspace) return
-  throw new Error(
-    `Workspace path must target a project directory under the default Projects directory, not the Projects root: ${defaultWorkspace}`,
-  )
-}
-
 function normalizeUserDataDirName(userId: string): string {
   return userId
     .trim()

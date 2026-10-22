@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -12,12 +13,13 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
   const root = await mkdtemp(join(tmpdir(), 'bgs-formal-v3-bootstrap-'))
   const store = createLocalWorkflowStore(join(root, 'workflow-store'))
   const cleanups: Array<() => void | Promise<void>> = []
-  const prompts: string[] = [], systemContexts: string[] = []
+  const prompts: string[] = [], systemContexts: string[] = [], workspaces: string[] = []
   const app = createAgentWorkflowApp({ currentUser: { id: 'owner', role: 'owner' },
     dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: join(root, 'projects'),
     workflowV3Store: store, modelConfigStore: false, skillsConfig: false,
     sessionRunner: { async start(input) {
       systemContexts.push(input.systemContext ?? '')
+      workspaces.push(input.cwd)
       const nativeId = input.resumeSessionId ?? '11111111-2222-4333-8444-555555555555'
       input.onNativeSessionId?.(nativeId)
       return { stop() {}, async submit(turn) {
@@ -44,7 +46,19 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
     // Bootstrap starts the confirmed goal, not a planning-only first turn.
     expect(prompts[0]).toContain('Stop at the requested boundary')
     expect(prompts[0]).not.toContain('$game-creative-director-expert')
-    expect(systemContexts.join('\n')).toContain('Machine design indexes, task coverage graphs and finalization of plain documents are not required')
+    const workspace = await realpath(body.project.root_path)
+    expect(workspaces).toEqual([workspace])
+    const guide = await readFile(join(workspace, 'AGENTS.md'))
+    // Native BGS loads the saved guide from cwd. Host context carries its
+    // identity and the current tool contract, not a duplicate guide body.
+    expect(guide.toString('utf8')).toContain('machine indexes and task coverage graphs are not required')
+    expect(guide.toString('utf8')).toContain('The current user assignment determines deliverables and stopping point')
+    expect(guide.toString('utf8')).toContain('Select and read applicable Skills')
+    expect(systemContexts[0]).toContain('Project working conventions and navigation: AGENTS.md (SHA-256 ' +
+      createHash('sha256').update(guide).digest('hex') + ', ' + guide.byteLength + ' bytes).')
+    expect(systemContexts[0]).toContain('Bgs loads applicable AGENTS.md instructions natively')
+    expect(systemContexts[0]).not.toContain(guide.toString('utf8'))
+    expect(systemContexts[0]).toContain('Plain documents need no index or finalization')
     expect(systemContexts.join('\n')).toContain('no redundant per-image approval, unknown paid replay or automatic paid retry')
     expect(prompts[0]).not.toContain('first assignment ends at visual-direction handoff')
     expect(prompts[0]).not.toContain('current milestone and its deliverables')

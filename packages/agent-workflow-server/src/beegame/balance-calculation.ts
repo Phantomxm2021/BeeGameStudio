@@ -35,11 +35,6 @@ export function readCalculationInputs(workspace: string, outputPath: string): st
 }
 
 export const BALANCE_CALCULATOR_PATH = '.beegame/delivery/calculate-balance.mjs'
-export const BALANCE_REVIEW_INSTRUCTION = (revise = false) => `Inspect existing calculations only where relevant to a consequential claim or recorded finding: read the formula, actual saved result, source definitions and stated limitations. Model self-check flags are not independent proof. Do not demand a calculation appendix or simulator for ordinary initial tuning choices.
-${revise ? 'Correct only exact retained calculation files authorized in the assignment and regenerate affected results with bun ' + BALANCE_CALCULATOR_PATH + ' MODEL_PATH OUTPUT_PATH (retain --scenes for Scene calculations) under native execution permissions. Group substantive source corrections first, then rerun affected calculations; the host maintains document versions and handoff hashes. Design-source calculation identity excludes the host-maintained Version line. Do not add a verifier or simulator.' : 'Inspect/Verify remain read-only: do not execute project-authored code or regenerate appendices.'}
-For a linked helper appendix, bun ${BALANCE_CALCULATOR_PATH} --check-result OUTPUT_PATH checks recorded input freshness without executing the model. A current record is not evidence of correct rules; unrecorded legacy results remain unverified, not automatically invalid prose.
-If a necessary claim cannot be established from permitted evidence, report the gap and responsible owner. BGS never executes project-authored models in its server.`
-
 
 /** Publish only platform tooling. Execution and authored outputs remain native Agent work. */
 let calculatorSource: Promise<string> | undefined

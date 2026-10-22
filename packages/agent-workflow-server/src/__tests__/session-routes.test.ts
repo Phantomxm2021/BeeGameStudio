@@ -18,26 +18,22 @@ import {
 } from '../auth/session-routes'
 import { encryptSecret } from '../security/secret-crypto'
 import { BeeGameAuthUnavailableError } from '../auth/user-context'
-import type { BeeGamePromptInput, BeeGameSessionRunnerStartInput } from '../beegame/session-manager'
+import type { BeeGamePromptInput, BeeGameSessionSubmitInput } from '../beegame/session-manager'
 import { recoverLatestProjectSessionFromDisk } from '../beegame/session-manager'
 import { appendProjectChatTimeline } from '../beegame/project-chat-timeline'
+import { createLocalWorkflowStore } from '../beegame/workflow-v3/store'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 const originalDataDir = process.env.AGENT_WORKFLOW_DATA_DIR
 const temporaryDirectories: string[] = []
 
-// The original request and host context are distinct native input blocks.
-// Platform context precedes the user's text so native Skill discovery reads
-// user intent from the final text block. These fixtures have no attachments.
-function requestText(prompt: BeeGamePromptInput): string {
-  if (typeof prompt === 'string') return prompt
-  expect(prompt).toHaveLength(2)
-  const [context, request] = prompt
-  expect(context?.type).toBe('text')
-  if (context?.type === 'text') expect(context.text).toStartWith('BGS project state')
-  expect(request?.type).toBe('text')
-  return request?.type === 'text' ? request.text : ''
+function goalRequest(chatSessionId: string, requestKey: string, idea: string) {
+  return { chatSessionId, requestKey, brief: {
+    kind: 'confirmed_build_brief', idea, selected_option: {}, settings: {},
+    document_language: 'en', game_user_visible_language: 'en',
+    agent_response_language: 'en', resource_library_usage: 'optional',
+  } }
 }
 
 it('runtime returns recoverable 503 rather than 401 when token resolution is unavailable', async () => {
@@ -66,15 +62,23 @@ it('does not offer a stopped native permission as actionable after service resta
   const workspace = join(projectsRoot, 'users', ownerId, projectId)
   await mkdir(workspace, { recursive: true })
   const cleanups: Array<() => void | Promise<void>> = []
+  const storePath = join(root, 'workflow-store')
+  const store = createLocalWorkflowStore(storePath)
+  const nativeId = '11111111-2222-4333-8444-555555555555'
+  const workflow = `/api/projects/${projectId}/workflow-v3`
   const options = { currentUser: { id: ownerId, role: 'owner' as const },
     dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: projectsRoot,
-    modelConfigStore: false as const, skillsConfig: false as const }
+    workflowV3Store: store, modelConfigStore: false as const, skillsConfig: false as const }
   const app = createAgentWorkflowApp({ ...options,
     registerCleanup: cleanup => cleanups.push(cleanup),
-    sessionRunner: { start: async () => ({ stop() {}, submit: async turn => {
-      await turn.requestPermission({ toolUseID: 'native-permission', toolName: 'SandboxNetworkAccess',
-        input: { host: 'registry.npmjs.org' }, message: 'Network access requires permission.' })
-    } }) },
+    sessionRunner: { start: async input => {
+      input.onNativeSessionId?.(nativeId)
+      return { reusable: false, stop() {}, submit: async turn => {
+        input.onNativeSubmission?.(nativeId)
+        await turn.requestPermission({ toolUseID: 'native-permission', toolName: 'SandboxNetworkAccess',
+          input: { host: 'registry.npmjs.org' }, message: 'Network access requires permission.' })
+      } }
+    } },
   })
   const post = (target: typeof app, url: string, body: unknown) => target.request(url, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
@@ -85,9 +89,9 @@ it('does not offer a stopped native permission as actionable after service resta
       apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
     const ensured = await post(app, `/api/projects/${projectId}/session/ensure`, {})
     const { session } = await ensured.json() as { session: { id: string } }
-    expect((await post(app, `/api/beegame-sessions/${session.id}/input`, {
-      text: 'Offline permission fixture', clientMessageId: 'permission-fixture',
-    })).status).toBe(202)
+    const started = await post(app, `${workflow}/agent/goal`,
+      goalRequest(session.id, 'permission-fixture', 'Offline permission fixture'))
+    expect(started.status, await started.clone().text()).toBe(202)
     for (let i = 0; i < 200; i++) {
       const state = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as {
         pending_permissions: unknown[]
@@ -100,8 +104,13 @@ it('does not offer a stopped native permission as actionable after service resta
     }
     expect(waiting.phase).toBe('waiting_approval')
     expect(waiting.pending_permissions).toHaveLength(1)
-    expect((await post(app, `/api/beegame-sessions/${session.id}/stop`, {})).status).toBe(200)
-    for (const cleanup of cleanups.splice(0)) await cleanup()
+    const stopped = await post(app, `${workflow}/stop`, {})
+    expect(stopped.status, await stopped.clone().text()).toBe(202)
+    expect(await stopped.json()).toMatchObject({ paused: true, stopping: false, partialOutputsAccepted: false })
+    const paused = (await store.read(projectId, ownerId))!
+    expect(paused.writer).toBeUndefined()
+    expect(paused.agentTurns?.at(-1)?.quiescedAt).toBeTruthy()
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 
     // The native callback is gone. A late duplicate with no turn ID is still
     // part of the transcript, but can never be answered by the new process.
@@ -122,17 +131,25 @@ it('does not offer a stopped native permission as actionable after service resta
     })}\n`)
 
     let runnerStarts = 0
-    let receivedPrompt = ''
+    let receivedPrompt: BeeGamePromptInput | undefined
+    let resumedNativeId: string | undefined
     let releaseTurn: (() => void) | undefined
-    const restarted = createAgentWorkflowApp({ ...options, registerCleanup: cleanup => cleanups.push(cleanup),
-      sessionRunner: { start: async () => {
+    const reopenedStore = createLocalWorkflowStore(storePath)
+    const restarted = createAgentWorkflowApp({ ...options, workflowV3Store: reopenedStore,
+      registerCleanup: cleanup => cleanups.push(cleanup),
+      sessionRunner: { start: async input => {
         runnerStarts++
-        return { stop() { releaseTurn?.() }, submit: async turn => {
-          receivedPrompt = requestText(turn.prompt)
+        resumedNativeId = input.resumeSessionId
+        input.onNativeSessionId?.(input.resumeSessionId ?? nativeId)
+        return { reusable: false, stop() { releaseTurn?.() }, submit: async turn => {
+          input.onNativeSubmission?.(input.resumeSessionId ?? nativeId)
+          receivedPrompt = turn.prompt
           await new Promise<void>(resolve => {
             releaseTurn = resolve
             turn.signal.addEventListener('abort', () => resolve(), { once: true })
           })
+          if (!turn.signal.aborted) await turn.onMessage({ type: 'runtime_event', runtime: 'bgs',
+            eventType: 'assistant.message', text: 'Offline follow-up ended' })
         } }
       } },
     })
@@ -146,15 +163,25 @@ it('does not offer a stopped native permission as actionable after service resta
     expect(await stale.json()).toMatchObject({ resolved: false, stale: true })
     const recoveredSession = await post(restarted, `/api/projects/${projectId}/session/ensure`, {})
     expect((await recoveredSession.json() as { session: { id: string } }).session.id).toBe(session.id)
-    const sent = await post(restarted, `/api/beegame-sessions/${session.id}/input`, {
-      text: 'Continue my project', clientMessageId: 'recovery-turn',
+    const resumed = await post(restarted, `${workflow}/resume`, { planRevision: paused.planRevision })
+    expect(resumed.status, await resumed.clone().text()).toBe(200)
+    expect(await resumed.json()).toMatchObject({ dispatched: false })
+    expect(runnerStarts).toBe(0)
+    const current = (await reopenedStore.read(projectId, ownerId))!
+    const sent = await post(restarted, `${workflow}/agent/messages`, {
+      requestKey: 'recovery-turn', runId: current.id, chatSessionId: session.id,
+      expectedVersion: current.version, requirementsRevision: current.requirements.revision,
+      text: 'Continue my project',
     })
-    expect(sent.status).toBe(202)
+    expect(sent.status, await sent.clone().text()).toBe(202)
     for (let i = 0; i < 200 && !receivedPrompt; i++) await Bun.sleep(5)
-    expect(receivedPrompt).toBe('Continue my project')
+    expect(receivedPrompt).toBe('User message:\nContinue my project')
+    expect((await reopenedStore.read(projectId, ownerId))?.agentTurns?.at(-1)?.message)
+      .toMatchObject({ text: 'Continue my project', intent: 'message', requestKey: 'recovery-turn' })
+    expect(resumedNativeId).toBe(nativeId)
     expect(runnerStarts).toBe(1)
     releaseTurn?.()
-  } finally { for (const cleanup of cleanups.splice(0)) await cleanup() }
+  } finally { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() }
 })
 
 it('keeps provider refusal actionable after host settlement and a later successful turn clears it', async () => {
@@ -228,16 +255,27 @@ it('reports only live native child tasks as runtime activity', async () => {
   const workspace = join(projectsRoot, 'users', ownerId, projectId)
   await mkdir(workspace, { recursive: true })
   const cleanups: Array<() => void | Promise<void>> = []
-  let nativeTaskNotification: BeeGameSessionRunnerStartInput['onNativeTaskNotification']
+  const store = createLocalWorkflowStore(join(root, 'workflow-store'))
+  let onMessage: BeeGameSessionSubmitInput['onMessage'] | undefined
+  let finishParent!: () => void
+  const parentFinished = new Promise<void>(resolve => { finishParent = resolve })
   const app = createAgentWorkflowApp({ currentUser: { id: ownerId, role: 'owner' },
     dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: projectsRoot,
-    modelConfigStore: false, skillsConfig: false, registerCleanup: cleanup => cleanups.push(cleanup),
+    workflowV3Store: store, modelConfigStore: false, skillsConfig: false, registerCleanup: cleanup => cleanups.push(cleanup),
     sessionRunner: { start: async input => {
-      nativeTaskNotification = input.onNativeTaskNotification
-      return { stop() {}, submit: async turn => {
-        nativeTaskNotification?.({ value: '', message: { type: 'system', subtype: 'task_started',
-          task_id: 'native-child', tool_use_id: 'agent-use-1' } })
-        await turn.onMessage({ type: 'result', subtype: 'success', result: 'Parent turn finished' })
+      const nativeId = '11111111-2222-4333-8444-555555555555'
+      input.onNativeSessionId?.(nativeId)
+      return { reusable: false, stop() { finishParent() }, submit: async turn => {
+        input.onNativeSubmission?.(nativeId)
+        onMessage = turn.onMessage
+        turn.signal.addEventListener('abort', finishParent, { once: true })
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'system.status',
+          childThreadId: 'native-child', childStatus: 'running', parentToolUseID: 'agent-use-1' })
+        // BGS rejects a terminal parent with unfinished children. Keep the
+        // parent live while observing child completion through the HTTP route.
+        await parentFinished
+        if (!turn.signal.aborted) await turn.onMessage({ type: 'runtime_event', runtime: 'bgs',
+          eventType: 'assistant.message', text: 'Parent turn finished' })
       } }
     } },
   })
@@ -250,9 +288,9 @@ it('reports only live native child tasks as runtime activity', async () => {
       models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
     const ensured = await post(`/api/projects/${projectId}/session/ensure`, {})
     const { session } = await ensured.json() as { session: { id: string } }
-    expect((await post(`/api/beegame-sessions/${session.id}/input`, {
-      text: 'Run one child task', clientMessageId: 'subagent-status-request',
-    })).status).toBe(202)
+    const started = await post(`/api/projects/${projectId}/workflow-v3/agent/goal`,
+      goalRequest(session.id, 'subagent-status-request', 'Run one child task'))
+    expect(started.status, await started.clone().text()).toBe(202)
     let state: Record<string, unknown> = {}
     for (let i = 0; i < 200; i++) {
       state = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, unknown>
@@ -260,15 +298,23 @@ it('reports only live native child tasks as runtime activity', async () => {
       await Bun.sleep(5)
     }
     expect(state).toMatchObject({ phase: 'running', active_subagents: ['agent-use-1'] })
-    nativeTaskNotification?.({ value: '', message: { type: 'system', subtype: 'task_notification',
-      task_id: 'native-child', tool_use_id: 'agent-use-1', status: 'completed' } })
+    expect(onMessage).toBeDefined()
+    await onMessage!({ type: 'runtime_event', runtime: 'bgs', eventType: 'system.status',
+      childThreadId: 'native-child', childStatus: 'completed', parentToolUseID: 'agent-use-1' })
+    expect(await (await app.request(`/api/projects/${projectId}/runtime-state`)).json())
+      .toMatchObject({ phase: 'running', active_subagents: [] })
+    finishParent()
     for (let i = 0; i < 200; i++) {
       state = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, unknown>
-      if (state.phase === 'idle') break
+      if (state.phase === 'idle' && !(await store.read(projectId, ownerId))?.writer) break
       await Bun.sleep(5)
     }
     expect(state).toMatchObject({ phase: 'idle', active_subagents: [] })
-  } finally { for (const cleanup of cleanups) await cleanup() }
+    const settled = (await store.read(projectId, ownerId))!
+    expect(settled.writer).toBeUndefined()
+    expect(settled.agentTurns?.at(-1)?.status).toBe('ended')
+    expect(settled.agentTurns?.at(-1)?.quiescedAt).toBeTruthy()
+  } finally { for (const cleanup of cleanups.reverse()) await cleanup() }
 })
 
 it('question answers cross both HTTP permission routes without replacing native input', async () => {
@@ -278,22 +324,27 @@ it('question answers cross both HTTP permission routes without replacing native 
   const projectId = 'question-project'
   const workspace = join(root, 'projects', 'users', ownerId, projectId)
   await mkdir(workspace, { recursive: true })
-  const cleanups: Array<() => void> = []
+  const cleanups: Array<() => void | Promise<void>> = []
+  const store = createLocalWorkflowStore(join(root, 'workflow-store'))
   const received: unknown[] = []
-  let requested = 0
   const nativeInput = { questions: [{ question: 'Which style?', header: 'Style', options: [{ label: 'Pixel' }, { label: 'Vector' }] }] }
   const app = createAgentWorkflowApp({
     currentUser: { id: ownerId, role: 'owner' }, dashboardDataRoot: join(root, 'dashboard'),
     defaultWorkspacePath: join(root, 'projects'), modelConfigStore: false, skillsConfig: false,
+    workflowV3Store: store,
     registerCleanup: cleanup => cleanups.push(cleanup),
-    sessionRunner: { start: async () => ({ stop() {}, submit: async turn => {
-      for (let i = 0; i < 2; i++) {
-        requested++
-        received.push(await turn.requestPermission({ toolUseID: `question-${i}`, toolName: 'AskUserQuestion',
-          input: nativeInput, message: 'AskUserQuestion requires permission.' }))
-      }
-      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
-    } }) },
+    sessionRunner: { start: async input => {
+      const nativeId = '11111111-2222-4333-8444-555555555555'
+      input.onNativeSessionId?.(nativeId)
+      return { reusable: false, stop() {}, submit: async turn => {
+        input.onNativeSubmission?.(nativeId)
+        for (let i = 0; i < 2; i++) {
+          received.push(await turn.requestPermission({ toolUseID: `question-${i}`, toolName: 'AskUserQuestion',
+            input: nativeInput, message: 'AskUserQuestion requires permission.' }))
+        }
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Done' })
+      } }
+    } },
   })
   const post = (url: string, body: unknown) => app.request(url, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
@@ -302,23 +353,35 @@ it('question answers cross both HTTP permission routes without replacing native 
     expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
     const ensured = await post(`/api/projects/${projectId}/session/ensure`, {})
     const { session } = await ensured.json() as { session: { id: string } }
-    const sent = await post(`/api/beegame-sessions/${session.id}/input`, { text: 'Offline fixture', clientMessageId: 'offline-question', language: 'en' })
-    expect({ status: sent.status, body: await sent.json() }).toMatchObject({ status: 202 })
+    const workflow = `/api/projects/${projectId}/workflow-v3`
+    const sent = await post(`${workflow}/agent/goal`, goalRequest(session.id, 'offline-question', 'Offline fixture'))
+    expect(sent.status, await sent.clone().text()).toBe(202)
     for (let i = 0; i < 2; i++) {
-      for (let n = 0; n < 200 && requested <= i; n++) await Bun.sleep(5)
+      let questions: Array<{ toolUseID: string; canAnswer: boolean }> = []
+      for (let n = 0; n < 200; n++) {
+        questions = (await (await app.request(`${workflow}/questions`)).json()).questions
+        if (questions.some(question => question.toolUseID === `question-${i}` && question.canAnswer)) break
+        await Bun.sleep(5)
+      }
+      expect(questions).toContainEqual(expect.objectContaining({ toolUseID: `question-${i}`, canAnswer: true }))
       const route = i === 0 ? `/api/projects/${projectId}` : `/api/beegame-sessions/${session.id}`
       expect((await post(`${route}/permissions/question-${i}`, { decision: 'allow', answers: {} })).status).toBe(400)
-      expect((await post(`${route}/permissions/question-${i}`, {
+      // Invalid answers must leave this same native callback actionable.
+      expect((await (await app.request(`${workflow}/questions`)).json()).questions)
+        .toContainEqual(expect.objectContaining({ toolUseID: `question-${i}`, canAnswer: true }))
+      const answered = await post(`${route}/permissions/question-${i}`, {
         decision: 'allow', answers: { 'Which style?': 'Pixel' },
         updatedInput: { questions: [] }, // Clients cannot replace the agent's question.
-      })).status).toBe(200)
+      })
+      expect(answered.status, await answered.clone().text()).toBe(200)
+      expect(await answered.json()).toMatchObject({ resolved: true })
     }
     for (let n = 0; n < 200 && received.length < 2; n++) await Bun.sleep(5)
     expect(received).toHaveLength(2)
     for (const decision of received) expect(decision).toMatchObject({
       behavior: 'allow', updatedInput: { ...nativeInput, answers: { 'Which style?': 'Pixel' } },
     })
-  } finally { for (const cleanup of cleanups) await cleanup() }
+  } finally { for (const cleanup of cleanups.reverse()) await cleanup() }
 })
 
 beforeEach(async () => {

@@ -62,13 +62,6 @@ type BeeGameFetch = (
 
 export const DEFAULT_LOCAL_USER_ID = 'dashboard-local'
 
-export function getLocalUserContext(): BeeGameUserContext {
-  return {
-    id: process.env.BEEGAME_LOCAL_USER_ID?.trim() || DEFAULT_LOCAL_USER_ID,
-    role: normalizeBeeGameRole(process.env.BEEGAME_LOCAL_USER_ROLE),
-  }
-}
-
 export function hasBeeGamePermission(
   user: BeeGameUserContext,
   permission: BeeGamePermission,

@@ -1,5 +1,4 @@
 /** Metadata-only wire protocol. Never transport prompts, URLs, headers or raw errors. */
-export const NATIVE_DIAGNOSTIC_PREFIX = 'BEEGAME_NATIVE_DIAGNOSTIC '
 const events = ['cli_entry', 'cli_ready', 'client_start', 'client_ready', 'request_start',
   'openai_stream_summary', 'response_headers', 'first_stream_event', 'stream_end', 'stream_error', 'request_end', 'api_error', 'retry_wait',
   'process_spawn', 'stdin_sent', 'stdout_first', 'model_first', 'usage_first',
