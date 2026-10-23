@@ -11,7 +11,7 @@ import { designReviewResultSchema, type DesignFinding } from './design-handoff'
 import { projectFiles, projectDependencies, changedProjectPaths, AGENT_EVIDENCE_DIRECTORY } from './workflow-v3/checks'
 import { projectPathSchema } from './workflow-v3/state'
 
-export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'Compare actual results with confirmed requirements and original design sources. Record real test/runtime/inspection evidence, knownIssues and unverified outcomes; a model declaration is not independent acceptance. Existing indexed requirementChecks remain supported with their original document/id, source hashes, method, scenario, observed result, status and evidencePaths; do not create indexes or coverage mappings to write a report. Every cited evidence path must appear in evidencePaths. Failed or unverified checks cannot support PASS. BGS validates retained evidence and data contracts, not complete requirements, truthful observations or visual/game quality.'
+export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'Compare actual results with confirmed requirements and original design sources. Record real test/runtime/inspection evidence, knownIssues and unverified outcomes; a model declaration is not independent acceptance. Existing indexed requirementChecks remain supported with their original document/id, source hashes, method, scenario, observed result, status and evidencePaths. For a delivery PASS, include a passed check for every existing design output that declares acceptance; empty or partial coverage is verification-incomplete. Request-scoped reports may remain local or partial. Do not create indexes or coverage mappings to write a report. Every cited evidence path must appear in evidencePaths. Failed or unverified checks cannot support PASS. BGS validates retained evidence and data contracts, not complete requirements, truthful observations or visual/game quality.'
 
 
 const requirementCheckSchema = z.object({
@@ -261,8 +261,8 @@ function deliveryLimitation(report: { verification?: z.infer<typeof verification
     return diagnostic('verification-incomplete', `Delivery still has unverified requirements: ${checked.data.unverified.join('; ')}`)
 }
 
-/** Checks declared requirement coverage/version, not the truth of an observation
- * or whether the author declared all necessary release requirements. */
+/** Checks declared requirement coverage/version for delivery reports, not the
+ * truth of an observation or semantic completeness of ordinary prose. */
 async function designRequirementLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined, evidencePaths: string[]): Promise<AcceptanceDiagnostic | undefined> {
   const requirements = readDesignAcceptanceRequirements(workspace)
   const checks = verification?.requirementChecks ?? []
@@ -286,6 +286,9 @@ async function designRequirementLimitation(workspace: string, verification: z.in
       if (sources.includes(await realpath(resolve(workspace, path))))
         return diagnostic('report-invalid', `Requirement ${check.document}#${check.id} needs recorded result evidence, not its design source.`)
   }
+  const missing = requirements.filter(source => !seen.has(source.document + '#' + source.id))
+  if (missing.length)
+    return diagnostic('verification-incomplete', `Design requirements are unverified: ${missing.map(source => `${source.document}#${source.id}`).join(', ')}.`)
 
 }
 

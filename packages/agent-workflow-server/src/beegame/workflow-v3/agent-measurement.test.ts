@@ -108,20 +108,37 @@ test('author report coverage survives reads and turn summaries without overridin
     expect(displayed).toContain(DESIGN_ACCEPTANCE_PATH+'#verification')
     expect(displayed).toContain('game quality remains unverified')
 
-    // A different author declaration can pass report rules without new runtime
-    // evidence. It must not change the saved build result or grant publication.
+    // A passed delivery declaration with existing design acceptance requirements
+    // but no requirement checks remains incomplete and cannot grant publication.
     report.status='passed';report.verification.knownIssues=[];report.verification.unverified=[]
     await save()
     const handoff=await f.measurement.handoff()
-    expect(handoff.acceptance).toMatchObject({valid:true,declaredStatus:'passed',status:'passed',quality:'unverified'})
+    expect(handoff.acceptance).toMatchObject({valid:false,declaredStatus:'passed',status:'blocked',quality:'unverified',
+      diagnostic:{category:'verification-incomplete'}})
+    expect(handoff.acceptance.summary).toContain('Design requirements are unverified')
     expect(handoff).toMatchObject({quality:'unverified',deliveryEligible:false})
     expect(handoff.measurement?.checks.find(check=>check.id==='build')?.status).toBe('failed')
     const updatedReason=await agentTurnHandoffReason(await f.current(),f.turn)
-    expect(updatedReason).toContain('declared=passed; checked=passed; delivery checks=passed')
+    expect(updatedReason).toContain('declared=passed; checked=blocked; delivery checks=not passed')
     expect(updatedReason).toContain('Author-reported known issues: 0; unverified items: 0')
-    expect(updatedReason).toContain('Empty declarations do not establish coverage')
+    expect(updatedReason).toContain('Indexed requirement checks: not provided (coverage unverified)')
+    expect(updatedReason).toContain('Design requirements are unverified')
     expect(updatedReason).toContain('game quality remains unverified')
     expect(updatedReason).not.toContain(report.summary)
+
+    // Restoring every existing acceptance-defined requirement returns the real
+    // report path to PASS; the host measurement remains independently failed.
+    const completeReport={...report,verification:{...report.verification,
+      requirementChecks:designRequirementChecksFixture(f.workspace,['observed.txt'])}}
+    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(completeReport))
+    const acceptedHandoff=await f.measurement.handoff()
+    expect(acceptedHandoff.acceptance).toMatchObject({valid:true,declaredStatus:'passed',status:'passed',quality:'unverified'})
+    expect(acceptedHandoff).toMatchObject({quality:'unverified',deliveryEligible:false})
+    const acceptedReason=await agentTurnHandoffReason(await f.current(),f.turn)
+    expect(acceptedReason).toContain('declared=passed; checked=passed; delivery checks=passed')
+    expect(acceptedReason).toContain('Indexed requirement checks: passed=8, failed=0, unverified=0')
+    expect(acceptedReason).toContain('game quality remains unverified')
+    expect(acceptedReason).not.toContain(completeReport.summary)
     const run=await f.settle()
     expect(JSON.stringify(run.agentTurns![0]!.measurements![0])).toBe(saved)
     for(const purpose of ['delivery','publication'] as const)
