@@ -127,8 +127,8 @@ jobs:
       - name: Run Scene Editor browser regressions
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
-        # Keep each Vite/Chromium fixture in its own Bun process; combining these
-        # suites can stall the second browser launch before any assertions run.
-        run: |
-          bun test packages/agent-workflow-server/src/beegame/scene-layout-browser.test.ts
-          bun test packages/agent-workflow-server/src/beegame/scene-model-browser.test.ts
+          DEBUG: pw:api,pw:browser
+        run: >-
+          bun test
+          packages/agent-workflow-server/src/beegame/scene-layout-browser.test.ts
+          packages/agent-workflow-server/src/beegame/scene-model-browser.test.ts
