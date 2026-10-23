@@ -191,17 +191,22 @@ describe('Unity-style Game Content scene contract', () => {
   })
 
   it('accepts the same GameObject model with concrete 3D components', () => {
-    const result = audit({ schema: 'beegame-content.v1', id: 'scene', kind: 'scene-3d', assetRefs: ['RES-SPRITE'], data: { cameraNodeId: 'camera', nodes: [
+    const source = { schema: 'beegame-content.v1', id: 'scene', kind: 'scene-3d', assetRefs: ['RES-MODEL'], data: { cameraNodeId: 'camera', nodes: [
       { id: 'camera', transform: { position: [0, 2, -8], rotation: [0, 0, 0], scale: [1, 1, 1] }, components: [component('camera-main', 'camera', { data: { orthographic: false, fieldOfView: 60, coordinateSpace: 'world-units' } }), component('camera-listener', 'audio-listener', { data: {} })] },
       { id: 'sun', transform: { position: [0, 5, 0], rotation: [45, 0, 0], scale: [1, 1, 1] }, components: [component('sun-light', 'light', { data: { kind: 'directional', color: '#ffffff', intensity: 1 } })] },
       { id: 'actor', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }, components: [
-        component('actor-mesh', 'mesh-filter', { assetRef: 'RES-SPRITE', data: {} }),
+        component('actor-mesh', 'mesh-filter', { assetRef: 'RES-MODEL', data: {} }),
         component('actor-renderer', 'mesh-renderer', { data: { material: { mode: 'standard' } } }),
         component('actor-collider', 'capsule-collider', { data: { radius: .5, height: 2, center: [0, 1, 0], direction: 'y', isTrigger: false } }),
         component('actor-body', 'rigidbody', { data: { isKinematic: false, useGravity: true, mass: 1 } }),
       ] },
-    ] } }, '3d')
-    expect(result.valid).toBe(true)
+    ] } }
+    const resource = { ...manifest.resources[0]!, id: 'RES-MODEL', dimension: '3D' as const, asset_kind: 'model' as const, root_path: 'assets/runtime/model.glb', file_paths: ['assets/runtime/model.glb'] }
+    expect(audit(source, '3d', { ...manifest, resources: [resource] }).valid).toBe(true)
+    const image = { ...resource, asset_kind: 'image' as const, root_path: 'assets/runtime/image.png', file_paths: ['assets/runtime/image.png'] }
+    const rejected = audit(source, '3d', { ...manifest, resources: [image] })
+    expect(rejected.valid).toBe(false)
+    expect(rejected.issues.join(' ')).toContain('requires a mesh/model resource')
   })
 
   it('rejects undeclared component inventions instead of degrading them to Empty', () => {

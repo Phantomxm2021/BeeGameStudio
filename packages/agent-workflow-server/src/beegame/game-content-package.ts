@@ -239,6 +239,44 @@ export function contentBindingIssues(path: string, document: BeeGameContentDocum
   return issues
 }
 
+const SCENE_GEOMETRY_RESOURCE_KINDS = new Set(['mesh', 'model', 'scene'])
+const IMAGE_MEMBER_EXTENSIONS = new Set(['.png', '.webp', '.jpg', '.jpeg', '.gif', '.avif'])
+
+function resolveResourceMemberPath(resource: BeeGameAssetManifest['resources'][number], member?: string): string | undefined {
+  if (!member) return resource.root_path
+  if (resource.file_paths.includes(member)) return member
+  const matches = resource.file_paths.filter(path => basename(path, extname(path)) === member)
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+/** Scene mesh consumers need a geometry resource at their selected member.
+ * Material and texture resources remain valid for their own consumers; this
+ * only rejects using them as the mesh input or selecting an image member from
+ * a multi-file model resource. */
+export function sceneResourceBindingIssues(
+  path: string,
+  document: BeeGameContentDocument,
+  manifest: BeeGameAssetManifest,
+): string[] {
+  if (document.kind !== 'scene-2d' && document.kind !== 'scene-3d') return []
+  const resources = new Map(manifest.resources.map(resource => [resource.id, resource]))
+  const issues: string[] = []
+  for (const node of document.data.nodes) for (const component of node.components ?? []) {
+    if (!['mesh-filter', 'skinned-mesh-renderer'].includes(component.type) || !component.assetRef) continue
+    const resource = resources.get(component.assetRef)
+    if (!resource) continue
+    if (resource.asset_kind && !SCENE_GEOMETRY_RESOURCE_KINDS.has(resource.asset_kind)) {
+      issues.push(`${path}: Scene component ${component.type} on ${node.id} requires a mesh/model resource; ${component.assetRef} is ${resource.asset_kind}.`)
+      continue
+    }
+    const member = typeof component.data?.member === 'string' ? component.data.member : undefined
+    const selected = resolveResourceMemberPath(resource, member)
+    if (selected && IMAGE_MEMBER_EXTENSIONS.has(extname(selected).toLowerCase()))
+      issues.push(`${path}: Scene component ${component.type} on ${node.id} selects image member ${selected}; mesh consumers require a model/mesh member.`)
+  }
+  return issues
+}
+
 function validateAssetMembers(
   path: string,
   value: unknown,
@@ -568,6 +606,7 @@ export function validateContentDocument(input: {
     input.authority.manifest,
     input.issues,
   )
+  input.issues.push(...sceneResourceBindingIssues(input.path, input.document, input.authority.manifest))
   if (input.document.kind === 'scene-2d' || input.document.kind === 'scene-3d')
     validateNoLegacyScriptFields(input.path, input.document.data, input.issues, ['data'])
   validateTree({

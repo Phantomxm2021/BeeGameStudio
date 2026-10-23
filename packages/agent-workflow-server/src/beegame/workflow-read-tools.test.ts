@@ -32,6 +32,30 @@ function snapshot(root: string) {
     }))
 }
 
+function minimalGlb() {
+  const text = JSON.stringify({ asset: { version: '2.0' }, meshes: [{ primitives: [] }] })
+  const json = Buffer.from(text.padEnd(Math.ceil(text.length / 4) * 4, ' '))
+  const header = Buffer.alloc(20)
+  header.writeUInt32LE(0x46546c67, 0)
+  header.writeUInt32LE(2, 4)
+  header.writeUInt32LE(20 + json.length, 8)
+  header.writeUInt32LE(json.length, 12)
+  header.writeUInt32LE(0x4e4f534a, 16)
+  return Buffer.concat([header, json])
+}
+
+function scene3dMesh(assetRef: string, member?: string) {
+  return { schema: 'beegame-content.v1', id: 'scene', kind: 'scene-3d', assetRefs: [assetRef], data: { cameraNodeId: 'camera', nodes: [
+    { id: 'camera', transform: { position: [0, 2, -8], rotation: [0, 0, 0], scale: [1, 1, 1] }, components: [
+      { id: 'camera-main', type: 'camera', data: { orthographic: false, fieldOfView: 60, coordinateSpace: 'world-units' } },
+    ] },
+    { id: 'actor', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }, components: [
+      { id: 'actor-mesh', type: 'mesh-filter', assetRef, data: member ? { member } : {} },
+      { id: 'actor-renderer', type: 'mesh-renderer', data: { material: { mode: 'standard' } } },
+    ] },
+  ] } }
+}
+
 test('design read retains available source text with missing siblings; no finalize/lock/files', async () => {
   const root = fixture()
   await writeDesignDocumentFixture(root, 'GDD.md')
@@ -265,6 +289,38 @@ test('binding check resolves exact atlas frames and reports missing required ass
   ;(ui.data.nodes[1] as any).role = 'image'; delete (ui.data.nodes[1] as any).data
   save(root, 'content/ui/menu.json', ui)
   expect((await checkResourcesAndBindings(root, {})).issues.join(' ')).toContain('requires assetRef')
+})
+
+test('binding check rejects image mesh inputs, accepts a model root, and blocks image member bypasses', async () => {
+  const root = fixture(), manifest = assetManifestAuthoringExamples().canonical
+  manifest.requirements = []
+  manifest.project_target!.asset_format_capabilities = ['json', 'png', 'glb']
+  const image = 'assets/runtime/image.png', model = 'assets/runtime/model.glb', modelTexture = 'assets/runtime/model.png'
+  const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#ffffff' } }).png().toBuffer()
+  const glb = minimalGlb()
+  mkdirSync(join(root, 'assets/runtime'), { recursive: true })
+  writeFileSync(join(root, image), png)
+  writeFileSync(join(root, model), glb)
+  writeFileSync(join(root, modelTexture), png)
+  const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+  const template = manifest.resources[0]!
+  manifest.resources = [
+    { ...template, id: 'RES-IMAGE', fulfills: [], root_path: image, file_paths: [image], local_file_hashes: { [image]: hash(png) }, dimension: '2D', asset_kind: 'image' },
+    { ...template, id: 'RES-MODEL', fulfills: [], root_path: model, file_paths: [model, modelTexture], local_file_hashes: { [model]: hash(glb), [modelTexture]: hash(png) }, dimension: '3D', asset_kind: 'model' },
+  ]
+  await writeBeeGameAssetManifest(root, manifest)
+  mkdirSync(join(root, 'content/ui'), { recursive: true })
+  mkdirSync(join(root, 'content/scenes'), { recursive: true })
+  save(root, 'content/scenes/scene.json', scene3dMesh('RES-IMAGE'))
+  const imageResult = await checkResourcesAndBindings(root, {})
+  expect(imageResult.valid).toBe(false)
+  expect(imageResult.issues.join(' ')).toContain('requires a mesh/model resource')
+  save(root, 'content/scenes/scene.json', scene3dMesh('RES-MODEL'))
+  expect((await checkResourcesAndBindings(root, {})).valid).toBe(true)
+  save(root, 'content/scenes/scene.json', scene3dMesh('RES-MODEL', modelTexture))
+  const memberResult = await checkResourcesAndBindings(root, {})
+  expect(memberResult.valid).toBe(false)
+  expect(memberResult.issues.join(' ')).toContain('selects image member')
 })
 
 test('native tools discover all six; result reads use fixed read requests, preserve newest failure and do not execute receipts', async () => {
