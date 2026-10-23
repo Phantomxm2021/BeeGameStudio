@@ -14,7 +14,7 @@ export const PRODUCTION_DEPENDENCIES = 'For a full new-game delivery, start with
 // Working contract for newly initialized projects. Native
 // metadata resolves Skill names/namespaces; procedures stay in the Skills.
 export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
-- The current user assignment determines deliverables and stopping point. Complete full-game work through resources and implementation; document-only or reference-only work stops at its requested boundary. For changes, update affected sources without restarting full-game production.
+- The current user assignment determines deliverables and stopping point. A full-game assignment includes resources and implementation; smaller assignments stop at their requested boundary. For changes, update affected sources without restarting full-game production.
 - Preserve confirmed requirements, design standards, budget, authorization and unrelated work. Use project-relative paths.
 - Architecture decisions belong in their existing design/configuration sources, not this guide. Navigation pointers do not verify behavior.
 
