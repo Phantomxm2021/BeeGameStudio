@@ -9,6 +9,7 @@ import { ImageGenerationService } from './service'
 import { imageConfigSchema } from './config'
 import { imageChargeCreditsMicro, fixedImageChargeCreditsMicro, CLOUDFLARE_INITIAL_FIXED_CREDITS } from './pricing'
 import { ImageProviderError } from './provider'
+import { writeProjectAssetCommand } from '../beegame/project-asset-command'
 import { openImageGenerationAccess } from './access'
 import { ImageConfigurationError } from './runtime-config'
 import { compileUiReferenceBoard, compileUiAssetSheet } from './ui-reference-board.mjs'
@@ -387,6 +388,80 @@ function fakeBilling() {
   return { client, actions }
 }
 async function png() { return sharp({ create: { width: 2, height: 2, channels: 4, background: '#fff' } }).png().toBuffer() }
+
+test('OpenRouter platform billing is unavailable before reservation; BYOK remains external', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-router-billing-'))
+  const billing = fakeBilling()
+  const routerConfig = imageConfigSchema.parse({ ...config, provider: 'openrouter' })
+  let calls = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(join(root, 'host'), { generate: async () => {
+    calls++; return { bytes: await png(), model: config.model, mimeType: 'image/png', usage: { cost: 0.042 } }
+  } }), billing.client)
+  const platform = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
+    loadConfig: async () => routerConfig, service })
+  const byok = openImageGenerationAccess({ userId: 'owner', projectId: 'personal', workspacePath: root,
+    source: 'byok', loadConfig: async () => routerConfig, service })
+  try {
+    const capability = await (await fetch(platform.endpoint)).json()
+    expect(capability).toMatchObject({ available: false, billingSource: 'platform' })
+    expect(capability.unavailableReason).toContain('OpenRouter')
+    await expect(service.generate({ ...input, config: routerConfig })).rejects.toMatchObject({ stage: 'billing-unsupported' })
+    const response = await fetch(platform.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ purpose: 'experiment', requestId: 'new', prompt: 'an icon' }) })
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({ code: 'billing-unsupported' })
+    expect(calls).toBe(0)
+    expect(billing.actions).toEqual([])
+    expect(existsSync(join(root, 'host'))).toBe(false)
+    expect(await (await fetch(byok.endpoint)).json()).toMatchObject({ available: true, billingSource: 'external' })
+    const external = await service.generate({ ...input, config: routerConfig }, 'byok')
+    expect(external).toMatchObject({ billingState: 'external', chargedCreditsMicro: null, usage: { cost: 0.042 } })
+    expect(calls).toBe(1)
+    expect(billing.actions).toEqual([])
+  } finally { await platform.close(); await byok.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('asset command recovers existing OpenRouter output but cannot submit new platform work', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-router-recovery-'))
+  const workspace = join(root, 'workspace')
+  mkdirSync(join(workspace, 'assets'), { recursive: true })
+  const billing = fakeBilling()
+  const historical = { ...input, config: imageConfigSchema.parse({ ...config, provider: 'openrouter' }) }
+  let calls = 0
+  const attempts = new ImageAttemptStore(join(root, 'host'), { generate: async () => {
+    calls++; return { bytes: await png(), model: config.model, mimeType: 'image/png', usage: { cost: 0.042 } }
+  } })
+  const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: workspace,
+    loadConfig: async () => historical.config, service: new ImageGenerationService(attempts, billing.client) })
+  try {
+    // Seed a pre-fix paid attempt through the existing stores, without a live provider or wallet.
+    await billing.client.apply('owner', { projectId: 'project', requestId: 'image-1', digest: 'historical',
+      action: 'reserve', amountCreditsMicro: 2e6, projectBudgetCreditsMicro: 10e6, metadata: { pricing } })
+    const original = await attempts.generate(historical)
+    const script = join(workspace, 'assets.mjs')
+    await writeProjectAssetCommand(script, { imageEndpoint: access.endpoint })
+    for (const [requestId, output] of [['image-1', 'first'], ['image-1', 'again'], ['new', 'blocked']]) {
+      const request = join(workspace, 'request.json')
+      writeFileSync(request, JSON.stringify({ requestId, prompt: input.request.prompt, ...(requestId === 'new' ? { purpose: 'experiment' } : {}) }))
+      const child = Bun.spawn([process.execPath, script, 'generate', request, `assets/${output}.png`],
+        { cwd: workspace, stdout: 'pipe', stderr: 'pipe' })
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+      ])
+      if (requestId === 'new') {
+        expect(code).toBe(1)
+        expect(stderr).toContain('billing-unsupported')
+        expect(existsSync(join(workspace, `assets/${output}.png`))).toBe(false)
+      } else {
+        expect(code).toBe(0)
+        expect(JSON.parse(stdout)).toMatchObject({ billingState: 'pending', chargedCreditsMicro: null })
+        expect(readFileSync(join(workspace, `assets/${output}.png`))).toEqual(original.bytes)
+      }
+    }
+    expect(calls).toBe(1)
+    expect(billing.actions).toEqual(['reserve', 'reserve', 'reserve'])
+  } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
+})
 
 test('image pricing uses detailed usage and exact micro-Credits; missing or inconsistent usage is not free', () => {
   expect(imageChargeCreditsMicro(usage, pricing)).toBe(975000)

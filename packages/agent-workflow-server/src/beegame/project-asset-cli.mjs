@@ -441,7 +441,9 @@ async function main() {
     if (request.quality) quoteUrl.searchParams.set('quality', request.quality)
     if (request.size) quoteUrl.searchParams.set('size', request.size)
     const quote = await jsonRequest(quoteUrl)
-    if (!quote.available) throw new Error('AI image generation unavailable: ' + (quote.unavailableReason ?? 'check model, credentials and billing'))
+    // Billing incompatibility blocks new work in the host, but paid receipts must still reach recovery.
+    if (!quote.available && quote.unavailableCode !== 'billing-unsupported')
+      throw new Error('AI image generation unavailable: ' + (quote.unavailableReason ?? 'check model, credentials and billing'))
     if (submittedRequest.uiAssets !== undefined && quote.referenceImageSupported !== true)
       throw Error('UI skins require a provider that accepts the selected design image; no generation was submitted')
     if (quote.fixedPrice === true) {

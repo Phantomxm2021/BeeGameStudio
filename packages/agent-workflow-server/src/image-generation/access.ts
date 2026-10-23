@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
-import type { ImageGenerationConfig, ImageSource } from './config'
+import { platformImageBillingUnavailableReason, type ImageGenerationConfig, type ImageSource } from './config'
 import type { ImageGenerationService } from './service'
 import { ImageAttemptError, ImageRequestValidationError } from './attempt'
 import { readBeeGameAssetManifestSync } from '../beegame/asset-contracts'
@@ -85,10 +85,13 @@ export function openImageGenerationAccess(input: {
             catch { /* Unpriced variant is unavailable, without an upstream call. */ }
           }
           const subscription = input.source === 'chatgpt-subscription'
-          const available = Boolean(quality && (subscription ? config.responseModel : sharedSubscription
+          const billingUnavailable = (!input.source || input.source === 'platform')
+            ? platformImageBillingUnavailableReason(config.provider) : undefined
+          const available = Boolean(!billingUnavailable && quality && (subscription ? config.responseModel : sharedSubscription
             ? fixedPlatform && config.responseModel && config.subscriptionOwnerId && quotedCreditsMicro !== null
             : config.apiKey && (input.source === 'byok' || (config.billing && (!fixedPlatform || quotedCreditsMicro !== null)))))
           return Response.json({ available,
+            ...(billingUnavailable ? { unavailableReason: billingUnavailable, unavailableCode: 'billing-unsupported' } : {}),
             quality: requestedQuality, size, fixedPrice: fixedPlatform,
             referenceImageSupported: config.provider === 'cloudflare',
             ...(config.provider === 'cloudflare' || sharedSubscription ? { availableSizes: ['1024x1024', '1024x1536', '1536x1024'] } : {}),
@@ -178,7 +181,7 @@ export function openImageGenerationAccess(input: {
         // Expose structured facts, never raw upstream bodies, credentials or echoed prompts.
         return Response.json({ error: 'Image request not delivered. Replaying an unknown/rejected receipt does not resubmit upstream. Do not change requestId merely to retry; report the failure and diagnostic details.',
           requestId: parsed.data.requestId, ...details, promptRecord: recordOk ? 'recorded' : 'failed' },
-          { status: reference ? 400 : error instanceof ImageServiceError && error.stage === 'price-unavailable' ? 422
+          { status: reference ? 400 : error instanceof ImageServiceError && ['price-unavailable', 'billing-unsupported'].includes(error.stage) ? 422
             : attempt?.replayed || attempt?.reason === 'conflict' ? 409 : attempt ? 502 : 503 })
       }
     },

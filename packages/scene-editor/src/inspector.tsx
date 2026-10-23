@@ -35,7 +35,7 @@ function assetAccepted(component: SceneComponent, asset: SceneAsset): boolean {
   if (IMAGE_COMPONENTS.has(component.type)) return asset.mimeType.startsWith('image/')
   if (MATERIAL_COMPONENTS.has(component.type)) return asset.mimeType.includes('material') || /\.(mat|material)$/i.test(asset.name)
   if (component.type === 'particle-system-renderer') return asset.mimeType.startsWith('image/')
-  if (MODEL_COMPONENTS.has(component.type)) return asset.mimeType.startsWith('model/') || /\.(glb|gltf|fbx|obj)$/i.test(asset.name)
+  if (MODEL_COMPONENTS.has(component.type)) return /\.(glb|gltf)$/i.test(asset.path)
   if (component.type === 'audio-source') return asset.mimeType.startsWith('audio/')
   if (component.type === 'animator') return asset.mimeType.includes('json')
   if (component.type === 'tilemap') return !!asset.tileSet

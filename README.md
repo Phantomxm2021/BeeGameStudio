@@ -101,8 +101,12 @@ Chat tools expand in place with BeUI ToolResult; full details and subagents rema
 `.github/workflows/backend-checks.yml` checks backend types and selected offline
 regressions when backend, deployment, or database sources change. It runs the
 billing SQL migrations against an isolated PGlite engine; it needs no service
-credentials and makes no model calls. Browser and native sandbox suites remain
-explicit checks because they require their respective host runtimes.
+credentials and makes no model calls. A separate Linux browser job checks the
+Scene Editor. A macOS native job builds the pinned `vendor/bgs` source and runs
+local protocol, sandbox, Skills, file-tool and subagent fixtures. It uses no model
+credentials or paid provider calls; fixed loopback responses validate integration,
+not autonomous Agent behavior. The source-built binary is cached by source commit,
+build script, OS and architecture, so host-only changes do not rebuild Rust.
 
 ```sh
 bun test packages/agent-workflow-server/src/bgs/runner.test.ts
@@ -111,10 +115,18 @@ bun test packages/agent-workflow-server/src/bgs/runner.test.ts
 The real-process integration tests use the pinned Bgs binary, local synthetic provider/MCP services and temporary synthetic files. They make no paid model calls:
 
 ```sh
-BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs/integration.test.ts packages/agent-workflow-server/src/model-providers/integration.test.ts
+BGS_SANDBOX_TESTS=1 bun test \
+  packages/agent-workflow-server/src/bgs/integration.test.ts \
+  packages/agent-workflow-server/src/model-providers/integration.test.ts \
+  packages/agent-workflow-server/src/bgs/goals.native.test.ts \
+  packages/agent-workflow-server/src/bgs/preferences.native.test.ts \
+  packages/agent-workflow-server/src/bgs/skills.native.test.ts \
+  packages/agent-workflow-server/src/bgs/project-file-tools.native.test.ts \
+  packages/agent-workflow-server/src/bgs/short-context.native.test.ts
 ```
 
-Run these on a host that permits nested sandbox setup and process inspection. They check real protocol behavior and file isolation; they do not establish game quality, live subscription availability, or production Linux/Windows behavior.
+Run these with Bun 1.4.3 on a macOS host that permits nested sandbox setup and process inspection.
+The legacy-home migration test still needs an explicit legacy binary and is not part of CI. They check real protocol behavior and file isolation; they do not establish game quality, live subscription availability, or production Linux/Windows behavior.
 
 The billing migration regressions execute the actual SQL functions in an isolated in-memory PostgreSQL engine. Install `@electric-sql/pglite@0.5.10` outside this repository and set `BGS_PGLITE_MODULE` to its absolute module path when running `bun test packages/beegame-billing-server/src/__tests__`. Without that variable, SQL checks are skipped locally; backend CI enables them. No production database is contacted.
 

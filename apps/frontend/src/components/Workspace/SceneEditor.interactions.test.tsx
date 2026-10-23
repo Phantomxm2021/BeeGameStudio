@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SceneEditor } from '../../../../../packages/scene-editor/src/editor';
 import { makeFixture, type SceneDocument } from '../../../../../packages/scene-editor/src/model';
+import { exportPackage, importPackage } from '../../../../../packages/scene-editor/src/persistence';
 import { readFileSync } from 'node:fs';
 const editorCss = readFileSync('../../packages/scene-editor/src/styles.css', 'utf8');
 
@@ -29,6 +30,39 @@ async function command(name: string) {
 }
 function select(name: string) { fireEvent.click(screen.getByText(name, { selector: '.node-name' })); }
 describe('Scene Editor interaction regressions', () => {
+  it.each(['mesh-filter', 'skinned-mesh-renderer', 'mesh-collider'] as const)('only offers GLTF/GLB paths for %s and preserves the selected asset when saved', async (type) => {
+    const doc = makeFixture();
+    doc.dimension = '3d';
+    doc.assets = {
+      gltf: { id: 'gltf', name: 'JSON model', path: 'models/scene.gltf', mimeType: 'application/octet-stream' },
+      glb: { id: 'glb', name: 'Binary model', path: 'models/scene.GLB', mimeType: 'application/octet-stream' },
+      fbx: { id: 'fbx', name: 'source.fbx', path: 'models/source.fbx', mimeType: 'model/fbx' },
+      obj: { id: 'obj', name: 'source.obj', path: 'models/source.obj', mimeType: 'model/obj' },
+      mislabeled: { id: 'mislabeled', name: 'misleading.glb', path: 'models/other.obj', mimeType: 'model/gltf-binary' },
+    };
+    const component = { id: 'mesh', enabled: true, assetId: 'gltf', properties: {} };
+    doc.nodes.flower.components = [type === 'mesh-collider' ? { ...component, type, convex: false, isTrigger: false } : { ...component, type }];
+    const before = JSON.stringify(doc);
+    const save = vi.fn<(document: SceneDocument) => void>();
+    render(<SceneEditor initialDocument={doc} onSave={save} />);
+    select('Flower');
+    const label = `${type.split('-').map(word => word[0].toUpperCase() + word.slice(1)).join(' ')} mesh`;
+    for (const [assetId, name] of [['glb', 'Binary model'], ['gltf', 'JSON model']]) {
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      const list = await screen.findByRole('listbox', { name: label });
+      expect(within(list).getAllByRole('option').map(option => option.textContent)).toEqual(['None', 'JSON model', 'Binary model']);
+      fireEvent.click(within(list).getByRole('option', { name, exact: true }));
+      await waitFor(() => expect(screen.getByRole('button', { name: label })).toHaveTextContent(name));
+      save.mockClear();
+      fireEvent.keyDown(screen.getByTestId('scene-editor'), { key: 's', metaKey: true });
+      await waitFor(() => expect(save).toHaveBeenCalledOnce());
+      const reopened = importPackage(exportPackage(save.mock.calls[0][0]));
+      expect(reopened.nodes.flower.components[0]).toMatchObject({ type, assetId });
+      expect(reopened.assets).toEqual(doc.assets);
+    }
+    expect(JSON.stringify(doc)).toBe(before);
+  });
+
   it('can clear an authored font without leaving non-JSON values or a legacy font reference', async () => {
     const document = makeFixture();
     document.assets.font = { id: 'font', name: '中文字体', path: 'fonts/chinese.woff2', mimeType: 'font/woff2' };
