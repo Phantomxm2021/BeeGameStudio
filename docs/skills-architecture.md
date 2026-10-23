@@ -2,6 +2,8 @@
 
 审计/实施日期：2026-10-23；起始版本 `c2b68c17a`。选型证据见 [skills-research.md](skills-research.md)，实测和限制见 [skills-validation.md](skills-validation.md)。
 
+后续体验工作顺序修订以 `415c7c85c` 为基线，见文末；前面的加载链研究与测试记录保留各自范围。
+
 ## 当前实际执行链
 
 ```text
@@ -89,3 +91,18 @@ Game Feel、技术美术、交互契约、试玩和完成证据按当前任务�
 这次应用层 `cwd` 修复单独提交并完成空闲核对后的重启。之后的 Skill 内容更新不需要启动项目任务；新 native catalog/读取会看到现有路径的新内容。未验证运行中模型的历史上下文是否会采用新正文，不修改其旧记录来伪装生效。
 
 本轮未增加强制审美分数、全局帧率门槛、必用动画类型、自动覆盖完整性保证或模型调用数量配额。产品质量仍须由匹配的实际证据支持。
+
+## 体验工作顺序修订（2026-10-23，基线 `415c7c85c`）
+
+只读执行证据显示，专业 Skills 已被读取，但实现仍先批量准备产物、较晚才观察连续玩家路径。源码中已有 player-situation 原则，同时 project guide 又把文档、视觉、资源、内容、实现列成五个编号步骤。这支持收敛指导顺序；不能据此认定所有项目问题都由提示词造成，或认定 native runtime、完成判定存在故障。
+
+改动沿用现有职责和工具：
+
+- [project guide](../packages/agent-workflow-server/src/beegame/workflow-v3/project-guide.ts) 将五阶段顺序改为当前玩家情境的输入依赖；先贯通判断、行动、规则或挑战、反馈与后续行动，再扩展同类内容。八域记录随决策维护，完整总览图、实际资源及接口仍是相关实现的依赖，最终完整范围不变。
+- [planning](../.beegame/skills/bgs-game-skills/game-implementation-planning/SKILL.md) 与 [execution](../.beegame/skills/bgs-game-skills/game-plan-execution/SKILL.md) 在同一情境中连接原始设计、预期与普通输入观察；依赖未就绪只影响其消费者，不把每个模块变为完整试玩任务。
+- [art direction](../.beegame/skills/bgs-game-skills/game-art-director-expert/SKILL.md) 明确决策提示的规则来源；[gameplay](../.beegame/skills/bgs-game-skills/gameplay-programmer/SKILL.md) 向表现提供已有条件、对象和确认结果，避免视觉信号另立判定边界。它不要求美术轮廓与碰撞边缘逐像素相等，也不要求展示设计中隐藏的信息。
+- [playtest](../.beegame/skills/bgs-game-skills/game-playtest-performance/SKILL.md) 从确认设计独立形成预期，按需观察决策信息、容错、失败原因及连续恢复。搜索到完美输入通路最多证明可达性；规则测试、可达性和体验质量分别陈述。
+
+方案自审保留了实际资源在相关实现前就绪的约束，并把路径观察限定在相关集成范围。关卡、技术美术、动作动画和手感参考已覆盖空间可供性、姿态、接触与反馈，未再扩写；没有增加入口、依赖、审核 Agent、协议、阶段或完成门禁。Skill 名称与 description 不变，原生加载机制不变。
+
+这些改动依然依赖执行模型理解并应用方法。如果它漏读或误用，静态检查无法保证体验；后续应以用户授权的真实运行证据判断效果，失败时重审责任层，不自动追加规则或付费重跑。共享 Skill 文件在后续读取时可见，新项目指南由服务加载的模板初始化；已有项目的 `AGENTS.md` 不自动覆盖，运行中上下文也不追写。本轮不借修改测试项目证明修复。

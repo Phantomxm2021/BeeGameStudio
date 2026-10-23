@@ -801,9 +801,8 @@ test('shared guide supplies design methods once without a compatibility fallback
     const context=professional+'\n'+savedGuide
     expect(context.split('## Professional methods')).toHaveLength(2)
     expect(context.split('## Required design dependencies')).toHaveLength(2)
-    for(const step of ['1. Design records:','2. Actual visual designs:','3. Resources:',
-      '4. Editable scene/UI content:','5. Implementation and runtime verification:'])expect(context.split(step)).toHaveLength(2)
-    for(const value of ['select applicable Skills','TECHNICAL_DESIGN.md','PROJECT_SPECIFIC_ROUTE',
+    expect(context.split(PRODUCTION_DEPENDENCIES)).toHaveLength(2)
+    for(const value of ['Select and read applicable Skills','TECHNICAL_DESIGN.md','PROJECT_SPECIFIC_ROUTE',
       'unknown paid replay or automatic paid retry','respect exclusions and the project budget','required licenses'])expect(context).toContain(value)
   }
 })
@@ -1366,11 +1365,8 @@ test('first and resumed goals retain professional coverage and design dependenci
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     for (const document of ['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ART_DIRECTION.md',
       'UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md']) expect(prompt).toContain(document)
-    const steps=['1. Design records:', '2. Actual visual designs:', '3. Resources:', '4. Editable scene/UI content:', '5. Implementation and runtime verification:']
-    const positions=steps.map(step=>prompt.indexOf(step))
-    expect(positions.every((position,index)=>position>=0 && (!index || position>positions[index-1]!))).toBe(true)
     expect(prompt).toContain('once the selected designs and resources for that content exist')
-    expect(prompt).toContain('unrelated planned resources/content may remain pending')
+    expect(prompt).toContain('unrelated resources/content may remain planned')
     expect(prompt).toContain('Preserve confirmed requirements')
     expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
   }

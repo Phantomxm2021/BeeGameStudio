@@ -13,7 +13,7 @@ Identify input, simulation and presentation ownership, consequential clocks/unit
 
 ## Integration and verification
 
-Consume authored configuration and Scene/UI through actual contracts, without duplicating static layout in gameplay code. Describe consequential interfaces/execution choices separately from product rules; share confirmed simulation results with animation, audio and UI.
+Consume authored configuration and Scene/UI through actual contracts, without duplicating static layout in gameplay code. Describe consequential interfaces/execution choices separately from product rules; share confirmed simulation results with animation, audio and UI. When a player-facing cue communicates where an action is possible, safe, risky or confirmed, give its presentation owner the existing condition, subject and result that determine the cue; presentation may clarify those facts but must not invent a different rule or boundary.
 
 For BGS new games, establish TECHNICAL_DESIGN.md among the eight design records with confirmed constraints, module responsibilities and unresolved dependencies. Resolve resource-dependent interfaces and implementation choices from selected designs and actual resources before affected implementation, updating the same document. Select implementation-planning guidance when useful; no task index is required. Document-only assignments do not authorize implementation.
 

@@ -22,7 +22,7 @@ test('template is read-only and remains available with an older saved content fo
     expect(PROJECT_GUIDE_TEMPLATE).toContain(PROJECT_WORKING_CONVENTIONS)
     expect(PROJECT_GUIDE_TEMPLATE).not.toContain('| Design responsibility | Skills |')
     expect(PROJECT_GUIDE_TEMPLATE).toContain('GDD.md')
-    expect(PROJECT_GUIDE_TEMPLATE).toContain('4. Editable scene/UI content:')
+    expect(PROJECT_GUIDE_TEMPLATE).toContain('Editable scene/UI content:')
     expect(PROJECT_GUIDE_TEMPLATE).toContain('format appropriate to the confirmed engine')
     expect(PROJECT_GUIDE_TEMPLATE).not.toContain('4. UI/Scene JSON:')
     expect(PROJECT_GUIDE_TEMPLATE).toContain('Architecture decisions belong in their existing design/configuration sources')
