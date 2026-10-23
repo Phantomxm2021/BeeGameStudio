@@ -58,13 +58,14 @@ test('implementation reads and exact visual saves preserve authorized requiremen
   }finally{await measurement?.close();await editor.dispose();await f.close()}
 },30000)
 
-test('resource obligations retain authorization and provenance without prescribing a sourcing or atlas tour', () => {
+test('resource context carries source priority and authorization without prescribing tool steps', () => {
   for (const prompt of [agentProfessionalContextForRun({} as Run), agentProfessionalContextForRun({} as Run, true)]) {
     expect(prompt).not.toContain('purpose: production')
     expect(prompt).not.toContain('file_paths')
     expect(prompt).not.toContain('local_path')
     expect(prompt).toContain('required licenses')
-    expect(prompt).toContain('AI is not the default for all core art')
+    expect(prompt).toContain('Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method')
+    expect(prompt).toContain('does not authorize automatic procedural replacement')
     expect(prompt).toContain('usage rights')
     expect(prompt).toContain('read-only quote')
     expect(prompt).toContain('no redundant per-image approval')

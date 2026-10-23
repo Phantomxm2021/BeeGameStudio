@@ -1,6 +1,6 @@
 # AI artwork to playable sprite animation
 
-Use for characters or effects that actually need changing drawn poses. Keep the selected art direction and the current playable slice; do not require a fixed set of actions, directions, frame counts or reference boards. A texture atlas can contain unrelated images; packing those images does not create an animation.
+Use after AI production has been selected under the [source policy](../SKILL.md), for characters or effects that actually need changing drawn poses. Keep the selected art direction and the current playable slice; do not require a fixed set of actions, directions, frame counts or reference boards. A texture atlas can contain unrelated images; packing those images does not create an animation.
 
 ## Describe the motion before requesting frames
 
