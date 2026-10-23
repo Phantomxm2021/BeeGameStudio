@@ -97,6 +97,10 @@ export function renderAssetManifestAuthoringContract(section: 'registration' | '
   const registration = `## Registration request
 
 Use this input with resources.mjs request.json or combine requests with --register-from.
+Required acquisition_profile enums (case-sensitive, non-empty arrays):
+- dimensions: ${RESOURCE_DIMENSIONS.join(', ')}
+- asset_kinds: ${RESOURCE_ASSET_KINDS.join(', ')}
+
 Minimal local-authoring request (replace example values with actual project facts):
 
 \`\`\`json
@@ -113,7 +117,7 @@ For locally authored files, omit source and supply resource.reason. Explicit sou
 Hashes, status, timestamps and registry modules are computed, not request fields.
 fulfills names actual requirement IDs. root_path is a loadable file in file_paths; selection_reason is a non-empty string array.
 On later registration, omit projectTarget or pass it unchanged; existing requirements cannot be redefined.
-Use --contract full for source fields, enums and saved registry examples; --contract atlas or --contract tilemap for those formats.
+Use --contract full for source fields and saved registry examples; --contract atlas or --contract tilemap for those formats.
 `
   const atlas = `## Sprite atlas contract
 
@@ -197,7 +201,6 @@ ${json(examples.resourceModule)}
 
 ## Canonical values
 
-- dimensions: ${json(RESOURCE_DIMENSIONS)}
 - source types: ${json(RESOURCE_SOURCE_KINDS)}
 - source fields (examples; replace placeholder values with actual provenance):
 
@@ -210,7 +213,6 @@ ${json(assetSourceAuthoringExamples)}
   source details attached to each registered resource; these examples do not
   prescribe which source to use.
 - resource-library usage: ${json(RESOURCE_LIBRARY_USAGE)}
-- requirement asset kinds: ${json(RESOURCE_ASSET_KINDS)}
 - resource status: ${json(BEEGAME_RESOURCE_STATUSES)}
 - \`usage_tags\` and \`capabilities\` describe the asset in your own words (string
   arrays), not a closed catalogue vocabulary. Extra resource/source description

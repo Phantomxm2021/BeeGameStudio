@@ -766,7 +766,7 @@ function validateAcquisitionProfile(
   issues: string[],
 ): void {
   if (!isRecord(value)) {
-    issues.push(`${path} must be an object with dimensions, asset_kinds and styles arrays; use resources.mjs --contract for exact fields and enums.`)
+    issues.push(`${path} must be an object with dimensions, asset_kinds and styles arrays; use resources.mjs --contract registration for exact fields and enums.`)
     return
   }
   validateEnumArray(
@@ -868,7 +868,7 @@ function validateEnumArray(
     )
   )
     issues.push(
-      `${path} must be ${requireOne ? 'a non-empty' : 'an'} array of canonical values (case-sensitive). ${allowed.length <= 8 ? `Allowed: ${allowed.join(', ')}.` : 'Use resources.mjs --contract for the exact allowed values.'}`,
+      `${path} must be ${requireOne ? 'a non-empty' : 'an'} array of canonical values (case-sensitive). ${allowed.length <= 8 || allowed === RESOURCE_ASSET_KINDS ? `Allowed: ${allowed.join(', ')}.` : 'Use resources.mjs --contract for the exact allowed values.'}`,
     )
 }
 

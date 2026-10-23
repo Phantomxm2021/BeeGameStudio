@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-23",
+  "baselineCommit": "d5a9c53b3",
+  "objective": "Reduce confirmed contract-discovery overhead during design and resource preparation without changing project artifacts, validation semantics or the workflow.",
+  "scope": {
+    "projectArtifacts": "read-only",
+    "productionFiles": 2,
+    "existingTestFilesUpdated": 1,
+    "promptOrSkillChanges": false,
+    "newWorkflowStages": false,
+    "realModelCalls": 0,
+    "realProjectReruns": 0,
+    "serviceRestarts": 0
+  },
+  "evidence": {
+    "nativeSnapshotSha256": "b40e14f52f9cc49d48e0446ac123751ab101f3ded2e9aedb5ea807dbd6e86cf3",
+    "hostSnapshotSha256": "039612e0fbc0ead02821c0013ed0687715dbd6aeff0689501132e6d75fc29e92",
+    "phase": {
+      "hostStartUTC": "2026-10-23T06:30:47.449Z",
+      "toUTCInclusive": "2026-10-23T06:43:28.003Z",
+      "elapsedSeconds": 760.554,
+      "providerResponses": 37,
+      "inputTokensIncludingCache": 3761997,
+      "cachedInputTokens": 3529216,
+      "uncachedInputTokens": 232781,
+      "outputTokensIncludingReasoning": 82970,
+      "reasoningOutputTokens": 34829,
+      "totalTokens": 3844967,
+      "firstInputTokens": 22943,
+      "lastInputTokens": 155878
+    },
+    "accountingBoundary": "Sum reported per-response token_usage_record once. Input includes cache; output includes reasoning. Cumulative context processing, output characters and monetary cost are different quantities. Images have no separate usage breakdown in this snapshot. Phase boundaries are analytical, not a host phase field; initial content authoring is included and the final package-writing call has no native output before the cutoff.",
+    "independentlyCheckedVisibleReads": {
+      "distinctSkillFiles": 13,
+      "skillOutputCharacters": 69031,
+      "distinctReferenceFiles": 3,
+      "referenceOutputCharacters": 20386,
+      "designDocumentWrites": 8,
+      "designWriteReceiptCharacters": 448,
+      "note": "Character totals include native text wrappers. These were explicit calls, with each Skill/reference path read once and each design document written once in this phase. No subsequent design-document full reread was observed."
+    }
+  },
+  "confirmedRootCause": {
+    "id": "compact-registration-contract-omits-required-enums",
+    "executionChain": [
+      { "nativeOutputOrdinal": 100, "action": "Read --contract registration", "characters": 2220 },
+      { "nativeCallOrdinal": 243, "nativeOutputOrdinal": 248, "action": "Register requirements; invalid dimensions and asset kinds rejected", "characters": 1037 },
+      { "nativeCallOrdinal": 250, "nativeOutputOrdinal": 255, "action": "Read the first selected portion of --contract full", "characters": 7643 },
+      { "nativeCallOrdinal": 257, "nativeOutputOrdinal": 262, "action": "Read a second selected portion of --contract full", "characters": 6824 },
+      { "nativeCallOrdinal": 264, "nativeOutputOrdinal": 269, "action": "Correct requirement enums and register successfully", "characters": 421 }
+    ],
+    "systemResponsibility": "BGS directs first-time registration to its compact input contract, but that contract exposed only example dimensions/asset kinds and sent readers to the full registry reference for the actual enum values. The validator listed short dimension choices but hid the longer asset-kind choices behind the same full-contract pointer. Invalid inputs were correctly rejected; the defect was unnecessary discovery work needed to obtain their legal values.",
+    "sources": [
+      "packages/agent-workflow-server/src/beegame/resource-production.ts:274",
+      "packages/agent-workflow-server/src/beegame/asset-manifest-authoring-contract.ts:94",
+      "packages/agent-workflow-server/src/beegame/asset-contracts.ts:761",
+      "packages/agent-workflow-server/src/beegame/asset-contracts.ts:856",
+      "packages/beegame-resource-core/src/types.ts:59"
+    ],
+    "impactBoundary": "The two selected full-contract outputs total 14467 characters. Their associated model calls also contain accumulated history; neither their full token counts nor an assumed avoided call count is claimed as measured savings."
+  },
+  "planAndSelfReview": [
+    "Reconstruct actual usage, tool calls and output sizes, then trace contract rendering, CLI dispatch, parser validation and existing consumers. Do not infer a BGS loop from model-selected reading or authoring.",
+    "Use the existing shared RESOURCE_DIMENSIONS and RESOURCE_ASSET_KINDS constants. Do not introduce another schema, enum copy, parser alias, fallback coercion or requirement-specific answer.",
+    "Move the two enum lists into the existing compact registration section. The full reference already embeds that section, so remove its duplicate lists while retaining all values and other reference topics.",
+    "Return exact allowed asset kinds at the existing validation failure boundary. Other long enum diagnostics retain their previous behavior; missing-profile errors point to the relevant registration contract.",
+    "Accept a small increase in the narrow contract/error output to avoid requiring a broad reference read. Do not optimize for the shortest individual error while forcing an extra model/tool round trip.",
+    "Keep invalid-case rejection, failure paths, input immutability, source provenance and registration behavior unchanged. Instructions/Skills, tools, workflow stages and project output are not modified.",
+    "Use an existing focused regression to demonstrate the old failure, then run the existing affected offline tests. Do not use project success or a paid rerun as proof."
+  ],
+  "changes": {
+    "registrationContract": "Required dimensions and asset kinds are listed directly from the shared constants, in compact form. The full reference includes those same lists once through its existing registration section.",
+    "validationDiagnostics": "Asset-kind enum errors now include Allowed values directly. A missing acquisition_profile points to --contract registration. No accepted input or automatic mutation changes.",
+    "registrationCharactersBefore": 2115,
+    "registrationCharactersAfter": 2534,
+    "fullReferenceCharactersBefore": 17635,
+    "fullReferenceCharactersAfter": 17548,
+    "sizeBoundary": "Current renderer strings without native wrappers, measured locally before and after. These are not tokenizer measurements or observed end-to-end savings."
+  },
+  "excludedOrPreviouslyFixed": [
+    "Skill/reference reading and large Scene/UI authoring commands substantially grow the single-turn history, but this phase shows no duplicate Skill path reads, repeated design-document writes or automatic full-document injection requiring a new BGS mechanism.",
+    "The slash-separated --format example was a real help-text ambiguity in the saved run. Commit 434d57a284 already replaced it with valid space-separated commands in checker and consumer help; it is not changed or counted again.",
+    "The media stdin '-' and missing-file calls, and the failed Python authoring command, do not establish a system parser or generation defect. No new input modes or automatic correction are added.",
+    "The unknown tool return at native ordinal 16 names an alias without the current adapter's bgs_ prefix. The original outgoing provider request is not retained, so the saved return and current source do not establish a defective BGS mapping. No fuzzy alias matching is introduced.",
+    "An upstream image request returned an unknown outcome, and a same-ID attempt returned the retained error rather than resubmitting. Polling output alone does not prove repeated image-generation requests. No duplicate charge or safe automatic recovery was established; receipt/authorization boundaries are unchanged.",
+    "Initial native guide loading and per-turn runtime/brief context do not establish repeated full-guide injection in this single-turn phase. Previously reviewed context-accounting and default-output fixes remain separate."
+  ],
+  "validation": {
+    "regressionBeforeFix": "The updated existing resource-enum assertion failed because the error omitted Allowed asset-kind values and directed the caller to --contract.",
+    "offlineTests": {
+      "pass": 50,
+      "fail": 0,
+      "assertions": 335,
+      "durationSeconds": 3.24,
+      "files": [
+        "packages/agent-workflow-server/src/beegame/asset-contract-audit.test.ts",
+        "packages/agent-workflow-server/src/beegame/asset-manifest-authoring-contract.test.ts",
+        "packages/agent-workflow-server/src/beegame/resource-production.test.ts"
+      ],
+      "coverage": "Real parser rejection and non-coercion, executable compact registration example, materialized CLI topics and diagnostics, provenance/integrity checks, failed registration behavior and existing local resource operations. Network cases use test mocks."
+    },
+    "typecheck": "./node_modules/.bin/tsc --noEmit -p tsconfig.json: exit 0.",
+    "diffReview": "Independent source/diff review found no contract regression. git diff --check passed.",
+    "limitations": "The contract is now sufficient to discover these legal values without a full reference read; a model can still ignore it or choose extra reads. No claim that the entire phase cost is avoidable or that a particular number of runtime tokens has been saved."
+  }
+}
