@@ -98,6 +98,12 @@ Chat tools expand in place with BeUI ToolResult; full details and subagents rema
 
 ## Verification
 
+`.github/workflows/backend-checks.yml` checks backend types and selected offline
+regressions when backend, deployment, or database sources change. It runs the
+billing SQL migrations against an isolated PGlite engine; it needs no service
+credentials and makes no model calls. Browser and native sandbox suites remain
+explicit checks because they require their respective host runtimes.
+
 ```sh
 bun test packages/agent-workflow-server/src/bgs/runner.test.ts
 ```
@@ -110,7 +116,7 @@ BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs/integration.
 
 Run these on a host that permits nested sandbox setup and process inspection. They check real protocol behavior and file isolation; they do not establish game quality, live subscription availability, or production Linux/Windows behavior.
 
-The billing migration regression executes the actual SQL functions in an isolated in-memory PostgreSQL engine. Install `@electric-sql/pglite` outside this repository and set `BGS_PGLITE_MODULE` to its absolute module path when running `bun test packages/beegame-billing-server/src/__tests__/model-request-usage.sql.test.ts`. Without that variable, this optional check is skipped; no production database is contacted.
+The billing migration regressions execute the actual SQL functions in an isolated in-memory PostgreSQL engine. Install `@electric-sql/pglite@0.5.10` outside this repository and set `BGS_PGLITE_MODULE` to its absolute module path when running `bun test packages/beegame-billing-server/src/__tests__`. Without that variable, SQL checks are skipped locally; backend CI enables them. No production database is contacted.
 
 The broad pre-existing BGS workflow/API suites are not fully green. Selected failures were reproduced in the original checkout; a strict-sandbox Bun HTML bundling limitation also remains. This migration is not a claim of full workflow acceptance.
 

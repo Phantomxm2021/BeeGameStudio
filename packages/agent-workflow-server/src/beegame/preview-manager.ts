@@ -1,7 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { isAbsolute, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bgsCommand, toml } from '../bgs/client'
+import { PROJECT_DESIGN_PATHS } from './design-handoff'
 
 export type BeeGamePreviewStatus =
   | 'idle'
@@ -40,6 +43,7 @@ export type BeeGamePreviewRunner = (
   command: string[],
   options: {
     cwd: string
+    workspacePath: string
     env: Record<string, string>
     onOutput: (text: string) => void
   },
@@ -85,6 +89,7 @@ type SupportedPreviewPlan = {
 
 const DEFAULT_PREVIEW_PORT_START = 63100
 const DEFAULT_HOST = '127.0.0.1'
+const PREVIEW_SANDBOX_PROFILE = 'bgs-preview'
 const VITE_PREVIEW_HOST_PATH = fileURLToPath(new URL('./vite-preview-host.ts', import.meta.url))
 const SAFE_PREVIEW_ENV_KEYS = [
   'HOME',
@@ -163,6 +168,7 @@ export class BeeGamePreviewManager {
     })
     const processes = plan.processes.map(processPlan => this.runner(processPlan.command, {
       cwd: processPlan.cwd,
+      workspacePath,
       env: buildPreviewProcessEnv(processPlan, plan),
       onOutput: text => {
         const record = this.records.get(options.sessionId)
@@ -601,21 +607,104 @@ function runPreviewProcess(
   command: string[],
   options: {
     cwd: string
+    workspacePath: string
     env: Record<string, string>
     onOutput: (text: string) => void
   },
 ): BeeGamePreviewProcess {
-  const proc = Bun.spawn(command, {
-    cwd: options.cwd,
-    env: options.env,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  void streamOutput(proc.stdout, options.onOutput)
-  void streamOutput(proc.stderr, options.onOutput)
-  return {
-    kill: () => proc.kill(),
-    exited: proc.exited,
+  const root = realpathSync(options.workspacePath)
+  const cwd = realpathSync(options.cwd)
+  const runtimeHome = mkdtempSync(join(realpathSync(tmpdir()), 'bgs-preview-'))
+  try {
+    for (const directory of ['cache', 'config', 'npm-cache', 'zsh'])
+      mkdirSync(join(runtimeHome, directory), { recursive: true })
+    const filesystem: Record<string, string> = {
+      ':root': 'deny',
+      ':minimal': 'read',
+      ':slash_tmp': 'deny',
+      [root]: 'write',
+      [runtimeHome]: 'write',
+    }
+    for (const path of [
+      '/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/private/etc',
+      '/System', '/Library/Apple', '/Library/Developer', '/dev', '/opt/homebrew',
+      realpathSync(process.execPath),
+      realpathSync(dirname(VITE_PREVIEW_HOST_PATH)),
+      realpathSync(VITE_PREVIEW_HOST_PATH),
+    ]) filesystem[path] = 'read'
+    for (const path of [
+      'AGENTS.md', ...PROJECT_DESIGN_PATHS, '.git', '.bgs', '.agents', '.aws',
+    ]) filesystem[resolve(root, path)] = 'read'
+    // Match the native project permission: preview clients may use their local
+    // backend and existing game integrations, while filesystem access stays
+    // inside this project and its private temporary home.
+    const sandboxConfig = { filesystem, network: { enabled: true } }
+    const sandboxCommand = bgsCommand().concat(
+      'sandbox', '-C', root, '-P', PREVIEW_SANDBOX_PROFILE,
+      '-c', `permissions.${PREVIEW_SANDBOX_PROFILE}=${toml(sandboxConfig)}`,
+      '--', ...command,
+    )
+    const env = {
+      ...options.env,
+      HOME: runtimeHome,
+      TMPDIR: runtimeHome,
+      TMP: runtimeHome,
+      TEMP: runtimeHome,
+      TMPPREFIX: join(runtimeHome, 'zsh'),
+      XDG_CACHE_HOME: join(runtimeHome, 'cache'),
+      XDG_CONFIG_HOME: join(runtimeHome, 'config'),
+      NPM_CONFIG_CACHE: join(runtimeHome, 'npm-cache'),
+      npm_config_cache: join(runtimeHome, 'npm-cache'),
+      NPM_CONFIG_USERCONFIG: '/dev/null',
+      npm_config_userconfig: '/dev/null',
+      PWD: cwd,
+    }
+    const proc = Bun.spawn(sandboxCommand, {
+      cwd,
+      env,
+      detached: process.platform !== 'win32',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+    const kill = () => {
+      if (process.platform === 'win32') {
+        if (typeof proc.pid === 'number') {
+          try {
+            Bun.spawn(['taskkill', '/PID', String(proc.pid), '/T', '/F'], { stdout: 'ignore', stderr: 'ignore' })
+          } catch { proc.kill() }
+        } else proc.kill()
+        return
+      }
+      if (typeof proc.pid !== 'number') {
+        proc.kill()
+        return
+      }
+      try { process.kill(-proc.pid, 'SIGTERM') }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        return
+      }
+      killTimer ??= setTimeout(() => {
+        try { process.kill(-proc.pid!, 'SIGKILL') }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+      }, 1_000)
+      killTimer.unref?.()
+    }
+    const exited = proc.exited.finally(() => {
+      rmSync(runtimeHome, { recursive: true, force: true })
+    })
+    if (proc.stdout && typeof proc.stdout !== 'number')
+      void streamOutput(proc.stdout, options.onOutput)
+    if (proc.stderr && typeof proc.stderr !== 'number')
+      void streamOutput(proc.stderr, options.onOutput)
+    return {
+      kill,
+      exited,
+    }
+  } catch (error) {
+    rmSync(runtimeHome, { recursive: true, force: true })
+    throw error
   }
 }
 

@@ -12,7 +12,7 @@ Use this checklist before promoting a BeeGame deployment to production.
   - a workspace membership row where the current user is `owner`.
 - Confirm realtime usage event recording, usage summaries, wallet debit idempotency,
   and billing audit routes are available.
-- Confirm no frontend or runtime-host environment contains a Supabase service-role key.
+- Confirm the trusted V3 runtime has its server-only Supabase service-role key, and that no frontend, generated project, or native model process receives it. `bun run saas:preflight` checks the trusted SaaS runtime configuration.
 
 ## Auth And OAuth
 
@@ -82,6 +82,7 @@ BEEGAME_BILLING_API_BASE_URL=https://billing.your-domain.com
 BEEGAME_CREDIT_CONTROL_TOKEN=shared-runtime-to-billing-secret
 BEEGAME_SUPABASE_URL=https://your-project.supabase.co
 BEEGAME_SUPABASE_ANON_KEY=your-supabase-anon-key
+BEEGAME_SUPABASE_SERVICE_ROLE_KEY=your-runtime-only-service-role-key
 BEEGAME_SUPABASE_AVATAR_BUCKET=avatars
 BEEGAME_SUPABASE_ASSET_BUCKET=beegame-assets
 BEEGAME_DEPLOYMENT_STORAGE_BUCKET=beegame-deployments
@@ -91,6 +92,11 @@ BEEGAME_WORKSPACE_ROOT=/srv/beegame/projects
 
 Local client runtime values when the web UI and runtime host are packaged
 together for users to run on their own machine:
+
+These credentials support user-scoped legacy reads; they do not configure a
+trusted V3 execution host. New hosted V3 goals require the server-only deployment
+above. Never distribute its service-role key or internal service tokens to a
+user-run client.
 
 ```env
 BEEGAME_BILLING_MODE=remote
@@ -104,6 +110,7 @@ BEEGAME_WORKSPACE_ROOT=/local/user/projects
 Rules:
 
 - Normal user requests use the current user's Supabase access token and RLS/RPC.
+- V3 Run persistence is the runtime's explicit service-role exception. Supply that key only to the trusted runtime service; do not put it in shared Docker env files or frontend build arguments.
 - Stripe webhook credit grants use the server-only Supabase service-role key
   only inside the dedicated billing backend running `BEEGAME_BILLING_MODE=server`.
 - Trusted runtime hosts in `BEEGAME_BILLING_MODE=remote` must send
@@ -123,8 +130,9 @@ BeeGame supports three billing modes:
 - `server`: trusted deployment mode. This process creates Stripe Checkout
   Sessions, receives Stripe webhooks, verifies `Stripe-Signature`, and grants
   credits through the Supabase service-role RPC.
-- `remote`: local-client mode. This process does not hold Stripe or service-role
-  secrets. It proxies Credit Store pack, checkout, and operator grant requests to
+- `remote`: billing-client mode. This process holds no Stripe secrets. A trusted
+  V3 runtime separately holds its workflow persistence key; a user-run local
+  client must not. It proxies Credit Store pack, checkout, and operator grant requests to
   `BEEGAME_BILLING_API_BASE_URL`, forwarding the signed-in user's authorization.
   The remote billing backend must run in `server` mode.
 - `disabled`: no billing. The Credit Store has no packs and checkout creation

@@ -77,7 +77,7 @@ export function createBeeGameBillingRouteApp(
     )
   })
 
-  app.use('/api/*', cors())
+  app.use('/api/*', cors({ origin: '*', exposeHeaders: ['X-Total-Count', 'X-Next-Offset'] }))
   registerBeeGameBillingPublicRoutes(app, {
     billingConfig: options.billingConfig,
     dashboardRepository: options.dashboardRepository,

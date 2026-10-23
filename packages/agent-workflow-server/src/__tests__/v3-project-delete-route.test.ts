@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createAgentWorkflowApp } from '../app'
 import { createRun, type Run } from '../beegame/workflow-v3/state'
+import { createLocalWorkflowStore } from '../beegame/workflow-v3/store'
 
 test('V3 projects allow owned single and batch deletion without allowing legacy mutations', async () => {
   const root = await mkdtemp(join(tmpdir(), 'beegame-v3-delete-route-'))
@@ -58,6 +59,41 @@ test('V3 projects allow owned single and batch deletion without allowing legacy 
     expect(audit.trim().split('\n').map(line => JSON.parse(line).targetId).sort()).toEqual(['batch-a', 'batch-b', 'single'])
   } finally {
     for (const cleanup of cleanups) await cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('local project deletion removes only the owner-bound workflow snapshot', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'beegame-v3-delete-local-workflow-'))
+  const projectsRoot = join(root, 'projects')
+  const store = createLocalWorkflowStore(join(root, 'workflow-store'))
+  const cleanups: Array<() => void | Promise<void>> = []
+  const app = createAgentWorkflowApp({
+    currentUser: { id: 'owner', role: 'owner' }, dashboardDataRoot: root,
+    defaultWorkspacePath: projectsRoot, modelConfigStore: false, skillsConfig: false,
+    workflowV3Store: store, sessionRunner: { start: async () => ({ stop() {}, async submit() {} }) },
+    registerCleanup: cleanup => cleanups.push(cleanup),
+  })
+  const createProject = (id: string, name: string) => app.request('/api/projects', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, name, root_path: join(projectsRoot, 'users', 'owner', id), created_at: Date.now() }),
+  })
+  try {
+    for (const [id, name] of [['remove-me', 'Remove me'], ['keep-me', 'Keep me']]) {
+      await mkdir(join(projectsRoot, 'users', 'owner', id), { recursive: true })
+      expect((await createProject(id, name)).status).toBe(200)
+      const run = createRun({ projectId: id, ownerId: 'owner',
+        workspacePath: join(projectsRoot, 'users', 'owner', id), chatSessionId: `chat-${id}`,
+        requestKey: 'create', text: JSON.stringify({ project: id }), constraints: {}, ids: ['goal'] })
+      await store.commit(id, 'owner', 0, run, 'agent.goal-confirmed')
+    }
+    const deleted = await app.request('/api/projects/remove-me', { method: 'DELETE' })
+    expect(deleted.status, await deleted.clone().text()).toBe(200)
+    expect(await store.read('remove-me', 'owner')).toBeUndefined()
+    expect((await store.read('keep-me', 'owner'))?.projectId).toBe('keep-me')
+    await expect(store.delete!('keep-me', 'other')).rejects.toMatchObject({ code: 'project-forbidden' })
+  } finally {
+    for (const cleanup of cleanups.reverse()) await cleanup()
     await rm(root, { recursive: true, force: true })
   }
 })

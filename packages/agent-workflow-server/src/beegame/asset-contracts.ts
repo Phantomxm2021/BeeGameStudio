@@ -1,6 +1,7 @@
 import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
 import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
 import { inspectResourceBytes } from '../../../beegame-resource-server/src/resource-inspection'
+import { assertWorkspacePath } from '../filesystem/workspace-path'
 import { createHash, randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
@@ -468,7 +469,7 @@ export async function uploadBeeGameAsset(
     selection_reason: ['User provided this project resource.'],
   }
   const updated = replaceResource(manifest, resource)
-  const rollback = await commitResourceWrites(writes)
+  const rollback = await commitResourceWrites(root, writes)
   try {
     await writeManifestAtomically(root, updated)
     await options.persist?.(updated)
@@ -1161,12 +1162,14 @@ function requireProjectTarget(
 }
 
 async function commitResourceWrites(
+  root: string,
   writes: Array<{ targetPath: string; bytes: Uint8Array }>,
 ): Promise<() => Promise<void>> {
   const snapshots: Array<{ targetPath: string; previous?: Uint8Array }> = []
   const temporaryPaths: string[] = []
   try {
     for (const write of writes) {
+      assertWorkspacePath(root, write.targetPath)
       const previous = existsSync(write.targetPath)
         ? new Uint8Array(await readFile(write.targetPath))
         : undefined
@@ -1175,26 +1178,33 @@ async function commitResourceWrites(
         ...(previous ? { previous } : {}),
       })
       await mkdir(dirname(write.targetPath), { recursive: true })
+      assertWorkspacePath(root, write.targetPath)
       const temporaryPath = `${write.targetPath}.${randomUUID()}.tmp`
       temporaryPaths.push(temporaryPath)
-      await writeFile(temporaryPath, write.bytes)
+      await writeFile(temporaryPath, write.bytes, { flag: 'wx' })
+      assertWorkspacePath(root, write.targetPath)
       await rename(temporaryPath, write.targetPath)
     }
   } catch (error) {
-    await rollbackResourceWrites(snapshots)
+    await rollbackResourceWrites(root, snapshots)
     throw error
   } finally {
     await Promise.all(
-      temporaryPaths.map(path => rm(path, { force: true }).catch(() => undefined)),
+      temporaryPaths.map(path => {
+        assertWorkspacePath(root, path)
+        return rm(path, { force: true })
+      }),
     )
   }
-  return () => rollbackResourceWrites(snapshots)
+  return () => rollbackResourceWrites(root, snapshots)
 }
 
 async function rollbackResourceWrites(
+  root: string,
   snapshots: Array<{ targetPath: string; previous?: Uint8Array }>,
 ): Promise<void> {
   for (const snapshot of snapshots.reverse()) {
+    assertWorkspacePath(root, snapshot.targetPath)
     if (snapshot.previous)
       await writeFile(snapshot.targetPath, snapshot.previous)
     else await rm(snapshot.targetPath, { force: true })
@@ -1223,6 +1233,7 @@ function resolveInsideWorkspace(workspace: string, candidate: string): string {
     : resolve(workspace, candidate)
   if (target !== workspace && !target.startsWith(`${workspace}${sep}`))
     throw new Error(`Path escapes workspace: ${candidate}`)
+  assertWorkspacePath(workspace, target)
   return target
 }
 
@@ -1359,12 +1370,15 @@ async function writeManifestAtomically(
   try {
     for (const write of writes) {
       await mkdir(dirname(write.targetPath), { recursive: true })
+      assertWorkspacePath(root, write.targetPath)
       const temporaryPath = `${write.targetPath}.${randomUUID()}.tmp`
       temporaryPaths.push(temporaryPath)
-      await writeFile(temporaryPath, write.bytes)
+      await writeFile(temporaryPath, write.bytes, { flag: 'wx' })
     }
-    for (let index = 0; index < writes.length; index += 1)
+    for (let index = 0; index < writes.length; index += 1) {
+      assertWorkspacePath(root, writes[index]!.targetPath)
       await rename(temporaryPaths[index]!, writes[index]!.targetPath)
+    }
     const currentPaths = new Set(resourceModules.map(module => module.path))
     currentPaths.add(requirementsModulePath)
     await Promise.all(
@@ -1374,9 +1388,10 @@ async function writeManifestAtomically(
     )
   } finally {
     await Promise.all(
-      temporaryPaths.map(path =>
-        rm(path, { force: true }).catch(() => undefined),
-      ),
+      temporaryPaths.map(path => {
+        assertWorkspacePath(root, path)
+        return rm(path, { force: true })
+      }),
     )
   }
 }

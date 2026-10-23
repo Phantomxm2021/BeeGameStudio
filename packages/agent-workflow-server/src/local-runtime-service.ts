@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { DEFAULT_LOCAL_USER_ID } from './auth/user-context'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
+import { assertWorkspacePath } from './filesystem/workspace-path'
 
 export async function deleteWorkspaceDirectoryIfSafe(
   workspacePath: string,
@@ -66,6 +67,7 @@ export async function resolveSessionWorkspacePath(
       `Workspace path must stay inside the default Projects directory: ${defaultWorkspace}`,
     )
   }
+  assertWorkspacePath(defaultWorkspace, canonicalWorkspace)
   return canonicalWorkspace
 }
 
@@ -88,7 +90,9 @@ export async function createManagedProjectWorkspacePath(
     options.projectId,
   )
   const workspacePath = join(userRoot, projectSegment)
+  assertWorkspacePath(defaultWorkspace, workspacePath)
   await mkdir(workspacePath, { recursive: true })
+  assertWorkspacePath(defaultWorkspace, workspacePath)
   return resolve(workspacePath)
 }
 

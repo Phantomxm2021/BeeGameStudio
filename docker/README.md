@@ -66,6 +66,11 @@ if authorization or settlement of pending usage cannot be confirmed. This
 endpoint adds no database migration; apply the existing usage migrations
 described in the root README before deployment.
 
+Usage summary reads additionally require
+`supabase/migrations/20261023030000_usage_read_aggregation.sql`. Apply it before
+deploying the updated billing service; it adds the read RPC and index without
+rewriting existing usage events or wallet balances.
+
 `http://127.0.0.1:62175/health` is public. Billing API routes under
 `/api/payments/*` require the same signed-in user Authorization header that the
 frontend sends to the runtime host; direct browser visits to those API routes
@@ -73,7 +78,9 @@ return `401 Unauthorized`.
 
 `http://127.0.0.1:62176/health` is public. User skill routes under
 `/api/user-skills/*` require the signed-in user Authorization header. Internal
-enabled-skill reads can require `BEEGAME_SKILLS_SERVICE_TOKEN` when configured.
+enabled-skill reads require `BEEGAME_SKILLS_SERVICE_TOKEN`.
+Production Skills authentication requires both Supabase URL and anon key;
+missing configuration rejects user requests instead of selecting a local owner.
 
 `http://127.0.0.1:62177/health` is public. Resource management routes require a
 signed-in resource administrator; runtime catalog exploration uses the

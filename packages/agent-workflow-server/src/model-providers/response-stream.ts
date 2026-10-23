@@ -21,6 +21,9 @@ export type ProviderUsage = {
   cache_creation_tokens: number
   total_tokens: number
 }
+
+const MAX_EVENT_SIZE = 64 * 1024 * 1024
+
 export async function* parseSse(response: Response): AsyncGenerator<Json> {
   if (!response.body) throw Error('Provider returned no response stream')
   const reader = response.body.getReader(),
@@ -60,9 +63,13 @@ export async function* parseSse(response: Response): AsyncGenerator<Json> {
           data.push(line.slice(5).trimStart())
           eventSize += line.length
         }
-        if (eventSize + buffer.length > 64 * 1024 * 1024)
+        if (eventSize + buffer.length > MAX_EVENT_SIZE)
           throw Error('Provider response event exceeds the size limit')
       }
+      // A provider may keep a malformed event on one very large line. The
+      // line loop above cannot enforce the bound until a delimiter arrives.
+      if (eventSize + buffer.length > MAX_EVENT_SIZE)
+        throw Error('Provider response event exceeds the size limit')
       if (chunk.done) {
         if (buffer.trim() || data.length)
           throw Error('Provider stream ended inside an event')
@@ -117,10 +124,16 @@ export async function* responseEvents(
     status,
     output,
   })
-  let reported: ProviderUsage | undefined, streamFinished = false
-  const observeUsage = (value: Json) => {
+  let reported: ProviderUsage | undefined,
+    streamFinished = false,
+    terminalUsageReported = false,
+    usageIncomplete = false
+  const observeUsage = (value: Json, terminal = config.protocol !== 'anthropic-messages') => {
     usage = { ...usage, ...value }
     reported = providerUsage(config, usage)
+    terminalUsageReported ||= terminal && (
+      config.protocol !== 'anthropic-messages' || hasAnthropicTerminalUsage(value)
+    )
   }
   try {
     yield {
@@ -271,7 +284,7 @@ export async function* responseEvents(
           else if (delta.type === 'signature_delta')
             block.signature = (block.signature ?? '') + delta.signature
         } else if (chunk.type === 'message_delta') {
-          if (chunk.usage) observeUsage(chunk.usage)
+          if (chunk.usage) observeUsage(chunk.usage, true)
           finish = chunk.delta?.stop_reason ?? finish
         } else if (chunk.type === 'message_stop') {
           ended = true
@@ -320,9 +333,11 @@ export async function* responseEvents(
   } finally {
     // Includes stream errors and consumer cancellation. Never discard usage
     // already acknowledged by the supplier, or invent the unreported remainder.
+    usageIncomplete = !streamFinished || !ended || !reported ||
+      config.protocol === 'anthropic-messages' && !terminalUsageReported
     onUsage?.({ ...(reported ?? { input_tokens: 0, output_tokens: 0,
       cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 0 }),
-      ...(!streamFinished || !ended || !reported ? { incomplete: true as const } : {}) })
+      ...(usageIncomplete ? { incomplete: true as const } : {}) })
   }
   if (!ended) throw Error('Provider stream ended without a terminal event')
   const complete =
@@ -442,7 +457,8 @@ export async function* responseEvents(
   const result = {
     ...envelope(complete ? 'completed' : 'incomplete'),
     // Completion follows the provider's terminal event. Missing accounting is
-    // already retained by onUsage as incomplete; never synthesize a zero receipt.
+    // retained in both the callback receipt and the response consumed by the
+    // runtime worker; never synthesize a zero receipt.
     ...(reported ? { usage: {
       input_tokens:
         reported.input_tokens +
@@ -457,6 +473,7 @@ export async function* responseEvents(
       ...(reported.reasoning_tokens !== undefined
         ? { output_tokens_details: { reasoning_tokens: reported.reasoning_tokens } }
         : {}),
+      ...(usageIncomplete ? { incomplete: true as const } : {}),
     } } : {}),
     ...(!complete
       ? { incomplete_details: { reason: incompleteReason } }
@@ -512,4 +529,9 @@ function providerUsage(
     cache_creation_tokens: write,
     total_tokens: input + output,
   }
+}
+
+function hasAnthropicTerminalUsage(value: Json): boolean {
+  return typeof value.output_tokens === 'number' &&
+    Number.isSafeInteger(value.output_tokens) && value.output_tokens >= 0
 }

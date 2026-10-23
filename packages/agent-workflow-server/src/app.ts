@@ -447,9 +447,9 @@ export function createAgentWorkflowApp(
       // Deliberately omit allowHeaders: Hono reflects the browser's requested
       // headers after the origin has passed the explicit trusted-origin policy.
       allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-      // Explicit export identity is verified by separately hosted dashboards.
+      // Separately hosted dashboards read export identity and usage pagination.
       // Do not expose credentials or loosen the trusted-origin policy.
-      exposeHeaders: ['X-BGS-Artifact-SHA256', 'X-BGS-Export-Kind'],
+      exposeHeaders: ['X-BGS-Artifact-SHA256', 'X-BGS-Export-Kind', 'X-Total-Count', 'X-Next-Offset'],
     }),
   )
   const outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {
@@ -715,7 +715,11 @@ export function createAgentWorkflowApp(
     await next()
   })
   app.use('/api/beegame-sessions/:id/*', async (c, next) => {
-    if (c.req.method === 'POST' && c.req.path.split('/').at(-1) === 'input') {
+    const tail = c.req.path.split('/').slice(4).join('/')
+    const isLegacyMutation =
+      (c.req.method === 'POST' && ['input', 'stop'].includes(tail)) ||
+      (c.req.method === 'DELETE' && tail === '')
+    if (isLegacyMutation) {
       const metadata = beeGameSessions.metadata(c.req.param('id')!)
       if (metadata?.projectId) {
         try { await v3Routes.assertLegacy(metadata.projectId, getCurrentUser(c.req.raw).id, c.req.raw) }
@@ -3170,6 +3174,11 @@ export function createAgentWorkflowApp(
         previewCapabilities.revokeSession(liveSession.id)
         await beeGameSessions.delete(liveSession.id, { deleteArtifacts: false })
       }
+      // Local V3 storage is not tied to project metadata and therefore needs
+      // an explicit owner-checked removal during the normal project delete.
+      // Remote storage is deleted by its project FK cascade and may not expose
+      // this optional local-only operation.
+      await v3Store?.delete?.(projectId, user.id)
       const deleted = await dashboardRepository.deleteProject(
         request,
         user,

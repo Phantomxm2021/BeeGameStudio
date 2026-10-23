@@ -15,6 +15,8 @@ import {
 } from './auth'
 import {
   createBeeGameSupabaseBillingRepositoryFromEnv,
+  DEFAULT_USAGE_EVENTS_PAGE_SIZE,
+  MAX_USAGE_EVENTS_PAGE_SIZE,
   type BeeGameBillingServerRepository,
 } from './supabase-billing-repository'
 import { createTLSAwareFetch } from '@bee-game-studio/security-core'
@@ -54,15 +56,18 @@ export function createBeeGameBillingServerApp(
     const to = parseOptionalDate(c.req.query('to'))
     if (from === null || to === null)
       return c.json({ error: 'Invalid usage date window' }, 400)
-    const events = await repository.listUsageEventsForUser(user.id, projectId)
-    return c.json(
-      events.filter(event => {
-        const createdAt = new Date(event.createdAt)
-        if (from && createdAt < from) return false
-        if (to && createdAt > to) return false
-        return true
-      }),
+    const pagination = parseUsagePagination(c.req.query('offset'), c.req.query('limit'))
+    if (!pagination) return c.json({ error: 'Invalid usage pagination' }, 400)
+    const page = await repository.listUsageEventsPageForUser(
+      user.id, projectId, from, to, pagination.offset, pagination.limit,
     )
+    if (page.total !== null) c.header('X-Total-Count', String(page.total))
+    const hasNextPage = page.total !== null
+      ? page.total > pagination.offset + page.items.length
+      : page.items.length === pagination.limit
+    if (page.items.length > 0 && hasNextPage)
+      c.header('X-Next-Offset', String(pagination.offset + page.items.length))
+    return c.json(page.items)
   })
   app.get('/api/usage/summary', async c => {
     const user = authContext.getCurrentUser(c.req.raw)
@@ -71,32 +76,7 @@ export function createBeeGameBillingServerApp(
     const to = parseOptionalDate(c.req.query('to'))
     if (from === null || to === null)
       return c.json({ error: 'Invalid usage date window' }, 400)
-    const events = (await repository.listUsageEventsForUser(user.id, projectId))
-      .filter(event => {
-        const createdAt = new Date(event.createdAt)
-        if (from && createdAt < from) return false
-        if (to && createdAt > to) return false
-        return true
-      })
-    return c.json(events.reduce((summary, event) => ({
-      eventsCount: summary.eventsCount + 1,
-      promptTokens: summary.promptTokens + event.delta.prompt_tokens,
-      completionTokens: summary.completionTokens + event.delta.completion_tokens,
-      cacheReadTokens: summary.cacheReadTokens + event.delta.cache_read_tokens,
-      cacheCreationTokens: summary.cacheCreationTokens + event.delta.cache_creation_tokens,
-      totalTokens: summary.totalTokens + event.delta.total_tokens,
-      weightedTokens: summary.weightedTokens + event.weightedTokensDelta,
-      creditsMicro: summary.creditsMicro + event.creditsMicro,
-    }), {
-      eventsCount: 0,
-      promptTokens: 0,
-      completionTokens: 0,
-      cacheReadTokens: 0,
-      cacheCreationTokens: 0,
-      totalTokens: 0,
-      weightedTokens: 0,
-      creditsMicro: 0,
-    }))
+    return c.json(await repository.getUsageSummaryForUser(user.id, projectId, from, to))
   })
   app.get('/api/usage-wallet', async c => {
     const user = authContext.getCurrentUser(c.req.raw)
@@ -109,4 +89,20 @@ function parseOptionalDate(value: string | undefined): Date | undefined | null {
   if (!value?.trim()) return undefined
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+function parseUsagePagination(
+  offsetValue: string | undefined,
+  limitValue: string | undefined,
+): { offset: number; limit: number } | null {
+  const parse = (value: string | undefined, fallback: number, positive: boolean) => {
+    if (!value?.trim()) return fallback
+    const parsed = Number(value)
+    if (!Number.isSafeInteger(parsed) || (positive ? parsed <= 0 : parsed < 0)) return null
+    return parsed
+  }
+  const offset = parse(offsetValue, 0, false)
+  const requestedLimit = parse(limitValue, DEFAULT_USAGE_EVENTS_PAGE_SIZE, true)
+  if (offset === null || requestedLimit === null) return null
+  return { offset, limit: Math.min(requestedLimit, MAX_USAGE_EVENTS_PAGE_SIZE) }
 }

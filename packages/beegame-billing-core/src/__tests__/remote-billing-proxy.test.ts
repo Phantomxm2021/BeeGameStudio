@@ -73,4 +73,27 @@ describe('remote-billing-proxy', () => {
       body: '{"priceId":"price_500"}',
     }])
   })
+
+  test('preserves usage pagination headers from remote billing', async () => {
+    const response = await proxyBeeGameBillingRequest(
+      new Request('https://runtime.beegame.test/api/usage/events?offset=100&limit=100'),
+      {
+        mode: 'remote',
+        remoteApiBaseUrl: 'https://billing.beegame.test',
+      },
+      '/api/usage/events?offset=100&limit=100',
+      async () => new Response('[]', {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'X-Total-Count': '1001',
+          'X-Next-Offset': '200',
+        },
+      }),
+    )
+
+    expect(response.headers.get('x-total-count')).toBe('1001')
+    expect(response.headers.get('x-next-offset')).toBe('200')
+    expect(await response.json()).toEqual([])
+  })
 })

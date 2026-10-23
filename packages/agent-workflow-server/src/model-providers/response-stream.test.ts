@@ -87,6 +87,18 @@ test('SSE still rejects malformed JSON and unfinished events', async () => {
   }
 })
 
+test('SSE rejects a no-newline event before it can grow without a bound', async () => {
+  const bytes = new Uint8Array(64 * 1024 * 1024 + 1)
+  bytes.set(new TextEncoder().encode('data:'))
+  bytes.fill(120, 5)
+  const read = async () => {
+    for await (const _ of parseSse(new Response(new ReadableStream({
+      start(controller) { controller.enqueue(bytes); controller.close() },
+    })))) { /* consume */ }
+  }
+  await expect(read()).rejects.toThrow('event exceeds the size limit')
+})
+
 test('Anthropic message_stop finishes and cancels the reader without reading a failing transport tail', async () => {
   let cancelled = false, position = 0
   const chunks = [
@@ -107,6 +119,24 @@ test('Anthropic message_stop finishes and cancels the reader without reading a f
   expect(receipts).toEqual([{ input_tokens: 10, output_tokens: 2, cache_read_tokens: 0,
     cache_creation_tokens: 0, total_tokens: 12 }])
   expect(cancelled).toBe(true)
+})
+
+test('Anthropic partial terminal usage stays marked incomplete through the response and callback', async () => {
+  const response = sse([
+    { type: 'message_start', message: { usage: { input_tokens: 10, output_tokens: 0 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Partial' } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: {} },
+    { type: 'message_stop' },
+  ])
+  const events: any[] = [], receipts: unknown[] = []
+  for await (const event of responseEvents({ ...config, protocol: 'anthropic-messages' }, response, [], usage => receipts.push(usage)))
+    events.push(event)
+  expect(events.at(-1)).toMatchObject({
+    type: 'response.completed',
+    response: { status: 'completed', usage: { input_tokens: 10, output_tokens: 0, incomplete: true } },
+  })
+  expect(receipts).toEqual([{ input_tokens: 10, output_tokens: 0, cache_read_tokens: 0,
+    cache_creation_tokens: 0, total_tokens: 10, incomplete: true }])
 })
 
 test('ordinary function argument errors reach the native tool handler and survive continuation', async () => {

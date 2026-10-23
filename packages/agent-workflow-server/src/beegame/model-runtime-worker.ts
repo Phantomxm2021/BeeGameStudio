@@ -194,5 +194,6 @@ function responseUsage(value: Record<string, any>): BeeGameModelUsage {
   if ([input, output, read, write].some(count => !Number.isSafeInteger(count) || count < 0) || read + write > input)
     throw Error('Provider reported invalid token usage')
   return { input_tokens: input - read - write, output_tokens: output, cache_read_tokens: read,
-    cache_creation_tokens: write, total_tokens: input + output }
+    cache_creation_tokens: write, total_tokens: input + output,
+    ...(value.incomplete === true ? { incomplete: true as const } : {}) }
 }

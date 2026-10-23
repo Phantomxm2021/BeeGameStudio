@@ -6,8 +6,17 @@ test('real auxiliary worker pins serialized addresses and returns usage on succe
   const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     requests++
     const body = await request.json() as any
-    if (new URL(request.url).pathname === '/v1/messages')
-      return new Response('data: ' + JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 100, output_tokens: 0 } } }) + '\n\n')
+    if (new URL(request.url).pathname === '/v1/messages') {
+      const events = body.model === 'missing-terminal-usage'
+        ? [
+            { type: 'message_start', message: { usage: { input_tokens: 100, output_tokens: 0 } } },
+            { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'offline partial usage' } },
+            { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+            { type: 'message_stop' },
+          ]
+        : [{ type: 'message_start', message: { usage: { input_tokens: 100, output_tokens: 0 } } }]
+      return new Response(events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join(''))
+    }
     return Response.json({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'offline success' }] }],
       ...(body.model !== 'missing-usage' ? { usage: { input_tokens: 100, output_tokens: 20, input_tokens_details: { cached_tokens: 10 } } } : {}) })
   } })
@@ -41,6 +50,16 @@ test('real auxiliary worker pins serialized addresses and returns usage on succe
       runtimeEnv: { OPENAI_API_KEY: 'synthetic', OPENAI_BASE_URL: endpoint, BEEGAME_MODEL: 'missing-usage' } })
     expect(unknown.content).toBe('offline success')
     expect(unknown.usage).toMatchObject({ total_tokens: 0, incomplete: true })
-    expect(requests).toBe(4)
+    try {
+      await host.generateWithUsage!({ ...base,
+        runtimeEnv: { BEEGAME_MODEL_TYPE: 'anthropic', ANTHROPIC_API_KEY: 'synthetic', ANTHROPIC_BASE_URL: endpoint, BEEGAME_MODEL: 'missing-terminal-usage' },
+        structuredOutput: { name: 'required', description: 'Offline', inputSchema: { type: 'object' } },
+      })
+      throw Error('Expected structured output validation to fail')
+    } catch (error) {
+      expect(error).toBeInstanceOf(BeeGameModelRuntimeError)
+      expect((error as BeeGameModelRuntimeError).usage).toMatchObject({ total_tokens: 100, incomplete: true })
+    }
+    expect(requests).toBe(5)
   } finally { upstream.stop(true) }
 }, 15_000)

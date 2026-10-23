@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm, access } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, access, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { uploadBeeGameAsset, readBeeGameAssetManifest, writeBeeGameAssetManifest } from './asset-contracts'
@@ -50,4 +50,29 @@ test('grouped files and manifest roll back together when persistence fails', asy
   await expect(uploadBeeGameAsset(root, 'rollback', [image(), atlas()], { persist: async () => { throw Error('offline persistence failure') } })).rejects.toThrow('persistence failure')
   expect(await readBeeGameAssetManifest(root)).toEqual(before)
   for (const name of ['icons.png', 'icons.json']) await expect(access(join(root, 'assets/runtime/user-provided/rollback', name))).rejects.toThrow()
+})
+
+test('rejects an upload through a linked runtime directory without writing outside or changing the manifest', async () => {
+  const root = await fixture(), before = await readBeeGameAssetManifest(root)
+  const outside = await mkdtemp(join(tmpdir(), 'bgs-upload-outside-')); roots.push(outside)
+  await symlink(outside, join(root, 'assets/runtime'))
+  await expect(uploadBeeGameAsset(root, 'escape', image())).rejects.toThrow('symbolic link')
+  expect(await readdir(outside)).toEqual([])
+  expect(await readBeeGameAssetManifest(root)).toEqual(before)
+})
+
+test('rejects a linked upload file and linked manifest directory without overwriting their targets', async () => {
+  const root = await fixture(), before = await readBeeGameAssetManifest(root)
+  const outside = await mkdtemp(join(tmpdir(), 'bgs-upload-target-')); roots.push(outside)
+  const sentinel = join(outside, 'sentinel.png')
+  await writeFile(sentinel, 'preserve')
+  const directory = join(root, 'assets/runtime/user-provided/escape')
+  await mkdir(directory, {recursive: true})
+  await symlink(sentinel, join(directory, 'icons.png'))
+  await expect(uploadBeeGameAsset(root, 'escape', image())).rejects.toThrow('symbolic link')
+  expect(await readFile(sentinel, 'utf8')).toBe('preserve')
+  await rm(join(root, 'assets/manifest'), {recursive: true})
+  await symlink(outside, join(root, 'assets/manifest'))
+  await expect(writeBeeGameAssetManifest(root, before)).rejects.toThrow('symbolic link')
+  expect(await readdir(outside)).toEqual(['sentinel.png'])
 })

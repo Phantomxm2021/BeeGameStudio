@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, realpathSync } from 'node:fs'
@@ -14,6 +14,8 @@ export const previewRunState = (run: PreviewRunState): PreviewRunState => ({
 export type WorkflowStore = {
   read(projectId: string, actorId: string): Promise<Run | undefined>
   readPreviewState?(projectId: string, actorId: string): Promise<PreviewRunState | undefined>
+  /** Remove the owner-bound local workflow snapshot and its append-only events. */
+  delete?(projectId: string, actorId: string): Promise<void>
   commit(projectId: string, actorId: string, expectedVersion: number, next: Run, event: string): Promise<void>
 }
 // JSONB may reorder keys. Compare JSON values, normalizing optional fields
@@ -54,6 +56,24 @@ export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
       const value = await load(projectId)
       if (value && value.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
       return value?.run ? currentAgentRun(value.run) : undefined
+    },
+    async delete(projectId, actorId) {
+      const initial = await load(projectId)
+      if (!initial) return
+      if (initial.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
+      // Serialize removal with commits for this workspace. Re-read after any
+      // queued commit so an owner check and deletion apply to the current file.
+      const lock = join(root, 'workflow-v3') + ':' + initial.run.workspacePath
+      const prior = queues.get(lock) ?? Promise.resolve()
+      const work = prior.catch(() => {}).then(async () => {
+        const value = await load(projectId)
+        if (!value) return
+        if (value.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
+        await rm(filename(projectId), { force: true })
+      })
+      const marker = work.then(() => {}, () => {})
+      queues.set(lock, marker)
+      try { await work } finally { if (queues.get(lock) === marker) queues.delete(lock) }
     },
     async commit(projectId, actorId, expectedVersion, next, event) {
       const file = filename(projectId), lock = join(root, 'workflow-v3')+':'+next.workspacePath, prior = queues.get(lock) ?? Promise.resolve()
