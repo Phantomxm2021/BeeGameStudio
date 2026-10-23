@@ -28,7 +28,7 @@ export const CONTENT_CONSUMER_API = {
     lifecycle: 'render replaces nodes; call it again with changed data/state/viewport. No update/setState/element lookup methods. Use host.querySelector with [data-node-id] for observations. dispose removes the surface.',
   },
   documents: {
-    formats: 'Read-only Editor/Preview contracts: in the current BGS tools directory, bun check-content.mjs --format lists sections. Select index/sceneDocument/uiDocument/coordinates for fields, examples for minimal inputs, preview for host environment/storage. No content or running Preview required. This consumer is optional. Resource registration: resources.mjs --help.',
+    formats: 'Read-only Editor/Preview contracts: in the current BGS tools directory, bun check-content.mjs --format lists sections. Use --format index sceneDocument uiDocument coordinates for fields, --format examples for minimal inputs, --format preview for host environment/storage. Separate section names with spaces. No content or running Preview required. This consumer is optional. Resource registration: resources.mjs --help.',
     loadProductionResources: 'await loadProductionResources(absolute assets/asset-manifest.json URL, parsed documents, fetcher?) -> {assets, fonts, resourceUrl(id,member?), dispose}; static images/atlas/fonts only. resourceUrl resolves registered audio/model/dependency files for your own integration; it does not play audio or render 3D.',
     readUiData: 'readUiData(document object) -> validated document.data; not a path, DOM element or Promise',
     readSceneData: 'readSceneData(document object) -> validated document.data',

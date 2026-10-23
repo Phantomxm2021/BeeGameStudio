@@ -1,0 +1,140 @@
+{
+  "date": "2026-10-23",
+  "baselineCommit": "31b925549",
+  "scope": {
+    "description": "Changes and actions performed by this audit, not the historical project run",
+    "projectArtifacts": "read-only",
+    "frontendChanges": false,
+    "nativeCliChanges": false,
+    "modelCalls": 0,
+    "serviceRestarts": 0
+  },
+  "evidence": {
+    "sessionId": "beegame_45fd24acc2aa4bb399f9c1ba51194af7",
+    "snapshotRows": 3972,
+    "snapshotLastEventAt": "2026-10-23T08:07:49.638Z",
+    "snapshotSha256": "a73a5aa568e51cdc2c2e5f06c658f310cca25ef66fcc03b4281570506c28c5b1",
+    "scope": "Fixed transcript snapshot: approximately 97 minutes, one failed turn and an explicit user continuation still unfinished at the snapshot. This is not the final project bill or final task outcome.",
+    "usage": {
+      "prompt_tokens": 2157543,
+      "completion_tokens": 444870,
+      "cache_read_tokens": 36702336,
+      "cache_creation_tokens": 0,
+      "total_tokens": 39304749,
+      "cacheSharePercent": 93.38,
+      "positiveUsageReceipts": 261,
+      "usageCallbacks": 262,
+      "weightedTokens": 8052127,
+      "creditsMicro": 805212700,
+      "incompleteProviderReceipt": true
+    },
+    "usageInterpretation": "Sum final cumulative usage once per provider epoch. Current BGS weighting is prompt + 5*completion + 0.1*cache_read + 1.25*cache_creation (rounded per ledger contract). 261 unique positive billing events agree with the recorded ledger. The timeout has an incomplete zero-increment receipt: unknown usage is not assumed to be zero. Provider-reported reasoning is a subset of completion and must not be counted twice; this snapshot has no separate reasoning field."
+  },
+  "findings": [
+    {
+      "id": "misleading-format-example",
+      "classification": "confirmed BGS help defect; fixed",
+      "events": [
+        122,
+        136
+      ],
+      "cause": "Both checker help and consumer API described separate format sections with slash separators. The observed invocation copied that form and failed; space-separated sections subsequently succeeded.",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+        "packages/agent-workflow-server/src/beegame/game-content-consumer-cli.ts"
+      ],
+      "change": "Show executable --format index sceneDocument uiDocument coordinates and state that section names are separated by spaces. Parser and output contracts are unchanged.",
+      "costBoundary": "One observed failed call. No claim that correcting this small defect materially resolves overall token or time cost."
+    },
+    {
+      "id": "command-progress-prefix-amplification",
+      "classification": "confirmed host event inefficiency; recorded, not changed",
+      "source": "packages/agent-workflow-server/src/bgs/runner.ts:390-397",
+      "worstSample": {
+        "events": [
+          2361,
+          2520
+        ],
+        "frames": 160,
+        "elapsedMs": 102,
+        "cumulativeOutputBytes": 1182464,
+        "finalOutputBytes": 16547,
+        "completionEvent": 2521
+      },
+      "allProgress": {
+        "frames": 843,
+        "tools": 125,
+        "cumulativeOutputBytes": 1807305,
+        "sumOfLastFrameBytes": 248028
+      },
+      "impact": "Repeated cumulative output increases transcript/diagnostic writes, serialization, network and UI work. These host progress receipts are not native model tool input, so this is not evidence of token inflation.",
+      "decision": "Do not introduce timers, emission locks or cancellation exceptions for this sample. Frontend expects cumulative output, and manager drops callbacks after abort; batching can lose already received partial output on cancellation. The measured 102ms burst cannot explain the 97-minute run."
+    },
+    {
+      "id": "silent-provider-wait",
+      "classification": "observed major delay; BGS policy tradeoff, root cause upstream unresolved",
+      "events": [
+        849,
+        854,
+        856
+      ],
+      "secondsBetweenUsageReceipts": 604.977,
+      "source": "packages/agent-workflow-server/src/beegame/model-runtime-transport.ts:9",
+      "behavior": "BGS allows 600000ms for response headers; this request ended in UND_ERR_HEADERS_TIMEOUT. The task failed and resumed only after an explicit user message.",
+      "decision": "Keep the timeout unchanged: one silent timeout does not establish a safe shorter threshold for slow successful requests. Do not add retries or a second timeout mechanism."
+    },
+    {
+      "id": "native-context-compaction",
+      "classification": "measured cost, no BGS misfire established",
+      "samples": [
+        {
+          "startEvent": 895,
+          "endEvent": 898,
+          "seconds": 143.155,
+          "prompt_tokens": 152797,
+          "completion_tokens": 13559,
+          "cache_read_tokens": 0
+        },
+        {
+          "startEvent": 2136,
+          "endEvent": 2138,
+          "seconds": 85.18,
+          "prompt_tokens": 196442,
+          "completion_tokens": 11807,
+          "cache_read_tokens": 7040
+        },
+        {
+          "startEvent": 2854,
+          "endEvent": 2857,
+          "seconds": 134.768,
+          "prompt_tokens": 182124,
+          "completion_tokens": 11070,
+          "cache_read_tokens": 7168
+        }
+      ],
+      "totalSeconds": 363.103,
+      "totalTokens": 582007,
+      "weightedTokens": 714964,
+      "decision": "No evidence of duplicate context injection or a host-triggered compaction loop. Keep native compaction and current tool output budget; reducing thresholds or discarding source context without evidence can increase failures."
+    },
+    {
+      "id": "project-test-iteration",
+      "classification": "agent execution behavior; no host automatic retry bug established",
+      "behavior": "Repeated route-check failures occur as separate agent-issued commands. Current transport and native provider settings disable automatic retry.",
+      "decision": "Do not add case-specific test answers, retry gates, test limits or another reviewer/model stage. Large raw project output alone does not prove model output limits were bypassed: native shell already has a 10000-token budget."
+    }
+  ],
+  "validation": {
+    "tests": {
+      "pass": 61,
+      "fail": 0,
+      "files": [
+        "packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts",
+        "packages/agent-workflow-server/src/beegame/game-content-consumer.test.ts"
+      ],
+      "scope": "Existing offline fixtures for actual selective format queries, checker entry, optional consumer API and output contracts; no paid calls."
+    },
+    "diff": "git diff --check passed",
+    "limits": "No new runtime timing mechanism, no production restart, no real-project rerun. End-to-end token/time savings remain unmeasured."
+  }
+}

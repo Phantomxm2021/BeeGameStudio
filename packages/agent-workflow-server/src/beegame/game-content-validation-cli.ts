@@ -265,7 +265,7 @@ export const CURRENT_CONTENT_CHECK_HELP = `Usage: bun <supplied-check-content-en
   --scene-point FILE NODE W H Derive saved Scene world/logical-screen coordinates; not rendered pixels
   --read-design JSON        Batch exact sections: [{"document":"GDD.md","sections":["Exact heading"]}]
   --review-sources FILE ... [--details] Batch saved source hashes/headings; --details adds text, not a semantic review
-FILE is workspace-relative unless stated otherwise. --format reads selected Editor/Preview contracts without creating content or starting Preview. Use index/sceneDocument/uiDocument/coordinates for Editor fields; preview for host constraints and storage.
+FILE is workspace-relative unless stated otherwise. --format reads selected Editor/Preview contracts without creating content or starting Preview. Use --format index sceneDocument uiDocument coordinates for Editor fields; --format preview for host constraints and storage. Separate section names with spaces.
 --report produces human-readable text and a saved JSON report path; omit it for JSON. --details retains full observations.
 --appendix replaces JSON with the existing UI/HUD coordinate tables and diagnostics; use it after FILE W H or the --game-view/--camera pair.
 Checks inspect selected saved inputs only. They do not create design records or certify complete gameplay/visual quality.
