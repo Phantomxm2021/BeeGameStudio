@@ -37,6 +37,132 @@ test('encoded authored audio rejects generic audio type before registration and 
   expect(parseCanonicalBeeGameAssetManifest(composite).resources[0]!.asset_kind).toBe('data')
 })
 
+test('requires local GLTF dependencies before batch registration and preserves embedded models', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'bgs-gltf-dependencies-'))
+  workspaces.push(workspace)
+  const value = manifest()
+  value.resources = []
+  value.project_target!.asset_format_capabilities = ['gltf', 'glb', 'json', 'png', 'bin']
+  value.requirements[0]!.acquisition_profile.asset_kinds = ['model']
+  await writeBeeGameAssetManifest(workspace, value)
+  await mkdir(join(workspace, 'assets/runtime/models'), { recursive: true })
+  await mkdir(join(workspace, 'assets/runtime/models/parts'), { recursive: true })
+
+  const modelPath = 'assets/runtime/models/hero.gltf'
+  const texturePath = 'assets/runtime/models/textures/base:diffuse.png'
+  const bufferPath = 'assets/runtime/mesh.bin'
+  const embeddedPath = 'assets/runtime/embedded.glb'
+  const dataPath = 'assets/runtime/data.gltf'
+  const remotePath = 'assets/runtime/remote.gltf'
+  const absolutePath = 'assets/runtime/absolute.gltf'
+  const externalGlbPath = 'assets/runtime/external.glb'
+  const externalGlbDependencyPath = 'assets/runtime/models/parts/external.png'
+  const packPath = 'assets/runtime/models/pack.json'
+  const memberPath = 'assets/runtime/models/parts/member.gltf'
+  const memberDependencyPath = 'assets/runtime/models/parts/member.png'
+  await writeFile(join(workspace, modelPath), JSON.stringify({
+    asset: { version: '2.0' },
+    images: [{ uri: './textures/base%3Adiffuse%2Epng' }],
+    buffers: [{ uri: '../mesh.bin' }],
+  }))
+  await writeFile(join(workspace, embeddedPath), glbWithJson({
+    asset: { version: '2.0' },
+    buffers: [{ byteLength: 0 }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 0 }],
+    images: [{ bufferView: 0, mimeType: 'image/png' }],
+  }))
+  await writeFile(join(workspace, dataPath), JSON.stringify({
+    asset: { version: '2.0' },
+    images: [{ uri: 'data:image/png;base64,AA==' }],
+    buffers: [{ uri: 'data:application/octet-stream;base64,AA==' }],
+  }))
+  await writeFile(join(workspace, remotePath), JSON.stringify({
+    asset: { version: '2.0' },
+    images: [{ uri: 'https://example.test/base.png' }],
+  }))
+  await writeFile(join(workspace, absolutePath), JSON.stringify({
+    asset: { version: '2.0' },
+    images: [{ uri: '/tmp/base.png' }],
+  }))
+  await writeFile(join(workspace, externalGlbPath), glbWithJson({
+    asset: { version: '2.0' },
+    images: [{ uri: 'models/parts/external.png' }],
+  }))
+  await writeFile(join(workspace, packPath), '{}')
+  await writeFile(join(workspace, memberPath), JSON.stringify({
+    asset: { version: '2.0' },
+    images: [{ uri: './member.png' }],
+  }))
+
+  const registration = (id: string, rootPath: string, filePaths: string[], extra: Record<string, unknown> = {}) => ({
+    id,
+    fulfills: ['req-model'],
+    root_path: rootPath,
+    file_paths: filePaths,
+    provisional: false,
+    reason: 'Synthetic GLTF dependency fixture',
+    selection_reason: ['Exercises local dependency closure'],
+    asset_kind: 'model',
+    ...extra,
+  })
+  const missing = registration('hero', modelPath, [modelPath])
+  const embedded = registration('embedded', embeddedPath, [embeddedPath])
+  const remote = registration('remote', remotePath, [remotePath])
+  const absolute = registration('absolute', absolutePath, [absolutePath])
+  const externalGlb = registration('external-glb', externalGlbPath, [externalGlbPath])
+  const member = registration('pack', packPath, [packPath, memberPath])
+  const before = await readFile(join(workspace, 'assets/asset-manifest.json'))
+  let missingError = ''
+  try {
+    await registerBeeGameLocalResources(workspace, [missing, embedded, member, externalGlb])
+  } catch (error) {
+    missingError = String(error)
+  }
+  expect(missingError).toContain('assets/runtime/models/hero.gltf')
+  expect(missingError).toContain('assets/runtime/models/textures/base:diffuse.png')
+  expect(missingError).toContain('assets/runtime/models/parts/member.gltf')
+  expect(missingError).toContain('assets/runtime/models/parts/member.png')
+  expect(missingError).toContain('assets/runtime/external.glb')
+  expect(missingError).toContain('assets/runtime/models/parts/external.png')
+  expect(await readFile(join(workspace, 'assets/asset-manifest.json'))).toEqual(before)
+  expect((await readBeeGameAssetManifest(workspace)).resources).toHaveLength(0)
+  let absoluteError = ''
+  try {
+    await registerBeeGameLocalResources(workspace, [remote, absolute])
+  } catch (error) {
+    absoluteError = String(error)
+  }
+  expect(absoluteError).toContain('assets/runtime/remote.gltf')
+  expect(absoluteError).toContain('https://example.test/base.png')
+  expect(absoluteError).toContain('assets/runtime/absolute.gltf')
+  expect(absoluteError).toContain('/tmp/base.png')
+  expect(absoluteError).toContain('must be a project-relative URI')
+  expect(await readFile(join(workspace, 'assets/asset-manifest.json'))).toEqual(before)
+
+  await mkdir(join(workspace, 'assets/runtime/models/textures'), { recursive: true })
+  await writeFile(join(workspace, texturePath), 'synthetic texture')
+  await writeFile(join(workspace, bufferPath), 'synthetic buffer')
+  await writeFile(join(workspace, memberDependencyPath), 'synthetic member texture')
+  await writeFile(join(workspace, externalGlbDependencyPath), 'synthetic external GLB texture')
+  const complete = registration('hero', modelPath, [modelPath, texturePath, bufferPath], {
+    dependencies: [
+      { key: 'texture', parent_key: 'hero', element_id: 'texture', element_path: 'textures/base:diffuse.png', reference_path: 'textures/base:diffuse.png', local_path: texturePath, kind: 'image' },
+      { key: 'mesh', parent_key: 'hero', element_id: 'mesh', element_path: '../mesh.bin', reference_path: '../mesh.bin', local_path: bufferPath, kind: 'buffer' },
+    ],
+  })
+  const data = registration('data', dataPath, [dataPath])
+  const memberComplete = registration('pack', packPath, [packPath, memberPath, memberDependencyPath])
+  const externalGlbComplete = registration('external-glb', externalGlbPath, [externalGlbPath, externalGlbDependencyPath])
+  const registered = await registerBeeGameLocalResources(workspace, [complete, embedded, data, memberComplete, externalGlbComplete])
+  expect(registered.resources).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'hero', status: 'verified', file_paths: [modelPath, texturePath, bufferPath] }),
+    expect.objectContaining({ id: 'embedded', status: 'verified', file_paths: [embeddedPath] }),
+    expect.objectContaining({ id: 'data', status: 'verified', file_paths: [dataPath] }),
+    expect.objectContaining({ id: 'pack', status: 'verified', file_paths: [packPath, memberPath, memberDependencyPath] }),
+    expect.objectContaining({ id: 'external-glb', status: 'verified', file_paths: [externalGlbPath, externalGlbDependencyPath] }),
+  ]))
+})
+
 test('reads legacy encoded audio without rewriting the manifest or relaxing new registration', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-legacy-audio-')); workspaces.push(root)
   const value = manifest()
@@ -354,6 +480,21 @@ function manifest(fulfills: string[] = ['req-model']): BeeGameAssetManifest {
       },
     ],
   }
+}
+
+function glbWithJson(value: Record<string, unknown>): Buffer {
+  const json = Buffer.from(JSON.stringify(value))
+  const paddedLength = (json.length + 3) & ~3
+  const chunk = Buffer.alloc(paddedLength, 0x20)
+  json.copy(chunk)
+  const result = Buffer.alloc(20 + chunk.length)
+  result.writeUInt32LE(0x46546c67, 0)
+  result.writeUInt32LE(2, 4)
+  result.writeUInt32LE(result.length, 8)
+  result.writeUInt32LE(chunk.length, 12)
+  result.writeUInt32LE(0x4e4f534a, 16)
+  chunk.copy(result, 20)
+  return result
 }
 
 async function writeFixture(value: BeeGameAssetManifest): Promise<string> {

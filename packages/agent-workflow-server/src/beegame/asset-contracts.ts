@@ -1,6 +1,6 @@
 import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
 import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
-import { inspectResourceBytes } from '../../../beegame-resource-server/src/resource-inspection'
+import { gltfExternalResourceUris, inspectResourceBytes } from '../../../beegame-resource-server/src/resource-inspection'
 import { assertWorkspacePath } from '../filesystem/workspace-path'
 import { createHash, randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -12,6 +12,7 @@ import {
   extname,
   isAbsolute,
   join,
+  posix,
   relative,
   resolve,
   sep,
@@ -533,6 +534,7 @@ export async function registerBeeGameLocalResources(
       if (!requirementIds.has(id)) batchIssues.push(`resource ${input.id}.fulfills: unknown requirement ID ${id}; use an ID from requirements, not a display name/resource ID`)
     const paths = uniqueStrings(input.file_paths.map(normalizedProjectPath))
     validateDependencies(input.dependencies, 'resource ' + input.id + '.dependencies', paths, batchIssues)
+    validateGltfExternalDependencies(root, input, paths, batchIssues)
     if ((AUDIO_FILE_EXTENSIONS.has(extname(input.root_path).toLowerCase()) || input.asset_kind?.startsWith('audio')) &&
         !AUDIO_ASSET_KINDS.has(input.asset_kind ?? ''))
       batchIssues.push(`resource ${input.id}.asset_kind: unsupported audio type ${input.asset_kind ?? '(missing)'}; use audio-clip for encoded files, audio-cue/audio-bank for structured definitions (music/ambience/voice are also supported).`)
@@ -1493,6 +1495,71 @@ function validateDependencies(
         `${itemPath}.local_path must be listed in resource file_paths.`,
       )
   })
+}
+
+/**
+ * Every registered GLTF/GLB member must keep its relative external URIs inside
+ * the resource file set. Inspection is deliberately limited to the existing
+ * resource parser: data URIs and GLB bufferView/embedded content produce no
+ * external references, while unsupported formats retain their existing rules.
+ */
+function validateGltfExternalDependencies(
+  workspacePath: string,
+  input: BeeGameAuthoredResourceInput,
+  filePaths: readonly string[],
+  issues: string[],
+): void {
+  for (const modelPath of filePaths) {
+    const extension = extname(modelPath).toLowerCase()
+    if (extension !== '.gltf' && extension !== '.glb') continue
+    const absolute = resolveInsideWorkspace(workspacePath, modelPath)
+    if (!existsSync(absolute)) continue
+
+    let references: string[]
+    try {
+      references = gltfExternalResourceUris(modelPath, readFileSync(absolute))
+    } catch {
+      // The normal registration loop reports missing/unreadable files. Avoid
+      // turning that existing diagnostic into an unrelated dependency error.
+      continue
+    }
+    const modelDirectory = dirname(modelPath).split(sep).join('/')
+    for (const rawReference of new Set(references)) {
+      let reference: string
+      try {
+        reference = decodeURIComponent(rawReference)
+      } catch {
+        issues.push(
+          `resource ${input.id}: GLTF external dependency ${rawReference} in ${modelPath} is not a valid percent-encoded URI`,
+        )
+        continue
+      }
+      if (
+        reference.startsWith('/') ||
+        reference.startsWith('\\') ||
+        /^[A-Za-z][A-Za-z0-9+.-]*:/.test(reference)
+      ) {
+        issues.push(
+          `resource ${input.id}: GLTF external dependency ${rawReference} in ${modelPath} must be a project-relative URI`,
+        )
+        continue
+      }
+      const normalizedReference = reference.replaceAll('\\', '/')
+      const resolved = posix.normalize(
+        modelDirectory === '.' ? normalizedReference : `${modelDirectory}/${normalizedReference}`,
+      )
+      if (!resolved || resolved === '..' || resolved.startsWith('../')) {
+        issues.push(
+          `resource ${input.id}: GLTF external dependency ${reference} in ${modelPath} resolves outside the project asset path`,
+        )
+        continue
+      }
+      if (!filePaths.includes(resolved))
+        issues.push(
+          `resource ${input.id}: GLTF external dependency ${reference} in ${modelPath} resolves to ${resolved}, which must be listed in file_paths`,
+        )
+    }
+  }
 }
 
 function rejectUnknownKeys(

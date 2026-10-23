@@ -78,6 +78,13 @@ function material(data: Record<string, unknown>, assetId?: string): MaterialOver
   return { mode: source?.mode === 'standard' ? 'standard' : 'unlit', color, metalness: finite(source?.metalness, 0), roughness: finite(source?.roughness, 1), opacity: Math.min(1, Math.max(0, finite(source?.opacity, finite(data.opacity, finite(data.alpha, 1))))), alphaMode: ['opaque', 'mask', 'blend'].includes(String(source?.alphaMode)) ? source?.alphaMode as MaterialOverride['alphaMode'] : 'blend', ...(assetId ? { textureAssetId: assetId } : {}) };
 }
 
+function modelMaterial(data: Record<string, unknown>): MaterialOverride | undefined {
+  const source = record(data.material);
+  const hasStyle = source !== undefined && ['mode', 'color', 'metalness', 'roughness', 'opacity', 'alphaMode'].some(key => source[key] !== undefined)
+    || ['color', 'opacity', 'alpha'].some(key => data[key] !== undefined);
+  return hasStyle ? material(data) : undefined;
+}
+
 export function lightData(data: Record<string, unknown>, pixelsPerUnit = 1) {
   const sourceKind = typeof data.kind === 'string' ? data.kind : data.lightType;
   const kind = ['ambient', 'directional', 'point', 'spot'].includes(String(sourceKind)) ? sourceKind as 'ambient' | 'directional' | 'point' | 'spot' : 'point';
@@ -125,8 +132,8 @@ function toEditorComponent(input: { node: BeeGameContentNode; component: Canonic
     return component.type === 'sprite-renderer' ? { ...common, assetId: assetId!, type: 'sprite-renderer', ...(region ? { frame: region } : {}), ...(animation ? { animation } : {}) } : { ...common, type: 'image' };
   }
   if (component.type === 'mesh-filter' || component.type === 'tilemap') { if (!assetId) throw new Error(`${component.type} ${node.id} requires assetRef`); const selectedMember = component.type === 'tilemap' ? explicitMember(data) : member; return { id, type: component.type, enabled, assetId, ...(selectedMember ? { member: selectedMember } : {}), properties: data }; }
-  if (component.type === 'mesh-renderer') return { id, type: 'mesh-renderer', enabled, ...(assetId ? { assetId } : {}), material: material(data, assetId), properties: data };
-  if (component.type === 'skinned-mesh-renderer') { if (!assetId) throw new Error(`skinned-mesh-renderer ${node.id} requires assetRef`); return { id, type: 'skinned-mesh-renderer', enabled, assetId, ...(member ? { member } : {}), material: material(data, assetId), properties: data }; }
+  if (component.type === 'mesh-renderer') { const override = modelMaterial(data); return { id, type: 'mesh-renderer', enabled, ...(assetId ? { assetId } : {}), ...(override ? { material: override } : {}), properties: data }; }
+  if (component.type === 'skinned-mesh-renderer') { if (!assetId) throw new Error(`skinned-mesh-renderer ${node.id} requires assetRef`); const override = modelMaterial(data); return { id, type: 'skinned-mesh-renderer', enabled, assetId, ...(member ? { member } : {}), ...(override ? { material: override } : {}), properties: data }; }
   if (component.type === 'particle-system') return { id, type: component.type, enabled, properties: input.dimension === '2d' ? editorParticleProperties(data, metrics) : data };
   if (component.type === 'grid' || component.type === 'audio-listener' || component.type === 'canvas-renderer') return { id, type: component.type, enabled, properties: data };
   if (component.type === 'tilemap-renderer') return { id, type: 'tilemap-renderer', enabled, properties: data };
@@ -197,7 +204,7 @@ function toCanonicalComponent(component: SceneComponent, metrics: CanvasMetrics,
   const unit = dimension === '2d' ? metrics.pixelsPerUnit : 1;
   const point = (value: [number, number]) => [value[0] * unit, value[1] * unit * (dimension === '2d' ? -1 : 1)];
   const enabled = component.enabled ? {} : { enabled: false }; const props = 'properties' in component ? structuredClone(component.properties) : {};
-  if ('material' in component) {
+  if ('material' in component && component.material) {
     const previous = material(props);
     // Keep unchanged source fields intact; write edits at their existing location.
     for (const key of ['color', 'opacity'] as const) {

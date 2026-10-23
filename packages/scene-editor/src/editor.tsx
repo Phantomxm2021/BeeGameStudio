@@ -200,7 +200,7 @@ export function SceneEditor({ onUploadAssets, initialDocument, storageKey = 'bee
     const id = `model-${crypto.randomUUID()}`
     const node: SceneNode = { id, name: asset.name.replace(/\.[^.]+$/, ''), parentId: null, children: [], active: true, locked: false, tags: [], transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }, components: [
       { id: `${id}:mesh-filter:0`, type: 'mesh-filter', enabled: true, assetId: asset.id, properties: {} },
-      { id: `${id}:mesh-renderer:1`, type: 'mesh-renderer', enabled: true, material: { mode: 'standard', color: '#ffffff', metalness: 0, roughness: 1, opacity: 1, alphaMode: 'opaque' }, properties: {} },
+      { id: `${id}:mesh-renderer:1`, type: 'mesh-renderer', enabled: true, properties: {} },
     ] }
     if (commit([...(document.assets[asset.id] ? [] : [operations.addAsset(asset)]), { type: 'scene.addGameObject', node }], `Add ${node.name}`)) { setSelection([id]); return true }
     return false

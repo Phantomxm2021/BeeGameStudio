@@ -7,6 +7,7 @@ on:
       - 'scripts/**'
       - 'supabase/**'
       - 'docker/**'
+      - '.beegame/skills/**'
       - 'vendor/bgs'
       - 'package.json'
       - 'bun.lock'
@@ -19,6 +20,7 @@ on:
       - 'scripts/**'
       - 'supabase/**'
       - 'docker/**'
+      - '.beegame/skills/**'
       - 'vendor/bgs'
       - 'package.json'
       - 'bun.lock'
@@ -38,7 +40,6 @@ jobs:
     timeout-minutes: 15
     env:
       BGS_SANDBOX_TESTS: '0'
-      BGS_PGLITE_MODULE: ${{ runner.temp }}/bgs-sql-tests/node_modules/@electric-sql/pglite/dist/index.js
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -55,9 +56,12 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/bgs-sql-tests"
           bun add --cwd "$RUNNER_TEMP/bgs-sql-tests" --ignore-scripts --exact @electric-sql/pglite@0.5.10
-      # These suites use temporary files and local fake services. Browser and
-      # native-runtime suites remain separate, explicitly enabled checks.
+      # These suites use temporary files and local fake services. The browser
+      # regressions run in the separate job below; native-runtime suites remain
+      # outside this workflow and are not executed automatically.
       - name: Run backend and deployment regressions
+        env:
+          BGS_PGLITE_MODULE: ${{ runner.temp }}/bgs-sql-tests/node_modules/@electric-sql/pglite/dist/index.js
         run: >-
           bun test
           packages/agent-workflow/src
@@ -69,8 +73,24 @@ jobs:
           packages/beegame-storage-core/src
           packages/agent-workflow-server/src/auth
           packages/agent-workflow-server/src/model-providers
+          packages/agent-workflow-server/src/bgs/skills.test.ts
           packages/agent-workflow-server/src/local-runtime-service.test.ts
           packages/agent-workflow-server/src/beegame/asset-upload.test.ts
+          packages/agent-workflow-server/src/beegame/runtime-acceptance.test.ts
+          packages/agent-workflow-server/src/beegame/content-binding.test.ts
+          packages/agent-workflow-server/src/beegame/workflow-v3/ui-binding-coverage.test.ts
+          packages/agent-workflow-server/src/beegame/workflow-v3/resource-structure.test.ts
+          packages/agent-workflow-server/src/beegame/asset-contract-audit.test.ts
+          packages/agent-workflow-server/src/beegame/asset-manifest-authoring-contract.test.ts
+          packages/agent-workflow-server/src/__tests__/asset-contracts-resource-binding.test.ts
+          packages/agent-workflow-server/src/beegame/game-content-package.test.ts
+          packages/agent-workflow-server/src/beegame/workflow-read-tools.test.ts
+          packages/agent-workflow-server/src/beegame/workflow-v3/project-guide.test.ts
+          packages/beegame-resource-server/src/__tests__/resource-dependency-bindings.test.ts
+          packages/beegame-resource-server/src/__tests__/resource-inspection.test.ts
+          packages/agent-workflow-server/src/image-generation/reference-image.test.ts
+          packages/agent-workflow-server/src/image-generation/image-result-network.test.ts
+          packages/agent-workflow-server/src/image-generation/provider-profiles.test.ts
           packages/agent-workflow-server/src/beegame/model-runtime-security.test.ts
           packages/agent-workflow-server/src/beegame/session-usage-billing.test.ts
           packages/agent-workflow-server/src/__tests__/preview-manager.test.ts
@@ -83,3 +103,32 @@ jobs:
           scripts/__tests__/docker-runtime-permissions.test.ts
           scripts/__tests__/beegame-owner-bootstrap.test.ts
           scripts/__tests__/beegame-migration-cli.test.ts
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BGS_LAYOUT_BROWSER: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25.2.1'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Bun 1.3.14 can close reused Chromium pipe fds during GC (oven-sh/bun#34785).
+          bun-version: '1.4.3'
+      - name: Install locked workspace dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Install Chromium and Linux dependencies
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+        working-directory: packages/agent-workflow-server
+        run: ./node_modules/.bin/playwright-core install chromium --with-deps --no-progress
+      - name: Run Scene Editor browser regressions
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+        run: >-
+          bun test
+          packages/agent-workflow-server/src/beegame/scene-layout-browser.test.ts
+          packages/agent-workflow-server/src/beegame/scene-model-browser.test.ts

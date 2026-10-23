@@ -9,8 +9,8 @@ export interface LightData { kind: LightKind; color: string; intensity: number; 
 type ComponentBase<T extends string> = { id: string; type: T; enabled: boolean }
 export type SpriteRendererComponent = ComponentBase<'sprite-renderer'> & { assetId: string; member?: string; material: MaterialOverride; frame?: { x: number; y: number; width: number; height: number }; animation?: { frameWidth: number; frameHeight: number; framesPerFacing: number; facings?: string[]; initialFacing?: string; frameDurationMs?: number[]; loop?: boolean }; properties: Record<string, unknown> }
 export type MeshFilterComponent = ComponentBase<'mesh-filter'> & { assetId: string; member?: string; properties: Record<string, unknown> }
-export type MeshRendererComponent = ComponentBase<'mesh-renderer'> & { assetId?: string; material: MaterialOverride; properties: Record<string, unknown> }
-export type SkinnedMeshRendererComponent = ComponentBase<'skinned-mesh-renderer'> & { assetId: string; member?: string; material: MaterialOverride; properties: Record<string, unknown> }
+export type MeshRendererComponent = ComponentBase<'mesh-renderer'> & { assetId?: string; material?: MaterialOverride; properties: Record<string, unknown> }
+export type SkinnedMeshRendererComponent = ComponentBase<'skinned-mesh-renderer'> & { assetId: string; member?: string; material?: MaterialOverride; properties: Record<string, unknown> }
 export type GridComponent = ComponentBase<'grid'> & { properties: Record<string, unknown> }
 export type TilemapComponent = ComponentBase<'tilemap'> & { assetId: string; member?: string; properties: Record<string, unknown> }
 export type TilemapRendererComponent = ComponentBase<'tilemap-renderer'> & { properties: Record<string, unknown> }

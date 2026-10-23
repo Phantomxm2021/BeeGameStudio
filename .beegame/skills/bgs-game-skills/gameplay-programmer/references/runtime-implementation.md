@@ -9,7 +9,7 @@ Use for a concrete execution/timing/collision question or when implementing, deb
 - Resolve held/pressed input, buffering, cancellation, recovery and transitions from design. Keep authoritative movement/contact distinct from smoothing; camera/animation must not change hit tests or input meaning accidentally.
 - For contact defects, inspect shapes, coordinates, displacement and ordering. Use suitable collision queries/continuous detection when sampled overlaps can miss crossings. Distinguish new contacts, sustained overlaps and repeated notifications to avoid duplicate consequences.
 - Apply simultaneous-outcome precedence from owning rules. Scoring, damage, spawning, destruction and completion consume the same confirmed event; presentation uses its actual subject/result. Missing consequential rules are design dependencies, not convenient code defaults.
-- Reset run-owned state across relevant pause/restart/scene-change/exit paths, including stale references, callbacks and subscriptions. Prefer existing lifecycle facilities or local fixes over a general state/event framework.
+- Resolve when a confirmed outcome ends simulation/input, how its required visual/audio response continues, and when the next screen or removal occurs. An immediate state change must not cancel feedback that the design requires; timing comes from that design, not a universal delay. Specify whether the original subject remains, changes or is replaced during its effect. Reset run-owned callbacks, effects and subscriptions on relevant restart/exit paths using existing lifecycle facilities.
 
 ## Runtime verification
 

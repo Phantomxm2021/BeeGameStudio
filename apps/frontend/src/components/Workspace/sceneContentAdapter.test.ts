@@ -43,7 +43,8 @@ describe('Unity-style scene adapter', () => {
         const editor = sceneContentToEditorDocument({ document: input, documentRevision: HASH });
         expect(editorDocumentToSceneContent(editor, input).data.nodes[0].components).toEqual(input.data.nodes[0].components);
         const component = editor.nodes.visual.components[0];
-        if (!('material' in component)) throw Error('Expected renderer');
+        if (!('material' in component) || !component.material) throw Error('Expected renderer');
+        if (type === 'mesh-renderer' || type === 'skinned-mesh-renderer') expect(component.material.textureAssetId).toBeUndefined();
         for (const opacity of [.25, 0, 1]) {
           component.material = { ...component.material, color: '#ff0000', opacity, alphaMode: opacity < 1 ? 'blend' : 'opaque' };
           const saved = editorDocumentToSceneContent(editor, input);
@@ -57,6 +58,36 @@ describe('Unity-style scene adapter', () => {
       }
     },
   );
+
+  it.each(['mesh-renderer', 'skinned-mesh-renderer'] as const)('keeps %s source materials when no explicit style is authored', type => {
+    const assetRef = type === 'mesh-renderer' ? 'RES-MATERIAL' : 'RES-MODEL';
+    const nodeComponents = type === 'mesh-renderer'
+      ? [
+          { id: 'mesh-filter', type: 'mesh-filter' as const, assetRef: 'RES-MODEL', data: {} },
+          { id: 'mesh-renderer', type, assetRef, data: { marker: 'keep', mode: 'walk', metalness: .2, roughness: .3, alphaMode: 'custom' } },
+        ]
+      : [{ id: 'skinned-renderer', type, assetRef, data: { marker: 'keep', mode: 'walk', metalness: .2, roughness: .3, alphaMode: 'custom' } }];
+    const input: BeeGameSceneContentDocument = { schema: 'beegame-content.v1', id: `model-${type}`, kind: 'scene-3d', assetRefs: ['RES-MODEL', 'RES-MATERIAL'], data: {
+      nodes: [{ id: 'visual', components: nodeComponents }],
+    } };
+    const modelAssets: Record<string, SceneAsset> = {
+      'RES-MODEL': { id: 'RES-MODEL', name: 'model.glb', mimeType: 'model/gltf-binary', path: 'model.glb' },
+      'RES-MATERIAL': { id: 'RES-MATERIAL', name: 'model.mat', mimeType: 'application/material', path: 'model.mat' },
+    };
+    const editor = sceneContentToEditorDocument({ document: input, documentRevision: HASH, assets: modelAssets });
+    const component = editor.nodes.visual.components.find(candidate => candidate.type === type);
+    if (!component || component.type !== type) throw Error(`Expected ${type}`);
+    expect(component.material).toBeUndefined();
+    expect(component.assetId).toBe(assetRef);
+    expect(editorDocumentToSceneContent(editor, input).data.nodes[0].components).toEqual(input.data.nodes[0].components);
+
+    component.material = { mode: 'unlit', color: '#ff0000', metalness: 0, roughness: 1, opacity: .5, alphaMode: 'blend' };
+    const edited = editorDocumentToSceneContent(editor, input);
+    const saved = edited.data.nodes[0].components?.find(candidate => candidate.type === type);
+    expect(saved).toMatchObject({ assetRef, data: { marker: 'keep', color: '#ff0000', opacity: .5 } });
+    const reopened = sceneContentToEditorDocument({ document: edited, documentRevision: HASH, assets: modelAssets });
+    expect(reopened.nodes.visual.components.find(candidate => candidate.type === type)).toMatchObject({ material: component.material, assetId: assetRef });
+  });
 
   it('opens current source without fabricating legacy authority hashes; published IR remains strict', () => {
     const input = scene(); input.assetRefs = []; input.data.nodes = [{ id: 'root', components: [] }];

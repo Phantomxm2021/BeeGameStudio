@@ -6,6 +6,39 @@ import { agentGoalPrompt, agentProfessionalContextForRun } from '../beegame/work
 import { PROJECT_GUIDE_TEMPLATE, projectGuideContext, readProjectGuide } from '../beegame/workflow-v3/project-guide'
 import { createRun } from '../beegame/workflow-v3/state'
 
+// Native history appends only changed keys. An unchanged first chunk is not
+// resent when the tail changes, so concatenating since the last first chunk
+// would count both versions of the tail. Reconstruct latest values by key.
+function latestContext(items: any[], key: string) {
+  const values = new Map<string, { value: string; part?: number; total?: number }>()
+  let family: number | undefined
+  for (const item of items) for (const block of item.content ?? []) {
+    const match = new RegExp('^<(' + key + '(?:_part_([0-9]+)_of_([0-9]+))?)>([\\s\\S]*)</\\1>$').exec(block.text ?? '')
+    if (!match) continue
+    expect(item.role).toBe('developer')
+    expect(Buffer.byteLength(match[4]!)).toBeLessThanOrEqual(4000)
+    family = match[3] ? Number(match[3]) : undefined
+    values.set(match[1]!, { value: match[4]!, part: match[2] ? Number(match[2]) : undefined, total: family })
+  }
+  if (family === undefined) return values.get(key)?.value ?? ''
+  const parts = [...values.values()].filter(part => part.total === family).sort((a, b) => a.part! - b.part!)
+  expect(parts.map(part => part.part)).toEqual(Array.from({ length: family }, (_, index) => index + 1))
+  return parts.map(part => part.value).join('')
+}
+
+test('context observation reconstructs changed chunks and switches between scalar and chunk families', () => {
+  const fragment = (key: string, value: string) => ({ role: 'developer', content: [{ text: `<${key}>${value}</${key}>` }] })
+  const history = [fragment('fixture_part_1_of_2', 'first'), fragment('fixture_part_2_of_2', '-old'),
+    fragment('fixture_part_2_of_2', '-current')]
+  expect(latestContext(history, 'fixture')).toBe('first-current')
+  history.push(fragment('fixture', 'short'))
+  expect(latestContext(history, 'fixture')).toBe('short')
+  history.push(fragment('fixture_part_1_of_3', 'one'), fragment('fixture_part_2_of_3', '-two'), fragment('fixture_part_3_of_3', '-three'))
+  expect(latestContext(history, 'fixture')).toBe('one-two-three')
+  history.push(fragment('fixture_part_2_of_3', '-updated'))
+  expect(latestContext(history, 'fixture')).toBe('one-updated-three')
+})
+
 // Real CLI, synthetic local Responses server; no model or project artifacts.
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 localTest('native resume receives current BGS context as well as project instructions and confirmed goal', async () => {
@@ -41,16 +74,6 @@ localTest('native resume receives current BGS context as well as project instruc
     settings: { engine: 'Godot', platform: 'Mobile', dimension: '2D', inputs: ['Touch'] },
     requirements: Array.from({ length: 90 }, (_, i) => ({ id: i, text: '保留用户明确要求的设计流程、交互体验与可编辑内容，具体安排由执行者自行决定。' })) })
   expect(Buffer.byteLength(longBrief)).toBeGreaterThan(12_000)
-  const latestContext = (items: any[], key: string) => {
-    const fragments = items.flatMap(item => (item.content ?? []).flatMap((block: any) => {
-      const match = new RegExp('^<(' + key + '(?:_part_([0-9]+)_of_[0-9]+)?)>([\\s\\S]*)</\\1>$').exec(block.text ?? '')
-      if (!match) return []
-      expect(item.role).toBe('developer')
-      expect(Buffer.byteLength(match[3]!)).toBeLessThanOrEqual(4000)
-      return [{ first: !match[2] || Number(match[2]) === 1, value: match[3]! }]
-    }))
-    return fragments.slice(fragments.findLastIndex(part => part.first)).map(part => part.value).join('')
-  }
   let nativeSessionId = '', runtime: Awaited<ReturnType<typeof runner.start>> | undefined
   try {
     for (const [index, marker] of ['INITIAL_GUIDE_MARKER', 'UPDATED_GUIDE_MARKER', 'SHORT_GUIDE_MARKER', 'FOCUSED_GUIDE_MARKER'].entries()) {

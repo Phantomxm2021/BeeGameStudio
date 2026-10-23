@@ -234,8 +234,8 @@ test('catalog CLI preserves structured filters and pagination, rejects ignored p
     expect(help.stdout).toContain('No free-text query/search')
     expect(help.stdout).toContain('nextCursor')
     expect(help.stdout).toContain('Honor explicit user source choices')
-    expect(help.stdout).toContain('first consider suitable supplied or built-in licensed resources')
-    expect(help.stdout).toContain('not as the default for all core art')
+    expect(help.stdout).toContain('Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method')
+    expect(help.stdout).toContain('does not authorize automatic procedural replacement')
     expect(help.stdout).not.toContain('AI generation is the primary route')
   }finally{server.stop(true);await rm(root,{recursive:true,force:true})}
 })

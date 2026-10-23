@@ -58,13 +58,14 @@ test('implementation reads and exact visual saves preserve authorized requiremen
   }finally{await measurement?.close();await editor.dispose();await f.close()}
 },30000)
 
-test('resource obligations retain authorization and provenance without prescribing a sourcing or atlas tour', () => {
+test('resource context carries source priority and authorization without prescribing tool steps', () => {
   for (const prompt of [agentProfessionalContextForRun({} as Run), agentProfessionalContextForRun({} as Run, true)]) {
     expect(prompt).not.toContain('purpose: production')
     expect(prompt).not.toContain('file_paths')
     expect(prompt).not.toContain('local_path')
     expect(prompt).toContain('required licenses')
-    expect(prompt).toContain('AI is not the default for all core art')
+    expect(prompt).toContain('Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method')
+    expect(prompt).toContain('does not authorize automatic procedural replacement')
     expect(prompt).toContain('usage rights')
     expect(prompt).toContain('read-only quote')
     expect(prompt).toContain('no redundant per-image approval')
@@ -857,9 +858,8 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).toContain('without a second hardcoded layout')
     expect(prompt).toContain('Prose, palettes and JSON geometry do not replace visual design')
     expect(prompt).toContain('do not create runtime scene/UI content here')
-    expect(prompt).toContain('Resolve resource production methods and consuming interfaces from selected designs and actual resources')
+    expect(prompt).toContain('Use actual asset metrics and existing checks when binding resources')
     expect(prompt).not.toContain('Technical/resource plans start as drafts')
-    expect(prompt).not.toContain('without waiting for production assets')
     expect(prompt).not.toContain('file_paths')
     expect(prompt).not.toContain('local_path')
     expect(prompt).not.toContain('request a separate shared PNG sheet')
@@ -1365,7 +1365,7 @@ test('first and resumed goals retain professional coverage and design dependenci
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
     for (const document of ['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ART_DIRECTION.md',
       'UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md']) expect(prompt).toContain(document)
-    expect(prompt).toContain('once the selected designs and resources for that content exist')
+    expect(prompt).toContain('Use actual asset metrics and existing checks when binding resources')
     expect(prompt).toContain('unrelated resources/content may remain planned')
     expect(prompt).toContain('Preserve confirmed requirements')
     expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')

@@ -8,7 +8,7 @@ import { auditAssetContract } from './asset-contract-audit'
 import { readBeeGameAssetManifestSync } from './asset-contracts'
 import { inspectContentBindings } from './content-binding'
 import { parseBeeGameContentDocument } from './game-content-schema'
-import { contentBindingIssues } from './game-content-package'
+import { contentBindingIssues, sceneResourceBindingIssues } from './game-content-package'
 import { validateResourceSelections } from './tilemap-contract'
 import { collectContentSourceFiles } from './content-source-files'
 
@@ -130,6 +130,7 @@ export async function checkResourcesAndBindings(workspace: string, input: unknow
     const document = parseBeeGameContentDocument(JSON.parse(readFileSync(resolve(root, file), 'utf8')))
     issues.push(...contentBindingIssues(file, document))
     if (manifest) {
+      issues.push(...sceneResourceBindingIssues(file, document, manifest))
       for (const assetRef of document.assetRefs) if (!manifest.resources.some(resource => resource.id === assetRef && resource.status === 'verified'))
         issues.push(file + ': missing verified declared resource ' + assetRef)
       validateResourceSelections(root, manifest, document.data, issues, file)
