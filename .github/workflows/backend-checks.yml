@@ -123,9 +123,9 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Fetch native release tags and identify the pinned source
         id: bgs-source
-        # Submodule checkout does not fetch tag refs, even with full history.
+        # The maintained fork has no release tags; provenance uses upstream tags.
         run: |
-          git -C vendor/bgs fetch --tags origin
+          git -C vendor/bgs fetch https://github.com/openai/codex.git 'refs/tags/rust-v*:refs/tags/rust-v*'
           echo "commit=$(git -C vendor/bgs rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Cache the source-built native runtime
         id: bgs-runtime
