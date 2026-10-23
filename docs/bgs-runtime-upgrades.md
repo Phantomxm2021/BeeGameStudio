@@ -33,6 +33,8 @@ BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导
 
 内置及用户 Skills 的原目录、投影目录只授予读取权限；不因此开放同级 auth.json、会话目录或写权限。
 
+非 ChatGPT 游戏会话通过原生 `skills.config` 按路径停用 `$BGS_HOME/skills/.system/imagegen/SKILL.md`：当前 BGS provider 不具备原生图像工具的认证条件，shell 也不持有该 Skill 的 CLI fallback 所需 API key。该覆盖只作用于本次运行器进程，不修改系统 Skill 缓存或用户配置，保留用户导入的同名 Skill；ChatGPT 会话沿用原生可用性规则。BGS 自有资源生成入口保持原有行为。
+
 明确保留的例外：真实外部 URL、模型 ID、服务端协议头及认证/额度标识；`bgs app` 所连接的官方桌面应用的签名、安装器和 URL scheme（该命令仍明确标为 upstream Codex Desktop）；第三方插件包中的 `.codex-plugin` 清单格式；LICENSE、NOTICE、来源说明；读取旧会话的兼容标识和迁移别名。安装根已属于 BGS，第三方包格式不会被擅自改写。Git 历史和 Git 自身的旧子模块元数据不做字符串改写。
 
 ## 本地构建和验证

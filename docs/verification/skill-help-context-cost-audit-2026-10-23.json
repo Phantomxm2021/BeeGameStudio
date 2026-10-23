@@ -1,0 +1,100 @@
+{
+  "date": "2026-10-23",
+  "reviewedSystemCommit": "9a0a286fe",
+  "nativeVersion": "0.164.0",
+  "objective": "Estimate prior context reductions and trace Skill/reference/help reads to BGS responsibilities before changing the system.",
+  "scope": {
+    "projectArtifacts": "read-only",
+    "realModelCalls": 0,
+    "realProjectReruns": 0,
+    "serviceRestarts": 0,
+    "promptOrSkillBodyChanges": false,
+    "newWorkflowStages": false
+  },
+  "evidence": {
+    "nativeSnapshotSha256": "b40e14f52f9cc49d48e0446ac123751ab101f3ded2e9aedb5ea807dbd6e86cf3",
+    "hostSnapshotSha256": "039612e0fbc0ead02821c0013ed0687715dbd6aeff0689501132e6d75fc29e92",
+    "nativeRows": 2851,
+    "usageRecords": 318,
+    "inputTokensIncludingCache": 47028335,
+    "compactionOrdinals": [589, 1140, 1631, 2338],
+    "privateReasoningRead": false
+  },
+  "priorSavingsEstimate": {
+    "exactMeasure": "UTF-8 bytes removed from saved tool receipts by current default serialization/projection, keeping the original call sequence fixed.",
+    "payloads": [
+      { "kind": "content CLI JSON whitespace", "jsonValues": 14, "removedBytes": 20235, "weightedBytes": 899896 },
+      { "kind": "measurement CLI JSON whitespace", "jsonValues": 2, "removedBytes": 13174, "weightedBytes": 243378 },
+      { "kind": "default resource-binding projection", "outputOrdinal": 2612, "removedBytes": 10268, "weightedBytes": 236164 }
+    ],
+    "onePassRemovedBytes": 43677,
+    "fixedTraceWeightedRemovedBytes": 1379438,
+    "weightMethod": "For each output, count subsequent token_usage_record events before the next compacted record. This assumes the original compaction schedule and context retention remain unchanged.",
+    "tokenHeuristic": "No offline DeepSeek tokenizer is available. Dividing bytes by 3 to 5 gives a sensitivity estimate, not a statistical confidence interval or measured token saving; indentation whitespace may tokenize very differently.",
+    "onePassApproxInputTokens": [8736, 14559],
+    "fixedTraceApproxInputTokens": [275888, 459813],
+    "fixedTraceApproxShareOfInputPercent": [0.59, 0.98],
+    "billingBoundary": "Includes cached input. These values are neither uncached-token savings nor monetary savings. A different compaction schedule can change retention, later reads and total input.",
+    "excluded": [
+      "The x-reasoning-included correction removed 104590 erroneous estimated context tokens at the observed boundary; that is accounting/compaction correctness, not provider billing savings.",
+      "Avoided model rounds from user-playtest scope changes have not been measured.",
+      "Transcript search exclusion and compact resource registration may avoid future reads, but their benefits remain conditional and are not added to these totals.",
+      "The imagegen availability fix below is not included in prior savings."
+    ],
+    "priorAudits": [
+      "current-project-context-iteration-fix-2026-10-23.json",
+      "initial-implementation-read-output-fix-2026-10-23.json"
+    ]
+  },
+  "findings": [
+    {
+      "id": "unavailable-system-imagegen-is-advertised",
+      "observed": "Native call 37/output 54 read the complete system imagegen Skill: 14139 body characters, 14179 UTF-8 body bytes. The project subsequently used the existing BGS resource command. The Skill describes native image_gen and an OPENAI_API_KEY-dependent CLI fallback.",
+      "cause": "BGS custom-provider sessions set requires_openai_auth=false without actor authorization. The current native image-generation gate therefore returns false. The BGS bridge only forwards Responses routes, and the shell environment excludes API keys. Native system-skill installation/discovery nevertheless advertises this Skill.",
+      "sources": [
+        "packages/agent-workflow-server/src/bgs/runner.ts",
+        "packages/agent-workflow-server/src/model-providers/bridge.ts",
+        "vendor/bgs/bgs-rs/core/src/tools/spec_plan.rs",
+        "vendor/bgs/bgs-rs/model-provider-info/src/lib.rs",
+        "vendor/bgs/bgs-rs/skills/src/assets/samples/imagegen/SKILL.md"
+      ],
+      "fix": "For non-ChatGPT game sessions, set one existing skills.config path rule to enabled=false for BGS_HOME/skills/.system/imagegen/SKILL.md in the native process CLI configuration. Both the runner's skills/list cache and native thread discovery inherit it. Do not delete files, change user configuration, disable by name or add instructions.",
+      "compatibility": "Preserve imported skills with the same name, other user enablement rules, built-in game skills and ChatGPT sessions. Model-list-only processes need no Skill override. Future changes to BGS provider image capabilities must revisit this condition.",
+      "conditionalContextImpact": {
+        "laterUsageRecordsBeforeFirstCompaction": 55,
+        "bodyBytesTimesObservedRetention": 779845,
+        "classification": "Potential avoided read and carriage, not measured savings or a bound. The model may still explicitly read an old path from retained history; disabling catalog availability does not erase prior conversations or deny filesystem reads."
+      }
+    },
+    {
+      "id": "skill-reference-reads-are-agent-selected",
+      "observed": "The initial phase explicitly read 13 Skill bodies and 3 references. Later commands reread planning/evidence/playtest bodies after compaction and during final checks. No automatic per-turn Skill body injection was established.",
+      "decision": "Do not add another selector prompt, force deduplication or prohibit legitimate rereads. The earlier c6e7a3484 scope changes already alter planning/playtest responsibilities, so historical bodies are not current defects. A later choice of static sprites alone cannot prove that an earlier animation-reference exploration was unnecessary. Conditional systems/creative advice and cross-role overlap do not establish a proportionate runtime fix."
+    },
+    {
+      "id": "help-duplicates-come-from-explicit-requests",
+      "observed": "assets generate --help and ui-board-plan --help each returned the same 4118-character help text; consumer --api returned approximately 9.4K characters. The caller explicitly requested each output. The help branch returns before capability/network access.",
+      "sources": [
+        "packages/agent-workflow-server/src/beegame/project-asset-cli.mjs",
+        "packages/agent-workflow-server/src/beegame/game-content-consumer-cli.ts"
+      ],
+      "decision": "Do not add selective API discovery or more mandatory reads. Full consumer API output matches its existing signatures/shapes/lifecycle contract. The duplicate help is a small explicit-read cost; maintaining separate command docs or a read cache is not justified by this trace."
+    }
+  ],
+  "planAndSelfReview": [
+    "Trace catalog installation, native capability gates, bridge routes, shell credentials and actual reads before attributing the problem to Skill selection.",
+    "Use the existing native config layer at the game-runner boundary; keep native binaries, Skill bodies, asset commands and public result contracts unchanged.",
+    "Apply the rule at process startup, not only thread/start, so the runner's cached catalog and native thread view agree.",
+    "Match only the unsupported system path. Native configuration merges User and SessionFlags rules; unrelated user disables must survive.",
+    "Verify a fresh home before the system Skill exists and reopen the same home as ChatGPT to check that the change is temporary.",
+    "Do not depend on the model obeying another warning: availability filtering is deterministic. Do not claim it prevents direct file reads or removes old history.",
+    "Reject text splitting, new help modes, deduplication state and extra model calls without a demonstrated benefit that offsets maintenance and context costs."
+  ],
+  "validation": {
+    "regressionBeforeFix": "Native catalog test failed with system imagegen enabled=true when non-ChatGPT expected false.",
+    "nativeCatalogAfterFix": "BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs/skills.native.test.ts packages/agent-workflow-server/src/bgs/skills.test.ts: 3 passed. Checks system imagegen disabled for custom provider and enabled for ChatGPT; imported same-name skill and game catalog enabled; unrelated user disable preserved; config.toml and system Skill contents unchanged.",
+    "runner": "bun test packages/agent-workflow-server/src/bgs/runner.test.ts: 45 passed using local fixtures. The first sandboxed attempt could not bind localhost; the approved local rerun passed without changing the tests or calling a real model.",
+    "typecheck": "bun run typecheck passed.",
+    "limitations": "No paid rerun, project modification, service restart or post-fix end-to-end cost measurement. This fixes a catalog/capability mismatch; it does not establish that other Skill reads are unnecessary or that overall task tokens will fall by a guaranteed percentage."
+  }
+}

@@ -155,6 +155,11 @@ export function bgsProviderConfig(env: Record<string, string>): Record<string, u
     // oversized output and smaller per-call requests remain bounded by CLI.
     tool_output_token_limit: 10_000,
     ...(env.OPENAI_AUTH_MODE === 'chatgpt' ? {} : {
+      // This provider has no native image_gen, and its shell has no API key for
+      // the system skill's CLI fallback. Match by path to preserve user imports.
+      ...(env.BGS_HOME ? { 'skills.config': [{
+        path: join(env.BGS_HOME, 'skills', '.system', 'imagegen', 'SKILL.md'), enabled: false,
+      }] } : {}),
       model_provider: 'bgs', model_providers: { bgs: { name: 'BGS model connection',
         base_url: custom || 'https://api.openai.com/v1', env_key: 'OPENAI_API_KEY',
         wire_api: 'responses', requires_openai_auth: false, supports_websockets: false, request_max_retries:0,stream_max_retries:0 } },
