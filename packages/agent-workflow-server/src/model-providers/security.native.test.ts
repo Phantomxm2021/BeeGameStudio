@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, readdir, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, readdir, readFile, writeFile } from 'node:fs/promises'
 import sharp from 'sharp'
 import { join } from 'node:path'
 import { createBgsRunner } from '../bgs/runner'
@@ -107,15 +107,16 @@ for (const malformedSuffix of [false, true]) nativeTest('converted provider unkn
     await runtime.submit({ prompt: 'Use this synthetic fixture.', signal: AbortSignal.timeout(15000),
       onMessage: value => { events.push(value) }, requestPermission: async () => ({ behavior: 'deny' }) })
     expect(bodies).toHaveLength(2)
-    expect(JSON.stringify(bodies[1].messages)).toContain('unknown')
-    expect(JSON.stringify(bodies[1].messages)).toContain('unsupported')
+    const feedback = bodies[1].messages.find((message: Json) => message.role === 'tool' && message.tool_call_id === 'unknown')
+    expect(feedback?.content).toContain('No action was executed.')
     expect(events.some(event => event.text?.includes('continuation completed'))).toBe(true)
     expect((await readdir(game)).filter(path => path !== '.beegame')).toEqual([])
   } finally { await runtime?.dispose?.(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 25_000)
 nativeTest('official Bgs failure retains partial supplier usage through the runner and billing outbox', async () => {
   const root = await mkdtemp('/private/tmp/bgs-native-partial-'), game = join(root, 'game'), catalog = join(root, 'skills')
-  await mkdir(game); await mkdir(catalog)
+  await mkdir(game); await mkdir(join(catalog, 'fixture'), { recursive: true })
+  await writeFile(join(catalog, 'fixture', 'SKILL.md'), '---\nname: fixture\ndescription: Offline usage accounting fixture.\n---\nUse only the local fixture response.\n')
   let requests = 0
   const supplier = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
     requests++
@@ -146,9 +147,14 @@ nativeTest('official Bgs failure retains partial supplier usage through the runn
     await manager.dispose()
     expect(requests).toBe(1)
     expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(100)
-    expect(writes).toHaveLength(1)
-    expect(writes[0]?.usage.prompt_tokens).toBe(100)
-    expect(writes[0]?.metadata?.providerUsageIncomplete).toBe(true)
+    expect(writes).toHaveLength(2) // Receipt checkpoint and terminal reconciliation.
+    expect(writes.map(write => write.metadata?.sourceMessageType)).toEqual(['usage_checkpoint', 'turn.failed'])
+    for (const write of writes) {
+      expect(write.usage.prompt_tokens).toBe(100)
+      expect(write.metadata?.usageBasis).toBe('session-cumulative-v1')
+      expect(write.metadata?.providerUsageIncomplete).toBe(true)
+      expect(write.metadata?.billableFinalUsage).toBeUndefined()
+    }
     expect(manager.transcriptFacts(session.id).some(event => event.type === 'turn.failed')).toBe(true)
     const sessions = join(root, 'config', 'bgs', 'sessions')
     const rollouts = (await readdir(sessions, { recursive: true })).filter(path => path.endsWith('.jsonl'))

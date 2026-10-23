@@ -7,8 +7,8 @@ BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导
 - 主仓库子模块：`vendor/bgs`；Rust 工作区：`vendor/bgs/bgs-rs`。
 - Fork：`https://github.com/Phantomxm2021/codex.git`。这是现有真实仓库地址，保留作为来源，不虚构新地址。
 - 官方上游：`https://github.com/openai/codex.git`。
-- `bgs/source-0.163.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新及锁文件版本修正。
-- `bgs/0.163.0`：从源码维护分支生成的完整 BGS 命名发行分支。主仓库 gitlink 固定发行提交。
+- `bgs/source-0.164.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新及锁文件版本修正。
+- `bgs/0.164.0`：从源码维护分支生成的完整 BGS 命名发行分支。主仓库 gitlink 固定发行提交。Rust 工具链由源码固定为 `1.99.1`。
 - 完整改名规则在 `scripts/brand-bgs.py`。默认只报告，`--apply` 才写入。只遍历 Git 源码，不遍历用户运行数据。`--host` 仅为本次宿主代码的一次性迁移用途；不要对后续 BGS 宿主源码重复执行，因为兼容读取代码有意保留旧名称。
 
 后续更新在源码维护分支合并上游，再重新生成发行分支，避免对数千个改名文件逐一解决合并冲突。新增上游名称和外部协议仍需要审查；脚本不能保证未来升级无需调整。
@@ -43,7 +43,7 @@ bun run bgs:build
 bun run bgs:check
 bun run bgs:verify
 python3 scripts/test_brand_bgs.py
-python3 scripts/verify-bgs-source.py bgs/source-0.163.0
+python3 scripts/verify-bgs-source.py bgs/source-0.164.0
 bun run typecheck
 bun test scripts/migrate-bgs-home.test.ts
 BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
@@ -52,6 +52,17 @@ BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
 首次准备依赖可执行 `cargo fetch --locked --manifest-path vendor/bgs/bgs-rs/Cargo.toml`。正常构建使用离线锁定依赖；本地测试使用脚本化 Responses 服务，不向真实模型提交任务。macOS 权限测试需要可运行 Seatbelt 的宿主环境。
 
 产物是 `dist/bgs-runtime/bgs`、`build.json`、LICENSE、NOTICE 和修改说明。构建信息记录源码 SHA、上游 tag、dirty 状态及平台架构。发布构建 `bun run bgs:build --release` 拒绝未提交的源码。缺少品牌二进制时不回退到官方 npm 包。
+
+## 0.164.0 本地验证（2026-10-23）
+
+- 源码维护提交：`3db5fa466`；品牌发行提交：`816a6982b`，基于官方 `rust-v0.164.0`。现有产品补丁保留；源码生成复现检查覆盖 9,439 个文件，无差异。
+- macOS arm64 打包版本为 `bgs 0.164.0`，构建记录 `dirty: false`。CLI、配置目录、插件本地安装和禁用官方二进制自更新检查通过。
+- BGS／供应商接入测试的失败项经定位均为过期测试文案、空 Skills 夹具和旧的单次用量写入假设；修正测试后相关检查通过。累计用量／outbox 专项检查通过，未修改实际供应商适配或计费逻辑。
+- 使用本机模拟 Responses 服务，验证 0.163.0 创建的会话在同一 BGS_HOME 由 0.164.0 恢复，线程身份与历史消息保留。
+- 上游压缩失败后历史恢复测试及后台压缩回退／取消测试共 12 项通过。运行 Rust 测试须沿用上游 justfile／CI 的 `RUST_MIN_STACK=8388608`，否则测试线程可能栈溢出。
+- 宿主 TypeScript 检查通过。验证未调用真实模型、真实计费接口或操作测试项目产物；Linux／Windows 包未在此次验证范围内。
+
+切换前通过本机认证会话列表确认 `turnStatus: idle`，并确认后端没有运行时子进程。运行时包替换到默认路径后，新任务按需启动新版；后端无需重启。原 0.163.0 包单独保留供回退。发布这些本地分支后，才能提交并推送主仓库的新 gitlink。
 
 ## 旧配置迁移
 
@@ -75,7 +86,7 @@ bun scripts/migrate-bgs-home.ts --from /OWNER/.runtime/app/codex --to /OWNER/.ru
 保持工作树干净，在同一个子模块中使用两条分支。以下 NEW_VERSION 是选定的官方版本：
 
 ```sh
-git -C vendor/bgs switch bgs/source-0.163.0
+git -C vendor/bgs switch bgs/source-0.164.0
 git -C vendor/bgs switch -c bgs/source-NEW_VERSION
 git -C vendor/bgs fetch upstream tag rust-vNEW_VERSION
 git -C vendor/bgs merge --no-ff rust-vNEW_VERSION
