@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-23",
+  "baselineCommit": "542a5813d",
+  "objective": "BGS verifies basic technical correctness; users own experience playtesting by default. Ordinary delivery no longer implies developing or optimizing a bot to finish the game.",
+  "scope": {
+    "projectArtifacts": "read-only",
+    "frontendChanges": false,
+    "nativeCliChanges": false,
+    "newWorkflowStages": false,
+    "newStateOrReportFields": false,
+    "realModelCalls": 0,
+    "realProjectReruns": 0,
+    "serviceRestarts": 0
+  },
+  "findings": [
+    {
+      "id": "no-host-playthrough-gate",
+      "sources": [
+        "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts:19",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts:137",
+        "packages/agent-workflow-server/src/beegame/preview-test-command.mjs:184"
+      ],
+      "evidence": "Measured delivery requires its existing build/smoke/freshness and registered-content conditions, not a successful project playtest or completed bot route. Preview executes a requested script once. Native turn completion, author reports and game-quality acceptance already have separate meanings.",
+      "decision": "Preserve these runtime contracts. Do not remove the Preview test tool, weaken technical evidence or add a new completion gate."
+    },
+    {
+      "id": "mixed-default-verification-responsibilities",
+      "sources": [
+        ".beegame/skills/bgs-game-skills/game-plan-execution/SKILL.md",
+        ".beegame/skills/bgs-game-skills/game-playtest-performance/SKILL.md",
+        ".beegame/skills/bgs-game-skills/game-implementation-planning/SKILL.md"
+      ],
+      "evidence": "The execution Skill defaulted to integrated player-path observations, kept items unfinished without applicable evidence, and required player paths again at finish. The playtest Skill limited what bot success could prove but did not consistently assign default experience playtesting to the user.",
+      "interpretation": "An ownership/scope ambiguity in execution guidance, not proof of an automatic runtime retry bug. The requested product responsibility change is implemented at this layer.",
+      "change": "Replace those default obligations with focused basic rule/interface, resource and affected ordinary-input/state-transition checks. Pending user experience feedback alone does not keep technical implementation open. Explicitly requested playtests retain their evidence obligations."
+    },
+    {
+      "id": "current-scope-must-reach-existing-projects",
+      "source": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts:42",
+      "change": "Add one concise default responsibility contract to the existing application context shared by initial and resumed work. This reaches existing/imported projects without rewriting their saved AGENTS.md. The project-guide template is also narrowed for newly initialized projects."
+    }
+  ],
+  "historicalEvidence": {
+    "sourceAudit": "current-project-context-iteration-fix-2026-10-23.json",
+    "projectSessionId": "beegame_45fd24acc2aa4bb399f9c1ba51194af7",
+    "stageAnalysis": "The saved run's playtest/correction phase accounted for 30,601,060 recorded tokens across 200 provider responses; 72 route experiment commands used 72 model responses. This is diagnostic evidence, not a claim that all of those calls were unnecessary.",
+    "skillVersionCaveat": "At 06:32:58Z the actual playtest Skill read was tool.started event 215 and tool.completed event 217. It contained the parent version of 31b925549, committed at 08:03:14Z. Reads of planning/execution at 218-221 also preceded that change. Successful reads cannot be treated as evidence that current HEAD guidance was seen or followed."
+  },
+  "planAndSelfReview": [
+    "Trace goal context, project conventions, Skill execution, Preview, measurement and turn settlement before deciding the change.",
+    "Keep mandatory functionality and basic technical integration checks; do not convert missing technical evidence into a pass.",
+    "Narrow default responsibilities by replacing existing guidance. Keep requested playtesting/performance/full-route automation available; do not invent a universal test matrix.",
+    "Use the existing application-context path so old projects receive current scope without modifying their artifacts or adding a new task stage.",
+    "Do not alter measurement/publication semantics or discard failed/stale receipts. No new reviewer, model call, state machine, report schema or UI.",
+    "Existing guidance and policy cannot mechanically guarantee that a model will never over-invest in a driver. No exact token or time savings are claimed."
+  ],
+  "changes": {
+    "productionFiles": 5,
+    "skillFiles": 3,
+    "combinedWordDelta": -142,
+    "wordCountBoundary": "Whitespace-separated word counts across the five changed source/Skill files; not a tokenizer measurement or a predicted runtime saving.",
+    "preserved": "Confirmed implementation scope, resource/visual requirements, basic controls and technical feedback, explicit user requests, failure/staleness semantics, publication boundaries and all existing runtime tools."
+  },
+  "validation": {
+    "existingOfflineTests": {
+      "pass": 153,
+      "fail": 0,
+      "files": [
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/project-guide.test.ts",
+        "packages/agent-workflow-server/src/beegame/plain-design-workflow.test.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts"
+      ]
+    },
+    "nativeContextFixture": {
+      "pass": 1,
+      "fail": 0,
+      "file": "packages/agent-workflow-server/src/bgs/context-integration.test.ts",
+      "provider": "Local scripted Responses fixture only",
+      "coverage": "Four native turns verify complete current application context, original/resumed/fresh history, shorter replacement context and confirmed user scope."
+    },
+    "skillValidation": "skill-creator quick_validate.py passed for all three modified Skill directories.",
+    "typecheck": "./node_modules/.bin/tsc --noEmit -p tsconfig.json: exit 0.",
+    "diffCheck": "git diff --check passed."
+  },
+  "limitations": [
+    "No paid model calls or real-project reruns; effectiveness and savings require observation in later normally authorized use.",
+    "Source changes are committed for the next deployment/restart; no service was restarted by this task.",
+    "Host checks remain scoped technical measurements. Arbitrary game semantics still need focused implementation checks; none certify user experience."
+  ]
+}
