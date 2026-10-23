@@ -18,6 +18,38 @@ export type ChatFileAttachmentPayload = {
 
 export type ChatAttachmentPayload = ChatImageAttachmentPayload | ChatFileAttachmentPayload;
 
+export type ChatAttachmentReference = {
+    type: 'image' | 'file';
+    mediaType: string;
+    filename: string;
+    storageId: string;
+    projectId: string;
+    data?: never;
+};
+export type ChatAttachment = ChatAttachmentPayload | ChatAttachmentReference;
+
+export function normalizeChatAttachments(value: unknown): ChatAttachment[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const attachments = value.flatMap((item): ChatAttachment[] => {
+        if (!item || typeof item !== 'object') return [];
+        const a = item as Record<string, unknown>;
+        if ((a.type === 'image' || a.type === 'file') && typeof a.mediaType === 'string' &&
+            typeof a.filename === 'string' && typeof a.projectId === 'string' && a.projectId &&
+            typeof a.storageId === 'string' && /^[0-9a-f-]{36}-[a-zA-Z0-9._-]+$/.test(a.storageId)) {
+            return [{ type: a.type, mediaType: a.mediaType, filename: a.filename,
+                projectId: a.projectId, storageId: a.storageId }];
+        }
+        if (typeof a.data !== 'string' || typeof a.mediaType !== 'string') return [];
+        if (a.type === 'image' && ['image/png', 'image/jpeg', 'image/webp'].includes(a.mediaType)) {
+            return [{ type: 'image', mediaType: a.mediaType as ChatImageAttachmentPayload['mediaType'], data: a.data,
+                ...(typeof a.filename === 'string' ? { filename: a.filename } : {}) }];
+        }
+        return a.type === 'file' && typeof a.filename === 'string'
+            ? [{ type: 'file', mediaType: a.mediaType, data: a.data, filename: a.filename }] : [];
+    });
+    return attachments.length ? attachments : undefined;
+}
+
 type AllowedAttachmentKind = 'image' | 'file';
 
 type AllowedAttachment = {
@@ -26,6 +58,9 @@ type AllowedAttachment = {
 };
 
 const ALLOWED_ATTACHMENTS: Record<string, AllowedAttachment> = {
+    '.mp4': { kind: 'file', mediaTypes: ['video/mp4'] },
+    '.mov': { kind: 'file', mediaTypes: ['video/quicktime'] },
+    '.webm': { kind: 'file', mediaTypes: ['video/webm'] },
     '.png': { kind: 'image', mediaTypes: ['image/png'] },
     '.jpg': { kind: 'image', mediaTypes: ['image/jpeg'] },
     '.jpeg': { kind: 'image', mediaTypes: ['image/jpeg'] },
@@ -77,7 +112,8 @@ const fileToChatAttachment = (file: File): Promise<ChatAttachmentPayload | null>
                 resolve(null);
                 return;
             }
-            const mediaType = file.type || definition.mediaTypes[0];
+            const reportedType = file.type.trim().toLowerCase();
+            const mediaType = GENERIC_UNKNOWN_MEDIA_TYPES.has(reportedType) ? definition.mediaTypes[0] : reportedType;
             if (definition.kind === 'image') {
                 resolve({
                     type: 'image',

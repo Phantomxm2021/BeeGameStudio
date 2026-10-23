@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-11",
+  "scope": "V3-06 static 2D Tilemap consumption in the actual target Canvas, using existing pixel-data-consumption; no new task schema, check ID, database objects or frontend integration",
+  "baselineReproduction": {
+    "case": "Correct independent Tilemap renderer + registered Scene/Grid/TileSet/atlas",
+    "status": "unverified",
+    "observation": "Pixel probe must select an actual registered image binding (Scene requires exact componentId)",
+    "rootCause": "Pixel preparation only supported sprite/image bindings and did not resolve Tilemap cells through their registered TileSet",
+    "log": "/private/tmp/bgs-v3-tilemap-before-2026-10-11.log",
+    "logSha256": "03745966afaa6774eb0169beeadfe5511d87ef48461604e7115581ae5a7bc6b3"
+  },
+  "implementation": {
+    "checkVersion": "v3-canvas-image-consumption.2",
+    "selection": "Existing pixelProbes identify the exact registered Scene node/component and actual Canvas; host derives every used tileId and all its cells, not an author-picked representative cell",
+    "geometry": "Existing Grid/TileSet parser and scene hierarchy/camera projection; negative cell coordinates, gap, anchor, tile pivot/offset/size; axis-aligned nonoverlapping static rectangles only",
+    "observation": "Host-owned Chromium renders the independent target build; two image/atlas-region marker responses plus node position, cell position, Grid cell size and TileSet tile size response mutations, followed by original Canvas hash restoration",
+    "cellProof": "Each individual cell's interior must match marker color at least 90 percent; two-pixel boundary tolerance; no marker pixels outside all expected cell rectangles",
+    "resourceIdentity": "Actual registered image paths and atlas rectangles, not frame names alone; overlapping regions across bindings remain unverified",
+    "sourceProtection": "Source/build Scene, TileSet, manifest modules, selected images and atlas bytes are version-bound. Browser mutations are response-only; tests assert original source files unchanged",
+    "versionPolicy": "Old .1 evidence remains saved but is not current .2 evidence. Explicit remeasurement is required; no automatic task rerun",
+    "sourceSha256": {
+      "pixel-consumption.ts": "12b9b830f21caba2d185d48a5202cbbbec7fd102af77811c75fbae15bcd4effd",
+      "runtime-browser.mjs": "6833d70fa4c4865b726e8f6202b23a73548e5107ca4fa6f3489dd80dafb658a3",
+      "check-versions.ts": "4a551710e22cf5b67830e6d658db6d5ccaa13c1a55afa1500c6d10b274a27e3e",
+      "runtime-checks.ts": "4407c53bd2da2c6de20c64c1593ee75c49934e90be1e0aad253799ac77305cb7",
+      "context.ts": "37c8741c873804088393ae123644a8e49735cc65ee9bba4522b524f6aa88eeb5",
+      "tilemap-consumption.test.ts": "66c7e70b1a055adc1b479b092e9880d9e70c5ca8fd44b6f82c7bb0d232af7f39"
+    }
+  },
+  "tilemapCases": {
+    "expectedPassed": ["consume", "individual-images", "parent-camera"],
+    "expectedFailed": ["wrong-cells", "wrong-tile-id", "omit-cell", "omit-interior", "extra-cell", "ignore-cells", "ignore-grid", "ignore-tile-size", "ignore-position"],
+    "expectedUnverified": ["ignore-resource", "missing-probe", "stale-tileset", "shared-frame", "shared-frame-alias", "rotated"],
+    "allExpectedStatusesMatched": true,
+    "interiorOmission": "11 cells share one tileId; omitting the middle cell preserves the total bounding box and more than 90 percent aggregate coverage. Individual-cell checks still fail it",
+    "currentEvidence": "Passed .2 result is current; the same result labeled .1 is not current; changing TileSet bytes makes the saved result noncurrent"
+  },
+  "frozenRegression": {
+    "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3 packages/agent-workflow-server/src/auth/auth-context.test.ts packages/agent-workflow-server/src/beegame/session-routes.test.ts",
+    "passed": 191,
+    "failed": 0,
+    "assertions": 1562,
+    "files": 26,
+    "exitCode": 0,
+    "log": "/private/tmp/bgs-v3-tilemap-frozen-regression-2026-10-11.log",
+    "logSha256": "71326f4d2c3d384a55f678d63c68eab9d61d8c54522755bbca23792eaa9bbeae",
+    "coverage": "Existing sprite/UI consumption, standalone debug/actual CLI with offline model, Review/Question/Repair, measured Preview/export, binding, changes and recovery, plus 18 Tilemap cases",
+    "intermediateRuns": "Initial restricted browser launch failed with macOS sandbox Input/output error. Authorized focused browser run passed 37 cases before the final alias/individual-image cases were added; only the frozen full run is final evidence. No browser safety flags were weakened"
+  },
+  "typecheck": {
+    "command": "bun run typecheck in packages/agent-workflow-server",
+    "exitCode": 2,
+    "existingDiagnostics": 3556,
+    "workflowV3Diagnostics": 0,
+    "wholeRepositoryPassed": false,
+    "log": "/private/tmp/bgs-v3-tilemap-frozen-typecheck-2026-10-11.log",
+    "logSha256": "43a892b87f4a09ac7842ad6479da216bc45ac1db517bc8ae1f2948a2291e9b6c"
+  },
+  "boundaries": {
+    "formalFrontendChanged": false,
+    "claudeCodeSourceChanged": false,
+    "builtinToolsChanged": false,
+    "protectedDiffSha256BeforeAndAfter": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995",
+    "realGeneratedProjectModified": false,
+    "paidModelCalls": 0,
+    "databaseMutations": false,
+    "sqlExecuted": false,
+    "productionServicesRestarted": false,
+    "userChromeUsedThisSlice": false,
+    "testBrowser": "Existing owned independent Chromium and synthetic OS temporary directories; full suite includes existing independent debug/CLI regressions, not another remote database UI acceptance",
+    "deliveryEligible": false,
+    "notProven": ["Tilemap collision or sorting", "rotated/sheared, overlapping, tinted/occluded visuals or shared image/frame regions across bindings", "animation, 3D, fonts or audio consumption", "all viewports and dynamic gameplay", "large-map performance", "semantic Review quality, aesthetics or complete game quality", "paid model token/cost improvement", "production deployment"]
+  }
+}

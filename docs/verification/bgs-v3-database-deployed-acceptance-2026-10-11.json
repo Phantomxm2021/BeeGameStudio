@@ -1,0 +1,125 @@
+{
+  "date": "2026-10-11",
+  "scope": "Real remote database and current local BGS deployment; explicit synthetic UI editing, requirement change, affected plan recovery, measured preview, browser downloads, extracted rebuild, pause/reload/resume. Not full game quality or production-domain release.",
+  "claudeCodeNativeSourceModified": false,
+  "existingGameArtifactsModifiedByDeveloper": false,
+  "deliveryEligible": false,
+  "database": {
+    "migration": "supabase/migrations/20261010030000_workflow_v3_conflict_http.sql",
+    "migrationSha256": "a982800f7f62465555a536b92c339e901cb4052c2907ac9724891e7b48bd116f",
+    "realFailure": "Business revision conflict used SQLSTATE 40001; losing real CAS transaction did not return promptly. It is a retryable serialization failure, not a business revision conflict.",
+    "fix": "Append migration replaces only this raise with PT409. Actual Chrome SQL Editor verification: conflict_http_409, no_retryable_business_conflict and host_only_acl all true. Historical migrations and privileges preserved.",
+    "officialReference": "https://supabase.com/docs/guides/troubleshooting/high-cpu-and-infinite-transaction-retries-when-using-custom-error-codes-in-rpc-functions-77326b",
+    "remotePostgrestVersion": "not verified",
+    "independentProcessAssertionsPassed": 11,
+    "observed": [
+      "Two same-revision races each have exactly one successful commit; loser HTTP 409/PT409, revision-conflict",
+      "Persisted Run, event revisions and project protocol mode reload consistently through independent store",
+      "Two different projects sharing canonical workspace: one writer winner; loser HTTP 409/23505, workspace-busy",
+      "Losing writer transaction leaves no partial Run/event update",
+      "Authorized requirements history append succeeds and reloads; history rewrite rejected without changing current version",
+      "Synthetic writer work was never launched; winner settled explicitly blocked, not PASS"
+    ],
+    "log": "/private/tmp/bgs-v3-real-database-concurrency-pt409.log",
+    "logSha256": "bf0f2571b60aa9cbe9bfa52c200db215a3eead9e39a3aa19dd195fdff4c295dd",
+    "sqlScreenshot": "/private/tmp/bgs-v3-conflict-http-verified.png",
+    "sqlScreenshotSha256": "fbc96e5c253005df8172180afe43a4c40d781245ffce960baba5bac9fab36d17"
+  },
+  "syntheticDeployment": {
+    "projectId": "v3-deployed-fixture-e58a5f9d-5e2f-49cc-9424-626d27f369d2",
+    "workspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/bgs-v3-deployed-synthetic-fGw6Vr",
+    "baseline": "Synthetic sources, actual host build and Chromium checks, no provider; initial wrong mixed HTML/JSON check contract failure retained before fixture contract correction",
+    "normalFlow": "Formal UI editor save and requirement/plan confirmations in logged-in Chrome, then normal BGS native executions. Developer did not hand-edit resulting candidates or receipts.",
+    "directUrlFix": "Restore actual owned Chat binding with existing openProject before exposing URL-selected project; late response cannot reopen a different route",
+    "uiEdit": {
+      "buttonHeightBefore": 52,
+      "buttonHeightAfter": 64,
+      "hostEditAttempt": "54c71b62-b318-455f-b8e0-67d059913c06",
+      "hostEditChecks": "none; explicitly unmeasured candidate",
+      "unrelatedQualificationRetained": "82ba6a09-0dc6-4a35-a83a-acbc373e5ad7",
+      "freshMeasuredAttempt": "3618752a-c835-4d8b-8928-b38ce6eef2cf",
+      "originalArtifact": "f3616d2cab1a27afe97855827909425e902dd6de1701fb85d1ddd15c5400b76b",
+      "editedArtifact": "c459671b1ca1962ddeecf10c6f33ae2b6a0cc9ae62f52fc5ea73bda7346a2634",
+      "actualPreview": "200x64 button, READY, click renders Clicked",
+      "oldQualification": "removed from normal UI. Independent old-URL navigation blocked by browser client; not used as server rejection proof."
+    },
+    "requirementChange": {
+      "originalRevision": "ba88c4a2-0287-46aa-9d9f-a7676347d292",
+      "currentRevision": "ed7c2437-8c5a-48a0-b7e9-c147db34bc2b",
+      "historyEntries": 1,
+      "observed": "Formal confirmation revokes all old qualifications, no automatic execution; new task changes title and h1 to Changed Goal while preserving height 64 and JSON bytes",
+      "freshMeasuredAttempt": "be1bad67-4a14-4065-91c9-2dc64293f905"
+    },
+    "affectedPlanRecovery": {
+      "observedFailure": "Independent task legitimately changed notes.json after source-copy build. Editable export correctly rejected changed exportable source; UI lacked plan-only recovery.",
+      "systemFix": "Explicit captured-version task-plan form uses existing PUT /plan. No requirement changes, auto-dispatch, framework or case-specific source exclusion.",
+      "normalRecovery": "User-facing plan adds evidenced source input/dependency. Plan 4->5; only game becomes pending; independent successful attempt retained. Execute normally and rebuild/measure again.",
+      "retainedIndependentAttempt": "1184bfd1-6dc9-4474-ba8b-762077ef923c",
+      "finalMeasuredAttempt": "f3e98340-dfa5-45bd-9065-56466fe2a3fa",
+      "artifact": "de815d731d98e64c601aca20c85465299d7235eef4a65abfec2468613f5d5e2b",
+      "checks": ["Actual source-copy bun run build, exit 0", "Host-owned Chromium runtime-smoke, passed"],
+      "sameArtifactBytesAsPreviousRequirementBuild": true,
+      "copiedPreviousCheckPass": false
+    },
+    "downloads": {
+      "uiEditStaticZip": "/Users/nswell/Downloads/measured-3618752a-c835-4d8b-8928-b38ce6eef2cf.zip",
+      "uiEditProjectZip": "/Users/nswell/Downloads/project-3618752a-c835-4d8b-8928-b38ce6eef2cf.zip",
+      "uiEditVerifiedFiles": {"static": 4, "project": 11},
+      "uiEditRebuild": "Extracted project bun run build followed by recursive diff with downloaded measured build, exit 0",
+      "finalProjectZip": "/Users/nswell/Downloads/project-f3e98340-dfa5-45bd-9065-56466fe2a3fa.zip",
+      "finalProjectZipSha256": "7d3f6d99ffc2ec1da96ab3a757f77a6d6a8204deebbf8e1b043cd34b283b2cce",
+      "finalVerifiedFiles": 11,
+      "finalRebuild": "Extracted project bun run build; every rebuilt dist file hash matches receipt",
+      "finalVerificationLog": "/private/tmp/bgs-v3-final-export-verified.log",
+      "finalVerificationLogSha256": "45fec026024bd6590d163eaf3ef5e4e39e0dca5cd445e9beac9a2eb2e1bfef4d",
+      "automationLimitation": "Browser download event waits timed out; normal Chrome downloads actually completed. Verified only the exact downloaded fixture ZIPs via local filesystem, not Chrome internal history."
+    },
+    "pauseReloadResume": {
+      "verifiedVersion": 23,
+      "planRevision": 5,
+      "attemptCount": 8,
+      "currentQualificationsUnchanged": true,
+      "writerAbsent": true,
+      "automaticDispatch": false,
+      "log": "/private/tmp/bgs-v3-reload-resume-verified.log"
+    },
+    "finalBrowserObservation": {"visibleHeading": "Changed Goal", "buttonWidth": 200, "buttonHeight": 64, "sceneXDataset": "0", "clickOutput": "Clicked"},
+    "finalScreenshot": "/private/tmp/bgs-v3-final-deployed-preview.png",
+    "finalScreenshotSha256": "92a74e0dd6ab7893d0698b15013fba2982445369ccf7d42b9d997f6f2e7b46be",
+    "finalRunSnapshot": "/private/tmp/bgs-v3-final-run.json",
+    "finalRunSnapshotSha256": "62f0d2089ee29e3bfae9edad6619554a141462c35cbf067790689157a16e94ad"
+  },
+  "realProviderUsage": {
+    "nativeTaskExecutions": 4,
+    "totalTokens": 1327857,
+    "promptTokens": 143837,
+    "cacheReadTokens": 1170424,
+    "cacheCreationTokens": 0,
+    "completionTokens": 13596,
+    "actualMoney": "unknown",
+    "costProblemResolved": false,
+    "observedWaste": "Repeated author environment exploration and self-checks, native sandbox bun cwd failure and unavailable browser, extra affected rebuild after missing synthetic plan dependency. Host independent checks do not depend on author PASS."
+  },
+  "regressions": {
+    "backend": {"testsPassed": 144, "testsFailed": 0, "assertions": 1159, "log": "/private/tmp/bgs-v3-deployed-all-backend.log", "logSha256": "1794f974166ea2850b910b2d6b11b580089e82ff46eea997c4cf753ca68226c9"},
+    "frontend": {"testsPassed": 52, "testsFailed": 0, "log": "/private/tmp/bgs-v3-deployed-frontend-plan-final.log", "logSha256": "03019d0949c29414e2d90f7327193a007036338b112326fa5a57124969ade06a"},
+    "frontendTypecheckAndBuild": {"command": "tsc -b && vite build", "exitCode": 0, "log": "/private/tmp/bgs-v3-deployed-frontend-plan-build.log"},
+    "earlierFrontendFailureRetained": "Initial 40 passing assertions with 7 jsdom Path2D unhandled errors was NOT accepted. Isolated unrelated animation in App routing tests; final run has no unhandled errors."
+  },
+  "retainedFailedAttempts": [
+    "/private/tmp/bgs-v3-real-database-concurrency-verified.log",
+    "/private/tmp/bgs-v3-real-database-concurrency-final.log",
+    "/private/tmp/bgs-v3-deployed-fixture-initialize-in-root.log",
+    "/private/tmp/bgs-v3-deployed-fixture-baseline.log",
+    "/private/tmp/bgs-v3-route-restore-regression.log"
+  ],
+  "unverified": [
+    "Full game quality, original idea gameplay/feel/aesthetics/audio and release eligibility",
+    "Formal Scene editor save interactions in the real logged-in deployment this round; API and actual Canvas consumption covered by regressions only",
+    "Production preview domain/TLS and production deployment rather than localhost UI",
+    "Unknown native writer and external paid-operation recovery; no timeout unlock",
+    "Fresh dependency installation, bit-reproducible builds, all targets and implicit read coverage",
+    "Ordinary Chat initial planning/creation/requirement change, all V3 subagent event details",
+    "Native sandbox bun/browser failure resolution and acceptable model cost"
+  ]
+}

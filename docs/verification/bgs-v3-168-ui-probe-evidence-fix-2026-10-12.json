@@ -1,0 +1,97 @@
+{
+  "version": "bgs-v3-168-ui-probe-evidence.1",
+  "status": "offline-verified-not-deployed",
+  "date": "2026-10-12",
+  "scope": "Existing UI consumption probe diagnostics/property selection and truthful evidence scope only; no paid run, real-game repair, role/Review/Skills prompt changes, Agent limits, native/formal frontend edits or new acceptance framework.",
+  "rootCauses": [
+    "Every node previously required both position and layout.size perturbations. Existing resolver overrides flow position and uses sizeDelta for stretch; legitimate nodes were rejected.",
+    "Preparation errors omitted probe identity; rejected checks inherited artifact inventory as UI coverage.",
+    "Passing container geometry was adopted as evidence for unselected text/state/semantic quality. Existing host quality was unverified; native author/child PASS was not sufficient."
+  ],
+  "implementation": [
+    "Prepare uses the existing initialized layout resolver. Flow-overridden/sub-tolerance properties are recorded as unobserved, not forced or used as proof. Stretch dimensions are perturbed through sizeDelta.",
+    "Errors identify document#node, viewport and source/node/layout property; runtime results identify failed baseline/mutation/restoration phase with expected/actual geometry.",
+    "No observable mutations => consumption unverified; text/button baseline/restoration still checked and actual overflow fails even with zero mutation variants.",
+    "Preparation failures have zero observed UI files, not build/smoke inventory. Compact/detailed existing handoff retains selected node/property and whether text fit was targeted or omitted plus unobserved screens/viewports.",
+    "UI checker .3 invalidates .1/.2 receipts, never rewrites old evidence. Pixel-only type excludes the new UI metadata; pixel/font/audio driver behavior unchanged.",
+    "No new schema/ownership/Gate or automated review. Source-copy build/Preview eligibility remains separate from overall game quality."
+  ],
+  "evidenceAssessment": {
+    "paid166": "Still insufficient for whole-game acceptance: two container nodes only, no text-fit execution, professional promises not closed. No retroactive upgrade of that PASS.",
+    "limits": [
+      "Selected states only; omitted nodes/viewports remain outside evidence. Active responsive overrides/intrinsic text sizing may remain unverified.",
+      "Geometry and visible text fit do not prove sibling occlusion, Canvas/Scene/audio consumption, listening quality, gameplay semantics or enjoyment.",
+      "Agent can still choose inadequate scopes or misjudge evidence. These mechanical changes do not prove semantic leak or total Token savings solved.",
+      "Paid166 host CPU/response anomaly not modified or located by this focused change. No deployment/restart; no new fee authorization assumed."
+    ]
+  },
+  "regression": {
+    "core": {
+      "pass": 59,
+      "fail": 0,
+      "skipped": 1,
+      "expects": 711,
+      "seconds": 126.41,
+      "files": 5,
+      "log": "/private/tmp/bgs-v3-168-final-core.log"
+    },
+    "optInExistingSkippedCase": {
+      "pass": 1,
+      "fail": 0,
+      "filtered": 7,
+      "expects": 12,
+      "seconds": 1.003,
+      "log": "/private/tmp/bgs-v3-168-optin-consumer.log",
+      "reason": "BGS_LAYOUT_BROWSER=1 on isolated fixture; no production environment change"
+    },
+    "native": {
+      "pass": 2,
+      "fail": 0,
+      "expects": 205,
+      "seconds": 26.43,
+      "files": 2,
+      "controlledLoopbackRequests": 35,
+      "paidModelCalls": 0,
+      "goalPromptChars": 708,
+      "toolContextChars": 2586,
+      "log": "/private/tmp/bgs-v3-168-native.log"
+    },
+    "distinctPassingTests": 62,
+    "typecheckExit": 0,
+    "typecheckLog": "/private/tmp/bgs-v3-168-final-typecheck.log",
+    "runtimeSyntaxCheckExit": 0,
+    "diffCheckExit": 0,
+    "counterexamples": [
+      "Flow correct/ignored size",
+      "Stretch sizeDelta correct/ignored",
+      "Clamped layout with no observable property stays unverified",
+      "Clamped layout with two visible text rows fails overflow despite no mutation",
+      "Unknown second probe and stale packed source precisely located; preparation coverage empty",
+      "Container geometry PASS explicitly says text not checked and quality unverified",
+      "Prior UI .2 receipt obsolete"
+    ],
+    "initialFailures": [
+      "Type check exposed PreparedPixelProbe inheriting the UI-only field; excluded it with existing Omit pattern, not by adding dummy pixel metadata.",
+      "Old tiny fixture expected blanket unverified. New probe retains observable position and exposes renderer ignoring scale at baseline, correctly failed. Expectation strengthened to failed; underlying paid game untouched."
+    ]
+  },
+  "integrity": {
+    "formalFrontend": {
+      "files": 825,
+      "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+    },
+    "nativeSrc": {
+      "files": 2445,
+      "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+    },
+    "builtinTools": {
+      "files": 383,
+      "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+    },
+    "rolePrompt": "faf133da01789b9e09c9efc2dc42e12204271844693453d0dc324b57848dd737",
+    "agentTools": "8025bf58ca61d79298c720449c9bea5e8e6cc6b969e236c4446aabc068d51ce7",
+    "originalPaidGame51FileExportStillMatches": true,
+    "unrelatedExistingSkillChangesPreserved": true,
+    "sourceHashes": "92a580d87af4d1bd2161d449f77f0a1670ae8c47afbe156373e4067e4c127d77  packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.ts\n1108ddc68ec149d643dad5c7385e5a8e11d80a8a8cc18738fd7796560a1e9949  packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs\n8cc01df050667b817911761cd87e9684b29e18df30d0b81876bda6ea300c1907  packages/agent-workflow-server/src/beegame/workflow-v3/pixel-consumption.ts\n8181d851e5cc5bc51326d1ff4bc27f3a2127fe48e786d393bdad40f836d43de4  packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.ts\n"
+  }
+}

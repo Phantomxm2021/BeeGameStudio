@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-13",
+  "scope": "Audit and BGS-only repair after stopping the fresh firefly-nightwatch paid run",
+  "deployment": {"changed": false, "paidModelCalls": 0, "generatedProjectWrites": 0},
+  "audit": {
+    "accepted": [
+      "Give the autonomous checker its own help/default entry. Retain explicit legacy commands, eight-domain design responsibilities and the old delivery entry; do not delete generated sidecars or rewrite project history.",
+      "Accept either a standalone Camera input or the existing scene-2d envelope. Reuse authored Camera selection and geometry, with source-specific errors rather than another layout algorithm.",
+      "Expose the optional browser consumer's actual signatures, result shapes and lifecycle without requiring the generated bundle to be read. Do not choose a renderer/engine or install it automatically.",
+      "Put receipt ID and check status before verbose diagnostic details. Preserve every selected probe identity, failure cause, current task text, Skill facts and historical measurement identity. Omit only passed text-fit detail from compact responses; full saved observations stay available.",
+      "Record actual browser viewport, DPR, touch and pointer conditions, plus declared probe activation paths. Accept optional deviceScaleFactor, keeping the default at 1. Compare screenshot pixels in CSS coordinates; backing-store size is evidence, not a requirement that it equal CSS size."
+    ],
+    "rejectedOrDeferred": [
+      "Removing the full current task from compact measurement inspection was prototyped and withdrawn during audit: a child may have no parent history, so identity alone cannot replace its authorization source.",
+      "No automatic context reset, tool/turn limit, extra Review prompt or Skill-loading mandate. These would not establish correct testing or visual quality.",
+      "No generic parser that treats arbitrary project report booleans or process exit 0 as full-game acceptance. Existing host receipts remain quality=unverified and deliveryEligible=false.",
+      "No attempt to automatically recognize teleports, resource refills or all valid player routes from arbitrary game code. A selected activation path is not complete player-flow coverage.",
+      "No automatic visual-taste/light-effect grader. The bound-image pixel probe still does not cover arbitrary procedural Canvas lighting."
+    ],
+    "compatibilityAndSideEffects": [
+      "The legacy checker interface remains explicitly callable, including --design-handoff-help; only the autonomous default help excludes those old handoff instructions.",
+      "Camera inspection supports scene-2d only in addition to the existing Camera input. Invalid/ambiguous/missing authored cameras stay errors; no input is repaired.",
+      "No DPR matrix runs automatically. Untested pixel densities and gameplay remain unverified; callback environment observations are not automatically rewritten into project reports.",
+      "Pixel driver version moves from v3-canvas-image-consumption.2 to .3. Historical receipts remain readable but are not current evidence for the changed driver; no automatic rerun is issued. Other checker versions are unchanged.",
+      "Existing paid projects and running services have not been migrated or restarted. Real Agent adoption, game quality and Token savings are not established by these offline tests."
+    ]
+  },
+  "implementation": {
+    "systemFiles": [
+      "packages/agent-workflow-server/src/beegame/content-checker-runtime.ts",
+      "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+      "packages/agent-workflow-server/src/beegame/game-content-consumer-cli.ts",
+      "packages/agent-workflow-server/src/beegame/preview-test-client.mjs",
+      "packages/agent-workflow-server/src/beegame/preview-test-access.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.ts"
+    ],
+    "noChangesTo": ["formal frontend", "Claude Code source", "builtin-tools source", "Skills", "responsibility prompts", "project settings/hooks", "paid game sources/content/docs/assets/evidence", "Agent limits", "runtime selection"],
+    "interfaceSize": {"legacyHelpCharacters": 9811, "autonomousHelpCharacters": 2046, "note": "Character count only, not model Token or monetary savings"}
+  },
+  "verification": {
+    "status": "targeted offline regressions and repository-root typecheck passed; not deployed or paid-game acceptance",
+    "syntheticDprCounterexample": "Passed: a correctly scaled DPR-2 Canvas passes; the same unscaled backing-store implementation passes at DPR 1 and fails at DPR 2. The observed DPR and viewport are present in evidence. No paid-game source was copied or repaired.",
+    "checkerAndMeasurement": {"passed": 106, "skipped": 1, "failed": 0, "files": ["game-content-validation-cli.test.ts", "current-content-validation.test.ts", "workflow-v3/agent-tools.test.ts", "workflow-v3/agent-measurement.test.ts", "workflow-v3/pixel-consumption.test.ts"]},
+    "skippedConsumerTestRerun": {"passed": 1, "failed": 0, "command": "BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts -t 'V3 consumer paints'"},
+    "browserCoverageAndConsumption": {"passed": 46, "failed": 0, "files": ["shared-playwright.test.ts", "workflow-v3/ui-coordinate-root.test.ts", "workflow-v3/check-versions.test.ts", "workflow-v3/agent-consumption.test.ts"], "environment": "BEEGAME_TEST_REAL_BROWSER=1"},
+    "schemaFinalRerun": {"passed": 1, "failed": 0, "note": "Invalid/zero/nonfinite DPR rejected; positive explicit DPR preserved. Included in unique cases, not counted twice."},
+    "taskBoundaryFinalRerun": {"passed": 23, "failed": 0, "note": "Reran agent-measurement.test.ts after retaining full current task text; included in unique cases, not counted twice."},
+    "densityIdentityFinalRerun": {"passed": 1, "failed": 0, "note": "A changed DPR with a reused request key is rejected without relabeling or replaying the old receipt; included in unique cases."},
+    "tilemapAndPreviewAccess": {"passed": 21, "failed": 0, "files": ["workflow-v3/tilemap-consumption.test.ts", "preview-test-access.test.ts"]},
+    "uniqueCases": {"passed": 174, "failed": 0, "remainingSkipped": 0, "note": "106 + explicitly enabled consumer case + 46 + 21; diagnostic reruns are not counted twice."},
+    "diffCheck": "passed",
+    "javascriptSyntax": "runtime-browser.mjs and preview-test-client.mjs passed node --check",
+    "typecheck": {"passed": true, "command": "bun run typecheck", "scope": "Repository root tsconfig with workspace aliases; no configuration or Claude Code source was modified"},
+    "standalonePackageTypecheck": {"passed": false, "command": "bun run --cwd packages/agent-workflow-server typecheck", "reason": "This package config lacks the root workspace aliases needed by cross-package imports. Used the existing root typecheck instead; did not expand the task to alter package/native configuration."},
+    "initialDiagnosticFailures": [
+      "Chromium was initially blocked by the command sandbox. Offline browser tests were rerun with execution permission; no browser isolation flag was disabled.",
+      "The first DPR regression exposed the old backing-store-equals-CSS-size precondition. This was corrected in the BGS pixel driver, then both good and bad synthetic renderers were rechecked.",
+      "The first root typecheck found a missing union-property guard in the new compact-response test. Added the guard, reran that test, and the complete root typecheck passed."
+    ]
+  }
+}

@@ -1,0 +1,822 @@
+{
+  "schema": "beegame-content.v1",
+  "kind": "ui-screen",
+  "id": "ui-start",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "referenceResolution": [
+            480,
+            672
+          ],
+          "compactMaxWidth": 600
+        }
+      },
+      {
+        "id": "game-view",
+        "role": "container",
+        "parentId": "root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0.02,
+            0.02
+          ],
+          "anchorMax": [
+            0.98,
+            0.98
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "parentId": "game-view",
+        "id": "start-plane",
+        "role": "container",
+        "enabled": true,
+        "data": {
+          "space": "camera-reference-2d"
+        },
+        "layout": {
+          "size": [
+            480,
+            672
+          ],
+          "item": {
+            "absolute": true
+          },
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 20,
+            "padding": [
+              88,
+              32,
+              56,
+              32
+            ],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "start-title",
+        "role": "text",
+        "text": "打砖块",
+        "layout": {
+          "size": [
+            280,
+            56
+          ]
+        },
+        "style": {
+          "fontSize": 44,
+          "align": "center"
+        },
+        "parentId": "start-plane"
+      },
+      {
+        "id": "hero-wall",
+        "role": "container",
+        "layout": {
+          "container": {
+            "direction": "grid",
+            "columns": 8,
+            "gap": 2,
+            "padding": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "parentId": "start-plane"
+      },
+      {
+        "id": "hero-brick-0",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-1",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-2",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-3",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-4",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-5",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-6",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-7",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-8",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-9",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-10",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-11",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-12",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-13",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-14",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-15",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-16",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-17",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-18",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-19",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-20",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-21",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-22",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-23",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-24",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-25",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-26",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-27",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-28",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-29",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-30",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-31",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-32",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-33",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-34",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-35",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-36",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-37",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-38",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "hero-brick-39",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "brick"
+        },
+        "layout": {
+          "size": [
+            34,
+            13
+          ]
+        },
+        "parentId": "hero-wall"
+      },
+      {
+        "id": "btn-start",
+        "role": "button",
+        "text": "开始游戏",
+        "layout": {
+          "size": [
+            200,
+            48
+          ],
+          "minSize": [
+            200,
+            48
+          ]
+        },
+        "parentId": "start-plane"
+      },
+      {
+        "id": "start-help",
+        "role": "text",
+        "text": "移动挡板反弹小球，击碎全部砖块",
+        "layout": {
+          "size": [
+            320,
+            20
+          ]
+        },
+        "style": {
+          "fontSize": 14,
+          "align": "center"
+        },
+        "parentId": "start-plane"
+      },
+      {
+        "id": "btn-mute-start",
+        "role": "toggle",
+        "text": "静音",
+        "layout": {
+          "anchor": "top-right",
+          "position": [
+            -12,
+            12
+          ],
+          "size": [
+            64,
+            40
+          ],
+          "minSize": [
+            64,
+            40
+          ],
+          "item": {
+            "absolute": true
+          }
+        },
+        "parentId": "start-plane"
+      }
+    ]
+  }
+}

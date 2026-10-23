@@ -3,6 +3,21 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 
 import { LandingView } from './LandingView';
 import { ToastProvider } from '../../contexts/ToastContext';
+import { resourceLibraryApi } from '../../services/resourceLibraryApi';
+
+// Workflow tests use the accessible reduced-motion path; the animated reveal is
+// verified separately with a controlled frame clock in AvatarDialogue.test.tsx.
+vi.mock('motion/react', async importOriginal => ({
+  ...await importOriginal<typeof import('motion/react')>(),
+  useReducedMotion: () => true,
+}));
+
+// Workflow tests isolate the GPU surface; fallback/rendering is checked separately.
+vi.mock('../beui/grain-gradient', () => ({ GrainGradient: () => <div aria-hidden="true" /> }));
+
+vi.mock('./Landing/DotsAvatar', () => ({
+  DotsAvatar: ({ mood, token, label }: { mood: string; token: string; label: string }) => <div role="img" aria-label={label} data-testid="idea-avatar" data-mood={mood} data-dot-token={token} />,
+}));
 
 const { analyzeIdeaIntake } = vi.hoisted(() => ({
   analyzeIdeaIntake: vi.fn(),
@@ -70,6 +85,8 @@ const {
   signInWithSupabaseOAuth,
   signInWithSupabasePassword,
   signUpWithSupabasePassword,
+  verifySupabaseSignupCode,
+  resendSupabaseSignupCode,
   updateSupabaseAvatarUrl,
   uploadSupabaseAvatarImage,
 } = vi.hoisted(() => ({
@@ -92,6 +109,8 @@ const {
   signInWithSupabaseOAuth: vi.fn(),
   signInWithSupabasePassword: vi.fn(),
   signUpWithSupabasePassword: vi.fn(),
+  verifySupabaseSignupCode: vi.fn(),
+  resendSupabaseSignupCode: vi.fn(),
   updateSupabaseAvatarUrl: vi.fn(),
   uploadSupabaseAvatarImage: vi.fn(),
 }));
@@ -111,7 +130,6 @@ let mockCurrentUser: {
   permissions: ['project.create', 'project.delete'],
 };
 let mockProjects: Array<{ id: string; name: string; created_at: string }> = [];
-const terminalRenderState = vi.hoisted(() => ({ renderCount: 0 }));
 
 vi.mock('../../store/projectStore', () => ({
   useProjectStore: (
@@ -134,23 +152,32 @@ vi.mock('../../store/systemStore', () => {
   const useSystemStore = (
     selector?: (state: {
       currentUser: typeof mockCurrentUser;
+      authenticationStatus: 'authenticated' | 'anonymous';
       loadCurrentUser: typeof mockLoadCurrentUser;
       hasPermission: (permission: string) => boolean;
+      isDark: boolean;
+      setTheme: (isDark: boolean) => void;
     }) => unknown,
   ) => {
     const state = {
       currentUser: mockCurrentUser,
+      authenticationStatus: mockCurrentUser ? 'authenticated' as const : 'anonymous' as const,
       loadCurrentUser: mockLoadCurrentUser,
       hasPermission: (permission: string) => Boolean(mockCurrentUser?.permissions.includes(permission)),
+      isDark: false,
+      setTheme: vi.fn(),
     };
     return selector ? selector(state) : state;
   };
   useSystemStore.getState = () => ({
     currentUser: mockCurrentUser,
+    authenticationStatus: mockCurrentUser ? 'authenticated' as const : 'anonymous' as const,
     loadCurrentUser: mockLoadCurrentUser,
     hasPermission: (permission: string) => Boolean(mockCurrentUser?.permissions.includes(permission)),
+    isDark: false,
+    setTheme: vi.fn(),
   });
-  return { useSystemStore };
+  return { useSystemStore, applyThemeToDocument: vi.fn() };
 });
 
 vi.mock('../../services/api', () => ({
@@ -220,22 +247,13 @@ vi.mock('../../services/supabaseAuthApi', () => ({
   signInWithSupabaseOAuth,
   signInWithSupabasePassword,
   signUpWithSupabasePassword,
+  verifySupabaseSignupCode,
+  resendSupabaseSignupCode,
   updateSupabaseAvatarUrl,
   uploadSupabaseAvatarImage,
 }));
 
-vi.mock('./DemiurgeLogo', () => ({
-  DemiurgeLogo: () => <div data-testid="demiurge-logo" />,
-}));
-
-vi.mock('./Landing/FaultyTerminal', () => ({
-  FaultyTerminal: () => {
-    terminalRenderState.renderCount += 1;
-    return <div data-testid="faulty-terminal-canvas" />;
-  },
-}));
-
-const renderLanding = async (props?: Partial<React.ComponentProps<typeof LandingView>>) => {
+const renderLanding = async (props?: Partial<React.ComponentProps<typeof LandingView>>, enterPrompt = true) => {
   let result!: ReturnType<typeof render>;
   await act(async () => {
     result = render(
@@ -245,6 +263,17 @@ const renderLanding = async (props?: Partial<React.ComponentProps<typeof Landing
     );
     await new Promise(resolve => setTimeout(resolve, 0));
   });
+  // Most workflow tests begin after the visitor explicitly chooses a mode.
+  const choices = screen.queryByTestId('creation-mode-choices');
+  if (enterPrompt && choices) {
+    await act(async () => {
+      fireEvent.click(within(choices).getByRole('button', { name: /^(创意模式|Creative mode|創意模式)$/ }));
+    });
+  }
+  if (enterPrompt && !choices) {
+    const input = screen.queryByRole('textbox');
+    if (input) fireEvent.focus(input);
+  }
   return result;
 };
 
@@ -259,9 +288,36 @@ const submitIdea = async (idea: string) => {
 };
 
 const confirmIntakeCreditQuote = async () => {
-  const dialog = await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' });
+  const dialog = await screen.findByRole('group', { name: '实时 Credit 扣除提示' });
   fireEvent.click(within(dialog).getByRole('button', { name: '继续生成' }));
 };
+
+const settingGroup = (label: string) => ['平台', '引擎', '表现形式', '屏幕方向'].includes(label) ? 0 : label === '补充说明' ? 2 : 1;
+const goToSettingsGroup = async (target: number) => {
+  const panel = screen.queryByTestId('intake-settings');
+  if (!panel) return;
+  let current = Number(panel.getAttribute('data-group'));
+  while (current !== target) {
+    fireEvent.click(screen.getByRole('button', { name: current < target ? '下一步' : '返回', exact: true }));
+    current = Number(screen.getByTestId('intake-settings').getAttribute('data-group'));
+  }
+};
+const confirmBrief = async () => {
+  await goToSettingsGroup(2);
+  fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
+};
+const openSettingOptions = async (label: string) => {
+  if (label !== 'Language') await goToSettingsGroup(settingGroup(label));
+  fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
+  return screen.findByRole('listbox', { name: label, exact: true });
+};
+
+const selectSetting = async (label: string, option: string) => {
+  const listbox = await openSettingOptions(label);
+  fireEvent.click(within(listbox).getByRole('option', { name: option, exact: true }));
+};
+
+const selectScreenOrientation = (label: '横屏' | '竖屏') => selectSetting('屏幕方向', label);
 
 const submitIdeaAndConfirmIntake = async (idea: string) => {
   const textbox = await submitIdea(idea);
@@ -497,7 +553,7 @@ beforeEach(() => {
       provider: 'openai-compatible',
       baseUrl: 'https://llm.example.test/v1',
       apiKeyPreview: 'sk-...test',
-      models: { balanced: 'balanced-model' },
+      model: 'balanced-model',
       isDefault: true,
     },
   ]);
@@ -551,6 +607,13 @@ beforeEach(() => {
     expiresAt: Date.now() + 3600_000,
     user: { id: 'user-2', email: 'new@example.com' },
   });
+  verifySupabaseSignupCode.mockReset();
+  verifySupabaseSignupCode.mockResolvedValue({
+    accessToken: 'verified-access-token', expiresAt: Date.now() + 3600_000,
+    user: { id: 'user-2', email: 'new@example.com' },
+  });
+  resendSupabaseSignupCode.mockReset();
+  resendSupabaseSignupCode.mockResolvedValue(undefined);
   updateSupabaseAvatarUrl.mockReset();
   updateSupabaseAvatarUrl.mockResolvedValue({
     accessToken: 'updated-access-token',
@@ -565,10 +628,48 @@ beforeEach(() => {
   });
   uploadSupabaseAvatarImage.mockReset();
   uploadSupabaseAvatarImage.mockResolvedValue('https://cdn.example.com/avatars/alice.png');
-  terminalRenderState.renderCount = 0;
 });
 
 describe('LandingView bootstrap submission', () => {
+  it('replays the home fade after resource navigation without remounting the idea draft', async () => {
+    const listPacks = vi.spyOn(resourceLibraryApi, 'listPacks').mockResolvedValue([]);
+    const originalUrl = window.location.href;
+    try {
+      const { container } = await renderLanding();
+      const page = container.firstElementChild;
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, { target: { value: 'Keep this draft' } });
+      expect(page).toHaveClass('page-enter');
+      await act(async () => {
+        window.history.pushState({}, '', '/?resourceLibrary=1');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await screen.findByRole('dialog');
+      expect(page).not.toHaveClass('page-enter');
+      await act(async () => {
+        window.history.replaceState({}, '', '/');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(container.firstElementChild).toBe(page);
+      expect(page).toHaveClass('page-enter');
+      expect(screen.getByRole('textbox')).toBe(input);
+      expect(input).toHaveValue('Keep this draft');
+      expect(listPacks).toHaveBeenCalledTimes(1);
+    } finally {
+      listPacks.mockRestore();
+      window.history.replaceState({}, '', originalUrl);
+    }
+  });
+
+  it('keeps the idea home header controls without a sound button', async () => {
+    await renderLanding();
+
+    expect(screen.queryByTestId('home-sound-toggle')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '用户菜单' })).toBeInTheDocument();
+    expect(document.querySelector('header .lucide-moon')).toBeInTheDocument();
+  });
+
   it('asks the user to sign in before generating intake options', async () => {
     mockCurrentUser = null;
 
@@ -576,7 +677,7 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdea('LLM generated idea');
 
-    expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '欢迎回来' })).toBeInTheDocument();
     expect(screen.getByText('你的灵感与项目，正在这里等待继续。')).toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
     expect(getCreditBalance).not.toHaveBeenCalled();
@@ -587,9 +688,18 @@ describe('LandingView bootstrap submission', () => {
 
     await renderLanding();
 
+    const send = screen.getByTestId('idea-prompt-send');
     await submitIdea('LLM generated idea');
 
-    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    expect(screen.getByTestId('idea-prompt-morph-shell')).toHaveAttribute('data-confirming', 'true');
+    // Consent merges the existing action into the same liquid surface. Removing
+    // and recreating it would snap its silhouette during the contraction.
+    expect(screen.getByTestId('idea-prompt-send')).toBe(send);
+    expect(send).toBeDisabled();
+    expect(send).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByRole('dialog', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument());
     expect(listModelConfigs).not.toHaveBeenCalled();
     expect(runIdeaIntake).not.toHaveBeenCalled();
   });
@@ -612,12 +722,12 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
     fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
 
-    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '继续生成' }));
 
@@ -644,7 +754,7 @@ describe('LandingView bootstrap submission', () => {
     await renderLanding();
 
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'wrong-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
@@ -661,7 +771,7 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdea('OAuth generated idea');
 
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
 
     expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
@@ -676,7 +786,7 @@ describe('LandingView bootstrap submission', () => {
     };
     await renderLanding();
 
-    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '继续生成' }));
 
@@ -702,21 +812,22 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdea('LLM generated idea');
 
-    expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '欢迎回来' })).toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
 
-    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
     });
+    expect(await screen.findByRole('textbox')).toHaveValue('LLM generated idea');
     expect(runIdeaIntake).not.toHaveBeenCalled();
 
     await submitIdea('LLM generated idea');
@@ -734,11 +845,11 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdea('Persistent LLM generated idea');
 
-    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
     unmount();
     await renderLanding();
 
-    expect(await screen.findByRole('dialog', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '继续生成' }));
 
     expect(await screen.findByText('LLM Mode A')).toBeInTheDocument();
@@ -761,15 +872,15 @@ describe('LandingView bootstrap submission', () => {
     const { unmount } = await renderLanding();
 
     await submitIdeaAndConfirmIntake('Cached options idea');
-    expect(await screen.findByRole('dialog', { name: '选择方案' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: '选择方案' })).toBeInTheDocument();
     expect(runIdeaIntake).toHaveBeenCalledTimes(1);
     unmount();
     await renderLanding();
 
-    const dialog = await screen.findByRole('dialog', { name: '选择方案' });
+    const dialog = await screen.findByRole('region', { name: '选择方案' });
     expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode A/ }));
     expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode B/ }));
-    expect(screen.getByRole('textbox')).toHaveValue('Cached options idea');
+    expect(JSON.parse(sessionStorage.getItem('beegame.pendingIntakeFlow.v1')!).idea).toBe('Cached options idea');
     expect(runIdeaIntake).toHaveBeenCalledTimes(1);
   });
 
@@ -787,7 +898,7 @@ describe('LandingView bootstrap submission', () => {
 
     await renderLanding();
 
-    expect(screen.queryByRole('dialog', { name: '选择方案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '选择方案' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox')).toHaveValue('');
   });
 
@@ -796,18 +907,167 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdeaAndConfirmIntake('Cached settings idea');
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
-    fireEvent.change(screen.getByRole('combobox', { name: '引擎' }), { target: { value: 'Godot' } });
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await selectSetting('引擎', 'Godot');
+    await goToSettingsGroup(2);
     fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), {
       target: { value: 'Keep the selected settings.' },
     });
     unmount();
     await renderLanding();
 
-    expect(await screen.findByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '引擎' })).toHaveValue('Godot');
+    expect(await screen.findByRole('region', { name: 'LLM Mode A' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '引擎', exact: true })).toHaveTextContent('Godot');
+    await goToSettingsGroup(2);
     expect(screen.getByRole('textbox', { name: '补充说明' })).toHaveValue('Keep the selected settings.');
     expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
     expect(runIdeaIntake).toHaveBeenCalledTimes(1);
+  });
+
+  it('blueprint opens settings directly and restores them without generating three options', async () => {
+    const { unmount } = await renderLanding();
+    fireEvent.blur(screen.getByRole('textbox'), { relatedTarget: document.body });
+    fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
+    fireEvent.click(await screen.findByRole('button', { name: '蓝图模式' }));
+    await submitIdea('按我的蓝图制作一个解谜游戏');
+    expect(await screen.findByTestId('intake-settings')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回输入' })).toBeInTheDocument();
+    expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+    expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
+    unmount();
+    await renderLanding();
+    expect(await screen.findByTestId('intake-settings')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回输入' }));
+    expect(screen.getByRole('textbox')).toHaveValue('按我的蓝图制作一个解谜游戏');
+    expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+  });
+
+  it('creative references accompany the typed idea through options and confirmed build', async () => {
+    const onStart = vi.fn().mockResolvedValue({});
+    await renderLanding({ onStart });
+    fireEvent.change(document.querySelector('#landing-attachment-upload')!, {
+      target: { files: [new File(['Keep the hand-drawn visual style.'], 'reference.md', { type: 'text/markdown' })] },
+    });
+    await screen.findByText('reference.md');
+    await submitIdeaAndConfirmIntake('参考附件，但玩法是解谜');
+    fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    expect(runIdeaIntake).toHaveBeenCalledWith(expect.objectContaining({
+      idea: '参考附件，但玩法是解谜',
+      attachments: [expect.objectContaining({ filename: 'reference.md', data: btoa('Keep the hand-drawn visual style.') })],
+    }));
+    expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
+    await selectScreenOrientation('横屏');
+    await confirmBrief();
+    fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
+    await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
+    expect(onStart.mock.calls[0][2]).toMatchObject({
+      creationMode: 'creative', attachments: [{ filename: 'reference.md', data: btoa('Keep the hand-drawn visual style.') }],
+    });
+  });
+
+  it('groups resources with gameplay and leaves notes alone without a close action', async () => {
+    await renderLanding();
+    fireEvent.blur(screen.getByRole('textbox'), { relatedTarget: document.body });
+    fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
+    fireEvent.click(screen.getByRole('button', { name: '蓝图模式' }));
+    await submitIdea('My blueprint draft');
+    expect(screen.getByRole('button', { name: '屏幕方向' })).toHaveTextContent('横屏');
+    await goToSettingsGroup(1);
+    expect(screen.getByRole('button', { name: '资源库使用方式' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '补充说明' })).not.toBeInTheDocument();
+    await goToSettingsGroup(2);
+    expect(screen.getByRole('textbox', { name: '补充说明' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '资源库使用方式' })).not.toBeInTheDocument();
+    const bubble = screen.getByRole('dialog');
+    expect(bubble.querySelector('svg.lucide-undo-2')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '关闭创作流程' })).not.toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+  });
+
+  it('uses sparkles for creation and offers closing beside return on the final confirmation', async () => {
+    const onStart = vi.fn();
+    await renderLanding({ onStart });
+    await submitIdeaAndConfirmIntake('Example game idea');
+    fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await confirmBrief();
+    expect(screen.getByRole('button', { name: '开始构建' }).querySelector('svg.lucide-sparkles')).not.toBeNull();
+    const close = screen.getByRole('button', { name: '关闭创作流程' });
+    const navigation = close.parentElement!;
+    expect(within(navigation).getAllByRole('button').at(-1)).toBe(close);
+    fireEvent.click(close);
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    expect(screen.queryByTestId('confirmed-brief')).not.toBeInTheDocument();
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it('blueprint references enter settings without analysis and survive closing settings', async () => {
+    await renderLanding();
+    fireEvent.change(document.querySelector('#landing-attachment-upload')!, {
+      target: { files: [new File(['# Complete blueprint'], 'blueprint.md', { type: 'text/markdown' })] },
+    });
+    await screen.findByText('blueprint.md');
+    fireEvent.blur(screen.getByRole('textbox'), { relatedTarget: document.body });
+    fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
+    fireEvent.click(await screen.findByRole('button', { name: '蓝图模式' }));
+    await submitIdea('实现附件蓝图');
+    expect(await screen.findByTestId('intake-settings')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回输入' }));
+    expect(screen.getByText('blueprint.md')).toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+    expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
+  });
+
+  it('blueprint configured settings and original references reach the build entry', async () => {
+    const onStart = vi.fn().mockResolvedValue({});
+    await renderLanding({ onStart });
+    fireEvent.change(document.querySelector('#landing-attachment-upload')!, {
+      target: { files: [new File(['# Blueprint'], 'plan.md', { type: 'text/markdown' })] },
+    });
+    await screen.findByText('plan.md');
+    fireEvent.blur(screen.getByRole('textbox'), { relatedTarget: document.body });
+    fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
+    fireEvent.click(await screen.findByRole('button', { name: '蓝图模式' }));
+    await submitIdea('按蓝图制作');
+    for (const [label, value] of [['平台', 'Web'], ['引擎', 'React'], ['表现形式', '2D'], ['游戏类型', '解谜'], ['风格', '像素']]) {
+      await selectSetting(label, value);
+    }
+    await goToSettingsGroup(1);
+    const inputTrigger = screen.getByText('输入方式').parentElement!.querySelector('button')!;
+    fireEvent.click(inputTrigger);
+    fireEvent.click(await screen.findByRole('option', { name: '键鼠', exact: true }));
+    await selectScreenOrientation('横屏');
+    await confirmBrief();
+    expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
+    expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('平台 AI 生图')
+    expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('不再逐张确认')
+    fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
+    await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
+    expect(onStart.mock.calls[0][2]).toMatchObject({
+      creationMode: 'blueprint', idea: '按蓝图制作',
+      attachments: [{ filename: 'plan.md', data: btoa('# Blueprint') }],
+      settings: { platform: 'Web', engine: 'React', dimension: '2D', genre: 'Puzzle', visualStyle: 'Pixel' },
+    });
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+    expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
+  });
+
+  it('blocks creative generation after refresh until references are reattached', async () => {
+    const { unmount } = await renderLanding();
+    fireEvent.change(document.querySelector('#landing-attachment-upload')!, {
+      target: { files: [new File(['# Reference'], 'reference.md', { type: 'text/markdown' })] },
+    });
+    await screen.findByText('reference.md');
+    await submitIdea('Use my reference');
+    unmount();
+    await renderLanding();
+    await confirmIntakeCreditQuote();
+    expect(await screen.findByText(/刷新后请返回输入重新添加参考文件/)).toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
   });
 
   it('restores confirmed intake brief after a page refresh', async () => {
@@ -815,25 +1075,44 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdeaAndConfirmIntake('Cached brief idea');
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
-    fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Web' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '引擎' }), { target: { value: 'Godot' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '游戏类型' }), { target: { value: 'Puzzle' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Cartoon' } });
-    const resourceLibrarySelect = screen.getByRole('combobox', { name: '资源库使用方式' });
-    expect(resourceLibrarySelect).toHaveValue('preferred');
-    fireEvent.change(resourceLibrarySelect, { target: { value: 'optional' } });
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    for (const [label, value] of [['平台', 'Web'], ['引擎', 'Godot'], ['表现形式', '3D'], ['游戏类型', '解谜'], ['风格', '卡通']]) {
+      await selectSetting(label, value);
+    }
+    await goToSettingsGroup(1);
+    expect(screen.getByRole('button', { name: '资源库使用方式', exact: true })).toHaveTextContent('按需使用');
+    // The options must escape the scrolling dialog, not merely have a larger
+    // z-index inside its clipping ancestor. All choices still update the brief.
+    for (const option of ['优先使用', '必须使用', '按需使用']) {
+      const listbox = await openSettingOptions('资源库使用方式');
+      expect(listbox.parentElement).toBe(document.body);
+      expect(listbox.closest('[role="dialog"]')).toBeNull();
+      expect(within(listbox).getAllByRole('option')).toHaveLength(3);
+      fireEvent.click(within(listbox).getByRole('option', { name: option, exact: true }));
+      expect(screen.getByRole('button', { name: '资源库使用方式', exact: true })).toHaveTextContent(option);
+      expect(screen.queryByRole('listbox', { name: '资源库使用方式', exact: true })).not.toBeInTheDocument();
+      expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
+    }
+    const openResourceMenu = await openSettingOptions('资源库使用方式');
+    fireEvent.keyDown(within(openResourceMenu).getByRole('option', { name: '必须使用', exact: true }), { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: '资源库使用方式', exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '资源库使用方式', exact: true })).toHaveFocus();
+    expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
+    await selectSetting('资源库使用方式', '按需使用');
+    await goToSettingsGroup(1);
     fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
     fireEvent.click(screen.getByRole('option', { name: '键鼠' }));
-    fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
+    await selectScreenOrientation('横屏');
+    await confirmBrief();
     expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
     expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('按需使用');
     unmount();
     await renderLanding();
 
-    expect(await screen.findByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'LLM Mode A' })).toBeInTheDocument();
     expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('确认构建方案');
     expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('Godot');
+    expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('横屏');
     expect(runIdeaIntake).toHaveBeenCalledTimes(1);
   });
 
@@ -955,7 +1234,8 @@ describe('LandingView bootstrap submission', () => {
 
     expect(screen.getByText('A')).toBeInTheDocument();
     expect(await screen.findByText('Alice')).toBeInTheDocument();
-    expect(screen.getByText('300 credits')).toBeInTheDocument();
+    expect(await screen.findByText('300 credits')).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /模式|mode/i })).not.toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
@@ -1015,9 +1295,10 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
 
-    expect(await screen.findByRole('dialog', { name: '个人主页' })).toBeInTheDocument();
-    expect(screen.getByText('Alice')).toBeInTheDocument();
-    expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+    const profileDialog = await screen.findByRole('dialog', { name: '个人主页' });
+    expect(profileDialog).toBeInTheDocument();
+    expect(within(profileDialog).getByText('Alice')).toBeInTheDocument();
+    expect(within(profileDialog).getByText('alice@example.com')).toBeInTheDocument();
     expect(screen.queryByLabelText('昵称')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('个人邮箱')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('头像 URL')).not.toBeInTheDocument();
@@ -1099,7 +1380,7 @@ describe('LandingView bootstrap submission', () => {
     await waitFor(() => expect(screen.queryByRole('menu', { name: '用户菜单' })).not.toBeInTheDocument());
   });
 
-  it('uses the frosted input surface style for the account menu without filling the avatar', async () => {
+  it('uses the shared circular dashboard avatar for the account menu', async () => {
     mockCurrentUser = {
       id: 'alice',
       role: 'owner',
@@ -1108,12 +1389,12 @@ describe('LandingView bootstrap submission', () => {
     await renderLanding();
 
     const userButton = await screen.findByRole('button', { name: '用户菜单' });
-    expect(userButton).toHaveAttribute('data-avatar-surface', 'outline');
-    expect(userButton).not.toHaveClass('bg-black/20');
+    expect(userButton).toHaveClass('rounded-full', 'bg-[var(--surface-2)]');
+    expect(userButton).not.toHaveClass('rounded-lg');
 
     fireEvent.click(userButton);
 
-    expect(screen.getByRole('menu', { name: '用户菜单' })).toHaveAttribute('data-surface', 'frosted-glass');
+    expect(screen.getByRole('menu', { name: '用户菜单' })).toHaveClass('bg-popover', 'border-border');
   });
 
   it('opens the login and registration dialog from the anonymous user icon', async () => {
@@ -1123,11 +1404,8 @@ describe('LandingView bootstrap submission', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
 
-    expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: '登录 / 注册 BeeGame' })).toHaveAttribute(
-      'data-surface',
-      'frosted-glass',
-    );
+    expect(await screen.findByRole('dialog', { name: '欢迎回来' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '欢迎回来' })).toHaveClass('border-border', 'bg-popover');
     expect(screen.getByRole('button', { name: '注册账号' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'GitHub' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
@@ -1143,21 +1421,21 @@ describe('LandingView bootstrap submission', () => {
     await renderLanding();
 
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-    const authDialog = await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    const authDialog = await screen.findByRole('dialog', { name: '欢迎回来' });
     const authPanel = authDialog.querySelector('form');
 
     expect(authPanel).toHaveClass('max-w-[520px]');
-    expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
+    expect(authPanel).toHaveClass('max-h-[calc(100dvh-2rem)]');
 
     fireEvent.click(screen.getByRole('button', { name: '注册账号' }));
 
     expect(authPanel).toHaveClass('max-w-[520px]');
-    expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
+    expect(authPanel).toHaveClass('max-h-[calc(100dvh-2rem)]');
 
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     expect(authPanel).toHaveClass('max-w-[520px]');
-    expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
+    expect(authPanel).toHaveClass('max-h-[calc(100dvh-2rem)]');
   });
 
   it('does not start generation after account-menu email login without an explicit generate click', async () => {
@@ -1176,13 +1454,13 @@ describe('LandingView bootstrap submission', () => {
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed but not submitted idea' } });
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
 
     await waitFor(() => expect(signInWithSupabasePassword).toHaveBeenCalled());
-    expect(screen.queryByRole('dialog', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
   });
 
@@ -1193,7 +1471,7 @@ describe('LandingView bootstrap submission', () => {
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed but not submitted idea' } });
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
 
     expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
@@ -1208,7 +1486,7 @@ describe('LandingView bootstrap submission', () => {
     };
     await renderLanding();
 
-    expect(screen.queryByRole('dialog', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
   });
 
@@ -1277,6 +1555,32 @@ describe('LandingView bootstrap submission', () => {
     expect(mockLoadCurrentUser).toHaveBeenCalled();
   });
 
+  it('asks for the email code when signup requires confirmation', async () => {
+    mockCurrentUser = null;
+    signUpWithSupabasePassword.mockResolvedValueOnce(null);
+    mockLoadCurrentUser.mockImplementation(async () => {
+      if (verifySupabaseSignupCode.mock.calls.length) {
+        mockCurrentUser = { id: 'user-2', role: 'owner', permissions: ['project.create'] };
+      }
+    });
+    await renderLanding();
+    fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
+    fireEvent.click(await screen.findByRole('button', { name: '注册账号' }));
+    fireEvent.change(screen.getByLabelText('昵称'), { target: { value: 'New Player' } });
+    fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'new@example.com' } });
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
+    fireEvent.click(screen.getByLabelText('同意用户协议'));
+    fireEvent.click(screen.getByRole('button', { name: '注册并继续' }));
+
+    expect(await screen.findByRole('dialog', { name: '验证邮箱' })).toBeInTheDocument();
+    expect(verifySupabaseSignupCode).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('邮箱验证码'), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: '验证邮箱并继续' }));
+
+    await waitFor(() => expect(verifySupabaseSignupCode).toHaveBeenCalledWith('new@example.com', '123456'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '验证邮箱' })).not.toBeInTheDocument());
+  });
+
   it('starts Supabase OAuth from third-party login buttons', async () => {
     mockCurrentUser = null;
 
@@ -1341,50 +1645,23 @@ describe('LandingView bootstrap submission', () => {
     expect(analyzeIdeaIntake).not.toHaveBeenCalled();
   });
 
-  it('shows generated intake options in a modal instead of embedding them into the landing page', async () => {
+  it('shows generated options and their real gameplay inside the production dialog', async () => {
     await renderLanding();
-
     await submitIdeaAndConfirmIntake('LLM generated idea');
-
-    const dialog = await screen.findByRole('dialog', { name: '选择方案' });
-
-    expect(dialog).toContainElement(screen.getByTestId('intake-options'));
-    expect(dialog.firstElementChild).toHaveClass('max-w-5xl');
-    expect(dialog).toContainElement(screen.getByRole('button', { name: /LLM Mode A/ }));
-    const modeLabel = screen.getAllByText('游戏模式')[0];
-    const gameplayLabel = screen.getAllByText('玩法')[0];
-    expect(dialog).toContainElement(modeLabel);
-    expect(dialog).toContainElement(gameplayLabel);
-    expect(modeLabel).toHaveClass('type-footnote');
-    expect(modeLabel).not.toHaveClass('type-caption-1');
-    expect(gameplayLabel).toHaveClass('type-footnote');
-    expect(gameplayLabel).not.toHaveClass('type-caption-1');
-    expect(dialog).toContainElement(screen.getByText('LLM generated gameplay rules A.'));
-    expect(dialog).not.toHaveTextContent('AUTO');
-    expect(dialog).not.toHaveTextContent('核心假设');
-    expect(dialog).not.toHaveTextContent('第一分钟');
-    expect(dialog).not.toHaveTextContent('为什么适合');
-    expect(dialog).not.toHaveTextContent('首版原型');
-    const optionsGrid = screen.getByTestId('intake-options').firstElementChild;
-    expect(optionsGrid).toHaveClass('md:grid-cols-3');
-    expect(optionsGrid).not.toHaveClass('md:grid-cols-2');
-    const cards = within(dialog).getAllByTestId('intake-option-card');
-    expect(cards[0]).toHaveClass('grid', 'h-[25rem]', 'grid-rows-[5.25rem_1.75rem_minmax(0,1fr)]');
-    expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('line-clamp-2', 'overflow-hidden');
-    expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('type-title-3');
-    expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass(
-      'scroll-fade',
-      'scroll-fade-y',
-      'scroll-fade-6',
-      'scrollbar-premium',
-      'type-body',
-      'min-h-0',
-      'overflow-y-auto',
-    );
-    expect(within(cards[0]).queryByTestId('intake-option-tags')).not.toBeInTheDocument();
-    expect(dialog).toHaveAttribute('data-intake-modal', 'true');
-    expect(screen.queryByText('BeeGame Idea Intake')).not.toBeInTheDocument();
-    expect(screen.queryByText('Choose a direction')).not.toBeInTheDocument();
+    const options = await screen.findByRole('region', { name: '选择方案' });
+    const bubble = screen.getByRole('dialog');
+    expect(bubble).toContainElement(options);
+    const backdrop = screen.getByTestId('idea-home-backdrop');
+    expect(within(options).getAllByTestId('bouncy-accordion-trigger')).toHaveLength(3);
+    expect(within(options).getAllByTestId('bouncy-accordion-trigger').every(button => button.getAttribute('aria-expanded') === 'false')).toBe(true);
+    expect(screen.queryByRole('button', { name: '下一步' })).not.toBeInTheDocument();
+    expect(options).toContainElement(screen.getByText('LLM generated gameplay rules A.'));
+    expect(screen.queryByTestId('idea-avatar')).not.toBeInTheDocument();
+    fireEvent.click(within(options).getByRole('button', { name: /LLM Mode A/ }));
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await waitFor(() => expect(screen.getByRole('dialog')).toContainElement(screen.getByTestId('intake-settings')));
+    expect(screen.getByRole('dialog')).toBe(bubble);
+    expect(screen.getByTestId('idea-home-backdrop')).toBe(backdrop);
   });
 
   it('does not show clarification when intake returns an old clarification-only response', async () => {
@@ -1406,34 +1683,49 @@ describe('LandingView bootstrap submission', () => {
     errorLog.mockRestore();
   });
 
-  it('keeps the landing content visible without opening a modal while generating options', async () => {
-    let resolveOptions: (value: Awaited<ReturnType<typeof generateIntakeOptions>>) => void = () => undefined;
+  it('shows a rejected idea below the prompt and keeps the draft editable', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    runIdeaIntake.mockRejectedValueOnce(new Error('这里用于创建游戏。请描述你想制作的游戏。'));
+
+    await renderLanding();
+    await submitIdeaAndConfirmIntake('你是谁');
+
+    const message = await screen.findByText('这里用于创建游戏。请描述你想制作的游戏。');
+    expect(screen.getByRole('alert')).toContainElement(message);
+    expect(screen.queryByTestId('idea-avatar')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('你是谁');
+    expect(screen.getByRole('textbox')).toBeEnabled();
+    errorLog.mockRestore();
+  });
+
+  it('replaces the consent input with a writing avatar while generating, then restores the draft on failure', async () => {
+    let rejectOptions: (reason: Error) => void = () => undefined;
     runIdeaIntake.mockReturnValue(
-      new Promise(resolve => {
-        resolveOptions = resolve;
+      new Promise((_resolve, reject) => {
+        rejectOptions = reject;
       }),
     );
     const onStart = vi.fn();
 
     await renderLanding({ onStart });
 
-    const textbox = await submitIdeaAndConfirmIntake('LLM generated idea');
+    await submitIdeaAndConfirmIntake('LLM generated idea');
 
-    expect(screen.getByRole('heading', { name: '从一个想法开始' })).toBeInTheDocument();
-    expect(screen.getByText('寥寥几句，就足以启程。')).toBeInTheDocument();
+    expect(screen.queryByTestId('avatar-dialogue')).not.toBeInTheDocument();
     expect(screen.queryByText('正在根据你的想法生成可选方案...')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(textbox).toBeDisabled();
+    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument());
+    expect(screen.getByTestId('idea-avatar')).toHaveAttribute('data-mood', 'writing');
+    expect(screen.getByRole('status')).toHaveTextContent('');
+    expect(screen.queryByText('可以是一句话、一张图片、一段视频。')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('idea-prompt-beam')).not.toBeInTheDocument();
 
-    resolveOptions({
-      maturity: 'vague',
-      needsClarification: false,
-      clarificationQuestions: [],
-      detectedConstraints: [],
-      recommendedNextStep: 'choose_direction',
-      options: [],
+    await act(async () => {
+      rejectOptions(new Error('Preview request failed'));
     });
-    await waitFor(() => expect(runIdeaIntake).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    expect(screen.getByRole('textbox')).toHaveValue('LLM generated idea');
+    expect(screen.queryByTestId('idea-avatar')).not.toBeInTheDocument();
     expect(onStart).not.toHaveBeenCalled();
   });
 
@@ -1451,8 +1743,8 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdeaAndConfirmIntake('LLM concrete idea');
 
-    expect(await screen.findByRole('dialog', { name: '选择方案' })).toBeInTheDocument();
-    expect(screen.getAllByTestId('intake-option-card')).toHaveLength(3);
+    expect(await screen.findByRole('region', { name: '选择方案' })).toBeInTheDocument();
+    expect(screen.getAllByTestId('bouncy-accordion-trigger')).toHaveLength(3);
     expect(screen.queryByTestId('intake-settings')).not.toBeInTheDocument();
   });
 
@@ -1490,37 +1782,26 @@ describe('LandingView bootstrap submission', () => {
     await submitIdeaAndConfirmIntake('LLM generated idea');
 
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
 
-    const platformSelect = screen.getByRole('combobox', { name: '平台' });
-    const engineSelect = screen.getByRole('combobox', { name: '引擎' });
-    const dimensionSelect = screen.getByRole('combobox', { name: '表现形式' });
-    const genreSelect = screen.getByRole('combobox', { name: '游戏类型' });
-    const styleSelect = screen.getByRole('combobox', { name: '风格' });
+    for (const [label, choices, invalid] of [
+      ['平台', ['Web', 'PC'], 'Experimental Arcade Cabinet'],
+      ['引擎', ['React', 'Unity', 'Godot', 'Unreal'], 'Custom Engine From Prompt'],
+      ['表现形式', ['2D'], 'Holographic 4D'],
+      ['游戏类型', ['街机'], 'Generated Genre'],
+      ['风格', ['像素'], 'Generated Style'],
+    ] as const) {
+      await goToSettingsGroup(settingGroup(label));
+      expect(screen.getByRole('button', { name: label, exact: true })).toHaveTextContent('请选择');
+      const listbox = await openSettingOptions(label);
+      for (const choice of choices) expect(within(listbox).getByRole('option', { name: choice, exact: true })).toBeInTheDocument();
+      expect(within(listbox).queryByRole('option', { name: invalid, exact: true })).not.toBeInTheDocument();
+      expect(within(listbox).queryByRole('option', { selected: true })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
+    }
 
-    expect(platformSelect).toHaveValue('');
-    expect(engineSelect).toHaveValue('');
-    expect(dimensionSelect).toHaveValue('');
-    expect(genreSelect).toHaveValue('');
-    expect(styleSelect).toHaveValue('');
-
-    expect(within(platformSelect).getByRole('option', { name: 'Web' })).toBeInTheDocument();
-    expect(within(platformSelect).getByRole('option', { name: 'PC' })).toBeInTheDocument();
-    expect(within(engineSelect).getByRole('option', { name: 'React' })).toBeInTheDocument();
-    expect(within(engineSelect).getByRole('option', { name: 'Unity' })).toBeInTheDocument();
-    expect(within(engineSelect).getByRole('option', { name: 'Godot' })).toBeInTheDocument();
-    expect(within(engineSelect).getByRole('option', { name: 'Unreal' })).toBeInTheDocument();
-    expect(within(dimensionSelect).getByRole('option', { name: '2D' })).toBeInTheDocument();
-    expect(within(genreSelect).getByRole('option', { name: '街机' })).toBeInTheDocument();
-    expect(within(styleSelect).getByRole('option', { name: '像素' })).toBeInTheDocument();
-    expect(
-      within(platformSelect).queryByRole('option', { name: 'Experimental Arcade Cabinet' }),
-    ).not.toBeInTheDocument();
-    expect(within(engineSelect).queryByRole('option', { name: 'Custom Engine From Prompt' })).not.toBeInTheDocument();
-    expect(within(dimensionSelect).queryByRole('option', { name: 'Holographic 4D' })).not.toBeInTheDocument();
-    expect(within(genreSelect).queryByRole('option', { name: 'Generated Genre' })).not.toBeInTheDocument();
-    expect(within(styleSelect).queryByRole('option', { name: 'Generated Style' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
+    await selectScreenOrientation('横屏');
+    await confirmBrief();
 
     expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
     expect(screen.queryByTestId('confirmed-brief')).not.toBeInTheDocument();
@@ -1553,36 +1834,40 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdeaAndConfirmIntake('LLM concrete settings idea');
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
-    expect(await screen.findByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    expect(await screen.findByRole('region', { name: 'LLM Mode A' })).toBeInTheDocument();
 
-    const platformSelect = screen.getByRole('combobox', { name: '平台' });
-    const engineSelect = screen.getByRole('combobox', { name: '引擎' });
-    const dimensionSelect = screen.getByRole('combobox', { name: '表现形式' });
-    const genreSelect = screen.getByRole('combobox', { name: '游戏类型' });
-    const styleSelect = screen.getByRole('combobox', { name: '风格' });
-
-    expect(platformSelect).toHaveValue('PC');
-    expect(engineSelect).toHaveValue('Unity');
-    expect(dimensionSelect).toHaveValue('3D');
-    expect(genreSelect).toHaveValue('Racing');
-    expect(styleSelect).toHaveValue('Realistic');
+    for (const [label, value] of [['平台', 'PC'], ['引擎', 'Unity'], ['表现形式', '3D'], ['游戏类型', 'Racing'], ['风格', '写实']]) {
+      await goToSettingsGroup(settingGroup(label));
+      expect(screen.getByRole('button', { name: label, exact: true })).toHaveTextContent(value);
+      const listbox = await openSettingOptions(label);
+      expect(within(listbox).getByRole('option', { name: value, exact: true })).toHaveAttribute('aria-selected', 'true');
+      fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
+    }
+    await goToSettingsGroup(1);
     expect(screen.getByRole('button', { name: '键鼠 / 手柄 / 手追' })).toBeInTheDocument();
-
-    expect(within(platformSelect).getByRole('option', { name: 'Web' })).toBeInTheDocument();
-    expect(within(platformSelect).getByRole('option', { name: 'PC' })).toBeInTheDocument();
-    expect(
-      within(engineSelect)
-        .getAllByRole('option')
-        .map(option => option.getAttribute('value')),
-    ).toEqual(['React', 'Unity', 'Godot', 'Unreal']);
-    expect(within(engineSelect).queryByRole('option', { name: '请选择' })).not.toBeInTheDocument();
-    expect(within(dimensionSelect).getByRole('option', { name: '2D' })).toBeInTheDocument();
-    expect(within(genreSelect).getByRole('option', { name: 'Racing' })).toBeInTheDocument();
-    expect(within(styleSelect).getByRole('option', { name: '写实' })).toBeInTheDocument();
+    const engines = await openSettingOptions('引擎');
+    expect(within(engines).getAllByRole('option').map(option => option.textContent)).toEqual(['React', 'Unity', 'Godot', 'Unreal']);
+    fireEvent.click(screen.getByRole('button', { name: '引擎', exact: true }));
+    await goToSettingsGroup(1);
     fireEvent.click(screen.getByRole('button', { name: '键鼠 / 手柄 / 手追' }));
     expect(
       within(screen.getByRole('listbox', { name: '输入方式' })).getByRole('option', { name: '手追' }),
     ).toBeInTheDocument();
+  });
+
+  it('defaults orientation to landscape and allows an explicit portrait choice', async () => {
+    await renderLanding();
+    await submitIdeaAndConfirmIntake('Touch game');
+    fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    const orientation = screen.getByRole('button', { name: '屏幕方向', exact: true });
+    expect(orientation).toHaveTextContent('横屏');
+    expect(orientation).not.toHaveTextContent('竖屏');
+    await selectScreenOrientation('竖屏');
+    await confirmBrief();
+    expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('竖屏');
+    expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('Touch');
   });
 
   it('confirms an intake brief before starting the BeeGame session', async () => {
@@ -1593,32 +1878,31 @@ describe('LandingView bootstrap submission', () => {
     await submitIdeaAndConfirmIntake('LLM generated idea');
 
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
     expect(screen.getByTestId('intake-settings')).toHaveAttribute('data-panel-depth', 'single');
-    expect(screen.getByRole('dialog', { name: 'LLM Mode A' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'LLM Mode A' })).toBeInTheDocument();
     expect(screen.queryByText('补齐制作设置')).not.toBeInTheDocument();
     expect(screen.queryByText('LLM generated hypothesis A.')).not.toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: '范围' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '范围', exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText('Auto')).not.toBeInTheDocument();
 
-    const engineSelect = screen.getByRole('combobox', { name: '引擎' });
-    const engineValues = within(engineSelect)
-      .getAllByRole('option')
-      .map(option => option.getAttribute('value'));
+    const engineListbox = await openSettingOptions('引擎');
+    const engineValues = within(engineListbox).getAllByRole('option').map(option => option.textContent);
     expect(engineValues).toEqual(['React', 'Unity', 'Godot', 'Unreal']);
-    fireEvent.change(screen.getByRole('combobox', { name: '平台' }), { target: { value: 'Web' } });
-    fireEvent.change(engineSelect, { target: { value: 'Godot' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '表现形式' }), { target: { value: '3D' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '游戏类型' }), { target: { value: 'Puzzle' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Cartoon' } });
+    fireEvent.click(within(engineListbox).getByRole('option', { name: 'Godot', exact: true }));
+    for (const [label, value] of [['平台', 'Web'], ['表现形式', '3D'], ['游戏类型', '解谜'], ['风格', '卡通']]) {
+      await selectSetting(label, value);
+    }
+    await goToSettingsGroup(1);
     fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
     const inputListbox = screen.getByRole('listbox', { name: '输入方式' });
-    expect(inputListbox).toHaveAttribute('data-surface', 'frosted-glass');
-    expect(inputListbox).toHaveAttribute('data-glass-density', 'reinforced');
     expect(inputListbox).toHaveAttribute('data-floating-layer', 'true');
-    expect(inputListbox).toHaveClass('fixed', 'z-[220]');
-    expect(inputListbox).toHaveClass('backdrop-blur-2xl');
+    expect(inputListbox).toHaveClass('fixed', 'z-[260]');
+    expect(inputListbox).toHaveClass('bg-popover', 'border-border');
+    await goToSettingsGroup(2);
     fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), { target: { value: '优先验证关卡节奏。' } });
-    fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
+    await selectScreenOrientation('横屏');
+    await confirmBrief();
 
     expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
     expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('LLM generated pitch A.');
@@ -1628,8 +1912,9 @@ describe('LandingView bootstrap submission', () => {
     expect(mockLoadCurrentUser).toHaveBeenCalledTimes(1);
 
     const startingCover = await screen.findByRole('status', { name: '正在启动项目' });
-    expect(startingCover).toHaveClass('fixed', 'inset-0', 'z-[300]');
-    expect(startingCover).toHaveTextContent('正在创建独立工作区并连接构建会话，很快就好。');
+    expect(startingCover).toBeInTheDocument();
+    expect(screen.queryByTestId('avatar-dialogue')).not.toBeInTheDocument();
+    expect(within(startingCover).getByText('正在创建独立工作区并连接构建会话，很快就好。')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '启动构建' })).not.toBeInTheDocument();
     await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));
     const [, clarification, brief] = onStart.mock.calls[0];
@@ -1646,11 +1931,12 @@ describe('LandingView bootstrap submission', () => {
         platform: 'Web',
         engine: 'Godot',
         dimension: '3D',
+        orientation: 'Landscape',
         genre: 'Puzzle',
         visualStyle: 'Cartoon',
         inputs: ['Keyboard/mouse', 'Touch'],
         notes: '优先验证关卡节奏。',
-        resourceLibraryUsage: 'preferred',
+        resourceLibraryUsage: 'optional',
       },
     });
   });
@@ -1660,6 +1946,8 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdeaAndConfirmIntake('LLM generated idea');
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await goToSettingsGroup(1);
     fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
 
     expect(screen.getByRole('listbox', { name: '输入方式' })).toBeInTheDocument();
@@ -1671,13 +1959,13 @@ describe('LandingView bootstrap submission', () => {
     });
   });
 
-  it('renders localized English hero copy and idea placeholder', async () => {
-    await renderLanding({ lang: 'en' });
-
-    expect(screen.getByRole('heading', { name: 'Start with an idea.' })).toBeInTheDocument();
-    expect(screen.getByText('A few words are enough to begin.')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('What game do you want to make? e.g. a mobile puzzle game')).toBeInTheDocument();
-    expect(screen.queryByTestId('demiurge-logo')).not.toBeInTheDocument();
+  it('shows the restored prompt immediately with English mode selection', async () => {
+    const { container } = await renderLanding({ lang: 'en' }, false);
+    expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', 'What kind of game do you want to create?');
+    expect(screen.getByRole('button', { name: 'Creative mode', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a reference' })).toBeInTheDocument();
+    expect(container.querySelector('img[src="/assets/bgs_logo.svg"]')).toBeInTheDocument();
+    expect(screen.queryByTestId('avatar-dialogue')).not.toBeInTheDocument();
   });
 
   it('accepts a GDD attachment from the landing prompt', async () => {
@@ -1685,7 +1973,9 @@ describe('LandingView bootstrap submission', () => {
 
     const input = document.getElementById('landing-attachment-upload') as HTMLInputElement;
     expect(input.accept).toContain('.md');
-    expect(input.accept).toContain('.jsonl');
+    expect(input.accept).toContain('.doc');
+    expect(input.accept).toContain('.mp4');
+    expect(input.accept).not.toContain('.jsonl');
     expect(input.accept).not.toContain('image/gif');
 
     fireEvent.change(input, {
@@ -1695,24 +1985,106 @@ describe('LandingView bootstrap submission', () => {
     expect(await screen.findByText('game-design.md')).toBeInTheDocument();
   });
 
-  it('renders the video landing background', async () => {
+  it('limits Idea Home images and documents to the requested types and sizes', async () => {
     await renderLanding();
+    const input = document.getElementById('landing-attachment-upload') as HTMLInputElement;
 
-    const background = screen.getByTestId('faulty-terminal-background');
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array(3 * 1024 * 1024 + 1)], 'large.jpg', { type: 'image/jpeg' })] } });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('large.jpg 不得超过 3 MB'));
+    expect(screen.queryByText('large.jpg')).not.toBeInTheDocument();
 
-    expect(background).toHaveAttribute('data-background', 'video');
-    expect(screen.getByTestId('landing-background-video')).toBeInTheDocument();
-    expect(screen.getByTestId('landing-background-video')).not.toHaveAttribute('loop');
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'large.pdf', { type: 'application/pdf' })] } });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('large.pdf 不得超过 2 MB'));
+    expect(screen.queryByText('large.pdf')).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { files: [new File(['legacy document'], 'reference.doc', { type: 'application/msword' })] } });
+    expect(await screen.findByText('reference.doc')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { files: [new File(['image'], 'reference.webp', { type: 'image/webp' })] } });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('请上传 JPG、PNG、DOC、MD、PDF 或 MP4 文件'));
+    expect(screen.queryByText('reference.webp')).not.toBeInTheDocument();
   });
 
-  it('keeps the video background stable while typing in the prompt', async () => {
+  it('rejects MP4 videos longer than 10 seconds and accepts a 10-second video', async () => {
     await renderLanding();
+    const input = document.getElementById('landing-attachment-upload') as HTMLInputElement;
+    const createObjectURL = vi.fn(() => 'blob:reference-video');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const duration = vi.spyOn(HTMLMediaElement.prototype, 'duration', 'get').mockReturnValue(11);
+    const src = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set').mockImplementation(function (this: HTMLMediaElement) {
+      queueMicrotask(() => this.dispatchEvent(new Event('loadedmetadata')));
+    });
+    try {
+      fireEvent.change(input, { target: { files: [new File(['video'], 'long.mp4', { type: 'video/mp4' })] } });
+      expect(await screen.findByRole('alert')).toHaveTextContent('10 秒');
+      expect(screen.queryByText('long.mp4')).not.toBeInTheDocument();
 
-    const video = screen.getByTestId('landing-background-video');
+      duration.mockReturnValue(10);
+      fireEvent.change(input, { target: { files: [new File(['video'], 'short.mp4', { type: 'video/mp4' })] } });
+      expect(await screen.findByText('short.mp4')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(createObjectURL).toHaveBeenCalledTimes(2);
+      expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+    } finally {
+      src.mockRestore();
+      duration.mockRestore();
+      delete (URL as typeof URL & { createObjectURL?: typeof createObjectURL }).createObjectURL;
+      delete (URL as typeof URL & { revokeObjectURL?: typeof revokeObjectURL }).revokeObjectURL;
+    }
+  });
+
+  it('renders the restored prompt with the current backdrop and theme control', async () => {
+    await renderLanding();
+    expect(screen.queryByTestId('landing-background-image')).not.toBeInTheDocument();
+    expect(screen.getByTestId('idea-prompt-surface')).toContainElement(screen.getByRole('textbox'));
+    expect(screen.getByTestId('beui-theme-toggle')).toHaveAccessibleName('深色模式');
+  });
+
+  it('hides Send until input focus, stays open while clearing, and supports focusing Send', async () => {
+    await renderLanding(undefined, false);
+    const input = screen.getByRole('textbox');
+    const group = screen.getByTestId('idea-prompt-liquid');
+    const send = screen.getByTestId('idea-prompt-send');
+    const mode = screen.getByRole('button', { name: '创意模式' });
+    expect(mode).toHaveAttribute('aria-hidden', 'false');
+    expect(group).toHaveAttribute('data-send-detached', 'false');
+    expect(send).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByRole('button', { name: '生成' })).not.toBeInTheDocument();
+    // A restored or programmatically changed draft must not open the action.
+    fireEvent.change(input, { target: { value: '像素跑酷游戏' } });
+    expect(group).toHaveAttribute('data-send-detached', 'false');
+    fireEvent.focus(input);
+    expect(group).toHaveAttribute('data-send-detached', 'true');
+    expect(send).toHaveAttribute('aria-hidden', 'false');
+    expect(mode).toHaveAttribute('aria-hidden', 'true');
+    expect(mode).toHaveAttribute('tabindex', '-1');
+    expect(mode).toHaveAttribute('hidden');
+    expect(send).toBeEnabled();
+    fireEvent.change(input, { target: { value: '' } });
+    expect(group).toHaveAttribute('data-send-detached', 'true');
+    expect(send).toBeDisabled();
+    fireEvent.change(input, { target: { value: '像素跑酷游戏' } });
+    fireEvent.blur(input, { relatedTarget: send });
+    expect(group).toHaveAttribute('data-send-detached', 'true');
+    fireEvent.click(send);
+    expect(await screen.findByRole('group', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    fireEvent.focus(screen.getByRole('textbox'));
+    fireEvent.blur(screen.getByRole('textbox'), { relatedTarget: document.body });
+    expect(group).toHaveAttribute('data-send-detached', 'false');
+    expect(screen.getByRole('button', { name: '创意模式' })).toHaveAttribute('aria-hidden', 'false');
+  });
+
+  it('keeps the prompt usable while typing', async () => {
+    await renderLanding();
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '像素跑酷游戏' } });
 
-    expect(screen.getByTestId('landing-background-video')).toBe(video);
+    expect(screen.getByRole('textbox')).toHaveValue('像素跑酷游戏');
+    expect(screen.getByRole('textbox')).toBeEnabled();
   });
 
   it('does not expose model thinking controls in the idea prompt', async () => {
@@ -1721,32 +2093,70 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.queryByRole('option', { name: '深度思考' })).not.toBeInTheDocument();
   });
 
-  it('renders the idea prompt as a frosted glass surface', async () => {
+  it('renders the idea prompt as a semantic surface', async () => {
     await renderLanding();
 
-    expect(screen.getByTestId('idea-prompt-surface')).toHaveAttribute('data-surface', 'frosted-glass');
-    expect(screen.getByTestId('idea-prompt-surface')).toHaveAttribute('data-style-source', 'pixelfork');
-    expect(screen.getByTestId('idea-prompt-surface')).toHaveAttribute('data-glass-density', 'reinforced');
+    expect(screen.queryByTestId('idea-prompt-beam')).not.toBeInTheDocument();
+    expect(screen.getByTestId('idea-prompt-surface')).toContainElement(screen.getByRole('textbox'));
+    expect(screen.getByRole('textbox').tagName).toBe('TEXTAREA');
+    expect(screen.queryByTestId('command-bar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('progressive-blur-layer')).not.toBeInTheDocument();
   });
 
-  it('renders the updated Simplified Chinese hero subtitle', async () => {
-    await renderLanding({ lang: 'zh' });
-
-    expect(screen.getByRole('heading', { name: '从一个想法开始' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '从一个想法开始。' })).not.toBeInTheDocument();
-    expect(screen.getByText('寥寥几句，就足以启程。')).toBeInTheDocument();
+  it('does not submit during Chinese composition and preserves the idea after cancelling consent', async () => {
+    await renderLanding();
+    const input = screen.getByRole('textbox');
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '会改变重力的游戏' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(screen.queryByRole('group', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+    const confirmation = await screen.findByRole('group', { name: '实时 Credit 扣除提示' });
+    expect(screen.queryByRole('button', { name: '切换创作方式' })).not.toBeInTheDocument();
+    expect(within(confirmation).getByRole('button', { name: '取消' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(await screen.findByRole('textbox')).toHaveValue('会改变重力的游戏');
+    expect(runIdeaIntake).not.toHaveBeenCalled();
   });
 
-  it('renders the Traditional Chinese hero title without punctuation', async () => {
-    await renderLanding({ lang: 'zh-TW' });
+  it('keeps reference upload available and changes mode without losing the draft', async () => {
+    await renderLanding({ lang: 'zh' });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '我的游戏想法' } });
+    const submitButton = screen.getByRole('button', { name: '生成' });
+    expect(submitButton.querySelector('path[d="m5 12 7-7 7 7"]')).not.toBeNull();
+    expect(submitButton.querySelector('path[d="M12 19V5"]')).not.toBeNull();
+    const picker = document.getElementById('landing-attachment-upload') as HTMLInputElement;
+    const clickPicker = vi.spyOn(picker, 'click').mockImplementation(() => {});
+    fireEvent.click(screen.getByRole('button', { name: '添加参考文件' }));
+    expect(clickPicker).toHaveBeenCalledOnce();
+    expect(picker.accept).toBe('.jpg,.jpeg,.png,.doc,.md,.pdf,.mp4');
+    fireEvent.blur(screen.getByRole('textbox'), { relatedTarget: document.body });
+    fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
+    expect(screen.getByRole('textbox')).toHaveValue('我的游戏想法');
+    fireEvent.click(screen.getByRole('button', { name: '蓝图模式', exact: true }));
+    expect(screen.queryByTestId('creation-mode-choices')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('我的游戏想法');
+  });
 
-    expect(screen.getByRole('heading', { name: '從一個想法開始' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '從一個想法開始。' })).not.toBeInTheDocument();
+  it('starts with the original input rather than the hidden Avatar mode picker', async () => {
+    await renderLanding({ lang: 'zh' }, false);
+    expect(screen.getByRole('textbox')).toBeEnabled();
+    expect(screen.getByRole('button', { name: '创意模式', exact: true })).toBeInTheDocument();
+    expect(screen.queryByTestId('creation-mode-choices')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('avatar-dialogue')).not.toBeInTheDocument();
+  });
+
+  it('localizes the restored prompt in Traditional Chinese', async () => {
+    await renderLanding({ lang: 'zh-TW' }, false);
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '創意模式', exact: true })).toBeInTheDocument();
   });
 
   it('opens the simplified settings overlay on the general tab', async () => {
-    await renderLanding({ lang: 'en' });
+    const onSetLang = vi.fn();
+    await renderLanding({ lang: 'en', onSetLang });
 
     fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
     await screen.findByRole('menuitem', { name: 'Settings' });
@@ -1760,16 +2170,12 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('Language')).toBeInTheDocument();
     expect(screen.getByText('System Settings')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'English' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '简体中文' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '繁體中文' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '日本語' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '한국어' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Français' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Deutsch' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Español' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Italiano' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Português' })).toBeInTheDocument();
+    const languages = await openSettingOptions('Language');
+    for (const name of ['English', '简体中文', '繁體中文', '日本語', '한국어', 'Français', 'Deutsch', 'Español', 'Italiano', 'Português']) {
+      expect(within(languages).getByRole('option', { name, exact: true })).toBeInTheDocument();
+    }
+    fireEvent.click(within(languages).getByRole('option', { name: '简体中文', exact: true }));
+    expect(onSetLang).toHaveBeenCalledWith('zh');
   });
 
   it('opens a centered history modal with project list content', async () => {
@@ -1833,7 +2239,8 @@ describe('LandingView bootstrap submission', () => {
 
     const emptyDialog = screen.getByRole('dialog', { name: 'History Projects' });
     const emptyContent = emptyDialog.querySelector('.scrollbar-premium');
-    expect(emptyContent).toHaveClass('min-h-48');
+    expect(emptyDialog).toHaveClass('h-[min(680px,calc(100dvh-2rem))]');
+    expect(emptyContent).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
 
     emptyRender.unmount();
 
@@ -1849,6 +2256,7 @@ describe('LandingView bootstrap submission', () => {
 
     const populatedDialog = screen.getByRole('dialog', { name: 'History Projects' });
     const populatedContent = populatedDialog.querySelector('.scrollbar-premium');
-    expect(populatedContent).toHaveClass('min-h-48');
+    expect(populatedDialog).toHaveClass('h-[min(680px,calc(100dvh-2rem))]');
+    expect(populatedContent).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
   });
 });

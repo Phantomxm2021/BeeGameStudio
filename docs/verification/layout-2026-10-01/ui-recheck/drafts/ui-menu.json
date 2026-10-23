@@ -1,0 +1,451 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-menu-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "data": {
+          "referenceResolution": [
+            960,
+            540
+          ],
+          "compactMaxWidth": 600
+        },
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "menu-column",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            360,
+            360
+          ],
+          "minSize": [
+            280,
+            332
+          ],
+          "maxSize": [
+            420,
+            420
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 16,
+            "padding": [
+              16,
+              16,
+              16,
+              16
+            ],
+            "justify": "center",
+            "align": "center"
+          },
+          "item": {
+            "shrink": 1
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": {
+              "size": [
+                280,
+                332
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "menu-title",
+        "role": "text",
+        "parentId": "menu-column",
+        "text": "打砖块",
+        "layout": {
+          "size": [
+            320,
+            56
+          ],
+          "minSize": [
+            248,
+            48
+          ],
+          "item": {
+            "shrink": 1
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": {
+              "size": [
+                248,
+                48
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "mini-wall",
+        "role": "container",
+        "parentId": "menu-column",
+        "layout": {
+          "size": [
+            254,
+            22
+          ],
+          "minSize": [
+            222,
+            22
+          ],
+          "container": {
+            "direction": "grid",
+            "columns": 8,
+            "gap": 2,
+            "padding": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "item": {
+            "shrink": 1
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": {
+              "size": [
+                222,
+                22
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "mw-01",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-02",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-03",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-04",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-05",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-06",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-07",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-08",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-09",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-10",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-11",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-12",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-13",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-14",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-15",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "mw-16",
+        "role": "shape",
+        "parentId": "mini-wall",
+        "layout": {
+          "size": [
+            30,
+            10
+          ],
+          "minSize": [
+            26,
+            10
+          ]
+        }
+      },
+      {
+        "id": "menu-instructions",
+        "role": "text",
+        "parentId": "menu-column",
+        "text": "移动挡板反弹小球，击碎全部砖块",
+        "layout": {
+          "size": [
+            320,
+            44
+          ],
+          "minSize": [
+            248,
+            44
+          ],
+          "item": {
+            "shrink": 1
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": {
+              "size": [
+                248,
+                44
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "btn-start",
+        "role": "button",
+        "parentId": "menu-column",
+        "text": "开始游戏",
+        "layout": {
+          "size": [
+            200,
+            48
+          ],
+          "minSize": [
+            180,
+            44
+          ],
+          "item": {
+            "shrink": 1
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": {
+              "size": [
+                248,
+                48
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

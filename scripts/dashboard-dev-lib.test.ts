@@ -4,7 +4,6 @@ import {
   buildApiEnv,
   buildFrontendEnv,
   resolveDashboardDevOptions,
-  resolveProductionApiBase,
 } from './dashboard-dev-lib'
 
 describe('dashboard dev launcher helpers', () => {
@@ -44,10 +43,9 @@ describe('dashboard dev launcher helpers', () => {
     expect(env.EXISTING).toBe('1')
     expect(env.PORT).toBe('62173')
     expect(env.VITE_API_BASE_URL).toBe('http://127.0.0.1:62174')
-    expect(env.VITE_WS_BASE_URL).toBe('ws://127.0.0.1:62174')
   })
 
-  test('does not pass Supabase service-role secrets to the runtime host', () => {
+  test('keeps V3 service-role credentials on the runtime host and strips them from the frontend', () => {
     const env = buildApiEnv({
       apiPort: 62174,
       frontendPort: 62173,
@@ -62,17 +60,14 @@ describe('dashboard dev launcher helpers', () => {
 
     expect(env.BEEGAME_SUPABASE_URL).toBe('https://project.supabase.co')
     expect(env.BEEGAME_SUPABASE_ANON_KEY).toBe('anon-key')
-    expect(env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
-    expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
+    expect(env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBe('service-role-secret')
+    expect(env.SUPABASE_SERVICE_ROLE_KEY).toBe('generic-service-role-secret')
+    const frontend = buildFrontendEnv({ apiPort: 62174, frontendPort: 62173, baseEnv: env })
+    expect(frontend.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
+    expect(frontend.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(env.AGENT_WORKFLOW_PORT).toBe('62174')
     expect(env.AGENT_WORKFLOW_WORKSPACE_PATH).toBe('/repo/Projects')
     expect(env.BEEGAME_API_CORS_ORIGINS).toBe('http://127.0.0.1:62173')
   })
 
-  test('keeps production frontend on same-origin api by default', () => {
-    expect(resolveProductionApiBase({ env: {} })).toBe('')
-    expect(resolveProductionApiBase({
-      env: { BEEGAME_DASHBOARD_API_BASE_URL: 'http://127.0.0.1:3040' },
-    })).toBe('http://127.0.0.1:3040')
-  })
 })

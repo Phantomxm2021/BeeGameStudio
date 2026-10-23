@@ -1,0 +1,137 @@
+{
+  "date": "2026-10-05",
+  "scope": "System repair after full-delivery paid reaccept; local and offline validation only.",
+  "paidReference": "docs/verification/full-delivery-paid-reaccept-2026-10-05.json",
+  "authorization": "Repair and optimize/control consumption; no additional paid run initiated.",
+  "confirmedCauses": [
+    {
+      "cause": "Review contract handoff missing",
+      "evidence": "authorBatchInstruction supplied DESIGN_HANDOFF_INSTRUCTION; authorBatchReviewInstruction did not. Joint Inspect inferred consumes coverage although the actual checker consumes events.source.",
+      "change": "Reuse the same existing contract in all review assignments; field-level diagnostics explain the actual closure and owning producer. No second schema or ownership definition."
+    },
+    {
+      "cause": "Capped execution reported as completed",
+      "evidence": "Native revision made exactly 32 calls and stopped after Edit. runAgent previously broke on max_turns_reached; foreground recovery also returned completed for partial assistant history.",
+      "change": "Throw AgentExecutionLimitError through existing failure paths; never recover this error as completed. Native scheduled dispatch forwards the actual error in foreground and background failures."
+    },
+    {
+      "cause": "History replay amplified ineffective work",
+      "evidence": {
+        "jointRevisionTotalTokens": 1439636,
+        "cacheReadTokens": 1347328,
+        "inputContextFirst": 11355,
+        "inputContextLast": 66017,
+        "modelCalls": 32,
+        "editCalls": 22
+      },
+      "change": "Give the exact field contract with initial diagnostics rather than requiring discovery after failed edits; remove duplicated reviewer system-prompt shell/receipt details already present in the tool/task. Keep existing grouped correction and one targeted verification."
+    },
+    {
+      "cause": "Overlapping producer declarations distorted coverage",
+      "evidence": "GDD broad loop/feedback categories and concrete end states were all flagged; Audio reassigned primary sources among broad clauses to pass structural coverage.",
+      "change": "Existing contract now says mark concrete sound-triggering outputs, not overlapping overview categories. Diagnostics name the GDD/UI declaration owner when the flag is wrong; legitimate required behavior must remain. No semantic heading heuristic, automatic flag deletion or new many-to-many schema."
+    }
+  ],
+  "modifiedSystemFiles": [
+    "src/utils/errors.ts",
+    "packages/builtin-tools/src/tools/AgentTool/runAgent.ts",
+    "packages/builtin-tools/src/tools/AgentTool/AgentTool.tsx",
+    "src/beegame/native-assignments.ts",
+    "src/beegame/design-review.ts",
+    "packages/agent-workflow-server/src/beegame/design-handoff.ts",
+    "packages/agent-workflow-server/src/beegame/project-author.ts"
+  ],
+  "bounds": {
+    "reviewMaximumCalls": 32,
+    "limitIncreased": false,
+    "automaticRetriesAdded": false,
+    "newReviewStages": false,
+    "newDecisionRegistry": false,
+    "newToolsOrSchema": false,
+    "skillOwnershipChanges": false,
+    "generality": "Max-turn exhaustion now fails for native subagents that set an execution ceiling, not just this fruit case; unaffected successful completion still works.",
+    "partialWork": "Already-applied changes are preserved, but never count as a completed/released assignment. No system-generated synthetic receipt.",
+    "costLimitMeaning": "32 calls bounds unfinished per-review execution, not provider tokens, Credits or a semantic acceptance score.",
+    "inputCostTradeoff": "The existing full contract is now explicit in task context and costs input tokens; it avoids extra help/discovery calls. System-prompt duplication is reduced. Net real-model savings are not measured yet."
+  },
+  "verification": {
+    "relatedTests": {
+      "passed": 178,
+      "files": 12,
+      "note": "Distinct selected tests only; repeated executions not counted twice."
+    },
+    "groups": [
+      {
+        "files": 3,
+        "passed": 51,
+        "assertions": 329
+      },
+      {
+        "files": 6,
+        "passed": 112,
+        "assertions": 941
+      },
+      {
+        "files": 2,
+        "passed": 13,
+        "assertions": 20
+      },
+      {
+        "files": 1,
+        "passed": 2,
+        "assertions": 30
+      }
+    ],
+    "offlineNative": {
+      "cli": "/private/tmp/bgs-review-limit-offline-20261005-9SvPvrA6/cli/cli.js",
+      "buildOutputs": 611,
+      "provider": "Loopback fake Anthropic transport; isolated configuration, LOCAL_ONLY_FIXTURE_KEY; no existing account credentials or paid model requests.",
+      "confirmed": [
+        "Actual built CLI stops after 32 child requests with execution-limit error.",
+        "SDK task_notification is failed, not completed; no successful parent result.",
+        "Partial fixture Edit remains; no review receipt was synthesized.",
+        "Ordinary fresh native review completes and reuses neither previous verdict nor coordinator assertions."
+      ],
+      "durationSeconds": 4.72,
+      "environment": "Initial sandbox attempt could not bind loopback (EADDRINUSE); same offline tests passed under approved escalation. This was not a model or production failure."
+    },
+    "background": "Unit handoff regression preserves native failed task reason and prevents redispatch; actual long-running paid background flow was not rerun.",
+    "serverTypecheck": "passed",
+    "rootTypecheck": {
+      "passed": false,
+      "remaining": "Existing frontend @beegame/scene-editor resolution/types; older authorDocuments fixture incompatible with current NativeProjectTurnInput; SystemPrompt-brand and SDK notification literal tests. The newly introduced optional tool-result-content type error was fixed and is absent in the final check. Unrelated code was preserved."
+    },
+    "readOnlyPaidSnapshotReplay": {
+      "missingSoundMappings": 4,
+      "diagnosticsSpecifyEventsSource": true,
+      "docsUnchanged": true,
+      "limitation": "Document-only snapshot lacks three retained format evidence entries; those ENOENT diagnostics reflect snapshot incompleteness, not a new product defect. No evidence check was disabled."
+    },
+    "reviewRolePromptSourceCharacters": {
+      "before": 3174,
+      "after": 1816,
+      "basis": "Characters in reviewer role-prompt source lines; not provider tokens or total request context."
+    },
+    "diffWhitespaceCheck": "passed"
+  },
+  "unchangedArtifacts": {
+    "paidRoot": "/private/tmp/bgs-full-delivery-reaccept-20261005-eJ5dEaFR",
+    "manuallyEditedProductFiles": [],
+    "paidReceiptsOrLogsRewritten": false,
+    "paidCliOverwritten": false,
+    "testFixtures": "New isolated offline fixtures only, not the paid project.",
+    "previousRolledBackOptimizationsReapplied": false
+  },
+  "skillUse": {
+    "name": "OpenAI Docs",
+    "influence": "Evaluate efficiency alongside correctness, completeness and evidence coverage; do not claim savings from omitted evidence or test count.",
+    "source": "https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling"
+  },
+  "limitations": [
+    "No new paid semantic acceptance.",
+    "No measured new provider Token/Credit savings.",
+    "Model can still misjudge semantic closure; exact inputs and diagnostics reduce an implementation-induced failure mode, not guarantee perfect reasoning.",
+    "No complete eight-document/game/runtime acceptance claimed."
+  ],
+  "next": "One separately authorized fresh paid acceptance is needed to measure the corrected flow and stage costs; do not silently continue the failed product or increase the execution limit."
+}

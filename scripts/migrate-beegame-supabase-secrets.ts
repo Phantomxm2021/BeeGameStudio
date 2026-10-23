@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   const ownerId = (process.env.BEEGAME_MIGRATION_OWNER_ID ?? auth.userId ?? '').trim()
   if (!ownerId) throw new Error('Missing migration owner')
   const summary = await baseStore.withAuthToken(auth.authToken).migrateLegacySecrets(ownerId)
-  console.log(`Migrated legacy secrets: modelConfigs=${summary.modelConfigs} webTools=${summary.webTools} mcpServers=${summary.mcpServers}`)
+  console.log(`Migrated legacy secrets: modelConfigs=${summary.modelConfigs} mcpServers=${summary.mcpServers}`)
 }
 
 main().catch(error => {

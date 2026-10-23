@@ -15,11 +15,11 @@ function ContextMenuSubTrigger({ className, inset, children, ...props }: Context
 }
 
 function ContextMenuSubContent({ className, ...props }: ContextMenuPrimitive.ContextMenuSubContentProps) {
-  return <ContextMenuPrimitive.SubContent className={cn('z-50 min-w-32 overflow-hidden rounded-md border border-white/10 bg-popover p-1 text-popover-foreground shadow-lg', className)} {...props} />
+  return <ContextMenuPrimitive.SubContent className={cn('z-50 min-w-32 overflow-hidden rounded-md border border-border/10 bg-popover p-1 text-popover-foreground shadow-lg', className)} {...props} />
 }
 
 function ContextMenuContent({ className, ...props }: ContextMenuPrimitive.ContextMenuContentProps) {
-  return <ContextMenuPrimitive.Portal><ContextMenuPrimitive.Content className={cn('z-50 min-w-36 overflow-hidden rounded-md border border-white/10 bg-popover p-1 text-popover-foreground shadow-lg', className)} {...props} /></ContextMenuPrimitive.Portal>
+  return <ContextMenuPrimitive.Portal><ContextMenuPrimitive.Content className={cn('z-50 min-w-36 overflow-hidden rounded-md border border-border/10 bg-popover p-1 text-popover-foreground shadow-lg', className)} {...props} /></ContextMenuPrimitive.Portal>
 }
 
 function ContextMenuItem({ className, inset, variant = 'default', ...props }: ContextMenuPrimitive.ContextMenuItemProps & { inset?: boolean; variant?: 'default' | 'destructive' }) {
@@ -39,7 +39,7 @@ function ContextMenuLabel({ className, inset, ...props }: ContextMenuPrimitive.C
 }
 
 function ContextMenuSeparator({ className, ...props }: ContextMenuPrimitive.ContextMenuSeparatorProps) {
-  return <ContextMenuPrimitive.Separator className={cn('-mx-1 my-1 h-px bg-white/10', className)} {...props} />
+  return <ContextMenuPrimitive.Separator className={cn('-mx-1 my-1 h-px bg-background', className)} {...props} />
 }
 
 export { ContextMenu, ContextMenuCheckboxItem, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuLabel, ContextMenuPortal, ContextMenuRadioGroup, ContextMenuRadioItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger }

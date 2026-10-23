@@ -1,0 +1,179 @@
+{
+  "observedAt": "2026-10-14T20:43:05.081Z",
+  "totalPacks": 25,
+  "recovered": [
+    {
+      "name": "kenney_casino-audio",
+      "before": 0,
+      "after": 54,
+      "actualElements": 54
+    },
+    {
+      "name": "kenney_impact-sounds",
+      "before": 0,
+      "after": 130,
+      "actualElements": 130
+    },
+    {
+      "name": "kenney_modular-cave-kit_1.0",
+      "before": 0,
+      "after": 81,
+      "actualElements": 81
+    },
+    {
+      "name": "kenney_modular-dungeon-kit_1.0",
+      "before": 0,
+      "after": 81,
+      "actualElements": 81
+    },
+    {
+      "name": "kenney_pirate-kit",
+      "before": 0,
+      "after": 145,
+      "actualElements": 145
+    },
+    {
+      "name": "kenney_platformer-kit",
+      "before": 0,
+      "after": 307,
+      "actualElements": 307
+    },
+    {
+      "name": "kenney_sci-fi-sounds",
+      "before": 0,
+      "after": 73,
+      "actualElements": 73
+    },
+    {
+      "name": "kenney_space-station-kit",
+      "before": 0,
+      "after": 195,
+      "actualElements": 195
+    },
+    {
+      "name": "kenney_ui-pack-adventure",
+      "before": 0,
+      "after": 128,
+      "actualElements": 128
+    }
+  ],
+  "sqlAndFilteredCountsAgree": true,
+  "samples": [
+    {
+      "packName": "kenney_casino-audio",
+      "packId": "pack-e32164e1-0b55-4ccd-8114-79405c691368",
+      "availableElements": 54,
+      "elementId": "pack-e32164e1-0b55-4ccd-8114-79405c691368-c9e18d6c-5e61-468c-8b54-b92a34b459ce",
+      "elementPath": "environment/card-fan-1.ogg",
+      "path": "assets/kenney_casino-audio.ogg",
+      "bytes": 12489,
+      "sha256": "7a9758ccad8899baef1b9f60b4064e4baa724a548293832fdaea07e6e07e638d",
+      "hashMatches": true,
+      "license": "CC0",
+      "usageTags": [],
+      "usageTagsMode": "inherit",
+      "pageTwoDifferent": true
+    },
+    {
+      "packName": "kenney_impact-sounds",
+      "packId": "pack-a228e79a-4508-4884-a55f-8989f97803e4",
+      "availableElements": 130,
+      "elementId": "pack-a228e79a-4508-4884-a55f-8989f97803e4-a96410d2-e973-41cd-aa79-6e3899a7493f",
+      "elementPath": "SFX/footstep_carpet_000.ogg",
+      "path": "assets/kenney_impact-sounds.ogg",
+      "bytes": 6353,
+      "sha256": "b9524658b52a99a20590f8feefc103088637fd13ea8ec35811aee785e1f2f330",
+      "hashMatches": true,
+      "license": "CC0",
+      "usageTags": [],
+      "usageTagsMode": "inherit",
+      "pageTwoDifferent": true
+    }
+  ],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs/pack-e32164e1-0b55-4ccd-8114-79405c691368/elements",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs/pack-e32164e1-0b55-4ccd-8114-79405c691368/elements",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-e32164e1-0b55-4ccd-8114-79405c691368",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-e32164e1-0b55-4ccd-8114-79405c691368/elements/pack-e32164e1-0b55-4ccd-8114-79405c691368-c9e18d6c-5e61-468c-8b54-b92a34b459ce",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-e32164e1-0b55-4ccd-8114-79405c691368/elements/pack-e32164e1-0b55-4ccd-8114-79405c691368-c9e18d6c-5e61-468c-8b54-b92a34b459ce/resource-url",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs/pack-a228e79a-4508-4884-a55f-8989f97803e4/elements",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs/pack-a228e79a-4508-4884-a55f-8989f97803e4/elements",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-a228e79a-4508-4884-a55f-8989f97803e4",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-a228e79a-4508-4884-a55f-8989f97803e4/elements/pack-a228e79a-4508-4884-a55f-8989f97803e4-a96410d2-e973-41cd-aa79-6e3899a7493f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-a228e79a-4508-4884-a55f-8989f97803e4/elements/pack-a228e79a-4508-4884-a55f-8989f97803e4-a96410d2-e973-41cd-aa79-6e3899a7493f/resource-url",
+      "status": 200
+    }
+  ],
+  "health": {
+    "62173": {
+      "status": 200
+    },
+    "62174": {
+      "status": 200
+    },
+    "62175": {
+      "status": 200
+    },
+    "62176": {
+      "status": 200
+    },
+    "62177": {
+      "status": "ok",
+      "processingEnabled": false
+    }
+  },
+  "scope": "Actual authenticated service -> existing bridge -> generated CLI -> live R2 signed download. Only isolated temporary output. No library/project mutation or paid call."
+}

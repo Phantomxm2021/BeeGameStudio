@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { decodeImageSettings, encodeImageSettings, type ImageSettings } from './image-generation/config-store'
 import { createTLSAwareFetch } from '@bee-game-studio/security-core'
 import {
   decryptSecret,
@@ -37,12 +38,6 @@ import {
   type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
-import type {
-  WebFetchAdapter,
-  WebSearchAdapter,
-  WebToolsConfig,
-} from './web-tools-store'
-import { toPublicWebToolsConfig } from './web-tools-store'
 
 type Env = Record<string, string | undefined>
 const PLATFORM_RUNTIME_SETTINGS_KEY = 'runtime_settings'
@@ -63,10 +58,13 @@ type SupabaseFetch = (
 type JsonObject = Record<string, unknown>
 
 type SupabaseModelConfigRow = {
+  published?: boolean
+  auth_methods?: PublicModelConfig['authMethods']
   id: string
   owner_id: string
   name: string
   provider: string
+  api_protocol?: PublicModelConfig['apiProtocol'] | null
   base_url: string | null
   // Legacy column name. The runtime host treats this as an RLS-protected
   // secret value; it does not perform Supabase server-side encryption.
@@ -85,12 +83,6 @@ type SupabaseRuntimeSettingsRow = {
 
 type SupabasePlatformSettingsRow = {
   key: string
-  config: JsonObject
-  updated_at: string
-}
-
-type SupabaseWebToolsRow = {
-  owner_id: string
   config: JsonObject
   updated_at: string
 }
@@ -122,6 +114,16 @@ type SupabaseProjectRow = {
   runtime_snapshot: JsonObject
   created_at: string
   updated_at: string
+}
+
+function toProjectMetadata(row: SupabaseProjectRow): BeeGameProjectMetadata {
+  return {
+    id: row.id,
+    name: row.name,
+    ...(row.root_path ? { root_path: row.root_path } : {}),
+    created_at: new Date(row.created_at).getTime(),
+    ...normalizeProjectRuntimeSnapshot(row.runtime_snapshot),
+  }
 }
 
 type SupabaseSessionRow = {
@@ -361,22 +363,24 @@ export class SupabaseDashboardStore {
   async loadRlsVisibleModelRuntimeEnv(
     id: string,
   ): Promise<Record<string, string>> {
+    const selected = await this.loadRlsVisibleModelRuntimeConfig(id)
+    if (!selected) throw new Error(`Selected model config is not visible to the authenticated runtime (${id})`)
+    return selected.env
+  }
+
+  async loadRlsVisibleModelRuntimeConfig(id?: string): Promise<{ config: PublicModelConfig; env: Record<string, string> } | undefined> {
     const rows = await this.rest<SupabaseModelConfigRow[]>(
-      `/rest/v1/beegame_model_configs?id=eq.${q(id)}&select=*&limit=1`,
+      `/rest/v1/beegame_model_configs?${id ? `id=eq.${q(id)}` : 'is_default=eq.true'}&select=*&limit=1`,
     )
     const row = rows[0]
-    if (!row) {
-      throw new Error(
-        `Selected model config is not visible to the authenticated runtime (${id})`,
-      )
-    }
+    if (!row) return undefined
     const env = modelConfigRowToRuntimeEnv(row)
     if (Object.keys(env).length === 0) {
       throw new Error(
         `Selected model config uses an unsupported provider (${row.provider || 'empty'})`,
       )
     }
-    return env
+    return { config: rowToPublicModelConfig(row), env }
   }
 
   async createModelConfig(
@@ -392,8 +396,11 @@ export class SupabaseDashboardStore {
       name: input.name,
       provider: input.provider,
       base_url: input.baseUrl ?? null,
+      api_protocol: input.apiProtocol ?? null,
       api_key_ciphertext: encryptSecret(input.apiKey, 'model-config:api-key'),
-      models: input.models,
+      models: { balanced: input.model },
+      published: input.published ?? true,
+      auth_methods: input.authMethods ?? ['platform'],
       is_default: false,
       created_at: now,
       updated_at: now,
@@ -416,6 +423,7 @@ export class SupabaseDashboardStore {
     }
     if (input.name !== undefined) patch.name = input.name
     if (input.provider !== undefined) patch.provider = input.provider
+    if (input.apiProtocol !== undefined) patch.api_protocol = input.apiProtocol
     if (input.baseUrl !== undefined) patch.base_url = input.baseUrl || null
     if (input.clearSecret) {
       patch.api_key_ciphertext = encryptSecret('', 'model-config:api-key')
@@ -425,7 +433,9 @@ export class SupabaseDashboardStore {
         'model-config:api-key',
       )
     }
-    if (input.models !== undefined) patch.models = input.models
+    if (input.model !== undefined) patch.models = { balanced: input.model }
+    if (input.published !== undefined) patch.published = input.published
+    if (input.authMethods !== undefined) patch.auth_methods = input.authMethods
     if (input.isDefault === false) patch.is_default = false
 
     const rows = await this.rest<SupabaseModelConfigRow[]>(
@@ -455,11 +465,14 @@ export class SupabaseDashboardStore {
         name: record.name,
         provider: record.provider,
         base_url: record.baseUrl ?? null,
+        api_protocol: record.apiProtocol ?? null,
         api_key_ciphertext: encryptSecret(
           record.apiKey,
           'model-config:api-key',
         ),
-        models: record.models,
+        models: { balanced: record.model },
+        published: record.published ?? true,
+        auth_methods: record.authMethods ?? ['platform'],
         is_default: record.isDefault ? false : record.isDefault,
         created_at: record.createdAt,
         updated_at: record.updatedAt,
@@ -533,6 +546,17 @@ export class SupabaseDashboardStore {
     return normalizeRuntimeSettings(rows[0]?.config ?? {})
   }
 
+  async loadPlatformImageSettings(): Promise<ImageSettings> {
+    const rows = await this.rest<{ config: unknown }[]>('/rest/v1/beegame_image_generation_settings?id=eq.platform&select=config&limit=1')
+    return decodeImageSettings(rows[0]?.config ?? {})
+  }
+
+  async savePlatformImageSettings(config: ImageSettings): Promise<void> {
+    await this.upsert('beegame_image_generation_settings', {
+      id: 'platform', config: encodeImageSettings(config), updated_at: new Date().toISOString(),
+    }, 'id')
+  }
+
   async savePlatformRuntimeSettings(
     config: RuntimeSettingsConfig,
   ): Promise<RuntimeSettingsConfig> {
@@ -550,20 +574,11 @@ export class SupabaseDashboardStore {
     return normalized
   }
 
-  async loadWebTools(ownerId: string): Promise<WebToolsConfig> {
-    const rows = await this.rest<SupabaseWebToolsRow[]>(
-      `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=config&limit=1`,
-    )
-    return normalizeWebTools(decryptWebTools(rows[0]?.config ?? {}))
-  }
-
   async migrateLegacySecrets(ownerId: string): Promise<{
     modelConfigs: number
-    webTools: number
     mcpServers: number
   }> {
     let modelConfigs = 0
-    let webTools = 0
     let mcpServers = 0
     const modelRows = await this.rest<SupabaseModelConfigRow[]>(
       `/rest/v1/beegame_model_configs?owner_id=eq.${q(ownerId)}&select=*`,
@@ -586,29 +601,6 @@ export class SupabaseDashboardStore {
         },
       )
       modelConfigs += 1
-    }
-    const webRows = await this.rest<SupabaseWebToolsRow[]>(
-      `/rest/v1/beegame_web_tools?owner_id=eq.${q(ownerId)}&select=*`,
-    )
-    for (const row of webRows) {
-      const config = isObject(row.config) ? row.config : {}
-      const legacy =
-        (typeof config.braveApiKey === 'string' &&
-          !isSecretEnvelope(config.braveApiKey)) ||
-        (typeof config.exaApiKey === 'string' &&
-          !isSecretEnvelope(config.exaApiKey))
-      if (!legacy) continue
-      const normalized = normalizeWebTools(decryptWebTools(config))
-      await this.upsert(
-        'beegame_web_tools',
-        {
-          owner_id: ownerId,
-          config: encryptWebTools(normalized),
-          updated_at: new Date().toISOString(),
-        },
-        'owner_id',
-      )
-      webTools += 1
     }
     const mcpRows = await this.rest<SupabaseMcpServerRow[]>(
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*`,
@@ -647,17 +639,17 @@ export class SupabaseDashboardStore {
       )
       mcpServers += 1
     }
-    const count = modelConfigs + webTools + mcpServers
+    const count = modelConfigs + mcpServers
     if (count > 0) {
       await this.appendAuditEvent(ownerId, {
         actorId: ownerId,
         action: 'secret.migrated',
         targetType: 'secret',
         targetId: 'migration',
-        metadata: { modelConfigs, webTools, mcpServers, count },
+        metadata: { modelConfigs, mcpServers, count },
       })
     }
-    return { modelConfigs, webTools, mcpServers }
+    return { modelConfigs, mcpServers }
   }
 
   async recordSecretMigration(
@@ -673,42 +665,16 @@ export class SupabaseDashboardStore {
     })
   }
 
-  async saveWebTools(
-    ownerId: string,
-    config: WebToolsConfig,
-  ): Promise<WebToolsConfig> {
-    const previous = await this.loadWebTools(ownerId)
-    const normalized = normalizeWebTools({
-      ...previous,
-      ...config,
-      braveApiKey: resolveSecretInput(
-        config.braveApiKey,
-        previous.braveApiKey,
-        config.clearSecret,
-      ),
-      exaApiKey: resolveSecretInput(
-        config.exaApiKey,
-        previous.exaApiKey,
-        config.clearSecret,
-      ),
-    })
-    await this.upsert(
-      'beegame_web_tools',
-      {
-        owner_id: ownerId,
-        config: encryptWebTools(normalized),
-        updated_at: new Date().toISOString(),
-      },
-      'owner_id',
-    )
-    return toPublicWebToolsConfig(normalized)
+  async listMcpServers(ownerId: string): Promise<McpServerConfig[]> {
+    return (await this.runtimeMcpServers(ownerId)).map(toPublicMcpServerConfig)
   }
 
-  async listMcpServers(ownerId: string): Promise<McpServerConfig[]> {
+  /** Host runtime only; public routes must use listMcpServers (redacted). */
+  async runtimeMcpServers(ownerId: string): Promise<McpServerConfig[]> {
     const rows = await this.rest<SupabaseMcpServerRow[]>(
       `/rest/v1/beegame_mcp_servers?owner_id=eq.${q(ownerId)}&select=*&order=created_at.asc`,
     )
-    return rows.map(row => toPublicMcpServerConfig(rowToMcpServer(row)))
+    return rows.map(rowToMcpServer)
   }
 
   async upsertMcpServer(
@@ -767,13 +733,28 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseProjectRow[]>(
       `/rest/v1/beegame_projects?owner_id=eq.${q(ownerId)}&select=*&order=created_at.desc,updated_at.desc`,
     )
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      ...(row.root_path ? { root_path: row.root_path } : {}),
-      created_at: new Date(row.created_at).getTime(),
-      ...normalizeProjectRuntimeSnapshot(row.runtime_snapshot),
-    }))
+    return rows.map(toProjectMetadata)
+  }
+
+  async listProjectsPage(ownerId: string, offset: number, limit: number, search = ''): Promise<{ items: BeeGameProjectMetadata[]; total: number | null }> {
+    const filter = search.trim()
+      ? `&or=${q(`(name.ilike.*${search.replace(/[,*()\\]/g, ' ')}*,root_path.ilike.*${search.replace(/[,*()\\]/g, ' ')}*)`)}`
+      : ''
+    const response = await this.restResponse(
+      `/rest/v1/beegame_projects?owner_id=eq.${q(ownerId)}&select=*&order=created_at.desc,updated_at.desc&offset=${offset}&limit=${limit}${filter}`,
+      { headers: { Prefer: 'count=exact' } },
+    )
+    const rows = await response.json() as SupabaseProjectRow[]
+    const totalText = response.headers.get('content-range')?.split('/')[1]
+    const total = totalText && /^\d+$/.test(totalText) ? Number(totalText) : null
+    return { items: rows.map(toProjectMetadata), total }
+  }
+
+  async getProject(ownerId: string, id: string): Promise<BeeGameProjectMetadata | undefined> {
+    const rows = await this.rest<SupabaseProjectRow[]>(
+      `/rest/v1/beegame_projects?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=*&limit=1`,
+    )
+    return rows[0] ? toProjectMetadata(rows[0]) : undefined
   }
 
   async upsertProject(
@@ -1270,6 +1251,12 @@ export class SupabaseDashboardStore {
   }
 
   private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await this.restResponse(path, init)
+    if (response.status === 204) return undefined as T
+    return (await response.json()) as T
+  }
+
+  private async restResponse(path: string, init: RequestInit = {}): Promise<Response> {
     const response = await this.fetchRestRequest(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -1281,12 +1268,11 @@ export class SupabaseDashboardStore {
     })
     if (!response.ok) {
       const text = await response.text().catch(() => '')
-      throw new Error(
+      throw Object.assign(new Error(
         `Supabase request failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
-      )
+      ), { status: response.status })
     }
-    if (response.status === 204) return undefined as T
-    return (await response.json()) as T
+    return response
   }
 
   /**
@@ -1347,14 +1333,6 @@ function parseSupabaseStorageUri(
   return { bucket, path }
 }
 
-function toModelMap(value: JsonObject): ModelConfigSnapshotRecord['models'] {
-  return {
-    ...(typeof value.fast === 'string' ? { fast: value.fast } : {}),
-    ...(typeof value.balanced === 'string' ? { balanced: value.balanced } : {}),
-    ...(typeof value.strong === 'string' ? { strong: value.strong } : {}),
-  }
-}
-
 function rowToPublicModelConfig(
   row: SupabaseModelConfigRow,
 ): PublicModelConfig {
@@ -1362,13 +1340,16 @@ function rowToPublicModelConfig(
     ? decryptSecret(row.api_key_ciphertext, 'model-config:api-key')
     : ''
   return {
+    published: row.published ?? true,
+    authMethods: row.auth_methods ?? ['platform'],
     id: row.id,
     ownerId: row.owner_id,
     name: row.name,
     provider: row.provider as PublicModelConfig['provider'],
+    ...(row.api_protocol ? {apiProtocol:row.api_protocol} : {}),
     ...(row.base_url ? { baseUrl: row.base_url } : {}),
     apiKeyPreview: maskSecret(apiKey),
-    models: toModelMap(row.models),
+    model: typeof row.models.balanced === 'string' ? row.models.balanced.trim() : undefined,
     isDefault: row.is_default,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -1383,9 +1364,10 @@ function modelConfigRowToRuntimeEnv(
     : ''
   return mapStoredModelConfigToRuntime({
     provider: row.provider as Parameters<typeof mapStoredModelConfigToRuntime>[0]['provider'],
+    ...(row.api_protocol ? {apiProtocol:row.api_protocol} : {}),
     ...(row.base_url ? { baseUrl: row.base_url } : {}),
     apiKey,
-    models: toModelMap(row.models),
+    model: typeof row.models.balanced === 'string' ? row.models.balanced.trim() : undefined,
   }).env
 }
 
@@ -1396,13 +1378,6 @@ function maskSecret(secret: string): string {
 }
 
 const RUNTIME_BOOLEAN_FIELDS: Array<keyof RuntimeSettingsConfig> = [
-  'autoMemoryEnabled',
-  'autoDreamEnabled',
-  'skillSearchEnabled',
-  'treeSitterBashEnabled',
-  'webBrowserToolEnabled',
-  'bashClassifierEnabled',
-  'mcpSkillsEnabled',
   'resourceLibraryEnabled',
 ]
 
@@ -1413,81 +1388,6 @@ function normalizeRuntimeSettings(value: unknown): RuntimeSettingsConfig {
     if (typeof value[field] === 'boolean') normalized[field] = value[field]
   }
   return normalized
-}
-
-function normalizeWebTools(value: unknown): WebToolsConfig {
-  if (!isObject(value)) return {}
-  return {
-    ...(isWebSearchAdapter(value.webSearchAdapter)
-      ? { webSearchAdapter: value.webSearchAdapter }
-      : {}),
-    ...(isWebFetchAdapter(value.webFetchAdapter)
-      ? { webFetchAdapter: value.webFetchAdapter }
-      : {}),
-    ...(trimString(value.tavilyEndpointUrl)
-      ? { tavilyEndpointUrl: trimString(value.tavilyEndpointUrl) }
-      : {}),
-    ...(trimString(value.braveApiKey)
-      ? { braveApiKey: trimString(value.braveApiKey) }
-      : {}),
-    ...(trimString(value.exaApiKey)
-      ? { exaApiKey: trimString(value.exaApiKey) }
-      : {}),
-    ...(trimString(value.exaEndpointUrl)
-      ? { exaEndpointUrl: trimString(value.exaEndpointUrl) }
-      : {}),
-    ...(Number.isInteger(value.webFetchHttpTimeoutMs) &&
-    Number(value.webFetchHttpTimeoutMs) > 0
-      ? { webFetchHttpTimeoutMs: Number(value.webFetchHttpTimeoutMs) }
-      : {}),
-  }
-}
-
-function encryptWebTools(config: WebToolsConfig): JsonObject {
-  return {
-    ...config,
-    ...(config.braveApiKey !== undefined
-      ? {
-          braveApiKey: encryptSecret(
-            config.braveApiKey,
-            'web-tools:brave-api-key',
-          ),
-        }
-      : {}),
-    ...(config.exaApiKey !== undefined
-      ? { exaApiKey: encryptSecret(config.exaApiKey, 'web-tools:exa-api-key') }
-      : {}),
-    braveApiKeyPreview: undefined,
-    exaApiKeyPreview: undefined,
-  }
-}
-
-function decryptWebTools(value: unknown): JsonObject {
-  if (!isObject(value)) return {}
-  return {
-    ...value,
-    ...(typeof value.braveApiKey === 'string'
-      ? {
-          braveApiKey: decryptSecret(
-            value.braveApiKey,
-            'web-tools:brave-api-key',
-          ),
-        }
-      : {}),
-    ...(typeof value.exaApiKey === 'string'
-      ? { exaApiKey: decryptSecret(value.exaApiKey, 'web-tools:exa-api-key') }
-      : {}),
-  }
-}
-
-function resolveSecretInput(
-  next: string | undefined,
-  previous: string | undefined,
-  clearSecret = false,
-): string | undefined {
-  if (clearSecret) return undefined
-  if (next === undefined) return previous
-  return trimString(next) || previous
 }
 
 function rowToMcpServer(row: SupabaseMcpServerRow): McpServerConfig {
@@ -1641,6 +1541,8 @@ function normalizeProjectRuntimeSnapshot(snapshot: unknown): {
       }
     : undefined
   const normalized: BeeGameProjectRuntimeSnapshot = {
+    ...(snapshot.workflow_protocol === 'bgs.workflow.v3' ? { workflow_protocol: 'bgs.workflow.v3' as const,
+      ...(trimString(snapshot.workflow_chat_session_id) ? { workflow_chat_session_id: trimString(snapshot.workflow_chat_session_id) } : {}) } : {}),
     ...(normalizedUsage ? { usage: normalizedUsage } : {}),
     ...(trimString(snapshot.phase_name)
       ? { phase_name: trimString(snapshot.phase_name) }
@@ -1909,18 +1811,4 @@ function isMcpServerTransport(value: unknown): value is McpServerTransport {
 
 function isMcpServerScope(value: unknown): value is McpServerScope {
   return value === 'beegame' || value === 'global' || value === 'project'
-}
-
-function isWebSearchAdapter(value: unknown): value is WebSearchAdapter {
-  return (
-    value === 'tavily' ||
-    value === 'api' ||
-    value === 'bing' ||
-    value === 'brave' ||
-    value === 'exa'
-  )
-}
-
-function isWebFetchAdapter(value: unknown): value is WebFetchAdapter {
-  return value === 'tavily' || value === 'http'
 }

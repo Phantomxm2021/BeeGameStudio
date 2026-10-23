@@ -1,0 +1,242 @@
+{
+  "verdict": "Independent document acceptance failed; native delivery also did not advance.",
+  "runtimeVerified": false,
+  "fontMeasured": false,
+  "numericCounterexample": {
+    "v": 360,
+    "vp": 600,
+    "angleMin": 15,
+    "angleMax": 60,
+    "diameter": 10,
+    "paddleWidth": 96,
+    "verticalDistance": 124,
+    "assumption": "Ball leaves bottom-row right-column at (840,303), downward/right; paddle starts at its initial center and moves immediately. No earlier anticipation is assumed.",
+    "timeAtMinAngle": 0.3565951288079175,
+    "timeAtMaxAngle": 0.6888888888888888,
+    "ballXAtContact": 873.2256998614592,
+    "minimumPaddleCenterForOverlap": 820.2256998614592,
+    "maximumPaddleCenterInWindow": 693.9570772847505,
+    "minimumPaddleTravelTime": 0.5670428331024321,
+    "scope": "Refutes the document worst-case proof, not a global claim that the game is unfair or impossible."
+  },
+  "worldScreenMismatch": {
+    "viewport": [
+      800,
+      450
+    ],
+    "hudBounds": {
+      "left": 0,
+      "top": 0,
+      "right": 800,
+      "bottom": 64
+    },
+    "allowedWorldBandBottom": 64,
+    "allowedBandBottomOnScreen": 53.333333333333336,
+    "intrusionIntoTopWallBand": 10.666666666666664,
+    "scope": "Violates the source no-top-wall-overlap allocation. Does not claim ball/brick occlusion or measured runtime visibility."
+  },
+  "spriteMapping": {
+    "rule": "ASSET_PLAN section 2.2: glow is baked into the full frame, drawn at logical dimensions.",
+    "frames": [
+      {
+        "name": "paddle",
+        "logicalCore": [
+          96,
+          16
+        ],
+        "fullFrame": [
+          120,
+          40
+        ],
+        "visibleCoreIfFullFrameDrawnAtLogicalSize": [
+          76.8,
+          6.4
+        ]
+      },
+      {
+        "name": "ball",
+        "logicalCore": [
+          10,
+          10
+        ],
+        "fullFrame": [
+          20,
+          20
+        ],
+        "visibleCoreIfFullFrameDrawnAtLogicalSize": [
+          5,
+          5
+        ]
+      }
+    ],
+    "scope": "Conditional consequence of the specified production/render mapping; no produced image or runtime was tested."
+  },
+  "otherGeometryObservations": {
+    "titleAtMinimum": {
+      "titleSub": {
+        "left": 120,
+        "top": 228,
+        "right": 680,
+        "bottom": 256
+      },
+      "startButton": {
+        "left": 290,
+        "top": 251,
+        "right": 510,
+        "bottom": 303
+      },
+      "rectangleVerticalIntersection": 5,
+      "scope": "Different-parent allocated boxes intersect. Actual glyph overlap remains unmeasured; not an automatic blocking verdict."
+    },
+    "unsupportedDirectionMessageOnly": {
+      "viewport": [
+        390,
+        844
+      ],
+      "diagnostics": {
+        "outsideViewport": [
+          "rotate-group",
+          "rotate-main-text",
+          "rotate-sub-text"
+        ],
+        "outsideParent": [
+          "rotate-group"
+        ],
+        "outsideContentArea": [],
+        "belowMinimumControlSize": [],
+        "overlapCandidates": []
+      },
+      "scope": "Only the required rotation message, not portrait gameplay adaptation; node overflow does not prove visible glyph clipping."
+    }
+  },
+  "nativeHandoff": {
+    "elapsedSeconds": 13416.382,
+    "requestCount": 213,
+    "failure": "Review did not advance; retain findings, no automatic paid repair",
+    "terminal": "turn.empty",
+    "result": {
+      "subtype": "success",
+      "isError": false,
+      "stopReason": "tool_use",
+      "resultText": ""
+    },
+    "markerReportedComplete": true,
+    "geometryRejected": false,
+    "explanation": "Last stream failed; SDK result text empty, followed by turn.empty. Production advances only on turn.completed. Root cause of transport failure not established; no max-turns cap inferred."
+  },
+  "billing": {
+    "completeUsageRequestCount": 190,
+    "completeUsage": {
+      "input": 1032716,
+      "cachedInput": 13461480,
+      "output": 185417
+    },
+    "unknownUsageRequests": [
+      {
+        "id": 1,
+        "status": 401
+      },
+      {
+        "id": 49,
+        "error": "TimeoutError"
+      },
+      {
+        "id": 50,
+        "error": "TimeoutError"
+      },
+      {
+        "id": 51,
+        "error": "Error"
+      },
+      {
+        "id": 52,
+        "error": "Error"
+      },
+      {
+        "id": 53,
+        "error": "Error"
+      },
+      {
+        "id": 54,
+        "error": "Error"
+      },
+      {
+        "id": 55,
+        "error": "Error"
+      },
+      {
+        "id": 56,
+        "error": "Error"
+      },
+      {
+        "id": 57,
+        "error": "Error"
+      },
+      {
+        "id": 58,
+        "error": "Error"
+      },
+      {
+        "id": 59,
+        "error": "Error"
+      },
+      {
+        "id": 60,
+        "error": "Error"
+      },
+      {
+        "id": 61,
+        "error": "Error"
+      },
+      {
+        "id": 62,
+        "error": "Error"
+      },
+      {
+        "id": 63,
+        "error": "Error"
+      },
+      {
+        "id": 64,
+        "error": "Error"
+      },
+      {
+        "id": 65,
+        "error": "Error"
+      },
+      {
+        "id": 66,
+        "error": "Error"
+      },
+      {
+        "id": 67,
+        "error": "Error"
+      },
+      {
+        "id": 68,
+        "error": "Error"
+      },
+      {
+        "id": 69,
+        "error": "Error"
+      }
+    ],
+    "partialUsageRequests": [
+      {
+        "id": 213,
+        "stage": "review",
+        "status": 200,
+        "usage": {
+          "input_tokens": 1213,
+          "output_tokens": 1,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 74040
+        },
+        "usageKnown": true,
+        "elapsedSeconds": 147.95,
+        "error": "Error"
+      }
+    ],
+    "note": "Request 213 has only an interrupted usage snapshot; do not treat output_tokens:1 as settled full usage or interpret SDK costUSD as account Credits."
+  }
+}

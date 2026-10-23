@@ -1,28 +1,16 @@
-import { describe, expect, test } from 'bun:test'
+import { expect, test } from 'bun:test'
 import { mergeRuntimeEnv } from './session-manager'
 
-describe('selected native runtime provider', () => {
-  test('projects the selected model type above inherited process configuration', () => {
-    expect(
-      mergeRuntimeEnv(
-        {
-          modelType: 'anthropic',
-          env: { ANTHROPIC_BASE_URL: 'https://provider.example.test' },
-        },
-        { BEEGAME_MODEL_TYPE: 'openai' },
-      ),
-    ).toMatchObject({
-      BEEGAME_MODEL_TYPE: 'anthropic',
-      ANTHROPIC_BASE_URL: 'https://provider.example.test',
-    })
-  })
-
-  test('derives the provider from the selected remote model environment', () => {
-    expect(
-      mergeRuntimeEnv(undefined, {
-        ANTHROPIC_BASE_URL: 'https://provider.example.test',
-        ANTHROPIC_AUTH_TOKEN: 'selected-token',
-      }),
-    ).toMatchObject({ BEEGAME_MODEL_TYPE: 'anthropic' })
-  })
+test('selected Responses settings win over inherited configuration', () => {
+  expect(mergeRuntimeEnv({modelType:'openai',env:{OPENAI_BASE_URL:'https://selected.example/v1',OPENAI_API_KEY:'selected'}},
+    {OPENAI_BASE_URL:'https://inherited.example/v1'})).toMatchObject({BEEGAME_MODEL_TYPE:'openai',OPENAI_BASE_URL:'https://selected.example/v1',OPENAI_API_KEY:'selected'})
+})
+test('explicit native provider selection remains stable above unrelated inherited settings', () => {
+  for (const modelType of ['anthropic','gemini','grok'] as const)
+    expect(mergeRuntimeEnv({modelType,env:{}},{OPENAI_API_KEY:'unselected'}).BEEGAME_MODEL_TYPE).toBe(modelType)
+  expect(()=>mergeRuntimeEnv(undefined,{BEEGAME_MODEL_TYPE:'unknown'})).toThrow('Unsupported')
+})
+test('an owner-resolved personal connection beats stale platform credentials', () => {
+  expect(mergeRuntimeEnv({modelType:'openai',env:{OPENAI_API_KEY:'platform'}},
+    {BGS_MODEL_CONNECTION_RESOLVED:'1',BEEGAME_MODEL_TYPE:'openai',OPENAI_API_KEY:'personal'}).OPENAI_API_KEY).toBe('personal')
 })

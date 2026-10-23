@@ -1,0 +1,6 @@
+{
+  "before": "suspended",
+  "after": "running",
+  "rms": 0.7059991984579174,
+  "method": "Actual click -> await AudioContext.resume() -> oscillator.start()"
+}

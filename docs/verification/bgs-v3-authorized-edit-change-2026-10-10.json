@@ -1,0 +1,200 @@
+{
+  "protocol": "bgs.verification.v3-authorized-edit-change.1",
+  "date": "2026-10-10",
+  "documentVersion": "1.13",
+  "workspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "scope": "Formal registered Scene/UI candidate editing and explicit authorized requirement/task-plan changes. Current-source rebuild/measurement identity, not complete game acceptance.",
+  "implementation": [
+    "Existing editors and game-content PUT dispatch V3 saves through owned project/version/path/source/schema checks. Read-only viewers/unknown owners remain read-only; legacy publication stays blocked.",
+    "Before filesystem replacement, CAS persists affected plan invalidation plus an exclusive host-edit Attempt/writer/fence. Exact prior JSON archived under .beegame, canonical candidate atomically replaced, actual saved/failed state settled; no native dispatch or forged Skill/measurement PASS.",
+    "Existing impact propagation includes actual projectBuild.files source-copy operands. Only affected owners/consumers reset for formal source edits; unrelated completed branch and all old Attempts/checks remain.",
+    "Changed current measurement requires authorized actual source-copy build and runtime-smoke. Old Preview/static/project export identity rejected. Actual changed source bytes produce new build/measurement; identical output bytes after changed requirements still require new Attempt and requirement-bound evidence.",
+    "Explicit requirement POST includes current Run/requirements versions, idempotent request key, full new text/constraints/IDs and authorized Task plan. Before/after/actor/time append-only; all current tasks read full requirements and are conservatively invalidated. Historical directed Review/Repair/Preview scopes cannot silently grant new-version authority.",
+    "Host edit records excluded from native transcript loading and labeled no-model/not-applicable usage. Editor saves update returned source/package/workflow versions and display unmeasured candidate; requirement UI retains drafts on conflict and never auto-dispatches.",
+    "New migration replaces host-only existing commit RPC, no new tables or native engine modifications. Production requires migration execution and independent real-database validation."
+  ],
+  "actualExecution": {
+    "formal": "Synthetic registered UI and Scene -> existing host editor save + actual old-byte archive -> old measurement rejection -> explicit synthetic owner checks -> source-copy Bun build -> host-owned Chromium smoke -> exact-source engineering ZIP. Actual task APIs/owner/viewer permissions and legacy write rejection exercised.",
+    "requirements": "Synthetic immutable requirement changes -> all qualifications revoked -> actual rebuild/browser measurement with new requirement input (including byte-identical artifact case) -> requalified measured selection; append-only history and local-store reconstruction.",
+    "native": "Real normal CLI + loopback fake provider editable-change: initial native Write/end/build/browser measure, explicit new requirement/task plan, new native Read/Write/end/source-copy build/browser measure/engineering export. Exactly 5 fake-provider requests total; no extra mechanical summary/model request.",
+    "interruption": "Synthetic cancelled operation exited before settlement; archived prior bytes/current candidates retained, owner remains pending, durable unknown writer blocks plan/resume after reconstruction, manual pause preserved. This is not verified cross-process automatic recovery."
+  },
+  "verification": {
+    "core": {
+      "log": "/private/tmp/bgs-v3-edits-core-final-verified.log",
+      "exitCode": 0,
+      "files": 25,
+      "passed": 177,
+      "failed": 0,
+      "assertions": 1314,
+      "scope": "All workflow-v3 tests, shared Preview authorization/capabilities/proxy/manager/access and legacy game-content-package"
+    },
+    "frontend": {
+      "log": "/private/tmp/bgs-v3-edits-front-verified.log",
+      "exitCode": 0,
+      "files": 7,
+      "passed": 160,
+      "failed": 0,
+      "scope": "WorkflowPanel, WorkflowMeasuredPreview, UserQuestionPanel, SceneEditorOverlay, UiEditorOverlay, beeGameAdapter, apiClient"
+    },
+    "distinctPassed": 337,
+    "note": "Focused and repeated regression logs not added again to distinct counts.",
+    "frontendBuild": {
+      "log": "/private/tmp/bgs-v3-edits-front-build.log",
+      "exitCode": 0,
+      "note": "Actual tsc -b + Vite production build; existing large-chunk warnings retained."
+    },
+    "types": {
+      "frontend": {
+        "exitCode": 0,
+        "log": "/private/tmp/bgs-v3-edits-front-verified-types.log"
+      },
+      "server": {
+        "exitCode": 2,
+        "log": "/private/tmp/bgs-v3-edits-server-final-types-confirmed.log",
+        "diagnosticCount": 3556,
+        "baseline": "/private/tmp/bgs-v3-editable-export-server-final-types.log",
+        "addedDiagnostics": 0,
+        "removedDiagnostics": 0
+      }
+    }
+  },
+  "failedExploration": [
+    {
+      "log": "/private/tmp/bgs-v3-edits-focused.log",
+      "cause": "New actual-app fixture used non-existent resolver/runner option names and got 401. Corrected fixture to existing currentUser/sessionRunner injection; no authentication relaxation."
+    },
+    {
+      "log": "/private/tmp/bgs-v3-edits-native-change.log",
+      "cause": "Fake provider attempted replacing an existing source without first Read. Native Write did not change it; host actually rebuilt/measured old bytes, showing smoke is not semantic proof that requirements were implemented.",
+      "resolution": "Corrected fake protocol to normal Read -> Write -> end; final actual build changed hash. No native-source fix or claim of general semantic acceptance."
+    },
+    {
+      "log": "/private/tmp/bgs-v3-edits-front-focused.log",
+      "cause": "New Scene test queried both output implicit status and notice status; narrowed query to explicit candidate notice. Existing UI/Workflow tests passed; no changed rendering expectations to hide a source failure."
+    },
+    {
+      "log": "/private/tmp/bgs-v3-edits-core-final.log",
+      "cause": "Existing persistent source-protection test expected original diagnostic wording; restored compatible accurate overwrite wording. Added normal host-edit event filtering instead of trying to read a synthetic native transcript."
+    },
+    {
+      "log": "/private/tmp/bgs-v3-edits-core-verified.log",
+      "cause": "Suite had imported executor before saved-package-version return was added; returned missing contentRevision in that loaded copy. Original log preserved, final production sources fixed before final whole-suite start and completely rerun."
+    }
+  ],
+  "limitations": [
+    "deliveryEligible:false. Schema, fresh build, browser smoke and source identities do not prove semantic request fulfillment, gameplay, aesthetics, audio, touch or complete game quality.",
+    "Source edit saves a candidate, not ownership-task success. Authorized authors may still need refinement/current Review; preserving semantic edit intent is not certified solely by prompt.",
+    "Filesystem and DB are not one transaction. Durable invalidation/writer precede replacement; interrupted or failed settlement retains unresolved writer. No timeout-based lease release or automatic cross-process recovery.",
+    "Whole confirmed requirement text is sent to every Task; full requirement changes revoke all task qualifications. This does not claim precise semantic-local impact analysis. Local JSON edits preserve unrelated successes only through declared/observed/build input evidence.",
+    "Real PostgreSQL migration, multi-worker CAS/permissions, unknown writer recovery and deployed full Dashboard editor/download interactions not executed.",
+    "Advanced explicit task-plan JSON confirmation implemented, not conversational initial planner or ordinary Chat automatic change generation.",
+    "No paid model/test-project writes, Claude Code native-source edits, service deploy/restart or real database migration. Only synthetic temporary fixtures and BGS frontend build output produced."
+  ],
+  "hashes": [
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+      "sha256": "cb94cf51e10f52620844594d891402733bd7bcc27d07ea3ac21c5c27b21b7dad"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/changes.ts",
+      "sha256": "00d6cba80f774a62e818ef82c1d71c0efb5b11b1dd089722587c690679a8eb0a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/source-edit.ts",
+      "sha256": "96fb1b97ddc9016a3e689196c5b3057f61b48b66d755daaa58f1572dbbb79ff7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts",
+      "sha256": "f64c808acea10b959ecd80c706bfe7200b1d965d1680e9a94bcaca5814c96539"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts",
+      "sha256": "7fac06330d503a4393817488d2fcab1310ced9229718088bebf11c18b79f69d7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/store.ts",
+      "sha256": "a084b91881820a3a1f9d4072c741978c261d8ac872f5b5ffb3882e2eb444adeb"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+      "sha256": "19e122548ce87901c3df4b0f9ad27cc8788bc594bc1acf335affbbc16bac7349"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/context.ts",
+      "sha256": "5b44092e1ac4f61b2c3e5a2041914b5e96627ad92909c0cad33279d2da121c88"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/changes.test.ts",
+      "sha256": "8770a93c35306b1d8311a5a2e9c9241b8b99fc53786880295d834084d87e59bf"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/native-integration.test.ts",
+      "sha256": "c593e97eeba1428dfb12850174c228ceed05bbbaddcc8b7e84002a6abc87a976"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/app.ts",
+      "sha256": "bafefcbee6c1bfd7a719cddbc9fc8910b0006dd113cd2b76ce999fe120bd60c0"
+    },
+    {
+      "path": "apps/frontend/src/services/beeGameAdapter.ts",
+      "sha256": "dcfd9179a30f9784cffb6b6c4692a3c60008cb3d9f0c18f71ae95bb5d18aced2"
+    },
+    {
+      "path": "apps/frontend/src/services/workflowV3Api.ts",
+      "sha256": "18ee0efd4f9df373174a36e59f8181ba5d45954699bdfcd8082ac0f3c0316ab1"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.tsx",
+      "sha256": "59f9362acf4ad5c8f0dcdf2318b10ca96d4166edf0d8ed11b38cc0ac5546db12"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.test.tsx",
+      "sha256": "b855fac7e6b5003395d6aa405c54e4c9b158faae6a71dba8ab8fe87ce8f65c16"
+    },
+    {
+      "path": "apps/frontend/src/components/Workspace/SceneEditorOverlay.tsx",
+      "sha256": "933889bd22385a341b91e9b8bcd9dd32e89ad7d2d491130c5e09f7ba97759d5c"
+    },
+    {
+      "path": "apps/frontend/src/components/Workspace/SceneEditorOverlay.test.tsx",
+      "sha256": "b988bc22ffac30e2f93cbedd3bcda824e8173d9416445cf189908406f14bf314"
+    },
+    {
+      "path": "apps/frontend/src/components/Workspace/UiEditorOverlay.tsx",
+      "sha256": "0a61201cd88a1ef41baa79502c80129d1ae9be12d4a0c25b21a5707b7195c5fa"
+    },
+    {
+      "path": "apps/frontend/src/components/Workspace/UiEditorOverlay.test.tsx",
+      "sha256": "d47994f5bf11d7d7c0016e06bf5960995bbfa4c5d36cddaae9dc4ade8fa996d1"
+    },
+    {
+      "path": "supabase/migrations/20261010020000_workflow_v3_authorized_changes.sql",
+      "sha256": "fec36be5a40f5b9c244c2ca3938b7c9cf7114c158b487a823104d58140329107"
+    },
+    {
+      "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+      "sha256": "67c855b7d1186bd1ca24dd89969245ef1707b807aaca9a9dc9548fcfb313bf4b"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-edits-core-final-verified.log",
+      "sha256": "1ef947bcd0e4335d52d55cb038cde14d750cf31ed44d0faf18acfb6468b04275"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-edits-front-verified.log",
+      "sha256": "940ef325156612a6c583094811f666d06b0844d8a7d224e0e92b57e622ad3438"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-edits-front-build.log",
+      "sha256": "8862174df3eec02ec4647e7eb1b73ea31a06c40564b4b7243c9b607dfcbb2dc3"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-edits-server-final-types-confirmed.log",
+      "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-edits-front-verified-types.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

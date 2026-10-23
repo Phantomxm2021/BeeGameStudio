@@ -1,226 +1,82 @@
-# BeeGame 资源与内容描述合同
+# BeeGame 资源与 Scene/UI 数据合同
 
-## 1. 目的
+2026-09-21 修订。替代早期 IR 前置、Scene node.kind 和 Content v1 索引示例，不做猜测式兼容或自动项目迁移。
 
-BeeGame 按人类游戏开发者的常规方式处理资源：先获得真实资源文件，再用少量 JSON/YAML 描述这些资源如何被游戏使用，最后由目标运行时加载或构建。
+## 职责
 
-系统不把“组装过程”提升为持久化领域对象，也不存在一个 requirement 对应一个中间组装记录的机械映射层。
+**BGS 定义数据并提供编辑器；Agent 选择技术，编写数据加载、解析及游戏代码。不是 BGS 游戏引擎。**
 
-唯一流程是：
+- Resource：素材文件、图集/Tile 定义、Manifest 的来源、引用、hash 与状态。
+- Content：Scene/UI/VFX 的组成、实例布局和配置。
+- Scene/UI Editor：同一数据的编辑、保存、撤销；编辑器渲染实现不成为游戏依赖。
+- Implementation：读取同一 Content 和资源；允许可重建的目标技术产物，不维护第二份独立布局。
+- Workflow：提供上下文、检查结构与引用、记录产物版本。不增加阶段或限制 Agent 工具、创意、引擎选择。
 
-```text
-基础文档审计
-  -> 下载或创作真实资源文件
-  -> 编写 JSON 资源映射、事件与波次，以及 YAML 世界/场景描述
-  -> 资源与内容门禁
-  -> 实现玩法并消费语义 ID
-  -> 目标运行时验收
-```
+当前输入是已接受设计文档 → Resource → Content → Implementation，不要求旧版独立 IR 前置。
 
-## 2. 权威文件
+## 文件与版本
 
-### 2.1 Canonical Asset Manifest v8
+只用 JSON，不同时维护 YAML。沿用现有入口：
 
-Asset Manifest 只记录项目实际拥有的资源，不描述场景布局、事件流程或玩法行为。它是一个模块化文件集合，不是一个无限增长的 JSON：
+- `assets/asset-manifest.json` 与 `assets/manifest/{requirements,resources}/*.json`：Manifest v9。
+- `assets/runtime/**`、`assets/generated/**`：素材和资源定义。
+- `content/index.json`：`beegame-content-package.v2`，`sceneModel: "game-object-v2"`。
+- 叶子：`beegame-content.v1`；kind 为 `scene-2d|scene-3d|ui-screen|ui-hud|ui-flow|vfx`，分别放在 scenes/ui/vfx 目录。
 
-```json
-{
-  "version": 8,
-  "project_target": {
-    "runtime_asset_root": "assets/runtime",
-    "content_root": "assets/content",
-    "generated_asset_root": "assets/generated",
-    "resource_library_usage": "required",
-    "asset_format_capabilities": ["png", "svg", "glb", "wav", "json", "yaml"]
-  },
-  "modules": {
-    "requirements": "assets/manifest/requirements/<content-digest>.json",
-    "resources": [
-      "assets/manifest/resources/<identity-digest>-<content-digest>.json"
-    ]
-  }
-}
-```
+索引声明 `id, dimension, documentRevision, assetManifestRevision, entryScene, files, sceneModel`；files 是 content 相对路径。revision 对应接受的文档和资源版本。
 
-requirements 模块保存唯一 requirements 数组；每个 resources 模块保存恰好一个 resource record。模块文件名由身份摘要与内容摘要确定，根索引中的 resources 路径按 resource ID 稳定排序。模块先落盘、根索引最后原子替换，因此中断不会让已提交索引指向半份新内容；提交后清理未被索引引用的模块。服务端读取时可返回一个内存聚合对象供 Gate、Reviewer、API 和实现消费，但不得把聚合对象持久化为第二份 Manifest。
+叶子声明 `schema,id,kind,assetRefs,data`。引用指向 Manifest 中 verified 的资源；多文件资源使用明确 member。路径必须登记且在项目内，不用 URL、绝对路径或内嵌字节绕过资源身份。
 
-Manifest 不包含：
+## Scene 与 UI
 
-- 中间组装记录；
-- `imports`、slots、selection receipt、no-match 或 fallback；
-- 场景位置、旋转、缩放或事件逻辑；
-- 构建步骤、目标引擎对象或运行时验收状态；
-- Agent 自述式验证文字。
+Scene 使用稳定节点 ID、parentId、父局部 Transform 和具有稳定 ID 的组件。组件类型来自实际 schema 的闭集，不把树、HUD、警觉槽等业务名称当渲染器。自定义行为说明保留在既有 node.data.behaviors。
 
-这三个根目录、模块路径和 `resource_library_usage` 都由 Workflow 根据系统合同与确认简报写入，Agent 不能提交、改写或降级它们。系统只读取当前模块合同，不双写 resources，也不维护旧副本。
+UI 保留当前 UI role、layout、style、bindings、actions，不为名称像 Unity 而重写。根为 screen-root/hud-root/flow-root，不能使用旧 status-text/hud 示例角色。精确词汇见生成的 authoring format。
 
-### 2.2 `assets/content/**/*.json`
+坐标、单位、旋转、pivot、UI anchor 的唯一解释见[坐标约定](./content-coordinate-contract-2026-09-20.md)。2D +Y 向下、逻辑像素；3D +Y 向上、米。父变换继承一次；图集矩形使用图片像素，显示尺寸不等于图片分辨率。
 
-JSON 用于机器稳定读取的资源映射和数据定义，例如：
+## 矩形 Tilemap
 
-- 实体与资源映射；
-- 动画状态映射；
-- UI、字体和音频 cue 映射；
-- 事件、触发器与波次；
-- 玩法参数表；
-- 资源尺寸、pivot、骨骼、动画、循环点等适配信息。
+借鉴 Unity 的 Grid/Tile/Tilemap 职责，不复制 Unity YAML 或内部对象。首批仅正交矩形 2D；不包含等距、六边形、规则自动铺设。
 
-合法 `kind` 只有：`resource-registry`、`entity-definitions`、`ui-configuration`、`audio-configuration`、`event-definitions`、`wave-definitions`、`numeric-configuration`。
+| 所属 | 必填 | 可选与默认 |
+| --- | --- | --- |
+| Grid data | schema=`grid.v1`、cellSize=[正数,正数] | cellGap=[0,0]；enabled=true |
+| Tilemap data | schema=`tilemap.v1`、gridNodeId、cells | tileAnchor=[.5,.5]；collisionEnabled=false；member=资源 root_path；enabled=true |
+| TilemapRenderer data | schema=`tilemap-renderer.v1` | sortingOrder=0（整数，越大越前）；enabled=true |
+| TileSet 资源 JSON | schema=`beegame-tileset.v1`、tiles（tileId→定义） | 空集合有效 |
+| 每个 Tile | sprite、size=[正数,正数] | pivot=[.5,.5]；offset=[0,0]；collision 无 |
+| sprite | assetRef、member=已登记图片的完整项目相对路径 | atlasMember 与 frame 必须同时提供 |
 
-### 2.3 `assets/content/**/*.yaml`
+Tilemap.assetRef 引用 TileSet；同节点必须有 TilemapRenderer。gridNodeId 明确指向自身或祖先 Grid。严格版本化，拒绝未定义字段、重复格子、缺失 Tile/帧，不静默解释旧 Tilemap。
 
-YAML 用于更适合人类与 Agent 编排的结构：
+- cells 是稀疏列表，例如 `[{x:-1,y:0,tileId:"ground"}]`。整数可为负，同层坐标唯一；空格省略，不创建大量 Sprite 节点。
+- 不同层用不同 Tilemap 节点；同层按 y、x 升序绘制。格子在 Tilemap 局部空间，Grid 提供规格。
+- Tile pivot 位置 = cell × (cellSize + cellGap) + cellSize × tileAnchor + offset。
+- Tile 左上角 = pivot 位置 − size × pivot。size 为逻辑像素，树冠可以大于格子。
+- atlasMember 属于 sprite.assetRef 的同一资源，frame 指定命名帧。格式：`frames: {ground:{frame:{x:0,y:0,w:32,h:32}}}`。拒绝 rotated/trimmed，不猜文件名。
+- collision 可包含 points（至少 3 个相对 Tile pivot 的二维点）、mode（solid/trigger/one-way）；one-way 还要求非零 normal。collisionEnabled=true 才启用。Agent 决定目标物理实现；编辑器仅显示轮廓。
+- TileSet 是既有 Manifest 的 data 资源，不新增注册库，也不保存 Scene 格子布局。普通图片不增加 JSON 包装。
 
-- 世界与场景结构；
-- 场景实例、层级、位置、旋转和缩放；
-- 场景对象的空间组织。
+字段示例由 `tilemap-authoring-contract.ts` 同时提供给资源与内容任务，并由测试验证。Implementation 自行映射目标技术，无需导入 BGS 包。
 
-合法 `kind` 只有：`world-definition`、`scene-definitions`、`hierarchy-definition`、`placement-definitions`。
+重复网格环境优先评估 Tilemap，是否采用由 Agent 判断；角色、自由装饰、机关、非网格背景不强制使用。
 
-JSON 与 YAML 不保存同一事实。每项数据必须只有一个 owner；禁止为兼容而同时维护两份映射。
+## 编辑器图片加载
 
-### 2.4 `assets/generated/**`
+- Tilemap 加载链：Scene 的 Tilemap.assetRef → Manifest 的 TileSet JSON → tiles[tileId].sprite.assetRef/member → 图片；使用图集时再按 atlasMember/frame 取精确矩形。独立图片不需要图集 JSON；TileSet 可以跨图片资源复用 Tile。
+- 地图保存的是 cells 与 Tile 引用，不是一张空白大图上的像素，也不为每格创建独立 Sprite 节点。Tilemap 属于 Scene；UI 图标、面板通过自己的 image/member/frame 引用图片。
+- Scene/UI 均支持完整图片路径；同名文件不互相覆盖。已有短 member 只在资源内无歧义时解析。普通 Sprite/UI 现有图集规则是同目录、同文件名的 JSON，Tilemap 使用显式 atlasMember，不猜名称。
+- TileSet 的间接图片/图集缺失或请求失败会阻止 Scene 以“加载成功”状态打开；报错指出具体 Tile 与路径。图片解码/帧越界仍需实际图像验证。
+- 资源/内容 Agent 已获得同一 authoring contract；Implementation 的实际 dispatch 会交接该合同路径。游戏侧由 Agent 使用所选技术加载同一数据，不自动获得 BGS 编辑器的渲染代码。
 
-仅存放目标构建工具生成的资源，例如字体编译结果、音频转码结果、图集或引擎导入产物。该目录可删除并重建，不是权威输入，也不产生第二套资源身份。
+## 验证和限制
 
-## 3. 内容文件公共头
+- 现有资源/内容验收检查结构、资源身份、路径、图集和格子引用。
+- 编辑器提供 Tile Palette：Active Target 指定 Tilemap，选择真实图集帧；支持 Paint（B）、Erase（D）、Pick（I，拾取后回到 Paint）、Box Fill（U）。拖动先预览，松手整笔提交一次 Undo/Redo；Escape、失焦、切换目标取消未提交笔画。保存仍只修改 Tilemap.cells，不改资源或生成游戏引擎代码。
+- 这是 Unity Tile Palette 工作方式的矩形网格子集，不是 Unity 文件格式/全功能兼容；尚无多格印章、Flood Fill、Tile 选区移动、旋转/翻转及 Rule Tile。
+- PNG 图集边界可由后端读头部检查；其他格式仍需解码验证。编辑器检查实际图片尺寸，结构检查不能代替视觉验收。
+- 静态 Scene PNG 工具支持矩形 2D Tilemap，按图片/命名帧、Grid、Tile 锚点和父级变换绘制；缺失或无法解码的资源明确失败。它只是诊断快照，不是游戏运行时或玩法验收，不应要求 Agent 为预览限制改坏合法 Content。
+- 结构通过不代表玩法、性能或游戏交付通过；新项目测试由用户安排，付费复测暂缓。
 
-每个内容文件包含最小公共头，业务数据位于 `data`：
-
-```yaml
-schema: beegame-content-v1
-id: main-scene
-kind: scene-definitions
-fulfills:
-  - IMG.SCENE.COAST_NIGHT
-resources:
-  - coast-background
-  - lighthouse-model
-data:
-  instances: []
-```
-
-```json
-{
-  "schema": "beegame-content-v1",
-  "id": "game-audio",
-  "kind": "audio-configuration",
-  "fulfills": ["SFX.WEAPON.HIT", "BGM.PHASE"],
-  "resources": ["weapon-audio-bank", "phase-music-bank"],
-  "data": {}
-}
-```
-
-公共头只提供确定性审计所需的身份和引用。`data` 的具体结构由项目文档与目标运行时决定，不能在共享合同中绑定 Web、Unity、Godot、Unreal 或其他引擎概念。
-
-同一内容文件应表达一个完整、可消费的领域单元。禁止按 requirement 机械拆成一文件一职责；一个文件可以覆盖多个 requirements，一个资源也可以被多个内容文件复用。
-
-## 4. 资源模型
-
-资源是项目本地一个独立、可替换的真实文件根，可以来自 Resource Library，也可以由 Agent 创作。
-
-### 4.1 Resource Library 资源
-
-必须保留 Pack ID、版本、element ID、依赖闭包、本地路径与完整性信息。
-
-### 4.2 Agent 创作资源
-
-必须：
-
-- 位于 `runtime_asset_root` 或 `generated_asset_root`；
-- 是独立文件，不隐藏在玩法源码中；
-- 标记 `provisional: true` 时仍然可被目标工具加载或构建；
-- 与正式资源使用相同的语义 ID 和内容描述接口。
-
-程序资源可以存在，但必须是独立文件，并由目标资源构建器产生普通媒体或引擎可加载产物。构建器不创建持久化中间组装记录。
-
-## 5. 替换规则
-
-资源替换优先保持语义资源 ID 不变。可以：
-
-1. 直接替换同一路径文件；或
-2. 修改 Asset Manifest 中该资源的文件路径；
-3. 当尺寸、pivot、单位、骨骼、动画名、循环点等发生变化时，只修改对应 JSON/YAML 描述；
-4. 重新执行资源门禁和目标运行时验收。
-
-仅替换兼容资源时，玩法代码不得变化。
-
-## 6. Workflow 所有权
-
-### Resource Production Agents
-
-同一 Resource Production phase 只允许三个串行、能力隔离的任务：
-
-- Resource Planner 只提交 Manifest plan，不访问 Catalog 或内容文件；
-- Resource Curator 浏览 Pack、检查元素、下载真实资源，并为缺失内容创建独立 provisional 文件；
-- Resource Content Author 只通过唯一 `CommitResourceContent` 提交完整 JSON/YAML 候选集；服务端验证、序列化并发布 `assets/content`，Agent 不持有通用文件写入能力；若编排时发现原料缺口，只提交精确 requirement ID，由唯一 Resource Curator 补齐；
-- 三者都不写玩法代码，也不建立第二份资源事实。
-
-每个任务提交 canonical artifact 后立即结束 dispatch。服务根据 Manifest 和内容文件派生下一个任务，不依靠 Worker prose、历史失败或固定次数续跑。
-
-### Resource service
-
-- 提供 Pack 摘要、所选 Pack 元素检查、精确下载、依赖、provenance、路径和完整性事实；
-- 不选择美术适用性，不自动绑定 requirement。
-
-### Workflow service
-
-- 是 Asset Manifest 的唯一写入边界；
-- 从 canonical Manifest 与库存 receipt 派生冻结的 requirement、resource、binding 与 baseline revision 投影，不要求 Agent 重读 Manifest 模块；
-- 使用唯一 canonical validator 在 mutation 前和 Gate 中验证公共头、resource-registry bindings、requirement 覆盖、资源引用、路径和格式；
-- 以 dispatch-bound prepared/committed receipt 和整个 content root 暂存发布处理恢复，拒绝迟到或基线已变化的提交；
-- receipt 是 Resource Content 唯一持久终态权威；`tool.completed` 与模型 prose 只用于传输和展示，重启后不得以事件缺失否定已提交 receipt，也不得重新派发模型；
-- 不创建中间组装状态机。
-
-### Implementation Agent
-
-- 读取内容描述并通过语义 ID 消费资源；
-- 编写目标运行时加载器、玩法、表现与交互；
-- 不下载资源、不修改 Asset Manifest、不生成替代媒体。
-
-### Validator
-
-- 在真实目标运行时验证资源加载、场景、事件、动画、音频和玩法；
-- 验收事实属于当前运行 evidence，不回写为另一套资源状态。
-
-## 7. 资源与内容门禁
-
-进入实现前必须满足：
-
-1. 每个 required requirement 至少被一个内容文件公共头覆盖；
-2. 每个内容文件引用的 resource ID 都存在且 verified；
-3. 每个保留 resource 至少被一个内容文件引用；
-4. 所有资源文件与依赖真实存在，路径不越界；
-5. JSON 可解析，YAML 使用安全 schema 且禁止重复键；
-6. 内容文件 ID 唯一，资源 ID 唯一，requirement ID 唯一；
-7. provisional 与正式资源采用相同引用方式；
-8. 不存在源码内嵌的可替换媒体；
-9. 不存在中间组装清单、第二资源库存或兼容 reader；
-10. Resource Library 为 required 时，至少存在一项真实、完整 provenance 的导入资源。
-
-门禁只验证结构事实。美术适配、场景合理性和事件一致性由 Reviewer 审计，真实加载与行为由 Runtime Acceptance 验证。
-
-## 8. 引擎中立性
-
-共享合同只认识资源文件、JSON/YAML 内容描述和可丢弃生成目录。
-
-- Web 可以读取 JSON/YAML 后生成模块或运行时对象；
-- Unity 可以由 Editor importer 生成 Scene、Prefab 或 ScriptableObject；
-- Godot 可以生成 `.tscn`、`.tres` 或运行时节点；
-- Unreal 可以生成 Level、Blueprint 或 Data Asset；
-- 自研引擎可以生成自己的资源包。
-
-这些输出属于目标适配器，不进入共享 Manifest schema。
-
-## 9. 明确删除
-
-- Manifest 中间组装记录；
-- 中间组装 phase、worker 和 stage；
-- 中间组装任务和前端展示；
-- 中间组装 output、member、status、evidence 与 replacement graph；
-- Implementation 的中间组装 ID/output binding；
-- 描述性中间组装文件；
-- 固定 WOFF2、TSX、Prefab 或特定引擎输出的共享层规则；
-- 旧版 reader、migration、feedback、shadow、fallback 与双轨测试。
-
-本项目处于开发阶段，不保留旧 Manifest 的运行时兼容。
+实施与验证进度见[落地方案](./scene-ui-data-contract-plan-2026-09-21.md)。不改已有示例项目，不引入游戏 renderer、game loop、物理或运行时资源管理模块。

@@ -1,0 +1,150 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-message",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "style": {
+          "background": {
+            "color": "#12102A"
+          }
+        },
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            960,
+            540
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1200,
+              540
+            ],
+            [
+              960,
+              600
+            ],
+            [
+              1280,
+              720
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "stage",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            520,
+            260
+          ]
+        },
+        "data": {
+          "container": {
+            "direction": "column",
+            "gap": 18,
+            "justify": "center",
+            "align": "center"
+          }
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "msg-icon",
+        "role": "text",
+        "enabled": true,
+        "parentId": "stage",
+        "layout": {
+          "size": [
+            120,
+            80
+          ]
+        },
+        "text": "↻",
+        "style": {
+          "fontSize": 64,
+          "color": "#29D3E0",
+          "align": "center"
+        },
+        "data": {
+          "visibleWhen": "reason:portrait; hiddenWhen:reason:size"
+        }
+      },
+      {
+        "id": "msg-text",
+        "role": "text",
+        "enabled": true,
+        "parentId": "stage",
+        "layout": {
+          "size": [
+            460,
+            72
+          ]
+        },
+        "text": "请旋转设备至横屏",
+        "style": {
+          "fontSize": 28,
+          "color": "#F4F2FF",
+          "align": "center",
+          "lineHeight": 36
+        },
+        "data": {
+          "boundText": "portrait=请旋转设备至横屏;size=窗口尺寸过小，请放大窗口"
+        }
+      },
+      {
+        "id": "msg-sub",
+        "role": "text",
+        "enabled": true,
+        "parentId": "stage",
+        "layout": {
+          "size": [
+            420,
+            30
+          ]
+        },
+        "text": "最小支持尺寸 960 × 540",
+        "style": {
+          "fontSize": 16,
+          "color": "#9E9AC8",
+          "align": "center"
+        }
+      }
+    ]
+  }
+}

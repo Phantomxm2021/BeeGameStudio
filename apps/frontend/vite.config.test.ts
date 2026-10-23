@@ -16,20 +16,24 @@ describe('vite production build config', () => {
     expect(configSource).toContain('safari16');
   });
 
-  it('defines an unprefixed backdrop-filter fallback for the idea input surface', () => {
+  it('keeps the idea input surface free of default glass blur', () => {
     const cssSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'src', 'index.css'), 'utf8');
 
-    expect(cssSource).toContain('@supports (backdrop-filter: blur(1px))');
-    expect(cssSource).toContain('backdrop-filter: blur(14px) saturate(120%);');
+    expect(cssSource).not.toContain('backdrop-filter: blur(14px)');
   });
 
   it('dedupes React for peer dependency UI packages', () => {
     const configSource = readFileSync(configPath, 'utf8');
 
     expect(configSource).toContain("dedupe: ['react', 'react-dom']");
-    expect(configSource).toContain('@shadcn/react/message-scroller');
-    expect(configSource).toContain("noExternal: ['@shadcn/react']");
-    expect(configSource).toContain("inline: ['@shadcn/react']");
+    expect(configSource).not.toContain('@shadcn/react/message-scroller');
+    expect(configSource).not.toContain("noExternal: ['@shadcn/react']");
+    expect(configSource).not.toContain("inline: ['@shadcn/react']");
+  });
+
+  it('prebundles the lazy chat image effect before its first render', () => {
+    const configSource = readFileSync(configPath, 'utf8');
+    expect(configSource).toContain("'img-fx',");
   });
 
 });

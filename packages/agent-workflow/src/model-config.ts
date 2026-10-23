@@ -1,44 +1,94 @@
 import { randomUUID } from 'node:crypto'
 
-export type ModelProviderKind =
-  | 'anthropic-compatible'
-  | 'openai-compatible'
-  | 'gemini'
-  | 'grok'
+import {
+  resolveModelApiProtocol,
+  type ModelApiProtocol,
+  type ModelProviderKind,
+} from './model-protocol'
+export {
+  resolveModelApiProtocol,
+  type ModelApiProtocol,
+  type ModelProviderKind,
+} from './model-protocol'
 
-export type ModelTierMap = {
-  fast?: string
-  balanced?: string
-  strong?: string
+export type ModelAuthMethod = 'platform' | 'byok' | 'chatgpt-subscription'
+
+export function modelAuthMethods(
+  provider: ModelProviderKind,
+): ModelAuthMethod[] {
+  return [
+    'platform',
+    'byok',
+    ...(provider === 'openai-compatible'
+      ? ['chatgpt-subscription' as const]
+      : []),
+  ]
+}
+
+export function validateModelAccess(
+  provider: ModelProviderKind,
+  methods: unknown,
+): ModelAuthMethod[] {
+  if (
+    !['anthropic-compatible', 'openai-compatible', 'gemini', 'grok'].includes(
+      provider,
+    )
+  ) {
+    throw new Error('Unsupported model provider')
+  }
+  if (methods === undefined) return ['platform']
+  if (
+    !Array.isArray(methods) ||
+    !methods.length ||
+    methods.some(method => !modelAuthMethods(provider).includes(method))
+  ) {
+    throw new Error(
+      'Choose at least one authentication method supported by this provider',
+    )
+  }
+  return [...new Set(methods)]
 }
 
 export type PublicModelConfig = {
+  published?: boolean
+  authMethods?: ModelAuthMethod[]
   id: string
   ownerId: string
   name: string
   provider: ModelProviderKind
+  apiProtocol?: ModelApiProtocol
   baseUrl?: string
   apiKeyPreview: string
   apiKey?: undefined
-  models: ModelTierMap
+  model?: string
   isDefault: boolean
   createdAt: Date
   updatedAt: Date
 }
 
 export type ModelConfigInput = {
+  published?: boolean
+  authMethods?: ModelAuthMethod[]
   name: string
   provider: ModelProviderKind
+  apiProtocol?: ModelApiProtocol
   baseUrl?: string
   apiKey: string
-  models: ModelTierMap
+  model?: string
   isDefault?: boolean
 }
 
 export type ModelConfigUpdate = Partial<
   Pick<
     ModelConfigInput,
-    'name' | 'provider' | 'baseUrl' | 'apiKey' | 'models'
+    | 'name'
+    | 'provider'
+    | 'apiProtocol'
+    | 'baseUrl'
+    | 'apiKey'
+    | 'model'
+    | 'published'
+    | 'authMethods'
   > & {
     isDefault: boolean
     clearSecret: boolean
@@ -52,9 +102,10 @@ export type RuntimeModelConfig = {
 
 export type StoredModelConfigRuntimeInput = {
   provider: ModelProviderKind
+  apiProtocol?: ModelApiProtocol
   baseUrl?: string
   apiKey: string
-  models: ModelTierMap
+  model?: string
 }
 
 type StoredModelConfig = Omit<PublicModelConfig, 'apiKeyPreview' | 'apiKey'> & {
@@ -69,7 +120,6 @@ export type ModelConfigSnapshotRecord = Omit<
   updatedAt: string
 }
 
-const LEGACY_RUNTIME_ENV_PREFIX = ['CLAU', 'DE_CODE_USE_'].join('')
 const configs = new Map<string, StoredModelConfig>()
 
 export function resetModelConfigs(): void {
@@ -78,13 +128,16 @@ export function resetModelConfigs(): void {
 
 export function exportModelConfigSnapshot(): ModelConfigSnapshotRecord[] {
   return [...configs.values()].map(config => ({
+    published: config.published ?? true,
+    authMethods: config.authMethods ?? ['platform'],
     id: config.id,
     ownerId: config.ownerId,
     name: config.name,
     provider: config.provider,
+    apiProtocol: config.apiProtocol,
     ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
     apiKey: config.apiKey,
-    models: { ...config.models },
+    model: readStoredModelSelection(config),
     isDefault: config.isDefault,
     createdAt: config.createdAt.toISOString(),
     updatedAt: config.updatedAt.toISOString(),
@@ -96,14 +149,22 @@ export function importModelConfigSnapshot(
 ): void {
   configs.clear()
   for (const config of snapshot) {
+    const methods = config.authMethods?.filter(method =>
+      modelAuthMethods(config.provider).includes(method),
+    ) ?? ['platform']
+    resolveModelApiProtocol(config.provider, config.apiProtocol)
+    const supported = methods.length > 0
     configs.set(config.id, {
+      published: supported && (config.published ?? true),
+      authMethods: methods.length ? methods : ['platform'],
       id: config.id,
       ownerId: config.ownerId,
       name: config.name,
       provider: config.provider,
+      apiProtocol: config.apiProtocol,
       ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
       apiKey: config.apiKey,
-      models: { ...config.models },
+      model: readStoredModelSelection(config),
       isDefault: config.isDefault,
       createdAt: new Date(config.createdAt),
       updatedAt: new Date(config.updatedAt),
@@ -117,13 +178,16 @@ export function createModelConfig(
 ): PublicModelConfig {
   const now = new Date()
   const record: StoredModelConfig = {
+    published: input.published ?? true,
+    authMethods: validateModelAccess(input.provider, input.authMethods),
     id: `llm_${randomUUID().replaceAll('-', '')}`,
     ownerId,
     name: input.name,
     provider: input.provider,
+    apiProtocol: resolveModelApiProtocol(input.provider, input.apiProtocol),
     ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
     apiKey: input.apiKey,
-    models: { ...input.models },
+    model: input.model?.trim(),
     isDefault: input.isDefault ?? listModelConfigs(ownerId).length === 0,
     createdAt: now,
     updatedAt: now,
@@ -156,6 +220,19 @@ export function updateModelConfig(
   const record = configs.get(id)
   if (!record) return undefined
 
+  const methods = validateModelAccess(
+    patch.provider ?? record.provider,
+    patch.authMethods ?? record.authMethods,
+  )
+  const provider = patch.provider ?? record.provider
+  const protocol = resolveModelApiProtocol(
+    provider,
+    patch.apiProtocol ??
+      (provider === record.provider ? record.apiProtocol : undefined),
+  )
+  record.apiProtocol = protocol
+  record.authMethods = methods
+  if (patch.published !== undefined) record.published = patch.published
   if (patch.name !== undefined) record.name = patch.name
   if (patch.provider !== undefined) record.provider = patch.provider
   if (patch.baseUrl !== undefined) {
@@ -166,8 +243,9 @@ export function updateModelConfig(
     }
   }
   if (patch.clearSecret) record.apiKey = ''
-  else if (patch.apiKey !== undefined && patch.apiKey.trim()) record.apiKey = patch.apiKey
-  if (patch.models !== undefined) record.models = { ...patch.models }
+  else if (patch.apiKey !== undefined && patch.apiKey.trim())
+    record.apiKey = patch.apiKey
+  if (patch.model !== undefined) record.model = patch.model.trim()
   if (patch.isDefault !== undefined) {
     if (patch.isDefault) {
       clearOwnerDefaults(record.ownerId)
@@ -196,54 +274,37 @@ export function mapModelConfigToRuntime(
 export function mapStoredModelConfigToRuntime(
   record: StoredModelConfigRuntimeInput,
 ): RuntimeModelConfig {
-  switch (record.provider) {
-    case 'anthropic-compatible':
-      return {
-        modelType: 'anthropic',
-        env: compactEnv({
-          ANTHROPIC_BASE_URL: record.baseUrl,
-          ANTHROPIC_AUTH_TOKEN: record.apiKey,
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: record.models.fast,
-          ANTHROPIC_DEFAULT_SONNET_MODEL: record.models.balanced,
-          ANTHROPIC_DEFAULT_OPUS_MODEL: record.models.strong,
-        }),
-      }
-    case 'openai-compatible':
-      return {
-        modelType: 'openai',
-        env: compactEnv({
-          [`${LEGACY_RUNTIME_ENV_PREFIX}OPENAI`]: '1',
-          OPENAI_BASE_URL: record.baseUrl,
-          OPENAI_API_KEY: record.apiKey,
-          OPENAI_DEFAULT_HAIKU_MODEL: record.models.fast,
-          OPENAI_DEFAULT_SONNET_MODEL: record.models.balanced,
-          OPENAI_DEFAULT_OPUS_MODEL: record.models.strong,
-        }),
-      }
-    case 'gemini':
-      return {
-        modelType: 'gemini',
-        env: compactEnv({
-          [`${LEGACY_RUNTIME_ENV_PREFIX}GEMINI`]: '1',
-          GEMINI_BASE_URL: record.baseUrl,
-          GEMINI_API_KEY: record.apiKey,
-          GEMINI_DEFAULT_HAIKU_MODEL: record.models.fast,
-          GEMINI_DEFAULT_SONNET_MODEL: record.models.balanced,
-          GEMINI_DEFAULT_OPUS_MODEL: record.models.strong,
-        }),
-      }
-    case 'grok':
-      return {
-        modelType: 'grok',
-        env: compactEnv({
-          [`${LEGACY_RUNTIME_ENV_PREFIX}GROK`]: '1',
-          GROK_BASE_URL: record.baseUrl,
-          GROK_API_KEY: record.apiKey,
-          GROK_DEFAULT_HAIKU_MODEL: record.models.fast,
-          GROK_DEFAULT_SONNET_MODEL: record.models.balanced,
-          GROK_DEFAULT_OPUS_MODEL: record.models.strong,
-        }),
-      }
+  const modelType =
+    record.provider === 'anthropic-compatible'
+      ? 'anthropic'
+      : record.provider === 'openai-compatible'
+        ? 'openai'
+        : record.provider
+  const prefix = {
+    anthropic: 'ANTHROPIC',
+    openai: 'OPENAI',
+    gemini: 'GEMINI',
+    grok: 'GROK',
+  }[modelType]
+  const baseUrl =
+    record.baseUrl ||
+    {
+      anthropic: 'https://api.anthropic.com',
+      openai: 'https://api.openai.com/v1',
+      gemini: 'https://generativelanguage.googleapis.com/v1beta',
+      grok: 'https://api.x.ai/v1',
+    }[modelType]
+  return {
+    modelType,
+    env: compactEnv({
+      [prefix + '_BASE_URL']: baseUrl,
+      [prefix + '_API_KEY']: record.apiKey,
+      BEEGAME_API_PROTOCOL: resolveModelApiProtocol(
+        record.provider,
+        record.apiProtocol,
+      ),
+      BEEGAME_MODEL: record.model,
+    }),
   }
 }
 
@@ -257,13 +318,16 @@ function clearOwnerDefaults(ownerId: string): void {
 
 function toPublicConfig(record: StoredModelConfig): PublicModelConfig {
   return {
+    published: record.published ?? true,
+    authMethods: [...(record.authMethods ?? ['platform'])],
     id: record.id,
     ownerId: record.ownerId,
     name: record.name,
     provider: record.provider,
+    apiProtocol: record.apiProtocol,
     ...(record.baseUrl ? { baseUrl: record.baseUrl } : {}),
     apiKeyPreview: maskApiKey(record.apiKey),
-    models: { ...record.models },
+    model: record.model,
     isDefault: record.isDefault,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -283,4 +347,13 @@ function compactEnv(
     if (value) env[key] = value
   }
   return env
+}
+
+/** Read the selected model from saved records, including pre-single-model snapshots.
+ * Legacy tiers are read only here; new API requests and writes use `model`. */
+export function readStoredModelSelection(record: { model?: unknown; models?: unknown }): string | undefined {
+  const previous = record.models && typeof record.models === 'object' && !Array.isArray(record.models)
+    ? (record.models as Record<string, unknown>).balanced : undefined
+  const value = record.model ?? previous
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }

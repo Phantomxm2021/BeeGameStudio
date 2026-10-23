@@ -1,0 +1,344 @@
+{
+  "version": "bgs-v3-offline-first-package.1",
+  "date": "2026-10-11",
+  "planVersion": "1.50",
+  "scope": {
+    "paidModelCalls": 0,
+    "realGameWrites": false,
+    "officialFrontendWrites": false,
+    "claudeCodeWrites": false,
+    "builtinToolsWrites": false,
+    "normalServiceRestart": false,
+    "deployed": false,
+    "newAgentLimits": false,
+    "newHostStages": false
+  },
+  "confirmedGap": {
+    "schema": "game-content-schema.ts: contentIndexSchema still requires documentRevision and assetManifestRevision",
+    "interface": "Before this change pure --format index pointed only to --authority or a saved index; --current required an existing index",
+    "consumers": "workflow-v3/content-view.ts reads saved registry identity and bytes with source freshness; it does not require a legacy eight-document release",
+    "classification": "BGS first-index interface omission, not a demonstrated model or native-history defect"
+  },
+  "implementation": {
+    "entry": "check-content.mjs --package-metadata content/scenes/FILE.json content/ui/FILE.json ...",
+    "input": "Explicit author-selected saved content/scenes, content/ui or content/vfx JSON and the actual canonical Manifest",
+    "output": "Read-only input paths/IDs/kinds/byte hashes plus first indexMetadata; includes workspace/contentRoot and designVerified=false, runtimeVerified=false",
+    "noWritesOrChoices": "No index/prose/handoff/Manifest creation, no design approval, no entry/load policy/tech route selection. Missing Manifest retains the existing empty-registry semantics, not resource approval.",
+    "identity": "documentRevision hashes the sorted explicit path/raw-byte hash pairs for initial compatibility only; assetManifestRevision hashes the canonical actual Manifest",
+    "subsequentUse": "Author saves actual registry; --current validates saved package/resources without rehashing prose; current source/report/build measurement remains required",
+    "failures": "Missing/invalid JSON, unsafe paths/symlinks, duplicate IDs and malformed Manifest fail; no partial indexMetadata returned",
+    "compatibility": "Explicit legacy --authority and ordinary delivery default remain strict; no schema or old release bypass",
+    "missingIndexFeedback": "ENOENT for saved content/index.json now points to the read-only first-index entry; malformed/escaped index is not silently replaced"
+  },
+  "regression": [
+    {
+      "command": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/current-content-validation.test.ts packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts packages/agent-workflow-server/src/beegame/game-content-package.test.ts packages/agent-workflow-server/src/beegame/content-binding.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/measured-preview.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/content-view.test.ts packages/agent-workflow-server/src/beegame/shared-playwright.test.ts",
+      "files": 11,
+      "pass": 134,
+      "fail": 0,
+      "expects": 1220,
+      "seconds": 17.52,
+      "exitCode": 0
+    },
+    {
+      "command": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal-native.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/runtime-integration.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/font-consumption.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/pixel-consumption.test.ts",
+      "files": 4,
+      "pass": 51,
+      "fail": 0,
+      "expects": 290,
+      "seconds": 164.78,
+      "exitCode": 0,
+      "nativeDebug": {
+        "existingRealCli": true,
+        "independentDebug": true,
+        "provider": "local fixed synthetic transport",
+        "requests": 25,
+        "paidModelCalls": 0,
+        "coverage": [
+          "Question",
+          "normal native tools and failed-check repair",
+          "same-project discussion/change",
+          "pause/resume/explicit continuation",
+          "saved registry view/edit invalidation",
+          "rebuild/re-measure",
+          "actual runtime JSON consumption",
+          "measured Preview/editable export"
+        ],
+        "notProof": [
+          "real game quality",
+          "actual Token savings"
+        ]
+      }
+    },
+    {
+      "command": "bun run typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  ],
+  "uniqueTotal": {
+    "tests": 185,
+    "expects": 1510,
+    "excludesRepeatedTargetedRuns": true
+  },
+  "testAuthoringFailures": [
+    "First narrow run: fixture assertion expected format.index; actual CLI returns value. Corrected assertion.",
+    "Second narrow run: synthetic author registry omitted required loadPhase; supplied explicit startup/on-demand as the actual schema requires, no schema relaxation.",
+    "Typecheck exposed the Bun expect overload selected by an any-typed diagnostic. Made the assertion operands Boolean/String; final typecheck and frozen regression passed.",
+    "Initial archive had one extra trailing newline; removed it and verified byte equality before revising the source plan."
+  ],
+  "protected": {
+    "trees": {
+      "apps/frontend": {
+        "files": 508,
+        "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+      },
+      "src": {
+        "files": 2445,
+        "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+      },
+      "packages/builtin-tools": {
+        "files": 383,
+        "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+      }
+    },
+    "gameRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/v3-agent-acceptance--1b167e40f20a",
+    "selectedGameFiles": [
+      {
+        "path": "bun.lock",
+        "sha256": "cd7f60aef306513e095d7d1478d449985dffdeec79464af96f1031d07fa2d040",
+        "unchanged": true
+      },
+      {
+        "path": "content/index.json",
+        "sha256": "9ef5bef7eaffaa4319cdf31283239a9ba8af21d07e7fb0077d4d61451423e427",
+        "unchanged": true
+      },
+      {
+        "path": "content/scenes/level-1.json",
+        "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d",
+        "unchanged": true
+      },
+      {
+        "path": "content/scenes/level-2.json",
+        "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022",
+        "unchanged": true
+      },
+      {
+        "path": "content/scenes/level-3.json",
+        "sha256": "3f5cb30ec6b7be0fda59add01bcec3b2f3c19ef9217adc9863611e684fdc6af6",
+        "unchanged": true
+      },
+      {
+        "path": "content/ui/ending.json",
+        "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee",
+        "unchanged": true
+      },
+      {
+        "path": "content/ui/fail.json",
+        "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226",
+        "unchanged": true
+      },
+      {
+        "path": "content/ui/hud.json",
+        "sha256": "b67165894e4c5d27a3712d60d4a8e9183a260cb2be2ff071fe69edd7291573d6",
+        "unchanged": true
+      },
+      {
+        "path": "content/ui/level-select.json",
+        "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630",
+        "unchanged": true
+      },
+      {
+        "path": "content/ui/success.json",
+        "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b",
+        "unchanged": true
+      },
+      {
+        "path": "content/ui/title.json",
+        "sha256": "4653aa969024c25575d3886226d19fe9dec3264be8ca0093db051c08f47de722",
+        "unchanged": true
+      },
+      {
+        "path": "docs/ART_DIRECTION.md",
+        "sha256": "d86eb5698a74fa89f90ae06abb2ef0c1a794fd09b1950b39486e16a21e5916a7",
+        "unchanged": true
+      },
+      {
+        "path": "docs/ASSET_PLAN.md",
+        "sha256": "e6dfce8526090583a7807348ea07831537bc06f3b4f93ba3400e7d9afbc67f73",
+        "unchanged": true
+      },
+      {
+        "path": "docs/AUDIO_DESIGN.md",
+        "sha256": "202511b264a3e2652af368984d954b1962c743ee70a372eda8ef7f44edfa7c6d",
+        "unchanged": true
+      },
+      {
+        "path": "docs/BALANCE_DESIGN.md",
+        "sha256": "b5efbaed193c03069d4f5daa184014f1714d54410f6dea7c143f10e2c7ef6af3",
+        "unchanged": true
+      },
+      {
+        "path": "docs/GDD.md",
+        "sha256": "d05cb55092fb1ebf0a916268af15492879e66e13dbc0544ffb97839a0108e2e2",
+        "unchanged": true
+      },
+      {
+        "path": "docs/LEVEL_SCENE_DESIGN.md",
+        "sha256": "f6daac5c0bb5ae41f3c5cc4e57c224337e9dc9ab33d124aae0ca7c9f4b41e5c8",
+        "unchanged": true
+      },
+      {
+        "path": "docs/README.md",
+        "sha256": "5688687b1ba9a7db4c6d7124852517331baf87b307d725ecbcd610a1af92436d",
+        "unchanged": true
+      },
+      {
+        "path": "docs/TECHNICAL_DESIGN.md",
+        "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b",
+        "unchanged": true
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "e2c74c6b209940ce945f08259db1cc652e7b411ca97977779cd1630e5b487145",
+        "unchanged": true
+      },
+      {
+        "path": "index.html",
+        "sha256": "d798ec27a484d11c067958ddcf1b830d0fef6292231a903cc26fbc6a9c1a0799",
+        "unchanged": true
+      },
+      {
+        "path": "package.json",
+        "sha256": "a6e112c7e8f286c451503c014307fe598bc9eec86adb4344a4ac26c50af00398",
+        "unchanged": true
+      },
+      {
+        "path": "src/audio.ts",
+        "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529",
+        "unchanged": true
+      },
+      {
+        "path": "src/content.ts",
+        "sha256": "e73fc9ec02b906cec7bf33625ae4297fd022f409ee7fbf7847239fe99882d0ac",
+        "unchanged": true
+      },
+      {
+        "path": "src/game.ts",
+        "sha256": "a37af585da1f6e2cf20e92ae32c4fb906484721b72cc91b3ec1c54f1427b003b",
+        "unchanged": true
+      },
+      {
+        "path": "src/main.ts",
+        "sha256": "0dc39610e5d9892f6a229cc08d4e9fec77b21d80b4ea2435add63ddabc405c42",
+        "unchanged": true
+      },
+      {
+        "path": "src/render.ts",
+        "sha256": "7f8108b74f2e9495a0bb789f1593d757870b1ba6039ff37fbfba79daf9e61eb7",
+        "unchanged": true
+      },
+      {
+        "path": "src/sim.ts",
+        "sha256": "6a7cff98d7ad50eed228c4819d11c7ffe1be2d6ee3f2428e1555ad98d0d27205",
+        "unchanged": true
+      },
+      {
+        "path": "src/storage.ts",
+        "sha256": "dfd9adbe96ba5c5fdf1e836ca24af4a8653f1250d095a3042a37c2c7bfe68905",
+        "unchanged": true
+      },
+      {
+        "path": "src/styles.css",
+        "sha256": "7680dbfa8292b36c1a48dc0182c76137a7818b7fdddac4bb188e96a8a2b5d1c6",
+        "unchanged": true
+      },
+      {
+        "path": "src/types.ts",
+        "sha256": "7009d7a731d39fec9826f177f2065b2a3ea46acfe41876b35046ae0ad1f26000",
+        "unchanged": true
+      },
+      {
+        "path": "tests/browser-fullflow.mjs",
+        "sha256": "35d99cf242881ce708eacab4c75191eafef0005017481ff59252055ce2dcc798",
+        "unchanged": true
+      },
+      {
+        "path": "tests/browser-verify.mjs",
+        "sha256": "23db3859b3c0f7ef22474fa833309bafdd0552a0fff919cbe19b25e3c133b9f9",
+        "unchanged": true
+      },
+      {
+        "path": "tests/headless-sim.ts",
+        "sha256": "9b9c87453519acc87dffee178cfa0f09f5492f8acc04fa946fcfa28dff7549b0",
+        "unchanged": true
+      },
+      {
+        "path": "tsconfig.json",
+        "sha256": "08316fe7b2133d3aaacdfd5eb393b0d7cb49c0fc9d69eb839c7d1bea81a9a61f",
+        "unchanged": true
+      },
+      {
+        "path": "vite.config.ts",
+        "sha256": "ea3af12244844b18d90e0594d4e4226274d6d54a2c97edc6b22cee26d8f7421e",
+        "unchanged": true
+      },
+      {
+        "path": "reports/browser/REPORT_V22.md",
+        "sha256": "e2fe7081ff4a3e3e56bf50a8c48baa07aaea5b93e1d8c639f3f73b942850479b",
+        "unchanged": true
+      },
+      {
+        "path": "docs/TECHNICAL_DESIGN.md",
+        "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b",
+        "unchanged": true
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "e2c74c6b209940ce945f08259db1cc652e7b411ca97977779cd1630e5b487145",
+        "unchanged": true
+      },
+      {
+        "path": "docs/LEVEL_SCENE_DESIGN.md",
+        "sha256": "f6daac5c0bb5ae41f3c5cc4e57c224337e9dc9ab33d124aae0ca7c9f4b41e5c8",
+        "unchanged": true
+      }
+    ],
+    "all40SelectedGameFilesUnchanged": true
+  },
+  "archive": {
+    "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/verification/BGS_V3_Agent_Driven_Workflow_Implementation.v1.49-before-first-package-2026-10-11.md",
+    "bytes": 134871,
+    "sha256": "05f484a391f27f8a984e778008a0c4eaefb802212eea37b82d5d4b18102c4557",
+    "byteIdenticalTo149BeforeRevision": true
+  },
+  "frozenSources": [
+    {
+      "path": "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+      "sha256": "6f85aded81d318be2fda8f67cc08dcdfa67b9ea1b701e8e973bfe64318091fdb"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/scene-ui-content-authoring.ts",
+      "sha256": "eedd2886d2395a1606818cb99bb4c2b236b7f5bb45dd90b20a6d224d37857c2e"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/current-content-validation.test.ts",
+      "sha256": "cf3f23b7dd02f7780161f36f16c4e0819859517a27f68cc255cb864f76465a6f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts",
+      "sha256": "574952524fe8ba1858de96dfb0e8c4d95b28bf6b29178d29cfd803175d1aa8cc"
+    }
+  ],
+  "remaining": [
+    "Real professional quality/game delivery is not accepted by these metadata or synthetic results.",
+    "Native long-history cost remains unproven; no changes to native compression/history/query loop and no paid replay.",
+    "Running service tool modules do not auto-refresh from source changes; no deployment or normal-service restart this round.",
+    "Metadata is a read snapshot, not an atomic lock, proof of complete registration or resource member correctness; saved package and runtime checks remain required.",
+    "Eight-domain design coverage and normal Agent dynamic responsibility are retained."
+  ]
+}

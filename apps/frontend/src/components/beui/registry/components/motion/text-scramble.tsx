@@ -1,0 +1,65 @@
+"use client";
+// beui.dev/components/motion/text-animation
+
+import { useReducedMotion } from "motion/react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { cn } from "@/components/beui/registry/lib/utils";
+
+const DEFAULT_GLYPHS = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#%&@$?/";
+
+export interface TextScrambleProps {
+  text: string;
+  duration?: number;
+  glyphs?: string;
+  stableGlyphPositions?: boolean;
+  className?: string;
+  style?: CSSProperties;
+}
+
+export function TextScramble({ text, duration, glyphs = DEFAULT_GLYPHS, stableGlyphPositions = false, className, style }: TextScrambleProps) {
+  const reduce = useReducedMotion() ?? false;
+  const [display, setDisplay] = useState(text);
+  const mounted = useRef(false);
+
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      setDisplay(text);
+      return;
+    }
+    if (reduce || !glyphs) {
+      setDisplay(text);
+      return;
+    }
+    const characters = text.split("");
+    const startedAt = performance.now();
+    const animationDuration = duration ?? Math.min(760, Math.max(420, characters.length * 32));
+    let frame = 0;
+    let lastUpdate = 0;
+    const animate = (now: number) => {
+      if (now - lastUpdate >= 40) {
+        lastUpdate = now;
+        const progress = Math.min((now - startedAt) / animationDuration, 1);
+        const settled = Math.floor(progress * characters.length);
+        setDisplay(characters.map((character, index) => index < settled || character === " " ? character : glyphs[Math.floor(Math.random() * glyphs.length)]).join(""));
+      }
+      if (now - startedAt < animationDuration) frame = requestAnimationFrame(animate);
+      else setDisplay(text);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [duration, glyphs, reduce, text]);
+
+  const visible = reduce ? text : display;
+  return <span className={cn("inline-block whitespace-pre", className)} style={style}>
+    <span className="sr-only">{text}</span>
+    <span aria-hidden="true">{stableGlyphPositions
+      ? Array.from(text).map((character, index) => (
+        <span key={index} className="relative inline-block">
+          <span className="invisible">{character === " " ? "\u00a0" : character}</span>
+          <span className="absolute inset-0 text-center">{visible[index] ?? ""}</span>
+        </span>
+      ))
+      : visible}</span>
+  </span>;
+}

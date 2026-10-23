@@ -1,7 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { isAbsolute, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bgsCommand, toml } from '../bgs/client'
+import { PROJECT_DESIGN_PATHS } from './design-handoff'
 
 export type BeeGamePreviewStatus =
   | 'idle'
@@ -12,6 +15,7 @@ export type BeeGamePreviewStatus =
   | 'unsupported'
 
 export type BeeGamePreviewSnapshot = {
+  mode?: 'development' | 'production'
   sessionId: string
   workspacePath: string
   status: BeeGamePreviewStatus
@@ -25,6 +29,7 @@ export type BeeGamePreviewSnapshot = {
 }
 
 export type BeeGamePreviewStartOptions = {
+  mode?: 'development' | 'production'
   sessionId: string
   workspacePath: string
 }
@@ -38,6 +43,7 @@ export type BeeGamePreviewRunner = (
   command: string[],
   options: {
     cwd: string
+    workspacePath: string
     env: Record<string, string>
     onOutput: (text: string) => void
   },
@@ -67,7 +73,7 @@ type PreviewProcessPlan = {
   command: string[]
   script: string
   entrypoint: string
-  nodeEnv?: 'development'
+  nodeEnv?: 'development' | 'production'
   url?: string
 }
 
@@ -83,6 +89,7 @@ type SupportedPreviewPlan = {
 
 const DEFAULT_PREVIEW_PORT_START = 63100
 const DEFAULT_HOST = '127.0.0.1'
+const PREVIEW_SANDBOX_PROFILE = 'bgs-preview'
 const VITE_PREVIEW_HOST_PATH = fileURLToPath(new URL('./vite-preview-host.ts', import.meta.url))
 const SAFE_PREVIEW_ENV_KEYS = [
   'HOME',
@@ -105,6 +112,7 @@ export class BeeGamePreviewManager {
     private readonly allocatePort: BeeGamePreviewPortAllocator = findAvailablePort,
     private readonly readinessProbe: BeeGamePreviewReadinessProbe = waitForPreviewReady,
     private readonly publicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL || '',
+    private readonly routeIdForSession: (sessionId: string) => string = sessionId => sessionId,
   ) {}
 
   status(sessionId: string, workspacePath: string): BeeGamePreviewSnapshot {
@@ -123,6 +131,7 @@ export class BeeGamePreviewManager {
     if (
       existing &&
       sameWorkspace(existing.snapshot.workspacePath, workspacePath) &&
+      (existing.snapshot.mode ?? 'development') === (options.mode ?? 'development') &&
       existing.snapshot.status === 'running'
     ) {
       return { ...existing.snapshot }
@@ -136,6 +145,7 @@ export class BeeGamePreviewManager {
       this.portStart,
       this.allocatePort,
       publicPath,
+      options.mode ?? 'development',
     )
     if (!plan.supported) {
       const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'unsupported', {
@@ -147,6 +157,7 @@ export class BeeGamePreviewManager {
 
     const startedAt = new Date().toISOString()
     const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'starting', {
+      mode: options.mode ?? 'development',
       url: '',
       port: plan.port,
       command: plan.command.join(' '),
@@ -157,6 +168,7 @@ export class BeeGamePreviewManager {
     })
     const processes = plan.processes.map(processPlan => this.runner(processPlan.command, {
       cwd: processPlan.cwd,
+      workspacePath,
       env: buildPreviewProcessEnv(processPlan, plan),
       onOutput: text => {
         const record = this.records.get(options.sessionId)
@@ -190,7 +202,7 @@ export class BeeGamePreviewManager {
         ...record.snapshot,
         status: 'failed',
         url: '',
-        message: `${readiness.message} ${record.snapshot.message || ''}`.trim(),
+        message: `${readiness.message} Expected ${plan.url} from ${plan.entrypoint} script "${plan.script}". The process receives PORT=${plan.port}; arbitrary scripts must honor that port (BGS does not infer custom positional arguments or adopt another port). ${record.snapshot.message || ''}`.trim(),
         updatedAt: new Date().toISOString(),
       }
       return { ...record.snapshot }
@@ -247,6 +259,15 @@ export class BeeGamePreviewManager {
     return record.internalUrl
   }
 
+  /** Resolve only an already-running preview owned by this workspace. */
+  runningForWorkspace(workspacePath: string): BeeGamePreviewSnapshot | undefined {
+    const record = [...this.records.values()].filter(record =>
+      record.snapshot.status === 'running' &&
+      sameWorkspace(record.snapshot.workspacePath, workspacePath),
+    ).sort((a, b) => b.snapshot.updatedAt.localeCompare(a.snapshot.updatedAt))[0]
+    return record ? { ...record.snapshot } : undefined
+  }
+
   expectsPublicPath(sessionId: string): boolean {
     const record = this.records.get(sessionId)
     return Boolean(record?.expectsPublicPath)
@@ -270,14 +291,14 @@ export class BeeGamePreviewManager {
 
   private publicUrl(sessionId: string, internalUrl: string): string {
     if (!internalUrl) return ''
-    const encodedSessionId = encodeURIComponent(sessionId)
+    const encodedSessionId = encodeURIComponent(this.routeIdForSession(sessionId))
     if (!this.publicBaseUrl.trim()) return `/previews/${encodedSessionId}/`
     const base = this.publicBaseUrl.trim().replace(/\/+$/, '')
     return `${base}/${encodedSessionId}/`
   }
 
   private publicPath(sessionId: string): string {
-    if (!this.publicBaseUrl.trim()) return `/previews/${encodeURIComponent(sessionId)}/`
+    if (!this.publicBaseUrl.trim()) return `/previews/${encodeURIComponent(this.routeIdForSession(sessionId))}/`
     try {
       const url = new URL(this.publicUrl(sessionId, DEFAULT_HOST))
       return url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`
@@ -330,6 +351,7 @@ async function createPreviewPlan(
   portStart: number,
   allocatePort: BeeGamePreviewPortAllocator,
   publicPath: string,
+  mode: 'development' | 'production' = 'development',
 ): Promise<
   | { supported: false; message: string }
   | SupportedPreviewPlan
@@ -348,14 +370,15 @@ async function createPreviewPlan(
     portStart,
     allocatePort,
     publicPath,
+    mode,
   )
   if (splitPlan) return splitPlan
 
-  const script = chooseScript(manifest, ['dev', 'preview', 'start'])
+  const script = chooseScript(manifest, mode === 'production' ? ['preview'] : ['dev', 'preview', 'start'])
   if (!script) {
     return {
       supported: false,
-      message: 'Preview host did not find a dev, preview, or start script',
+      message: mode === 'production' ? 'Production preview requires an existing build and a preview script; no dev fallback was started' : 'Preview host did not find a dev, preview, or start script',
     }
   }
   const port = await allocatePort(portStart)
@@ -375,7 +398,7 @@ async function createPreviewPlan(
       command,
       script,
       entrypoint: 'package.json',
-      nodeEnv: usesVite(manifest, script) && script === 'dev' ? 'development' : undefined,
+      nodeEnv: mode === 'production' ? 'production' : usesVite(manifest, script) && script === 'dev' ? 'development' : undefined,
       url,
     }],
   }
@@ -387,6 +410,7 @@ async function createSplitClientServerPreviewPlan(
   portStart: number,
   allocatePort: BeeGamePreviewPortAllocator,
   publicPath: string,
+  mode: 'development' | 'production',
 ): Promise<SupportedPreviewPlan | undefined> {
   const clientCwd = join(workspacePath, 'client')
   const clientManifestPath = join(clientCwd, 'package.json')
@@ -400,7 +424,7 @@ async function createSplitClientServerPreviewPlan(
     portStart,
     allocatePort,
   )
-  const clientScript = chooseScript(clientManifest, ['dev', 'preview', 'start'])
+  const clientScript = chooseScript(clientManifest, mode === 'production' ? ['preview'] : ['dev', 'preview', 'start'])
   if (!clientScript) return undefined
   const clientPort = await allocatePort(portStart)
   const clientCommand = buildRunCommand(clientCwd, clientManifest, clientScript, clientPort, publicPath)
@@ -412,7 +436,7 @@ async function createSplitClientServerPreviewPlan(
     command: clientCommand,
     script: clientScript,
     entrypoint: 'client/package.json',
-    nodeEnv: usesVite(clientManifest, clientScript) && clientScript === 'dev'
+    nodeEnv: mode === 'production' ? 'production' : usesVite(clientManifest, clientScript) && clientScript === 'dev'
       ? 'development'
       : undefined,
     url: clientUrl,
@@ -583,21 +607,104 @@ function runPreviewProcess(
   command: string[],
   options: {
     cwd: string
+    workspacePath: string
     env: Record<string, string>
     onOutput: (text: string) => void
   },
 ): BeeGamePreviewProcess {
-  const proc = Bun.spawn(command, {
-    cwd: options.cwd,
-    env: options.env,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  void streamOutput(proc.stdout, options.onOutput)
-  void streamOutput(proc.stderr, options.onOutput)
-  return {
-    kill: () => proc.kill(),
-    exited: proc.exited,
+  const root = realpathSync(options.workspacePath)
+  const cwd = realpathSync(options.cwd)
+  const runtimeHome = mkdtempSync(join(realpathSync(tmpdir()), 'bgs-preview-'))
+  try {
+    for (const directory of ['cache', 'config', 'npm-cache', 'zsh'])
+      mkdirSync(join(runtimeHome, directory), { recursive: true })
+    const filesystem: Record<string, string> = {
+      ':root': 'deny',
+      ':minimal': 'read',
+      ':slash_tmp': 'deny',
+      [root]: 'write',
+      [runtimeHome]: 'write',
+    }
+    for (const path of [
+      '/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/private/etc',
+      '/System', '/Library/Apple', '/Library/Developer', '/dev', '/opt/homebrew',
+      realpathSync(process.execPath),
+      realpathSync(dirname(VITE_PREVIEW_HOST_PATH)),
+      realpathSync(VITE_PREVIEW_HOST_PATH),
+    ]) filesystem[path] = 'read'
+    for (const path of [
+      'AGENTS.md', ...PROJECT_DESIGN_PATHS, '.git', '.bgs', '.agents', '.aws',
+    ]) filesystem[resolve(root, path)] = 'read'
+    // Match the native project permission: preview clients may use their local
+    // backend and existing game integrations, while filesystem access stays
+    // inside this project and its private temporary home.
+    const sandboxConfig = { filesystem, network: { enabled: true } }
+    const sandboxCommand = bgsCommand().concat(
+      'sandbox', '-C', root, '-P', PREVIEW_SANDBOX_PROFILE,
+      '-c', `permissions.${PREVIEW_SANDBOX_PROFILE}=${toml(sandboxConfig)}`,
+      '--', ...command,
+    )
+    const env = {
+      ...options.env,
+      HOME: runtimeHome,
+      TMPDIR: runtimeHome,
+      TMP: runtimeHome,
+      TEMP: runtimeHome,
+      TMPPREFIX: join(runtimeHome, 'zsh'),
+      XDG_CACHE_HOME: join(runtimeHome, 'cache'),
+      XDG_CONFIG_HOME: join(runtimeHome, 'config'),
+      NPM_CONFIG_CACHE: join(runtimeHome, 'npm-cache'),
+      npm_config_cache: join(runtimeHome, 'npm-cache'),
+      NPM_CONFIG_USERCONFIG: '/dev/null',
+      npm_config_userconfig: '/dev/null',
+      PWD: cwd,
+    }
+    const proc = Bun.spawn(sandboxCommand, {
+      cwd,
+      env,
+      detached: process.platform !== 'win32',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+    const kill = () => {
+      if (process.platform === 'win32') {
+        if (typeof proc.pid === 'number') {
+          try {
+            Bun.spawn(['taskkill', '/PID', String(proc.pid), '/T', '/F'], { stdout: 'ignore', stderr: 'ignore' })
+          } catch { proc.kill() }
+        } else proc.kill()
+        return
+      }
+      if (typeof proc.pid !== 'number') {
+        proc.kill()
+        return
+      }
+      try { process.kill(-proc.pid, 'SIGTERM') }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        return
+      }
+      killTimer ??= setTimeout(() => {
+        try { process.kill(-proc.pid!, 'SIGKILL') }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+      }, 1_000)
+      killTimer.unref?.()
+    }
+    const exited = proc.exited.finally(() => {
+      rmSync(runtimeHome, { recursive: true, force: true })
+    })
+    if (proc.stdout && typeof proc.stdout !== 'number')
+      void streamOutput(proc.stdout, options.onOutput)
+    if (proc.stderr && typeof proc.stderr !== 'number')
+      void streamOutput(proc.stderr, options.onOutput)
+    return {
+      kill,
+      exited,
+    }
+  } catch (error) {
+    rmSync(runtimeHome, { recursive: true, force: true })
+    throw error
   }
 }
 
@@ -667,16 +774,18 @@ function findAvailablePort(start: number): Promise<number> {
 async function waitForPreviewReady(url: string): Promise<boolean> {
   const deadline = Date.now() + getPreviewReadyTimeoutMs()
   while (Date.now() < deadline) {
-    if (await canReachPreview(url)) return true
+    if (await canReachPreview(url, Math.min(2_000, Math.max(1, deadline - Date.now())))) return true
     await sleep(getPreviewReadyPollMs())
   }
   return false
 }
 
-async function canReachPreview(url: string): Promise<boolean> {
+async function canReachPreview(url: string, timeoutMs: number): Promise<boolean> {
   try {
-    const response = await fetch(url, { method: 'GET' })
-    return response.status < 500
+    const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(timeoutMs) })
+    const ready = response.ok
+    await response.body?.cancel()
+    return ready
   } catch {
     return false
   }

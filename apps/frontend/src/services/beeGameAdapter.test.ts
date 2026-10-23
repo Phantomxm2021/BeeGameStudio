@@ -1,3946 +1,1313 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import {
-  beeGameAdapter,
-  getBeeGameWorkspaceSettings,
-} from './beeGameAdapter';
-import { clearSupabaseSession, hydrateSupabaseSessionUser } from './supabaseAuthApi';
+vi.mock('./apiClient', () => ({
+  authenticatedFetch: vi.fn(),
+}))
 
-const makeLlmOption = (overrides: Record<string, unknown> = {}) => ({
-  id: 'mode_from_llm',
-  title: 'Mode From LLM',
-  pitch: 'LLM generated pitch.',
-  gameplay: 'LLM generated playable rules.',
-  coreGameplayHypothesis: 'LLM generated hypothesis.',
-  experienceSnapshot: 'LLM generated snapshot.',
-  playerFirstMinute: 'LLM generated first minute.',
-  whyFitsIdea: 'LLM generated fit.',
-  playablePrototype: 'LLM generated first playable.',
-  validationTarget: 'LLM generated validation target.',
-  coreMechanic: 'LLM generated core mechanic.',
-  firstBuild: 'LLM generated first build.',
-  validationGoal: 'LLM generated validation goal.',
-  risk: 'LLM generated risk.',
-  fit: 'LLM generated fit.',
-  firstPlayableValidation: 'LLM generated validation.',
-  riskComplexity: 'LLM generated complexity.',
-  recommendedPlatform: 'Web',
-  recommendedDimension: '2D',
-  recommendedGenre: 'Action',
-  recommendedStyle: 'Minimal',
-  recommendedInputs: ['Keyboard/mouse'],
-  scope: 'Playable demo',
+import { authenticatedFetch } from './apiClient'
+import { beeGameAdapter, transcriptEventsToHistory } from './beeGameAdapter'
+import { normalizeChatHistory } from '../utils/chatHistory'
+import { toChatDisplayMessages } from '../viewModels/displayModels'
+import { deriveCurrentProjectTodos } from '../utils/projectTodos'
+
+const authenticatedFetchMock = vi.mocked(authenticatedFetch)
+
+it.each(['stale', 'paused', 'paused-between-reads'] as const)('does not automatically retry a %s turn', async kind => {
+  authenticatedFetchMock.mockReset();
+  const run = { id: 'run', version: 7, planRevision: 2, chatSessionId: 'chat', requirements: { revision: 'r' },
+    agentTurns: [{ attemptId: 'failed', turnId: kind === 'stale' ? 'newer-turn' : 'failed-turn', status: 'failed' }],
+    ...(kind === 'paused' ? { paused: { at: 'now' } } : {}) };
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat', turnStatus: 'idle' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run })));
+  if (kind === 'paused-between-reads') authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    run: { ...run, paused: { at: 'now' } },
+  })));
+  await expect(beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn', automatic_retry: true }))
+    .rejects.toThrow(kind === 'stale' ? '任务回合已改变' : '任务已被暂停');
+  expect(authenticatedFetchMock.mock.calls.some(([url]) => String(url).endsWith('/agent/messages') || String(url).endsWith('/resume'))).toBe(false);
+});
+
+it('retries the selected failed turn in the same conversation with a single continuation submission', async () => {
+  authenticatedFetchMock.mockReset();
+  const run = { id: 'run', version: 7, planRevision: 2, chatSessionId: 'chat', requirements: { revision: 'r' },
+    agentTurns: [{ attemptId: 'failed', turnId: 'failed-turn', status: 'failed' }] };
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat', turnStatus: 'idle' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run', turn: { attemptId: 'retry' } })));
+  await beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn', automatic_retry: true });
+  const calls = authenticatedFetchMock.mock.calls.filter(([url]) => String(url).endsWith('/agent/messages'));
+  expect(calls).toHaveLength(1);
+  expect(JSON.parse(calls[0]![1]!.body as string)).toMatchObject({ runId: 'run', chatSessionId: 'chat',
+    intent: 'continue', continuationOf: 'failed' });
+  expect(authenticatedFetchMock.mock.calls.some(([url]) => String(url).includes('model-config'))).toBe(false);
+});
+
+it('routes ordinary project chat through V3 without asking the user for an intent', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    session: { id: 'chat-1', cwd: '/workspace', status: 'running', turnStatus: 'idle' },
+  })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1',
+    requirements: { revision: 'revision-1' }, agentTurns: [{ attemptId: 'first', status: 'ended' }],
+  } })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    runId: 'run-1', turn: { attemptId: 'next' },
+  }), { status: 202 }))
+  const result = await beeGameAdapter.sendMessage({ project_id: 'project', content: 'Why is level two hard?',
+    client_message_id: 'client-1' })
+  expect(result.task_id).toBe('next')
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure',
+    '/api/projects/project/workflow-v3',
+    '/api/projects/project/workflow-v3/agent/messages',
+  ])
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[2]![1]!.body as string)).toEqual({
+    requestKey: 'client-1', runId: 'run-1', chatSessionId: 'chat-1',
+    expectedVersion: 7, requirementsRevision: 'revision-1',
+    text: 'Why is level two hard?',
+  })
+})
+
+it('resumes a stopped V3 run before dispatching an explicit new message', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    session: { id: 'chat-1', cwd: '/workspace', status: 'stopped', turnStatus: 'idle' },
+  })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1', paused: { at: 'now' },
+    requirements: { revision: 'revision-1' }, agentTurns: [{ attemptId: 'first', status: 'interrupted' }],
+  } })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 8, planRevision: 2, chatSessionId: 'chat-1',
+    requirements: { revision: 'revision-1' }, agentTurns: [{ attemptId: 'first', status: 'interrupted' }],
+  } })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    runId: 'run-1', turn: { attemptId: 'next' },
+  }), { status: 202 }))
+  const result = await beeGameAdapter.sendMessage({ project_id: 'project', content: 'Continue this slice',
+    client_message_id: 'client-2' })
+  expect(result.task_id).toBe('next')
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure',
+    '/api/projects/project/workflow-v3',
+    '/api/projects/project/workflow-v3/resume',
+    '/api/projects/project/workflow-v3/agent/messages',
+  ])
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[2]![1]!.body as string)).toEqual({ planRevision: 2 })
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[3]![1]!.body as string)).toMatchObject({
+    requestKey: 'client-2', expectedVersion: 8, text: 'Continue this slice',
+  })
+})
+
+it.each(['message', 'continue'] as const)('blocks %s before resume when a paused writer is unresolved', async kind => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    session: { id: 'chat-1', cwd: '/workspace', status: 'running', turnStatus: 'idle' },
+  })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1', paused: { at: 'now' },
+    writer: { attemptId: 'first', fence: 1 }, requirements: { revision: 'revision-1' },
+    agentTurns: [{ attemptId: 'first', status: 'running' }],
+  }, writerLiveness: 'unknown', recoveryEvidence: 'unavailable', recoveryDiagnostic: 'same-boot' })))
+  await expect(kind === 'message' ? beeGameAdapter.sendMessage({ project_id: 'project', content: '继续任务' }) :
+    beeGameAdapter.continueTask({ project_id: 'project' })).rejects.toThrow('同次开机')
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure', '/api/projects/project/workflow-v3',
+  ])
+})
+
+it('explicit writer recovery does not resume or dispatch a model message', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({run:{
+    id:'run-1',version:7,chatSessionId:'chat-1',requirements:{revision:'r'},
+    writer:{attemptId:'first',fence:1},agentTurns:[{attemptId:'first',status:'running'}],
+  },writerLiveness:'unknown',recoveryEvidence:'host-reboot'})))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({run:{
+    id:'run-1',paused:{at:'now'},agentTurns:[{attemptId:'first',status:'interrupted'}],
+  }})))
+  expect(await beeGameAdapter.recoverTask({project_id:'project'})).toEqual({recovered:true,paused:true})
+  expect(authenticatedFetchMock.mock.calls.map(([url])=>url)).toEqual([
+    '/api/projects/project/workflow-v3','/api/projects/project/workflow-v3/recover-writer',
+  ])
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[1]![1]!.body as string)).toEqual({expectedVersion:7,attemptId:'first',fence:1})
+})
+
+it('settles a proven leftover writer during an explicit message without a recovery panel', async () => {
+  authenticatedFetchMock.mockReset();
+  const run = { id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1',
+    requirements: { revision: 'r' }, writer: { attemptId: 'first', fence: 1 },
+    agentTurns: [{ attemptId: 'first', status: 'running' }] };
+  const settled = { ...run, version: 8, writer: undefined, paused: { at: 'now' },
+    agentTurns: [{ attemptId: 'first', status: 'interrupted' }] };
+  const unresolved = { run, writerLiveness: 'unknown', recoveryEvidence: 'persisted' };
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat-1' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify(unresolved)))
+    .mockResolvedValueOnce(new Response(JSON.stringify(unresolved)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run: settled })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run: settled })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run: { ...settled, version: 9, paused: undefined } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-1', turn: { attemptId: 'next' } })));
+  await beeGameAdapter.sendMessage({ project_id: 'project', content: 'Continue existing work' });
+  const mutations = authenticatedFetchMock.mock.calls.filter(([, options]) => options?.method === 'POST');
+  expect(mutations.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure', '/api/projects/project/workflow-v3/recover-writer',
+    '/api/projects/project/workflow-v3/resume', '/api/projects/project/workflow-v3/agent/messages',
+  ]);
+  expect(JSON.parse(mutations.at(-1)![1]!.body as string)).toMatchObject({ expectedVersion: 9, text: 'Continue existing work' });
+});
+
+it('lets explicit resume wait for a paused local writer, but automatic retry never clears the pause', async () => {
+  authenticatedFetchMock.mockReset();
+  const run = { id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1', paused: { at: 'now' },
+    requirements: { revision: 'r' }, writer: { attemptId: 'first', fence: 1 },
+    agentTurns: [{ attemptId: 'first', status: 'running' }] };
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat-1' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run, writerLiveness: 'local-active' })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run: { ...run, version: 9, writer: undefined, paused: undefined } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-1', turn: { attemptId: 'next' } })));
+  await beeGameAdapter.sendMessage({ project_id: 'project', content: 'Continue existing work' });
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure', '/api/projects/project/workflow-v3',
+    '/api/projects/project/workflow-v3/resume', '/api/projects/project/workflow-v3/agent/messages',
+  ]);
+  authenticatedFetchMock.mockReset();
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat-1' } })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ run, writerLiveness: 'local-active', recoveryEvidence: 'persisted' })));
+  await expect(beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn', automatic_retry: true }))
+    .rejects.toThrow('任务已被暂停');
+  expect(authenticatedFetchMock.mock.calls.filter(([url]) => String(url).includes('/workflow-v3/')).length).toBe(0);
+});
+
+it('explains a resume race without sending a new model message', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({session:{id:'chat-1'}})))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({run:{
+    id:'run-1',version:7,planRevision:2,chatSessionId:'chat-1',paused:{at:'now'},requirements:{revision:'r'},
+    agentTurns:[{attemptId:'first',status:'interrupted'}],
+  }})))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({code:'writer-unresolved',
+    error:'Resume cannot release an unknown writer'}),{status:409}))
+  await expect(beeGameAdapter.sendMessage({project_id:'project',content:'继续任务'})).rejects.toThrow('旧执行尚未确认停止或结算')
+  expect(authenticatedFetchMock.mock.calls).toHaveLength(3)
+  expect(authenticatedFetchMock.mock.calls[2]![0]).toBe('/api/projects/project/workflow-v3/resume')
+})
+
+it('forwards a chat attachment to V3 without adding a user-facing intent', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    session: { id: 'chat-1', cwd: '/workspace', status: 'running', turnStatus: 'idle' },
+  })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1',
+    requirements: { revision: 'revision-1' }, agentTurns: [{ attemptId: 'first', status: 'ended' }],
+  } })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    runId: 'run-1', turn: { attemptId: 'next' },
+  }), { status: 202 }))
+  const attachment = { type: 'file' as const, mediaType: 'text/plain', filename: 'note.txt', data: 'SGVsbG8=' }
+  await beeGameAdapter.sendMessage({ project_id: 'project', content: '', attachments: [attachment] })
+  const body = JSON.parse(authenticatedFetchMock.mock.calls[2]![1]!.body as string)
+  expect(body).toMatchObject({ text: '', attachments: [attachment] })
+  expect(body).not.toHaveProperty('intent')
+})
+
+it('forwards only the explicit release-time discussion confirmation when publishing', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: 'deployment-1' }), { status: 202 }))
+  const confirmation = { measurementId: 'measurement-1', requirementsRevision: 'revision-2',
+    discussionConfirmation: { messageRequestKeys: ['question-1'] } }
+  await beeGameAdapter.deployProject('project', confirmation)
+  expect(authenticatedFetchMock.mock.calls[0]![0]).toBe('/api/projects/project/deployments')
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[0]![1]!.body as string)).toEqual(confirmation)
+})
+
+it('requires the current project artifact index instead of reconstructing an older server response', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Index unavailable' }), { status: 404 }))
+  await expect(beeGameAdapter.getArtifacts('project')).rejects.toThrow('Index unavailable')
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/projects/project/artifact-index'])
+})
+
+it('returns the project package from the current artifact index without needing a transcript', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ workspacePath: '/workspace/game', artifacts: [] })))
+  const artifacts = await beeGameAdapter.getArtifacts('project')
+  expect(artifacts).toEqual([expect.objectContaining({ name: 'game.zip', package_download: true })])
+  expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
+})
+
+it('keeps delivery handoff failures visible after the successful Agent turn', () => {
+  const history = transcriptEventsToHistory('project', [
+    { id: 1, sessionId: 'session', turnId: 'turn', type: 'turn.completed', text: '',
+      createdAt: '2026-09-25T14:20:14Z', payload: { type: 'turn.completed' } },
+    { id: 2, sessionId: 'session', turnId: 'turn', type: 'system.status', text: '交付未能继续：测试清理失败',
+      createdAt: '2026-09-25T14:20:15Z', payload: { type: 'system.status', subtype: 'delivery_error' } },
+  ])
+  expect(history).toContainEqual(expect.objectContaining({
+    sender: 'system', content: '交付未能继续：测试清理失败', taskKind: 'delivery_error',
+  }))
+})
+
+it('sends answers through the permission endpoint and does not treat stale requests as submitted', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: true })))
+  const answers = { 'Which style?': 'Pixel' }
+  await beeGameAdapter.resolveToolPermission({ project_id: 'project', gate_id: 'question', decision: 'allow', answers })
+  const [url, request] = authenticatedFetchMock.mock.calls[0]
+  expect(url).toContain('/api/projects/project/permissions/question')
+  expect(JSON.parse(request?.body as string)).toEqual({ decision: 'allow', scope: 'once', remember: false, answers })
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: true })))
+  await beeGameAdapter.resolveToolPermission({project_id:'project',gate_id:'design-question',decision:'allow',answers,intent:'change'})
+  expect(JSON.parse(authenticatedFetchMock.mock.calls.at(-1)![1]?.body as string)).toMatchObject({answers,intent:'change'})
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: false, stale: true })))
+  await expect(beeGameAdapter.resolveToolPermission({ project_id: 'project', gate_id: 'question', decision: 'allow', answers }))
+    .rejects.toMatchObject({ code: 'permission_not_pending', message: expect.stringContaining('no longer pending') })
+})
+
+const transcriptResponse = (overrides: Record<string, unknown> = {}) => new Response(JSON.stringify({
+  sessionId: 'session-1',
+  workspacePath: '/workspace',
+  events: [],
+  page: { hasMore: true, nextBeforeId: 99 },
   ...overrides,
-});
+}))
 
-const makeLlmOptions = (first: Record<string, unknown> = makeLlmOption()) => [
-  first,
-  makeLlmOption({ id: 'mode_from_llm_2', title: 'Mode From LLM 2' }),
-  makeLlmOption({ id: 'mode_from_llm_3', title: 'Mode From LLM 3' }),
-];
+describe('transcriptEventsToHistory', () => {
+  it('keeps the turn completion time separate from the first assistant block timestamp', () => {
+    const events = [
+      { id: 1, sessionId: 'session-1', turnId: 'turn-1', type: 'assistant.message', text: 'Done',
+        createdAt: '2026-09-25T06:50:55.000Z', payload: { type: 'assistant.message', assistantBlockId: 'answer-1' } },
+      { id: 2, sessionId: 'session-1', turnId: 'turn-1', type: 'turn.completed', text: '',
+        createdAt: '2026-09-25T06:51:10.920Z', payload: { type: 'turn.completed' } },
+    ]
+    const [answer] = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('project', events)))
+    expect(answer.timestamp).toBe(Date.parse('2026-09-25T06:50:55.000Z'))
+    expect(answer.turnCompletedAt).toBe(Date.parse('2026-09-25T06:51:10.920Z'))
+  })
 
-const createCompletedIntakeJobFetch = (result: Record<string, unknown>) => vi.fn(
-  async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    if (path === '/api/beegame-intake/jobs' && init?.method === 'POST') {
-      return jsonResponse({ jobId: 'intake_job_test', status: 'running' }, 202);
-    }
-    if (path === '/api/beegame-intake/jobs/intake_job_test') {
-      return jsonResponse({ status: 'completed', result });
-    }
-    return jsonResponse({ error: 'not found' }, 404);
-  },
-);
+  it('uses full timestamps across history pages when source sequences restart', () => {
+    const event = (id: number, sourceSequence: number, text: string) => ({
+      id, sessionId: 'session-1', turnId: `turn-${id}`, type: 'assistant.message' as const,
+      text, createdAt: new Date(1_790_000_000_000 + id).toISOString(),
+      payload: { type: 'assistant.message', assistantBlockId: `block-${id}`, sourceSequence },
+    })
+    const initial = normalizeChatHistory(transcriptEventsToHistory('project', [event(500, 1, 'latest reply')]))
+    const older = normalizeChatHistory(transcriptEventsToHistory('project', [event(400, 400, 'older reply')]))
+    expect(initial[0].sequence).toBe(1)
+    expect(normalizeChatHistory([...initial, ...older]).map(message => message.content))
+      .toEqual(['older reply', 'latest reply'])
+  })
 
-const bootstrapResponse = (
-  init: RequestInit | undefined,
-  options: { sessionId: string; workspacePath: string },
-) => {
-  const request = JSON.parse(String(init?.body || '{}')) as {
-    project?: Record<string, unknown>;
-  };
-  const project = {
-    ...request.project,
-    root_path: options.workspacePath,
-    runtime_snapshot: { phase_name: 'starting', status: 'running' },
-  };
-  return jsonResponse({
-    project,
-    session: {
-      id: options.sessionId,
-      cwd: options.workspacePath,
-      status: 'running',
-      turnStatus: 'running',
-    },
-    binding: {
-      projectId: project.id,
-      sessionId: options.sessionId,
-      workspacePath: options.workspacePath,
-    },
-    task_id: options.sessionId,
-    status: 'starting',
-  }, 202);
-};
+  it('omits automatic delivery continuation but keeps two genuine identical user requests', () => {
+    const events = ['project_request', 'delivery_continue', 'project_request'].map((displayKind, index) => ({
+      id: index + 1, sessionId: 'main', type: 'user.message', text: '修复按钮',
+      createdAt: new Date(1000 + index).toISOString(), payload: { type: 'user.message', displayKind, clientMessageId: `client-${index}` },
+    }))
+    const history = transcriptEventsToHistory('project', events)
+    expect(history).toHaveLength(2)
+    expect(history.map(message => message.content)).toEqual(['修复按钮', '修复按钮'])
+  })
 
-const seedBoundProject = (sessionId: string, workspacePath: string) => {
-  const now = 1710000000000;
-  const project = {
-    id: `project_${sessionId}`,
-    name: 'Adapter transport test',
-    root_path: workspacePath,
-    created_at: now,
-    updated_at: now,
-  };
-  localStorage.setItem('beegame-adapter-projects', JSON.stringify([project]));
-  localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-    projectId: project.id,
-    sessionId,
-    workspacePath,
-    language: 'en',
-  }]));
-  const upstream = globalThis.fetch.bind(globalThis);
-  const projectRoot = `/api/projects/${encodeURIComponent(project.id)}`;
-  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    if (path === `${projectRoot}/stop`) {
-      return upstream(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/stop`, init);
-    }
-    if (path === `${projectRoot}/package`) {
-      return upstream(`/api/beegame-sessions/${encodeURIComponent(sessionId)}/package?workspacePath=${encodeURIComponent(workspacePath)}`, init);
-    }
-    if (path.startsWith(`${projectRoot}/events`)) {
-      const query = new URLSearchParams(path.split('?')[1] || '');
-      const response = await upstream(
-        `/api/beegame-sessions/${encodeURIComponent(sessionId)}/events?after=${encodeURIComponent(query.get('after') || '0')}`,
-        init,
-      );
-      if (!response.ok) return response;
-      return jsonResponse({
-        sessionId,
-        workspacePath,
-        events: await response.json(),
-        recoveredFromTranscript: false,
-      });
-    }
-    if (path.startsWith(`${projectRoot}/transcript`)) {
-      const query = new URLSearchParams(path.split('?')[1] || '');
-      const base = `/api/beegame-sessions/${encodeURIComponent(sessionId)}/transcript?workspacePath=${encodeURIComponent(workspacePath)}`;
-      const paged = `${base}&limit=${encodeURIComponent(query.get('limit') || '300')}${query.get('before') ? `&before=${encodeURIComponent(query.get('before')!)}` : ''}`;
-      let response = await upstream(paged, init);
-      if (response.status === 404) response = await upstream(base, init);
-      if (!response.ok) return response;
-      const payload = await response.json();
-      const page = Array.isArray(payload)
-        ? { events: payload, page: { hasMore: false, nextBeforeId: null } }
-        : payload;
-      return jsonResponse({ sessionId, workspacePath, ...page });
-    }
-    if (path === `${projectRoot}/artifact-index`) {
-      const response = await upstream(
-        `/api/beegame-sessions/${encodeURIComponent(sessionId)}/artifact-index?workspacePath=${encodeURIComponent(workspacePath)}`,
-        init,
-      );
-      if (!response.ok) return response;
-      return jsonResponse({ sessionId, workspacePath, artifacts: await response.json() });
-    }
-    return upstream(input, init);
-  });
-  return { project };
-};
+  it('shows the idea instead of the workflow goal transport JSON in user chat', () => {
+    const brief = JSON.stringify({ kind: 'confirmed_build_brief', idea: '做一个萤石驿站游戏', settings: { orientation: 'landscape' } })
+    const events = [
+      { id: 1, sessionId: 'main', type: 'user.message', text: brief,
+        createdAt: new Date(1000).toISOString(), payload: { type: 'user.message', displayKind: 'workflow_v3_goal', displayText: brief } },
+      { id: 2, sessionId: 'main', type: 'user.message', text: brief,
+        createdAt: new Date(2000).toISOString(), payload: { type: 'user.message', displayKind: 'project_request', displayText: brief } },
+    ]
+    const history = transcriptEventsToHistory('project', events)
+    expect(history.map(message => message.content)).toEqual(['做一个萤石驿站游戏', brief])
+  })
 
-describe('beeGameAdapter prompt rules', () => {
+  it('recovers the original idea from a saved initial goal without exposing internal prompt JSON', () => {
+    // A user may intentionally author JSON; unwrap only the system brief once.
+    const idea = '{"idea":"做一个小游戏","controls":"方向键"}'
+    const brief = JSON.stringify({ kind: 'confirmed_build_brief', idea, settings: { orientation: 'landscape' } })
+    const prompt = 'This first assignment delivers one representative playable slice.\n\nConfirmed full goal:\n' + brief
+    const events = [
+      { id: 1, sessionId: 'main', type: 'user.message', text: prompt,
+        createdAt: new Date(1000).toISOString(), payload: { type: 'user.message', displayKind: 'workflow_v3_goal',
+          displayText: prompt, confirmedBriefContext: brief } },
+      { id: 2, sessionId: 'main', type: 'user.message', text: idea,
+        createdAt: new Date(2000).toISOString(), payload: { type: 'user.message', displayKind: 'workflow_v3_message',
+          displayText: idea, confirmedBriefContext: brief } },
+    ]
+    expect(transcriptEventsToHistory('project', events).map(message => message.content)).toEqual([idea, idea])
+  })
+  const nativeThinking = (id: number, status: string, text: string) => ({
+    id, sessionId: 'native-session', turnId: 'native-turn',
+    type: 'assistant.thinking' as const, text,
+    createdAt: new Date(1000 + id * 1000).toISOString(),
+    payload: { type: 'assistant.thinking', status, contentMode: 'snapshot',
+      thinkingBlockId: 'query-1:message-1:0', thinkingStartedAt: new Date(2000).toISOString() },
+  })
+
+  it('joins native thinking start, snapshots and end by block identity', () => {
+    const events = [nativeThinking(1, 'started', 'Thinking'),
+      nativeThinking(2, 'streaming', 'First'),
+      nativeThinking(3, 'streaming', 'First and second'),
+      nativeThinking(4, 'ended', 'Thinking')]
+    const history = transcriptEventsToHistory('p', events) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ content: 'First and second', streamStatus: 'complete', thinkingDurationMs: 3000 })
+    const child = events.map(e => ({ ...e, id: e.id + 10,
+      payload: { ...e.payload, parentToolUseID: 'child-1' } }))
+    expect(transcriptEventsToHistory('p', [...events, ...child])).toHaveLength(2)
+  })
+
+  it('uses the same thinking identity across separate SSE batches and history replay', async () => {
+    const events = [nativeThinking(1, 'started', 'Thinking'),
+      nativeThinking(2, 'streaming', 'Content'),
+      nativeThinking(3, 'ended', 'Thinking')]
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      for (const event of events) controller.enqueue(new TextEncoder().encode(`id: ${event.id}\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages('native-thinking-test', 0, { onMessage, onCursor: vi.fn() }, new AbortController().signal)
+    const projected = onMessage.mock.calls.map(([message]) => message)
+    expect(projected.map(m => m.type)).toEqual(['think_start', 'thought', 'think_end'])
+    expect(new Set(projected.map(m => m.message_id)).size).toBe(1)
+    expect(projected.at(-1)).toMatchObject({ thinking_duration_ms: 2000 })
+    expect((transcriptEventsToHistory('native-thinking-test', events)[0] as { id: string }).id).toBe(projected[0].message_id)
+  })
+
+  it('preserves client acknowledgements through history without collapsing repeated user text', () => {
+    const events = [1, 2].map(id => ({ id, sessionId: 's', type: 'user.message' as const,
+      text: 'Again', createdAt: new Date(id * 1000).toISOString(),
+      payload: { type: 'user.message', clientMessageId: `client-${id}`, supersedesMessageId: id === 2 ? 'previous-edit' : undefined } }))
+    const history = normalizeChatHistory(transcriptEventsToHistory('p', events))
+    expect(history).toHaveLength(2)
+    expect(history.map(m => m.clientMessageId)).toEqual(['client-1', 'client-2'])
+    expect(history[1].supersedesMessageId).toBe('previous-edit')
+  })
+  it('projects a replacement user turn without the superseded assistant and tool output', () => {
+    const event = (id: number, type: string, text: string, turnId: string, payload: Record<string, unknown> = {}) => ({
+      id, type, text, turnId, sessionId: 's', createdAt: new Date(id * 1000).toISOString(), payload,
+    })
+    const events = [
+      event(1, 'turn.started', '', 'one'),
+      event(2, 'user.message', 'Before', 'one', { clientMessageId: 'before' }),
+      event(3, 'assistant.message', 'First reply', 'one'),
+      event(4, 'turn.started', '', 'two'),
+      event(5, 'user.message', 'Original', 'two', { clientMessageId: 'original' }),
+      event(6, 'tool.completed', 'Old tool result', 'two', { toolName: 'Bash', toolUseID: 'old-tool' }),
+      event(7, 'assistant.message', 'Old reply', 'two'),
+      event(8, 'turn.started', '', 'replacement'),
+      event(9, 'user.message', 'Edited', 'replacement', { clientMessageId: 'edited', supersedesMessageId: 'original' }),
+      event(10, 'assistant.message', 'New reply', 'replacement'),
+    ]
+    const history = transcriptEventsToHistory('p', events)
+    expect(history.map(item => item.content).filter(Boolean)).toEqual(['Before', 'First reply', 'Edited', 'New reply'])
+  })
+  it('restores attachment-only turns through every display projection without merging repeated text', () => {
+    const attachments = [{ type: 'image', filename: 'scene.png', mediaType: 'image/png',
+      storageId: '00000000-0000-0000-0000-000000000000-image.png' }]
+    const events = [1, 2].map(id => ({ id, type: 'user.message', sessionId: 's', turnId: `turn-${id}`,
+      text: '', createdAt: new Date(id).toISOString(), payload: { type: 'user.message', attachments } }))
+    const result = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('project-1', events)))
+    expect(result).toHaveLength(2)
+    expect(result[0]?.attachments).toEqual([{ ...attachments[0], projectId: 'project-1' }])
+    expect(result[1]?.attachments).toEqual(result[0]?.attachments)
+  })
+  const nativeEvent = (id: number, type: string, payload: Record<string, unknown>, sessionId = 'worker-1') => ({
+    id, type, payload, sessionId, turnId: 'turn-1', text: 'system', createdAt: `2026-09-19T00:00:0${id}.000Z`,
+  })
+  it('projects native compaction start and boundary as one history marker', () => {
+    const start = nativeEvent(1, 'system.status', { type: 'system', subtype: 'status', status: 'compacting' })
+    const end = nativeEvent(2, 'system.status', { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto' } })
+    const startOnly = transcriptEventsToHistory('p', [start]) as Record<string, unknown>[]
+    expect(startOnly).toHaveLength(1)
+    expect(startOnly[0]).toMatchObject({ type: 'system_status', taskKind: 'context_compaction', streamStatus: 'streaming' })
+
+    const history = transcriptEventsToHistory('p', [start, end]) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ id: startOnly[0].id, type: 'system_status', taskKind: 'context_compaction',
+      content: 'compacted', streamStatus: 'complete', timestamp: Date.parse(start.createdAt) })
+  })
+
+  it('keeps delivery and session boundaries without turning tool progress into markers', () => {
+    const history = transcriptEventsToHistory('p', [
+      nativeEvent(1, 'system.status', { type: 'system.status', subtype: 'delivery_phase', phase: 'author' }),
+      nativeEvent(2, 'system.status', { type: 'system.status', subtype: 'task_progress', status: 'running' }),
+      nativeEvent(3, 'session.stopped', { type: 'session.stopped' }),
+      nativeEvent(4, 'session.resumed', { type: 'session.resumed' }),
+      nativeEvent(5, 'system.status', { type: 'system.status', subtype: 'delivery_phase', phase: 'review' }),
+    ]) as Record<string, unknown>[]
+    const markers = history.filter(message => message.taskKind === 'delivery_phase' || message.taskKind === 'session_lifecycle')
+    expect(markers.map(message => message.content)).toEqual(['author', 'stopped', 'resumed', 'review'])
+    expect(markers.every(message => message.type === 'normal')).toBe(true)
+  })
+
+  it('streams the same compaction marker identity on start and completion', async () => {
+    const events = [
+      nativeEvent(1, 'system.status', { type: 'system', subtype: 'status', status: 'compacting' }),
+      nativeEvent(2, 'system.status', { type: 'system', subtype: 'compact_boundary' }),
+    ]
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      for (const event of events) controller.enqueue(new TextEncoder().encode(`id: ${event.id}\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages('compaction-test', 0, { onMessage, onCursor: vi.fn() }, new AbortController().signal)
+    const markers = onMessage.mock.calls.map(([message]) => message).filter(message => message.type === 'context_compaction')
+    expect(markers).toHaveLength(2)
+    expect(markers.map(message => message.status)).toEqual(['running', 'finished'])
+    expect(new Set(markers.map(message => message.message_id)).size).toBe(1)
+  })
+  const launchEvents = () => [
+    nativeEvent(1, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-1', input: { description: 'Audit assets', prompt: 'Check manifest' } }),
+    nativeEvent(2, 'tool.completed', { toolName: 'Agent', toolUseID: 'agent-1', input: { prompt: 'Check manifest' },
+      output: 'Async agent launched successfully.\nagentId: task-1 (internal ID)\noutput_file: /tmp/task-1.output' }),
+  ]
+
+  const childTool = (id: number, type: string, parent: string, toolUseID: string, toolName = 'Read') =>
+    nativeEvent(id, type, { parentToolUseID: parent, toolUseID, toolName,
+      input: toolName === 'Read' ? { file_path: `docs/${toolUseID}.md` } : { command: 'bun --version' },
+      ...(type === 'tool.started' ? {} : { output: `${toolUseID} result` }),
+    })
+
+  it('puts child tools in their own subagent details, preserving main tools, failures and snapshots', () => {
+    const events = [
+      ...launchEvents(),
+      nativeEvent(3, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-2', input: { prompt: 'Write audio' } }),
+      childTool(4, 'tool.started', 'agent-1', 'read-1'),
+      childTool(5, 'tool.completed', 'agent-1', 'read-1'),
+      childTool(6, 'tool.failed', 'agent-2', 'bash-2', 'Bash'),
+      nativeEvent(7, 'tool.completed', { toolName: 'Bash', toolUseID: 'main-check', input: { command: 'bun test' }, output: 'passed' }),
+      nativeEvent(8, 'system.status', { type: 'system', subtype: 'task_progress', toolUseID: 'agent-1',
+        subagentActivity: { entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read', status: 'completed' }], truncated: true } }),
+      nativeEvent(9, 'tool.completed', { toolName: 'Agent', toolUseID: 'agent-1', input: {}, output: 'Checked' }),
+    ]
+    const history = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('project', events)))
+    expect(history.filter(message => message.type === 'tool').map(message => message.toolUseId))
+      .toEqual(['agent-1', 'agent-2', 'main-check'])
+    const first = history.find(message => message.toolUseId === 'agent-1')!
+    expect(first).toMatchObject({ toolStatus: 'completed', subagentPrompt: 'Check manifest', subagentOutput: 'Checked' })
+    expect(first.subagentActivity).toEqual({ entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read',
+      filePath: 'docs/read-1.md', input: JSON.stringify({ file_path: 'docs/read-1.md' }, null, 2),
+      output: 'read-1 result', status: 'completed' }], truncated: true })
+    expect(history.find(message => message.toolUseId === 'agent-2')?.subagentActivity?.entries)
+      .toEqual([expect.objectContaining({ id: 'bash-2', status: 'failed', command: 'bun --version' })])
+  })
+
+  it('routes a history page starting mid-worker by its parent ID, including the snake_case alias', () => {
+    const event = childTool(1, 'tool.completed', 'agent-missing', 'read-mid')
+    const history = transcriptEventsToHistory('mid-page', [{ ...event,
+      payload: { ...event.payload, parentToolUseID: undefined, parent_tool_use_id: 'agent-missing' } }])
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolUseId: 'agent-missing', isSubagentTool: true, toolStatus: 'running',
+      subagentActivity: { entries: [expect.objectContaining({ id: 'read-mid', output: 'read-mid result' })] } })
+  })
+
+  it('keeps child text, approval records, compaction and tool images in the owning drawer', () => {
+    const parentToolUseID = 'agent-1'
+    const child = (id: number, type: string, payload: Record<string, unknown>, text: string) =>
+      ({ ...nativeEvent(id, type, { parentToolUseID, ...payload }), text })
+    const history = transcriptEventsToHistory('owned-events', [
+      ...launchEvents(),
+      child(3, 'assistant.partial', { messageId: 'child-note' }, 'Checking '),
+      child(4, 'assistant.partial', { messageId: 'child-note' }, 'layout'),
+      child(5, 'assistant.message', { message: { id: 'child-note', content: [{ type: 'text', text: 'Checking layout' }] } }, 'Checking layout'),
+      child(6, 'permission.requested', { toolUseID: 'bash-child', toolName: 'Bash', message: 'Approval reason' }, 'Approval reason'),
+      child(7, 'permission.resolved', { toolUseID: 'bash-child', toolName: 'Bash', decision: 'allow' }, 'Bash: allow'),
+      child(8, 'system.status', { type: 'system', subtype: 'status', status: 'compacting' }, 'system'),
+      child(9, 'system.status', { type: 'system', subtype: 'compact_boundary' }, 'system'),
+      child(10, 'tool.completed', { toolUseID: 'screenshot', toolName: 'Capture', output: 'Captured', attachments: [{
+        type: 'image', mediaType: 'image/png', filename: 'screen.png', storageId: '00000000-0000-0000-0000-000000000000-screen.png',
+      }] }, 'Capture'),
+      nativeEvent(11, 'assistant.message', { message: { id: 'main-note', content: [{ type: 'text', text: 'Parent summary' }] } }),
+    ]) as any[]
+    expect(history.map(message => message.toolUseId || message.content)).toEqual(['agent-1', 'Parent summary'])
+    const entries = history[0].subagentActivity.entries
+    expect(entries.filter((e: any) => e.kind === 'message' && e.text === 'Checking layout')).toHaveLength(1)
+    expect(entries).toContainEqual(expect.objectContaining({ kind: 'permission', status: 'allowed', message: 'Approval reason' }))
+    expect(entries).toContainEqual(expect.objectContaining({ kind: 'message', text: 'Context compacted' }))
+    expect(entries).not.toContainEqual(expect.objectContaining({ text: 'Context compacting' }))
+    expect(entries.find((e: any) => e.id === 'screenshot').attachments[0]).toMatchObject({ projectId: 'owned-events', filename: 'screen.png' })
+  })
+
+  it('routes nested workers and their failures inside the root drawer and deduplicates transcript text', () => {
+    const history = transcriptEventsToHistory('nested', [...launchEvents(),
+      childTool(3, 'tool.started', 'agent-1', 'nested-agent', 'Agent'),
+      { ...nativeEvent(4, 'assistant.message', { parent_tool_use_id: 'nested-agent', uuid: 'nested-uuid',
+        message: { id: 'nested-message', content: [{ type: 'text', text: 'Nested update' }] } }), text: 'Nested update' },
+      childTool(5, 'tool.failed', 'nested-agent', 'nested-read'),
+      nativeEvent(6, 'system.status', { type: 'system', subtype: 'task_notification', toolUseID: 'nested-agent',
+        toolName: 'Agent', parentToolUseID: 'agent-1', status: 'failed', summary: 'Nested failed' }),
+      nativeEvent(7, 'system.status', { type: 'system', subtype: 'task_progress', toolUseID: 'nested-agent',
+        toolName: 'Agent', parentToolUseID: 'agent-1', subagentActivity: {
+        entries: [{ id: 'message-nested-message', kind: 'message', text: 'Nested update' }], truncated: false,
+      } }),
+    ]) as any[]
+    expect(history).toHaveLength(1)
+    expect(history[0].toolUseId).toBe('agent-1')
+    expect(history[0].subagentActivity.entries).toEqual([
+      expect.objectContaining({ id: 'nested-agent', kind: 'tool', status: 'failed', output: 'Nested failed' }),
+      { id: 'nested-agent:message-nested-message', kind: 'message', text: 'Nested update' },
+      expect.objectContaining({ id: 'nested-read', status: 'failed' }),
+    ])
+  })
+
+  it('does not merge concurrent parent/child messages even if a provider reuses the same message ID', () => {
+    const message = (id: number, parent: string, text: string) => ({ ...nativeEvent(id, 'assistant.message', {
+      ...(parent ? { parent_tool_use_id: parent } : {}), message: { id: 'provider-id', content: [{ type: 'text', text }] },
+    }), text })
+    const history = transcriptEventsToHistory('same-native-id', [...launchEvents(),
+      nativeEvent(3, 'tool.started', { toolUseID: 'agent-2', toolName: 'Agent', input: { prompt: 'Another worker' } }),
+      message(4, 'agent-1', 'First worker'), message(5, 'agent-2', 'Second worker'), message(6, '', 'Main summary'),
+    ]) as any[]
+    expect(history.map(m => m.toolUseId || m.content)).toEqual(['agent-1', 'agent-2', 'Main summary'])
+    expect(history[0].subagentActivity.entries).toEqual([{ id: 'message-provider-id', kind: 'message', text: 'First worker' }])
+    expect(history[1].subagentActivity.entries).toEqual([{ id: 'message-provider-id', kind: 'message', text: 'Second worker' }])
+  })
+
+  it('keeps same-ID nested worker messages distinct across live output and snapshots', () => {
+    const history = transcriptEventsToHistory('nested-id-scope', [...launchEvents(),
+      childTool(3, 'tool.started', 'agent-1', 'nested-a', 'Agent'),
+      childTool(4, 'tool.started', 'agent-1', 'nested-b', 'Agent'),
+      ...['agent-1', 'nested-a', 'nested-b'].map((parent, index) => ({ ...nativeEvent(5 + index, 'assistant.message', {
+        parentToolUseID: parent, message: { id: 'reused', content: [{ type: 'text', text: parent }] },
+      }), text: parent })),
+      nativeEvent(8, 'system.status', { type: 'system', subtype: 'task_progress', toolUseID: 'nested-a',
+        toolName: 'Agent', parentToolUseID: 'agent-1', subagentActivity: {
+          truncated: false, entries: [{ id: 'message-reused', kind: 'message', text: 'nested-a' }],
+        } }),
+    ]) as any[]
+    expect(history).toHaveLength(1)
+    expect(history[0].subagentActivity.entries.filter((e: any) => e.kind === 'message').map((e: any) => e.text))
+      .toEqual(['agent-1', 'nested-a', 'nested-b'])
+  })
+
+  it('keeps canonical shell progress and image materialization errors inside the drawer', () => {
+    const history = transcriptEventsToHistory('shell-progress', [...launchEvents(),
+      nativeEvent(3, 'tool.progress', { type: 'tool_progress', tool_use_id: 'bash', tool_name: 'Bash',
+        parent_tool_use_id: 'agent-1', elapsed_time_seconds: 120 }),
+      nativeEvent(4, 'tool.completed', { toolUseID: 'image', toolName: 'Read', parentToolUseID: 'agent-1',
+        output: '', attachmentError: 'Tool image could not be stored for Chat.' }),
+    ]) as any[]
+    expect(history).toHaveLength(1)
+    expect(history[0].subagentActivity.entries).toEqual([
+      expect.objectContaining({ id: 'bash', toolName: 'Bash', elapsedTimeSeconds: 120, status: 'running' }),
+      expect.objectContaining({ id: 'image', status: 'completed', attachmentError: expect.stringContaining('could not be stored') }),
+    ])
+  })
+
+  it('does not complete nested background launch receipts, and closes them from native task results', () => {
+    const events = [...launchEvents(),
+      childTool(3, 'tool.started', 'agent-1', 'nested-agent', 'Agent'),
+      { ...childTool(4, 'tool.completed', 'agent-1', 'nested-agent', 'Agent'), payload: {
+        parentToolUseID: 'agent-1', toolUseID: 'nested-agent', toolName: 'Agent',
+        output: 'Async agent launched successfully.\nagentId: nested-task (internal ID)\noutput_file: /tmp/nested.output',
+      } },
+    ]
+    const started = transcriptEventsToHistory('nested-async', events) as any[]
+    expect(started).toHaveLength(1)
+    expect(started[0].subagentActivity.entries[0]).toMatchObject({ id: 'nested-agent', status: 'running' })
+    expect(started[0].subagentActivity.entries[0]).not.toHaveProperty('output')
+    const closed = transcriptEventsToHistory('nested-async', [...events, nativeEvent(5, 'tool.completed', {
+      parentToolUseID: 'agent-1', toolUseID: 'wait-nested', toolName: 'TaskOutput',
+      nativeBackgroundTaskResult: { toolUseID: 'nested-agent', status: 'stopped', result: 'Stopped' },
+    })]) as any[]
+    expect(closed).toHaveLength(1)
+    expect(closed[0].subagentActivity.entries[0]).toMatchObject({ id: 'nested-agent', status: 'cancelled', output: 'Stopped' })
+  })
+
+  it('still sends the live approval notification while keeping its explanation out of main chat', async () => {
+    const project = 'owned-permission-live'
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({ events: launchEvents() }))
+    await beeGameAdapter.getChatHistory(project)
+    const events = [
+      nativeEvent(3, 'permission.requested', { parentToolUseID: 'agent-1', toolUseID: 'bash', toolName: 'Bash', message: 'Approval reason' }),
+      nativeEvent(4, 'permission.resolved', { parentToolUseID: 'agent-1', toolUseID: 'bash', toolName: 'Bash', decision: 'deny' }),
+    ]
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({ start(controller) {
+      events.forEach(event => controller.enqueue(new TextEncoder().encode(`id: ${event.id}\ndata: ${JSON.stringify({ events: [event] })}\n\n`)))
+      controller.close()
+    } })))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages(project, 2, { onMessage, onCursor: vi.fn() }, new AbortController().signal)
+    const messages = onMessage.mock.calls.map(([message]) => message)
+    expect(messages.map(message => message.type)).toEqual(['tool_start', 'human_gate', 'tool_start'])
+    expect(messages[1]).toMatchObject({ requires_user_action: true, task_kind: 'subagent_permission_request' })
+    expect(messages.at(-1).subagent_activity.entries).toEqual([
+      expect.objectContaining({ id: 'permission-bash', status: 'denied', message: 'Approval reason' }),
+    ])
+    const history = transcriptEventsToHistory(project, [...launchEvents(), ...events]) as any[]
+    expect(history).toHaveLength(1)
+    // Missing ownership is never guessed from the most recent worker.
+    expect(transcriptEventsToHistory(project, [...launchEvents(), nativeEvent(5, 'permission.requested', { toolUseID: 'unknown' })])).toHaveLength(2)
+  })
+
+  it('does not mix sessions or turn completed tools back into running when an older snapshot arrives', () => {
+    const events = [...launchEvents(), childTool(3, 'tool.completed', 'agent-1', 'read-1'),
+      nativeEvent(4, 'system.status', { type: 'system', subtype: 'task_progress', toolUseID: 'agent-1',
+        subagentActivity: { entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read', status: 'running' }], truncated: false } }),
+      { ...childTool(5, 'tool.completed', 'agent-1', 'other-session-read'), sessionId: 'other-session' },
+    ]
+    const history = transcriptEventsToHistory('session-scopes', events)
+    expect(history).toHaveLength(2)
+    expect(history[0]).toMatchObject({ subagentActivity: {
+      entries: [expect.objectContaining({ id: 'read-1', status: 'completed', output: 'read-1 result' })] } })
+    expect(history[1]).toMatchObject({ subagentActivity: {
+      entries: [expect.objectContaining({ id: 'other-session-read' })] } })
+  })
+
+  it('retains the structured terminal task result when a child tool result is delivered afterward', () => {
+    const history = transcriptEventsToHistory('terminal-routing', [...launchEvents(),
+      childTool(3, 'tool.started', 'agent-1', 'read-late'),
+      nativeEvent(4, 'tool.completed', { toolName: 'TaskOutput', toolUseID: 'wait',
+        nativeBackgroundTaskResult: { toolUseID: 'agent-1', status: 'failed', result: 'Worker failed' },
+        backgroundAgentInput: { prompt: 'Check manifest' } }),
+      childTool(5, 'tool.completed', 'agent-1', 'read-late'),
+    ])
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolUseId: 'agent-1', toolStatus: 'failed', subagentOutput: 'Worker failed',
+      subagentActivity: { entries: [expect.objectContaining({ id: 'read-late', status: 'completed' })] } })
+  })
+
+  it('retains child activity across history, separate SSE frames and polling without emitting child tool rows', async () => {
+    const project = 'subagent-routing-live'
+    const initial = [...launchEvents(), childTool(3, 'tool.completed', 'agent-1', 'read-in-history')]
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({ events: initial }))
+    await beeGameAdapter.getChatHistory(project)
+    const events = [childTool(4, 'tool.started', 'agent-1', 'bash-live', 'Bash'),
+      childTool(5, 'tool.completed', 'agent-1', 'bash-live', 'Bash')]
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      for (const event of events) controller.enqueue(new TextEncoder().encode(`id: ${event.id}\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn(), onCursor = vi.fn()
+    await beeGameAdapter.streamMessages(project, 3, { onMessage, onCursor }, new AbortController().signal)
+    const updates = onMessage.mock.calls.map(([message]) => message)
+    expect(updates.map(message => message.tool_use_id)).toEqual(['agent-1', 'agent-1'])
+    expect(updates.at(-1)).toMatchObject({ tool_status: 'running', subagent_prompt: 'Check manifest',
+      subagent_activity: { entries: [expect.objectContaining({ id: 'read-in-history', status: 'completed' }),
+        expect.objectContaining({ id: 'bash-live', status: 'completed' })] } })
+    expect(onCursor).toHaveBeenLastCalledWith(5)
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ events: [
+      childTool(6, 'tool.failed', 'agent-1', 'read-polled'),
+    ] })))
+    const polled = await beeGameAdapter.pollMessages(project, 5)
+    expect(polled.lastEventId).toBe(6)
+    expect(polled.messages).toHaveLength(1)
+    expect(polled.messages[0].tool_use_id).toBe('agent-1')
+    expect(polled.messages[0].subagent_activity?.entries).toHaveLength(3)
+    expect(polled.messages[0].subagent_activity?.entries.at(-1)).toMatchObject({ id: 'read-polled', status: 'failed' })
+  })
+
+  it('keeps asynchronous launch running, not completed, without showing the launch receipt as a result', () => {
+    const history = transcriptEventsToHistory('project-1', launchEvents()) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolStatus: 'running', isSubagentTool: true, subagentPrompt: 'Check manifest' })
+    expect(history[0]?.subagentOutput).toBeUndefined()
+  })
+
+  it('reconciles native progress, trace and terminal result into the same subagent card', () => {
+    const subagentActivity = { entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read',
+      filePath: 'manifest.json', status: 'completed', output: '{}' }], truncated: false }
+    const events = [...launchEvents(),
+      nativeEvent(3, 'system.status', { type: 'system', subtype: 'task_progress', task_id: 'task-1', tool_use_id: 'agent-1',
+        description: 'Reading manifest', last_tool_name: 'Read',
+        usage: { tool_uses: 45, duration_ms: 1083052, total_tokens: 156415 }, subagentTrace: '[read-1] Read manifest.json', subagentActivity }),
+    ]
+    const progress = transcriptEventsToHistory('project-1', events) as Record<string, unknown>[]
+    expect(progress).toHaveLength(1)
+    expect(progress[0]).toMatchObject({ toolStatus: 'running', subagentPrompt: 'Check manifest' })
+    expect(progress[0]?.subagentTrace).toContain('45 tools')
+    expect(progress[0]?.subagentTrace).toContain('[read-1] Read')
+    events.push(nativeEvent(4, 'turn.completed', {}), nativeEvent(5, 'system.status', {
+      type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1', status: 'completed', summary: 'All assets checked',
+    }))
+    const history = transcriptEventsToHistory('project-1', events) as Record<string, unknown>[]
+    const card = history.find(message => message.isSubagentTool)
+    expect(history.filter(message => message.isSubagentTool)).toHaveLength(1)
+    expect(card).toMatchObject({ toolStatus: 'completed', subagentOutput: 'All assets checked', subagentPrompt: 'Check manifest' })
+    expect(card?.subagentTrace).toContain('[read-1] Read')
+    expect(card?.subagentActivity).toEqual(subagentActivity)
+    const displayed = toChatDisplayMessages(normalizeChatHistory(history))
+    expect(displayed.find(message => message.isSubagentTool)?.subagentActivity).toEqual(subagentActivity)
+  })
+
+  it('uses a structured TaskOutput terminal result when the native task notification is missing', () => {
+    const events = [...launchEvents(),
+      nativeEvent(3, 'system.status', { type: 'system', subtype: 'task_started', task_id: 'task-1',
+        toolUseID: 'agent-1', input: { prompt: 'Check manifest' } }),
+      nativeEvent(4, 'tool.completed', { toolName: 'TaskOutput', toolUseID: 'wait-1',
+        input: { task_id: 'task-1' }, nativeBackgroundTaskResult: {
+          toolUseID: 'agent-1', status: 'failed', result: 'Test failed',
+        }, backgroundAgentInput: { prompt: 'Check manifest' } }),
+    ]
+    const history = transcriptEventsToHistory('project-1', events) as Record<string, unknown>[]
+    expect(history.filter(message => message.isSubagentTool)).toHaveLength(1)
+    expect(history.find(message => message.isSubagentTool)).toMatchObject({
+      toolStatus: 'failed', subagentPrompt: 'Check manifest', subagentOutput: 'Test failed',
+    })
+  })
+
+  it('recovers a historical background Bash task result without labeling it an Agent', () => {
+    const history = transcriptEventsToHistory('project-1', [
+      nativeEvent(1, 'system.status', { type: 'system', subtype: 'task_started', task_id: 'task-1',
+        task_type: 'local_bash', toolUseID: 'bash-call-1', input: { description: 'Run tests' } }),
+      nativeEvent(2, 'tool.completed', { toolName: 'TaskOutput', toolUseID: 'wait-1',
+        input: { task_id: 'task-1' }, nativeTaskResult: { taskId: 'task-1', status: 'failed', result: 'Tests failed' } }),
+    ]) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolStatus: 'failed', toolName: 'Task',
+      subagentOutput: 'Tests failed', isSubagentTool: true })
+  })
+
+  it('does not resurrect a background task from a late start event after session Stop', () => {
+    const history = transcriptEventsToHistory('project-1', [
+      nativeEvent(1, 'session.stopped', {}),
+      nativeEvent(2, 'system.status', { type: 'system', subtype: 'task_started', task_id: 'late-task',
+        task_type: 'local_bash', toolUseID: 'late-call' }),
+    ]) as Record<string, unknown>[]
+    expect(history.some(message => message.isSubagentTool)).toBe(false)
+  })
+
+  it.each(['failed', 'stopped', 'killed'])('retains %s background task outcomes after foreground completion', status => {
+    const history = transcriptEventsToHistory('project-1', [...launchEvents(), nativeEvent(3, 'turn.completed', {}),
+      nativeEvent(4, 'system.status', { type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1', status, summary: 'Task ended' }),
+    ]) as Record<string, unknown>[]
+    expect(history.find(message => message.isSubagentTool)).toMatchObject({ toolStatus: 'failed', subagentOutput: 'Task ended' })
+  })
+
+  it('keeps synchronous Agent and Task results completed', () => {
+    for (const toolName of ['Agent', 'Task']) {
+      const history = transcriptEventsToHistory('project-1', [nativeEvent(1, 'tool.completed', {
+        toolName, toolUseID: 'sync-1', output: 'Audit finished', input: { prompt: 'Audit' },
+      })]) as Record<string, unknown>[]
+      expect(history[0]).toMatchObject({ toolStatus: 'completed', subagentOutput: 'Audit finished' })
+    }
+  })
+
+  it('correlates a native task notification with its tool invocation', () => {
+    const history = transcriptEventsToHistory('project-1', [
+      nativeEvent(1, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-1', input: { prompt: 'Review' } }),
+      nativeEvent(2, 'system.status', { type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1',
+        status: 'completed', summary: 'Checked' }),
+    ]) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolStatus: 'completed', subagentPrompt: 'Review', subagentOutput: 'Checked' })
+  })
   beforeEach(() => {
-    localStorage.clear();
-    vi.restoreAllMocks();
-  });
+    authenticatedFetchMock.mockReset()
+  })
 
-  afterEach(() => {
-    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '0');
-    clearSupabaseSession();
-    vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
-  });
+  it('streams native partials without a stage ID, handles split UTF-8 frames, and ignores replayed cursors', async () => {
+    const event = { id: 1, sessionId: 's', turnId: 't', type: 'assistant.partial', text: '中文\n',
+      createdAt: '2026-09-20T00:00:00Z', payload: { messageId: 'native-message' } }
+    const encoded = new TextEncoder().encode(`id: 1\ndata: ${JSON.stringify({ events: [event] })}\n\nid: 1\ndata: ${JSON.stringify({ events: [event] })}\n\n`)
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      for (const byte of encoded) controller.enqueue(new Uint8Array([byte]))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn(), onCursor = vi.fn()
+    await beeGameAdapter.streamMessages('stream-native-test', 0, { onMessage, onCursor }, new AbortController().signal)
+    expect(onMessage).toHaveBeenCalledTimes(1)
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'token', content: '中文\n', message_id: 'beegame-assistant-s-native-message' }))
+    expect(onCursor).toHaveBeenLastCalledWith(1)
+    expect(onMessage.mock.invocationCallOrder[0]).toBeLessThan(onCursor.mock.invocationCallOrder[0])
+  })
 
-  it('analyzes uploaded attachments without converting them into intake options', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
-      analysisId: 'analysis_gdd',
-      sourceType: 'gdd',
-      completeness: 'complete',
-      confirmedFacts: [],
-      inferredDesign: [],
-      missingFields: [],
-      conflicts: [],
-      gddDraft: '# Confirmed GDD',
-    }));
-    vi.stubGlobal('fetch', fetchMock);
+  it('shows a queued user message on the live stream without requiring a page refresh', async () => {
+    const event = { id: 7, sessionId: 's', turnId: 'turn-2', type: 'user.message', text: '继续',
+      createdAt: '2026-09-20T00:00:00Z', payload: { type: 'user.message', clientMessageId: 'client-7' } }
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(`id: 7\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages('live-user-test', 6, { onMessage }, new AbortController().signal)
+    expect(onMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      type: 'agent_message', sender: 'user', content: '继续',
+      message_id: 'client-7', client_message_id: 'client-7',
+    }))
+  })
 
-    const analysis = await beeGameAdapter.analyzeAttachmentBuild({
-      attachments: [{
-        type: 'file',
-        mediaType: 'text/markdown',
-        data: 'I0dE',
-        filename: 'game-design.md',
-      }],
-      language: 'zh',
-      clientRequestId: 'attachment-analysis-1',
-    });
+  it('shows the same user message when live updates fall back to polling', async () => {
+    const event = { id: 8, sessionId: 's', turnId: 'turn-3', type: 'user.message', text: '修复按钮',
+      createdAt: '2026-09-20T00:00:00Z', payload: { type: 'user.message', clientMessageId: 'client-8' } }
+    authenticatedFetchMock.mockResolvedValueOnce(Response.json({ events: [event], workspacePath: '' }))
+    const result = await beeGameAdapter.pollMessages('live-poll-user-test', 7)
+    expect(result.messages).toEqual([expect.objectContaining({
+      type: 'agent_message', sender: 'user', content: '修复按钮', message_id: 'client-8',
+    })])
+  })
 
-    expect(analysis.completeness).toBe('complete');
-    expect(fetchMock).toHaveBeenCalledWith('/api/beegame-intake/analyze-attachments', expect.objectContaining({ method: 'POST' }));
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual(expect.objectContaining({
-      clientRequestId: 'attachment-analysis-1',
-      attachments: expect.any(Array),
-    }));
-  });
+  it('forwards in-flight native usage from the live event stream', async () => {
+    const event = { id: 9, sessionId: 's', turnId: 'turn-3', type: 'usage', text: '',
+      createdAt: '2026-09-20T00:00:03Z', payload: { type: 'stream_event', event: {
+        type: 'message_delta', usage: { input_tokens: 100, output_tokens: 20,
+          cache_read_input_tokens: 300, cache_creation_input_tokens: 10 },
+      } } }
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(`id: 9\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages('live-usage-test', 8, { onMessage }, new AbortController().signal)
+    expect(onMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      type: 'usage', usage: { prompt_tokens: 100, completion_tokens: 20,
+        cache_read_tokens: 300, cache_creation_tokens: 10, total_tokens: 430 },
+    }))
+  })
 
-  it('loads projects from the BeeGame metadata API when available', async () => {
-    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
-      { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
-    ]));
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/projects') {
-        return jsonResponse([
-          {
-            id: 'project_sqlite',
-            name: 'SQLite Project',
-            root_path: '/tmp/beegame-projects/sqlite-project',
-            created_at: 1710000000000,
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
+  it('forwards confirmed credit debits without rendering them as chat messages', async () => {
+    const event = { ...nativeEvent(1, 'system.status', {
+      type: 'billing.realtime_debited', creditsMicro: 500,
+    }), text: 'Realtime usage debited' }
+    const history = transcriptEventsToHistory('project', [event])
+    expect(history).toEqual([])
+    authenticatedFetchMock.mockResolvedValueOnce(Response.json({ events: [event], workspacePath: '' }))
+    const result = await beeGameAdapter.pollMessages('billing-test', 0)
+    expect(result.messages).toContainEqual(expect.objectContaining({ type: 'billing_update' }))
+  })
 
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([
-      {
-        id: 'project_sqlite',
-        name: 'SQLite Project',
-        root_path: '/tmp/beegame-projects/sqlite-project',
-        created_at: 1710000000000,
-      },
-    ]);
-  });
-
-  it('stops the current project without resolving a browser session binding', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === '/api/projects/project_local/stop' && init?.method === 'POST') {
-        return jsonResponse({ id: 'beegame_session_1', status: 'stopped' });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.stopTask({
-      task_id: 'project_local',
-      project_id: 'project_local',
-    })).resolves.toEqual(expect.objectContaining({
-      task_id: 'beegame_session_1',
-      state: 'stopped',
-    }));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/project_local/stop',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('continues and retries a recoverable workflow with the current UI language', async () => {
-    localStorage.setItem('i18nextLng', 'zh-TW');
-    const fetchMock = vi.fn(async () => jsonResponse({ status: 'running' }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await beeGameAdapter.resumeWorkflow('project recovery');
-    await beeGameAdapter.retryWorkflow('project recovery');
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/project%20recovery/workflow/resume',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ language: 'zh-TW' }),
-      }),
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/project%20recovery/workflow/retry',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ language: 'zh-TW' }),
-      }),
-    );
-  });
-
-  it('does not migrate browser-local project metadata into the canonical project repository', async () => {
-    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
-      {
-        id: 'project_local',
-        name: 'Local Only',
-        root_path: '/tmp/beegame-projects/local-only',
-        created_at: 1700000000000,
-      },
-    ]));
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === '/api/projects' && !init?.method) {
-        return jsonResponse([]);
-      }
-      if (String(input) === '/api/projects' && init?.method === 'POST') {
-        return jsonResponse(JSON.parse(String(init.body)));
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/projects', expect.objectContaining({
-      method: 'POST',
-    }));
-  });
-
-  it('does not fall back to browser-local project storage when the project API is unavailable', async () => {
-    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
-      { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
-    ]));
-    const fetchMock = vi.fn(async () => jsonResponse({ error: 'not found' }, 404));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.getProjects()).rejects.toThrow('not found');
-  });
-
-  it('does not fall back to local project storage for authenticated cloud sessions', async () => {
-    localStorage.setItem('beegame_supabase_session', JSON.stringify({
-      accessToken: 'cloud-access-token',
-      expiresAt: Date.now() + 60_000,
-      user: { id: 'user_cloud' },
-    }));
-    localStorage.setItem('beegame-adapter-projects', JSON.stringify([
-      { id: 'project_local', name: 'Local Only', created_at: 1700000000000 },
-    ]));
-    const fetchMock = vi.fn(async () => jsonResponse({ error: 'not found' }, 404));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.getProjects()).rejects.toThrow('not found');
-  });
-
-  it('preserves recoverable authentication outage metadata from fetch routes', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({
-      code: 'authentication_unavailable',
-      message: 'Authentication service is temporarily unavailable',
-      recoverable: true,
-      retry_after_ms: 2_000,
-    }, 503));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.getProjectRuntimeState('project_1')).rejects.toMatchObject({
-      status: 503,
-      code: 'authentication_unavailable',
-      recoverable: true,
-      retryAfterMs: 2_000,
-    });
-  });
-
-  it('does not create a second browser-owned cloud project cache', async () => {
-    localStorage.setItem('beegame_supabase_session', JSON.stringify({
-      accessToken: 'cloud-access-token',
-      expiresAt: Date.now() + 60_000,
-      user: { id: 'user_cloud' },
-    }));
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/projects') {
-        return jsonResponse([
-          { id: 'project_cloud', name: 'Cloud Project', created_at: 1710000000000 },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([
-      { id: 'project_cloud', name: 'Cloud Project', created_at: 1710000000000 },
-    ]);
-
-    expect(localStorage.getItem('beegame-adapter-projects')).toBeNull();
-    expect(localStorage.getItem('beegame-adapter-projects:user_cloud')).toBeNull();
-  });
-
-  it('does not synthesize local game mode options when LLM intake fails', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
-      String(input) === '/api/beegame-intake/jobs'
-        ? jsonResponse({ error: 'not found' }, 404)
-        : jsonResponse({ error: 'intake unavailable' }, 500)
-    )
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.generateIntakeOptions({ idea: 'idea requiring LLM' }))
-      .rejects.toThrow('not found');
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/beegame-intake/options', expect.anything());
-  });
-
-  it('uses backend error message text when intake returns a structured failure', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
-      String(input) === '/api/beegame-intake/jobs'
-        ? jsonResponse({
-          error: 'Insufficient credits',
-          message: 'Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。',
-        }, 402)
-        : jsonResponse({ error: 'not found' }, 404)
-    )
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring LLM' }))
-      .rejects.toThrow('Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。');
-  });
-
-
-  it('runs BeeGame intake through a short-lived async job when the runtime supports it', async () => {
-    const llmOption = makeLlmOption({ id: 'job_mode', title: 'Job Mode' });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/beegame-intake/jobs' && init?.method === 'POST') {
-        return jsonResponse({ jobId: 'intake_job_1', status: 'running' }, 202);
-      }
-      if (path === '/api/beegame-intake/jobs/intake_job_1') {
-        return jsonResponse({
-          status: 'completed',
-          result: {
-            maturity: 'directional',
-            needsClarification: false,
-            detectedConstraints: ['Async constraint'],
-            recommendedNextStep: 'choose_direction',
-            options: makeLlmOptions(llmOption),
-          },
-        });
-      }
-      return jsonResponse({ error: 'unexpected request' }, 500);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea', language: 'zh' });
-
-    expect(intake.options[0]).toEqual(expect.objectContaining({ id: 'job_mode', title: 'Job Mode' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/beegame-intake/jobs');
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string; clientRequestId?: string };
-    expect(requestBody).toEqual({
-      idea: 'LLM generated idea',
-      language: 'zh',
-      clientRequestId: expect.any(String),
-    });
-  });
-
-  it('keeps polling the same intake job when authentication is temporarily unavailable', async () => {
-    vi.useFakeTimers();
+  it('breaks a silent SSE socket after the heartbeat deadline so the hook can reconnect', async () => {
+    vi.useFakeTimers()
     try {
-      let pollAttempts = 0;
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const path = String(input);
-        if (path === '/api/beegame-intake/jobs' && init?.method === 'POST') {
-          return jsonResponse({ jobId: 'intake_job_recoverable', status: 'running' }, 202);
-        }
-        if (path === '/api/beegame-intake/jobs/intake_job_recoverable') {
-          pollAttempts += 1;
-          if (pollAttempts === 1) {
-            return jsonResponse({
-              error: 'Authentication unavailable',
-              message: 'Authentication service is temporarily unavailable',
-            }, 503);
-          }
-          return jsonResponse({
-            status: 'completed',
-            result: {
-              maturity: 'directional',
-              needsClarification: false,
-              detectedConstraints: [],
-              recommendedNextStep: 'choose_direction',
-              options: makeLlmOptions(),
-            },
-          });
-        }
-        return jsonResponse({ error: 'unexpected request' }, 500);
-      });
-      vi.stubGlobal('fetch', fetchMock);
+      const cancel = vi.fn()
+      authenticatedFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({ cancel })))
+      const result = beeGameAdapter.streamMessages('silent-stream-test', 0, { onMessage: vi.fn() }, new AbortController().signal)
+      const assertion = expect(result).rejects.toThrow('heartbeat timed out')
+      await vi.advanceTimersByTimeAsync(20_001)
+      await assertion
+      expect(cancel).toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
 
-      const intakePromise = beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
-      await vi.advanceTimersByTimeAsync(1500);
-      await expect(intakePromise).resolves.toEqual(expect.objectContaining({
-        options: expect.arrayContaining([
-          expect.objectContaining({ id: 'mode_from_llm' }),
-        ]),
-      }));
+  it('preserves the auth outage envelope and retry delay when opening an SSE stream', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce(Response.json({
+      error: 'Authentication service is temporarily unavailable', code: 'authentication_unavailable',
+      recoverable: true, retry_after_ms: 2000,
+    }, { status: 503 }))
+    const onCursor = vi.fn(), onOpen = vi.fn()
+    await expect(beeGameAdapter.streamMessages('auth-outage', 42,
+      { onMessage: vi.fn(), onCursor, onOpen }, new AbortController().signal))
+      .rejects.toMatchObject({ status: 503, code: 'authentication_unavailable', recoverable: true, retryAfterMs: 2000 })
+    expect(onCursor).not.toHaveBeenCalled()
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(authenticatedFetchMock.mock.calls.at(-1)?.[0]).toContain('after=42')
+  })
 
-      expect(fetchMock.mock.calls.filter(([input, init]) =>
-            String(input) === '/api/beegame-intake/jobs' && init?.method === 'POST'
-      )).toHaveLength(1);
-      expect(pollAttempts).toBe(2);
-    } finally {
-      vi.useRealTimers();
+  it('loads a small latest page first and keeps the larger upward page intact', async () => {
+    authenticatedFetchMock
+      .mockResolvedValueOnce(transcriptResponse())
+      .mockResolvedValueOnce(transcriptResponse({
+        page: { hasMore: false, nextBeforeId: null },
+      }))
+
+    await beeGameAdapter.getChatHistory('project-1')
+    await beeGameAdapter.getOlderChatHistory('project-1')
+
+    expect(authenticatedFetchMock.mock.calls[0]?.[0]).toContain('limit=50')
+    expect(authenticatedFetchMock.mock.calls[1]?.[0]).toContain('limit=300')
+    expect(authenticatedFetchMock.mock.calls[1]?.[0]).toContain('before=99')
+  })
+
+  it('retains all subagent records and terminal status through pagination and subsequent live projection', async () => {
+    const { useChatStore } = await import('../store/chatStore')
+    useChatStore.getState().clearMessages()
+    const project = 'subagent-history-union'
+    const latest = [childTool(50, 'tool.completed', 'agent-1', 'read-new'),
+      nativeEvent(51, 'tool.completed', { toolUseID: 'agent-1', toolName: 'Agent', output: 'Done' })]
+    const older = [...launchEvents(), childTool(3, 'tool.completed', 'agent-1', 'read-old')]
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({ events: latest, page: { hasMore: true, nextBeforeId: 50 } }))
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({ events: older, page: { hasMore: false, nextBeforeId: null } }))
+    try {
+      useChatStore.getState().loadHistory(normalizeChatHistory(await beeGameAdapter.getChatHistory(project)))
+      useChatStore.getState().loadHistory(normalizeChatHistory((await beeGameAdapter.getOlderChatHistory(project)).messages))
+      expect(useChatStore.getState().messages[0]).toMatchObject({ toolStatus: 'completed', subagentOutput: 'Done' })
+      expect(useChatStore.getState().messages[0].subagentActivity?.entries.map(e => e.id)).toEqual(['read-old', 'read-new'])
+      // A reconnect can replay the latest page after the user loaded old pages.
+      useChatStore.getState().loadHistory(normalizeChatHistory(transcriptEventsToHistory(project, latest)))
+      expect(useChatStore.getState().messages[0].subagentActivity?.entries.map(e => e.id)).toEqual(['read-old', 'read-new'])
+      expect(useChatStore.getState().messages[0].toolStatus).toBe('completed')
+    } finally { useChatStore.getState().clearMessages() }
+  })
+
+  it('preserves the Preview rejection reason and code without retrying', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      code: 'measurement-stale', error: 'Exportable sources changed: tests/capture.mjs',
+    }), { status: 409, headers: { 'content-type': 'application/json' } }))
+    await expect(beeGameAdapter.startProjectPreview('rejected-preview')).rejects.toMatchObject({
+      status: 409, code: 'measurement-stale', message: 'Exportable sources changed: tests/capture.mjs',
+    })
+    expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('requests Scene/UI file metadata without downloading document bodies', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      state: 'ready',
+      documents: [{ path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' }],
+    })))
+
+    const snapshot = await beeGameAdapter.getProjectGameContentFileList('project-1')
+
+    expect(authenticatedFetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project-1/game-content?metadata=1')
+    expect(snapshot.documents).toEqual([
+      { path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' },
+    ])
+    expect(snapshot.documents?.[0]).not.toHaveProperty('document')
+  })
+
+  it('normalizes one legacy full snapshot without retrying the heavy endpoint', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      state: 'ready',
+      documents: [{
+        path: 'scenes/main.json', revision: 'a'.repeat(64),
+        document: { id: 'scene.main', kind: 'scene-2d', data: { nodes: [{ id: 'root' }] } },
+      }],
+    })))
+
+    const snapshot = await beeGameAdapter.getProjectGameContentFileList('project-1')
+
+    expect(snapshot.documents).toEqual([
+      { path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' },
+    ])
+    expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps per-file errors and registry identities in a partial Scene/UI list', async () => {
+    const documents = [
+      { path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' },
+      { path: 'ui/hud.json', revision: 'b'.repeat(64), id: 'hud', kind: 'ui-hud', error: 'data.nodes.5.responsive.compact.layout: Unrecognized key: "gap"' },
+      { path: 'ui/missing.json', id: 'missing', kind: 'ui-screen', error: 'Cannot read registered file (ENOENT)' },
+    ]
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'draft', documents })))
+
+    expect((await beeGameAdapter.getProjectGameContentFileList('project-1')).documents).toEqual(documents)
+    expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let an in-flight runtime snapshot overwrite preview start state', async () => {
+    let resolveStale!: (response: Response) => void
+    let resolveFresh!: (response: Response) => void
+    const staleResponse = new Promise<Response>(resolve => { resolveStale = resolve })
+    const freshResponse = new Promise<Response>(resolve => { resolveFresh = resolve })
+    const previewResponse = {
+      sessionId: 'preview-session', workspacePath: '/workspace', status: 'running',
+      url: '/previews/preview-session/', updatedAt: '2026-09-22T00:00:01.000Z',
     }
-  });
+    const runningRuntime = {
+      project_id: 'preview-race', phase: 'idle', blocked: false,
+      build_report: { status: 'passed', build_url: '/previews/preview-session/' },
+    }
 
-  it('keeps intake model behavior out of the browser request', async () => {
-    const llmOption = makeLlmOption({ id: 'job_mode', title: 'Job Mode' });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/beegame-intake/jobs' && init?.method === 'POST') {
-        return jsonResponse({ jobId: 'intake_job_1', status: 'running' }, 202);
-      }
-      if (path === '/api/beegame-intake/jobs/intake_job_1') {
-        return jsonResponse({
-          status: 'completed',
-          result: {
-            maturity: 'directional',
-            needsClarification: false,
-            detectedConstraints: [],
-            recommendedNextStep: 'choose_direction',
-            options: makeLlmOptions(llmOption),
-          },
-        });
-      }
-      return jsonResponse({ error: 'unexpected request' }, 500);
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    authenticatedFetchMock
+      .mockReturnValueOnce(staleResponse)
+      .mockResolvedValueOnce(new Response(JSON.stringify(previewResponse)))
+      .mockReturnValueOnce(freshResponse)
 
-    await beeGameAdapter.runIdeaIntake({
-      idea: 'LLM generated idea',
-      language: 'zh',
-    });
+    const staleRuntime = beeGameAdapter.getProjectRuntimeState('preview-race')
+    await beeGameAdapter.startProjectPreview('preview-race')
+    const refreshedRuntime = beeGameAdapter.getProjectRuntimeState('preview-race')
 
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as {
-      idea?: string;
-      language?: string;
-      clientRequestId?: string;
-    };
-    expect(requestBody).toEqual({
-      idea: 'LLM generated idea',
-      language: 'zh',
-      clientRequestId: expect.any(String),
-    });
-  });
+    resolveStale(new Response(JSON.stringify({
+      project_id: 'preview-race', phase: 'idle', blocked: false, build_report: null,
+    })))
+    resolveFresh(new Response(JSON.stringify(runningRuntime)))
 
-  it('normalizes BeeGame intake analysis with maturity and LLM-provided option fields', async () => {
-    const llmOption = makeLlmOption({
-      title: 'LLM Mode',
-      coreGameplayHypothesis: 'LLM hypothesis',
-      playerFirstMinute: 'LLM first minute',
-      whyFitsIdea: 'LLM fit',
-      playablePrototype: 'LLM first playable',
-      validationTarget: 'LLM validation target',
-      fit: 'LLM fit',
-      firstPlayableValidation: 'LLM validation',
-      riskComplexity: 'LLM complexity',
-    });
-    const fetchMock = createCompletedIntakeJobFetch({
-      maturity: 'directional',
-      needsClarification: false,
-      detectedConstraints: ['LLM constraint'],
-      recommendedNextStep: 'choose_direction',
-      options: makeLlmOptions(llmOption),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    await expect(staleRuntime).resolves.toMatchObject({ status: { build_report: runningRuntime.build_report } })
+    await expect(refreshedRuntime).resolves.toMatchObject({ status: { build_report: runningRuntime.build_report } })
+  })
 
-    const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
+  it('does not let a runtime poll started during preview mutation return stale state', async () => {
+    let resolvePreview!: (response: Response) => void
+    let resolveDuringMutation!: (response: Response) => void
+    let resolveFresh!: (response: Response) => void
+    const previewResponse = new Promise<Response>(resolve => { resolvePreview = resolve })
+    const duringMutationResponse = new Promise<Response>(resolve => { resolveDuringMutation = resolve })
+    const freshResponse = new Promise<Response>(resolve => { resolveFresh = resolve })
+    const runningRuntime = {
+      project_id: 'preview-race-during-mutation', phase: 'idle', blocked: false,
+      build_report: { status: 'passed', build_url: '/previews/preview-session/' },
+    }
 
-    expect(intake).toMatchObject({
-      maturity: 'directional',
-      needsClarification: false,
-      detectedConstraints: ['LLM constraint'],
-      recommendedNextStep: 'choose_direction',
-    });
-    expect(intake.options[0]).toEqual(expect.objectContaining({
-      title: 'LLM Mode',
-      coreGameplayHypothesis: 'LLM hypothesis',
-      playerFirstMinute: 'LLM first minute',
-      whyFitsIdea: 'LLM fit',
-      playablePrototype: 'LLM first playable',
-      validationTarget: 'LLM validation target',
-      fit: 'LLM fit',
-      firstPlayableValidation: 'LLM validation',
-      riskComplexity: 'LLM complexity',
-    }));
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string; clientRequestId?: string };
-    expect(requestBody).toEqual({ idea: 'LLM generated idea', language: 'zh', clientRequestId: expect.any(String) });
-  });
+    authenticatedFetchMock
+      .mockReturnValueOnce(previewResponse)
+      .mockReturnValueOnce(duringMutationResponse)
+      .mockReturnValueOnce(freshResponse)
 
-  it('normalizes snake_case intake setting fields before the UI builds production settings', async () => {
-    const llmOption = makeLlmOption({
-      recommendedPlatform: undefined,
-      recommendedDimension: undefined,
-      recommendedGenre: undefined,
-      recommendedStyle: undefined,
-      recommendedInputs: undefined,
-      recommended_platform: 'PC',
-      recommended_engine: 'Unity',
-      recommended_dimension: '3D',
-      recommended_genre: 'Racing',
-      recommended_style: 'Realistic',
-      recommended_inputs: ['Keyboard/mouse', 'Gamepad'],
-    });
-    const fetchMock = createCompletedIntakeJobFetch({
-      maturity: 'directional',
-      needsClarification: false,
-      detectedConstraints: [],
-      recommendedNextStep: 'choose_direction',
-      options: makeLlmOptions(llmOption),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    const mutation = beeGameAdapter.startProjectPreview('preview-race-during-mutation')
+    const polledDuringMutation = beeGameAdapter.getProjectRuntimeState('preview-race-during-mutation')
 
-    const intake = await beeGameAdapter.runIdeaIntake({ idea: 'LLM generated idea' });
+    resolvePreview(new Response(JSON.stringify({
+      sessionId: 'preview-session', workspacePath: '/workspace', status: 'running',
+      url: '/previews/preview-session/', updatedAt: '2026-09-22T00:00:01.000Z',
+    })))
+    await mutation
 
-    expect(intake.options[0]).toEqual(expect.objectContaining({
-      recommendedPlatform: 'PC',
-      recommendedEngine: 'Unity',
-      recommendedDimension: '3D',
-      recommendedGenre: 'Racing',
-      recommendedStyle: 'Realistic',
-      recommendedInputs: ['Keyboard/mouse', 'Gamepad'],
-    }));
-  });
+    resolveDuringMutation(new Response(JSON.stringify({
+      project_id: 'preview-race-during-mutation', phase: 'idle', blocked: false, build_report: null,
+    })))
+    resolveFresh(new Response(JSON.stringify(runningRuntime)))
 
-  it('passes the selected language to BeeGame intake', async () => {
-    const llmOption = makeLlmOption();
-    const fetchMock = createCompletedIntakeJobFetch({
-      maturity: 'directional',
-      needsClarification: false,
-      detectedConstraints: [],
-      recommendedNextStep: 'choose_direction',
-      options: makeLlmOptions(llmOption),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    await expect(polledDuringMutation).resolves.toMatchObject({
+      status: { build_report: runningRuntime.build_report },
+    })
+  })
 
-    await beeGameAdapter.runIdeaIntake({ idea: 'Créer un jeu exemple', language: 'fr-FR' });
+  it('loads Todo snapshots from earlier turns independently of the latest chat page', async () => {
+    const todo = (id: number, turnId: string) => ({ ...nativeEvent(id, 'tool.completed', {
+      toolName: 'TodoWrite', toolUseID: 'todo-' + id,
+      input: { todos: [{ content: 'Review', status: 'completed' }] },
+    }), turnId })
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({
+      events: [nativeEvent(8, 'assistant.message', { message: { id: 'latest' } })],
+      todoEvents: [todo(1, 'turn-1'), todo(2, 'turn-2')],
+    }))
+    const history = await beeGameAdapter.getChatHistory('all-todos') as Record<string, unknown>[]
+    const todos = history.filter(m => m.toolName === 'TodoWrite')
+    expect(todos).toHaveLength(2)
+    expect(todos[0].todoScope).toBe(todos[1].todoScope)
+    expect(deriveCurrentProjectTodos(toChatDisplayMessages(normalizeChatHistory(history)))).toHaveLength(1)
+    expect(beeGameAdapter.getChatHistoryPaginationState('all-todos').hasMore).toBe(true)
+  })
 
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { idea?: string; language?: string; clientRequestId?: string };
-    expect(requestBody).toEqual({ idea: 'Créer un jeu exemple', language: 'fr', clientRequestId: expect.any(String) });
-  });
+  it('replaces native Todo snapshots across turns while separating child agents and sessions', () => {
+    const todo = (id: number, parent?: string) => nativeEvent(id, 'tool.completed', {
+      toolName: 'TodoWrite', toolUseID: 'todo-' + id, parentToolUseID: parent,
+      input: { todos: [{ content: 'Verify', status: 'completed' }] },
+    })
+    const messages = transcriptEventsToHistory('todo-resume', [
+      { ...todo(1), turnId: 'turn-6' }, { ...todo(2), turnId: 'turn-7' },
+      { ...todo(3, 'child'), turnId: 'turn-7' },
+      { ...todo(4), sessionId: 'another-session', turnId: 'turn-7' },
+    ])
+      .filter(message => message.toolName === 'TodoWrite')
+    expect(messages).toHaveLength(4)
+    expect(messages[0].todoScope).toBe(messages[1].todoScope)
+    expect(messages[2].todoScope).not.toBe(messages[1].todoScope)
+    expect(messages[3].todoScope).not.toBe(messages[1].todoScope)
+    const current = deriveCurrentProjectTodos(toChatDisplayMessages(normalizeChatHistory(messages)))
+    expect(current).toHaveLength(3)
+  })
 
-  it('uses the explicit UI language instead of inferring language from idea text', async () => {
-    localStorage.setItem('i18nextLng', 'ja');
-    const fetchMock = createCompletedIntakeJobFetch({
-      maturity: 'directional',
-      needsClarification: false,
-      detectedConstraints: [],
-      recommendedNextStep: 'choose_direction',
-      options: makeLlmOptions(makeLlmOption()),
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await beeGameAdapter.runIdeaIntake({ idea: '制作一个中文游戏' });
-
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body || '{}')) as { language?: string };
-    expect(requestBody.language).toBe('ja');
-  });
-
-  it('rejects structured clarification responses without intake options', async () => {
-    const fetchMock = createCompletedIntakeJobFetch({
-      maturity: 'vague',
-      needsClarification: true,
-      clarification: {
-        prompt: 'Which direction should BeeGame use?',
-        options: [
-          { id: 'direction_a', label: 'Direction A', description: 'Use direction A.' },
-          { id: 'direction_b', label: 'Direction B', value: 'Use direction B.' },
-        ],
-        freeformLabel: 'Add detail',
-      },
-      clarificationQuestions: [],
-      detectedConstraints: [],
-      recommendedNextStep: 'clarify',
-      options: [],
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' })).rejects.toThrow(
-      'BeeGame intake must return exactly 3 game mode options; received 0',
-    );
-  });
-
-  it('creates new sessions in a project-specific workspace under the default Projects directory', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
-        return bootstrapResponse(init, {
-          sessionId: 'beegame_scoped',
-          workspacePath: '/tmp/beegame-projects/llm-project',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: 'LLM generated idea',
-      title: 'LLM Project',
-      option: {
-        id: 'sample_web',
-        title: 'LLM Project',
-        pitch: 'LLM generated pitch.',
-        gameplay: '吃食物、增长、避免撞墙。',
-        coreGameplayHypothesis: 'LLM generated hypothesis.',
-        experienceSnapshot: '你会看到一个网格里的蛇移动、吃食物、变长并撞墙失败。',
-        playerFirstMinute: '玩家用方向键移动，吃到食物并理解撞墙失败。',
-        whyFitsIdea: 'LLM generated fit.',
-        playablePrototype: 'LLM generated first playable.',
-        validationTarget: '验证移动和失败条件。',
-        coreMechanic: '路线规划和风险控制。',
-        firstBuild: 'LLM generated first build.',
-        validationGoal: '验证移动和失败条件。',
-        risk: '低复杂度。',
-        fit: '适合快速验证。',
-        firstPlayableValidation: '验证移动和失败条件。',
-        riskComplexity: '低复杂度。',
-        recommendedPlatform: 'Web',
-        recommendedDimension: '2D',
-        recommendedGenre: 'Arcade',
-        recommendedStyle: 'Pixel',
-        recommendedInputs: ['Keyboard/mouse'],
-        scope: 'Playable demo',
-      },
-      settings: {
-        platform: 'Web',
-        visualStyle: 'Pixel',
-        dimension: '2D',
-        genre: 'Arcade',
-        inputs: ['Keyboard/mouse'],
-        scope: 'Playable demo',
-      },
-    });
-
-    const startCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    )
-    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { projectName?: string };
-
-    expect(startBody.projectName).toBe('llm-project');
-    expect(result.project.root_path).toBe('/tmp/beegame-projects/llm-project');
-    expect(result.project.name).toBe('LLM Project');
-    expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/model-configs')).toBe(false);
-  });
-
-  it('reads the only workspace root from the server and ignores stale browser state', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/filesystem/default-workspace') {
-        return jsonResponse({ path: '/srv/beegame/projects' });
-      }
-      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
-        return bootstrapResponse(init, {
-          sessionId: 'beegame_custom_root',
-          workspacePath: '/srv/beegame/projects/arena-prototype',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    localStorage.setItem('beegame-adapter-workspace-root', '/tmp/stale-client-root');
-
-    const result = await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: 'arena prototype',
-      title: 'Arena Prototype',
-      option: makeLlmOption({ title: 'Arena Prototype' }),
-      settings: {
-        platform: 'Web',
-        visualStyle: 'Minimal',
-        dimension: '2D',
-        genre: 'Action',
-        inputs: ['Keyboard/mouse'],
-        scope: 'Playable demo',
-      },
-    });
-
-    const settings = await getBeeGameWorkspaceSettings();
-
-    expect(result.project.root_path).toBe('/srv/beegame/projects/arena-prototype');
-    expect(settings).toEqual({
-      workspacePath: '/srv/beegame/projects',
-      isDefault: true,
-    });
-    expect(fetchMock).toHaveBeenCalledWith('/api/filesystem/default-workspace', expect.anything());
-  });
-
-  it('sends a confirmed attachment GDD as the direct build source', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
-        return bootstrapResponse(init, {
-          sessionId: 'beegame_gdd',
-          workspacePath: '/tmp/beegame-projects/confirmed-gdd',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: 'uploaded design',
-      title: 'Confirmed GDD',
-      option: makeLlmOption({ title: 'Confirmed GDD' }),
-      settings: { platform: '', visualStyle: '', dimension: '', genre: '', inputs: [], scope: '' },
-      language: 'en',
-      confirmedGdd: '# Rules\n- Solve the puzzle to win.',
-      buildSource: 'gdd',
-      analysisId: 'analysis_direct_build',
-    });
-
-    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    )
-    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { brief?: Record<string, unknown> };
-    expect(body.brief).toMatchObject({
-      confirmedGdd: '# Rules\n- Solve the puzzle to win.',
-      buildSource: 'gdd',
-      analysisId: 'analysis_direct_build',
-    });
-    expect(JSON.stringify(body)).not.toContain('Save it as docs/GDD.md first');
-    expect(JSON.stringify(body)).not.toContain('Do not regenerate a game plan');
-  });
-
-  it('keeps the confirmed project title for display and uses the LLM folder name for files', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
-        return bootstrapResponse(init, {
-          sessionId: 'beegame_safe_path',
-          workspacePath: '/tmp/beegame-projects/movement-aim-trainer',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: '移动与瞄准训练',
-      title: '移动与瞄准训练',
-      option: makeLlmOption({ title: '移动与瞄准训练', projectFolderName: 'movement-aim-trainer' }),
-      settings: {
-        platform: 'Web',
-        visualStyle: 'Minimal',
-        dimension: '2D',
-        genre: 'Action',
-        inputs: ['Keyboard/mouse'],
-        scope: 'Playable demo',
-      },
-    });
-
-    const startCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    )
-    const startBody = JSON.parse(String(startCall?.[1]?.body || '{}')) as { projectName?: string };
-    expect(startBody.projectName).toBe('movement-aim-trainer');
-    expect(result.project.name).toBe('移动与瞄准训练');
-  });
-
-  it('delegates project session recovery to the backend ensure endpoint', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path.startsWith('/api/projects/') && path.endsWith('/session/ensure') && init?.method === 'POST') {
-        return jsonResponse({
-          session: {
-            id: 'beegame_migrated',
-            cwd: '/tmp/beegame-projects/llm-project',
-            modelConfigId: 'model_default',
-            status: 'running',
-            turnStatus: 'idle',
-            createdAt: '2026-06-21T00:00:00.000Z',
-            updatedAt: '2026-06-21T00:00:00.000Z',
-          },
-          binding: {
-            projectId: path.split('/')[3],
-            sessionId: 'beegame_migrated',
-            workspacePath: '/tmp/beegame-projects/llm-project',
-          },
-          previousSessionId: 'beegame_legacy',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_migrated/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_migrated',
-          cwd: '/tmp/beegame-projects/sample-web-game',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project: legacyProject } = seedBoundProject('beegame_legacy', '/tmp/beegame-projects');
-    await beeGameAdapter.sendMessage({
-      project_id: legacyProject.id,
-      content: '修复蛇会自动增长的问题',
-    });
-
-    const ensureCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path).endsWith('/session/ensure') && init?.method === 'POST'
-    )
-    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/beegame-sessions/beegame_migrated/input' && init?.method === 'POST'
-    )
-    expect(ensureCall).toBeTruthy();
-    expect(inputCall).toBeTruthy();
-  });
-
-  it('loads chat history from a persisted transcript after the backend restarts', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_restart/events?after=0') {
-        return jsonResponse({ error: 'Session not found' }, 404);
-      }
-      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
-        return jsonResponse([
-          {
-            id: 1,
-            sessionId: 'beegame_restart',
-            turnId: 'turn-1',
-            type: 'user.message',
-            text: 'LLM generated user message',
-            payload: { type: 'user.message' },
-            createdAt: '2026-06-21T00:00:01.000Z',
-          },
-          {
-            id: 2,
-            sessionId: 'beegame_restart',
-            turnId: 'turn-1',
-            type: 'assistant.message',
-            text: 'LLM generated assistant message.',
-            payload: { type: 'assistant.message' },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_restart', '/tmp/beegame-projects/sample-web-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_restart',
-      workspacePath: '/tmp/beegame-projects/sample-web-game',
-    }]));
-
-    const history = await beeGameAdapter.getChatHistory(project.id);
-
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sender: 'user',
-        content: 'LLM generated user message',
-      }),
-      expect.objectContaining({
-        sender: 'beegame',
-        content: 'LLM generated assistant message.',
-      }),
-    ]));
-    expect(fetchMock.mock.calls.some(([path, init]) =>
-          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    )).toBe(false);
-  });
-
-  it('loads compact chat history from newest to oldest with a stable cursor', async () => {
-    const workspacePath = '/tmp/beegame-projects/paged-game';
-    const pageRequest = `/api/beegame-sessions/beegame_paged/transcript?workspacePath=${encodeURIComponent(workspacePath)}&limit=300`;
-    const olderRequest = `${pageRequest}&before=501`;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === pageRequest) {
-        return jsonResponse({
-          events: [{
-            id: 501,
-            sessionId: 'beegame_paged',
-            turnId: 'turn-new',
-            type: 'assistant.message',
-            text: 'Newest page.',
-            createdAt: '2026-06-21T00:00:02.000Z',
-          }],
-          page: { hasMore: true, nextBeforeId: 501 },
-        });
-      }
-      if (path === olderRequest) {
-        return jsonResponse({
-          events: [{
-            id: 201,
-            sessionId: 'beegame_paged',
-            turnId: 'turn-old',
-            type: 'assistant.message',
-            text: 'Older page.',
-            createdAt: '2026-06-20T00:00:02.000Z',
-          }],
-          page: { hasMore: false, nextBeforeId: 201 },
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_paged/events?after=501') {
-        return jsonResponse([{
-          id: 502,
-          sessionId: 'beegame_paged',
-          turnId: 'turn-live',
-          type: 'assistant.message',
-          text: 'Live continuation.',
-          createdAt: '2026-06-21T00:00:03.000Z',
-        }]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    const { project } = seedBoundProject('beegame_paged', workspacePath);
-
-    const latest = (await beeGameAdapter.getChatHistory(project.id)) as Array<{ content: string }>;
-    expect(beeGameAdapter.getChatHistoryPaginationState(project.id)).toEqual({
-      initialized: true,
-      hasMore: true,
-    });
-    const live = await beeGameAdapter.pollMessages(project.id, 0);
-    const older = await beeGameAdapter.getOlderChatHistory(project.id);
-    const exhausted = await beeGameAdapter.getOlderChatHistory(project.id);
-
-    expect(latest.map(message => message.content)).toEqual(['Newest page.']);
-    expect(live.lastEventId).toBe(502);
-    expect(live.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ content: 'Live continuation.' }),
-    ]));
-    expect((older.messages as Array<{ content: string }>).map(message => message.content)).toEqual(['Older page.']);
-    expect(older.hasMore).toBe(false);
-    expect(beeGameAdapter.getChatHistoryPaginationState(project.id)).toEqual({
-      initialized: true,
-      hasMore: false,
-    });
-    expect(exhausted).toEqual({ messages: [], hasMore: false });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-  });
-
-  it('loads cloud project history through the project-scoped transcript endpoint', async () => {
-    localStorage.setItem('beegame_supabase_session', JSON.stringify({
-      accessToken: 'cloud-access-token',
-      expiresAt: Date.now() + 60_000,
-      user: { id: 'user_cloud' },
-    }));
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/projects/project_cloud/transcript?limit=300') {
-        return jsonResponse({
-          sessionId: 'beegame_cloud_restore',
-          workspacePath: '/tmp/beegame-projects/users/user-cloud/cloud-game',
-          events: [{
-            id: 1,
-            sessionId: 'beegame_cloud_restore',
-            turnId: 'turn-1',
-            type: 'assistant.message',
-            text: 'Cloud transcript restored.',
-            payload: { type: 'assistant.message' },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          }],
-          page: { hasMore: false, nextBeforeId: null },
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const history = await beeGameAdapter.getChatHistory('project_cloud');
-
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sender: 'beegame',
-        content: 'Cloud transcript restored.',
-      }),
-    ]));
-    expect(localStorage.getItem('beegame-adapter-bindings')).toBeNull();
-    expect(localStorage.getItem('beegame-adapter-bindings:user_cloud')).toBeNull();
-  });
-
-  it('loads a cookie-authenticated project transcript without a browser-readable token', async () => {
-    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
-    const workspacePath = '/tmp/beegame-projects/users/cookie-user/cookie-game';
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/auth/session') {
-        return jsonResponse({
-          authenticated: true,
-          expires_at: Date.now() + 3_600_000,
-          user: { id: 'cookie-user' },
-        });
-      }
-      if (path === '/api/projects/project_cookie/transcript?limit=300') {
-        return jsonResponse({
-          sessionId: 'beegame_cookie_restore',
-          workspacePath,
-          events: [{
-            id: 1,
-            sessionId: 'beegame_cookie_restore',
-            turnId: 'turn-1',
-            type: 'assistant.message',
-            text: 'Cookie transcript restored.',
-            payload: { type: 'assistant.message' },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          }],
-          page: { hasMore: false, nextBeforeId: null },
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await hydrateSupabaseSessionUser();
-    const history = await beeGameAdapter.getChatHistory('project_cookie');
-
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sender: 'beegame',
-        content: 'Cookie transcript restored.',
-      }),
-    ]));
-    expect(localStorage.getItem('beegame_supabase_session')).toBeNull();
-    expect(localStorage.getItem('beegame-adapter-bindings:cookie-user')).toBeNull();
-  });
-
-  it('uses the server-owned project transcript workspace instead of browser metadata', async () => {
-    localStorage.setItem('beegame_supabase_session', JSON.stringify({
-      accessToken: 'cloud-access-token',
-      expiresAt: Date.now() + 60_000,
-      user: { id: 'user_cloud' },
-    }));
-    localStorage.setItem('beegame-adapter-projects:user_cloud', JSON.stringify([
+  it('keeps one Think lifecycle at its start while applying its terminal duration', () => {
+    const history = transcriptEventsToHistory('project-1', [
       {
-        id: 'project_cloud_migrated',
-        name: 'Cloud Migrated',
-        root_path: '/tmp/beegame-projects/cloud-migrated',
-        created_at: 1710000000000,
-      },
-    ]));
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/projects/project_cloud_migrated/transcript?limit=300') {
-        return jsonResponse({
-          sessionId: 'beegame_cloud_migrated',
-          workspacePath: '/tmp/beegame-projects/users/user-cloud/project_cloud_migrated',
-          events: [{
-            id: 1,
-            sessionId: 'beegame_cloud_migrated',
-            turnId: 'turn-1',
-            type: 'assistant.message',
-            text: 'Migrated project transcript restored.',
-            payload: { type: 'assistant.message' },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          }],
-          page: { hasMore: false, nextBeforeId: null },
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const history = await beeGameAdapter.getChatHistory('project_cloud_migrated');
-
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sender: 'beegame',
-        content: 'Migrated project transcript restored.',
-      }),
-    ]));
-    expect(localStorage.getItem('beegame-adapter-bindings:user_cloud')).toBeNull();
-  });
-
-  it('does not infer session identity from a project id or browser-local project record', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_legacy/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Flegacy-game') {
-        return jsonResponse([
-          {
-            id: 1,
-            sessionId: 'beegame_legacy',
-            turnId: 'turn-1',
-            type: 'user.message',
-            text: 'Existing user request.',
-            payload: { type: 'user.message' },
-            createdAt: '2026-06-21T00:00:01.000Z',
-          },
-          {
-            id: 2,
-            sessionId: 'beegame_legacy',
-            turnId: 'turn-1',
-            type: 'assistant.message',
-            text: 'Existing project history.',
-            payload: { type: 'assistant.message' },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    localStorage.setItem('beegame-adapter-projects', JSON.stringify([{
-      id: 'project_beegame_legacy',
-      name: 'legacy-game',
-      root_path: '/tmp/beegame-projects/legacy-game',
-      created_at: 1710000000000,
-    }]));
-
-    const history = await beeGameAdapter.getChatHistory('project_beegame_legacy');
-
-    expect(history).toEqual([]);
-    expect(JSON.parse(localStorage.getItem('beegame-adapter-bindings') || '[]')).toEqual([]);
-  });
-
-  it('prefers persisted transcript history over incomplete runtime events after refresh', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_refresh/events?after=0') {
-        return jsonResponse([
-          {
-            id: 2,
-            sessionId: 'beegame_refresh',
-            turnId: 'turn-1',
-            type: 'assistant.message',
-            text: 'Runtime only assistant message.',
-            payload: { type: 'assistant.message' },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          },
-        ]);
-      }
-      if (path === '/api/beegame-sessions/beegame_refresh/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Frefresh-game') {
-        return jsonResponse([
-          {
-            id: 1,
-            sessionId: 'beegame_refresh',
-            turnId: 'turn-1',
-            type: 'user.message',
-            text: 'Fix the input lag.',
-            payload: { type: 'user.message' },
-            createdAt: '2026-06-21T00:00:01.000Z',
-          },
-          {
-            id: 2,
-            sessionId: 'beegame_refresh',
-            turnId: 'turn-1',
-            type: 'assistant.message',
-            text: 'Transcript assistant message.',
-            payload: { type: 'assistant.message' },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_refresh', '/tmp/beegame-projects/refresh-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_refresh',
-      workspacePath: '/tmp/beegame-projects/refresh-game',
-    }]));
-
-    const history = await beeGameAdapter.getChatHistory(project.id);
-
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sender: 'user',
-        content: 'Fix the input lag.',
-      }),
-      expect.objectContaining({
-        sender: 'beegame',
-        content: 'Transcript assistant message.',
-      }),
-    ]));
-    expect(history).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        content: 'Runtime only assistant message.',
-      }),
-    ]));
-  });
-
-  it('does not replace the persisted binding during read-only status sync after the backend restarts', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path.startsWith('/api/projects/') && path.endsWith('/runtime-state')) {
-        return jsonResponse(projectRuntimeState(path.split('/')[3], {
-          phase: 'idle',
-          active_agents: [],
-          next_action: 'Ready for next request',
-        }));
-      }
-      if (path === '/api/beegame-sessions/beegame_restart/events?after=0') {
-        return jsonResponse({ error: 'Session not found' }, 404);
-      }
-      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
-        return jsonResponse([
-          {
-            id: 1,
-            sessionId: 'beegame_restart',
-            turnId: 'turn-1',
-            type: 'assistant.message',
-            text: 'Recovered design context.',
-            payload: { type: 'assistant.message' },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_restart', '/tmp/beegame-projects/sample-web-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_restart',
-      workspacePath: '/tmp/beegame-projects/sample-web-game',
-    }]));
-
-    await beeGameAdapter.getProjectStatus(project.id);
-    const history = await beeGameAdapter.getChatHistory(project.id);
-
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sender: 'beegame',
-        content: 'Recovered design context.',
-      }),
-    ]));
-    expect(fetchMock.mock.calls.some(([path, init]) =>
-          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    )).toBe(false);
-  });
-
-  it('does not keep a transcript-only interrupted turn running after the backend restarts', async () => {
-    const transcript = [
-      turnStartedEvent(1, 'beegame_restart', 'turn-1'),
-      assistantMessageEvent(2, 'beegame_restart', 'turn-1', 'Running final build.'),
-      bashCompletedEvent(3, 'beegame_restart', 'turn-1', 'bun run build', 'Build completed.'),
-    ];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path.startsWith('/api/projects/') && path.endsWith('/runtime-state')) {
-        return jsonResponse(projectRuntimeState(path.split('/')[3], {
-          phase: 'idle',
-          active_agents: [],
-          next_action: 'Ready for next request',
-        }));
-      }
-      if (path === '/api/beegame-sessions/beegame_restart/events?after=0') {
-        return jsonResponse({ error: 'Session not found' }, 404);
-      }
-      if (path === '/api/beegame-sessions/beegame_restart/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-web-game') {
-        return jsonResponse(transcript);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_restart', '/tmp/beegame-projects/sample-web-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_restart',
-      workspacePath: '/tmp/beegame-projects/sample-web-game',
-    }]));
-
-    const status = await beeGameAdapter.getProjectStatus(project.id);
-    const polled = await beeGameAdapter.pollMessages(project.id, 0);
-
-    expect(status.phase).toBe('idle');
-    expect(status.active_agents).toEqual([]);
-    expect(status.next_action).toBe('Ready for next request');
-    expect(polled.messages.some(message =>
-          message.type === 'status' && String(message.content || '').includes('Backend restarted')
-    )).toBe(false);
-  });
-
-  it('treats a stopped session as idle even when the transcript turn never completed', async () => {
-    const transcript = [
-      turnStartedEvent(1, 'beegame_stopped', 'turn-1'),
-      assistantMessageEvent(2, 'beegame_stopped', 'turn-1', 'Starting final verification.'),
-      toolStartedEvent(3, 'beegame_stopped', 'tool_write_3', 'Write', 'Writing final notes.', 'turn-1'),
-      sessionStoppedEvent(4, 'beegame_stopped', 'turn-1'),
-    ];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path.startsWith('/api/projects/') && path.endsWith('/runtime-state')) {
-        return jsonResponse(projectRuntimeState(path.split('/')[3], {
-          phase: 'idle',
-          active_agents: [],
-          next_action: 'Ready for input',
-          model_config_id: 'model_default',
-        }));
-      }
-      if (path === '/api/beegame-sessions/beegame_stopped/events?after=0') {
-        return jsonResponse(transcript);
-      }
-      if (path === '/api/beegame-sessions/beegame_stopped') {
-        return jsonResponse({ id: 'beegame_stopped', modelConfigId: 'model_default' });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_stopped', '/tmp/beegame-projects/sample-web-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_stopped',
-      workspacePath: '/tmp/beegame-projects/sample-web-game',
-    }]));
-
-    const status = await beeGameAdapter.getProjectStatus(project.id);
-
-    expect(status.phase).toBe('idle');
-    expect(status.active_agents).toEqual([]);
-    expect(status.next_action).toBe('Ready for input');
-  });
-
-  it('derives the build report preview URL from the managed preview host', async () => {
-    const transcript = [
-      turnStartedEvent(1, 'beegame_preview', 'turn-1'),
-      bashCompletedEvent(
-        2,
-        'beegame_preview',
-        'turn-1',
-        'bun run dev -- --host 127.0.0.1 --port 5178',
-        'Vite ready in 320ms\nLocal: http://127.0.0.1:5178/',
-      ),
-      bashCompletedEvent(3, 'beegame_preview', 'turn-1', 'bun run build', 'Build completed successfully.'),
-      assistantMessageEvent(4, 'beegame_preview', 'turn-1', 'The playable game is delivered and available for preview.'),
-    ];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path.startsWith('/api/projects/') && path.endsWith('/runtime-state')) {
-        return jsonResponse(projectRuntimeState(path.split('/')[3], {
-          build_report: {
-            status: 'passed',
-            build_url: 'http://127.0.0.1:63100/',
-            agents: ['dashboard-preview'],
-          },
-        }));
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_preview', '/tmp/beegame-projects/preview-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_preview',
-      workspacePath: '/tmp/beegame-projects/preview-game',
-    }]));
-
-    const status = await beeGameAdapter.getProjectStatus(project.id);
-
-    expect(status.build_report).toMatchObject({
-      status: 'passed',
-      build_url: 'http://127.0.0.1:63100/',
-      agents: ['dashboard-preview'],
-    });
-  });
-
-  it('reads project status from the backend runtime-state endpoint', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/projects/project_runtime_state/runtime-state') {
-        return jsonResponse({
-          project_id: 'project_runtime_state',
-          phase: 'running',
-          blocked: false,
-          active_agents: ['beegame'],
-          updated_at: '2026-06-21T00:00:04.000Z',
-          next_action: 'BeeGame is processing',
-          context: {
-            phase: 'running',
-            token_budget: {
-              status: 'tracking',
-              prompt_tokens: 10,
-              completion_tokens: 5,
-              total_tokens: 15,
-            },
-          },
-          build_report: null,
-          model_config_id: 'model_default',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const status = await beeGameAdapter.getProjectStatus('project_runtime_state');
-    expect(status.phase).toBe('running');
-    expect(fetchMock.mock.calls.some(([path]) => String(path).includes('/runtime-snapshot'))).toBe(false);
-    expect(fetchMock.mock.calls.some(([path]) => String(path).includes('/events?after='))).toBe(false);
-  });
-
-  it('coalesces concurrent runtime-state consumers for the same project', async () => {
-    let resolveResponse!: (response: Response) => void;
-    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
-      resolveResponse = resolve;
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const statusPromise = beeGameAdapter.getProjectStatus('project_shared_runtime');
-    const reviewsPromise = beeGameAdapter.getPendingToolPermissions('project_shared_runtime');
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-
-    resolveResponse(jsonResponse({
-      project_id: 'project_shared_runtime',
-      phase: 'running',
-      pending_permissions: [],
-    }));
-    await expect(statusPromise).resolves.toMatchObject({ project_id: 'project_shared_runtime' });
-    await expect(reviewsPromise).resolves.toEqual({ items: [] });
-  });
-
-  it('delegates missing-session recovery to the backend ensure endpoint before sending input', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/project_backend_ensure/session/ensure' && init?.method === 'POST') {
-        return jsonResponse({
-          session: {
-            id: 'beegame_new',
-            cwd: '/tmp/beegame-projects/sample-web-game',
-            status: 'running',
-            turnStatus: 'idle',
-            createdAt: '2026-06-21T00:00:03.000Z',
-            updatedAt: '2026-06-21T00:00:03.000Z',
-          },
-          binding: {
-            projectId: 'project_backend_ensure',
-            sessionId: 'beegame_new',
-            workspacePath: '/tmp/beegame-projects/sample-web-game',
-          },
-          previousSessionId: 'beegame_previous',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_new/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_new',
-          cwd: '/tmp/beegame-projects/sample-web-game',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:03.000Z',
-          updatedAt: '2026-06-21T00:00:04.000Z',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await beeGameAdapter.sendMessage({
-      project_id: 'project_backend_ensure',
-      content: '继续任务',
-    });
-
-    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/beegame-sessions/beegame_new/input' && init?.method === 'POST'
-    )
-    const ensureCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/projects/project_backend_ensure/session/ensure' && init?.method === 'POST'
-    )
-    const ensureBody = JSON.parse(String(ensureCall?.[1]?.body || '{}')) as { language?: string };
-    expect(ensureBody.language).toBeTruthy();
-    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string; thinkingMode?: string };
-    expect(body.text).toBe('继续任务');
-    expect(body.thinkingMode).toBeUndefined();
-    expect(fetchMock.mock.calls.some(([path, init]) =>
-          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    )).toBe(false);
-  });
-
-  it('ensures a stopped BeeGame session in the backend before sending a new chat message', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
-      if (path.startsWith('/api/projects/') && path.endsWith('/session/ensure') && init?.method === 'POST') {
-        return jsonResponse(projectEnsureResponse(
-          path.split('/')[3],
-          'beegame_stopped',
-          '/tmp/beegame-projects/sample-web-game',
-          { modelConfigId: 'model_default' },
-        ));
-      }
-      if (path === '/api/beegame-sessions/beegame_stopped/input' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_stopped',
-          cwd: '/tmp/beegame-projects/sample-web-game',
-          status: 'running',
-          turnStatus: 'running',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_stopped', '/tmp/beegame-projects/sample-web-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_stopped',
-      workspacePath: '/tmp/beegame-projects/sample-web-game',
-    }]));
-
-    await beeGameAdapter.sendMessage({
-      project_id: project.id,
-      content: 'Continue fixing the game.',
-    });
-
-    const ensureCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path).endsWith('/session/ensure') && init?.method === 'POST'
-    )
-    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/beegame-sessions/beegame_stopped/input' && init?.method === 'POST'
-    )
-    const inputBody = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { text?: string };
-    expect(ensureCall).toBeTruthy();
-    expect(inputBody.text).toBe('Continue fixing the game.');
-    expect(fetchMock.mock.calls.some(([path, init]) =>
-          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    )).toBe(false);
-  });
-
-  it('sends continue input for an existing idle session with transcript context', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path.startsWith('/api/projects/') && path.endsWith('/session/ensure') && init?.method === 'POST') {
-        return jsonResponse(projectEnsureResponse(
-          path.split('/')[3],
-          'beegame_paused',
-          '/tmp/beegame-projects/mode-from-llm',
-        ));
-      }
-      if (path === '/api/beegame-sessions/beegame_paused/continue' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_paused',
-          cwd: '/tmp/beegame-projects/mode-from-llm',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:03.000Z',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_paused', '/tmp/beegame-projects/mode-from-llm');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_paused',
-      workspacePath: '/tmp/beegame-projects/mode-from-llm',
-    }]));
-
-    await beeGameAdapter.continueTask({ project_id: project.id });
-
-    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/beegame-sessions/beegame_paused/continue' && init?.method === 'POST'
-    )
-    expect(inputCall).toBeTruthy();
-    const body = JSON.parse(String(inputCall?.[1]?.body || '{}')) as { language?: string };
-    expect(body.language).toBe('zh');
-  });
-
-  it('keeps an existing session bound to its configured model before continuing', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path.startsWith('/api/projects/') && path.endsWith('/session/ensure') && init?.method === 'POST') {
-        return jsonResponse(projectEnsureResponse(
-          path.split('/')[3],
-          'beegame_model_old',
-          '/tmp/beegame-projects/model-sync-game',
-          { modelConfigId: 'llm_old' },
-        ));
-      }
-      if (path === '/api/beegame-sessions/beegame_model_old/continue' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_model_old',
-          cwd: '/tmp/beegame-projects/model-sync-game',
-          modelConfigId: 'llm_old',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:03.000Z',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_model_old', '/tmp/beegame-projects/model-sync-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_model_old',
-      workspacePath: '/tmp/beegame-projects/model-sync-game',
-    }]));
-
-    await beeGameAdapter.continueTask({ project_id: project.id });
-
-    expect(fetchMock.mock.calls.some(([path]) => String(path) === '/api/model-configs')).toBe(false);
-    expect(fetchMock.mock.calls.some(([path, init]) =>
-          String(path) === '/api/beegame-sessions/beegame_model_old/model' &&
-      init?.method === 'PATCH'
-    )).toBe(false);
-  });
-
-  it('starts a BeeGame session with structured confirmed product input only', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
-        return bootstrapResponse(init, {
-          sessionId: 'beegame_brief',
-          workspacePath: '/tmp/beegame-projects/mode-from-llm',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const option = makeLlmOption();
-    await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: 'LLM generated idea',
-      option,
-      settings: {
-        platform: 'Web',
-        visualStyle: 'Pixel',
-        dimension: '2D',
-        genre: 'Arcade',
-        inputs: ['Keyboard/mouse', 'Touch'],
-        scope: 'Playable demo',
-        notes: '节奏快一点',
-      },
-      root_path: '/tmp/beegame-projects',
-    });
-
-    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    )
-    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as {
-      brief?: Record<string, any>;
-      language?: string;
-    };
-
-    const brief = body.brief || {};
-    expect(brief.idea).toBe('LLM generated idea');
-    expect(brief.settings).toEqual(expect.objectContaining({
-      platform: 'Web',
-      inputs: ['Keyboard/mouse', 'Touch'],
-    }));
-    expect(JSON.stringify(body)).not.toContain('delivery contract');
-    expect(JSON.stringify(body)).not.toContain('验收');
-    expect(JSON.stringify(body)).not.toContain('subagents');
-    expect(JSON.stringify(body)).not.toContain('apps/frontend');
-  });
-
-  it('restores the visible idea from transcript display metadata instead of the transport prompt', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_display/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fdisplay-game') {
-        return jsonResponse([
-          {
-            id: 1,
-            sessionId: 'beegame_display',
-            turnId: 'turn-1',
-            type: 'user.message',
-            text: '请使用中文与用户沟通。\n我要做一个完整游戏项目。\n原始想法：用户输入的完整游戏想法',
-            payload: {
-              type: 'user.message',
-              displayText: '用户输入的完整游戏想法',
-              displayKind: 'confirmed_brief',
-            },
-            createdAt: '2026-06-21T00:00:01.000Z',
-          },
-          assistantMessageEvent(2, 'beegame_display', 'turn-1', '我会开始规划。'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_display', '/tmp/beegame-projects/display-game');
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: project.id,
-      sessionId: 'beegame_display',
-      workspacePath: '/tmp/beegame-projects/display-game',
-    }]));
-
-    const history = (await beeGameAdapter.getChatHistory(project.id)) as Array<{ sender: string; content: string }>;
-
-    expect(history).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sender: 'user',
-        content: '用户输入的完整游戏想法',
-      }),
-    ]));
-    expect(history.map(message => message.content).join('\n')).not.toContain('请使用中文与用户沟通');
-    expect(history.map(message => message.content).join('\n')).not.toContain('我要做一个完整游戏项目');
-  });
-
-  it('sends confirmed build input as structured product data without browser-owned agent policy', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/bootstrap' && init?.method === 'POST') {
-        return bootstrapResponse(init, {
-          sessionId: 'beegame_english_brief',
-          workspacePath: '/tmp/beegame-projects/snake-game',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await beeGameAdapter.bootstrapProjectFromBrief({
-      idea: 'Build a sample game',
-      title: 'Snake Game',
-      option: makeLlmOption({ title: 'Snake Game' }),
-      settings: {
-        platform: 'Web',
-        visualStyle: 'Pixel',
-        dimension: '2D',
-        genre: 'Arcade',
-        inputs: ['Keyboard/mouse'],
-        scope: 'Playable demo',
-        notes: 'Fast restart loop',
-      },
-      language: 'en',
-      root_path: '/tmp/beegame-projects',
-    });
-
-    const inputCall = fetchMock.mock.calls.find(([path, init]) =>
-        String(path) === '/api/projects/bootstrap' && init?.method === 'POST'
-    )
-    const body = JSON.parse(String(inputCall?.[1]?.body ?? '{}')) as { brief?: Record<string, unknown> };
-    const brief = body.brief || {};
-    expect(brief.idea).toBe('Build a sample game');
-    expect(brief.settings).toEqual(expect.objectContaining({ platform: 'Web', dimension: '2D' }));
-    expect(JSON.stringify(body)).not.toContain('executable player-path checks');
-    expect(JSON.stringify(body)).not.toContain('delivery contract');
-    expect(JSON.stringify(body)).not.toContain('Do not count log-only scripts');
-  });
-
-  it('sends follow-up messages without repeating session policy blocks', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
-      if (path.startsWith('/api/projects/') && path.endsWith('/session/ensure') && init?.method === 'POST') {
-        return jsonResponse(projectEnsureResponse(
-          path.split('/')[3],
-          'beegame_followup',
-          '/tmp/beegame-projects/followup',
-          { modelConfigId: 'model_default' },
-        ));
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_followup',
-          cwd: '/tmp/beegame-projects/followup',
-          modelConfigId: 'model_default',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if ((path === '/api/beegame-sessions/beegame_followup/idea' || path === '/api/beegame-sessions/beegame_followup/input') && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_followup',
-          cwd: '/tmp/beegame-projects/followup',
-          modelConfigId: 'model_default',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_followup') {
-        return jsonResponse({
-          id: 'beegame_followup',
-          cwd: '/tmp/beegame-projects/followup',
-          modelConfigId: 'model_default',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_followup', '/tmp/beegame-projects/followup');
-    await beeGameAdapter.sendMessage({
-      project_id: result.project.id,
-      content: '开始游戏后蛇没有吃食物也会变长，请修复。',
-    });
-
-    const inputBodies = fetchMock.mock.calls
-      .filter(([path, init]) =>
-          String(path) === '/api/beegame-sessions/beegame_followup/input' &&
-        init?.method === 'POST'
-      )
-      .map(([, init]) => JSON.parse(String(init?.body ?? '{}')) as { text?: string });
-    const followUp = inputBodies[0]?.text || '';
-
-    expect(followUp).toBe('开始游戏后蛇没有吃食物也会变长，请修复。');
-    expect(followUp).not.toContain('Branding rule:');
-    expect(followUp).not.toContain('Workspace rule:');
-    expect(followUp).not.toContain('Response language:');
-  });
-
-  it('keeps repeated tool calls as distinct chat messages', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_tools',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_tools/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_tools',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_tools') {
-        return jsonResponse({
-          id: 'beegame_tools',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_tools/events?after=0') {
-        return jsonResponse([
-          {
-            id: 10,
-            sessionId: 'beegame_tools',
-            turnId: 'turn-1',
-            type: 'tool.started',
-            text: 'Bash',
-            payload: { type: 'tool.started', toolUseID: 'tool_a', toolName: 'Bash', input: { command: 'pwd' } },
-            createdAt: '2026-06-21T00:00:02.000Z',
-          },
-          {
-            id: 11,
-            sessionId: 'beegame_tools',
-            turnId: 'turn-1',
-            type: 'tool.started',
-            text: 'Bash',
-            payload: { type: 'tool.started', toolUseID: 'tool_b', toolName: 'Bash', input: { command: 'ls' } },
-            createdAt: '2026-06-21T00:00:03.000Z',
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_tools', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages).toHaveLength(2);
-    expect(polled.messages.map(message => message.message_id)).toEqual([
-      'beegame-tool-beegame_tools-tool_a',
-      'beegame-tool-beegame_tools-tool_b',
-    ]);
-    expect(polled.messages.map(message => message.tool_use_id)).toEqual([
-      'tool_a',
-      'tool_b',
-    ]);
-  });
-
-  it('does not create a separate clarification protocol for permission events', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_question',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_question/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_question',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_question') {
-        return jsonResponse({
-          id: 'beegame_question',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_question/events?after=0') {
-        return jsonResponse([askUserQuestionEvent()]);
-      }
-      if (path === '/api/beegame-sessions/beegame_question/events?after=12') {
-        return jsonResponse([]);
-      }
-      if (path.startsWith('/api/projects/') && path.endsWith('/runtime-state')) {
-        return jsonResponse(projectRuntimeState(path.split('/')[3], {
-          phase: 'waiting_approval',
-          blocked: true,
-          next_action: 'Review BeeGame permission request',
-          active_agents: ['beegame'],
-          pending_permissions: [{
-            id: 'tool_question',
-            session_id: 'beegame_question',
-            event_id: 12,
-            tool_name: 'AskUserQuestion',
-            message: '游戏模式',
-            created_at: '2026-06-21T00:00:04.000Z',
-            input: {
-              questions: [{
-                header: '游戏模式',
-                question: '你想做单人模式还是双人模式？',
-                options: [
-                  { label: '单人模式' },
-                  { label: '双人模式' },
-                ],
-              }],
-            },
-          }],
-        }));
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_question', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-    const reviews = await beeGameAdapter.getPendingToolPermissions(result.project.id);
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(polled.messages.some(message => message.type === 'agent_message')).toBe(false);
-    expect(polled.messages.some(message => message.type === 'human_gate')).toBe(true);
-    expect(reviews.items).toEqual([
-      expect.objectContaining({
-        gate_id: 'tool_question',
-        task_id: 'beegame_question',
-        type: 'BEEGAME_PERMISSION',
-        title: 'AskUserQuestion permission',
-        permission_tool_name: 'AskUserQuestion',
-        artifact: expect.objectContaining({
-          content: '游戏模式',
-        }),
-      }),
-    ]);
-    expect(status.phase).toBe('waiting_approval');
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      '/api/beegame-sessions/beegame_question/events?after=0',
-      expect.objectContaining({ method: 'GET' }),
-    );
-  });
-
-  it('resolves BeeGame permission requests through the project scoped endpoint', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/project_permission/permissions/tool_question' && init?.method === 'POST') {
-        return jsonResponse({ resolved: true });
-      }
-      if (path.includes('/api/beegame-sessions/') && path.includes('/permissions/')) {
-        return jsonResponse({ error: 'legacy session permission endpoint should not be used' }, 500);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.resolveToolPermission({
-      project_id: 'project_permission',
-      gate_id: 'tool_question',
-      decision: 'allow',
-      scope: 'once',
-    })).resolves.toEqual({ ok: true });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/project_permission/permissions/tool_question',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ decision: 'allow', remember: false, scope: 'once' }),
-      }),
-    );
-  });
-
-  it('keeps multiple final assistant messages in the same turn instead of overwriting them', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_multi',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_multi/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_multi',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_multi') {
-        return jsonResponse({
-          id: 'beegame_multi',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_multi/events?after=0') {
-        return jsonResponse([
-          assistantMessageEvent(20, 'beegame_multi', 'turn-1', '先创建项目结构。'),
-          assistantMessageEvent(21, 'beegame_multi', 'turn-1', '然后修复类型错误。'),
-          assistantMessageEvent(22, 'beegame_multi', 'turn-1', '最后整理验证结果。'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_multi', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages.map(message => message.content)).toEqual([
-      '先创建项目结构。',
-      '然后修复类型错误。',
-      '最后整理验证结果。',
-    ]);
-    expect(polled.messages.map(message => message.message_id)).toEqual([
-      'beegame-event-20',
-      'beegame-event-21',
-      'beegame-event-22',
-    ]);
-  });
-
-  it('coalesces historical assistant blocks that share an upstream message id', async () => {
-    const sessionId = 'beegame_coalesced';
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: sessionId,
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === `/api/beegame-sessions/${sessionId}/idea` && init?.method === 'POST') {
-        return jsonResponse({
-          id: sessionId,
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === `/api/beegame-sessions/${sessionId}`) {
-        return jsonResponse({
-          id: sessionId,
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === `/api/beegame-sessions/${sessionId}/events?after=0`) {
-        return jsonResponse([
-          assistantLogicalMessageEvent(30, sessionId, 'turn-1', 'logical-1', 'First', 'First second.'),
-          assistantLogicalMessageEvent(31, sessionId, 'turn-1', 'logical-1', ' second.', ' second.'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject(sessionId, '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    const assistantMessages = polled.messages.filter(message => message.type === 'agent_message');
-    expect(assistantMessages).toEqual([
-      expect.objectContaining({
-        content: 'First second.',
-        message_id: `beegame-assistant-${sessionId}-logical-1`,
-      }),
-    ]);
-  });
-
-  it('maps BeeGame turn completion to idle instead of finished project status', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_idle',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_idle/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_idle',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_idle/events?after=0') {
-        return jsonResponse([
-          assistantMessageEvent(30, 'beegame_idle', 'turn-1', '这一轮处理完了，可以继续反馈。'),
-          turnCompletedEvent(31, 'beegame_idle', 'turn-1'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_idle', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    const status = polled.messages.find(message => message.type === 'status');
-    expect(status).toEqual(expect.objectContaining({ status: 'idle' }));
-    expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
-  });
-
-  it('shows an empty native turn as an incomplete system message while keeping the session resumable', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_empty_turn',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_empty_turn/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_empty_turn',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_empty_turn/events?after=0') {
-        return jsonResponse([{
-          id: 30,
-          sessionId: 'beegame_empty_turn',
-          turnId: 'turn-1',
-          type: 'turn.empty',
-          text: 'Bee Game Studio 已结束本轮，但没有返回最终答复。当前任务可能尚未完成，请在同一会话中继续。',
-          payload: { type: 'turn.empty', reason: 'missing_native_final_result' },
-          createdAt: '2026-06-21T00:00:02.000Z',
-        }]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_empty_turn', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'agent_message',
-        content: expect.stringContaining('没有返回最终答复'),
-      }),
-      expect.objectContaining({ type: 'status', status: 'idle' }),
-    ]));
-    expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
-  });
-
-  it('does not synthesize delivery evidence from ordinary tool activity', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_review',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_review/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_review',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_review/events?after=0') {
-        return jsonResponse([
-          bashCompletedEvent(40, 'beegame_review', 'turn-1', 'game-engine verify', 'Verified.'),
-          turnCompletedEvent(41, 'beegame_review', 'turn-1'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_review', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'tool_end', tool: 'Bash' }),
-      expect.objectContaining({ type: 'status', status: 'idle' }),
-    ]));
-    expect(polled.messages.some(message => message.task_kind === 'delivery_review')).toBe(false);
-    expect(polled.messages.some(message => message.type === 'status' && message.status === 'finished')).toBe(false);
-  });
-
-  it('does not classify failed commands through command-name heuristics', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_failed_check',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_failed_check/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_failed_check',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_failed_check/events?after=0') {
-        return jsonResponse([
-          bashFailedEvent(
-            40,
-            'beegame_failed_check',
-            'turn-1',
-            'game-engine build',
-            'Exit code 1\nCould not resolve entry module "index.html".',
-          ),
-          turnCompletedEvent(41, 'beegame_failed_check', 'turn-1'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_failed_check', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'tool_end', tool: 'Bash', tool_status: 'failed' }),
-      expect.objectContaining({ type: 'status', status: 'idle' }),
-    ]));
-    expect(polled.messages.some(message => message.task_kind === 'last_check_failed')).toBe(false);
-  });
-
-  it('hides streaming partials and shows only the final assistant message', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_stream',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_stream/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_stream',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_stream') {
-        return jsonResponse({
-          id: 'beegame_stream',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_stream/events?after=0') {
-        return jsonResponse([
-          assistantPartialEvent(30, 'beegame_stream', 'turn-1', '先创建'),
-          assistantPartialEvent(31, 'beegame_stream', 'turn-1', '项目。'),
-          assistantMessageEvent(32, 'beegame_stream', 'turn-1', '先创建项目。'),
-        ]);
-      }
-      if (path === '/api/beegame-sessions/beegame_stream/events?after=32') {
-        return jsonResponse([]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_stream', '/tmp/beegame-projects');
-    const firstPoll = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(firstPoll.messages).toEqual([
-      expect.objectContaining({
-        type: 'agent_message',
-        content: '先创建项目。',
-        message_id: 'beegame-event-32',
-      }),
-    ]);
-    expect(firstPoll.messages.some(message => message.type === 'token')).toBe(false);
-  });
-
-  it('maps BeeGame thinking events to one redacted start/end lifecycle', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/beegame-sessions/beegame_thinking/events?after=0') {
-        return jsonResponse([
-          thinkingEvent(30, 'beegame_thinking', 'turn-1', 'started'),
-          thinkingEvent(31, 'beegame_thinking', 'turn-1', 'streaming'),
-          thinkingEvent(32, 'beegame_thinking', 'turn-1', 'ended'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_thinking', '/tmp/beegame-projects/thinking');
-    const polled = await beeGameAdapter.pollMessages(project.id, 0);
-
-    expect(polled.messages).toHaveLength(2);
-    expect(polled.messages[0]).toEqual(expect.objectContaining({
-      type: 'think_start',
-      sender: 'beegame',
-      content: 'Thinking',
-      task_kind: 'assistant_thinking',
-      message_id: 'beegame-thinking-turn-1',
-    }));
-    expect(polled.messages[1]).toEqual(expect.objectContaining({
-      type: 'think_end',
-      sender: 'beegame',
-      message_id: 'beegame-thinking-turn-1',
-    }));
-    expect(JSON.stringify(polled.messages)).not.toContain('private reasoning');
-  });
-
-  it('drops runtime output that arrives after its turn has ended', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([{
-      projectId: 'project_late_thinking',
-      sessionId: 'beegame_late_thinking',
-      workspacePath: '/tmp/beegame-projects/late-thinking',
-    }]));
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/beegame-sessions/beegame_late_thinking/events?after=0') {
-        return jsonResponse([
-          { id: 40, sessionId: 'beegame_late_thinking', turnId: 'turn-closed', type: 'turn.failed', text: 'Interrupted', createdAt: '2026-06-21T00:00:00.000Z' },
-          thinkingEvent(41, 'beegame_late_thinking', 'turn-closed', 'started'),
-          thinkingEvent(42, 'beegame_late_thinking', 'turn-closed', 'streaming'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    }));
-
-    const polled = await beeGameAdapter.pollMessages('project_late_thinking', 0);
-    expect(polled.messages.some(message => message.task_kind === 'assistant_thinking')).toBe(false);
-  });
-
-  it('keeps assistant and tool messages in BeeGame event order', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_order',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_order/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_order',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_order') {
-        return jsonResponse({
-          id: 'beegame_order',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_order/events?after=0') {
-        return jsonResponse([
-          assistantPartialEvent(40, 'beegame_order', 'turn-1', '我要读取'),
-          toolStartedEvent(41, 'beegame_order', 'tool_read', 'Read', '读取文件'),
-          toolCompletedEvent(42, 'beegame_order', 'tool_read', 'Read', '读取完成'),
-          assistantMessageEvent(43, 'beegame_order', 'turn-1', '读取完成，接下来写文件。'),
-          toolStartedEvent(44, 'beegame_order', 'tool_write', 'Write', '写入文件'),
-          assistantMessageEvent(45, 'beegame_order', 'turn-1', '文件已写好。'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_order', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages.map(message => message.message_id)).toEqual([
-      'beegame-tool-beegame_order-tool_read',
-      'beegame-tool-beegame_order-tool_read',
-      'beegame-event-43',
-      'beegame-tool-beegame_order-tool_write',
-      'beegame-event-45',
-    ]);
-    expect(polled.messages.map(message => message.type)).toEqual([
-      'tool_start',
-      'tool_end',
-      'agent_message',
-      'tool_start',
-      'agent_message',
-    ]);
-    expect(polled.messages[0].content).toContain('Tool: Read');
-    expect(polled.messages[0].content).toContain('Status: running');
-    expect(polled.messages[0].content).toContain('Target: sample-game/src/main.ts');
-    expect(polled.messages[0]).toEqual(expect.objectContaining({
-      tool: 'Read',
-      tool_status: 'running',
-      tool_detail: 'Target: sample-game/src/main.ts',
-      is_subagent_tool: false,
-    }));
-    expect(polled.messages[1].content).toContain('Status: completed');
-    expect(polled.messages[1].content).toContain('Target: sample-game/src/main.ts');
-    expect(polled.messages[1]).toEqual(expect.objectContaining({
-      tool: 'Read',
-      tool_status: 'completed',
-      tool_detail: 'Target: sample-game/src/main.ts',
-    }));
-    expect(polled.messages[3].content).toContain('Target: sample-game/src/main.ts');
-    expect(polled.messages[3].artifact_path).toBe('sample-game/src/main.ts');
-  });
-
-  it('renders sanitized native tool input preparation as an active tool card', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/beegame-sessions/beegame_tool_input/events?after=0') {
-        return jsonResponse([{
-          id: 46,
-          sessionId: 'beegame_tool_input',
-          turnId: 'turn-1',
-          type: 'tool.progress',
-          text: 'Write input streaming',
-          payload: {
-            type: 'tool_progress',
-            toolUseID: 'native-write-preparing',
-            toolName: 'Write',
-            phase: 'input_streaming',
-          },
-          createdAt: '2026-06-21T00:00:46.000Z',
-        }]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    }));
-    const result = seedBoundProject(
-      'beegame_tool_input',
-      '/tmp/beegame-projects/tool-input',
-    );
-
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages).toEqual([
-      expect.objectContaining({
-        type: 'tool_start',
-        tool_use_id: 'native-write-preparing',
-        tool: 'Write',
-        tool_status: 'running',
-        content: expect.stringContaining('Write input streaming'),
-      }),
-    ]);
-    expect(JSON.stringify(polled.messages)).not.toContain('PRIVATE DOCUMENT BODY');
-  });
-
-  it('formats Agent tool events as subagent cards', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_subagent',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_subagent/idea' && init?.method === 'POST') {
-        return jsonResponse({ ok: true });
-      }
-      if (path === '/api/beegame-sessions/beegame_subagent') {
-        return jsonResponse({
-          id: 'beegame_subagent',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_subagent/events?after=0') {
-        return jsonResponse([
-          {
-            id: 50,
-            sessionId: 'beegame_subagent',
-            turnId: 'turn-1',
-            type: 'tool.started',
-            text: 'Agent',
-            payload: {
-              type: 'tool.started',
-              toolUseID: 'tool_agent',
-              toolName: 'Agent',
-              input: {
-                description: 'Review game feel',
-                prompt: 'Review the prototype controls and feedback.',
-                subagent_type: 'general-purpose',
-              },
-            },
-            createdAt: '2026-06-21T00:00:50.000Z',
-          },
-          {
-            id: 51,
-            sessionId: 'beegame_subagent',
-            turnId: 'turn-1',
-            type: 'tool.failed',
-            text: 'Agent failed',
-            payload: {
-              type: 'tool.failed',
-              toolUseID: 'tool_agent_empty',
-              toolName: 'Agent',
-              input: {},
-              output: '<tool_use_error>InputValidationError</tool_use_error>',
-            },
-            createdAt: '2026-06-21T00:00:51.000Z',
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_subagent', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages[0]).toEqual(expect.objectContaining({
-      type: 'tool_start',
-      tool: 'Agent',
-      content: expect.stringContaining('Subagent: Review game feel'),
-    }));
-    expect(polled.messages[0].content).toContain('Type: general-purpose');
-    expect(polled.messages[0].content).toContain('Prompt: Review the prototype controls and feedback.');
-    expect(polled.messages[1]).toEqual(expect.objectContaining({
-      type: 'tool_end',
-      tool: 'Agent',
-      content: expect.stringContaining('Subagent: Agent'),
-    }));
-    expect(polled.messages[1].content).toContain('Status: failed');
-  });
-
-  it('maps BeeGame result usage into token usage messages', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_usage',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_usage/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_usage',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_usage') {
-        return jsonResponse({
-          id: 'beegame_usage',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_usage/events?after=0') {
-        return jsonResponse([
-          {
-            ...resultEvent(60, 'beegame_usage', 'turn-1', 100, 25),
-            text: '',
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_usage', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages).toEqual([
-      expect.objectContaining({
-        type: 'usage',
-        usage: {
-          prompt_tokens: 100,
-          completion_tokens: 25,
-          total_tokens: 125,
+        id: 1,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: 'assistant.thinking',
+        text: 'Thinking',
+        payload: {
+          type: 'assistant.thinking',
+          status: 'started',
+          thinkingBlockId: 'block-1',
         },
-      }),
-    ]);
-  });
-
-  it('maps BeeGame assistant message usage into token usage messages', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_assistant_usage',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_assistant_usage/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_assistant_usage',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_assistant_usage') {
-        return jsonResponse({
-          id: 'beegame_assistant_usage',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_assistant_usage/events?after=0') {
-        return jsonResponse([
-          assistantUsageEvent(60, 'beegame_assistant_usage', 'turn-1', 100, 25),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_assistant_usage', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-
-    expect(polled.messages).toEqual([
-      expect.objectContaining({
-        type: 'agent_message',
-        content: 'Built with assistant usage.',
-      }),
-      expect.objectContaining({
-        type: 'usage',
-        usage: {
-          prompt_tokens: 100,
-          completion_tokens: 25,
-          total_tokens: 125,
+        createdAt: '2026-09-17T00:00:00.000Z',
+      },
+      {
+        id: 2,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: 'assistant.thinking',
+        text: 'Inspecting the scene.',
+        payload: {
+          type: 'assistant.thinking',
+          status: 'streaming',
+          thinkingBlockId: 'block-1',
         },
-      }),
-    ]);
-  });
-
-  it('maps runtime observation events into project context without adding chat noise', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_observe',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_observe/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_observe',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_observe') {
-        return jsonResponse({
-          id: 'beegame_observe',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_observe/events?after=0') {
-        return jsonResponse([
-          resultEvent(71, 'beegame_observe', 'turn-1', 200, 50),
-        ]);
-      }
-      if (path.startsWith('/api/projects/') && path.endsWith('/runtime-state')) {
-        return jsonResponse(projectRuntimeState(path.split('/')[3], {
-          context: {
-            bundle_id: 'beegame-runtime-beegame_observe',
-            status: 'initialized',
-            selected_skills: [
-              'Context collapse',
-              'History snip',
-              'Token budget',
-              'Monitor tool',
-            ],
-            token_budget: {
-              status: 'tracking',
-              prompt_tokens: 200,
-              completion_tokens: 50,
-              total_tokens: 250,
-            },
-          },
-        }));
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_observe', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(polled.messages.some(message => message.content?.includes('runtime observability'))).toBe(false);
-    expect(status.context).toEqual(expect.objectContaining({
-      bundle_id: 'beegame-runtime-beegame_observe',
-      status: 'initialized',
-      selected_skills: expect.arrayContaining([
-        'Context collapse',
-        'History snip',
-        'Token budget',
-        'Monitor tool',
-      ]),
-      token_budget: {
-        status: 'tracking',
-        prompt_tokens: 200,
-        completion_tokens: 50,
-        total_tokens: 250,
+        createdAt: '2026-09-17T00:00:01.000Z',
       },
-    }));
-  });
-
-  it('shows real permission requests without synthetic runtime gates', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_gate',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_gate/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_gate',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_gate') {
-        return jsonResponse({
-          id: 'beegame_gate',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:02.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_gate/events?after=0') {
-        return jsonResponse([
-          turnStartedEvent(49, 'beegame_gate', 'turn-1'),
-          permissionRequestedEvent(53, 'beegame_gate', 'turn-1', 'Write'),
-        ]);
-      }
-      if (path.startsWith('/api/projects/') && path.endsWith('/runtime-state')) {
-        return jsonResponse(projectRuntimeState(path.split('/')[3], {
-          phase: 'waiting_approval',
-          blocked: true,
-          next_action: 'Review BeeGame permission request',
-          active_agents: ['beegame'],
-        }));
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_gate', '/tmp/beegame-projects');
-    const polled = await beeGameAdapter.pollMessages(result.project.id, 0);
-    const status = await beeGameAdapter.getProjectStatus(result.project.id);
-
-    expect(polled.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'human_gate',
-        message_id: 'beegame-permission-beegame_gate-tool_53',
-        content: 'Write game files?',
-        requires_user_action: true,
-      }),
-    ]));
-    expect(polled.messages.some(message => message.type === 'agent_message')).toBe(false);
-    expect(status.phase).toBe('waiting_approval');
-    expect(status.next_action).toBe('Review BeeGame permission request');
-  });
-
-  it('delegates project and runtime cleanup to the project-scoped delete endpoint', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_delete',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_delete/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_delete',
-          cwd: '/tmp/beegame-projects',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_delete?deleteArtifacts=1&workspacePath=%2Ftmp%2Fbeegame-projects' && init?.method === 'DELETE') {
-        return jsonResponse({ deleted: true, deletedArtifactPaths: ['/tmp/beegame-projects/sample-game'] });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject('beegame_delete', '/tmp/beegame-projects');
-
-    await beeGameAdapter.deleteProject(result.project.id);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/projects/${encodeURIComponent(result.project.id)}`,
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-    expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith('/api/beegame-sessions/'))).toBe(false);
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
-  });
-
-  it('creates review copies through the project-scoped endpoint', async () => {
-    const payload = {
-      project: {
-        id: 'copy-1',
-        name: 'Source Review Copy',
-        root_path: '/tmp/review-copy',
-        created_at: 2,
-      },
-      runId: 'review-run',
-      phase: 'DOCUMENT_REVIEW',
-    };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-      String(input) === '/api/projects/source-1/review-copy' && init?.method === 'POST'
-        ? jsonResponse(payload, 201)
-        : jsonResponse({ error: 'not found' }, 404),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.createReviewCopy('source-1')).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/source-1/review-copy',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('treats an already-missing BeeGame session workspace as deleted locally', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects' && !init?.method) return jsonResponse([]);
-      if (path === '/api/model-configs') {
-        return jsonResponse([{ id: 'model_default', isDefault: true }]);
-      }
-      if (path === '/api/beegame-sessions' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_delete_missing',
-          cwd: '/tmp/beegame-projects/sample-level-game',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/beegame-sessions/beegame_delete_missing/idea' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'beegame_delete_missing',
-          cwd: '/tmp/beegame-projects/sample-level-game',
-          status: 'running',
-          turnStatus: 'running',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:01.000Z',
-        });
-      }
-      if (
-        path === '/api/beegame-sessions/beegame_delete_missing?deleteArtifacts=1&workspacePath=%2Ftmp%2Fbeegame-projects%2Fsample-level-game' &&
-        init?.method === 'DELETE'
-      ) {
-        return jsonResponse({
-          error: "ENOENT: no such file or directory, lstat '/tmp/beegame-projects/sample-level-game'",
-        }, 404);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = seedBoundProject(
-      'beegame_delete_missing',
-      '/tmp/beegame-projects/sample-level-game',
-    );
-
-    await expect(beeGameAdapter.deleteProject(result.project.id)).resolves.toEqual({ ok: true });
-    await expect(beeGameAdapter.getProjects()).resolves.toEqual([]);
-  });
-
-  it('lists only docs markdown files plus an on-demand project package artifact', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/beegame-sessions/beegame_docs/events?after=0') {
-        return jsonResponse([
-          writeFileEvent(1, 'beegame_docs', 'docs/GDD.md'),
-          writeFileEvent(2, 'beegame_docs', 'docs/TECH_SPEC.md'),
-          writeFileEvent(3, 'beegame_docs', 'src/main.ts'),
-          writeFileEvent(4, 'beegame_docs', 'package.json'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_docs', '/tmp/beegame-projects/sample-game');
-    const artifacts = await beeGameAdapter.getArtifacts(project.id);
-
-    expect(artifacts.map(artifact => artifact.path).filter(Boolean)).toEqual([
-      'docs/GDD.md',
-      'docs/TECH_SPEC.md',
-    ]);
-    expect(artifacts.map(artifact => artifact.name)).toContain('sample-game.zip');
-    expect(artifacts.find(artifact => artifact.package_download)).toEqual(expect.objectContaining({
-      artifact_type: 'Project Package',
-    }));
-  });
-
-  it('lists docs markdown artifacts when tool events use absolute workspace paths', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/beegame-sessions/beegame_absolute_docs/events?after=0') {
-        return jsonResponse([
-          writeFileEvent(1, 'beegame_absolute_docs', '/tmp/beegame-projects/absolute-docs/docs/GDD.md'),
-          writeFileEvent(2, 'beegame_absolute_docs', '/tmp/beegame-projects/absolute-docs/src/main.ts'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_absolute_docs', '/tmp/beegame-projects/absolute-docs');
-    const artifacts = await beeGameAdapter.getArtifacts(project.id);
-
-    expect(artifacts.map(artifact => artifact.path).filter(Boolean)).toEqual(['docs/GDD.md']);
-  });
-
-  it('lists discovered docs but hides internal transcripts from deliverables', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === '/api/beegame-sessions/beegame_restored_docs/events?after=0') {
-        return jsonResponse([]);
-      }
-      if (url === '/api/beegame-sessions/beegame_restored_docs/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Frestored-docs') {
-        return jsonResponse([]);
-      }
-      if (url === '/api/beegame-sessions/beegame_restored_docs/artifact-index?workspacePath=%2Ftmp%2Fbeegame-projects%2Frestored-docs') {
-        return jsonResponse([
-          {
-            path: 'docs/GDD.md',
-            name: 'GDD.md',
-            artifact_type: 'Document',
-            created_at: '2026-06-30T00:00:00.000Z',
-          },
-          {
-            path: 'transcripts/restored-docs__12345678.jsonl',
-            name: 'restored-docs__12345678.jsonl',
-            artifact_type: 'Transcript',
-            created_at: '2026-06-30T00:00:01.000Z',
-          },
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { project } = seedBoundProject('beegame_restored_docs', '/tmp/beegame-projects/restored-docs');
-    const artifacts = await beeGameAdapter.getArtifacts(project.id);
-
-    expect(artifacts.map(artifact => artifact.path).filter(Boolean)).toEqual([
-      'docs/GDD.md',
-    ]);
-    expect(artifacts.map(artifact => artifact.name)).toContain('restored-docs.zip');
-    expect(artifacts.map(artifact => artifact.name)).not.toContain('restored-docs__12345678.jsonl');
-  });
-
-  it('downloads the project package through the project-scoped endpoint', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/projects/project_zip/package') {
-        return new Response('PK zip', {
-          headers: {
-            'content-type': 'application/zip',
-            'content-disposition': 'attachment; filename="zip-game.zip"',
-          },
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.downloadProjectPackage('project_zip');
-
-    expect(result.filename).toBe('zip-game.zip');
-    await expect(readBlobText(result.blob)).resolves.toBe('PK zip');
-  });
-
-  it('does not create a runtime session when a read-only package download fails', async () => {
-    let packageAttempts = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/project_zip_retry/package') {
-        packageAttempts += 1;
-        return jsonResponse({ error: 'Session not found' }, 404);
-      }
-      if (path === '/api/projects/project_zip_retry/session/ensure' && init?.method === 'POST') {
-        return jsonResponse(projectEnsureResponse(
-          'project_zip_retry',
-          'beegame_zip_retry',
-          '/tmp/beegame-projects/zip-retry',
-        ));
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(beeGameAdapter.downloadProjectPackage('project_zip_retry'))
-      .rejects.toThrow('Session not found');
-    expect(packageAttempts).toBe(1);
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      '/api/projects/project_zip_retry/session/ensure',
-      expect.anything(),
-    );
-  });
-
-  it('manages preview and deployment through project scoped endpoints', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/project_runtime/preview' && init?.method === 'POST') {
-        return jsonResponse({
-          sessionId: 'beegame_runtime',
-          status: 'running',
-          url: 'http://127.0.0.1:63220/',
-        });
-      }
-      if (path === '/api/projects/project_runtime/preview/restart' && init?.method === 'POST') {
-        return jsonResponse({
-          sessionId: 'beegame_runtime',
-          status: 'running',
-          url: 'http://127.0.0.1:63221/',
-        });
-      }
-      if (path === '/api/projects/project_runtime/preview' && init?.method === 'DELETE') {
-        return jsonResponse({
-          sessionId: 'beegame_runtime',
-          status: 'stopped',
-          url: '',
-        });
-      }
-      if (path === '/api/projects/project_runtime/deployments' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'deploy_project',
-          sessionId: 'beegame_runtime',
-          workspacePath: '/tmp/beegame-projects/runtime',
-          status: 'succeeded',
-          url: '/deployments/deploy_project/',
-          buildCommand: 'npm run build',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-          deployedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/projects/project_runtime/deployments' && !init?.method) {
-        return jsonResponse([]);
-      }
-      if (path === '/api/projects/project_runtime/deployments/deploy_project/rollback' && init?.method === 'POST') {
-        return jsonResponse({
-          id: 'deploy_rollback',
-          sessionId: 'beegame_runtime',
-          workspacePath: '/tmp/beegame-projects/runtime',
-          status: 'succeeded',
-          url: '/deployments/deploy_rollback/',
-          buildCommand: 'rollback',
-          createdAt: '2026-06-21T00:00:00.000Z',
-          updatedAt: '2026-06-21T00:00:00.000Z',
-          deployedAt: '2026-06-21T00:00:00.000Z',
-        });
-      }
-      if (path === '/api/projects/project_runtime/assets' && !init?.method) {
-        return jsonResponse({
-          version: 8,
-          requirements: [{ id: 'title_logo', name: 'Title logo', required: true }],
-          resources: [],
-          });
-      }
-      if (path ===
-            '/api/projects/project_runtime/assets/resources/title_logo/upload' && init?.method === 'POST') {
-        return jsonResponse({
-          path: 'public/assets/title-logo.png',
-            resource: { id: 'title_logo' },
-          manifest: {
-            version: 8,
-            requirements: [{ id: 'title_logo', required: true }],
-            resources: [],
-          },
-        });
-      }
-      if (path.includes('/api/beegame-sessions/') && (path.includes('/preview') || path.includes('/deployments') || path.includes('/assets'))) {
-        return jsonResponse({ error: 'legacy session runtime endpoint should not be used' }, 500);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const preview = await beeGameAdapter.startProjectPreview('project_runtime');
-    const restarted = await beeGameAdapter.restartProjectPreview('project_runtime');
-    const stopped = await beeGameAdapter.stopProjectPreview('project_runtime');
-    const deployments = await beeGameAdapter.listProjectDeployments('project_runtime');
-    const deployment = await beeGameAdapter.deployProject('project_runtime');
-    const rollback = await beeGameAdapter.rollbackProjectDeployment('project_runtime', 'deploy_project');
-    const assets = await beeGameAdapter.getProjectAssets('project_runtime');
-    const upload = await beeGameAdapter.uploadProjectAsset(
-      'project_runtime',
-      'title_logo',
-      new File(['logo-bytes'], 'title-logo.png', { type: 'image/png' }),
-    );
-
-    expect(preview.url).toBe('http://127.0.0.1:63220/');
-    expect(restarted.url).toBe('http://127.0.0.1:63221/');
-    expect(stopped.status).toBe('stopped');
-    expect(deployments).toEqual([]);
-    expect(deployment.url).toBe('/deployments/deploy_project/');
-    expect(rollback.url).toBe('/deployments/deploy_rollback/');
-    expect(assets.version).toBe(8);
-    expect(assets.requirements[0]?.id).toBe('title_logo');
-    expect(upload.path).toBe('public/assets/title-logo.png');
-  });
-
-  it('accepts transcript recovery from the project-scoped event endpoint', async () => {
-    let eventsAttempts = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path === '/api/projects/project_poll_retry/events?after=0') {
-        eventsAttempts += 1;
-        return jsonResponse({
-          sessionId: 'beegame_poll_retry',
-          workspacePath: '/tmp/beegame-projects/poll-retry',
-          events: [turnStartedEvent(1, 'beegame_poll_retry', 'turn-1')],
-          recoveredFromTranscript: true,
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await beeGameAdapter.pollMessages('project_poll_retry', 0);
-
-    expect(result.lastEventId).toBe(1);
-    expect(eventsAttempts).toBe(1);
-    expect(fetchMock.mock.calls.some(([path, init]) =>
-          String(path) === '/api/beegame-sessions' && init?.method === 'POST'
-    )).toBe(false);
-  });
-
-  it('does not replay a recovered terminal failure as a live dashboard error', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/projects/project_failed_history/events?after=0') {
-        return jsonResponse({
-          sessionId: 'beegame_failed_history',
-          workspacePath: '/tmp/beegame-projects/failed-history',
-          events: [{
-            id: 7,
-            sessionId: 'beegame_failed_history',
-            turnId: 'turn-1',
-            type: 'turn.failed',
-            text: 'Historical runtime failure',
-            createdAt: '2026-07-12T00:00:00.000Z',
-          }],
-          recoveredFromTranscript: true,
-        });
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    }));
-
-    const initial = await beeGameAdapter.pollMessages('project_failed_history', 0);
-
-    expect(initial.lastEventId).toBe(7);
-    expect(initial.messages).toEqual([]);
-  });
-
-  it('does not keep polling missing sessions after read-only status falls back to transcript', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
       {
-        projectId: 'project_status_cache',
-        sessionId: 'beegame_status_cache',
-        workspacePath: '/tmp/beegame-projects/status-cache',
+        id: 3,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: 'tool.started',
+        text: 'Read',
+        payload: {
+          type: 'tool.started',
+          toolName: 'Read',
+          toolUseID: 'tool-1',
+          input: { file_path: 'scene.json' },
+        },
+        createdAt: '2026-09-17T00:00:02.000Z',
       },
-    ]));
-    let eventsAttempts = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/projects/project_status_cache/runtime-state') {
-        return jsonResponse(projectRuntimeState('project_status_cache', {
-          phase: 'idle',
-          active_agents: [],
-        }));
-      }
-      if (path === '/api/beegame-sessions/beegame_status_cache/events?after=0') {
-        eventsAttempts += 1;
-        return jsonResponse({ error: 'Session not found' }, 404);
-      }
-      if (path === '/api/beegame-sessions/beegame_status_cache/transcript?workspacePath=%2Ftmp%2Fbeegame-projects%2Fstatus-cache') {
-        return jsonResponse([
-          turnStartedEvent(1, 'beegame_status_cache', 'turn-1'),
-        ]);
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await beeGameAdapter.getProjectStatus('project_status_cache');
-    await beeGameAdapter.getProjectStatus('project_status_cache');
-
-    expect(eventsAttempts).toBe(0);
-  });
-
-  it('uses persisted runtime snapshot for model phase and token usage when the live session is gone', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
       {
-        projectId: 'project_snapshot',
-        sessionId: 'beegame_snapshot',
-        workspacePath: '/tmp/beegame-projects/snapshot-game',
+        id: 4,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: 'assistant.thinking',
+        text: 'Thinking',
+        payload: {
+          type: 'assistant.thinking',
+          status: 'ended',
+          thinkingBlockId: 'block-1',
+          thinkingStartedAt: '2026-09-17T00:00:00.000Z',
+        },
+        createdAt: '2026-09-17T00:00:03.000Z',
       },
-    ]));
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/projects/project_snapshot/runtime-state') {
-        return jsonResponse(projectRuntimeState('project_snapshot', {
-          phase: 'implementation',
-          model_config_id: 'llm_current',
-          context: {
-            phase: 'implementation',
-            token_budget: {
-              status: 'tracking',
-              prompt_tokens: 120,
-              completion_tokens: 30,
-              total_tokens: 150,
-            },
-          },
-        }));
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    ]) as Array<Record<string, unknown>>
 
-    const status = await beeGameAdapter.getProjectStatus('project_snapshot');
-    expect(status.model_config_id).toBe('llm_current');
-    expect(status.context).toEqual(expect.objectContaining({
-      token_budget: {
-        status: 'tracking',
-        prompt_tokens: 120,
-        completion_tokens: 30,
-        total_tokens: 150,
-      },
-    }));
-  });
+    const thought = history.find(message => message.type === 'thought')
+    const tool = history.find(message => message.type === 'tool')
 
-  it('prefers transcript assistant usage over stale zero runtime snapshot', async () => {
-    localStorage.setItem('beegame-adapter-bindings', JSON.stringify([
+    expect(thought).toMatchObject({
+      timestamp: Date.parse('2026-09-17T00:00:00.000Z'),
+      thinkingDurationMs: 3_000,
+    })
+    expect(tool).toMatchObject({
+      timestamp: Date.parse('2026-09-17T00:00:02.000Z'),
+    })
+    expect(history.indexOf(thought!)).toBeLessThan(history.indexOf(tool!))
+  })
+
+  it('projects one compact terminal Thinking event into one completed Thought', () => {
+    const history = transcriptEventsToHistory('project-1', [
       {
-        projectId: 'project_assistant_usage_snapshot',
-        sessionId: 'beegame_assistant_usage_snapshot',
-        workspacePath: '/tmp/beegame-projects/assistant-usage-snapshot',
+        id: 9,
+        sessionId: 'session-1',
+        type: 'assistant.thinking',
+        text: 'Inspecting the scene and UI.',
+        payload: {
+          type: 'assistant.thinking',
+          status: 'ended',
+          thinkingBlockId: 'block-compact',
+          thinkingStartedAt: '2026-09-17T00:00:00.000Z',
+        },
+        createdAt: '2026-09-17T00:00:09.000Z',
       },
-    ]));
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path === '/api/projects/project_assistant_usage_snapshot/runtime-state') {
-        return jsonResponse(projectRuntimeState('project_assistant_usage_snapshot', {
-          context: {
-            token_budget: {
-              status: 'tracking',
-              prompt_tokens: 100,
-              completion_tokens: 25,
-              total_tokens: 125,
-            },
-          },
-        }));
-      }
-      return jsonResponse({ error: 'not found' }, 404);
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    ]) as Array<Record<string, unknown>>
 
-    const status = await beeGameAdapter.getProjectStatus('project_assistant_usage_snapshot');
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({
+      type: 'thought',
+      content: 'Inspecting the scene and UI.',
+      timestamp: Date.parse('2026-09-17T00:00:00.000Z'),
+      thinkingDurationMs: 9_000,
+    })
+  })
 
-    expect(status.context?.token_budget).toEqual({
-      status: 'tracking',
-      prompt_tokens: 100,
-      completion_tokens: 25,
-      total_tokens: 125,
-    });
-  });
-});
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
-
-function projectRuntimeState(
-  projectId: string,
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    project_id: projectId,
-    phase: 'idle',
-    blocked: false,
-    blocked_reason: null,
-    active_agents: [],
-    updated_at: '2026-06-21T00:00:00.000Z',
-    next_action: 'Ready for next request',
-    context: null,
-    build_report: null,
-    model_config_id: null,
-    ...overrides,
-  };
-}
-
-function projectEnsureResponse(
-  projectId: string,
-  sessionId: string,
-  workspacePath: string,
-  sessionOverrides: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    session: {
-      id: sessionId,
-      cwd: workspacePath,
-      status: 'running',
-      turnStatus: 'idle',
-      createdAt: '2026-06-21T00:00:00.000Z',
-      updatedAt: '2026-06-21T00:00:01.000Z',
-      ...sessionOverrides,
-    },
-    binding: {
-      projectId,
-      sessionId,
-      workspacePath,
-    },
-  };
-}
-
-function readBlobText(blob: Blob): Promise<string> {
-  if (typeof blob.text === 'function') return blob.text();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob'));
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.readAsText(blob);
-  });
-}
-
-function askUserQuestionEvent() {
-  return {
-    id: 12,
-    sessionId: 'beegame_question',
-    turnId: 'turn-1',
-    type: 'permission.requested',
-    text: 'Ask the user which game mode to build.',
-    payload: {
-      type: 'permission.requested',
-      toolUseID: 'tool_question',
-      toolName: 'AskUserQuestion',
-      message: 'Ask the user which game mode to build.',
-      input: {
-        questions: [
-          {
-            header: '游戏模式',
-            question: '你想做单人模式还是双人模式？',
-            options: [
-              { label: '单人模式', description: '更快开始，适合第一版。' },
-              { label: '双人模式', description: '需要更多联网或本地对战逻辑。' },
-            ],
-          },
-        ],
-      },
-    },
-    createdAt: '2026-06-21T00:00:02.000Z',
-  };
-}
-
-function assistantMessageEvent(id: number, sessionId: string, turnId: string, text: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'assistant.message',
-    text,
-    payload: { type: 'assistant.message' },
-    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
-  };
-}
-
-function assistantLogicalMessageEvent(
-  id: number,
-  sessionId: string,
-  turnId: string,
-  messageId: string,
-  payloadText: string,
-  displayText: string,
-) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'assistant.message',
-    text: displayText,
-    payload: {
-      type: 'assistant',
-      message: {
-        id: messageId,
-        content: [{ type: 'text', text: payloadText }],
-      },
-    },
-    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
-  };
-}
-
-function assistantPartialEvent(id: number, sessionId: string, turnId: string, text: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'assistant.partial',
-    text,
-    payload: { type: 'assistant.partial' },
-    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
-  };
-}
-
-function thinkingEvent(id: number, sessionId: string, turnId: string, status: 'started' | 'streaming' | 'ended') {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'assistant.thinking',
-    text: 'Thinking',
-    payload: {
+  it('does not collide when a runtime reuses a Thinking block id', () => {
+    const compactBlock = (id: number, startedAt: string, endedAt: string, text: string) => ({
+      id,
+      sessionId: 'session-1',
       type: 'assistant.thinking',
-      status,
-    },
-    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
-  };
-}
-
-function turnStartedEvent(id: number, sessionId: string, turnId: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'turn.started',
-    text: 'Turn started',
-    payload: { type: 'turn.started' },
-    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
-  };
-}
-
-function sessionStoppedEvent(id: number, sessionId: string, turnId: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'session.stopped',
-    text: 'BeeGame session stopped',
-    payload: { type: 'session.stopped' },
-    createdAt: `2026-06-21T00:00:${String(id % 60).padStart(2, '0')}.000Z`,
-  };
-}
-
-function toolStartedEvent(id: number, sessionId: string, toolUseID: string, toolName: string, text: string, turnId = 'turn-1') {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'tool.started',
-    text,
-    payload: {
-      type: 'tool.started',
-      toolUseID,
-      toolName,
-      input: toolName === 'Bash'
-        ? { command: 'bun run build' }
-        : { file_path: '/tmp/beegame-projects/sample-game/src/main.ts' },
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function resultEvent(id: number, sessionId: string, turnId: string, inputTokens: number, outputTokens: number) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'result',
-    text: 'Done',
-    payload: {
-      type: 'result',
-      usage: {
-        input_tokens: inputTokens,
-        output_tokens: outputTokens,
+      text,
+      payload: {
+        type: 'assistant.thinking',
+        status: 'ended',
+        thinkingBlockId: 'reused-block',
+        thinkingStartedAt: startedAt,
       },
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
+      createdAt: endedAt,
+    })
+    const history = transcriptEventsToHistory('project-1', [
+      compactBlock(1, '2026-09-17T00:00:00.000Z', '2026-09-17T00:00:02.000Z', 'First thought.'),
+      compactBlock(2, '2026-09-17T00:00:03.000Z', '2026-09-17T00:00:05.000Z', 'Second thought.'),
+    ]) as Array<Record<string, unknown>>
 
-function assistantUsageEvent(id: number, sessionId: string, turnId: string, inputTokens: number, outputTokens: number) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'assistant.message',
-    text: 'Built with assistant usage.',
-    payload: {
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'Built with assistant usage.' }],
-        usage: {
-          input_tokens: inputTokens,
-          output_tokens: outputTokens,
+    expect(history).toHaveLength(2)
+    expect(new Set(history.map(message => message.id)).size).toBe(2)
+    expect(history.map(message => message.content)).toEqual(['First thought.', 'Second thought.'])
+  })
+
+  it('materializes the same Thought from realtime deltas and refreshed history', () => {
+    const realtime = transcriptEventsToHistory('project-1', [
+      {
+        id: 1,
+        sessionId: 'session-1',
+        type: 'assistant.thinking',
+        text: 'Checking',
+        payload: {
+          type: 'assistant.thinking',
+          status: 'started',
+          thinkingBlockId: 'block-equivalent',
+          thinkingStartedAt: '2026-09-17T00:00:00.000Z',
         },
+        createdAt: '2026-09-17T00:00:00.000Z',
       },
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function endTurnResultEvent(id: number, sessionId: string, turnId: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'result',
-    text: 'Done',
-    payload: {
-      type: 'result',
-      stop_reason: 'end_turn',
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function compactBoundaryEvent(id: number, sessionId: string, turnId: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'system.status',
-    text: 'system',
-    payload: {
-      type: 'system',
-      subtype: 'compact_boundary',
-      compact_metadata: {
-        trigger: 'auto',
-        pre_tokens: 87354,
+      {
+        id: 2,
+        sessionId: 'session-1',
+        type: 'assistant.thinking',
+        text: ' the scene.',
+        payload: {
+          type: 'assistant.thinking',
+          status: 'streaming',
+          thinkingBlockId: 'block-equivalent',
+          thinkingStartedAt: '2026-09-17T00:00:00.000Z',
+        },
+        createdAt: '2026-09-17T00:00:04.000Z',
       },
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
+      {
+        id: 3,
+        sessionId: 'session-1',
+        type: 'assistant.thinking',
+        text: 'Thinking',
+        payload: {
+          type: 'assistant.thinking',
+          status: 'ended',
+          thinkingBlockId: 'block-equivalent',
+          thinkingStartedAt: '2026-09-17T00:00:00.000Z',
+        },
+        createdAt: '2026-09-17T00:00:09.000Z',
+      },
+    ]) as Array<Record<string, unknown>>
+    const refreshed = transcriptEventsToHistory('project-1', [
+      {
+        id: 3,
+        sessionId: 'session-1',
+        type: 'assistant.thinking',
+        text: 'Checking the scene.',
+        payload: {
+          type: 'assistant.thinking',
+          sourceSequence: 1,
+          status: 'ended',
+          thinkingBlockId: 'block-equivalent',
+          thinkingStartedAt: '2026-09-17T00:00:00.000Z',
+        },
+        createdAt: '2026-09-17T00:00:09.000Z',
+      },
+    ]) as Array<Record<string, unknown>>
 
-function bashCompletedEvent(id: number, sessionId: string, turnId: string, command: string, output: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'tool.completed',
-    text: output,
-    payload: {
-      type: 'tool.completed',
-      toolUseID: `tool_${id}`,
-      toolName: 'Bash',
-      input: { command },
-      output,
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
+    expect(realtime).toEqual(refreshed)
+  })
 
-function bashFailedEvent(id: number, sessionId: string, turnId: string, command: string, output: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'tool.failed',
-    text: output,
-    payload: {
-      type: 'tool.failed',
-      toolUseID: `tool_${id}`,
-      toolName: 'Bash',
-      input: { command },
-      output,
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
+  it('keeps interrupted text checkpoints complete and separate across messages', () => {
+    const rows = [
+      { ...nativeEvent(1, 'assistant.partial', { messageId: 'm1', assistantBlockId: 'm1:0', contentMode: 'snapshot' }), text: 'first' },
+      { ...nativeEvent(2, 'assistant.partial', { messageId: 'm1', assistantBlockId: 'm1:0', contentMode: 'snapshot' }), text: 'first complete checkpoint' },
+      { ...nativeEvent(3, 'assistant.partial', { messageId: 'm2', assistantBlockId: 'm2:0', contentMode: 'snapshot' }), text: 'next message' },
+    ]
+    const history = transcriptEventsToHistory('project-1', rows) as Record<string, unknown>[]
+    expect(history.map(row => row.content)).toEqual(['first complete checkpoint', 'next message'])
+    expect(history.every(row => row.type === 'text')).toBe(true)
+  })
+})
 
 
-function turnCompletedEvent(id: number, sessionId: string, turnId: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'turn.completed',
-    text: 'Turn ended',
-    payload: { type: 'turn.completed' },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
+it('preserves the host design-change permission when restoring a pending question from runtime state',async()=>{
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({project_id:'design-approval',pending_permissions:[
+    {id:'design-question',tool_name:'AskUserQuestion',session_id:'session',design_change_allowed:true,
+      input:{questions:[{question:'Approve correction?',options:[{label:'Approve'},{label:'Reject'}]}]}}
+  ]})))
+  const state=await beeGameAdapter.getProjectRuntimeState('design-approval')
+  expect(state.pendingPermissions[0]?.artifact?.designChangeAllowed).toBe(true)
+})
 
-function permissionResolvedEvent(
-  id: number,
-  sessionId: string,
-  turnId: string,
-  toolName: string,
-  decision: 'allow' | 'deny',
-  autoDenied: boolean,
-  reason: string,
-) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'permission.resolved',
-    text: `${toolName}: ${decision}`,
-    payload: {
-      type: 'permission.resolved',
-      toolUseID: `tool_${id}`,
-      toolName,
-      decision,
-      ...(autoDenied ? { autoDenied: true } : {}),
-      ...(reason ? { reason } : {}),
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function permissionRequestedEvent(id: number, sessionId: string, turnId: string, toolName: string) {
-  return {
-    id,
-    sessionId,
-    turnId,
-    type: 'permission.requested',
-    text: `${toolName} game files?`,
-    payload: {
-      type: 'permission.requested',
-      toolUseID: `tool_${id}`,
-      toolName,
-      message: `${toolName} game files?`,
-      input: { file_path: 'sample-game/src/main.ts' },
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function toolCompletedEvent(id: number, sessionId: string, toolUseID: string, toolName: string, text: string) {
-  return {
-    id,
-    sessionId,
-    turnId: 'turn-1',
-    type: 'tool.completed',
-    text,
-    payload: {
-      type: 'tool.completed',
-      toolUseID,
-      toolName,
-      input: toolName === 'Bash'
-        ? { command: 'bun run build' }
-        : { file_path: '/tmp/beegame-projects/sample-game/src/main.ts' },
-      output: text,
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
-
-function writeFileEvent(id: number, sessionId: string, filePath: string) {
-  return {
-    id,
-    sessionId,
-    turnId: 'turn-1',
-    type: 'tool.completed',
-    text: `Write completed: ${filePath}`,
-    payload: {
-      type: 'tool.completed',
-      toolUseID: `tool_write_${id}`,
-      toolName: 'Write',
-      input: { file_path: filePath },
-      output: `Created ${filePath}`,
-    },
-    createdAt: `2026-06-21T00:00:${String(id).padStart(2, '0')}.000Z`,
-  };
-}
+it('submits PNG and atlas JSON together through the existing upload endpoint without starting an Agent', async () => {
+  authenticatedFetchMock.mockReset();
+  authenticatedFetchMock.mockResolvedValue(new Response(JSON.stringify({ resource: {id:'new'}, manifest:{resources:[]} }),{headers:{'content-type':'application/json'}}));
+  const files = [new File(['image'],'icons.png',{type:'image/png'}),new File(['{}'],'icons.json',{type:'application/json'})];
+  await beeGameAdapter.uploadProjectAsset('project','new',files);
+  expect(authenticatedFetchMock).toHaveBeenCalledTimes(1);
+  const [url, options] = authenticatedFetchMock.mock.calls[0];
+  expect(url).toBe('/api/projects/project/assets/resources/new/upload');
+  expect((options?.body as FormData).getAll('file')).toEqual(files);
+});

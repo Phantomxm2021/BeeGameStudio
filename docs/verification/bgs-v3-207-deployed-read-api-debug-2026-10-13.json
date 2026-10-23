@@ -1,0 +1,45 @@
+{
+  "scope": "Deploy 206 read-API classification correction and verify the actual running service through independent debug, without model execution, game edits or automatic retries.",
+  "result": "passed within read-only deployment scope",
+  "deployment": {
+    "at": "2026-10-13T02:58:19.075Z",
+    "runtimePid": 87181,
+    "runtimePort": 62174,
+    "launcher": "/private/tmp/bgs-v3-deploy-207-runtime.ts",
+    "log": "/private/tmp/bgs-v3-207-deployed-runtime.log",
+    "routesSha256": "d976c1100e1a9fb2a76578651f6575fea00a0446953494eba57766aea339854f",
+    "nativeBuildRetained": "dist/build-4Xpeak",
+    "cliRebuilt": false,
+    "frontendRebuilt": false,
+    "otherServicesRestarted": false,
+    "serviceHealth": {"62173":200,"62174":200,"62175":200,"62176":200,"62177":200}
+  },
+  "debug": {
+    "url": "http://127.0.0.1:62174/debug/workflow-v3",
+    "browser": "Chrome, existing normal BGS HttpOnly login; no credential extraction",
+    "project": "v3-fresh-a44f123f-7289-459d-8a4e-6f2401c5ae23",
+    "measurement": "4f9db89e-f3e6-4b28-b3ae-4d51c8058773",
+    "observedFreshness": {
+      "current":false,"inputsCurrent":false,"code":"preview-unverified",
+      "changes":{"requirements":false,"authorizedSourceSave":false,"sources":["docs/TECHNICAL_DESIGN.md"],"reports":[],"dependencies":false,"buildOrArtifact":true,"artifact":false,"checkInputs":["build"]},
+      "evidence":{"artifactMatches":true,"exportableSourcesMatch":false,"checks":[{"id":"build","savedStatus":"passed","inputsMatch":false},{"id":"runtime-smoke","savedStatus":"passed","inputsMatch":true},{"id":"ui-data-consumption","savedStatus":"passed","inputsMatch":true}]}
+    },
+    "selection":{"eligible":false,"code":"preview-unverified"},
+    "quality":"unverified",
+    "execution":"interrupted",
+    "rejectionChecks":[
+      {"action":"Preview","status":409,"code":"preview-unverified","previewVisible":false},
+      {"action":"project export","status":409,"code":"preview-unverified","downloadLinks":0},
+      {"action":"static export","status":409,"code":"preview-unverified","downloadLinks":0}
+    ],
+    "unchangedBeforeAndAfter":{"version":16,"turns":2,"writer":null,"lastStatus":"interrupted","pausedAt":"2026-10-13T01:56:09.449Z"},
+    "note":"Current-input comparison describes historical evidence identity only. Matching runtime checks are not acceptance of the changed document/source package or new game quality. Rejection here is the interrupted-turn gate; source-only rejection was separately covered by 206 synthetic API/debug regression."
+  },
+  "safety": {
+    "paidModelCalls":0,"agentTasksDispatched":0,"taskResumes":0,"automaticRetries":0,
+    "gameFilesChanged":false,"formalFrontendChanged":false,"claudeCodeChanged":false,
+    "nativeProcessesObserved":"none before deployment and after new runtime startup",
+    "gitDiffCheck":"passed"
+  },
+  "limits":["No new game-quality or token-consumption acceptance", "No new focused continuation this turn; previously verified by 206", "No full regression rerun; this is deployed-service verification of the already-tested fix"]
+}

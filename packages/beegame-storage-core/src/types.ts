@@ -62,6 +62,10 @@ export type CreateMultipartUploadInput = StorageObjectLocator & {
   metadata?: Record<string, string>
 }
 
+export type StorageHttpMetadata = {
+  cacheControl?: string
+}
+
 export type CompleteMultipartUploadPart = {
   partNumber: number
   etag: string
@@ -74,6 +78,7 @@ export interface ProjectStorageDriver {
     bytes: Uint8Array,
     contentType: string,
     metadata?: Record<string, string>,
+    httpMetadata?: StorageHttpMetadata,
   ): Promise<void>
   getObject(
     locator: StorageObjectLocator,

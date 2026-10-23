@@ -22,10 +22,11 @@ import type {
 } from './types'
 import { normalizeResourceTechnicalFacts } from './technical-facts'
 import { evaluateResourceElementSelectionReadiness } from './publish-readiness'
+import { resolveEffectiveResourceMetadata } from './metadata-policy'
 
 /**
  * Browse published Packs without assigning project-specific game roles.
- * Filtering is exact and metadata-driven; free-form intent remains Claude
+ * Filtering is exact and metadata-driven; free-form intent remains Bgs
  * Code's reasoning input and is never interpreted here with name heuristics.
  */
 export function browseResourceCatalogPacks(
@@ -34,11 +35,12 @@ export function browseResourceCatalogPacks(
   request: ResourceCatalogRequest,
 ): ResourceCatalogPage<ResourceCatalogPack> {
   const catalogRequest = resolveCatalogRequest(request, 'packs')
+  elements = elements.map(resolveEffectiveResourceMetadata)
   const published = packs.filter(pack => pack.status === 'published')
   const readyByPack = new Map<string, ResourceElement[]>()
   for (const element of elements) {
     const pack = published.find(candidate => candidate.id === element.packId)
-    if (!pack || !isCatalogSelectableElement(pack, element, elements)) continue
+    if (!pack || !isCatalogBrowsableElement(pack, element, elements)) continue
     const list = readyByPack.get(element.packId) ?? []
     list.push(element)
     readyByPack.set(element.packId, list)
@@ -50,18 +52,6 @@ export function browseResourceCatalogPacks(
     .sort((left, right) => compareText(left.pack.name, right.pack.name) || compareText(left.pack.id, right.pack.id))
   const facets = collectFacets(available.map(entry => entry.pack), available.flatMap(entry => entry.elements))
   return page(filtered.map(({ pack, elements: packElements }) => summarizePack(pack, packElements)), catalogRequest, facets, item => item.packId)
-}
-
-/** Browse pre-aggregated Pack summaries without loading every element. */
-export function browseResourceCatalogPackSummaries(
-  summaries: readonly ResourceCatalogPack[],
-  request: ResourceCatalogRequest,
-): ResourceCatalogPage<ResourceCatalogPack> {
-  const catalogRequest = resolveCatalogRequest(request, 'pack-summaries')
-  const filtered = summaries
-    .filter(pack => catalogPackMatches(pack, catalogRequest.filters))
-    .sort((left, right) => compareText(left.packName, right.packName) || compareText(left.packId, right.packId))
-  return page(filtered, catalogRequest, collectSummaryFacets(summaries), item => item.packId)
 }
 
 export function hasElementCatalogFilters(
@@ -88,12 +78,13 @@ export function browseResourcePackElements(
   request: ResourceCatalogRequest,
 ): ResourceCatalogPage<ResourceCatalogElement> {
   const catalogRequest = resolveCatalogRequest(request, `pack-elements:${packId}`)
+  elements = elements.map(resolveEffectiveResourceMetadata)
   const published = packs.filter(pack => pack.status === 'published')
   const packById = new Map(published.map(pack => [pack.id, pack]))
   const available = elements
     .filter(element => {
       const pack = packById.get(element.packId)
-      return Boolean(pack && element.packId === packId && isCatalogSelectableElement(pack, element, elements))
+      return Boolean(pack && element.packId === packId && isCatalogBrowsableElement(pack, element, elements))
     })
   const eligible = available
     .filter(element => elementMatches(element, packById.get(element.packId)!, catalogRequest.filters))
@@ -257,11 +248,12 @@ export function matchResourceRequirements(
   }
 }
 
-function candidateCoversObligation(
-  candidate: ResourceRequirementCandidate,
+export function candidateCoversObligation(
+  candidate: { assetKind?: string; usageTags: readonly string[]; capabilities: readonly string[];
+    relations: readonly { kind: string }[]; contentProfile?: { components: readonly { kind: string }[] } },
   obligation: ResourceCoverageObligation,
 ): boolean {
-  if (obligation.assetKinds?.length && (!candidate.assetKind || !obligation.assetKinds.includes(candidate.assetKind))) return false
+  if (obligation.assetKinds?.length && (!candidate.assetKind || !obligation.assetKinds.some(kind => kind === candidate.assetKind))) return false
   if (obligation.usageTags?.length && !intersects(obligation.usageTags, candidate.usageTags)) return false
   if (obligation.capabilities?.length && !obligation.capabilities.every(capability => candidate.capabilities.includes(capability))) return false
   if (obligation.relationKinds?.length && !obligation.relationKinds.every(kind => candidate.relations.some(relation => relation.kind === kind))) return false
@@ -278,14 +270,6 @@ function compareCandidateSelections(
   const leftKey = left.map(index => candidates[index]!.elementId).join(',')
   const rightKey = right.map(index => candidates[index]!.elementId).join(',')
   return compareText(leftKey, rightKey)
-}
-
-function hasImmutableContentHash(element: ResourceElement): boolean {
-  const value = element.specs.contentHash
-  if (typeof value !== 'string' || value.length !== 64) return false
-  for (const character of value.toLocaleLowerCase())
-    if (!'0123456789abcdef'.includes(character)) return false
-  return true
 }
 
 function packMatches(pack: ResourcePack, elements: readonly ResourceElement[], filters?: ResourceCatalogFilter): boolean {
@@ -340,37 +324,6 @@ function summarizePack(pack: ResourcePack, elements: readonly ResourceElement[])
     ...(pack.author ? { author: pack.author } : {}),
     ...(pack.source ? { source: pack.source } : {}),
     compatibleEngines: [...(pack.compatibleEngines ?? [])],
-  }
-}
-
-function catalogPackMatches(pack: ResourceCatalogPack, filters?: ResourceCatalogFilter): boolean {
-  if (!filters) return true
-  if (filters.packIds?.length && !filters.packIds.includes(pack.packId)) return false
-  if (filters.dimensions?.length && !filters.dimensions.includes(pack.dimension)) return false
-  if (filters.primaryCategories?.length && !filters.primaryCategories.includes(pack.primaryCategory)) return false
-  if (filters.styles?.length && !intersectsNormalized(filters.styles, pack.styles)) return false
-  if (filters.gameTypes?.length && !intersectsNormalized(filters.gameTypes, pack.gameTypes)) return false
-  if (filters.packTags?.length && !intersectsNormalized(filters.packTags, pack.tags)) return false
-  if (filters.categories?.length && !intersects(filters.categories, pack.categories)) return false
-  if (filters.usageTags?.length && !intersects(filters.usageTags, pack.usageTags)) return false
-  if (filters.assetKinds?.length && !intersects(filters.assetKinds, pack.assetKinds)) return false
-  if (filters.capabilities?.length && !filters.capabilities.every(value => pack.capabilities.includes(value))) return false
-  if (filters.formats?.length && !intersectsNormalized(filters.formats.map(value => value.replace(/^\./, '')), pack.formats)) return false
-  return true
-}
-
-function collectSummaryFacets(packs: readonly ResourceCatalogPack[]): ResourceCatalogFacets {
-  return {
-    dimensions: unique(packs.map(pack => pack.dimension)),
-    primaryCategories: unique(packs.map(pack => pack.primaryCategory)),
-    categories: unique(packs.flatMap(pack => [...pack.categories])),
-    styles: unique(packs.flatMap(pack => [...pack.styles])),
-    gameTypes: unique(packs.flatMap(pack => [...pack.gameTypes])),
-    packTags: unique(packs.flatMap(pack => [...pack.tags])),
-    usageTags: unique(packs.flatMap(pack => [...pack.usageTags])),
-    assetKinds: unique(packs.flatMap(pack => [...pack.assetKinds])),
-    capabilities: unique(packs.flatMap(pack => [...pack.capabilities])),
-    formats: unique(packs.flatMap(pack => [...pack.formats])),
   }
 }
 
@@ -559,13 +512,16 @@ function isCursorPayload(value: unknown): value is {
   )
 }
 
-function isCatalogSelectableElement(
+function isCatalogBrowsableElement(
   pack: ResourcePack,
   element: ResourceElement,
   elements: readonly ResourceElement[],
 ): boolean {
-  if (element.usageTagsMode === 'inherit' || element.usageTagsMode === 'manual-only') return false
-  return evaluateResourceElementSelectionReadiness(pack, element, elements).selectionReady
+  if (element.usageTagsMode === 'manual-only') return false
+  // Browsing a known file does not certify its game role. Missing semantic
+  // tags must not hide otherwise ready audio/images; matching remains strict.
+  return evaluateResourceElementSelectionReadiness(pack, element, elements)
+    .blocking.every(issue => issue.code === 'usage_tags_missing')
 }
 
 function includesFormat(formats: readonly string[], path: string): boolean {

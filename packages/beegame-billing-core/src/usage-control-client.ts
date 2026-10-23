@@ -51,6 +51,7 @@ export type BeeGameUsageBillingRecordResult = {
 }
 
 export type BeeGameUsageBillingClient = {
+  assertUsageAvailable?: (userId: string) => Promise<void>
   recordUsage: (
     userId: string,
     input: BeeGameUsageBillingRecordInput,
@@ -93,6 +94,7 @@ export function createRemoteUsageBillingClient(
 }
 
 class DisabledRemoteUsageBillingClient implements BeeGameUsageBillingClient {
+  assertUsageAvailable(): Promise<void> { return Promise.reject(remoteUsageBillingConfigError()) }
   recordUsage(): Promise<BeeGameUsageBillingRecordResult> {
     return Promise.reject(remoteUsageBillingConfigError())
   }
@@ -108,6 +110,11 @@ class RemoteUsageBillingClient implements BeeGameUsageBillingClient {
     private readonly token: string,
     private readonly fetchImpl: BillingFetch,
   ) {}
+
+  async assertUsageAvailable(userId: string): Promise<void> {
+    const result = await this.post<{ available?: boolean }>('/api/internal/usage/authorize', { userId })
+    if (result.available !== true) throw new BeeGameUsageBillingError('Usage authorization was not confirmed', false)
+  }
 
   recordUsage(
     userId: string,
@@ -139,6 +146,7 @@ class RemoteUsageBillingClient implements BeeGameUsageBillingClient {
         buildUsageBillingUrl(this.baseUrl, path),
         {
           method: 'POST',
+          signal: AbortSignal.timeout(30_000),
           headers: {
             'content-type': 'application/json',
             'x-beegame-credit-control-token': this.token,

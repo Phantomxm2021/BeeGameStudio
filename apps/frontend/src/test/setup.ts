@@ -1,7 +1,12 @@
-import { afterEach, beforeAll } from 'vitest';
+import { afterEach, beforeAll, expect } from 'vitest';
 import { cleanup } from '@testing-library/react';
-import '@testing-library/jest-dom/vitest';
+import * as matchers from '@testing-library/jest-dom/matchers';
 import '../i18n';
+
+// Extend the exact Vitest instance running this workspace. The monorepo also
+// contains an older Vitest version, so jest-dom's convenience entrypoint can
+// otherwise register its matchers on the wrong instance.
+expect.extend(matchers);
 
 // Mock localStorage for all tests
 const localStorageMock = (() => {
@@ -43,6 +48,60 @@ beforeAll(() => {
         this.scrollTop = options.top;
       }
     };
+  }
+
+  // Motion's viewport helpers use this browser API. JSDOM intentionally does
+  // not implement it, so provide the inert platform equivalent for unit tests.
+  if (!globalThis.IntersectionObserver) {
+    class IntersectionObserverMock implements IntersectionObserver {
+      readonly root: Element | Document | null = null;
+      readonly rootMargin = '0px';
+      readonly scrollMargin = '0px';
+      readonly thresholds = [0];
+      constructor(_callback: IntersectionObserverCallback, _options?: IntersectionObserverInit) {}
+      disconnect() {}
+      observe(_target: Element) {}
+      takeRecords(): IntersectionObserverEntry[] { return []; }
+      unobserve(_target: Element) {}
+    }
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      value: IntersectionObserverMock,
+      writable: true,
+      configurable: true,
+    });
+  }
+
+  if (!globalThis.ResizeObserver) {
+    class ResizeObserverMock implements ResizeObserver {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    }
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      value: ResizeObserverMock,
+      writable: true,
+      configurable: true,
+    });
+  }
+
+  // JSDOM does not implement media queries. Visual libraries may use this to
+  // select a palette even when their theme is explicitly set.
+  if (!window.matchMedia) {
+    window.matchMedia = (query: string): MediaQueryList => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    });
+  }
+
+  // BeUI favicons decode images before displaying them; JSDOM has no decoder.
+  if (!HTMLImageElement.prototype.decode) {
+    HTMLImageElement.prototype.decode = () => Promise.resolve();
   }
 });
 

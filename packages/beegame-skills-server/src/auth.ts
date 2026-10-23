@@ -46,7 +46,8 @@ export function createConfiguredSkillsUserResolver(
       env.SUPABASE_ANON_KEY ??
       env.VITE_SUPABASE_ANON_KEY,
   )
-  if (!baseUrl || !apiKey) return createLocalSkillsUserResolver(env)
+  if (!baseUrl || !apiKey)
+    return env.NODE_ENV === 'production' ? undefined : createLocalSkillsUserResolver(env)
   return async request => {
     const token = getBearerToken(request)
     if (!token) return undefined

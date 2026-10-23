@@ -1,8 +1,9 @@
 /**
  * Project event transport.
  *
- * BeeGame has one canonical frontend transport: polling the server-persisted
- * project event stream.
+ * BeeGame uses an authenticated SSE stream for live project events and keeps
+ * cursor-based polling as a compatibility fallback. Both transports resume
+ * from the server-persisted event cursor after tab suspension or reconnects.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -18,6 +19,7 @@ export type ProjectEventPollingState =
   | 'failed';
 
 export interface UseProjectEventPollingOptions {
+  enabled?: boolean;
   projectId: string;
   onMessage: (message: ProjectEventMessage) => void;
   onClose?: () => void;
@@ -34,6 +36,7 @@ export interface UseProjectEventPollingReturn {
 
 export const useProjectEventPolling = ({
   projectId,
+  enabled = true,
   onMessage,
   onClose,
   onOpen,
@@ -45,6 +48,7 @@ export const useProjectEventPolling = ({
   const reconnectAttemptsRef = useRef(0);
   const callbacksRef = useRef({ onMessage, onClose, onOpen, showToastError });
   const disconnectedRef = useRef(false);
+  const cursorRef = useRef({ projectId, value: 0 });
 
   useEffect(() => {
     callbacksRef.current = { onMessage, onClose, onOpen, showToastError };
@@ -66,45 +70,59 @@ export const useProjectEventPolling = ({
   }, []);
 
   useEffect(() => {
-    if (!projectId || disconnectedRef.current) return;
+    if (!enabled || !projectId || disconnectedRef.current) return;
 
     let cancelled = false;
-    let lastEventId = 0;
+    if (cursorRef.current.projectId !== projectId) cursorRef.current = { projectId, value: 0 };
+    let lastEventId = cursorRef.current.value;
     let idlePolls = 0;
     let connected = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let streamAbortController: AbortController | null = null;
+    let usePollingFallback = typeof beeGameAdapter.streamMessages !== 'function';
     queueMicrotask(() => {
       if (!cancelled && !disconnectedRef.current) setState('connecting');
     });
 
-    const schedule = (delayMs: number) => {
+    const schedule = (task: () => void, delayMs: number) => {
       if (cancelled || disconnectedRef.current) return;
-      timer = setTimeout(() => void poll(), delayMs);
+      timer = setTimeout(task, delayMs);
+    };
+
+    const markConnected = () => {
+      if (cancelled || disconnectedRef.current) return;
+      const recovered = reconnectAttemptsRef.current > 0;
+      reconnectAttemptsRef.current = 0;
+      setReconnectAttempts(0);
+      if (!connected || recovered) {
+        connected = true;
+        setState('connected');
+        callbacksRef.current.onOpen?.();
+      }
     };
 
     const poll = async () => {
       if (cancelled || disconnectedRef.current) return;
       if (typeof document !== 'undefined' && document.hidden) {
-        schedule(5_000);
+        schedule(() => void poll(), 5_000);
         return;
       }
 
       try {
         const result = await beeGameAdapter.pollMessages(projectId, lastEventId);
-        const recovered = reconnectAttemptsRef.current > 0;
-        reconnectAttemptsRef.current = 0;
-        setReconnectAttempts(0);
-        lastEventId = result.lastEventId;
+        // The request can resolve after a project switch, disconnect, or
+        // explicit reconnect. Return before touching polling state or reading
+        // callbacksRef so a stale response cannot notify the next project.
+        if (cancelled || disconnectedRef.current) return;
         result.messages.forEach(message => callbacksRef.current.onMessage(message));
+        lastEventId = result.lastEventId;
+        cursorRef.current.value = lastEventId;
         idlePolls = result.messages.length > 0 ? 0 : idlePolls + 1;
-
-        if (!connected || recovered) {
-          connected = true;
-          setState('connected');
-          callbacksRef.current.onOpen?.();
-        }
-
-        schedule(result.messages.length > 0 ? 800 : Math.min(5_000, 1_000 + idlePolls * 500));
+        markConnected();
+        schedule(
+          () => void poll(),
+          result.messages.length > 0 ? 800 : Math.min(5_000, 1_000 + idlePolls * 500),
+        );
       } catch (error) {
         if (cancelled || disconnectedRef.current) return;
         reconnectAttemptsRef.current += 1;
@@ -114,19 +132,85 @@ export const useProjectEventPolling = ({
           console.warn('[ProjectEvents] Poll failed:', error);
         }
         if (reconnectAttemptsRef.current === 3) {
-          callbacksRef.current.showToastError?.('BeeGame 连接暂时不可用，正在自动重连');
+          callbacksRef.current.showToastError?.(isAuthenticationServiceUnavailable(error)
+            ? '登录验证服务暂时不可用，正在自动恢复连接'
+            : 'BeeGame 连接暂时不可用，正在自动重连');
         }
-        schedule(Math.min(15_000, 500 * 2 ** Math.min(reconnectAttemptsRef.current - 1, 5)));
+        schedule(
+          () => void poll(),
+          reconnectDelay(error, reconnectAttemptsRef.current),
+        );
       }
     };
 
-    void poll();
+    const stream = async () => {
+      if (cancelled || disconnectedRef.current || usePollingFallback) return;
+      if (typeof document !== 'undefined' && document.hidden) {
+        schedule(() => void stream(), 5_000);
+        return;
+      }
+      streamAbortController = new AbortController();
+      try {
+        await beeGameAdapter.streamMessages(
+          projectId,
+          lastEventId,
+          {
+            onOpen: markConnected,
+            onCursor: eventId => {
+              if (cancelled || disconnectedRef.current) return;
+              lastEventId = Math.max(lastEventId, eventId);
+              cursorRef.current.value = lastEventId;
+            },
+            onMessage: message => { if (!cancelled && !disconnectedRef.current) callbacksRef.current.onMessage(message); },
+          },
+          streamAbortController.signal,
+        );
+        if (cancelled || disconnectedRef.current) return;
+        schedule(() => void stream(), 0);
+      } catch (error) {
+        if (cancelled || disconnectedRef.current) return;
+        const status = typeof error === 'object' && error !== null && 'status' in error
+          ? (error as { status?: unknown }).status
+          : undefined;
+        if (status === 404 || status === 405) {
+          usePollingFallback = true;
+          void poll();
+          return;
+        }
+        reconnectAttemptsRef.current += 1;
+        setReconnectAttempts(reconnectAttemptsRef.current);
+        setState('reconnecting');
+        if (!isAuthenticationServiceUnavailable(error)) {
+          console.warn('[ProjectEvents] SSE failed:', error);
+        }
+        if (reconnectAttemptsRef.current === 3) {
+          callbacksRef.current.showToastError?.(isAuthenticationServiceUnavailable(error)
+            ? '登录验证服务暂时不可用，正在自动恢复连接'
+            : 'BeeGame 连接暂时不可用，正在自动重连');
+        }
+        schedule(
+          () => void stream(),
+          reconnectDelay(error, reconnectAttemptsRef.current),
+        );
+      } finally {
+        streamAbortController = null;
+      }
+    };
+
+    if (usePollingFallback) void poll();
+    else void stream();
+    const onVisible = () => {
+      if (!document.hidden && !cancelled && !disconnectedRef.current) setGeneration(value => value + 1);
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
       if (timer) clearTimeout(timer);
+      streamAbortController?.abort();
     };
-  }, [generation, projectId]);
+  }, [enabled, generation, projectId]);
 
   return {
     state,
@@ -135,3 +219,10 @@ export const useProjectEventPolling = ({
     disconnect,
   };
 };
+
+function reconnectDelay(error: unknown, attempts: number): number {
+  const retryAfterMs = (error as { retryAfterMs?: unknown } | null)?.retryAfterMs;
+  const suggestedDelay = typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs)
+    ? Math.max(0, Math.min(60_000, retryAfterMs)) : 0;
+  return Math.max(suggestedDelay, Math.min(15_000, 500 * 2 ** Math.min(attempts - 1, 5)));
+}

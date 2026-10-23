@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "date": "2026-10-10",
+  "scope": "V3-05 host batch binding entry and local source/version adaptation",
+  "sourceRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "filesSha256": {
+    "packages/agent-workflow-server/src/beegame/content-binding.ts": "4bf738690a841fa70e1e87ea461ce08f759303076bb6bcc524023f88d361f503",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts": "4d47c24862e08b5521b7630731162e6e8669ead8b202bcc876041f2125d06ca7",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/context.ts": "0627030e0aa59505bf2c5978e08be6e983cb98e069842f8821fa2b78849125d1",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts": "9db14ef14c97e355f3ed3c2427971cb25d4297713adc0540b5cf43625888d530",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts": "0e48f44912c4ff9ef581906d6c53a958a50217bea943a88a3fa99edc9518891c",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/binding.ts": "4ed06a3811a7e50111d536ca565188172dbd27c162c667e321f46067f47ab50c",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/binding.test.ts": "b2ab7576761d19961f4b474d95a948dcaf3e15436af74ff81ec163c96c4d7606",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/native-integration.test.ts": "940b84b09693546a7c4e549893a7d78d052fac11e05f72f3057aa6f2705bc3cb"
+  },
+  "implemented": [
+    "optional strict Task.bindingPlan with explicit writable/expected content targets",
+    "existing binder uses trusted host task-source reader; legacy default retains eight-document authority",
+    "host executes within current attempt/fence after real native writer exit",
+    "source/linked content/mapping/manifest/referenced member identities retained",
+    "only validated host binding transforms original input versions into new check/output versions",
+    "actual per-file written/pending/issues preserved, including cancellation",
+    "repeat execute request does not redispatch native or apply binding twice"
+  ],
+  "database": {
+    "newMigrationRequired": false,
+    "productionMigrationApplied": false,
+    "localInstallationRequired": false,
+    "development": "explicit single-process file storage supported; not evidence of PostgreSQL permissions or multi-worker correctness",
+    "production": "existing Supabase/PostgreSQL plus prior V3 migration",
+    "unverified": [
+      "real PostgreSQL migration execution",
+      "cross-process CAS/workspace writer exclusion",
+      "DB permissions"
+    ]
+  },
+  "tests": {
+    "regression": {
+      "passed": 157,
+      "failed": 0,
+      "assertions": 985,
+      "files": 12,
+      "log": "/private/tmp/bgs-v3-binding-regression-final.log"
+    },
+    "realNativeCli": {
+      "passed": 4,
+      "failed": 0,
+      "assertions": 54,
+      "log": "/private/tmp/bgs-v3-binding-native-final.log",
+      "provider": "localhost deterministic fake provider only",
+      "cases": [
+        "plain saved output",
+        "successful native Skill",
+        "Write mapping -> normal final -> actual host binding/checks",
+        "Skill + binding transformed source versions"
+      ]
+    },
+    "focusedTypes": {
+      "passed": true,
+      "files": [
+        "state.ts",
+        "context.ts",
+        "checks.ts",
+        "binding.ts"
+      ],
+      "log": "/private/tmp/bgs-v3-binding-types-final.log"
+    },
+    "sharedBinderWhitespaceCheck": {
+      "passed": true
+    }
+  },
+  "coverage": [
+    "UI layout and design-field preservation",
+    "Scene exact node/component identity",
+    "undeclared targets and stale hashes",
+    "fence loss and actual resource byte drift",
+    "cancelled partial writes kept without rollback/retry",
+    "dependent consumer uses bound output versions",
+    "unrelated UI unchanged",
+    "legacy batch binding regressions"
+  ],
+  "noPaidCalls": true,
+  "noNativeSourceChanges": true,
+  "noRealProjectArtifactChanges": true,
+  "noProductionDbWrites": true,
+  "noServiceRestartOrDeploymentCommands": true,
+  "limits": [
+    "No full-game release acceptance; deliveryEligible stays false",
+    "No semantic/visual quality or correct Skill application proof",
+    "No paid model cost improvement measurement",
+    "No full-repository typecheck or repair of prior unrelated failing suites",
+    "Per-file commits are not a multi-file transaction",
+    "Old standalone CLI stays legacy-only; V3 entry is the declared Task host operation",
+    "Raw original input versions are historical; consumer must bind current task output identity"
+  ],
+  "next": [
+    "V3-06 actual target-runtime observations, tested package and formal-data consumption",
+    "isolated real PostgreSQL verification",
+    "V3-07/08/09 review/recovery/frontend per the remaining implementation checklist"
+  ]
+}

@@ -72,7 +72,7 @@ export function AccountActionsMenu({
         },
         ...(canManageResources ? [{
             key: 'resources',
-            label: '资源库',
+            label: t.resourceLibrary,
             icon: <FolderOpen className="h-4 w-4" />,
             onClick: onOpenResourceLibrary || onToggleSettings,
         }] : []),

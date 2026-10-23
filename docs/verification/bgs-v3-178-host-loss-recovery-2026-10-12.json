@@ -1,0 +1,171 @@
+{
+  "version": "1.78",
+  "date": "2026-10-12",
+  "status": "implemented-offline-verified-not-deployed",
+  "preImplementationAudit": "docs/verification/bgs-v3-178-host-loss-audit-2026-10-12.json",
+  "conclusion": "Original-host memory loss after confirmed cleanup is preventable by an independently persisted signed host exit receipt. Death before any trustworthy cleanup observation remains unknowable, not force-recoverable.",
+  "implementation": {
+    "newProductionModule": "packages/agent-workflow-server/src/beegame/workflow-v3/host-exit-receipt.ts",
+    "integration": [
+      "packages/agent-workflow-server/src/app.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/debug.html"
+    ],
+    "storage": "Existing host data root/workflow-v3-exits, outside project workspace; existing parent is resolved and outside-project location verified before creating receipt directory. Reads do not create directories.",
+    "authority": "Existing BEEGAME_CONFIG_ENCRYPTION_KEY, HMAC domain-separated derivation. Key not written into receipt, user request or normal native environment; no new settings/hooks/key provisioning. Root environment presence checked without displaying key.",
+    "binding": [
+      "owner",
+      "project",
+      "Run",
+      "workspace",
+      "Chat",
+      "attempt",
+      "worker",
+      "fence",
+      "session",
+      "request",
+      "start identity",
+      "requirements revision",
+      "task/plan where applicable",
+      "source-edit exact path/before/after/archive where applicable"
+    ],
+    "publication": "Write exclusive temporary file, fsync bytes, atomically link final immutable receipt without replacing prior proof, fsync directory. Partial .tmp files are not accepted. Current-platform process-death durability verified, not whole-disk/power-loss or universal OS guarantees.",
+    "persistedFacts": [
+      "observed quiescence timestamp",
+      "literal notStarted where originally observed",
+      "native session/turn",
+      "usage",
+      "Skill facts",
+      "accounting epochs",
+      "Question provenance where existing executor observes it"
+    ],
+    "excluded": [
+      "credentials",
+      "game source bytes",
+      "passed checks",
+      "outputs",
+      "quality verdicts",
+      "replay commands"
+    ],
+    "recovery": "Existing authenticated explicit recover-writer API, current CAS version/owner/writer identity and no-active-writer guards. Restore factual quiescence then mark interrupted/failed; preserve paused intent, requirements, saved bytes and unrelated results. Never automatically dispatch.",
+    "readApi": "recoveryEvidence adds host-receipt; hostExitReceiptsConfigured reports configured capability. Corrupt or unusable records show unavailable; explicit recovery reports exit-receipt-invalid.",
+    "writeFailure": "Log sanitized local-receipt warning and retain original-host observation; do not block normal DB quiescence/settlement solely because optional local copy fails.",
+    "legacy": "Compatible Task/source-save path shares same receipt helper; no new stage, migration, supervisor, heartbeat, takeover or engine/renderer selection."
+  },
+  "verification": {
+    "consolidated": {
+      "tests": 75,
+      "files": 9,
+      "failures": 0,
+      "assertions": 966,
+      "log": "/private/tmp/bgs-v3-178-regression-final.log"
+    },
+    "native": {
+      "distinctTests": 3,
+      "files": 2,
+      "failures": 0,
+      "assertions": 185,
+      "initialCompleteLog": "/private/tmp/bgs-v3-178-native-debug.log",
+      "latestTwoOverlappingDebugTests": "/private/tmp/bgs-v3-178-native-debug-final.log",
+      "provider": "real native CLI with fixed loopback responses; dedicated synthetic browser only",
+      "requestsForDistinctFinalPaths": 36,
+      "actualLoopbackProviderRequestsIncludingOverlappingRerun": 44,
+      "paidCalls": 0
+    },
+    "distinctTests": 78,
+    "failures": 0,
+    "assertions": 1151,
+    "typecheck": {
+      "passed": true,
+      "log": "/private/tmp/bgs-v3-178-typecheck-final-verified.log",
+      "processExitCode": 0
+    },
+    "diffCheck": true,
+    "actualSigkill": {
+      "runner": "fake native transport / real BGS executor child process",
+      "checkpoint": "complete host receipt before remote-quiescence path; the local test store's CAS is sequential, not claimed multi-process race safety",
+      "positiveCases": [
+        "autonomous native goal",
+        "formal source save",
+        "known not-started reservation"
+      ],
+      "negativeCase": "SIGKILL after reservation before exit observation has no receipt and cannot recover",
+      "log": "/private/tmp/bgs-v3-178-regression-final.log"
+    },
+    "actualNativeDebug": {
+      "runner": "real CLI, local store, fixed loopback provider",
+      "case": "after native cleanup and simulated failed DB exit persistence, reconstruct whole app; original observation gone, host-receipt shown; explicit recovery adds no native start/provider request",
+      "reconstructions": 2,
+      "nativeStarts": 1,
+      "providerRequests": 4,
+      "questionAnswered": true,
+      "skillLoaded": true,
+      "screenshot": "/private/tmp/bgs-v3-178-debug-controlled.png"
+    },
+    "otherBoundaries": [
+      "owner/project/Run/chat/workspace/worker/fence/request/requirement/task mismatch rejects",
+      "missing/changed key rejects; no plaintext fallback",
+      "unsigned/tampered/truncated/symlinked/mismatched signed records reject",
+      "second different fact cannot overwrite existing receipt",
+      "receipt root inside project rejected before creating directory",
+      "active writer and stale version/identity reject even with valid receipt",
+      "native cleanup rejection writes no receipt",
+      "local write outage still allows normal DB settlement",
+      "no-start recovery retains proof; pause/resume never dispatches; continue rejected after unpause",
+      "compatible Task recovery restores accounting, not checks/PASS",
+      "original source bytes archived, candidate/Scene/independent note retained",
+      "old source-fault regression still preserves no-proof refusal"
+    ],
+    "limitations": [
+      "No real remote SQL/RPC experiment this round.",
+      "Actual SIGKILL uses fake native transport; real CLI path uses app reconstruction, not SIGKILL. Separate layers are not claimed as one combined real-model/remote-DB crash acceptance.",
+      "No real game, design judgment, engine or subjective quality acceptance."
+    ],
+    "initialHarnessFailures": [
+      "First receipt test child stdin used end(payload), which did not write bytes in Bun; corrected write then end.",
+      "Source fixture lacked required entryScene/scene registry and typed draft narrowing; fixture corrected, production validation unchanged.",
+      "Optional Buffer assertion types corrected without weakening byte checks.",
+      "Compatible task test initially disposed immediately before native start; corrected to await actual exit-persistence checkpoint.",
+      "Package-level tsc command resolved wrong aliases and reported unrelated core errors; root project typecheck is the verified command.",
+      "Unescalated tests could not listen on loopback; same regressions passed with local network permission, without assertion relaxation."
+    ],
+    "initialLogs": [
+      "/private/tmp/bgs-v3-178-receipt-initial.log",
+      "/private/tmp/bgs-v3-178-receipt-second.log",
+      "/private/tmp/bgs-v3-178-receipt-complete.log",
+      "/private/tmp/bgs-v3-178-existing-core.log"
+    ]
+  },
+  "protections": {
+    "paidCalls": 0,
+    "newPaidAuthorizations": 0,
+    "actualGameArtifactEdits": 0,
+    "formalFrontendEdits": 0,
+    "claudeCodeCoreEdits": 0,
+    "settingsHooksOpened": false,
+    "reviewPromptAdded": false,
+    "agentLimitsAdded": false,
+    "automaticModelToolRetry": false,
+    "costOptimizationDeferred": true,
+    "productionServicesRestarted": false,
+    "productionModelBillingChanged": false
+  },
+  "deployment": {
+    "performed": false,
+    "lastKnownProductionBaseline": "1.77",
+    "existingHostSigningKeyConfigured": true
+  },
+  "remaining": [
+    "Old unknown writers without database proof or signed host receipt remain locked; no invented migration/backfill.",
+    "Host dies before owned cleanup/receipt publication: no factual recovery proof. PID/time/session-terminal/user claims remain insufficient.",
+    "Loss of trusted host disk, signature key or different machine without receipt storage remains unavailable.",
+    "Receipt establishes owned host quiescence only, not completion of all remote MCP/paid/Unity/Godot operations; uncertain external outcomes unaccepted and not retried.",
+    "Same-OS malicious actor with host secret or host process compromise can defeat trust; signature is not full OS isolation.",
+    "Root config key rotation invalidates old host receipts until actual DB proof is available; no automatic key fallback or keyring framework.",
+    "Local receipts retained; no automatic historical deletion or rewritten proof.",
+    "Real remote deployment combination, historical 1.75 downloaded ZIP identity, eight-domain design/resources/Scene/UI/game quality and actual engine delivery remain unaccepted.",
+    "Formal frontend and publishing excluded, costs last, no token savings claimed."
+  ]
+}

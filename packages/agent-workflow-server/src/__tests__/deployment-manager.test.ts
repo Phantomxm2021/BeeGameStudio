@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { artifactDigest } from '../beegame/runtime-acceptance'
+import { computeWorkspaceRevision } from '../beegame/workspace-revision'
+import { createPreviewTestBrowser } from '../beegame/preview-test-browser'
+import { sharedPlaywright } from '../beegame/shared-playwright'
 import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisher,
+  mergeDeploymentRecords,
   type BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
 
@@ -20,6 +25,274 @@ describe('BeeGameDeploymentManager', () => {
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true })
+  })
+
+  test('published local bytes load HTML, module and JSON through their actual deployment URL in Chromium',async()=>{
+    workspace=await realpath(workspace)
+    await mkdir(join(workspace,'site'))
+    await writeFile(join(workspace,'site/index.html'),'<main id="value">loading</main><script type="module" src="./game.js"></script>')
+    await writeFile(join(workspace,'site/game.js'),'const v=await(await fetch("./data.json")).json();document.querySelector("#value").textContent="value="+v.value;')
+    await writeFile(join(workspace,'site/data.json'),'{"value":7}')
+    const manager=new BeeGameDeploymentManager({dataRoot:root,runner:async()=>{throw Error('No rebuild')}})
+    const artifact={path:'site',sha256:await artifactDigest(workspace,'site',true)}
+    const result=await manager.deploy({sessionId:'browser-fixture',workspacePath:workspace,
+      measured:{runId:'synthetic',measurementId:'synthetic',artifact,validate:async()=>{}}})
+    expect(result.status).toBe('succeeded')
+    const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+      const file=await manager.readPublicFile(new URL(request.url).pathname)
+      return file?new Response(file.body,{headers:{'content-type':file.contentType}}):new Response('Not found',{status:404})
+    }})
+    const browser=createPreviewTestBrowser()
+    let child:ReturnType<typeof Bun.spawn>|undefined
+    try{
+      const {endpoint}=await browser.start()
+      const browserProcess=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',`
+        const {chromium}=await import(process.env.CLIENT);
+        const browser=await chromium.connectOverCDP(process.env.ENDPOINT);
+        const context=await browser.newContext(),page=await context.newPage();
+        const errors=[];page.on('pageerror',e=>errors.push(e.message));
+        try{
+          await page.goto(process.env.URL);
+          await page.getByText('value=7',{exact:true}).waitFor({timeout:10000});
+          await page.reload();await page.getByText('value=7',{exact:true}).waitFor({timeout:10000});
+          if(errors.length)throw Error(JSON.stringify(errors));
+          console.log('published-module-json-pass');
+        }finally{await context.close();await browser.close()}
+      `],{env:{PATH:process.env.PATH,CLIENT:sharedPlaywright().moduleUrl,ENDPOINT:endpoint,
+        URL:server.url.origin+result.url},stdout:'pipe',stderr:'pipe'})
+      child=browserProcess
+      const timeout=setTimeout(()=>child?.kill(),20000)
+      try {
+        const [stdout,stderr,code]=await Promise.all([new Response(browserProcess.stdout).text(),new Response(browserProcess.stderr).text(),browserProcess.exited])
+        expect(code,stderr).toBe(0);expect(stdout).toContain('published-module-json-pass')
+      }finally{clearTimeout(timeout)}
+    }finally{child?.kill();await browser.close();server.stop(true)}
+  },30000)
+
+  test.each(['./game.js','/game.js'])(
+    'V3 publication checks the returned nested URL without rewriting asset references: %s',async script=>{
+      workspace=await realpath(workspace)
+      await mkdir(join(workspace,'site'))
+      await writeFile(join(workspace,'site/index.html'),'<main>Loading</main><script type="module" src="'+script+'"></script>')
+      await writeFile(join(workspace,'site/game.js'),'document.querySelector("main").textContent="Loaded"')
+      const artifact={path:'site',sha256:await artifactDigest(workspace,'site',true)}
+      const manager=new BeeGameDeploymentManager({dataRoot:root,runner:async()=>{throw Error('No rebuild')},
+        publisher:{async publishStaticDirectory(){return {url:'https://publication.invalid/nested/files/index.html'}}}})
+      const record=await manager.deploy({sessionId:'path-fixture',workspacePath:workspace,
+        measured:{runId:'fixture',measurementId:'fixture',artifact,validate:async()=>{}}})
+      expect(record.status,record.message).toBe(script.startsWith('./')?'succeeded':'failed')
+      if(script.startsWith('/')){
+        expect(record.message).toContain('/game.js (outside publication base /nested/files/)')
+        expect(await manager.readPublicFile('/deployments/'+record.id+'/')).toBeUndefined()
+      }
+      expect(await artifactDigest(workspace,'site',true)).toBe(artifact.sha256)
+    },30000)
+
+  test.each(['unchanged','modified','revoked-after-copy','publisher-failed'] as const)(
+    'V3 publishes the explicit measured directory without a package build script: %s',async mode=>{
+      workspace=await realpath(workspace)
+      const output=join(workspace,'web-output')
+      await mkdir(output)
+      await writeFile(join(output,'index.html'),'<main>Measured static fixture</main>')
+      const artifact={path:'web-output',sha256:await artifactDigest(workspace,'web-output',true)}
+      if(mode==='modified')await writeFile(join(output,'index.html'),'<main>Untested version</main>')
+      let validations=0,uploads=0
+      const manager=new BeeGameDeploymentManager({dataRoot:root,
+        runner:async()=>{throw Error('No build permitted')},
+        ...(mode==='publisher-failed'?{publisher:{async publishStaticDirectory(){
+          uploads++;throw Error('Synthetic publication failed')
+        }}}:{})})
+      const result=await manager.deploy({sessionId:'measured',workspacePath:workspace,
+        measured:{runId:'run',measurementId:'measurement',artifact,async validate(){
+          validations++;if(mode==='revoked-after-copy'&&validations===2)throw Error('Writer started')
+        }}})
+      expect(result.status).toBe(mode==='unchanged'?'succeeded':'failed')
+      expect(result.buildCommand).toBeUndefined()
+      const publicFile=await manager.readPublicFile('/deployments/'+result.id+'/')
+      if(mode==='unchanged'){
+        expect(await publicFile!.body.text()).toBe('<main>Measured static fixture</main>')
+        const restarted=new BeeGameDeploymentManager({dataRoot:root,runner:async()=>{throw Error('No rebuild')}})
+        expect(await(await restarted.readPublicFile('/deployments/'+result.id+'/'))!.body.text()).toContain('Measured static fixture')
+      }else expect(publicFile).toBeUndefined()
+      expect(uploads).toBe(mode==='publisher-failed'?1:0)
+    })
+
+  test('retention preserves rollback bytes and later collects them when unreferenced', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'dist/index.html'), '<main>Original</main>')
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+    const original = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    await Bun.sleep(2)
+    const rollback = await manager.rollbackTo(original)
+    expect(rollback.url).toBe(original.url)
+    const plan = await manager.applyRetention({ dryRun: true, keepSuccessfulPerProject: 1 })
+    expect(plan.plannedForDeletion).toEqual([])
+    expect(plan.retained.find(item => item.id === original.id)?.reason).toBe('artifact_referenced_by_retained_deployment')
+    await manager.applyRetention({ dryRun: false, keepSuccessfulPerProject: 1 })
+    expect(await (await manager.readPublicFile(rollback.url))?.body.text()).toBe('<main>Original</main>')
+    await Bun.sleep(2)
+    const latest = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    const cleanup = await manager.applyRetention({ dryRun: false, keepSuccessfulPerProject: 1 })
+    expect(cleanup.deleted.map(item => item.id).sort()).toEqual([original.id, rollback.id].sort())
+    expect(await manager.readPublicFile(original.url)).toBeUndefined()
+    expect((await manager.list()).map(item => item.id)).toEqual([latest.id])
+    await expect(manager.rollbackTo(original)).rejects.toThrow('no longer available')
+  })
+
+  test('cleanup cannot overwrite a concurrently requested rollback', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'dist/index.html'), '<main>Fixture</main>')
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+    const original = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    await Bun.sleep(2)
+    const latest = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    let entered!: () => void, release!: () => void
+    const deleting = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const internal = manager as unknown as { deleteLocalArtifact: (record: typeof original) => Promise<boolean> }
+    const remove = internal.deleteLocalArtifact.bind(manager)
+    internal.deleteLocalArtifact = async record => { entered(); await gate; return remove(record) }
+    const cleaning = manager.applyRetention({ dryRun: false, keepSuccessfulPerProject: 1 })
+    await deleting
+    const rollback = manager.rollbackTo(latest)
+    release()
+    await cleaning
+    const restored = await rollback
+    expect((await manager.list()).some(item => item.id === restored.id)).toBe(true)
+    await access(join(latest.artifactPath!, 'index.html'))
+  })
+
+  test.each(['unchanged-file', 'unchanged-directory', 'changed', 'extra', 'missing', 'source-changed'] as const)(
+    'accepted deployment publishes only covered tested bytes: %s', async mode => {
+      await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+      await mkdir(join(workspace, 'dist'))
+      await writeFile(join(workspace, 'dist/index.html'), '<main>Tested A</main>')
+      const path = mode === 'unchanged-directory' ? 'dist' : 'dist/index.html'
+      const acceptance = { revision: await computeWorkspaceRevision(workspace),
+        artifacts: [{ path, sha256: await artifactDigest(workspace, path, true) }] }
+      if (mode === 'changed') await writeFile(join(workspace, 'dist/index.html'), '<main>Untested B</main>')
+      if (mode === 'extra') await writeFile(join(workspace, 'dist/untested.js'), 'untested')
+      if (mode === 'missing') await rm(join(workspace, 'dist/index.html'))
+      if (mode === 'source-changed') await writeFile(join(workspace, 'new-source.js'), 'unverified source')
+      let builds = 0, uploads = 0
+      const manager = new BeeGameDeploymentManager({ dataRoot: root,
+        runner: async () => { builds++; throw new Error('Do not rebuild accepted output') },
+        publisher: { async publishStaticDirectory(input) {
+          uploads++
+          expect(await input.files.find(file => file.path === 'index.html')!.text()).toBe('<main>Tested A</main>')
+          return { url: 'https://synthetic.invalid/no-upload' }
+        } } })
+      const result = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace, acceptance })
+      const valid = mode.startsWith('unchanged')
+      expect(result.status).toBe(valid ? 'succeeded' : 'failed')
+      expect(uploads).toBe(valid ? 1 : 0)
+      expect(builds).toBe(0)
+      if (mode === 'changed') expect(result.message).toContain('differs from acceptance')
+      if (mode === 'extra') expect(result.message).toContain('not covered by acceptance')
+    })
+
+  test.each([false, true])('registers before Worker verification and revokes failure: %s', async (rejectVerification) => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    const statuses: string[] = []
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => {
+        await mkdir(join(workspace, 'dist'), { recursive: true })
+        await writeFile(join(workspace, 'dist/index.html'), '<main>Ready</main>')
+        return { exitCode: 0, stdout: '', stderr: '' }
+      },
+      publisher: {
+        publishStaticDirectory: async () => ({ url: 'https://games.test/test', manifestStorageObjectId: 'manifest' }),
+        verifyPublished: async () => {
+          expect(statuses).toEqual(['succeeded'])
+          expect((await manager.list())[0]?.status).toBe('publishing')
+          if (rejectVerification) throw new Error('Public page mismatch')
+        },
+      },
+    })
+    const result = await manager.deploy({sessionId: 'test', workspacePath: workspace}, undefined,
+      async record => { statuses.push(record.status) })
+    expect(result.status).toBe(rejectVerification ? 'failed' : 'succeeded')
+    expect(statuses).toEqual(rejectVerification ? ['succeeded', 'failed'] : ['succeeded'])
+    if (rejectVerification) expect(result.url).toBe('')
+  })
+
+  test.each([false, true])('measured publication revalidates after public verification: changed=%s', async changed => {
+    workspace = await realpath(workspace)
+    await mkdir(join(workspace, 'site'))
+    await writeFile(join(workspace, 'site/index.html'), '<main>Measured bytes</main>')
+    const artifact = { path: 'site', sha256: await artifactDigest(workspace, 'site', true) }
+    let eligible = true, verified = false
+    const statuses: string[] = []
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => { throw Error('No rebuild') },
+      publisher: {
+        publishStaticDirectory: async () => ({ url: 'https://publication.invalid/game/index.html' }),
+        verifyPublished: async () => { verified = true; eligible = !changed },
+      },
+    })
+    const result = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace,
+      measured: { runId: 'run', measurementId: 'measurement', artifact,
+        validate: async () => { if (!eligible) throw Error('Workflow changed during public verification') } },
+    }, undefined, async record => { statuses.push(record.status) })
+    expect(verified).toBe(true)
+    expect(result.status).toBe(changed ? 'failed' : 'succeeded')
+    expect(statuses).toEqual(changed ? ['succeeded', 'failed'] : ['succeeded'])
+    expect((await manager.list())[0]?.status).toBe(result.status)
+    if (changed) {
+      expect(result.message).toContain('Workflow changed during public verification')
+      expect(result.url).toBe('')
+    }
+  }, 30000)
+
+  test('background publishing returns before build completion and deduplicates repeated clicks', async () => {
+    let release!: () => void
+    let runs = 0
+    const gate = new Promise<void>(resolve => { release = resolve })
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    const manager = new BeeGameDeploymentManager({ dataRoot: root, runner: async (_, options) => {
+      runs++
+      await gate
+      await mkdir(join(options.cwd, 'dist'), { recursive: true })
+      await writeFile(join(options.cwd, 'dist/index.html'), '<main>Ready</main>')
+      return { exitCode: 0, stdout: 'Built', stderr: '' }
+    } })
+    let finish!: () => void
+    const finished = new Promise<void>(resolve => { finish = resolve })
+    const input = { sessionId: 'session', userId: 'owner', workspacePath: workspace }
+    const first = await manager.start(input, async () => { finish() })
+    try {
+      const second = await manager.start(input)
+      expect(first.status).toBe('queued')
+      expect(second.id).toBe(first.id)
+      expect(manager.isPublishing('owner', workspace)).toBe(true)
+      expect(manager.isPublishing('other-owner', workspace)).toBe(false)
+    } finally { release(); await finished }
+    expect(runs).toBe(1)
+    const final = (await manager.list('session'))[0]!
+    expect(final.status).toBe('succeeded')
+    expect(mergeDeploymentRecords([final], [first])[0]?.status).toBe('succeeded')
+  })
+
+  test('parallel project records are not lost and interrupted records become explicit failures after restart', async () => {
+    const manager = new BeeGameDeploymentManager({ dataRoot: root })
+    const records = await Promise.all(Array.from({ length: 8 }, (_, index) => manager.deploy({
+      sessionId: `session-${index}`, workspacePath: workspace,
+    })))
+    expect(await manager.list()).toHaveLength(8)
+    expect(new Set(records.map(record => record.id)).size).toBe(8)
+    await writeFile(join(root, 'deployments/deployments.json'), JSON.stringify([
+      { ...records[0], status: 'building' }, ...records.slice(1),
+    ]))
+    const restarted = new BeeGameDeploymentManager({ dataRoot: root })
+    const recovered = (await restarted.list()).find(record => record.id === records[0]!.id)!
+    expect(recovered.status).toBe('failed')
+    expect(recovered.message).toContain('interrupted')
+    expect(recovered.url).toBe('')
+    expect(await restarted.list()).toHaveLength(8)
   })
 
   test('builds a package project and publishes static output', async () => {
@@ -104,7 +377,10 @@ describe('BeeGameDeploymentManager', () => {
 
     expect(await manager.readPublicFile(`/deployments/${deployment.id}/assets/missing.glb`)).toBeUndefined()
     expect(await manager.readPublicFile(`/deployments/${deployment.id}/game-route`)).toEqual(
-      expect.objectContaining({ contentType: 'text/html; charset=utf-8' }),
+      expect.objectContaining({
+        contentType: 'text/html; charset=utf-8',
+        cacheControl: 'public, max-age=31536000, immutable',
+      }),
     )
   })
 
@@ -166,6 +442,7 @@ describe('BeeGameDeploymentManager', () => {
       authorization: string | null
       apikey: string | null
       contentType: string | null
+      cacheControl: string | null
       body: string
     }> = []
     const runner: BeeGameDeploymentRunner = async (_command, options) => {
@@ -199,6 +476,9 @@ describe('BeeGameDeploymentManager', () => {
             contentType: init?.headers instanceof Headers
               ? init.headers.get('content-type')
               : (init?.headers as Record<string, string>)['content-type'],
+            cacheControl: init?.headers instanceof Headers
+              ? init.headers.get('cache-control')
+              : (init?.headers as Record<string, string>)['cache-control'],
             body: await new Response(init?.body as BodyInit).text(),
           })
           return new Response('{}', { status: 200 })
@@ -225,12 +505,14 @@ describe('BeeGameDeploymentManager', () => {
         authorization: 'Bearer user-jwt',
         apikey: 'anon-key',
         contentType: 'text/javascript; charset=utf-8',
+        cacheControl: 'max-age=31536000',
         body: 'console.log("storage")',
       }),
       expect.objectContaining({
         authorization: 'Bearer user-jwt',
         apikey: 'anon-key',
         contentType: 'text/html; charset=utf-8',
+        cacheControl: 'max-age=31536000',
         body: '<main>Storage game</main>',
       }),
     ])
@@ -304,6 +586,22 @@ describe('BeeGameDeploymentManager', () => {
 
     expect(deployment.status).toBe('failed')
     expect(deployment.message).toContain('invalid GLB')
+  })
+
+  test('rejects source symbolic links before building or publishing', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    await writeFile(join(workspace, 'actual.js'), 'export default "fixture"')
+    await symlink('actual.js', join(workspace, 'entry.js'))
+    let built = false
+    const manager = new BeeGameDeploymentManager({ dataRoot: root, runner: async () => {
+      built = true
+      return { exitCode: 0, stdout: '', stderr: '' }
+    } })
+    const result = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    expect(result.status).toBe('failed')
+    expect(result.message).toContain('unsupported symbolic link: entry.js')
+    expect(result.url).toBe('')
+    expect(built).toBe(false)
   })
 
   test('rejects symbolic links in deployment output', async () => {

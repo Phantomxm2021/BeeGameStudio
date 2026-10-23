@@ -1,0 +1,550 @@
+{
+  "originalTestRoot": "/private/tmp/bgs-design-tools-retest.tGFXKq",
+  "projectProductsWereModifiedByCodex": false,
+  "sourceComparison": {
+    "changed": [],
+    "added": []
+  },
+  "files": [
+    {
+      "path": "after-author-1/assets/manifest/check.mjs",
+      "sha256": "35d32f9644f7bf99eac7ea22103aab66f83d265a8dbf54b959f8aef21bf7395f"
+    },
+    {
+      "path": "after-author-1/assets/manifest/CONTRACT.md",
+      "sha256": "edb0fb01084e5364e39a473ee6bdeb20c558f18c38abe613e5088c1e1fd28794"
+    },
+    {
+      "path": "after-author-1/docs/GDD.md",
+      "sha256": "91f89271081a8f8283c558705ab601c26014f414fcadd2895c86b6fdb3af209b"
+    },
+    {
+      "path": "after-author-2/assets/manifest/check.mjs",
+      "sha256": "35d32f9644f7bf99eac7ea22103aab66f83d265a8dbf54b959f8aef21bf7395f"
+    },
+    {
+      "path": "after-author-2/assets/manifest/CONTRACT.md",
+      "sha256": "edb0fb01084e5364e39a473ee6bdeb20c558f18c38abe613e5088c1e1fd28794"
+    },
+    {
+      "path": "after-author-2/docs/ART_DIRECTION.md",
+      "sha256": "c95009d8405571907aa64967617684fa3a68ad863ae597ba205b2be243f03e9a"
+    },
+    {
+      "path": "after-author-2/docs/AUDIO_DESIGN.md",
+      "sha256": "cf441a1cdcfefc70cc704ab6f19f47a01c58968ed74144660fb1ade6f066b941"
+    },
+    {
+      "path": "after-author-2/docs/concept/breakout_concept.svg",
+      "sha256": "d1f87c337f2401791dd8056814b2e4ffd4054a8a1dd76db3784556db975af8b7"
+    },
+    {
+      "path": "after-author-2/docs/GDD.md",
+      "sha256": "91f89271081a8f8283c558705ab601c26014f414fcadd2895c86b6fdb3af209b"
+    },
+    {
+      "path": "after-author-2/docs/TECHNICAL_DESIGN.md",
+      "sha256": "546944e5f2add60c853d65fc3b743a56e9e7475a0ffb83c079d4697d177bf32d"
+    },
+    {
+      "path": "after-author-3/assets/manifest/check.mjs",
+      "sha256": "35d32f9644f7bf99eac7ea22103aab66f83d265a8dbf54b959f8aef21bf7395f"
+    },
+    {
+      "path": "after-author-3/assets/manifest/CONTRACT.md",
+      "sha256": "edb0fb01084e5364e39a473ee6bdeb20c558f18c38abe613e5088c1e1fd28794"
+    },
+    {
+      "path": "after-author-3/content/scenes/breakout_camera.json",
+      "sha256": "9a933eb372c1d025f8e7e06c3de61159dc64928cd9df2bb70fae2afef507c68d"
+    },
+    {
+      "path": "after-author-3/content/scenes/breakout_level.json",
+      "sha256": "d9eec7fdcbb9a03aa016f1c2e80dfdc609df8d3a516b8ef3d9553eba09bedbd9"
+    },
+    {
+      "path": "after-author-3/docs/ART_DIRECTION.md",
+      "sha256": "c95009d8405571907aa64967617684fa3a68ad863ae597ba205b2be243f03e9a"
+    },
+    {
+      "path": "after-author-3/docs/AUDIO_DESIGN.md",
+      "sha256": "cf441a1cdcfefc70cc704ab6f19f47a01c58968ed74144660fb1ade6f066b941"
+    },
+    {
+      "path": "after-author-3/docs/balance_appendix.md",
+      "sha256": "0ecc68737c668fca4b956c1b1357735885f1a5a3e5ac30eea4357c33d6e3e858"
+    },
+    {
+      "path": "after-author-3/docs/BALANCE_DESIGN.md",
+      "sha256": "ad49abe3ebcb72f800cfe629adea27c1638dc0c00409667ce961dba304029ae7"
+    },
+    {
+      "path": "after-author-3/docs/balance_model.mjs",
+      "sha256": "010186cf815acd95f5330b8204604dc35389d1cba06194386fe358069ed9b2e9"
+    },
+    {
+      "path": "after-author-3/docs/concept/breakout_concept.svg",
+      "sha256": "d1f87c337f2401791dd8056814b2e4ffd4054a8a1dd76db3784556db975af8b7"
+    },
+    {
+      "path": "after-author-3/docs/GDD.md",
+      "sha256": "91f89271081a8f8283c558705ab601c26014f414fcadd2895c86b6fdb3af209b"
+    },
+    {
+      "path": "after-author-3/docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "28cc05004045ab6763bf85223cb55c9fa1c20f2285f7340a0e21e3939a1b6975"
+    },
+    {
+      "path": "after-author-3/docs/TECHNICAL_DESIGN.md",
+      "sha256": "546944e5f2add60c853d65fc3b743a56e9e7475a0ffb83c079d4697d177bf32d"
+    },
+    {
+      "path": "after-author-4/assets/manifest/check.mjs",
+      "sha256": "35d32f9644f7bf99eac7ea22103aab66f83d265a8dbf54b959f8aef21bf7395f"
+    },
+    {
+      "path": "after-author-4/assets/manifest/CONTRACT.md",
+      "sha256": "edb0fb01084e5364e39a473ee6bdeb20c558f18c38abe613e5088c1e1fd28794"
+    },
+    {
+      "path": "after-author-4/content/scenes/breakout_camera.json",
+      "sha256": "9a933eb372c1d025f8e7e06c3de61159dc64928cd9df2bb70fae2afef507c68d"
+    },
+    {
+      "path": "after-author-4/content/scenes/breakout_level.json",
+      "sha256": "d9eec7fdcbb9a03aa016f1c2e80dfdc609df8d3a516b8ef3d9553eba09bedbd9"
+    },
+    {
+      "path": "after-author-4/content/ui/game_hud.json",
+      "sha256": "e7f07e0c18bb794bc923092a18152e039134d300663c83d9ec4223d70a0b6e24"
+    },
+    {
+      "path": "after-author-4/content/ui/game_over.json",
+      "sha256": "057a31b0955d09c8fe9f95b863216287bec3629e46ee4a83c9a113f69ac64e68"
+    },
+    {
+      "path": "after-author-4/content/ui/level_clear.json",
+      "sha256": "32c17f080a2943e6b6eb0aa441f49f2dc4509d7332a0e9a7f4dfb7f863add88f"
+    },
+    {
+      "path": "after-author-4/content/ui/load_error.json",
+      "sha256": "2a1512c9142eccec1dc07820c2c7291dec145788906481e57ba6fdd592a99c0c"
+    },
+    {
+      "path": "after-author-4/content/ui/loading.json",
+      "sha256": "bf67dd9b6098c0bf2738421ee65dab4d29583c3ee01e76f981f58e26debcddf0"
+    },
+    {
+      "path": "after-author-4/content/ui/pause_overlay.json",
+      "sha256": "d646e318ca2f461c89221e16eb9e8e6de6657275bba901f0a837ce36204420dc"
+    },
+    {
+      "path": "after-author-4/content/ui/rotate_prompt.json",
+      "sha256": "236068b6b1a5845a9a4b977bdc8610f72109ed431cb3493b03f9b606ad4d1aee"
+    },
+    {
+      "path": "after-author-4/content/ui/space_prompt.json",
+      "sha256": "9b77fd2f8d6504b7ba5e71b51dc13da1a3ac80ce3d5700a46d0af029b9dfd2b3"
+    },
+    {
+      "path": "after-author-4/content/ui/start_screen.json",
+      "sha256": "60cc5a407c9f97adf5c9aa67af14f48231a79cfe49e25b0a12047a2201819306"
+    },
+    {
+      "path": "after-author-4/docs/ART_DIRECTION.md",
+      "sha256": "c95009d8405571907aa64967617684fa3a68ad863ae597ba205b2be243f03e9a"
+    },
+    {
+      "path": "after-author-4/docs/AUDIO_DESIGN.md",
+      "sha256": "cf441a1cdcfefc70cc704ab6f19f47a01c58968ed74144660fb1ade6f066b941"
+    },
+    {
+      "path": "after-author-4/docs/balance_appendix.md",
+      "sha256": "0ecc68737c668fca4b956c1b1357735885f1a5a3e5ac30eea4357c33d6e3e858"
+    },
+    {
+      "path": "after-author-4/docs/BALANCE_DESIGN.md",
+      "sha256": "ad49abe3ebcb72f800cfe629adea27c1638dc0c00409667ce961dba304029ae7"
+    },
+    {
+      "path": "after-author-4/docs/balance_model.mjs",
+      "sha256": "010186cf815acd95f5330b8204604dc35389d1cba06194386fe358069ed9b2e9"
+    },
+    {
+      "path": "after-author-4/docs/concept/breakout_concept.svg",
+      "sha256": "d1f87c337f2401791dd8056814b2e4ffd4054a8a1dd76db3784556db975af8b7"
+    },
+    {
+      "path": "after-author-4/docs/GDD.md",
+      "sha256": "91f89271081a8f8283c558705ab601c26014f414fcadd2895c86b6fdb3af209b"
+    },
+    {
+      "path": "after-author-4/docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "28cc05004045ab6763bf85223cb55c9fa1c20f2285f7340a0e21e3939a1b6975"
+    },
+    {
+      "path": "after-author-4/docs/TECHNICAL_DESIGN.md",
+      "sha256": "546944e5f2add60c853d65fc3b743a56e9e7475a0ffb83c079d4697d177bf32d"
+    },
+    {
+      "path": "after-author-4/docs/UI_UX_SPEC.md",
+      "sha256": "f3357417040e0b5eaffce69f028b9b3faf90026f9a8cb375d836dabf76cf5ca9"
+    },
+    {
+      "path": "after-author-5/assets/manifest/check.mjs",
+      "sha256": "35d32f9644f7bf99eac7ea22103aab66f83d265a8dbf54b959f8aef21bf7395f"
+    },
+    {
+      "path": "after-author-5/assets/manifest/CONTRACT.md",
+      "sha256": "edb0fb01084e5364e39a473ee6bdeb20c558f18c38abe613e5088c1e1fd28794"
+    },
+    {
+      "path": "after-author-5/content/scenes/breakout_camera.json",
+      "sha256": "9a933eb372c1d025f8e7e06c3de61159dc64928cd9df2bb70fae2afef507c68d"
+    },
+    {
+      "path": "after-author-5/content/scenes/breakout_level.json",
+      "sha256": "d9eec7fdcbb9a03aa016f1c2e80dfdc609df8d3a516b8ef3d9553eba09bedbd9"
+    },
+    {
+      "path": "after-author-5/content/ui/game_hud.json",
+      "sha256": "e7f07e0c18bb794bc923092a18152e039134d300663c83d9ec4223d70a0b6e24"
+    },
+    {
+      "path": "after-author-5/content/ui/game_over.json",
+      "sha256": "057a31b0955d09c8fe9f95b863216287bec3629e46ee4a83c9a113f69ac64e68"
+    },
+    {
+      "path": "after-author-5/content/ui/level_clear.json",
+      "sha256": "32c17f080a2943e6b6eb0aa441f49f2dc4509d7332a0e9a7f4dfb7f863add88f"
+    },
+    {
+      "path": "after-author-5/content/ui/load_error.json",
+      "sha256": "2a1512c9142eccec1dc07820c2c7291dec145788906481e57ba6fdd592a99c0c"
+    },
+    {
+      "path": "after-author-5/content/ui/loading.json",
+      "sha256": "bf67dd9b6098c0bf2738421ee65dab4d29583c3ee01e76f981f58e26debcddf0"
+    },
+    {
+      "path": "after-author-5/content/ui/pause_overlay.json",
+      "sha256": "d646e318ca2f461c89221e16eb9e8e6de6657275bba901f0a837ce36204420dc"
+    },
+    {
+      "path": "after-author-5/content/ui/rotate_prompt.json",
+      "sha256": "236068b6b1a5845a9a4b977bdc8610f72109ed431cb3493b03f9b606ad4d1aee"
+    },
+    {
+      "path": "after-author-5/content/ui/space_prompt.json",
+      "sha256": "9b77fd2f8d6504b7ba5e71b51dc13da1a3ac80ce3d5700a46d0af029b9dfd2b3"
+    },
+    {
+      "path": "after-author-5/content/ui/start_screen.json",
+      "sha256": "60cc5a407c9f97adf5c9aa67af14f48231a79cfe49e25b0a12047a2201819306"
+    },
+    {
+      "path": "after-author-5/docs/ART_DIRECTION.md",
+      "sha256": "c95009d8405571907aa64967617684fa3a68ad863ae597ba205b2be243f03e9a"
+    },
+    {
+      "path": "after-author-5/docs/ASSET_PLAN.md",
+      "sha256": "a8d3be5d90819134e3d91b2a12e89396e6c517fd039275fa5eccd875028adc0e"
+    },
+    {
+      "path": "after-author-5/docs/AUDIO_DESIGN.md",
+      "sha256": "cf441a1cdcfefc70cc704ab6f19f47a01c58968ed74144660fb1ade6f066b941"
+    },
+    {
+      "path": "after-author-5/docs/balance_appendix.md",
+      "sha256": "0ecc68737c668fca4b956c1b1357735885f1a5a3e5ac30eea4357c33d6e3e858"
+    },
+    {
+      "path": "after-author-5/docs/BALANCE_DESIGN.md",
+      "sha256": "ad49abe3ebcb72f800cfe629adea27c1638dc0c00409667ce961dba304029ae7"
+    },
+    {
+      "path": "after-author-5/docs/balance_model.mjs",
+      "sha256": "010186cf815acd95f5330b8204604dc35389d1cba06194386fe358069ed9b2e9"
+    },
+    {
+      "path": "after-author-5/docs/concept/breakout_concept.svg",
+      "sha256": "d1f87c337f2401791dd8056814b2e4ffd4054a8a1dd76db3784556db975af8b7"
+    },
+    {
+      "path": "after-author-5/docs/GDD.md",
+      "sha256": "91f89271081a8f8283c558705ab601c26014f414fcadd2895c86b6fdb3af209b"
+    },
+    {
+      "path": "after-author-5/docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "28cc05004045ab6763bf85223cb55c9fa1c20f2285f7340a0e21e3939a1b6975"
+    },
+    {
+      "path": "after-author-5/docs/TECHNICAL_DESIGN.md",
+      "sha256": "5120f4b3a4421d3572491ed10d98b58093e1ea8945981a400fe8c7c41b71a16e"
+    },
+    {
+      "path": "after-author-5/docs/UI_UX_SPEC.md",
+      "sha256": "f3357417040e0b5eaffce69f028b9b3faf90026f9a8cb375d836dabf76cf5ca9"
+    },
+    {
+      "path": "after-review/assets/manifest/check.mjs",
+      "sha256": "35d32f9644f7bf99eac7ea22103aab66f83d265a8dbf54b959f8aef21bf7395f"
+    },
+    {
+      "path": "after-review/assets/manifest/CONTRACT.md",
+      "sha256": "edb0fb01084e5364e39a473ee6bdeb20c558f18c38abe613e5088c1e1fd28794"
+    },
+    {
+      "path": "after-review/content/scenes/breakout_camera.json",
+      "sha256": "9a933eb372c1d025f8e7e06c3de61159dc64928cd9df2bb70fae2afef507c68d"
+    },
+    {
+      "path": "after-review/content/scenes/breakout_level.json",
+      "sha256": "d9eec7fdcbb9a03aa016f1c2e80dfdc609df8d3a516b8ef3d9553eba09bedbd9"
+    },
+    {
+      "path": "after-review/content/ui/game_hud.json",
+      "sha256": "e7f07e0c18bb794bc923092a18152e039134d300663c83d9ec4223d70a0b6e24"
+    },
+    {
+      "path": "after-review/content/ui/game_over.json",
+      "sha256": "057a31b0955d09c8fe9f95b863216287bec3629e46ee4a83c9a113f69ac64e68"
+    },
+    {
+      "path": "after-review/content/ui/level_clear.json",
+      "sha256": "32c17f080a2943e6b6eb0aa441f49f2dc4509d7332a0e9a7f4dfb7f863add88f"
+    },
+    {
+      "path": "after-review/content/ui/load_error.json",
+      "sha256": "2a1512c9142eccec1dc07820c2c7291dec145788906481e57ba6fdd592a99c0c"
+    },
+    {
+      "path": "after-review/content/ui/loading.json",
+      "sha256": "bf67dd9b6098c0bf2738421ee65dab4d29583c3ee01e76f981f58e26debcddf0"
+    },
+    {
+      "path": "after-review/content/ui/pause_overlay.json",
+      "sha256": "d646e318ca2f461c89221e16eb9e8e6de6657275bba901f0a837ce36204420dc"
+    },
+    {
+      "path": "after-review/content/ui/rotate_prompt.json",
+      "sha256": "236068b6b1a5845a9a4b977bdc8610f72109ed431cb3493b03f9b606ad4d1aee"
+    },
+    {
+      "path": "after-review/content/ui/space_prompt.json",
+      "sha256": "9b77fd2f8d6504b7ba5e71b51dc13da1a3ac80ce3d5700a46d0af029b9dfd2b3"
+    },
+    {
+      "path": "after-review/content/ui/start_screen.json",
+      "sha256": "60cc5a407c9f97adf5c9aa67af14f48231a79cfe49e25b0a12047a2201819306"
+    },
+    {
+      "path": "after-review/docs/ART_DIRECTION.md",
+      "sha256": "e9f8618d2a0c8b786ee857b98ffd7dd9c9e6042c490e5907c65bf84f8db89da1"
+    },
+    {
+      "path": "after-review/docs/ASSET_PLAN.md",
+      "sha256": "a8d3be5d90819134e3d91b2a12e89396e6c517fd039275fa5eccd875028adc0e"
+    },
+    {
+      "path": "after-review/docs/AUDIO_DESIGN.md",
+      "sha256": "cf441a1cdcfefc70cc704ab6f19f47a01c58968ed74144660fb1ade6f066b941"
+    },
+    {
+      "path": "after-review/docs/balance_appendix.md",
+      "sha256": "0ecc68737c668fca4b956c1b1357735885f1a5a3e5ac30eea4357c33d6e3e858"
+    },
+    {
+      "path": "after-review/docs/BALANCE_DESIGN.md",
+      "sha256": "ad49abe3ebcb72f800cfe629adea27c1638dc0c00409667ce961dba304029ae7"
+    },
+    {
+      "path": "after-review/docs/balance_model.mjs",
+      "sha256": "010186cf815acd95f5330b8204604dc35389d1cba06194386fe358069ed9b2e9"
+    },
+    {
+      "path": "after-review/docs/concept/breakout_concept.svg",
+      "sha256": "d1f87c337f2401791dd8056814b2e4ffd4054a8a1dd76db3784556db975af8b7"
+    },
+    {
+      "path": "after-review/docs/GDD.md",
+      "sha256": "91f89271081a8f8283c558705ab601c26014f414fcadd2895c86b6fdb3af209b"
+    },
+    {
+      "path": "after-review/docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "dfca2a3c221581377423480c02902bc2d1656c61a6b84de0de3201c19bda8d75"
+    },
+    {
+      "path": "after-review/docs/TECHNICAL_DESIGN.md",
+      "sha256": "5120f4b3a4421d3572491ed10d98b58093e1ea8945981a400fe8c7c41b71a16e"
+    },
+    {
+      "path": "after-review/docs/UI_UX_SPEC.md",
+      "sha256": "f3357417040e0b5eaffce69f028b9b3faf90026f9a8cb375d836dabf76cf5ca9"
+    },
+    {
+      "path": "balance-independent-audit.json",
+      "sha256": "8d68054d46787dc66d5f4628929f2161f5a2970fd6a0cd37ba393a5eba1a8b99"
+    },
+    {
+      "path": "before-review-ui/game_hud.json",
+      "sha256": "e7f07e0c18bb794bc923092a18152e039134d300663c83d9ec4223d70a0b6e24"
+    },
+    {
+      "path": "before-review-ui/game_over.json",
+      "sha256": "057a31b0955d09c8fe9f95b863216287bec3629e46ee4a83c9a113f69ac64e68"
+    },
+    {
+      "path": "before-review-ui/level_clear.json",
+      "sha256": "32c17f080a2943e6b6eb0aa441f49f2dc4509d7332a0e9a7f4dfb7f863add88f"
+    },
+    {
+      "path": "before-review-ui/load_error.json",
+      "sha256": "2a1512c9142eccec1dc07820c2c7291dec145788906481e57ba6fdd592a99c0c"
+    },
+    {
+      "path": "before-review-ui/loading.json",
+      "sha256": "bf67dd9b6098c0bf2738421ee65dab4d29583c3ee01e76f981f58e26debcddf0"
+    },
+    {
+      "path": "before-review-ui/pause_overlay.json",
+      "sha256": "d646e318ca2f461c89221e16eb9e8e6de6657275bba901f0a837ce36204420dc"
+    },
+    {
+      "path": "before-review-ui/rotate_prompt.json",
+      "sha256": "236068b6b1a5845a9a4b977bdc8610f72109ed431cb3493b03f9b606ad4d1aee"
+    },
+    {
+      "path": "before-review-ui/space_prompt.json",
+      "sha256": "9b77fd2f8d6504b7ba5e71b51dc13da1a3ac80ce3d5700a46d0af029b9dfd2b3"
+    },
+    {
+      "path": "before-review-ui/start_screen.json",
+      "sha256": "60cc5a407c9f97adf5c9aa67af14f48231a79cfe49e25b0a12047a2201819306"
+    },
+    {
+      "path": "before-review/ART_DIRECTION.md",
+      "sha256": "c95009d8405571907aa64967617684fa3a68ad863ae597ba205b2be243f03e9a"
+    },
+    {
+      "path": "before-review/ASSET_PLAN.md",
+      "sha256": "a8d3be5d90819134e3d91b2a12e89396e6c517fd039275fa5eccd875028adc0e"
+    },
+    {
+      "path": "before-review/AUDIO_DESIGN.md",
+      "sha256": "cf441a1cdcfefc70cc704ab6f19f47a01c58968ed74144660fb1ade6f066b941"
+    },
+    {
+      "path": "before-review/BALANCE_DESIGN.md",
+      "sha256": "ad49abe3ebcb72f800cfe629adea27c1638dc0c00409667ce961dba304029ae7"
+    },
+    {
+      "path": "before-review/GDD.md",
+      "sha256": "91f89271081a8f8283c558705ab601c26014f414fcadd2895c86b6fdb3af209b"
+    },
+    {
+      "path": "before-review/LEVEL_SCENE_DESIGN.md",
+      "sha256": "28cc05004045ab6763bf85223cb55c9fa1c20f2285f7340a0e21e3939a1b6975"
+    },
+    {
+      "path": "before-review/TECHNICAL_DESIGN.md",
+      "sha256": "5120f4b3a4421d3572491ed10d98b58093e1ea8945981a400fe8c7c41b71a16e"
+    },
+    {
+      "path": "before-review/UI_UX_SPEC.md",
+      "sha256": "f3357417040e0b5eaffce69f028b9b3faf90026f9a8cb375d836dabf76cf5ca9"
+    },
+    {
+      "path": "concept-independent-audit.png",
+      "sha256": "c2a54aead7974911e90fda8ec7eac3b23c5450e78b0243fce4fa725d33b3a77e"
+    },
+    {
+      "path": "design-result.json",
+      "sha256": "d201c594f649b9c2c0d4f636415f54a438c2086675d2ceac3b7bbcbeaf73fd37"
+    },
+    {
+      "path": "geometry-independent-audit.json",
+      "sha256": "abedb2a4af53990102da1a59086fd453458df09fe6d8f510b28e98a06cee92cc"
+    },
+    {
+      "path": "harness/audit-balance.ts",
+      "sha256": "a8b3d0f2b51bd14f3b683f96c6013585f9bd3fc72e7a06e0000fce1f49ce5ea8"
+    },
+    {
+      "path": "harness/audit-geometry.ts",
+      "sha256": "5d059d377d4fbd45512308cbef6d33d73acbaf86512829cab8b1de17c8b15387"
+    },
+    {
+      "path": "harness/build-cli.ts",
+      "sha256": "ed769cc36d6bed20aabff291586a4570a301beb404bbe9116bc5ba69854d602a"
+    },
+    {
+      "path": "harness/capture-concept.ts",
+      "sha256": "2d62f5fa9b29b4c085045d174dc36563a0240700e27295d13aff4d9e28d86d14"
+    },
+    {
+      "path": "harness/freeze.ts",
+      "sha256": "d4a73b0a113ee5c8a6d9cea25709dc58e7c142cd242661059d7a23a363367bcd"
+    },
+    {
+      "path": "harness/inspect-actions.ts",
+      "sha256": "564ceaa93b9b1bba02bf3b2e9fd936d3b2cbe429ac6366bacf579d5528f4abd8"
+    },
+    {
+      "path": "harness/inspect-prompts.ts",
+      "sha256": "6b2a027260154b465519a8e2902bba6086c87e708851b3c15276b409009fb1de"
+    },
+    {
+      "path": "harness/metrics.ts",
+      "sha256": "170e216766d185527a358d6776e7fb74166f63e8eb389512f774a6a86d18d955"
+    },
+    {
+      "path": "harness/preflight.ts",
+      "sha256": "43fc713dcec85c56b47bd92b0e7befdcf12d02023d66fd4912f70f7c30e84e78"
+    },
+    {
+      "path": "harness/progress.ts",
+      "sha256": "317cfe8dbdac32d6a509025fc92b68c67526db0f93772bbfe9cd61cbafd0de0f"
+    },
+    {
+      "path": "harness/run.ts",
+      "sha256": "971cf0dcc8f23b6219608d751c8e27cef936ad97cc23a0a759f951477d870e4f"
+    },
+    {
+      "path": "harness/snapshot.ts",
+      "sha256": "505cd12128159252805631321b212d402cf7208f275860b612109cad6fca74d5"
+    },
+    {
+      "path": "inputs.json",
+      "sha256": "bedb3d53585a2c538f567152cc4d05b8edab35aa164bb44af3fa3d38f273ab8b"
+    },
+    {
+      "path": "native-actions-derived.json",
+      "sha256": "0eac6ac213549f13271166866e5b5dea20fa6e413bebbe707fa104dfb11f3e02"
+    },
+    {
+      "path": "source-after.json",
+      "sha256": "5a5920fd30212f945c66961581a6bf257ce7f1467be1a4cdc2155f84bff7933f"
+    },
+    {
+      "path": "source-before.json",
+      "sha256": "5a5920fd30212f945c66961581a6bf257ce7f1467be1a4cdc2155f84bff7933f"
+    },
+    {
+      "path": "source-comparison.json",
+      "sha256": "bdc9cd0e82c54753fb5558f16785492399d973be634b4b17d192cd5996c061c8"
+    },
+    {
+      "path": "stages.json",
+      "sha256": "0e20c05e125ad13d0a52c2c0aa53213887e371e373d1e0f2dbe9a8a439223529"
+    },
+    {
+      "path": "summary.json",
+      "sha256": "63a6325f41dce6d603fa4768af5f597f70dcc0c73da16d5aaa05c8cbfef77d72"
+    },
+    {
+      "path": "usage.json",
+      "sha256": "a4cc60f6ee51c7b4f5ffc8bdcc59ca16334d26daa4e8d311164dd72ec6ad2e5d"
+    }
+  ]
+}

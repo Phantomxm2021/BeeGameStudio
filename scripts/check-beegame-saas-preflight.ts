@@ -19,10 +19,15 @@ const checks = [
     'SUPABASE_ANON_KEY',
     'VITE_SUPABASE_ANON_KEY',
   ]),
-  checkForbiddenEnv('Runtime host service-role secret', [
+  checkAnyEnv('Trusted V3 runtime service-role key', [
     'BEEGAME_SUPABASE_SERVICE_ROLE_KEY',
     'SUPABASE_SERVICE_ROLE_KEY',
   ]),
+  checkForbiddenEnv('Frontend service-role secret', Object.keys(env).filter(key =>
+    key.startsWith('VITE_') && (/SERVICE_ROLE/i.test(key) ||
+      [env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY, env.SUPABASE_SERVICE_ROLE_KEY]
+        .some(secret => secret?.trim() && env[key]?.trim() === secret.trim())),
+  )),
   checkAnyEnv('Runtime avatar storage bucket', [
     'BEEGAME_SUPABASE_AVATAR_BUCKET',
     'SUPABASE_AVATAR_BUCKET',
@@ -84,7 +89,7 @@ function checkForbiddenEnv(
   return {
     label,
     status: 'fail',
-    message: `remove ${configuredKeys.join(', ')} from frontend/runtime env`,
+    message: `remove ${configuredKeys.join(', ')} from frontend env`,
   }
 }
 
@@ -98,6 +103,8 @@ function checkTrackedSensitiveFiles(): {
     '.env.billing',
     'docker/.env.production',
     'docker/.env.billing',
+    '.env.resource',
+    'docker/.env.resource',
   ]
   const trackedPaths = sensitivePaths.filter(path => {
     try {

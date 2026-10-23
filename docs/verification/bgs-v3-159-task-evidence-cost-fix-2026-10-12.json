@@ -1,0 +1,188 @@
+{
+  "version": "1.59",
+  "date": "2026-10-12",
+  "status": "offline-verified-not-deployed",
+  "runningVersion": "1.57",
+  "scope": {
+    "paidModelCalls": 0,
+    "serviceRestarts": 0,
+    "reviewPromptAdded": false,
+    "agentLimitsAdded": false,
+    "formalFrontendModified": false,
+    "claudeCodeModified": false,
+    "builtinToolsModified": false,
+    "realGameModified": false
+  },
+  "priorPaidEvidence": {
+    "projectId": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+    "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+    "requestKey": "f41f59f4-df1b-4e9b-90f9-d8e25633580b",
+    "totalTokens": 2315274,
+    "requests": 39,
+    "main": {
+      "requests": 12,
+      "tokens": 1470004
+    },
+    "subagent": {
+      "requests": 27,
+      "tokens": 845270
+    },
+    "inputStart": 119079,
+    "inputEnd": 127293,
+    "compactionRequests": 0,
+    "files": [
+      "bgs-v3-157-paid-acceptance-2026-10-12.json",
+      "bgs-v3-157-paid-requests-2026-10-12.jsonl"
+    ]
+  },
+  "roots": [
+    {
+      "issue": "Checking/repair authorization was conflated with requirements changes",
+      "classification": "BGS interface gap",
+      "evidence": "Only discuss/change/continue were accepted. continue requires the latest interrupted/failed attempt. change appends the entire execution message into authorized_user_changes, increments requirements and plan revisions. The real paid checking turn took that path although production sources did not change.",
+      "fix": "Explicit work intent reuses confirmed requirements and native UUID. The caller, not a model classifier, selects it; genuine change remains unchanged. Actual saved input changes still invalidate measured evidence.",
+      "files": [
+        "workflow-v3/state.ts",
+        "workflow-v3/agent-goal.ts",
+        "workflow-v3/debug.html"
+      ],
+      "limits": "Historical requirements/messages are not migrated or erased. No automatic execution after pause, no retry or build is added."
+    },
+    {
+      "issue": "Handoff freshness/changes filtered out, repeated input investigation",
+      "classification": "BGS delivery weakness plus model filtering",
+      "evidence": "Main call_f90afe09sh9k3olzzjliccw6 printed status/blockedReason, requirement revision, measurement identity/date, source validity and report paths but omitted measurement.freshness and changes. Child read the complete handoff and still conflated same bytes with professional coverage.",
+      "fix": "prepareTurn sends one read-only current evidence snapshot directly with active task identity, latest receipt/artifact, requirements revision, freshness/changes, check statuses and narrow check scope. It contains no source body, report contents or measurement history. Diagnostic failures are explicitly unverified and do not prevent repair; current writer fencing still rejects stale attempts.",
+      "files": [
+        "workflow-v3/agent-goal.ts",
+        "workflow-v3/agent-measurement.ts"
+      ],
+      "limits": "Verified transportation, not guaranteed model adoption. It adds small actual facts to history; redundant tool descriptions were shortened rather than raising the existing precision test threshold."
+    },
+    {
+      "issue": "Legacy authority discovery/hash guessing/rechecks",
+      "classification": "BGS interface ambiguity plus model unnecessary exploration",
+      "evidence": "Child mixed authority exploration in requests 14–23 cost 248126 Tokens. Request 27 did call --authority successfully for 34429; it is false to claim it never called the command. Earlier output supplied computed identity without registry comparison; tool prose incorrectly described autonomous handoff as legacy release.",
+      "fix": "--authority now returns computed identity alongside saved registry status/matches and explicit designVerified=false/runtimeVerified=false. Missing/malformed/aliased registry is visible. --current behavior and source safety remain unchanged; no eight-document release gate is added.",
+      "files": [
+        "project-content-authority.ts",
+        "game-content-validation-cli.ts",
+        "workflow-v3/agent-tools.ts"
+      ],
+      "limits": "ok means the read-only comparison executed, not that registry matches or design/game quality passed. Legacy identity is not an autonomous release prerequisite."
+    },
+    {
+      "issue": "Long history magnifies small operations and repeated finalization",
+      "classification": "Native conversation accumulation and model work granularity; BGS requirement churn contributed",
+      "evidence": "Actual parentUuid ancestor walk before the paid user entry retained 350 records since the last compact boundary, rather than counting unrelated JSONL branches. Current paid input grew from 119079 to 127293 with no compaction request.",
+      "fix": "work stops artificial requirement churn; compact host facts reduce the need for optional evidence discovery; duplicate tool prose was shortened. Stable professional system context remains unchanged.",
+      "limits": "No native source/history rewriting, forced compaction, session reset, turn limit or forced delegation. Existing history and discretionary repetition remain unresolved. Provider cost reduction is not demonstrated by fake-model usage."
+    },
+    {
+      "issue": "Quality misses despite current bytes and old PASS reports",
+      "classification": "Model coverage/judgment and inadequate project assertions; not proven failure of existing geometry math",
+      "evidence": "Gray third star overlaps statistics in a two-star result; AUDIO_DESIGN promises max two voices per sound but audio.ts lacks that limit; camera test uses x540 instead of saved x560 and broad sampling hides x664 vs x640. Existing checkTextSeparation/checkNumericSamples/--scene-point were not selected.",
+      "fix": "Current task facts explicitly expose source-copy build and initial static-browser smoke scope, reportSemantics=not-verified, quality=unverified, deliveryEligible=false. Existing deterministic helper regressions still run.",
+      "limits": "The three real game defects are not repaired or certified. No new semantic-review framework, review prompt, forced all-state crawl or test-project source patch."
+    }
+  ],
+  "history": {
+    "entryTime": "2026-10-11T16:56:06.150Z",
+    "lastCompactBoundary": "2026-10-11T12:45:04.500Z",
+    "records": 350,
+    "user": 123,
+    "assistant": 226,
+    "systemCompact": 1,
+    "serializedContentChars": {
+      "user": 133138,
+      "assistant": 171874
+    },
+    "selectedBlockChars": {
+      "assistantToolArguments": 91358,
+      "assistantThinking": 70747,
+      "bashResults": 46546
+    },
+    "method": "Walk active parentUuid chain to the most recent compact boundary. Serialized characters are not provider-token allocations and are not added to request-token totals."
+  },
+  "regression": {
+    "command": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts packages/agent-workflow-server/src/beegame/current-content-validation.test.ts packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts packages/agent-workflow-server/src/beegame/project-content-authority.test.ts packages/agent-workflow-server/src/beegame/content-handoff.test.ts packages/agent-workflow-server/src/beegame/preview-test-access.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal-native.test.ts",
+    "pass": 109,
+    "fail": 0,
+    "skip": 0,
+    "expects": 1272,
+    "files": 9,
+    "elapsedSeconds": 44.05,
+    "log": "/private/tmp/bgs-v3-159-final-regression.log",
+    "native": {
+      "realCli": true,
+      "model": "controlled-loopback-fake",
+      "requests": 27,
+      "turns": 6,
+      "sameNativeUUID": true,
+      "intents": [
+        "goal",
+        "discuss",
+        "change",
+        "change-interrupted",
+        "continue",
+        "work"
+      ],
+      "initialGoalPromptChars": 708,
+      "initialToolsAndEvidenceChars": 2556,
+      "workRequirementsUnchanged": true,
+      "workPlanRevisionUnchanged": true,
+      "workNoAutomaticMeasurement": true,
+      "unchangedInputsPreviousReceiptCurrent": true,
+      "sourceChangesInvalidated": true,
+      "quality": "not-tested"
+    },
+    "typecheck": {
+      "command": "bun run typecheck",
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-159-typecheck.log"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "exitCode": 0
+    },
+    "initialFailures": "First incorrect import was fixed. Restricted sandbox could not bind test services. Native fixture initially selected the first historical facts instead of the latest task; corrected findLast plus active task identity. New input exceeded the existing 2600-character regression threshold; shortened repetitive tool prose without relaxing it. Existing legacy format test expected no field despite the current shared placeholder; corrected placeholder/non-hash assertions while retaining legacy contract behavior. Required literal runtime-consumption guidance was retained. Final suite enables both browser flags; no skipped case is counted passed."
+  },
+  "integrity": {
+    "command": "node /private/tmp/bgs-v3-155-final-audit.mjs",
+    "protectedTrees": [
+      {
+        "path": "apps/frontend",
+        "files": 825,
+        "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+      },
+      {
+        "path": "src",
+        "files": 2445,
+        "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+      },
+      {
+        "path": "packages/builtin-tools",
+        "files": 383,
+        "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+      }
+    ],
+    "method": "Public file trees excluding private paths/node_modules; unchanged before and after. Not a claim about every hidden file.",
+    "previousArchive": {
+      "path": "/Users/nswell/Downloads/bgs-v3-project (1).zip",
+      "bytes": 369424,
+      "sha256": "db95b8b6ebbc6a5e4c784dcf3d36518ee698764e1f87b954c2330794a2cf8e9b",
+      "files": 51,
+      "sourceFiles": 38,
+      "buildFiles": 13,
+      "allReceiptAndCurrentHashesMatch": true,
+      "newArchiveDownloaded": false
+    }
+  },
+  "remaining": [
+    "True paid-token reduction is unverified.",
+    "No guarantee of model evidence adoption or coverage choice.",
+    "Old native history, repeated optional checks/Todo/finalization persist.",
+    "Three read-only real game quality defects persist.",
+    "No deployment, paid rerun or automatic retry was performed."
+  ]
+}

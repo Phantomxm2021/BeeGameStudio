@@ -1,10 +1,12 @@
 import type {
   BeeGameBillingUserContext,
 } from '@bee-game-studio/beegame-billing-core/billing-route-types'
-import type { TLSAwareFetch } from '@bee-game-studio/security-core'
+import { authRequestTimeoutMs, verifiedTokenCacheUntil, type TLSAwareFetch } from '@bee-game-studio/security-core'
+import { createHash } from 'node:crypto'
 
 type BillingUserResolver = (
   request: Request,
+  signal?: AbortSignal,
 ) => BeeGameBillingUserContext | undefined | Promise<BeeGameBillingUserContext | undefined>
 
 export type BeeGameBillingAuthOptions = {
@@ -23,12 +25,48 @@ export function createBeeGameBillingAuthContext(
 ): BeeGameBillingAuthContext {
   const requestUsers = new WeakMap<Request, BeeGameBillingUserContext>()
   const timeoutMs = normalizeResolveTimeoutMs(options.userResolveTimeoutMs)
+  // Cache only verified identities, scoped to the complete credential, never
+  // to a caller-supplied user ID. Billing still validates its own credentials.
+  const users = new Map<string, { user: BeeGameBillingUserContext; until: number }>()
+  const pending = new Map<string, Promise<BeeGameBillingUserContext | undefined>>()
+  const failures = new Map<string, { attempts: number; retryAt: number }>()
+  const resolve = async (request: Request) => {
+    if (!options.currentUserResolver) return undefined
+    const token = getBearerToken(request)
+    if (!token) return await resolveWithTimeout(signal => options.currentUserResolver!(request, signal), timeoutMs)
+    const key = createHash('sha256').update(token).digest('hex')
+    const cached = users.get(key)
+    if (cached && cached.until > Date.now()) return cached.user
+    users.delete(key)
+    const active = pending.get(key)
+    if (active) return active
+    const retryAt = failures.get(key)?.retryAt ?? 0
+    if (retryAt > Date.now()) throw new BillingAuthError('cooldown', undefined, retryAt - Date.now())
+    const startedAt = Date.now()
+    const lookup = resolveWithTimeout(signal => options.currentUserResolver!(request, signal), timeoutMs)
+      .then(user => {
+        failures.delete(key)
+        if (user) {
+          if (users.size >= 256) users.delete(users.keys().next().value!)
+          users.set(key, { user, until: verifiedTokenCacheUntil(token, 15_000) })
+        }
+        return user
+      }).catch(error => {
+        if (error instanceof BillingAuthError) error.elapsedMs = Date.now() - startedAt
+        const attempts = (failures.get(key)?.attempts ?? 0) + 1
+        if (failures.size >= 256) failures.delete(failures.keys().next().value!)
+        const delay = Math.min(30_000, 2_000 * 2 ** Math.min(attempts - 1, 4))
+        if (error instanceof BillingAuthError) error.retryAfterMs = delay
+        failures.set(key, { attempts, retryAt: Date.now() + delay })
+        throw error
+      }).finally(() => { pending.delete(key) })
+    pending.set(key, lookup)
+    return lookup
+  }
   return {
     resolveRequestUser: async request => {
       if (options.currentUser) return options.currentUser
-      const user = options.currentUserResolver
-        ? await resolveWithTimeout(options.currentUserResolver(request), timeoutMs)
-        : undefined
+      const user = await resolve(request)
       if (user) requestUsers.set(request, user)
       return user
     },
@@ -71,10 +109,10 @@ function createSupabaseBillingUserResolver(
       env.SUPABASE_ANON_KEY ??
       env.VITE_SUPABASE_ANON_KEY,
   )
-  if (!baseUrl || !apiKey) return undefined
-  return async request => {
+  return async (request, signal) => {
     const token = getBearerToken(request)
     if (!token) return undefined
+    if (!baseUrl || !apiKey) throw new Error('Billing authentication is not configured')
     const response = await fetchImpl(`${removeTrailingSlashes(baseUrl)}/rest/v1/rpc/beegame_current_user_context`, {
       method: 'POST',
       headers: {
@@ -83,9 +121,18 @@ function createSupabaseBillingUserResolver(
         'content-type': 'application/json',
       },
       body: '{}',
-    }).catch(() => undefined)
-    if (!response?.ok) return undefined
-    return toBillingUser(await response.json().catch(() => undefined))
+      // This lookup can serve several requests; its own deadline owns abort.
+      signal,
+    }).catch(() => { throw new BillingAuthError(signal?.aborted ? 'timeout' : 'network') })
+    if (response.status === 401 || response.status === 403) return undefined
+    if (!response.ok) throw new BillingAuthError('upstream', response.status)
+    const value = await response.json().catch(() => { throw new Error('Billing authentication response is invalid') })
+    // A null identity is an explicit anonymous result; malformed responses are
+    // service failures, not evidence that the user's credential is invalid.
+    if (value === null) return undefined
+    const user = toBillingUser(value)
+    if (!user) throw new Error('Billing authentication response has no valid identity')
+    return user
   }
 }
 
@@ -116,16 +163,20 @@ function getBearerToken(request: Request): string | undefined {
 }
 
 async function resolveWithTimeout(
-  user: BeeGameBillingUserContext | undefined | Promise<BeeGameBillingUserContext | undefined>,
+  resolve: (signal: AbortSignal) => BeeGameBillingUserContext | undefined | Promise<BeeGameBillingUserContext | undefined>,
   timeoutMs: number,
 ): Promise<BeeGameBillingUserContext | undefined> {
-  if (timeoutMs <= 0) return await user
+  const controller = new AbortController()
+  if (timeoutMs <= 0) return await resolve(controller.signal)
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
-      user,
-      new Promise<undefined>(resolve => {
-        timer = setTimeout(() => resolve(undefined), timeoutMs)
+      resolve(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new BillingAuthError('timeout'))
+          controller.abort()
+        }, timeoutMs)
       }),
     ])
   } finally {
@@ -134,11 +185,15 @@ async function resolveWithTimeout(
 }
 
 function normalizeResolveTimeoutMs(value: number | undefined): number {
-  const configured = value ?? Number.parseInt(
-    process.env.BEEGAME_AUTH_RESOLVE_TIMEOUT_MS ?? '',
-    10,
-  )
-  return Number.isFinite(configured) && configured >= 0 ? configured : 3_000
+  return authRequestTimeoutMs(value)
+}
+
+class BillingAuthError extends Error {
+  elapsedMs?: number
+  constructor(readonly reason: 'timeout' | 'network' | 'upstream' | 'cooldown', readonly upstreamStatus?: number, public retryAfterMs = 2000) {
+    super('Billing authentication temporarily unavailable')
+    this.name = 'BillingAuthError'
+  }
 }
 
 function trimString(value: unknown): string {

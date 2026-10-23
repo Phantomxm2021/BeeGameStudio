@@ -1,0 +1,204 @@
+{
+  "date": "2026-10-05",
+  "verdict": "not-accepted",
+  "scope": "One user-authorized fresh full BGS paid integration delivery; native host orchestration, not Dashboard bootstrap.",
+  "projectId": "full-reaccept-fruit-20261005-eJ5dEaFR",
+  "evidenceRoot": "/private/tmp/bgs-full-delivery-reaccept-20261005-eJ5dEaFR",
+  "model": "ark-code-latest",
+  "modelConfigId": "llm_ac40e5d1be394ffe925e3f2532dedd34",
+  "brief": "我想做一个浏览器里的水果接篮小游戏：玩家左右移动篮子接住下落的水果、避开杂物，完成一局后能重新开始。键盘和触屏都能操作。",
+  "outcome": "handoff-incomplete",
+  "elapsedSeconds": 1555.046,
+  "reached": "GDD released after Inspect/Revise/Verify; Technical/Art/Audio authored; joint Inspect completed; joint Revise ended without receipt.",
+  "notExecuted": [
+    "joint Verify",
+    "remaining four documents and final technical completion",
+    "resources",
+    "authored content",
+    "implementation",
+    "target-runtime acceptance"
+  ],
+  "mutations": {
+    "manualProductEdits": false,
+    "injectedFindings": false,
+    "reusedDrafts": false,
+    "systemChangesDuringRun": false,
+    "sourceAndCliHashesCompared": 3828,
+    "changedHashes": [],
+    "additionalPaidRuns": false
+  },
+  "costs": {
+    "currencyOrCredits": null,
+    "billingReason": "billing_observation_transport_failed",
+    "usageBasis": "Provider final per-request usage; cache reads included, not settled Credit cost; repeated context counts multiple times.",
+    "startedRequests": 95,
+    "completedModelCalls": 94,
+    "missingUsageRequestIds": [
+      1
+    ],
+    "usageComplete": false,
+    "input": 383302,
+    "cacheRead": 2748024,
+    "cacheWrite": 0,
+    "output": 84893,
+    "observedTotalLowerBound": 3216219,
+    "stages": [
+      {
+        "stage": "GDD author",
+        "seconds": 176.016,
+        "calls": 5,
+        "input": 45893,
+        "cacheRead": 162016,
+        "output": 6661,
+        "total": 214570
+      },
+      {
+        "stage": "GDD Inspect",
+        "seconds": 148.263,
+        "calls": 6,
+        "input": 28036,
+        "cacheRead": 80408,
+        "output": 5413,
+        "total": 113857
+      },
+      {
+        "stage": "GDD Revise",
+        "seconds": 117.666,
+        "calls": 11,
+        "input": 28616,
+        "cacheRead": 211816,
+        "output": 5246,
+        "total": 245678
+      },
+      {
+        "stage": "GDD Verify",
+        "seconds": 84.045,
+        "calls": 7,
+        "input": 26220,
+        "cacheRead": 113288,
+        "output": 4383,
+        "total": 143891
+      },
+      {
+        "stage": "Three parallel authors",
+        "seconds": 308.532,
+        "calls": 26,
+        "input": 134487,
+        "cacheRead": 690184,
+        "output": 32255,
+        "total": 856926
+      },
+      {
+        "stage": "Joint Inspect",
+        "seconds": 212.133,
+        "calls": 7,
+        "input": 49807,
+        "cacheRead": 142984,
+        "output": 8870,
+        "total": 201661
+      },
+      {
+        "stage": "Joint Revise",
+        "seconds": 507.902,
+        "calls": 32,
+        "input": 70243,
+        "cacheRead": 1347328,
+        "output": 22065,
+        "total": 1439636
+      }
+    ],
+    "parallelAuthors": [
+      {
+        "document": "TECHNICAL_DESIGN.md",
+        "actor": "abdac4fb176ff75af",
+        "calls": 11,
+        "total": 381999
+      },
+      {
+        "document": "ART_DIRECTION.md",
+        "actor": "a8914706284575b6f",
+        "calls": 8,
+        "total": 252139
+      },
+      {
+        "document": "AUDIO_DESIGN.md",
+        "actor": "a46eebd204a3198dd",
+        "calls": 7,
+        "total": 222788
+      }
+    ]
+  },
+  "nativeReview": {
+    "gdd": "Found and corrected inconsistent miss-deduction timing, plus Balance dependency wrongly reopening the fixed one-life penalty. Verify resolved the recorded issues and host released GDD.",
+    "jointInspect": "Six findings: F-01 required sound source coverage; F-02 ending-frame result audio contradiction; F-03 catch overflow behavior; F-04/F-05/F-06 parallel-document delivery status and later alignment follow-ups.",
+    "incorrectClosure": "F-01 told revision to add consumes and allowed events.source unchanged. The actual checker and published help require events.source coverage. consumes cannot close this error.",
+    "jointRevise": "Corrected F-02 and F-03; then repaired event-source references after the initial consumes change failed. No Write of a step receipt occurred; no final semantic verification executed.",
+    "writableDocuments": [
+      "AUDIO_DESIGN.md"
+    ],
+    "followUps": "Technical/Art nonblocking recorded follow-ups remain due at their specified downstream stages; this run never reached those deadlines.",
+    "rootEvidence": [
+      "stages.json",
+      "review-2-inspect-turn6-events.json",
+      "review-2-revise-turn7-events.json",
+      "native subagent agent-ad57f28013b29eda5.jsonl"
+    ]
+  },
+  "failureAttribution": [
+    {
+      "category": "LLM semantic/contract judgment",
+      "confirmed": true,
+      "problem": "Reviewer supplied a wrong field-level closure condition despite an available events.source contract, causing ineffective revision and extra investigation."
+    },
+    {
+      "category": "Agent execution/result reporting",
+      "confirmed": true,
+      "problem": "Revision made 32 model calls, matching DESIGN_REVIEW_MAX_TURNS=32, and ended after Edit tool results without a step receipt. runAgent.ts breaks on max_turns_reached without recording/forwarding that attachment; task notification reported completed. Evidence strongly supports execution-limit stop, but the exact attachment itself is absent from saved transcript."
+    },
+    {
+      "category": "Cost amplification",
+      "confirmed": true,
+      "problem": "Revision used 22 Edit, 7 Read, 7 Grep, 5 Bash and 2 Glob calls. Two Bash scope denials, one actual failing coverage check and two replacement-string misses added work. Input context grew from 11,355 to 66,017 tokens; history replay, not new document output, dominates total usage."
+    },
+    {
+      "category": "Schema representational limitation",
+      "confirmed": true,
+      "problem": "Audio explains many-to-many semantic coverage but events.source permits one primary producer. Broad overlapping GDD soundRequired outputs forced reassignment among sounds to satisfy structural coverage. Final passing check alone cannot prove this mapping is semantically adequate; no joint Verify happened."
+    }
+  ],
+  "observerChecks": {
+    "readOnly": true,
+    "finalStructuralCheck": {
+      "command": "bun .beegame/delivery/check-content.mjs --design-handoff 2",
+      "exitCode": 0,
+      "valid": true,
+      "runtimeVerified": false,
+      "revision": "1bdc18befc2bf282b6c5a20f07cd2b0d0bfa4154def162142c357e20b1caeb46",
+      "productEdits": false
+    },
+    "declaration": "This observer check did not create a review receipt or advance delivery.",
+    "sourceIntegrity": "All 3,828 watched system/Skill/bundled-CLI hashes identical before and after the paid run.",
+    "proseRisksNotInjected": [
+      "Audio ready has no audio versus ACT-EXIT plays a cue while returning to ready; entry-transition exception not explicit.",
+      "Audio claims GDD no progress save also excludes preference persistence; gameplay and professional preference authority are not equivalent.",
+      "Audio fallback allows missing mute/volume controls despite mandatory controls; unresolved UI dependency not yet due in this stopped run.",
+      "Technical author retained supplied format contract evidence but no external platform documentation; consequential autoplay/background behavior claims need appropriate evidence or actual verification."
+    ]
+  },
+  "optimizationAssessment": {
+    "previousComparableRunObservedTokens": 4717325,
+    "previousComparableRunElapsedSeconds": 2378.64,
+    "currentObservedTokens": 3216219,
+    "qualifiedSuccess": false,
+    "caution": "Both runs stopped before joint Verify. Lower cost is not proof of acceptance or causality from one model sample. Technical author used fewer calls but omitted external evidence; do not call omission a qualified saving.",
+    "newSkillMethodsActuallyLoaded": true,
+    "priorRolledBackOptimizationsReintroduced": false
+  },
+  "limitations": [
+    "Existing image-config preflight network failure; resources never reached, not this stop cause.",
+    "Optional resource library unavailable in isolated harness.",
+    "No runtime game exists yet, so no gameplay/visual/audio quality acceptance.",
+    "Actual settled Credit charge unavailable."
+  ],
+  "conclusion": "The new plan is not accepted. Existing document ownership and review gates prevented false release, but review closure accuracy and native execution-limit result signaling still failed. No automatic extra run or speculative limit increase was performed."
+}

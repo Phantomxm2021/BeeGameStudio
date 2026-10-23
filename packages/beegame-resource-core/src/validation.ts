@@ -10,7 +10,6 @@ import {
   type ResourceElement,
   type ResourcePack,
 } from './types'
-import { isResourceContentHash } from './semantic-curation'
 
 export class ResourceValidationError extends Error {
   constructor(message: string) {

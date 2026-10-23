@@ -8,6 +8,15 @@ import {
 } from './api'
 
 describe('API normalization', () => {
+  it('retains confirmed token totals and missing-receipt state across runtime normalization', () => {
+    const token_budget = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 0,
+      providerUsageIncomplete: true };
+    const first = normalizeProjectBaselineStatusPayload({ project_id: 'p', phase: 'idle', blocked: false,
+      context: { token_budget } });
+    expect(first.context?.token_budget).toEqual(token_budget);
+    // Both the API caller and project store normalize this response.
+    expect(normalizeProjectBaselineStatusPayload(first).context?.token_budget).toEqual(token_budget);
+  });
   beforeEach(() => stubLocalStorage())
 
   afterEach(() => {
@@ -37,16 +46,29 @@ describe('API normalization', () => {
       phase: ' IMPLEMENTATION ',
       blocked: false,
       active_agents: [' worker '],
+      active_subagents: [' agent-use-1 '],
       acceptance: { status: 'not_run' },
       workflow: { runId: 'run-1', status: 'running' },
-    })).toMatchObject({
+    } as never)).toMatchObject({
       project_id: 'project-1',
       phase: 'IMPLEMENTATION',
       blocked: false,
       active_agents: ['worker'],
+      active_subagents: ['agent-use-1'],
       acceptance: { status: 'not_run' },
-      workflow: { runId: 'run-1', status: 'running' },
     })
+    expect(normalizeProjectBaselineStatusPayload({ workflow: { status: 'running' } } as never))
+      .not.toHaveProperty('workflow')
+  })
+
+  it('preserves valid project execution totals and rejects missing or malformed timing', () => {
+    const status = { project_id: 'project', phase: 'idle', blocked: false }
+    expect(normalizeProjectBaselineStatusPayload({ ...status, execution_time: { elapsed_ms: 60_000, running: false } }).execution_time)
+      .toEqual({ elapsed_ms: 60_000, running: false })
+    expect(normalizeProjectBaselineStatusPayload({ ...status, execution_time: { elapsed_ms: 0, running: true } }).execution_time)
+      .toEqual({ elapsed_ms: 0, running: true })
+    for (const value of [null, undefined, { elapsed_ms: -1, running: false }, { elapsed_ms: Infinity, running: false }, { elapsed_ms: 1, running: 'yes' }])
+      expect(normalizeProjectBaselineStatusPayload({ ...status, execution_time: value } as never).execution_time).toBeNull()
   })
 
   it('keeps only canonical tool-permission fields', () => {

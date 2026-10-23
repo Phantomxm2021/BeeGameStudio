@@ -1,0 +1,18 @@
+.form { width: 100%; min-width: 0; }
+.form :global(.bgs-command-bar .cmd input) { font-size: var(--type-body-size); line-height: var(--type-body-leading); letter-spacing: inherit; font-optical-sizing: auto; }
+.morphShell { position: relative; display: block; width: 100%; min-width: 0; }
+.frostedSurface { color: var(--foreground); background: transparent; }
+.composerContent { min-width: 0; margin: 0; padding: 0; border: 0; }
+.attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.attachment { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--muted); color: var(--foreground); font-size: .8125rem; line-height: 1.125rem; }
+.attachment img { width: 32px; height: 32px; flex: none; border-radius: 6px; object-fit: cover; }
+.attachment>span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment>svg { width: 16px; height: 16px; flex: none; }
+.attachment button { display: grid; flex: none; place-items: center; border: 0; padding: 4px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.attachment button svg { width: 14px; height: 14px; }
+.error { margin: 12px 0 0; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); color: var(--foreground); font-size: .9375rem; line-height: 1.25rem; }
+.confirmationContent { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.confirmationActions { display: flex; flex-wrap: wrap; justify-content: flex-end; width: 100%; gap: 10px; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media(pointer: coarse) { .attachment button { min-width: 44px; min-height: 44px; } }
+@media(prefers-reduced-motion: reduce) { .form * { animation: none; transition: none; } }

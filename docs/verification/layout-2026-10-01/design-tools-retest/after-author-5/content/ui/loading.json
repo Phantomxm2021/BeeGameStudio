@@ -1,0 +1,99 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui.loading",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "name": "startup 加载视图根",
+        "layout": {
+          "size": [1280, 720]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [1280, 720],
+          "targetViewports": [[1280, 720], [1024, 576], [960, 540]],
+          "minimumControlSize": [88, 44],
+          "compactMaxWidth": 1024
+        }
+      },
+      {
+        "id": "bg",
+        "parentId": "root",
+        "role": "container",
+        "name": "全屏暗底",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0]
+        },
+        "style": {
+          "background": { "color": "#060512", "opacity": 1 }
+        }
+      },
+      {
+        "id": "loading-wordmark",
+        "parentId": "bg",
+        "role": "text",
+        "text": "NEON BREAKOUT",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, -48],
+          "size": [360, 32]
+        },
+        "style": {
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "#7B88B8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 10
+        }
+      },
+      {
+        "id": "loading-ring",
+        "parentId": "bg",
+        "role": "shape",
+        "name": "加载指示环（运行时旋转）",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [32, 32]
+        },
+        "style": {
+          "shape": "ellipse",
+          "background": { "color": "#000000", "opacity": 0 },
+          "border": { "width": 3, "color": "#2DE2FF", "radius": 16 },
+          "arcGap": 0.3,
+          "glow": { "color": "#2DE2FF", "radius": 6, "opacity": 0.4 }
+        },
+        "data": {
+          "component": "loading-spinner",
+          "note": "不确定进度，故无百分比；旋转循环由运行时承担"
+        }
+      },
+      {
+        "id": "loading-text",
+        "parentId": "bg",
+        "role": "text",
+        "text": "加载中…",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 52],
+          "size": [200, 24]
+        },
+        "style": {
+          "fontSize": 15,
+          "color": "#7B88B8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 4
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "version": "1.84",
+  "date": "2026-10-13",
+  "deployedRuntime": "1.82",
+  "implemented": true,
+  "deployed": false,
+  "productionGrantsEnabled": false,
+  "productionEnvironmentEdited": false,
+  "audit": "docs/verification/bgs-v3-184-tool-access-audit-2026-10-13.json",
+  "implementation": {
+    "configuration": "BEEGAME_PROJECT_TOOL_READ_PATHS",
+    "format": "JSON object: exact canonical workspace -> array of literal canonical external tool file/directory paths",
+    "source": "BGS host process.env only",
+    "scope": "Whole-project native launch OS allowRead only. No Read/Grep/Glob auto-approval, extra write, network, PATH rewrite, engine choice or unsandboxed execution.",
+    "sourceFiles": [
+      "packages/agent-workflow-server/src/beegame/project-execution-access.ts",
+      "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts",
+      "scripts/beegame-dev-lib.ts"
+    ],
+    "default": "No grants; unchanged policy",
+    "validation": "Invalid JSON/current entry, relative/glob/noncanonical/link/missing/special/broad/inside-workspace paths fail closed before scratch execution. Noncurrent workspace entries never grant access.",
+    "handoff": "Normal launcher keeps map in runtime only; selected-model injection is ignored for authorization and stripped from native environment.",
+    "sideEffects": [
+      "Explicit tool contents are readable by permitted shell commands, not only one binary.",
+      "Grant applies to the canonical physical workspace; projects intentionally sharing that workspace share its grant under existing owner/workspace checks.",
+      "Current native launch captures policy; revocation takes effect on a later launch, not an in-flight process.",
+      "Trusted operator must grant actual trusted installs, not secret directories; validation is not a publisher/authenticity checker."
+    ]
+  },
+  "verification": {
+    "core": {
+      "tests": 104,
+      "files": 5,
+      "assertions": 664,
+      "log": "/private/tmp/bgs-v3-184-regression-final.log"
+    },
+    "actualCLI": {
+      "tests": 3,
+      "files": 3,
+      "assertions": 224,
+      "log": "/private/tmp/bgs-v3-184-real-cli-regression.log",
+      "controlledProviderRequests": 41
+    },
+    "distinctPass": 107,
+    "failed": 0,
+    "assertions": 888,
+    "typecheckPassed": true,
+    "typecheckLog": "/private/tmp/bgs-v3-184-typecheck-final-verified.log",
+    "diffCheckPassed": true,
+    "red": [
+      "/private/tmp/bgs-v3-184-tool-grants-red.log",
+      "/private/tmp/bgs-v3-184-launcher-map-red.log"
+    ],
+    "nativeBoundary": "actual CLI reads explicit tool bytes; other workspace/model env cannot obtain access; external writes and symlink target reads denied. Current guided/child/debug goal/change/pause/source-save/rebuild/export paths remain green.",
+    "unity": {
+      "log": "/private/tmp/bgs-v3-184-unity-read-scope.log",
+      "script": "/private/tmp/bgs-v3-184-unity-read-scope.ts",
+      "variants": [
+        {
+          "readPaths": [],
+          "exitCode": 134
+        },
+        {
+          "readPaths": [
+            "exact Unity executable"
+          ],
+          "exitCode": 134
+        },
+        {
+          "readPaths": [
+            "exact Unity executable",
+            "same version Contents/Frameworks"
+          ],
+          "exitCode": 0,
+          "version": "6000.4.0f1"
+        }
+      ],
+      "externalWriteGrants": 0,
+      "createdEngineProject": false,
+      "licenseChanged": false,
+      "scope": "This installed Unity's headless version command in actual OS sandbox; not full Agent/engine development or licensing proof."
+    }
+  },
+  "fixtureFailure": {
+    "log": "/private/tmp/bgs-v3-184-tool-native.log",
+    "cause": "Fixed localhost SSE fixture omitted event-type headers, producing malformed Anthropic response. Fixed fixture only, no Claude Code edits or production retry.",
+    "subsequent": "Actual native test passed; final combined regression passed."
+  },
+  "boundaries": {
+    "paidCalls": 0,
+    "formalFrontendChanged": false,
+    "claudeCodeChanged": false,
+    "builtinToolsChanged": false,
+    "projectArtifactsManuallyEdited": false,
+    "projectSettingsOrHooksOpened": false,
+    "agentLimited": false,
+    "reviewPromptAdded": false,
+    "automaticExecutionRetry": false
+  },
+  "remaining": [
+    "Unity licensing, Resources/editor data and cache access need actual intended operations and separate minimum-scope evidence.",
+    "Godot not present in previously checked locations; no installation or claims of coverage.",
+    "MCP runs through existing trusted user servers; this launch filesystem grant does not sandbox or authorize a separate engine/MCP service.",
+    "Real gameplay/eight-domain/resource/Scene/UI quality and actual engine project/export remain unaccepted; cost optimization last."
+  ]
+}

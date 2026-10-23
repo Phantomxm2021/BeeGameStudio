@@ -1,0 +1,10 @@
+{
+  "source": "Focused test setup with eight prepared documents",
+  "state": {
+    "version": 1,
+    "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"style\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+    "status": "active",
+    "phase": "review",
+    "authorBatch": 3
+  }
+}

@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import type { ResourceElement } from '../../services/resourceLibraryApi'
 import type { ModelMetrics } from './ModelPreview'
 import type { MaterialTextureBindings } from './materialTextureBindings'
@@ -65,19 +64,18 @@ type ResourcePreviewProps = {
 }
 
 export function ResourcePreview({ element, url, onMetrics, materialTextureBindings, textureUrls, externalResourceUrls, externalReferences, onPreviewError }: ResourcePreviewProps) {
-  const { t } = useTranslation('resourceLibrary')
   const renderer = renderPreview(element)
   const extension = extensionFor(element)
 
-  if (renderer === 'image') return <img src={url} alt={element.name} onError={() => onPreviewError?.(new Error(t('preview.imageFailed')))} className="h-full w-full object-contain" />
-  if (renderer === 'audio') return <div className="grid h-full w-full place-items-center"><audio controls src={url} onError={() => onPreviewError?.(new Error(t('preview.audioFailed')))}>{t('preview.audioUnsupported')}</audio></div>
-  if (renderer === 'video') return <video controls src={url} onError={() => onPreviewError?.(new Error(t('preview.videoFailed')))} className="h-full w-full object-contain">{t('preview.videoUnsupported')}</video>
+  if (renderer === 'image') return <img src={url} alt={element.name} onError={() => onPreviewError?.(new Error('Image preview failed'))} className="h-full w-full object-contain" />
+  if (renderer === 'audio') return <div className="grid h-full w-full place-items-center"><audio controls src={url} onError={() => onPreviewError?.(new Error('Audio preview failed'))}>Your browser cannot play this audio file.</audio></div>
+  if (renderer === 'video') return <video controls src={url} onError={() => onPreviewError?.(new Error('Video preview failed'))} className="h-full w-full object-contain">Your browser cannot play this video file.</video>
   if (renderer === 'font') return <FontPreview url={url} element={element} onPreviewError={onPreviewError} />
   if (renderer === 'pdf') return <iframe title={element.name} src={url} sandbox="allow-same-origin" className="h-full w-full border-0" />
   if (renderer === 'text') return <SafeTextPreview url={url} onPreviewError={onPreviewError} />
   if (renderer === 'model') {
     return (
-      <Suspense fallback={<div className="grid h-full w-full place-items-center"><span role="status" aria-label={t('preview.loading')} className="size-6 animate-spin rounded-full border-2 border-white/20 border-t-white/70" /></div>}>
+      <Suspense fallback={<div className="grid h-full w-full place-items-center"><span className="size-6 animate-spin rounded-full border-2 border-border border-t-foreground/70" /></div>}>
         <ModelPreview url={url} sourcePath={element.path} extension={extension} onMetrics={onMetrics} onMetricsError={onPreviewError} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} externalResourceUrls={externalResourceUrls} externalReferences={externalReferences} />
       </Suspense>
     )
@@ -86,7 +84,6 @@ export function ResourcePreview({ element, url, onMetrics, materialTextureBindin
 }
 
 function FontPreview({ url, onPreviewError }: { url: string; element: ResourceElement; onPreviewError?: (error: Error) => void }) {
-  const { t } = useTranslation('resourceLibrary')
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -94,31 +91,28 @@ function FontPreview({ url, onPreviewError }: { url: string; element: ResourceEl
     let active = true
     font.load()
       .then(loadedFont => { document.fonts.add(loadedFont); if (active) setLoaded(true) })
-      .catch(error => { if (active) { setLoaded(false); onPreviewError?.(error instanceof Error ? error : new Error(t('preview.fontFailed'))) } })
+      .catch(error => { if (active) { setLoaded(false); onPreviewError?.(error instanceof Error ? error : new Error('Font preview failed')) } })
     return () => { active = false; document.fonts.delete(font) }
-  }, [t, url])
+  }, [url])
 
-  return <div className="grid h-full w-full place-items-center p-8"><p className="max-w-full break-words text-center text-4xl text-white" style={{ fontFamily: loaded ? 'resource-preview-font, sans-serif' : 'sans-serif' }}>{t('preview.fontSample')}</p></div>
+  return <div className="grid h-full w-full place-items-center p-8"><p className="max-w-full break-words text-center text-4xl text-foreground" style={{ fontFamily: loaded ? 'resource-preview-font, sans-serif' : 'sans-serif' }}>The quick brown fox jumps over the lazy dog</p></div>
 }
 
 function SafeTextPreview({ url, onPreviewError }: { url: string; onPreviewError?: (error: Error) => void }) {
-  const { t } = useTranslation('resourceLibrary')
-  const [result, setResult] = useState<{ url: string; status: 'loaded' | 'failed'; content?: string }>()
+  const [content, setContent] = useState('Loading text preview…')
 
   useEffect(() => {
     const controller = new AbortController()
     fetch(url, { signal: controller.signal })
-      .then(response => response.ok ? response.text() : Promise.reject(new Error(t('preview.loadTextFailed'))))
-      .then(content => setResult({ url, status: 'loaded', content }))
-      .catch(error => { if (error.name !== 'AbortError') { setResult({ url, status: 'failed' }); onPreviewError?.(error instanceof Error ? error : new Error(t('preview.textFailed'))) } })
+      .then(response => response.ok ? response.text() : Promise.reject(new Error('Unable to load text preview')))
+      .then(setContent)
+      .catch(error => { if (error.name !== 'AbortError') { setContent('Text preview is unavailable.'); onPreviewError?.(error instanceof Error ? error : new Error('Text preview failed')) } })
     return () => controller.abort()
-  }, [t, url])
+  }, [url])
 
-  const displayContent = result?.url !== url ? t('preview.textLoading') : result.status === 'failed' ? t('preview.textUnavailable') : result.content || ''
-  return <pre className="h-full w-full overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-4 text-sm text-zinc-100">{displayContent}</pre>
+  return <pre className="h-full w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-4 text-sm text-foreground">{content}</pre>
 }
 
 function DocumentCard({ element, url }: { element: ResourceElement; url: string }) {
-  const { t } = useTranslation('resourceLibrary')
-  return <div className="grid h-full w-full place-items-center p-8"><div className="rounded-xl border border-white/10 bg-white/5 p-6 text-center text-zinc-200"><p className="font-medium">{element.name}</p><p className="mt-2 text-sm text-zinc-400">{t('preview.fileUnsupported')}</p><a className="mt-4 inline-block text-sm text-amber-300 underline" href={url} download={element.name}>{t('preview.download')}</a></div></div>
+  return <div className="grid h-full w-full place-items-center p-8"><div className="rounded-xl border border-border bg-muted p-6 text-center text-foreground"><p className="font-medium">{element.name}</p><p className="mt-2 text-sm text-muted-foreground">This file type cannot be previewed in the workspace.</p><a className="mt-4 inline-block text-sm text-foreground underline" href={url} download={element.name}>Download file</a></div></div>
 }

@@ -1,0 +1,285 @@
+{
+  "record": "1.90",
+  "deployment": {
+    "deployed": "runtime",
+    "pid": 54803,
+    "codeBaseline": "1.89",
+    "sourceHashes": [
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs",
+        "sha256": "9f246ef4ea35623ec51d9aed6b8f464f9ce4fdcf430674007619c78feefaf2e6"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.ts",
+        "sha256": "3a4468ee98e22cc95d2178b997d4d5bca0e055cbad30dc0ac6b81972dc3986d2"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.ts",
+        "sha256": "10a2a09da683695f00b174bc530e2eb4a503d25f923beaf6e1db13415b8587d2"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.ts",
+        "sha256": "0cff343bf3b6dba00c1b35264377e0c0a443093119f12351a39838deb9930e09"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+        "sha256": "bd3853eea96cf068da12d4929cc1d8319858c1d212b98e657304fdc4569fe5a8"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+        "sha256": "2ca985cbec7d6862198a8241459de1f7946c5cadedde90cfd1fd7d05a581bc9a"
+      }
+    ],
+    "uiVersion": "v3-ui-dom-consumption.5",
+    "cliRebuilt": false,
+    "frontendRebuilt": false,
+    "otherServicesRestarted": false,
+    "toolGrantsConfigured": false
+  },
+  "acceptance": {
+    "startedAt": "2026-10-12T18:19:22.548Z",
+    "completedAt": "2026-10-12T18:20:38.886Z",
+    "passed": true,
+    "sourcesMatchDeployed": true,
+    "scope": "Independent Chrome debug invokes identical-source production UI driver in synthetic projects, not a native Agent or production measurement HTTP request",
+    "runs": [
+      {
+        "mode": "visible-window",
+        "expected": "passed",
+        "status": "passed",
+        "version": "v3-ui-dom-consumption.5",
+        "reason": "Selected geometry and text fit observed",
+        "feedback": true,
+        "retainedProbes": 1,
+        "sourceUnchanged": true,
+        "pass": true,
+        "probes": [
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              1024,
+              576
+            ],
+            "status": "passed",
+            "clippedCount": 0
+          }
+        ]
+      },
+      {
+        "mode": "visible-scaled",
+        "expected": "passed",
+        "status": "passed",
+        "version": "v3-ui-dom-consumption.5",
+        "reason": "Selected geometry and text fit observed",
+        "feedback": true,
+        "retainedProbes": 1,
+        "sourceUnchanged": true,
+        "pass": true,
+        "probes": [
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              800,
+              600
+            ],
+            "status": "passed",
+            "clippedCount": 0
+          }
+        ]
+      },
+      {
+        "mode": "hidden-window",
+        "expected": "unverified",
+        "status": "unverified",
+        "version": "v3-ui-dom-consumption.5",
+        "reason": "Target UI ancestor is hidden; geometry alone cannot establish visible consumption",
+        "feedback": true,
+        "retainedProbes": 1,
+        "sourceUnchanged": true,
+        "pass": true,
+        "probes": [
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              1024,
+              576
+            ],
+            "status": "unverified",
+            "reason": "Target UI ancestor is hidden; geometry alone cannot establish visible consumption"
+          }
+        ]
+      },
+      {
+        "mode": "hidden-scaled",
+        "expected": "unverified",
+        "status": "unverified",
+        "version": "v3-ui-dom-consumption.5",
+        "reason": "Target UI ancestor is hidden; geometry alone cannot establish visible consumption",
+        "feedback": true,
+        "retainedProbes": 1,
+        "sourceUnchanged": true,
+        "pass": true,
+        "probes": [
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              800,
+              600
+            ],
+            "status": "unverified",
+            "reason": "Target UI ancestor is hidden; geometry alone cannot establish visible consumption"
+          }
+        ]
+      },
+      {
+        "mode": "clipped-window",
+        "expected": "unverified",
+        "status": "unverified",
+        "version": "v3-ui-dom-consumption.5",
+        "reason": "Complete visible text fit could not be established",
+        "feedback": true,
+        "retainedProbes": 1,
+        "sourceUnchanged": true,
+        "pass": true,
+        "probes": [
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              1024,
+              576
+            ],
+            "status": "unverified",
+            "reason": "Complete visible text fit could not be established",
+            "clippedCount": 1
+          }
+        ]
+      },
+      {
+        "mode": "clipped-scaled",
+        "expected": "unverified",
+        "status": "unverified",
+        "version": "v3-ui-dom-consumption.5",
+        "reason": "Complete visible text fit could not be established",
+        "feedback": true,
+        "retainedProbes": 1,
+        "sourceUnchanged": true,
+        "pass": true,
+        "probes": [
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              800,
+              600
+            ],
+            "status": "unverified",
+            "reason": "Complete visible text fit could not be established",
+            "clippedCount": 1
+          }
+        ]
+      },
+      {
+        "mode": "mixed-selectors",
+        "expected": "unverified",
+        "status": "unverified",
+        "version": "v3-ui-dom-consumption.5",
+        "reason": "Target selector is invalid; select one actual UI element: [",
+        "feedback": true,
+        "retainedProbes": 3,
+        "sourceUnchanged": true,
+        "pass": true,
+        "probes": [
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              1024,
+              576
+            ],
+            "status": "passed",
+            "clippedCount": 0
+          },
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              1024,
+              576
+            ],
+            "status": "unverified",
+            "reason": "Target selector is invalid; select one actual UI element: ["
+          },
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              1024,
+              576
+            ],
+            "status": "passed",
+            "clippedCount": 0
+          }
+        ]
+      },
+      {
+        "mode": "overflow",
+        "expected": "failed",
+        "status": "failed",
+        "version": "v3-ui-dom-consumption.5",
+        "reason": "Visible text exceeds node bounds at baseline",
+        "feedback": true,
+        "retainedProbes": 1,
+        "sourceUnchanged": true,
+        "pass": true,
+        "probes": [
+          {
+            "document": "content/ui/menu.json",
+            "nodeId": "play",
+            "viewport": [
+              1024,
+              576
+            ],
+            "status": "failed",
+            "reason": "Visible text exceeds node bounds at baseline",
+            "clippedCount": 0
+          }
+        ]
+      }
+    ]
+  },
+  "regression": {
+    "pass": 7,
+    "fail": 0,
+    "assertions": 114,
+    "rootTypecheck": true,
+    "mjsSyntax": true,
+    "diffCheck": true
+  },
+  "guards": {
+    "protectedFiles": 3207,
+    "protectedChanges": [],
+    "gameFiles": 201,
+    "gameChanges": [],
+    "checkedAt": "2026-10-12T18:21:06.317Z"
+  },
+  "knownWriterLocksUnchanged": true,
+  "projectsChecked": 40,
+  "modelCalls": 0,
+  "paidCalls": 0,
+  "projectWrites": 0,
+  "evidence": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-190-debug-zeMOTb/evidence.json",
+  "screenshot": "/private/tmp/bgs-v3-190-debug-proof.jpg",
+  "initialFailure": "Temporary debug POST timed out at the Bun default 10s; all 8 checks completed once. Read-only page reload displayed saved results; no re-execution.",
+  "remaining": [
+    "Real native Agent adoption",
+    "Production measurement HTTP/native-turn invocation",
+    "Game quality, full Scene/UI, assets and full player flow",
+    "Engines, unknown external results and authorized formal product integration"
+  ],
+  "debugServicesClosed": true
+}

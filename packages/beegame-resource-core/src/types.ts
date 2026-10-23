@@ -1,6 +1,11 @@
 export const RESOURCE_DIMENSIONS = ['2D', '3D', 'agnostic'] as const
 export type ResourceDimension = (typeof RESOURCE_DIMENSIONS)[number]
 
+export const RESOURCE_SOURCE_KINDS = [
+  'resource-library', 'web', 'agent-authored', 'user-provided',
+] as const
+export type ResourceSourceKind = (typeof RESOURCE_SOURCE_KINDS)[number]
+
 export const RESOURCE_LIBRARY_USAGE = ['optional', 'preferred', 'required'] as const
 export type ResourceLibraryUsage = (typeof RESOURCE_LIBRARY_USAGE)[number]
 
@@ -250,7 +255,7 @@ export type ResourceSelectionDependency = {
 }
 
 /**
- * One exact element resolved after Claude Code has already made the artistic
+ * One exact element resolved after Bgs has already made the artistic
  * choice. It carries no role, score, or generated rationale: the service only
  * validates identity, publication state, version, and the dependency closure.
  */
@@ -409,6 +414,7 @@ export type ResourceCatalogPack = {
   primaryCategory: ResourcePackPrimaryCategory
   categories: readonly ResourceCategory[]
   tags: readonly string[]
+  /** Technically browsable elements, including those without semantic usage tags; not a match count. */
   readyElementCount: number
   assetKinds: readonly ResourceAssetKind[]
   usageTags: readonly ResourceUsageTag[]

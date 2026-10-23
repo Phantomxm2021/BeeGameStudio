@@ -6,8 +6,11 @@ const {
   getProjectStatus,
   getProjectRuntimeState,
   getProjects,
+  getProjectPage,
+  getProjectMetadata,
   openProject,
-  createReviewCopy,
+  bootstrapProjectFromBrief,
+  deleteProjectRequest,
   chatActions,
   updateTokenUsage,
 } = vi.hoisted(() => ({
@@ -15,8 +18,11 @@ const {
   getProjectStatus: vi.fn(),
   getProjectRuntimeState: vi.fn(),
   getProjects: vi.fn(),
+  getProjectPage: vi.fn(),
+  getProjectMetadata: vi.fn(),
   openProject: vi.fn(),
-  createReviewCopy: vi.fn(),
+  bootstrapProjectFromBrief: vi.fn(),
+  deleteProjectRequest: vi.fn(),
   chatActions: {
     clearMessages: vi.fn(),
     addMessage: vi.fn(),
@@ -34,8 +40,11 @@ vi.mock('../services/api', async () => {
       getProjectStatus,
       getProjectRuntimeState,
       getProjects,
+      getProjectPage,
+      getProjectMetadata,
       openProject,
-      createReviewCopy,
+      bootstrapProjectFromBrief,
+      deleteProject: deleteProjectRequest,
     },
   }
 })
@@ -63,13 +72,19 @@ describe('projectStore pending review normalization', () => {
     getProjectStatus.mockReset()
     getProjectRuntimeState.mockReset()
     getProjects.mockReset()
+    getProjectPage.mockReset()
+    getProjectMetadata.mockReset()
+    getProjectPage.mockResolvedValue({ items: [], hasMore: false })
+    getProjectMetadata.mockImplementation(async (id: string) => ({ id, name: id, created_at: 1 }))
     getProjectRuntimeState.mockImplementation(async (projectId: string) => ({
       status: await getProjectStatus(projectId),
       pendingPermissions: (await getPendingToolPermissions(projectId)).items || [],
     }))
     openProject.mockReset()
     openProject.mockResolvedValue({})
-    createReviewCopy.mockReset()
+    bootstrapProjectFromBrief.mockReset()
+    deleteProjectRequest.mockReset()
+    deleteProjectRequest.mockResolvedValue({ ok: true })
     chatActions.clearMessages.mockReset()
     chatActions.addMessage.mockReset()
     updateTokenUsage.mockReset()
@@ -89,6 +104,11 @@ describe('projectStore pending review normalization', () => {
       projects: [],
       activeProjectId: null,
       isLoading: false,
+      hasLoadedProjects: false,
+      projectsHasMore: false,
+      projectsTotal: null,
+      pagedProjectIds: [],
+      isLoadingMoreProjects: false,
       isOpeningProject: false,
       pendingPermissions: [],
       projectStatus: null,
@@ -98,41 +118,138 @@ describe('projectStore pending review normalization', () => {
     useProjectStore.persist.clearStorage()
   })
 
-  it('inserts a created review copy once and returns it', async () => {
-    const source = { id: 'source', name: 'Source', created_at: 1 }
-    const copy = { id: 'copy', name: 'Source Review Copy', created_at: 2 }
-    useProjectStore.setState({ projects: [source] })
-    createReviewCopy.mockResolvedValue({
-      project: copy,
-      runId: 'run-copy',
-      phase: 'DOCUMENT_REVIEW',
-    })
-
-    await expect(
-      useProjectStore.getState().createReviewCopy('source'),
-    ).resolves.toEqual(copy)
-    expect(useProjectStore.getState().projects).toEqual([copy, source])
-
-    await useProjectStore.getState().createReviewCopy('source')
-    expect(useProjectStore.getState().projects).toEqual([copy, source])
+  it('does not inject a duplicate user message after the server has persisted the bootstrap idea', async () => {
+    const project = { id: 'new-project', name: 'Game', created_at: 1 }
+    bootstrapProjectFromBrief.mockResolvedValue({ project, task_id: 'task-1', status: 'started' })
+    getProjects.mockResolvedValue([project])
+    getPendingToolPermissions.mockResolvedValue({ items: [] })
+    await useProjectStore.getState().bootstrapProjectFromBrief({
+      idea: '做一个超级马里奥游戏', option: { title: 'Platformer' }, settings: { platform: 'web' },
+    } as Parameters<ReturnType<typeof useProjectStore.getState>['bootstrapProjectFromBrief']>[0])
+    expect(chatActions.clearMessages).toHaveBeenCalledOnce()
+    expect(chatActions.addMessage.mock.calls.filter(([message]) => message.sender === 'user')).toHaveLength(0)
   })
 
-  it('persists the last active project id while a cloud session is active for validated restoration', () => {
-    localStorage.setItem(
-      'beegame_supabase_session',
-      JSON.stringify({
-        accessToken: 'cloud-token',
-        expiresAt: Date.now() + 60_000,
-        user: { id: 'cloud-user' },
-      }),
-    )
+  it('bulk deletes unique IDs without navigating or toasting for unrelated projects', async () => {
+    const projects = ['one', 'two', 'keep'].map(id => ({ id, name: id, created_at: 1 }))
+    const toast = vi.fn()
+    useProjectStore.setState({ projects, pagedProjectIds: ['one', 'two', 'keep'], projectsTotal: 100, activeProjectId: 'keep', showToastSuccess: toast })
+    window.history.replaceState({}, '', '/?project=keep&editor=ui')
+    const navigate = vi.spyOn(window.history, 'replaceState')
+    try {
+      expect(await useProjectStore.getState().deleteProjects(['one', 'one', 'two'])).toEqual({ deletedIds: ['one', 'two'], failedIds: [] })
+      expect(deleteProjectRequest.mock.calls).toEqual([['one'], ['two']])
+      expect(useProjectStore.getState().projects.map(project => project.id)).toEqual(['keep'])
+      expect(useProjectStore.getState().pagedProjectIds).toEqual(['keep'])
+      expect(useProjectStore.getState().projectsTotal).toBe(98)
+      expect(useProjectStore.getState().activeProjectId).toBe('keep')
+      expect(navigate).not.toHaveBeenCalled()
+      expect(chatActions.clearMessages).not.toHaveBeenCalled()
+      expect(toast).not.toHaveBeenCalled()
+    } finally { navigate.mockRestore() }
+  })
 
+  it('retains remotely failed projects and decrements the total only for successes', async () => {
+    const projects = ['one', 'two'].map(id => ({ id, name: id, created_at: 1 }))
+    useProjectStore.setState({ projects, pagedProjectIds: ['one', 'two'], projectsTotal: 2, activeProjectId: 'two' })
+    deleteProjectRequest.mockImplementation(async (id: string) => { if (id === 'two') throw new Error('Denied') })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      expect(await useProjectStore.getState().deleteProjects(['one', 'two'])).toEqual({ deletedIds: ['one'], failedIds: ['two'] })
+      expect(useProjectStore.getState().projects.map(project => project.id)).toEqual(['two'])
+      expect(useProjectStore.getState().projectsTotal).toBe(1)
+      expect(useProjectStore.getState().activeProjectId).toBe('two')
+      expect(useProjectStore.getState().isLoading).toBe(false)
+      expect(chatActions.clearMessages).not.toHaveBeenCalled()
+    } finally { log.mockRestore() }
+  })
+
+  it('updates the active route once after the whole batch, never to another selected project', async () => {
+    const projects = ['one', 'two', 'keep'].map(id => ({ id, name: id, created_at: 1 }))
+    useProjectStore.setState({ projects, projectsTotal: 3, activeProjectId: 'one' })
+    window.history.replaceState({}, '', '/?project=one')
+    const navigate = vi.spyOn(window.history, 'replaceState')
+    deleteProjectRequest.mockImplementation(async () => {
+      expect(useProjectStore.getState().activeProjectId).toBe('one')
+      expect(navigate).not.toHaveBeenCalled()
+    })
+    try {
+      await useProjectStore.getState().deleteProjects(['one', 'two'])
+      expect(useProjectStore.getState().activeProjectId).toBe('keep')
+      expect(navigate).toHaveBeenCalledOnce()
+      expect(new URL(window.location.href).searchParams.get('project')).toBe('keep')
+      expect(chatActions.clearMessages).toHaveBeenCalledOnce()
+    } finally { navigate.mockRestore() }
+  })
+
+  it('clears the last active project after deletion and makes an empty batch a no-op', async () => {
+    useProjectStore.setState({ projects: [{ id: 'one', name: 'One', created_at: 1 }], activeProjectId: 'one', projectsTotal: 1 })
+    window.history.replaceState({}, '', '/?project=one')
+    await useProjectStore.getState().deleteProjects(['one'])
+    expect(useProjectStore.getState().activeProjectId).toBeNull()
+    expect(useProjectStore.getState().projectsTotal).toBe(0)
+    expect(new URL(window.location.href).searchParams.has('project')).toBe(false)
+    expect(chatActions.clearMessages).toHaveBeenCalledOnce()
+    deleteProjectRequest.mockClear()
+    expect(await useProjectStore.getState().deleteProjects([])).toEqual({ deletedIds: [], failedIds: [] })
+    expect(deleteProjectRequest).not.toHaveBeenCalled()
+  })
+
+  it('does not use the last active project as browser navigation state', () => {
     useProjectStore.setState({ activeProjectId: 'project_from_other_account' })
 
     expect(JSON.parse(storageData.get('project-storage') || '{}')).toEqual({
-      state: { activeProjectId: 'project_from_other_account' },
+      state: {},
       version: 0,
     })
+  })
+
+  it('restores a project only when the URL explicitly selects it', async () => {
+    getProjectPage.mockResolvedValue({ items: [
+      { id: 'proj_1', name: 'One', created_at: 1 },
+      { id: 'proj_2', name: 'Two', created_at: 2 },
+    ], hasMore: false })
+    useProjectStore.setState({ activeProjectId: 'proj_1' })
+
+    window.history.replaceState({}, '', '/')
+    await useProjectStore.getState().loadProjects()
+    expect(useProjectStore.getState().activeProjectId).toBeNull()
+
+    window.history.replaceState({}, '', '/?project=proj_2&editor=scene')
+    await useProjectStore.getState().loadProjects()
+    expect(useProjectStore.getState().activeProjectId).toBe('proj_2')
+  })
+
+  it('loads project history by page and restores a deep-linked project outside the first page', async () => {
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({
+      id: `project-${index}`,
+      name: `Project ${index}`,
+      created_at: 100 - index,
+    }))
+    const secondPage = Array.from({ length: 20 }, (_, index) => ({
+      id: `project-${index + 20}`,
+      name: `Project ${index + 20}`,
+      created_at: 80 - index,
+    }))
+    getProjectPage.mockResolvedValueOnce({ items: firstPage, hasMore: true, total: 100 })
+      .mockResolvedValueOnce({ items: secondPage, hasMore: false, total: 100 })
+    getProjectMetadata.mockResolvedValue({ id: 'project-90', name: 'Old Project', created_at: 10 })
+    window.history.replaceState({}, '', '/?project=project-90')
+
+    await useProjectStore.getState().loadProjects()
+
+    expect(getProjectPage).toHaveBeenCalledWith(0)
+    expect(getProjectMetadata).toHaveBeenCalledWith('project-90')
+    expect(useProjectStore.getState().projects).toHaveLength(21)
+    expect(useProjectStore.getState().activeProjectId).toBe('project-90')
+    expect(useProjectStore.getState().pagedProjectIds).toHaveLength(20)
+    expect(useProjectStore.getState().projectsTotal).toBe(100)
+
+    await useProjectStore.getState().loadMoreProjects()
+
+    expect(getProjectPage).toHaveBeenCalledWith(20)
+    expect(useProjectStore.getState().projects).toHaveLength(41)
+    expect(useProjectStore.getState().projectsHasMore).toBe(false)
   })
 
   it('tracks project opening while switching projects', async () => {
@@ -229,6 +346,7 @@ describe('projectStore pending review normalization', () => {
         blocked: false,
         context: {
           token_budget: {
+            providerUsageIncomplete: true,
             prompt_tokens: 120,
             completion_tokens: 30,
             total_tokens: 150,
@@ -248,6 +366,7 @@ describe('projectStore pending review normalization', () => {
     ])
     expect(updateTokenUsage).toHaveBeenCalledWith(
       {
+        providerUsageIncomplete: true,
         cached_input_tokens: 0,
         completion_tokens: 30,
         input_tokens: 120,

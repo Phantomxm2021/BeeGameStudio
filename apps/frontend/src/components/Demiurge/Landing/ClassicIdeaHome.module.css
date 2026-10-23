@@ -1,0 +1,33 @@
+/* The restored prompt stays independent of the hidden Avatar scene. */
+.main { align-items: center; padding-top: 96px; }
+.stage { width: 100%; max-width: 896px; display: flex; flex-direction: column; align-items: center; gap: 36px; margin-top: -8dvh; }
+.intro { text-align: center; padding-inline: 16px; color: #fff; text-shadow: 0 2px 18px rgb(0 0 0 / 55%); }
+.intro h1 { margin: 0; font-size: clamp(34px, 5vw, 56px); line-height: 1.07; font-weight: 600; letter-spacing: -.035em; text-wrap: balance; }
+.intro h1:lang(zh) { letter-spacing: normal; line-height: 1.2; }
+.intro p { margin: 16px 0 0; font-size: 20px; line-height: 28px; color: rgb(255 255 255 / 90%); }
+/* Every daily preset has a pale upper-left corner, including in dark mode.
+   Keep the brand readable against that actual backdrop rather than inverting it. */
+.brand { color: #1d1d1f; }
+.promptStage { position: relative; width: 100%; min-height: 72px; }
+.promptLayer { width: 100%; }
+.writing { position: absolute; top: 50%; left: 50%; translate: -50% -50%; width: 176px; height: 176px; }
+/* The top edge stays anchored while the bottom follows natural content.
+   Only viewport overflow scrolls; pages fade without scaling their text. */
+.dialog { --intake-top: clamp(24px, 14dvh, 100px); top: var(--intake-top); translate: -50% 0; width: calc(100vw - 32px); max-width: 560px; height: var(--intake-height, auto); max-height: calc(100dvh - var(--intake-top) - 24px); overflow-y: auto; scrollbar-gutter: stable; padding: 0; scale: 1; transition: height 320ms cubic-bezier(.22,1,.36,1), opacity var(--motion-dialog); }
+.dialogPage { --dialogue-reveal-delay: 160ms; padding: 24px; }
+.dialogPage > p { animation: page-reveal 320ms ease-out 60ms backwards; }
+.dialogPage > div:first-child { animation: page-reveal 320ms ease-out backwards; }
+@keyframes page-reveal { from { opacity: 0; } to { opacity: 1; } }
+.dialogHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.iconButton { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: transparent; color: var(--foreground); cursor: pointer; }
+.iconButton:hover { background: var(--muted); }
+.iconButton:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .dialog { transition: none; }
+  .dialogPage > *, .dialogPage [data-dialogue-item], .dialogPage [data-dialogue-items] > * { animation: none; translate: none; }
+}
+@media (max-width: 560px) {
+  .stage { gap: 28px; }
+  .intro p { margin-top: 12px; font-size: 17px; line-height: 25px; }
+  .dialogPage { padding: 20px; }
+}

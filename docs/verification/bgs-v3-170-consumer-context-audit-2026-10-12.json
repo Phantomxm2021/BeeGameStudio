@@ -1,0 +1,154 @@
+{
+  "version": "1.70-audit",
+  "status": "implemented-and-passed-offline-not-deployed",
+  "paidCalls": 0,
+  "decisions": [
+    {
+      "issue": "Shared helper missing when the original consumer was authored, later help-only optional reuse",
+      "action": "Reuse existing module; explicit non-overwriting install and read-only compatibility inspection. No automatic game migration or engine selection."
+    },
+    {
+      "issue": "Format align/verticalAlign versus production CSS-only style vocabulary",
+      "action": "Normalize these documented aliases once in shared surface; preserve conflicts/unsupported fields as actionable errors, not silent drops."
+    },
+    {
+      "issue": "Fresh-context loss of implicit decisions and unknown interrupted work",
+      "action": "Explicit focused mode only for work/change after an ended, quiesced prior turn. Default/discussion/continuation keep resume. Preserve current requirements, literal prior user messages and recorded Question answers; omit old model/tool history. Do not replay shell permissions or claim unrecorded implicit decisions are retained."
+    },
+    {
+      "issue": "Repeated geometry retrieval and invalid game-view guesses",
+      "action": "Selected-node geometry in existing layout CLI, with available IDs on invalid input; no new checker/pipeline."
+    },
+    {
+      "issue": "Proposed cross-measurement build caching has unproven invalidation/recovery semantics",
+      "action": "Defer caching. Batch observation already supported; retain actual new checks and exact version evidence."
+    }
+  ],
+  "sideEffects": [
+    "Shared module still has limited render/style/binding coverage; custom Canvas/gameplay remains project responsibility.",
+    "Focused context loses old assistant-only assumptions and loaded Skill bodies; record old loads as not transferred, retain method discovery without enabling settings/hooks.",
+    "Focused mode is explicit, not an automatic cost fix or guaranteed adoption. Large literal user history can still grow; no claim of zero missing semantic context.",
+    "No real game fixes, complete quality pass or paid Token reduction established by synthetic regression."
+  ],
+  "implementationScope": [
+    "BGS integration and shared scene-editor consumer only",
+    "Independent debug option only",
+    "No formal frontend/native/builtin-tools or project artifact edits",
+    "No role/Review prompt addition, model or Agent limits"
+  ],
+  "implementation": {
+    "consumer": {
+      "commands": [
+        "consumer.mjs --inspect FILE ...",
+        "consumer.mjs --install public-target.mjs"
+      ],
+      "nonOverwriting": true,
+      "automaticMigration": false,
+      "sharedStyleAliases": [
+        "align -> textAlign (conflicts explicit)",
+        "verticalAlign top/middle/center/bottom"
+      ],
+      "limits": "Not all roles/styles/rich content, project data.action/data.variant or dynamic game behavior are implemented; static support diagnostic is not runtime acceptance."
+    },
+    "execution": {
+      "apiField": "AgentMessage.contextMode = resume | focused (optional)",
+      "default": "resume",
+      "focusedAllowed": "Explicit work/change after an ended quiesced previous turn; active writer, failed/interrupted previous work and discussion/continuation do not silently reset.",
+      "persistedHistory": "Chat and previous native histories retained; new native context only skips their model replay.",
+      "facts": "Current requirements, literal prior V3 messages, ordinary Chat user messages, recorded Question answers/refusals; no old assistant/tool/thinking history or shell/network permission grants.",
+      "skills": "Old loads marked not-transferred; ordinary native method discovery stays enabled, no settings/hooks expansion."
+    },
+    "diagnostics": {
+      "command": "Existing --layout/--layout-draft ... --nodes ID ... [--details]",
+      "result": "Selected resolved rectangles, source input identity, explicit host vs parent-local spaces and available IDs on missing targets.",
+      "addedRuntimeGate": false
+    },
+    "deferred": "Cross-measurement build cache and automatic consumer/context adoption are not implemented; no new scheduler/limit."
+  },
+  "regression": {
+    "core": {
+      "pass": 121,
+      "fail": 0,
+      "skip": 0,
+      "expects": 1205,
+      "files": 8,
+      "seconds": 24.49,
+      "log": "/private/tmp/bgs-v3-170-core.log"
+    },
+    "native": {
+      "pass": 2,
+      "fail": 0,
+      "skip": 0,
+      "expects": 214,
+      "files": 2,
+      "seconds": 27.59,
+      "log": "/private/tmp/bgs-v3-170-native.log",
+      "localFakeModelRequests": 36,
+      "paidModelCalls": 0
+    },
+    "totalDistinctPassingTests": 123,
+    "typecheck": {
+      "exit": 0,
+      "log": "/private/tmp/bgs-v3-170-typecheck.log"
+    },
+    "syntax": [
+      "debug-client.js",
+      "agent-goal-browser.mjs"
+    ],
+    "diffCheck": 0,
+    "syntheticMessageCharacters": {
+      "beforeFocused": 69641,
+      "focused": 15549,
+      "followingResume": 16338,
+      "meaning": "Observed message body characters in the controlled transport fixture, not actual token savings or autonomous model capability."
+    },
+    "unchangedPromptFixture": {
+      "goalCharacters": 708,
+      "defaultToolContextCharacters": 2586
+    },
+    "earlyFailures": [
+      "Initial sandbox blocked local listeners (EADDRINUSE) and local proxy; reran with approved local-test permissions, no system fix for a fake port error.",
+      "One new assertion compared doubly escaped requirements text incorrectly; now parses actual facts and compares the complete object.",
+      "Native fixture still asserted same-UUID/contextPresence for all turns; replaced with original first-five same UUID, explicitly focused new UUID, following resumed UUID and not-transferred Skill evidence. No weakening of default continuation/recovery checks."
+    ]
+  },
+  "integrity": {
+    "protectedTrees": [
+      {
+        "path": "apps/frontend",
+        "files": 825,
+        "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+      },
+      {
+        "path": "src",
+        "files": 2445,
+        "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+      },
+      {
+        "path": "packages/builtin-tools",
+        "files": 383,
+        "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+      }
+    ],
+    "realGameSourceFiles": 39,
+    "unchangedSinceUserPause": true,
+    "formalFrontendChanges": 0,
+    "claudeCodeSourceChanges": 0,
+    "builtinToolChanges": 0,
+    "paidCalls": 0,
+    "deployments": 0,
+    "serviceRestarts": 0,
+    "manualGameChanges": 0,
+    "additionalRoleOrReviewPrompt": 0,
+    "agentLimits": 0,
+    "projectSettingsHooksEnabled": false,
+    "existingDirtySkillsChanges": "Preserved; not edited by this turn."
+  },
+  "remaining": [
+    "Explicit focused mode is available, not a silent default policy change; the existing paused real project has not been resumed or reset.",
+    "Shared helper availability/installation does not guarantee actual autonomous adoption or full UI quality; no real game repair/quality acceptance this turn.",
+    "Assistant-only implicit design assumptions are not transferred. Use resumed context when they remain necessary; current factual snapshots cannot certify semantic completeness.",
+    "Large literal user history and a long single production task can still grow. No paid token reduction or fixed cost promise.",
+    "No deployed database/concurrency test of focused mode; existing CAS/unit and local native integration verified."
+  ]
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CreditCard, X } from 'lucide-react';
+import { CreditCard } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
@@ -9,6 +9,10 @@ import {
   getStripeCreditPacks,
   type BeeGameStripeCreditPack,
 } from '../../../services/creditsApi';
+import { Button } from '../../beui/project-button';
+import { CloseIconButton } from '../../ui/CloseIconButton';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
+import { useToastContext } from '../../../contexts/ToastContext';
 
 interface CreditStoreModalProps {
   isOpen: boolean;
@@ -36,6 +40,7 @@ type CreditStoreTierKey = 'starter' | 'builder' | 'pro' | 'studio';
 const CREDIT_STORE_TIERS: CreditStoreTierKey[] = ['starter', 'builder', 'pro', 'studio'];
 
 export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProps) {
+  const { showError } = useToastContext();
   const { i18n } = useTranslation('beegame');
   const copy = getCreditStoreCopy((key, options) => (
     i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame')(key, options)
@@ -48,6 +53,8 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    // Opening the modal starts a fresh catalog request and clears stale status.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
     setStatus('');
     void getStripeCreditPacks()
@@ -68,9 +75,7 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
-
-  if (!isOpen) return null;
+  }, [copy.notConfigured, copy.unavailable, isOpen]);
 
   const startCheckout = async (priceId: string) => {
     setStatus('');
@@ -79,56 +84,41 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
       const session = await createStripeCheckoutSession(priceId);
       window.open(session.url, '_self');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : copy.checkoutUnavailable);
+      showError(error instanceof Error ? error.message : copy.checkoutUnavailable);
       setCheckoutPriceId('');
     }
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={copy.title}
-      className="fixed inset-0 z-[210] flex items-center justify-center bg-zinc-950/60 p-4 backdrop-blur-sm"
-    >
-      <div
-        data-surface="frosted-glass"
-        className="input-surface glass-panel flex max-h-[min(560px,calc(100vh-2rem))] w-[min(600px,calc(100vw-2rem))] flex-col overflow-hidden rounded-[28px] p-5 text-zinc-100"
-      >
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flex max-h-[min(560px,calc(100dvh-2rem))] max-w-2xl flex-col overflow-hidden p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="type-title-2 text-white">{copy.title}</h2>
-            <p className="type-footnote mt-1 text-zinc-500">{copy.description}</p>
+            <DialogTitle className="type-title-2 text-foreground">{copy.title}</DialogTitle>
+            <DialogDescription className="type-footnote mt-1 text-muted-foreground">{copy.description}</DialogDescription>
           </div>
-          <button
-            type="button"
-            aria-label={copy.close}
-            onClick={onClose}
-            className="glass-icon-button inline-flex h-9 w-9 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <CloseIconButton label={copy.close} onClick={onClose} />
         </div>
 
         <div className="mt-4 min-h-0">
           {isLoading ? (
-            <div className="overflow-hidden rounded-2xl border border-white/10" aria-label={copy.loading}>
+            <div className="overflow-hidden rounded-lg border border-border" aria-label={copy.loading}>
               {Array.from({ length: 4 }).map((_, index) => (
                 <div
                   key={index}
-                  className="grid gap-3 border-b border-white/10 bg-white/[0.035] px-3 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+                  className="grid gap-3 border-b border-border bg-muted/40 px-3 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
                 >
                   <div className="min-w-0 space-y-2">
-                    <Skeleton className="h-4 w-32 bg-white/10" />
-                    <Skeleton className="h-3 w-56 bg-white/10" />
+                    <Skeleton className="h-4 w-32 bg-accent" />
+                    <Skeleton className="h-3 w-56 bg-accent" />
                   </div>
-                  <Skeleton className="h-5 w-24 bg-white/10 sm:ml-auto" />
-                  <Skeleton className="h-9 w-full rounded-full bg-white/10 sm:w-24" />
+                  <Skeleton className="h-5 w-24 bg-accent sm:ml-auto" />
+                  <Skeleton className="h-9 w-full rounded-full bg-accent sm:w-24" />
                 </div>
               ))}
             </div>
           ) : (
-            <div className="max-h-[min(360px,calc(100vh-13rem))] overflow-y-auto rounded-2xl border border-white/10">
+            <div className="max-h-[min(360px,calc(100vh-13rem))] overflow-y-auto rounded-lg border border-border">
               {packs.map((pack, index) => (
                 <CreditPackRow
                   key={pack.priceId}
@@ -144,12 +134,12 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
         </div>
 
         {status ? (
-          <div className="type-footnote mt-3 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-200">
+          <div className="type-footnote mt-3 rounded-lg border border-[var(--warning)] bg-[var(--surface-2)] px-3 py-2 text-[var(--warning)]">
             {status}
           </div>
         ) : null}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -169,22 +159,24 @@ function CreditPackRow({
   const credits = pack.credits.toLocaleString();
   const title = pack.displayName?.trim() || copy.tierTitle(tier, copy.creditAmount(credits));
   return (
-    <div className="grid gap-3 border-b border-white/10 bg-white/[0.035] px-3 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+    <div className="grid gap-3 border-b border-border bg-muted/40 px-3 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
       <div className="min-w-0">
-        <div className="type-footnote text-white">{title}</div>
-        <p className="type-caption-1 mt-0.5 line-clamp-2 text-zinc-500">{copy.tierDescription(tier)}</p>
+        <div className="type-footnote text-foreground">{title}</div>
+        <p className="type-caption-1 mt-0.5 line-clamp-2 text-muted-foreground">{copy.tierDescription(tier)}</p>
       </div>
-      <div className="type-subheadline text-white sm:min-w-32 sm:text-right">{copy.creditAmount(credits)}</div>
-      <button
+      <div className="type-subheadline text-foreground sm:min-w-32 sm:text-right">{copy.creditAmount(credits)}</div>
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         aria-label={copy.buyAria(credits)}
         disabled={isCheckingOut}
         onClick={onBuy}
-        className="glass-control type-button inline-flex h-9 w-full shrink-0 items-center justify-center gap-2 rounded-full px-3 text-zinc-100 disabled:opacity-60 sm:w-24"
+        className="w-full sm:w-24"
       >
         <CreditCard className="h-3.5 w-3.5" />
         {copy.buy}
-      </button>
+      </Button>
     </div>
   );
 }

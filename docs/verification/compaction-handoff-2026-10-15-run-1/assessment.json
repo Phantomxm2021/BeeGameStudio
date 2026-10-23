@@ -1,0 +1,128 @@
+{
+  "kind": "one-shot-compression-handoff-assessment",
+  "recordedAt": "2026-10-15",
+  "method": "Reuse prior independent summaries and exact reconstructed post-compaction contexts. Same five questions; one request per arm; tool_choice none; no readbacks or extra attempts.",
+  "arms": {
+    "A": {
+      "usage": {
+        "input_tokens": 6600,
+        "output_tokens": 1783,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "elapsedMs": 46933,
+      "stopReason": "end_turn",
+      "responseSha256": "f262539078157c3825b84259a379a00fd711867a7fb5dd030f0ae4b0ff67eeac"
+    },
+    "B": {
+      "usage": {
+        "input_tokens": 17896,
+        "output_tokens": 1465,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "elapsedMs": 34127,
+      "stopReason": "end_turn",
+      "responseSha256": "d4335c108b7f815336426d9618112c16fc094bcad05d4ef020ec535f3d720e27"
+    }
+  },
+  "requestCount": 2,
+  "toolExecutions": 0,
+  "sourceHashUnchanged": true,
+  "failures": [],
+  "sourceVersionIntegrity": {
+    "priorFirstContinuationRequestHashesMatchedForBothArms": true,
+    "changedLiveFile": "src/services/compact/preservedContext.ts",
+    "action": "Recovered prior source into audit-only snapshot, matching original SHA-256 52b55538aae7573496107d22158336063cd88af958d8df2a750e48c5e0ed3159. Active source was not reverted or changed.",
+    "evaluatedBaseline": "Same pinned GitHub v2.8.4 and local preflight implementation as prior pilot; later local successful-Write-body compaction is not evaluated here."
+  },
+  "evaluation": {
+    "scope": {
+      "A": "fail-attribution",
+      "B": "pass-on-specified-product-scope",
+      "evidence": "A labels exact scores and slowdown durations as user-specified. B explicitly separates these implementation choices from the confirmed brief. Original line 4 specifies broad scoring/trash behavior, not these numeric values.",
+      "limitation": "This is not an exhaustive proof that every process instruction survives."
+    },
+    "unresolved": {
+      "A": "fail-critical",
+      "B": "pass",
+      "AQuote": "未知或被拒 receipt 不能靠重放原 requestId 重新提交，需新 requestId",
+      "BQuote": "不得更换 requestId 重试、不得重放未知/被拒回执当作重新提交；需如实上报，且不能假设收费或免费",
+      "originalLines": [
+        107,
+        111,
+        126
+      ],
+      "groundTruth": "Original receipts explicitly prohibit changing requestId merely to retry. kittyfish-bg-v1 and kittyfish-sprites-v1 have unknown outcomes; v2 success does not establish v1 billing. B preserves both IDs and billing uncertainty."
+    },
+    "toolPaths": {
+      "A": "fail-missing-information",
+      "B": "pass-path-recovery",
+      "AQuote": "工具脚本的具体绝对路径或项目内封装路径：未保留／无法确认",
+      "BPaths": [
+        ".beegame/tmp/goal-tools-S66Tsk/check-content.mjs",
+        ".beegame/tmp/goal-tools-S66Tsk/measure.mjs",
+        ".beegame/tmp/goal-tools-S66Tsk/preview.mjs"
+      ],
+      "originalLines": [
+        4
+      ],
+      "limitation": "Correct historical paths do not prove the expired turn-scoped bridges are currently usable; no tool availability was tested."
+    },
+    "checkpoint": {
+      "A": "main-checkpoint-recovered",
+      "B": "main-checkpoint-recovered-with-stale-issue",
+      "groundTruth": "engine.js saved; React application layer remains; build/browser/resource-consumption validation pending.",
+      "originalLines": [
+        310,
+        325,
+        326
+      ],
+      "BWarning": {
+        "quote": "另外五个 UI JSON 曾报缺少 root.data.orientation: Landscape（scene 布局校验通过），是否已修复未保留／无法确认",
+        "sourceLines": [
+          286,
+          298,
+          303,
+          307
+        ],
+        "fact": "Orientation was written and later design-layout/current checks reported valid. Later scene-zone edits require current revision checking but do not erase the earlier orientation repair.",
+        "assessment": "B fails to preserve the historical resolution of this specific issue and may prompt redundant inspection. Calling it uncertain is safer than inventing success, but it is still incomplete handoff information."
+      }
+    },
+    "nextStep": {
+      "A": "main-development-step-recovered-but-separate-recovery-advice-unsafe",
+      "B": "main-development-step-recovered-with-redundant-orientation-check",
+      "fact": "Both describe remaining React integration, asset copying and real validation. B prohibits unnecessary paid regeneration. B also carries forward the obsolete orientation uncertainty.",
+      "limitation": "No steps were executed; their production correctness is not established."
+    }
+  },
+  "strictAcceptance": {
+    "A": "failed",
+    "B": "not-unqualified-pass",
+    "explanation": "Do not retroactively lower the five-question correctness bar: B retains a stale issue, so it is not perfect or fully accepted. Its critical authorization, unknown-billing and path information are materially better preserved in this sample."
+  },
+  "engineeringDecision": {
+    "selection": "Retain local approach; do not replace it with the tested GitHub baseline.",
+    "rationale": "The GitHub arm is disqualified by explicit unsafe retry guidance and missing tool paths. The local arm retains these critical facts, at higher context cost, with a bounded stale-status defect. This supports retaining the current direction, not claiming a flawless implementation.",
+    "nextMinimalWork": "Only if separately requested: inspect the existing evidence-retention rule for why obsolete orientation errors persist alongside later valid checks. No extra paid experiment or threshold change is needed to make the replacement decision.",
+    "thresholdChange": "none",
+    "implementationChange": "none"
+  },
+  "tokenInterpretation": {
+    "completeHandoffInput": {
+      "A": 6600,
+      "B": 17896,
+      "difference": 11296
+    },
+    "note": "Measured provider-reported input for identical fixed questions/system/tool schema; includes the entire tested post-compaction context plus shared request overhead, not just summary length. No cache reads occurred. It is not a full-production context measurement or monetary comparison.",
+    "noCostWinner": "The smaller arm fails correctness; smaller token count does not qualify it for replacement. No billed currency amount was obtained."
+  },
+  "limits": [
+    "Single case and one response per arm.",
+    "Pinned GitHub source is not verified latest main.",
+    "Original system prompt/restored attachments/native tools/visual evidence remain outside this isolated test.",
+    "The later local preservedContext change was left intact and was not measured.",
+    "No new summary generation, project mutation, service restart or business-tool calls."
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "status-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "container": { "direction": "column", "gap": 14, "padding": [24, 24, 24, 24], "justify": "center", "align": "center" }
+        },
+        "style": { "background": { "color": "#0b0a1a" } }
+      },
+      {
+        "id": "spinner",
+        "parentId": "root",
+        "role": "shape",
+        "enabled": true,
+        "layout": { "size": [36, 36] },
+        "style": { "shape": "ring", "color": "#7df9ff" }
+      },
+      {
+        "id": "status-text",
+        "parentId": "root",
+        "role": "text",
+        "enabled": true,
+        "text": "装载失败，请检查网络后重试",
+        "layout": { "size": [272, 48] },
+        "style": { "fontSize": 15, "lineHeight": 24, "align": "center", "color": "#b9b6d9" }
+      },
+      {
+        "id": "retry-btn",
+        "parentId": "root",
+        "role": "button",
+        "enabled": true,
+        "text": "重试",
+        "layout": { "size": [180, 46] },
+        "actions": { "onActivate": "RETRY" },
+        "style": { "fontSize": 17 }
+      }
+    ]
+  }
+}

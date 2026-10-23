@@ -1,11 +1,9 @@
 export type BeeGameBillingMode = 'server' | 'remote' | 'disabled'
-export type BeeGameUsageBillingMode = 'realtime'
 
 export type BeeGameBillingConfig = {
   mode: BeeGameBillingMode
   remoteApiBaseUrl?: string
   creditControlToken?: string
-  usageBillingMode: BeeGameUsageBillingMode
 }
 
 type BillingEnv = {
@@ -13,7 +11,6 @@ type BillingEnv = {
   BEEGAME_BILLING_MODE?: string
   BEEGAME_BILLING_API_BASE_URL?: string
   BEEGAME_CREDIT_CONTROL_TOKEN?: string
-  BEEGAME_USAGE_BILLING_MODE?: string
   BEEGAME_STRIPE_SECRET_KEY?: string
   BEEGAME_STRIPE_WEBHOOK_SECRET?: string
   BEEGAME_STRIPE_PRICE_CREDITS?: string
@@ -29,7 +26,6 @@ export function resolveBeeGameBillingConfig(
   const explicitMode = normalizedOptional(
     env.BEEGAME_BILLING_MODE,
   )?.toLowerCase()
-  const usageBillingMode: BeeGameUsageBillingMode = 'realtime'
   if (
     explicitMode === 'server' ||
     explicitMode === 'remote' ||
@@ -39,7 +35,6 @@ export function resolveBeeGameBillingConfig(
       mode: explicitMode,
       remoteApiBaseUrl,
       creditControlToken,
-      usageBillingMode,
     })
   }
   if (remoteApiBaseUrl) {
@@ -47,7 +42,6 @@ export function resolveBeeGameBillingConfig(
       mode: 'remote',
       remoteApiBaseUrl,
       creditControlToken,
-      usageBillingMode,
     })
   }
   if (
@@ -58,13 +52,11 @@ export function resolveBeeGameBillingConfig(
     return compactBillingConfig({
       mode: 'server',
       creditControlToken,
-      usageBillingMode,
     })
   }
   return compactBillingConfig({
     mode: 'disabled',
     creditControlToken,
-    usageBillingMode,
   })
 }
 
@@ -84,6 +76,5 @@ function compactBillingConfig(
     ...(config.creditControlToken
       ? { creditControlToken: config.creditControlToken }
       : {}),
-    usageBillingMode: config.usageBillingMode,
   }
 }

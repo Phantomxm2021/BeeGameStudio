@@ -196,10 +196,13 @@ create table if not exists public.beegame_sessions (
 );
 
 create table if not exists public.beegame_model_configs (
+  published boolean not null default true,
+  auth_methods jsonb not null default '["platform"]'::jsonb,
   id text primary key,
   owner_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   provider text not null,
+  api_protocol text check (api_protocol is null or api_protocol in ('responses', 'chat-completions', 'anthropic-messages', 'gemini')),
   base_url text,
   -- Historical column name. BeeGame stores an RLS-protected secret here; the
   -- local runtime host must not require or use a Supabase service-role key.
@@ -209,6 +212,9 @@ create table if not exists public.beegame_model_configs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Existing installations receive the same column before the runtime RPC is replaced.
+alter table public.beegame_model_configs add column if not exists api_protocol text;
 
 with ranked_model_defaults as (
   select
@@ -245,6 +251,12 @@ create table if not exists public.beegame_platform_settings (
 
 create table if not exists public.beegame_web_tools (
   owner_id uuid primary key references auth.users(id) on delete cascade,
+  config jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.beegame_image_generation_settings (
+  id text primary key check (id = 'platform'),
   config jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
@@ -421,7 +433,7 @@ with selectable_elements as (
     e.pack_id,
     e.status,
     e.usage_tags_mode,
-    e.usage_tags,
+    case when e.usage_tags_mode = 'override' then e.usage_tags else '{}'::text[] end as usage_tags,
     e.asset_kind,
     e.specs,
     e.dependencies,
@@ -432,8 +444,8 @@ with selectable_elements as (
     e.path
   from public.beegame_resource_elements e
   where e.status = 'ready'
-    and e.usage_tags_mode = 'override'
-    and cardinality(e.usage_tags) > 0
+    -- Browsing is technical availability, not semantic requirement matching.
+    and e.usage_tags_mode <> 'manual-only'
     and e.asset_kind is not null
     and length(coalesce(e.specs ->> 'contentHash', '')) = 64
     and not exists (
@@ -1325,11 +1337,9 @@ stable
 as $$
 declare
   model_row public.beegame_model_configs%rowtype;
-  web_row public.beegame_web_tools%rowtype;
   settings_row public.beegame_runtime_settings%rowtype;
   platform_settings jsonb := '{}'::jsonb;
   model_env jsonb := '{}'::jsonb;
-  web_env jsonb := '{}'::jsonb;
   settings_env jsonb := '{}'::jsonb;
   runtime_env jsonb := '{}'::jsonb;
   base_config_dir text;
@@ -1367,56 +1377,40 @@ begin
     case model_row.provider
       when 'anthropic-compatible' then
         model_env := jsonb_build_object(
-          'ANTHROPIC_BASE_URL', model_row.base_url,
-          'ANTHROPIC_AUTH_TOKEN', model_row.api_key_ciphertext,
-          'ANTHROPIC_DEFAULT_HAIKU_MODEL', model_row.models->>'fast',
-          'ANTHROPIC_DEFAULT_SONNET_MODEL', model_row.models->>'balanced',
-          'ANTHROPIC_DEFAULT_OPUS_MODEL', model_row.models->>'strong'
+          'BEEGAME_MODEL_TYPE', 'anthropic',
+          'BEEGAME_API_PROTOCOL', coalesce(model_row.api_protocol, 'anthropic-messages'),
+          'ANTHROPIC_BASE_URL', coalesce(nullif(model_row.base_url, ''), 'https://api.anthropic.com'),
+          'ANTHROPIC_API_KEY', model_row.api_key_ciphertext
         );
       when 'openai-compatible' then
         model_env := jsonb_build_object(
-          'CLAUDE_CODE_USE_OPENAI', '1',
-          'OPENAI_BASE_URL', model_row.base_url,
-          'OPENAI_API_KEY', model_row.api_key_ciphertext,
-          'OPENAI_DEFAULT_HAIKU_MODEL', model_row.models->>'fast',
-          'OPENAI_DEFAULT_SONNET_MODEL', model_row.models->>'balanced',
-          'OPENAI_DEFAULT_OPUS_MODEL', model_row.models->>'strong'
+          'BEEGAME_MODEL_TYPE', 'openai',
+          'BEEGAME_API_PROTOCOL', coalesce(model_row.api_protocol, 'chat-completions'),
+          'OPENAI_BASE_URL', coalesce(nullif(model_row.base_url, ''), 'https://api.openai.com/v1'),
+          'OPENAI_API_KEY', model_row.api_key_ciphertext
         );
       when 'gemini' then
         model_env := jsonb_build_object(
-          'CLAUDE_CODE_USE_GEMINI', '1',
-          'GEMINI_BASE_URL', model_row.base_url,
-          'GEMINI_API_KEY', model_row.api_key_ciphertext,
-          'GEMINI_DEFAULT_HAIKU_MODEL', model_row.models->>'fast',
-          'GEMINI_DEFAULT_SONNET_MODEL', model_row.models->>'balanced',
-          'GEMINI_DEFAULT_OPUS_MODEL', model_row.models->>'strong'
+          'BEEGAME_MODEL_TYPE', 'gemini',
+          'BEEGAME_API_PROTOCOL', coalesce(model_row.api_protocol, 'gemini'),
+          'GEMINI_BASE_URL', coalesce(nullif(model_row.base_url, ''), 'https://generativelanguage.googleapis.com/v1beta'),
+          'GEMINI_API_KEY', model_row.api_key_ciphertext
         );
       when 'grok' then
         model_env := jsonb_build_object(
-          'CLAUDE_CODE_USE_GROK', '1',
-          'GROK_BASE_URL', model_row.base_url,
-          'GROK_API_KEY', model_row.api_key_ciphertext,
-          'GROK_DEFAULT_HAIKU_MODEL', model_row.models->>'fast',
-          'GROK_DEFAULT_SONNET_MODEL', model_row.models->>'balanced',
-          'GROK_DEFAULT_OPUS_MODEL', model_row.models->>'strong'
+          'BEEGAME_MODEL_TYPE', 'grok',
+          'BEEGAME_API_PROTOCOL', coalesce(model_row.api_protocol, 'chat-completions'),
+          'GROK_BASE_URL', coalesce(nullif(model_row.base_url, ''), 'https://api.x.ai/v1'),
+          'GROK_API_KEY', model_row.api_key_ciphertext
         );
       else
-        model_env := '{}'::jsonb;
+        raise exception 'Unsupported model provider';
     end case;
-  end if;
-
-  select *
-  into web_row
-  from public.beegame_web_tools
-  where owner_id = config_owner_id
-  limit 1;
-
-  if found then
-    web_env := jsonb_build_object(
-      'WEB_SEARCH_ADAPTER', web_row.config->>'webSearchAdapter',
-      'WEB_FETCH_ADAPTER', web_row.config->>'webFetchAdapter',
-      'BRAVE_SEARCH_API_KEY', web_row.config->>'braveApiKey',
-      'EXA_API_KEY', web_row.config->>'exaApiKey'
+    model_env := model_env || jsonb_build_object(
+      'BEEGAME_MODEL', model_row.models->>'balanced',
+      'BGS_DEFAULT_FAST_MODEL', model_row.models->>'fast',
+      'BGS_DEFAULT_BALANCED_MODEL', model_row.models->>'balanced',
+      'BGS_DEFAULT_STRONG_MODEL', model_row.models->>'strong'
     );
   end if;
 
@@ -1443,27 +1437,10 @@ begin
       'BEEGAME_RUNTIME_SETTINGS_JSON',
       platform_settings::text
     );
-    if platform_settings ? 'autoMemoryEnabled' then
-      settings_env := settings_env || jsonb_build_object(
-        'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
-        case when (platform_settings->>'autoMemoryEnabled')::boolean then '0' else '1' end
-      );
-    end if;
-    if (platform_settings->>'treeSitterBashEnabled')::boolean is true then
-      settings_env := settings_env || jsonb_build_object('FEATURE_TREE_SITTER_BASH', '1');
-    end if;
-    if (platform_settings->>'webBrowserToolEnabled')::boolean is true then
-      settings_env := settings_env || jsonb_build_object('FEATURE_WEB_BROWSER_TOOL', '1');
-    end if;
-    if (platform_settings->>'bashClassifierEnabled')::boolean is true then
-      settings_env := settings_env || jsonb_build_object('FEATURE_BASH_CLASSIFIER', '1');
-    end if;
-    if (platform_settings->>'mcpSkillsEnabled')::boolean is true then
-      settings_env := settings_env || jsonb_build_object('FEATURE_MCP_SKILLS', '1');
-    end if;
+
   end if;
 
-  return jsonb_strip_nulls(runtime_env || model_env || web_env || settings_env);
+  return jsonb_strip_nulls(runtime_env || model_env || settings_env);
 end
 $$;
 
@@ -1519,15 +1496,10 @@ end
 $$;
 
 create or replace function public.beegame_record_usage(
-  p_user_id uuid,
-  p_session_id text,
-  p_turn_id text default null,
-  p_project_id text default null,
-  p_idempotency_key text default null,
-  p_usage jsonb default '{}'::jsonb,
-  p_metadata jsonb default '{}'::jsonb,
-  p_pricing_version text default 'weighted-v1',
-  p_usage_source text default 'runtime_snapshot'
+  p_user_id uuid, p_session_id text, p_turn_id text default null,
+  p_project_id text default null, p_idempotency_key text default null,
+  p_usage jsonb default '{}'::jsonb, p_metadata jsonb default '{}'::jsonb,
+  p_pricing_version text default 'weighted-v1', p_usage_source text default 'runtime_snapshot'
 )
 returns jsonb
 language plpgsql
@@ -1564,33 +1536,43 @@ begin
   end if;
   if coalesce(auth.role(), '') <> 'service_role' and (
     auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
-  ) then
-    raise exception 'Forbidden';
-  end if;
+  ) then raise exception 'Forbidden'; end if;
   if p_usage_source not in ('runtime_snapshot', 'model_runtime_host') then
     raise exception 'Invalid usage source';
   end if;
-
   perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':' || p_session_id));
-  select * into event_row
-  from public.beegame_usage_events
-  where user_id = p_user_id and idempotency_key = p_idempotency_key;
-
+  select * into event_row from public.beegame_usage_events
+    where user_id = p_user_id and idempotency_key = p_idempotency_key;
   if event_row.id is not null then
     duplicate_event := true;
   else
-    select * into previous_row
-    from public.beegame_usage_events
-    where user_id = p_user_id and session_id = p_session_id
-    order by created_at desc, id desc
-    limit 1;
-
+    select * into previous_row from public.beegame_usage_events
+      where user_id = p_user_id and session_id = p_session_id
+      order by created_at desc, id desc limit 1;
+    -- The legacy sender retained its real cumulative snapshot in metadata.
+    -- Change only the comparison baseline, never the persisted old charge.
+    if p_usage_source = 'runtime_snapshot' and p_metadata->>'usageBasis' = 'session-cumulative-v1'
+       and previous_row.id is not null and previous_row.usage_source = 'runtime_snapshot' then
+      if jsonb_typeof(previous_row.metadata->'providerCumulativeUsage') is distinct from 'object' then
+        raise exception 'Legacy runtime usage baseline is unknown; reconcile before resuming billing';
+      end if;
+      previous_row.prompt_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'prompt_tokens')::bigint;
+      previous_row.completion_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'completion_tokens')::bigint;
+      previous_row.cache_read_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'cache_read_tokens')::bigint;
+      previous_row.cache_creation_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'cache_creation_tokens')::bigint;
+      previous_row.total_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'total_tokens')::bigint;
+      if previous_row.prompt_tokens is null or previous_row.completion_tokens is null or previous_row.cache_read_tokens is null
+         or previous_row.cache_creation_tokens is null or previous_row.total_tokens is null then
+        raise exception 'Legacy runtime usage baseline is incomplete; reconcile before resuming billing';
+      end if;
+      previous_row.weighted_tokens := ceil((previous_row.prompt_tokens * 100 + previous_row.cache_read_tokens * 10
+        + previous_row.cache_creation_tokens * 125 + previous_row.completion_tokens * 500)::numeric / 100)::bigint;
+    end if;
     current_weighted := ceil((current_prompt * 100 + current_cache_read * 10 + current_cache_creation * 125 + current_completion * 500)::numeric / 100)::bigint;
-    reset_epoch := previous_row.id is null or
-      current_prompt < previous_row.prompt_tokens or
-      current_completion < previous_row.completion_tokens or
-      current_cache_read < previous_row.cache_read_tokens or
-      current_cache_creation < previous_row.cache_creation_tokens or
+    -- Auxiliary usage is per physical request; agent snapshots remain cumulative.
+    reset_epoch := p_usage_source = 'model_runtime_host' or previous_row.id is null or
+      current_prompt < previous_row.prompt_tokens or current_completion < previous_row.completion_tokens or
+      current_cache_read < previous_row.cache_read_tokens or current_cache_creation < previous_row.cache_creation_tokens or
       current_total < previous_row.total_tokens;
     delta_prompt := case when reset_epoch then current_prompt else greatest(0, current_prompt - previous_row.prompt_tokens) end;
     delta_completion := case when reset_epoch then current_completion else greatest(0, current_completion - previous_row.completion_tokens) end;
@@ -1598,29 +1580,25 @@ begin
     delta_cache_creation := case when reset_epoch then current_cache_creation else greatest(0, current_cache_creation - previous_row.cache_creation_tokens) end;
     delta_total := case when reset_epoch then current_total else greatest(0, current_total - previous_row.total_tokens) end;
     delta_weighted := case when reset_epoch then current_weighted else greatest(0, current_weighted - previous_row.weighted_tokens) end;
-
     insert into public.beegame_usage_events (
       user_id, session_id, turn_id, project_id, idempotency_key, pricing_version, usage_source,
       prompt_tokens, completion_tokens, cache_read_tokens, cache_creation_tokens, total_tokens,
       prompt_tokens_delta, completion_tokens_delta, cache_read_tokens_delta, cache_creation_tokens_delta,
       total_tokens_delta, weighted_tokens, weighted_tokens_delta, credits_micro, metadata
     ) values (
-      p_user_id, p_session_id, p_turn_id, p_project_id, p_idempotency_key, coalesce(nullif(trim(p_pricing_version), ''), 'weighted-v1'), p_usage_source,
+      p_user_id, p_session_id, p_turn_id, p_project_id, p_idempotency_key,
+      coalesce(nullif(trim(p_pricing_version), ''), 'weighted-v1'), p_usage_source,
       current_prompt, current_completion, current_cache_read, current_cache_creation, current_total,
-      delta_prompt, delta_completion, delta_cache_read, delta_cache_creation,
-      delta_total, current_weighted, delta_weighted, delta_weighted * 100, coalesce(p_metadata, '{}'::jsonb)
+      delta_prompt, delta_completion, delta_cache_read, delta_cache_creation, delta_total,
+      current_weighted, delta_weighted, delta_weighted * 100, coalesce(p_metadata, '{}'::jsonb)
     ) returning * into event_row;
   end if;
-
   select coalesce(sum(prompt_tokens_delta), 0), coalesce(sum(completion_tokens_delta), 0),
     coalesce(sum(cache_read_tokens_delta), 0), coalesce(sum(cache_creation_tokens_delta), 0),
-    coalesce(sum(total_tokens_delta), 0), coalesce(sum(weighted_tokens_delta), 0),
-    coalesce(sum(credits_micro), 0)
-  into cumulative_prompt, cumulative_completion, cumulative_cache_read,
-    cumulative_cache_creation, cumulative_total, cumulative_weighted, cumulative_credits
-  from public.beegame_usage_events
-  where user_id = p_user_id and session_id = p_session_id;
-
+    coalesce(sum(total_tokens_delta), 0), coalesce(sum(weighted_tokens_delta), 0), coalesce(sum(credits_micro), 0)
+  into cumulative_prompt, cumulative_completion, cumulative_cache_read, cumulative_cache_creation,
+    cumulative_total, cumulative_weighted, cumulative_credits
+  from public.beegame_usage_events where user_id = p_user_id and session_id = p_session_id;
   return jsonb_build_object(
     'duplicate', duplicate_event,
     'event', jsonb_build_object(
@@ -1634,16 +1612,13 @@ begin
       'completion_tokens_delta', event_row.completion_tokens_delta, 'cache_read_tokens_delta', event_row.cache_read_tokens_delta,
       'cache_creation_tokens_delta', event_row.cache_creation_tokens_delta, 'total_tokens_delta', event_row.total_tokens_delta,
       'weighted_tokens', event_row.weighted_tokens, 'weighted_tokens_delta', event_row.weighted_tokens_delta,
-      'credits_micro', event_row.credits_micro, 'created_at', event_row.created_at,
-      'metadata', event_row.metadata
+      'credits_micro', event_row.credits_micro, 'created_at', event_row.created_at, 'metadata', event_row.metadata
     ),
     'cumulative_usage', jsonb_build_object(
       'prompt_tokens', cumulative_prompt, 'completion_tokens', cumulative_completion,
-      'cache_read_tokens', cumulative_cache_read, 'cache_creation_tokens', cumulative_cache_creation,
-      'total_tokens', cumulative_total
+      'cache_read_tokens', cumulative_cache_read, 'cache_creation_tokens', cumulative_cache_creation, 'total_tokens', cumulative_total
     ),
-    'cumulative_weighted_tokens', cumulative_weighted,
-    'credits_micro', cumulative_credits
+    'cumulative_weighted_tokens', cumulative_weighted, 'credits_micro', cumulative_credits
   );
 end
 $$;
@@ -1668,82 +1643,47 @@ declare
   wallet_row public.beegame_usage_wallets%rowtype;
   debit_row public.beegame_usage_debit_events%rowtype;
   usage_row public.beegame_usage_events%rowtype;
-  previous_usage_row public.beegame_usage_events%rowtype;
   result_payload jsonb;
   amount_micro bigint;
-  prompt_tokens bigint := greatest(0, coalesce((p_usage->>'prompt_tokens')::bigint, 0));
-  completion_tokens bigint := greatest(0, coalesce((p_usage->>'completion_tokens')::bigint, 0));
-  cache_read_tokens bigint := greatest(0, coalesce((p_usage->>'cache_read_tokens')::bigint, 0));
-  cache_creation_tokens bigint := greatest(0, coalesce((p_usage->>'cache_creation_tokens')::bigint, 0));
-  weighted_tokens bigint;
-  previous_weighted_tokens bigint := 0;
-  reset_epoch boolean := false;
+  reserved_micro bigint;
 begin
   if p_user_id is null or nullif(trim(p_session_id), '') is null or nullif(trim(p_idempotency_key), '') is null then
     raise exception 'User id, session id, and idempotency key are required';
   end if;
   if coalesce(auth.role(), '') <> 'service_role' and (
     auth.uid() is null or public.beegame_account_id(auth.uid()) <> p_user_id
-  ) then
-    raise exception 'Forbidden';
-  end if;
+  ) then raise exception 'Forbidden'; end if;
 
   perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':usage-wallet'));
-  select * into debit_row
-  from public.beegame_usage_debit_events
-  where user_id = p_user_id and idempotency_key = p_idempotency_key;
+  select * into debit_row from public.beegame_usage_debit_events
+    where user_id = p_user_id and idempotency_key = p_idempotency_key;
   if debit_row.id is not null then
     return jsonb_set(debit_row.result, '{duplicate}', 'true'::jsonb);
   end if;
 
-  select * into usage_row
-  from public.beegame_usage_events
-  where user_id = p_user_id and idempotency_key = p_idempotency_key;
+  insert into public.beegame_usage_wallets (user_id) values (p_user_id) on conflict do nothing;
+  select * into wallet_row from public.beegame_usage_wallets where user_id = p_user_id for update;
+  -- Supports deployments preceding the optional image-reservation column too.
+  reserved_micro := coalesce((to_jsonb(wallet_row)->>'reserved_credits_micro')::bigint, 0);
 
-  select * into wallet_row
-  from public.beegame_usage_wallets
-  where user_id = p_user_id
-  for update;
-
-  weighted_tokens := ceil((prompt_tokens * 100 + cache_read_tokens * 25 + cache_creation_tokens * 125 + completion_tokens * 500)::numeric / 100)::bigint;
-  if usage_row.id is not null then
-    amount_micro := usage_row.weighted_tokens_delta * 100;
-  else
-    select * into previous_usage_row
-    from public.beegame_usage_events
-    where user_id = p_user_id and session_id = p_session_id
-    order by created_at desc, id desc
-    limit 1;
-    if previous_usage_row.id is not null then
-      reset_epoch := prompt_tokens < previous_usage_row.prompt_tokens or
-        completion_tokens < previous_usage_row.completion_tokens or
-        cache_read_tokens < previous_usage_row.cache_read_tokens or
-        cache_creation_tokens < previous_usage_row.cache_creation_tokens or
-        coalesce((p_usage->>'total_tokens')::bigint, 0) < previous_usage_row.total_tokens;
-      previous_weighted_tokens := previous_usage_row.weighted_tokens;
-    end if;
-    amount_micro := case
-      when reset_epoch or previous_usage_row.id is null then weighted_tokens * 100
-      else greatest(0, weighted_tokens - previous_weighted_tokens) * 100
-    end;
-  end if;
-  if wallet_row.included_credits_micro - wallet_row.consumed_credits_micro < amount_micro then
-    raise exception 'Insufficient realtime usage credits';
-  end if;
-
+  -- The ledger owns counter baselines and pricing. A direct debit registers its
+  -- usage in the same transaction; insufficient credit rolls that insert back.
   result_payload := public.beegame_record_usage(
     p_user_id, p_session_id, p_turn_id, p_project_id, p_idempotency_key,
     p_usage, p_metadata, p_pricing_version, p_usage_source
   );
-  insert into public.beegame_usage_debit_events (
-    user_id, idempotency_key, amount_credits_micro, result
-  ) values (
-    p_user_id, p_idempotency_key, amount_micro, result_payload
-  );
+  select * into strict usage_row from public.beegame_usage_events
+    where user_id = p_user_id and idempotency_key = p_idempotency_key;
+  amount_micro := usage_row.credits_micro;
+  if wallet_row.included_credits_micro - wallet_row.consumed_credits_micro - reserved_micro < amount_micro then
+    raise exception 'Insufficient realtime usage credits';
+  end if;
+
+  insert into public.beegame_usage_debit_events (user_id, idempotency_key, amount_credits_micro, result)
+    values (p_user_id, p_idempotency_key, amount_micro, result_payload);
   update public.beegame_usage_wallets
-  set consumed_credits_micro = consumed_credits_micro + amount_micro,
-      updated_at = now()
-  where user_id = p_user_id;
+    set consumed_credits_micro = consumed_credits_micro + amount_micro, updated_at = now()
+    where user_id = p_user_id;
   return result_payload;
 end
 $$;
@@ -1884,6 +1824,15 @@ create policy "platform settings authenticated read" on public.beegame_platform_
   for select using (auth.uid() is not null);
 create policy "platform settings managed by platform owner" on public.beegame_platform_settings
   for all using (public.beegame_is_platform_owner())
+  with check (public.beegame_is_platform_owner());
+
+alter table public.beegame_image_generation_settings enable row level security;
+revoke all on public.beegame_image_generation_settings from anon;
+grant select, insert, update, delete on public.beegame_image_generation_settings to authenticated;
+grant all on public.beegame_image_generation_settings to service_role;
+drop policy if exists "image generation platform owner" on public.beegame_image_generation_settings;
+create policy "image generation platform owner" on public.beegame_image_generation_settings
+  for all to authenticated using (public.beegame_is_platform_owner())
   with check (public.beegame_is_platform_owner());
 
 drop policy if exists "web tools owner access" on public.beegame_web_tools;
@@ -2237,26 +2186,6 @@ alter table public.beegame_storage_objects enable row level security;
 alter table public.beegame_storage_upload_intents enable row level security;
 alter table public.beegame_storage_migration_jobs enable row level security;
 
--- Storage-object policies below use this helper. Keep it in the base schema
--- because a fresh install reaches these policies before the incremental
--- resource-ownership migration is applied.
-create or replace function public.beegame_can_manage_resource_pack(target_pack_id text)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select public.beegame_is_platform_owner()
-      or exists (
-        select 1 from public.beegame_resource_packs pack
-        where pack.id = target_pack_id and pack.created_by = auth.uid()
-      );
-$$;
-
-revoke execute on function public.beegame_can_manage_resource_pack(text) from public;
-grant execute on function public.beegame_can_manage_resource_pack(text) to authenticated;
-
 drop policy if exists "storage object owner read" on public.beegame_storage_objects;
 create policy "storage object owner read" on public.beegame_storage_objects
   for select using (
@@ -2351,3 +2280,129 @@ revoke all on table public.beegame_storage_migration_jobs from anon;
 grant select, insert, update on table public.beegame_storage_objects to authenticated;
 grant select, insert, update on table public.beegame_storage_upload_intents to authenticated;
 grant select on table public.beegame_storage_migration_jobs to authenticated;
+
+-- Apply before enabling image generation. No existing wallet balance is changed.
+begin;
+alter table public.beegame_usage_wallets
+  add column if not exists reserved_credits_micro bigint not null default 0;
+
+-- Also protects concurrent/older text-debit writers which do not yet subtract holds.
+-- Existing overdrawn wallets without holds keep their previous behavior.
+alter table public.beegame_usage_wallets drop constraint if exists beegame_wallet_image_reservation;
+alter table public.beegame_usage_wallets add constraint beegame_wallet_image_reservation
+  check (reserved_credits_micro >= 0 and
+    (reserved_credits_micro = 0 or consumed_credits_micro + reserved_credits_micro <= included_credits_micro));
+
+create table if not exists public.beegame_image_charges (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  project_id text not null,
+  request_id text not null,
+  digest text not null,
+  state text not null check (state in ('reserved', 'settled', 'released')),
+  reserved_credits_micro bigint not null check (reserved_credits_micro > 0),
+  charged_credits_micro bigint not null default 0 check (charged_credits_micro >= 0),
+  metadata jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, project_id, request_id),
+  check (charged_credits_micro <= reserved_credits_micro)
+);
+alter table public.beegame_image_charges enable row level security;
+revoke all on public.beegame_image_charges from anon, authenticated;
+grant all on public.beegame_image_charges to service_role;
+
+create or replace function public.beegame_image_billing(
+  p_user_id uuid, p_project_id text, p_request_id text, p_digest text,
+  p_action text, p_amount bigint, p_budget bigint, p_metadata jsonb
+) returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  charge public.beegame_image_charges%rowtype;
+  wallet public.beegame_usage_wallets%rowtype;
+  committed bigint;
+  created boolean := false;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'Service authorization required'; end if;
+  if p_user_id is null or coalesce(length(trim(p_project_id)), 0) = 0
+    or coalesce(length(trim(p_request_id)), 0) = 0 or coalesce(length(trim(p_digest)), 0) = 0
+    or p_action is null or p_action not in ('reserve', 'settle', 'release')
+    or p_amount is null or p_amount < 0 or p_budget is null or p_budget < 0
+    or p_metadata is null or jsonb_typeof(p_metadata) <> 'object'
+  then raise exception 'Invalid image billing request'; end if;
+  -- Same user wallet lock as text billing, covering per-project budgets as well.
+  perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':usage-wallet'));
+  select * into charge from public.beegame_image_charges
+    where user_id = p_user_id and project_id = p_project_id and request_id = p_request_id for update;
+  if found then
+    if charge.digest <> p_digest then raise exception 'Image request identity conflict'; end if;
+    if p_action = 'reserve' then
+      if p_amount <> charge.reserved_credits_micro then raise exception 'Reservation amount conflict'; end if;
+      -- Existing terminal state is returned: it never authorizes another generation.
+    elsif charge.state <> 'reserved' then
+      if (p_action = 'settle' and (charge.state <> 'settled' or p_amount <> charge.charged_credits_micro))
+        or (p_action = 'release' and (charge.state <> 'released' or p_amount <> 0))
+      then raise exception 'Image settlement conflict'; end if;
+    else
+      if p_action = 'release' and p_amount <> 0 then raise exception 'Release amount must be zero'; end if;
+      if p_amount > charge.reserved_credits_micro then raise exception 'Charge exceeds reserved amount'; end if;
+      update public.beegame_usage_wallets set
+        reserved_credits_micro = reserved_credits_micro - charge.reserved_credits_micro,
+        consumed_credits_micro = consumed_credits_micro + p_amount, updated_at = now()
+        where user_id = p_user_id;
+      update public.beegame_image_charges set
+        state = case when p_action = 'settle' then 'settled' else 'released' end,
+        charged_credits_micro = p_amount, metadata = metadata || p_metadata, updated_at = now()
+        where user_id = p_user_id and project_id = p_project_id and request_id = p_request_id
+        returning * into charge;
+    end if;
+  else
+    if p_action <> 'reserve' or p_amount <= 0 or p_budget < p_amount
+      then raise exception 'Image reservation required'; end if;
+    -- The wallet lock also serializes renamed retries of an unresolved image.
+    -- Return the original receipt without creating a hold or authorizing work.
+    select * into charge from public.beegame_image_charges
+      where user_id = p_user_id and project_id = p_project_id
+        and digest = p_digest and state = 'reserved'
+      order by updated_at, request_id limit 1;
+    if found then
+      return jsonb_build_object('created', false, 'state', charge.state,
+        'reservedCreditsMicro', charge.reserved_credits_micro, 'chargedCreditsMicro', charge.charged_credits_micro,
+        'metadata', charge.metadata, 'blockedByRequestId', charge.request_id);
+    end if;
+    created := true;
+    insert into public.beegame_usage_wallets (user_id) values (p_user_id) on conflict do nothing;
+    select * into wallet from public.beegame_usage_wallets where user_id = p_user_id for update;
+    if wallet.included_credits_micro - wallet.consumed_credits_micro - wallet.reserved_credits_micro < p_amount
+      then raise exception 'Insufficient image credits'; end if;
+    select coalesce(sum(case when state = 'reserved' then reserved_credits_micro else charged_credits_micro end), 0)
+      into committed from public.beegame_image_charges where user_id = p_user_id and project_id = p_project_id;
+    if committed + p_amount > p_budget then raise exception 'Image project budget exceeded'; end if;
+    update public.beegame_usage_wallets set reserved_credits_micro = reserved_credits_micro + p_amount,
+      updated_at = now() where user_id = p_user_id;
+    insert into public.beegame_image_charges
+      (user_id, project_id, request_id, digest, state, reserved_credits_micro, metadata)
+      values (p_user_id, p_project_id, p_request_id, p_digest, 'reserved', p_amount, p_metadata)
+      returning * into charge;
+  end if;
+  return jsonb_build_object('created', created, 'state', charge.state,
+    'reservedCreditsMicro', charge.reserved_credits_micro, 'chargedCreditsMicro', charge.charged_credits_micro,
+    'metadata', charge.metadata);
+end;
+$$;
+revoke all on function public.beegame_image_billing(uuid,text,text,text,text,bigint,bigint,jsonb) from public, anon, authenticated;
+grant execute on function public.beegame_image_billing(uuid,text,text,text,text,bigint,bigint,jsonb) to service_role;
+-- Credit grants must not write a stale consumed amount over concurrent settlement.
+create or replace function public.beegame_increment_credit_wallet(p_user_id uuid, p_amount bigint)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare wallet public.beegame_usage_wallets%rowtype;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'Service authorization required'; end if;
+  if p_user_id is null or p_amount is null or p_amount <= 0 then raise exception 'Invalid credit grant'; end if;
+  perform pg_advisory_xact_lock(hashtext(p_user_id::text || ':usage-wallet'));
+  insert into public.beegame_usage_wallets (user_id) values (p_user_id) on conflict do nothing;
+  update public.beegame_usage_wallets set included_credits_micro = included_credits_micro + p_amount,
+    updated_at = now() where user_id = p_user_id returning * into wallet;
+  return to_jsonb(wallet);
+end;
+$$;
+revoke all on function public.beegame_increment_credit_wallet(uuid,bigint) from public, anon, authenticated;
+grant execute on function public.beegame_increment_credit_wallet(uuid,bigint) to service_role;
+commit;

@@ -2,23 +2,28 @@ import type {
   BeeGameUserContext,
   BeeGameUserResolver,
 } from './user-context'
-import { BeeGameAuthUnavailableError } from './user-context'
+import { BeeGameAuthUnavailableError, getBearerToken } from './user-context'
+import { authRequestTimeoutMs } from '@bee-game-studio/security-core'
 
 export type BeeGameAuthContextOptions = {
   currentUser?: BeeGameUserContext
   currentUserResolver?: BeeGameUserResolver
+  resolveAccessToken?: (request: Request) => Promise<string | undefined>
   userResolveTimeoutMs?: number
 }
 
 export type BeeGameAuthContext = {
   resolveRequestUser: (request: Request) => Promise<BeeGameUserContext | undefined>
   getCurrentUser: (request?: Request) => BeeGameUserContext
+  getAccessToken: (request: Request) => string | undefined
 }
 
 export function createBeeGameAuthContext(
   options: BeeGameAuthContextOptions,
 ): BeeGameAuthContext {
-  const requestUsers = new WeakMap<Request, BeeGameUserContext>()
+  // Identity and its credential belong to the same request. Re-reading the
+  // session later can cross its refresh boundary or select a stale bearer.
+  const requestAuth = new WeakMap<Request, { user: BeeGameUserContext; accessToken?: string }>()
   const userResolveTimeoutMs = normalizeAuthResolveTimeoutMs(
     options.userResolveTimeoutMs,
   )
@@ -26,23 +31,39 @@ export function createBeeGameAuthContext(
   return {
     resolveRequestUser: async (request) => {
       if (options.currentUser) return options.currentUser
+      requestAuth.delete(request)
+      let accessToken: string | undefined
       const user = options.currentUserResolver
         ? await resolveUserWithTimeout(
-            options.currentUserResolver(request),
+            (async () => {
+              accessToken = options.resolveAccessToken
+                ? await options.resolveAccessToken(request)
+                : getBearerToken(request)
+              let identityRequest = request
+              if (options.resolveAccessToken) {
+                identityRequest = new Request(request)
+                identityRequest.headers.delete('authorization')
+                if (accessToken) identityRequest.headers.set('authorization', `Bearer ${accessToken}`)
+              }
+              return options.currentUserResolver!(identityRequest)
+            })(),
             userResolveTimeoutMs,
           )
         : undefined
-      if (user) requestUsers.set(request, user)
+      if (user) requestAuth.set(request, { user, accessToken })
       return user
     },
 
     getCurrentUser: (request) => {
       const user =
         options.currentUser ??
-        (request ? requestUsers.get(request) : undefined)
+        (request ? requestAuth.get(request)?.user : undefined)
       if (!user) throw new Error('Authenticated BeeGame user is required')
       return user
     },
+    getAccessToken: request => options.currentUser
+      ? getBearerToken(request)
+      : requestAuth.get(request)?.accessToken,
   }
 }
 
@@ -56,7 +77,7 @@ async function resolveUserWithTimeout(
     return await Promise.race([
       user,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new BeeGameAuthUnavailableError()), timeoutMs)
+        timer = setTimeout(() => reject(new BeeGameAuthUnavailableError(undefined, 'timeout')), timeoutMs)
       }),
     ])
   } finally {
@@ -65,9 +86,6 @@ async function resolveUserWithTimeout(
 }
 
 function normalizeAuthResolveTimeoutMs(value: number | undefined): number {
-  const configured = value ?? Number.parseInt(
-    process.env.BEEGAME_AUTH_RESOLVE_TIMEOUT_MS ?? '',
-    10,
-  )
-  return Number.isFinite(configured) && configured >= 0 ? configured : 3_000
+  // A cold request can perform two bounded calls: refresh, then identity.
+  return value ?? 2 * authRequestTimeoutMs()
 }

@@ -1,0 +1,389 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui.game-hud",
+  "kind": "ui-hud",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "hud-root",
+        "name": "游玩 HUD 根",
+        "layout": {
+          "size": [1280, 720]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [1280, 720],
+          "targetViewports": [[1280, 720], [1024, 576], [960, 540]],
+          "minimumControlSize": [88, 44],
+          "compactMaxWidth": 1024
+        }
+      },
+      {
+        "id": "hud-band",
+        "parentId": "root",
+        "role": "container",
+        "name": "顶部 HUD 带（拉伸，固定高 48）",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 0],
+          "sizeDelta": [0, 48]
+        },
+        "data": {
+          "component": "hud-band",
+          "note": "屏幕空间；y0-48，不进入 y48 起的场地，见 LEVEL_SCENE_DESIGN 5"
+        }
+      },
+      {
+        "id": "score-cluster",
+        "parentId": "hud-band",
+        "role": "container",
+        "name": "SCORE 左簇",
+        "layout": {
+          "anchor": "top-left",
+          "position": [24, 8],
+          "size": [200, 32],
+          "container": {
+            "direction": "row",
+            "gap": 10,
+            "align": "center"
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "position": [16, 10], "size": [172, 28] }
+          }
+        }
+      },
+      {
+        "id": "score-label",
+        "parentId": "score-cluster",
+        "role": "text",
+        "text": "SCORE",
+        "layout": {
+          "size": [64, 24]
+        },
+        "style": {
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "#7B88B8",
+          "align": "left",
+          "verticalAlign": "middle",
+          "letterSpacing": 4
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [56, 20] },
+            "style": { "fontSize": 12 }
+          }
+        }
+      },
+      {
+        "id": "score-value",
+        "parentId": "score-cluster",
+        "role": "text",
+        "text": "00000",
+        "layout": {
+          "size": [120, 28]
+        },
+        "style": {
+          "fontSize": 24,
+          "fontWeight": 700,
+          "fontFamily": "monospace",
+          "color": "#E8F4FF",
+          "align": "left",
+          "verticalAlign": "middle",
+          "glow": { "color": "#2DE2FF", "radius": 6, "opacity": 0.4 }
+        },
+        "bindings": {
+          "source": "session.score",
+          "format": "00000",
+          "range": "[0,2100]",
+          "digits": "5"
+        },
+        "data": {
+          "component": "mono-numeric",
+          "note": "等宽街机计字；实际字库由 ASSET_PLAN 提供，当前 monospace 为占位回退"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [104, 24] },
+            "style": { "fontSize": 20 }
+          }
+        }
+      },
+      {
+        "id": "right-cluster",
+        "parentId": "hud-band",
+        "role": "container",
+        "name": "右侧簇（LIVES + 暂停按钮）",
+        "layout": {
+          "anchor": "top-right",
+          "position": [-24, 2],
+          "size": [246, 44],
+          "container": {
+            "direction": "row",
+            "gap": 16,
+            "align": "center"
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "position": [-16, 2], "size": [226, 44], "container": { "direction": "row", "gap": 12 } }
+          }
+        }
+      },
+      {
+        "id": "lives-cluster",
+        "parentId": "right-cluster",
+        "role": "container",
+        "name": "LIVES 簇",
+        "layout": {
+          "size": [142, 40],
+          "container": {
+            "direction": "row",
+            "gap": 8,
+            "align": "center"
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [126, 40], "container": { "direction": "row", "gap": 6 } }
+          }
+        }
+      },
+      {
+        "id": "lives-label",
+        "parentId": "lives-cluster",
+        "role": "text",
+        "text": "LIVES",
+        "layout": {
+          "size": [56, 24]
+        },
+        "style": {
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "#7B88B8",
+          "align": "left",
+          "verticalAlign": "middle",
+          "letterSpacing": 4
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [48, 20] },
+            "style": { "fontSize": 12 }
+          }
+        }
+      },
+      {
+        "id": "pip-1",
+        "parentId": "lives-cluster",
+        "role": "shape",
+        "name": "生命 pip 1",
+        "layout": {
+          "size": [18, 18]
+        },
+        "style": {
+          "shape": "ellipse",
+          "background": { "color": "#FFFDF5", "opacity": 1 },
+          "glow": { "color": "#FFB548", "radius": 6, "opacity": 0.5 }
+        },
+        "bindings": {
+          "source": "session.lives",
+          "index": "1",
+          "aliveStyle": "life-pip-alive",
+          "lostStyle": "life-pip-lost"
+        },
+        "data": {
+          "component": "life-pip"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [16, 16] }
+          }
+        }
+      },
+      {
+        "id": "pip-2",
+        "parentId": "lives-cluster",
+        "role": "shape",
+        "name": "生命 pip 2",
+        "layout": {
+          "size": [18, 18]
+        },
+        "style": {
+          "shape": "ellipse",
+          "background": { "color": "#FFFDF5", "opacity": 1 },
+          "glow": { "color": "#FFB548", "radius": 6, "opacity": 0.5 }
+        },
+        "bindings": {
+          "source": "session.lives",
+          "index": "2",
+          "aliveStyle": "life-pip-alive",
+          "lostStyle": "life-pip-lost"
+        },
+        "data": {
+          "component": "life-pip"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [16, 16] }
+          }
+        }
+      },
+      {
+        "id": "pip-3",
+        "parentId": "lives-cluster",
+        "role": "shape",
+        "name": "生命 pip 3",
+        "layout": {
+          "size": [18, 18]
+        },
+        "style": {
+          "shape": "ellipse",
+          "background": { "color": "#FFFDF5", "opacity": 1 },
+          "glow": { "color": "#FFB548", "radius": 6, "opacity": 0.5 }
+        },
+        "bindings": {
+          "source": "session.lives",
+          "index": "3",
+          "aliveStyle": "life-pip-alive",
+          "lostStyle": "life-pip-lost"
+        },
+        "data": {
+          "component": "life-pip"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [16, 16] }
+          }
+        }
+      },
+      {
+        "id": "pause-button",
+        "parentId": "right-cluster",
+        "role": "button",
+        "name": "暂停按钮（88 宽触控命中区，图标居中）",
+        "layout": {
+          "size": [88, 44]
+        },
+        "style": {
+          "background": { "color": "#123244", "opacity": 0.8 },
+          "border": { "width": 1.5, "color": "#2DE2FF", "radius": 8 },
+          "glow": { "color": "#2DE2FF", "radius": 4, "opacity": 0.25 }
+        },
+        "actions": {
+          "action": "pauseToggle",
+          "audioEvent": "ui.click"
+        },
+        "data": {
+          "component": "icon-button",
+          "note": "两条竖条为程序化占位图形；P/Esc 等价"
+        }
+      },
+      {
+        "id": "pause-icon",
+        "parentId": "pause-button",
+        "role": "container",
+        "layout": {
+          "anchor": "middle-center",
+          "size": [11, 18],
+          "container": {
+            "direction": "row",
+            "gap": 3,
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "pause-bar-1",
+        "parentId": "pause-icon",
+        "role": "shape",
+        "layout": {
+          "size": [4, 18]
+        },
+        "style": {
+          "shape": "rounded-rectangle",
+          "cornerRadius": 1,
+          "background": { "color": "#E8F4FF", "opacity": 0.95 }
+        }
+      },
+      {
+        "id": "pause-bar-2",
+        "parentId": "pause-icon",
+        "role": "shape",
+        "layout": {
+          "size": [4, 18]
+        },
+        "style": {
+          "shape": "rounded-rectangle",
+          "cornerRadius": 1,
+          "background": { "color": "#E8F4FF", "opacity": 0.95 }
+        }
+      },
+      {
+        "id": "serve-zone",
+        "parentId": "root",
+        "role": "button",
+        "name": "发球提示与发球热区（仅 Ready 启用）",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 116],
+          "size": [320, 88]
+        },
+        "style": {
+          "background": { "color": "#000000", "opacity": 0 }
+        },
+        "actions": {
+          "action": "serve",
+          "audioEvent": "ball.launch"
+        },
+        "bindings": {
+          "enabledWhen": "state===ready"
+        },
+        "data": {
+          "component": "serve-zone",
+          "note": "透明热区，承载提示文案；呼吸参数遵循 ART_DIRECTION 8（1.2s 周期）"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [280, 80] }
+          }
+        }
+      },
+      {
+        "id": "serve-prompt",
+        "parentId": "serve-zone",
+        "role": "text",
+        "text": "空格 / 点按发球",
+        "layout": {
+          "anchor": "middle-center",
+          "size": [320, 32]
+        },
+        "style": {
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 4,
+          "glow": { "color": "#2DE2FF", "radius": 6, "opacity": 0.5 },
+          "breathing": {
+            "period": 1.2,
+            "opacityRange": [0.55, 1],
+            "scaleRange": [0.97, 1.03],
+            "easing": "ease-in-out"
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [280, 28] },
+            "style": { "fontSize": 17 }
+          }
+        }
+      }
+    ]
+  }
+}

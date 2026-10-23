@@ -1,0 +1,77 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "gameover-portrait-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "over-root",
+    "nodes": [
+      {
+        "id": "over-root",
+        "role": "screen-root",
+        "layout": {
+          "size": [390, 844],
+          "container": { "direction": "column", "padding": [0, 16, 0, 16], "justify": "center", "align": "center" }
+        },
+        "style": { "background": { "color": "#0F1420", "opacity": 0.6 } }
+      },
+      {
+        "id": "panel",
+        "role": "container",
+        "parentId": "over-root",
+        "layout": {
+          "size": [340, 440],
+          "container": { "direction": "column", "gap": 14, "padding": [28, 24, 28, 24], "justify": "start", "align": "stretch" }
+        },
+        "style": { "background": { "color": "#1C2738", "opacity": 1 }, "border": { "width": 1, "color": "#4CC9F0" }, "cornerRadius": 12 }
+      },
+      {
+        "id": "end-title",
+        "role": "text",
+        "parentId": "panel",
+        "text": "游戏结束",
+        "layout": { "size": [292, 44], "item": { "shrink": 0 } },
+        "style": { "fontSize": 28, "color": "#EAF0F8", "align": "center", "verticalAlign": "middle" }
+      },
+      {
+        "id": "record-badge",
+        "role": "shape",
+        "parentId": "panel",
+        "enabled": false,
+        "layout": { "size": [292, 30], "item": { "shrink": 0 } }
+      },
+      {
+        "id": "score-line",
+        "role": "text",
+        "parentId": "panel",
+        "text": "本局得分 3970",
+        "layout": { "size": [292, 40], "item": { "shrink": 0 } },
+        "style": { "fontSize": 24, "color": "#EAF0F8", "align": "center", "verticalAlign": "middle" }
+      },
+      {
+        "id": "hiscore-line",
+        "role": "text",
+        "parentId": "panel",
+        "text": "历史最高 3970",
+        "layout": { "size": [292, 36], "item": { "shrink": 0 } },
+        "style": { "fontSize": 18, "color": "#93A3BC", "align": "center", "verticalAlign": "middle" }
+      },
+      {
+        "id": "restart-btn",
+        "role": "button",
+        "parentId": "panel",
+        "text": "再来一局",
+        "layout": { "size": [292, 60], "item": { "shrink": 0 } },
+        "style": { "fontSize": 22, "cornerRadius": 10 }
+      },
+      {
+        "id": "home-btn",
+        "role": "button",
+        "parentId": "panel",
+        "text": "返回主菜单",
+        "layout": { "size": [292, 56], "item": { "shrink": 0 } },
+        "style": { "fontSize": 20, "cornerRadius": 10 }
+      }
+    ]
+  }
+}

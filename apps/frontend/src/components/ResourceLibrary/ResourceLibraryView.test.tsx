@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { ReactElement } from 'react'
-import { buildSafePublishFix, ResourceLibraryView } from './ResourceLibraryView'
+import { buildSafePublishFix, ResourceLibraryPage, ResourceLibraryView } from './ResourceLibraryView'
 import { closeResourcePackRoute } from './resourceLibraryRoute'
-import { ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
+import { resourceLibraryApi, ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { ToastProvider } from '../../contexts/ToastContext'
 import i18n from '../../i18n'
+import { api as beeGameApi } from '../../services/api'
+
+// Canvas rendering is independent of this workspace's dialog lifecycle.
+vi.mock('../Demiurge/Landing/DotsAvatar', () => ({ DotsAvatar: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }))
 
 const pack: ResourcePackSummary = { id: 'pack-1', name: 'Example Pack',
   styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'world-scene', categories: ['models'], version: '1.0.0', status: 'published', elementCount: 1 }
@@ -24,23 +28,81 @@ function renderResourceLibrary(view: ReactElement) {
 }
 
 describe('ResourceLibraryView workspace', () => {
-  afterEach(async () => { cleanup(); closeResourcePackRoute(); await i18n.changeLanguage('zh') })
+  afterEach(() => { cleanup(); closeResourcePackRoute() })
 
-  test('uses the active user language for the empty library action', async () => {
-    await i18n.changeLanguage('ja')
-    renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api, listPacks: async () => [] }} />)
-
-    expect(await screen.findByRole('button', { name: 'パックを作成' })).toBeInTheDocument()
+  test('uses opacity-only motion for the full-screen page without postponing navigation', async () => {
+    const listPacks = vi.spyOn(resourceLibraryApi, 'listPacks').mockResolvedValue([])
+    const onBack = vi.fn()
+    try {
+      renderResourceLibrary(<ResourceLibraryPage onBack={onBack} />)
+      const popup = await screen.findByRole('dialog')
+      expect(popup).toHaveClass('transition-opacity', 'duration-200', 'data-[starting-style]:scale-100', 'data-[ending-style]:scale-100', 'motion-reduce:transition-none')
+      expect(popup).not.toHaveClass('transition-[opacity,transform,scale]', 'data-[starting-style]:scale-[0.98]')
+      fireEvent.click(await screen.findByRole('button', { name: i18n.t('resourceLibrary:list.backToWorkspace') }))
+      expect(onBack).toHaveBeenCalledTimes(1)
+      expect(listPacks).toHaveBeenCalledTimes(1)
+    } finally { listPacks.mockRestore() }
   })
 
-  test('translates the library list title when the user changes language', async () => {
-    i18n.addResource('en', 'resourceLibrary', 'list.title', 'Localized resource packs')
-    i18n.addResource('zh', 'resourceLibrary', 'list.title', '本地化资源包')
-    await i18n.changeLanguage('en')
-    renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api, listPacks: async () => [] }} />)
-    expect(await screen.findByText('Localized resource packs')).toBeInTheDocument()
-    await i18n.changeLanguage('zh')
-    expect(await screen.findByText('本地化资源包')).toBeInTheDocument()
+  test.each(['rename', 'curation', 'publish', 'archive'] as const)('retains the %s dialog until its exit finishes', async (kind) => {
+    const user = userEvent.setup()
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations')
+    let finishClose!: () => void
+    let closingObserved = false
+    const finished = new Promise<void>(resolve => { finishClose = resolve })
+    Object.defineProperty(Element.prototype, 'getAnimations', {
+      configurable: true,
+      value: function (this: Element) {
+        if (!this.hasAttribute('data-ending-style')) return []
+        closingObserved = true
+        return [{ finished, pending: true, playState: 'running' }]
+      },
+    })
+    const impact = vi.spyOn(beeGameApi, 'getResourcePackImpact').mockResolvedValue({ packId: pack.id, projectCount: 0, references: [], unreadableProjects: [] })
+    try {
+      const draft = { ...pack, status: 'draft' }
+      renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api,
+        listPacks: async () => [draft], getPack: async () => draft,
+        getPublishReadiness: async () => ({ canPublish: false, blocking: [], warnings: [] }),
+        getCurationQueue: async () => ({ items: [], counts: { pendingItems: 0, missingSemanticTags: 0, technicalIssues: 0, dependencyIssues: 0 }, usageTagOptions: [] }),
+      }} />)
+      await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
+      if (kind === 'rename') {
+        fireEvent.contextMenu(screen.getByRole('tree', { name: 'Pack files' }))
+        await user.click(screen.getByText(i18n.t('resourceLibrary:detail.newFolder'), { exact: true }))
+      } else {
+        await user.click(screen.getByRole('button', { name: i18n.t(`resourceLibrary:list.${kind === 'curation' ? 'curation' : kind === 'publish' ? 'publish' : 'archivePack'}`) }))
+      }
+      const popup = await screen.findByRole('dialog')
+      await waitFor(() => expect(popup).not.toHaveAttribute('data-starting-style'))
+      const closeName = i18n.t(`resourceLibrary:${kind === 'curation' ? 'curation.close' : kind === 'publish' ? 'detail.closePublishCheck' : 'detail.cancel'}`)
+      await user.click(within(popup).getByRole('button', { name: closeName }))
+      await waitFor(() => expect(closingObserved).toBe(true))
+      expect(popup).toBeInTheDocument()
+      expect(popup).toHaveAttribute('inert')
+      expect(popup).toHaveAttribute('aria-hidden', 'true')
+      expect(popup).toHaveClass('transition-[opacity,transform,scale]')
+      await act(async () => { finishClose() })
+      await waitFor(() => expect(popup).not.toBeInTheDocument())
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('tree', { name: 'Pack files' })).toBeInTheDocument()
+    } finally {
+      impact.mockRestore()
+      if (original) Object.defineProperty(Element.prototype, 'getAnimations', original)
+      else Reflect.deleteProperty(Element.prototype, 'getAnimations')
+    }
+  })
+
+  test('shows the loading page instead of a partial resource-pack list', async () => {
+    let resolvePacks!: (packs: ResourcePackSummary[]) => void
+    const pendingPacks = new Promise<ResourcePackSummary[]>(resolve => { resolvePacks = resolve })
+    renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api, listPacks: () => pendingPacks }} />)
+
+    expect(screen.getByRole('status', { name: i18n.t('resourceLibrary:list.loading') })).toBeInTheDocument()
+    expect(screen.queryByText(i18n.t('resourceLibrary:list.all'))).not.toBeInTheDocument()
+
+    await act(async () => { resolvePacks([pack]) })
+    expect(screen.getByRole('button', { name: 'Example Pack' })).toBeInTheDocument()
   })
 
   test('mounts the Pack workspace with the explorer and no obsolete recursive rows', async () => {
@@ -95,7 +157,7 @@ describe('ResourceLibraryView workspace', () => {
     expect(await screen.findByRole('status')).toBeInTheDocument()
     completeJob()
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument(), { timeout: 2_000 })
-    expect(screen.getByRole('alert')).toHaveTextContent(/(资源分析完成，共处理 1 个元素|Resource analysis complete\. 1 elements processed)/)
+    expect(await screen.findByText(/(资源分析完成，共处理 1 个元素|Resource analysis complete\. 1 elements processed)/)).toBeInTheDocument()
   })
 
   test('offers re-publishing for archived Packs', async () => {
@@ -121,8 +183,9 @@ describe('ResourceLibraryView workspace', () => {
     expect(screen.queryByRole('button', { name: '保存配置' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: '元素配置' }))
     expect(screen.getByRole('button', { name: '保存配置' })).toBeInTheDocument()
+    await user.click(screen.getByLabelText('资产类型'))
     expect(screen.queryByRole('option', { name: '模型' })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '3D 模型' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '模型 / 3D 资产' })).toBeInTheDocument()
   })
 
   test('edits typed asset capabilities and semantic relations without filename inference', async () => {
@@ -136,7 +199,8 @@ describe('ResourceLibraryView workspace', () => {
     await user.click(screen.getByRole('treeitem', { name: 'knight.png' }))
     await user.click(await screen.findByRole('button', { name: '显示元素信息' }))
     await user.click(screen.getByRole('tab', { name: '元素配置' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: '资产类型' }), 'animation-library')
+    await user.click(screen.getByLabelText('资产类型'))
+    await user.click(screen.getByRole('option', { name: '独立动画库' }))
     await user.click(screen.getByRole('button', { name: '包含动画' }))
     await user.type(screen.getByPlaceholderText('例如 locomotion, combat'), 'locomotion')
     await user.click(screen.getByText('外部资产关系'))
@@ -231,5 +295,26 @@ describe('ResourceLibraryView workspace', () => {
       dependencies: ['texture-1'],
     })
     expect(buildSafePublishFix(model, [model, { ...texture, path: 'unrelated/stone.png' }])).toBeUndefined()
+  })
+
+  test('localizes the list and places an icon-only back control beside its title', async () => {
+    await i18n.changeLanguage('en')
+    try {
+      const user = userEvent.setup()
+      renderResourceLibrary(<ResourceLibraryView apiClient={api} onBack={() => undefined} />)
+      const back = await screen.findByRole('button', { name: 'Back to workspace' })
+      expect(back).toHaveTextContent('')
+      expect(back.parentElement).toHaveTextContent('All resource packs')
+      const packButton = await screen.findByRole('button', { name: 'Example Pack' })
+      expect(packButton).toHaveTextContent('1 element')
+      await user.click(packButton)
+      expect(screen.getByRole('button', { name: 'Edit pack' })).toBeInTheDocument()
+      await user.click(screen.getByRole('treeitem', { name: 'Environments & props' }))
+      await user.click(screen.getByRole('treeitem', { name: 'knight.png' }))
+      await user.click(await screen.findByRole('button', { name: 'Show element info' }))
+      expect(screen.getByRole('tab', { name: 'Element info' })).toBeInTheDocument()
+    } finally {
+      await i18n.changeLanguage('zh')
+    }
   })
 })

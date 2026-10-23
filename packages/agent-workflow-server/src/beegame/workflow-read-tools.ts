@@ -1,0 +1,192 @@
+import { readFileSync, realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { z } from 'zod/v4'
+import { PROJECT_DOCUMENTS, DESIGN_WRITING_ORDER } from '@bee-game-studio/agent-workflow/design-review-result'
+import { checkDesignHandoffDraft, designReviewIndexes, type DesignHandoff } from './design-handoff'
+import { designSourceLocations, readDesignSections } from './design-source-reading'
+import { auditAssetContract } from './asset-contract-audit'
+import { readBeeGameAssetManifestSync } from './asset-contracts'
+import { inspectContentBindings } from './content-binding'
+import { parseBeeGameContentDocument } from './game-content-schema'
+import { contentBindingIssues } from './game-content-package'
+import { validateResourceSelections } from './tilemap-contract'
+import { collectContentSourceFiles } from './content-source-files'
+
+export const designReadSchema = z.strictObject({ read: z.array(z.strictObject({
+  document: z.enum(PROJECT_DOCUMENTS), sections: z.array(z.string().min(1)).min(1).optional(),
+})).min(1).optional() })
+export const implementationReadSchema = z.strictObject({ id: z.string().trim().min(1).optional() })
+export const bindingsReadSchema = z.strictObject({ detailsFor: z.string().optional() })
+export const verificationReadSchema = z.strictObject({
+  measurementId: z.string().trim().min(1).optional(), previewReceipt: z.string().min(1).optional(),
+  details: z.boolean().optional(),
+}).refine(value => !(value.measurementId && value.previewReceipt), 'Select a measurement ID or a preview receipt, not both')
+const reason = (error: unknown) => error instanceof Error ? error.message : String(error)
+
+/** Current saved inputs, including independently readable drafts. Never finalize or lock. */
+export function readDesignHandoff(workspace: string, input: unknown) {
+  const { read = [] } = designReadSchema.parse(input)
+  const issues: string[] = []
+  const sources = read.flatMap(request => {
+    if (!request.sections) return []
+    try { return readDesignSections(workspace, [request]).sources }
+    catch (error) { issues.push(request.document + ': ' + reason(error)); return [] }
+  })
+  const documents = designSourceLocations(workspace, read.length ? [...new Set(read.map(item => item.document))] : DESIGN_WRITING_ORDER)
+    .map(document => {
+      if (read.length && document.unavailable) issues.push(document.document + ': ' + document.unavailable)
+      const requests = read.filter(request => request.document === document.document)
+      return { document: document.document, path: 'docs/' + document.document,
+        available: !document.unavailable,
+        ...(document.unavailable ? { unavailable: document.unavailable } : {}),
+        ...(read.length && 'sections' in document ? { sections: requests.some(request => !request.sections)
+          ? document.sections : document.sections.filter(section => requests.some(request => request.sections?.includes(section.heading))) } : {}),
+      }
+    })
+  return { valid: !issues.length, scope: 'saved-design-handoff', issues: [...new Set(issues)], documents, sources,
+    contracts: 'Editor fields and Preview capabilities: bun check-content.mjs --format in the current BGS tools directory lists sections for selective reading; no project content required.',
+    note: 'Read availability only, not design completeness or approval. Unrequested missing documents do not fail a read. No index requirement counts, metadata changes or baseline lock. Use read:[{document:"GDD.md"}] for headings; add sections:["Exact heading"] for prose.' }
+}
+
+/** The existing technical index locates prose; it is not a second task store. */
+export function readImplementationTask(workspace: string, input: unknown) {
+  const { id } = implementationReadSchema.parse(input)
+  const indexes = designReviewIndexes(workspace, PROJECT_DOCUMENTS)
+  const technical = indexes.find(index => index.document === 'TECHNICAL_DESIGN.md')!
+  const items: NonNullable<DesignHandoff['implementationItems']> = 'implementationItems' in technical ? technical.implementationItems ?? [] : []
+  const issues = [...checkDesignHandoffDraft(workspace, 'TECHNICAL_DESIGN.md', { finalTechnical: true }).issues]
+  const directory = items.map(item => ({ id: item.id, dependsOn: item.dependsOn,
+    dependencyStatus: item.dependsOn === undefined ? 'unspecified' : 'not-verified', section: item.section }))
+  const result = { scope: 'saved-implementation-task', directory, issues,
+    documents: designSourceLocations(workspace, ['TECHNICAL_DESIGN.md']),
+    note: 'Read-only technical source and optional existing task index. No index is required; an empty directory does not mean implementation is complete. Read the technical document and choose the work organization. Reading does not lock or authorize implementation.' }
+  if (id === undefined) return { ...result, valid: !issues.length }
+  const matches = items.filter(item => item.id === id)
+  if (matches.length !== 1) return { ...result, valid: false,
+    issues: [...issues, matches.length ? 'Ambiguous task ID: ' + id : 'Unknown task ID: ' + id] }
+  const task = matches[0]!
+  const requirements = task.requirementRefs.map(ref => {
+    const owner = indexes.find(index => index.document === ref.document)
+    const outputs = owner && 'outputs' in owner ? owner.outputs.filter(output => output.id === ref.id) : []
+    if (outputs.length !== 1) {
+      issues.push(`Missing or ambiguous requirement ${ref.document}#${ref.id}`)
+      return { ...ref, unavailable: true }
+    }
+    const output = outputs[0]!
+    if (!output.acceptance) issues.push(`Missing acceptance for ${ref.document}#${ref.id}`)
+    return { ...ref, section: output.section, acceptance: output.acceptance }
+  })
+  const requests = new Map<string, Set<string>>([['TECHNICAL_DESIGN.md', new Set([task.section])]])
+  for (const requirement of requirements) {
+    if (!('section' in requirement)) continue
+    const sections = requests.get(requirement.document) ?? new Set<string>()
+    sections.add(requirement.section)
+    if (requirement.acceptance) sections.add(requirement.acceptance.section)
+    requests.set(requirement.document, sections)
+  }
+  const sources: ReturnType<typeof readDesignSections>['sources'] = []
+  for (const [document, requested] of requests) {
+    const location = designSourceLocations(workspace, [document])[0]!
+    const available = 'sections' in location ? location.sections : undefined
+    if (!available) { issues.push(document + ': ' + location.unavailable); continue }
+    // A broken pointer must not hide another independently readable section.
+    const sections = [...requested].filter(heading => {
+      if (available.filter(section => section.heading === heading).length === 1) return true
+      issues.push(`${document}: missing/ambiguous heading ${JSON.stringify(heading)}`)
+      return false
+    })
+    if (!sections.length) continue
+    try { sources.push(...readDesignSections(workspace, [{ document, sections }]).sources) }
+    catch (error) { issues.push(document + ': ' + reason(error)) }
+  }
+  // An ID-like table cell can be a shared interface or acceptance requirement.
+  // Keep source sections intact; the selected task/requirements already identify
+  // the requested work without silently rewriting authoritative prose.
+  const siblings = items.filter(item => item.section === task.section)
+  if (siblings.length > 1) for (const source of sources.filter(source => source.document === 'TECHNICAL_DESIGN.md')) for (const read of source.reads)
+    Object.assign(read, { selection: 'shared-section', note: 'Multiple tasks share this section; original source text is retained.' })
+  return { ...result, directory: directory.filter(item => item.id === id), valid: !issues.length, task, requirements, sources }
+}
+
+export async function checkResourcesAndBindings(workspace: string, input: unknown) {
+  const { detailsFor } = bindingsReadSchema.parse(input)
+  if (detailsFor !== undefined && (!/^content\/(ui|scenes)\/.+\.json$/.test(detailsFor) ||
+      detailsFor.includes('\\') || detailsFor.split('/').some(part => !part || part === '.' || part === '..')))
+    throw Error('detailsFor must be an exact content/ui or content/scenes JSON path')
+  const root = realpathSync(workspace), issues: string[] = []
+  const paths = collectContentSourceFiles(root, ['content/ui', 'content/scenes'], issues)
+  if (!paths.length) issues.push('No saved UI/Scene binding inputs found')
+  const bindings = paths.length ? await inspectContentBindings(root, paths) : { files: [], issues: [] }
+  issues.push(...bindings.issues)
+  const audit = auditAssetContract(root)
+  issues.push(...audit.issues)
+  if (!audit.present) issues.push('assets/asset-manifest.json is missing; resource bindings remain unverified')
+  const manifest = (() => {
+    try { return readBeeGameAssetManifestSync(root) }
+    catch (error) { if (audit.present) issues.push(reason(error)); return undefined }
+  })()
+  // Read full source, not the display projection: nested locators must also be checked.
+  for (const file of paths) try {
+    const document = parseBeeGameContentDocument(JSON.parse(readFileSync(resolve(root, file), 'utf8')))
+    issues.push(...contentBindingIssues(file, document))
+    if (manifest) {
+      for (const assetRef of document.assetRefs) if (!manifest.resources.some(resource => resource.id === assetRef && resource.status === 'verified'))
+        issues.push(file + ': missing verified declared resource ' + assetRef)
+      validateResourceSelections(root, manifest, document.data, issues, file)
+    }
+  } catch (error) { issues.push(file + ': ' + reason(error)) }
+  if (detailsFor && !bindings.files.some(file => file.file === detailsFor)) issues.push('Cannot expand unavailable binding input: ' + detailsFor)
+  return { valid: !issues.length, scope: 'saved-resources-and-bindings', issues: [...new Set(issues)],
+    requirements: audit.requirements,
+    resources: audit.resources.map(({ fileEvidence, ...resource }) => {
+      const registered = manifest?.resources.find(item => item.id === resource.id)
+      return { ...resource, assetKind: registered?.asset_kind, fulfills: registered?.fulfills,
+        files: fileEvidence.map(({ path, sha256 }) => ({ path, sha256 })) }
+    }),
+    requirementBindings: audit.bindings,
+    files: bindings.files.map(file => file.file === detailsFor ? file : {
+      file: file.file, sha256: file.sha256, documentId: file.documentId, kind: file.kind, assetRefs: file.assetRefs,
+      nodeCount: file.nodes.length,
+      bindingNodeCount: file.nodes.filter(node => JSON.stringify(node).includes('"assetRef":')).length,
+    }),
+    note: 'All saved UI/Scene files and registered resources checked; detailsFor changes presentation only. Missing inputs are unverified. Actions/state bindings are source operands only: runtime wiring, design coverage and quality remain unverified. No files changed.' }
+}
+
+export type VerificationReadBinding = { capabilityFile: string; sessionId: string }
+export async function readVerificationResults(workspace: string, input: unknown, binding?: VerificationReadBinding) {
+  const { measurementId, previewReceipt, details = false } = verificationReadSchema.parse(input)
+  if (!binding) throw Error('Current BGS turn result access is unavailable; no verification was started')
+  const root = realpathSync(workspace)
+  let capability: { version: number; workspace: string; sessionId: string; executionId: string; apiUrl: string }
+  try { capability = JSON.parse(readFileSync(binding.capabilityFile, 'utf8')) }
+  catch { throw Error('Current BGS turn result access has expired; no verification was started') }
+  if (capability.version !== 1 || capability.workspace !== root || capability.sessionId !== binding.sessionId || !capability.executionId)
+    throw Error('Current BGS turn result access does not match this project/session')
+  const api = new URL(capability.apiUrl)
+  if (api.protocol !== 'http:' || api.hostname !== '127.0.0.1' || api.username || api.password || api.search || api.hash)
+    throw Error('Invalid host result-read endpoint')
+  // Never forward model input to this endpoint: its generic fallback starts a measurement.
+  const body = previewReceipt ? { executionInputs: true } : measurementId
+    ? { inspectRequestKey: measurementId, details } : { handoffPaths: [], details }
+  let response: Response
+  try { response = await fetch(api, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) }
+  catch { throw Error('Current BGS result-read connection is unavailable; no retry or verification was started') }
+  const result = await response.json()
+  if (!response.ok) throw Error(String(result.error ?? 'Result read rejected').replace(/https?:\/\/\S+/g, '[host endpoint]'))
+  if (previewReceipt) {
+    // Keep the supplied Node helpers as modules: bundling them would make their
+    // CLI import.meta.url guard mistake this MCP executable for their main file.
+    const inspectorUrl = new URL('./preview-test-command.mjs', import.meta.url).href
+    const { inspectPreviewTest } = await import(inspectorUrl)
+    return inspectPreviewTest(previewReceipt, { workspace: root, capabilityFile: binding.capabilityFile })
+  }
+  if (measurementId) {
+    if (result.id !== measurementId) throw Error('No saved measurement with this exact ID; select an ID from retained results')
+    return result
+  }
+  // Keep host freshness/failed/unfinished status; never search backward for a PASS.
+  return { scope: result.scope, designFileChanges: result.designFileChanges, measurement: result.measurement,
+    quality: 'unverified', note: result.note,
+    ...(details ? { checkScope: result.checkScope, acceptance: result.acceptance, measurements: result.measurements } : {}) }
+}

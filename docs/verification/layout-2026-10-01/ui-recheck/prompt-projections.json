@@ -1,0 +1,121 @@
+{
+  "rows": [
+    {
+      "source": "drafts/ui-prompt-check.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "cameraDerivedBounds": {
+        "left": 387.4285714285714,
+        "top": 448.9714285714285,
+        "right": 572.5714285714284,
+        "bottom": 467.4857142857142
+      },
+      "retainedProbeBounds": {
+        "left": 387.4285,
+        "top": 448.9714,
+        "right": 572.5714,
+        "bottom": 467.4857
+      },
+      "maximumError": 0.0000714285714025209,
+      "matchesWithinRounding": true,
+      "screenGapToPaddle": 21.600014285714167,
+      "worldGapToPaddle": 28.00001851851837,
+      "diagnostics": {
+        "outsideViewport": [],
+        "outsideParent": [],
+        "outsideContentArea": [],
+        "overlapCandidates": []
+      }
+    },
+    {
+      "source": "drafts/ui-prompt-390.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "cameraDerivedBounds": {
+        "left": 101.39999999999999,
+        "top": 602.96,
+        "right": 288.59999999999997,
+        "bottom": 621.68
+      },
+      "retainedProbeBounds": {
+        "left": 101.4,
+        "top": 602.96,
+        "right": 288.6,
+        "bottom": 621.6800000000001
+      },
+      "maximumError": 1.1368683772161603e-13,
+      "matchesWithinRounding": true,
+      "screenGapToPaddle": 21.839999999999918,
+      "worldGapToPaddle": 27.999999999999897,
+      "diagnostics": {
+        "outsideViewport": [],
+        "outsideParent": [],
+        "outsideContentArea": [],
+        "overlapCandidates": []
+      }
+    },
+    {
+      "source": "drafts/ui-prompt-minland.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "cameraDerivedBounds": {
+        "left": 83.2,
+        "top": 388.47999999999996,
+        "right": 236.8,
+        "bottom": 403.84
+      },
+      "retainedProbeBounds": {
+        "left": 83.2,
+        "top": 388.47999999999996,
+        "right": 236.8,
+        "bottom": 403.84
+      },
+      "maximumError": 0,
+      "matchesWithinRounding": true,
+      "screenGapToPaddle": 17.920000000000016,
+      "worldGapToPaddle": 28.000000000000025,
+      "diagnostics": {
+        "outsideViewport": [],
+        "outsideParent": [],
+        "outsideContentArea": [],
+        "overlapCandidates": []
+      }
+    },
+    {
+      "source": "drafts/ui-prompt-portrait.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "cameraDerivedBounds": {
+        "left": 83.2,
+        "top": 432.47999999999996,
+        "right": 236.8,
+        "bottom": 447.84
+      },
+      "retainedProbeBounds": {
+        "left": 83.2,
+        "top": 432.48,
+        "right": 236.8,
+        "bottom": 447.84000000000003
+      },
+      "maximumError": 5.684341886080802e-14,
+      "matchesWithinRounding": true,
+      "screenGapToPaddle": 17.91999999999996,
+      "worldGapToPaddle": 27.999999999999936,
+      "diagnostics": {
+        "outsideViewport": [],
+        "outsideParent": [],
+        "outsideContentArea": [],
+        "overlapCandidates": []
+      }
+    }
+  ],
+  "scope": "Four authored fixed-host samples match camera projection within rounding. This does not establish a reusable complete-layout input or runtime behavior."
+}

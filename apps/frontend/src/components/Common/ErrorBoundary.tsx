@@ -60,11 +60,11 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     if (this.state.hasError) {
       // 降级 UI
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-          <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
-            <div className="flex items-center justify-center w-16 h-16 mx-auto bg-red-100 rounded-full mb-4">
+        <div className="min-h-screen flex items-center justify-center bg-muted px-4">
+          <div className="max-w-md w-full bg-background rounded-lg shadow-lg p-8">
+            <div className="flex items-center justify-center w-16 h-16 mx-auto bg-muted rounded-full mb-4">
               <svg
-                className="w-8 h-8 text-red-600"
+                className="w-8 h-8 text-foreground"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -78,29 +78,29 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               </svg>
             </div>
 
-	            <h2 className="type-title-3 mb-2 text-center text-zinc-100">
+	            <h2 className="type-title-3 mb-2 text-center text-muted-foreground">
               出错了
             </h2>
 
-	            <p className="type-callout mb-6 text-center text-zinc-400">
+	            <p className="type-callout mb-6 text-center text-muted-foreground">
               应用遇到了一个错误，请刷新页面重试。
             </p>
 
             {/* 错误详情（仅在开发环境显示） */}
             {import.meta.env.DEV && this.state.error && (
-	              <div className="mb-6 max-h-48 overflow-auto rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-	                <p className="type-footnote mb-2 text-zinc-300">
+	              <div className="mb-6 max-h-48 overflow-auto rounded-2xl border border-border bg-muted p-4">
+	                <p className="type-footnote mb-2 text-muted-foreground">
                   错误详情：
                 </p>
-	                <p className="type-code-sm break-all text-red-300">
+	                <p className="type-code-sm break-all text-foreground">
                   {this.state.error.toString()}
                 </p>
                 {this.state.errorInfo && (
                   <details className="mt-2">
-	                    <summary className="type-footnote cursor-pointer text-zinc-400 hover:text-zinc-200">
+	                    <summary className="type-footnote cursor-pointer text-muted-foreground hover:text-muted-foreground">
                       组件堆栈
                     </summary>
-	                    <pre className="type-code-sm mt-2 whitespace-pre-wrap text-zinc-400">
+	                    <pre className="type-code-sm mt-2 whitespace-pre-wrap text-muted-foreground">
                       {this.state.errorInfo.componentStack}
                     </pre>
                   </details>
@@ -110,7 +110,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
             <button
               onClick={this.handleRefresh}
-	              className="type-button w-full rounded-full bg-white px-4 py-3 text-zinc-950 transition-colors duration-200 hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-white/35"
+	              className="type-button w-full rounded-full bg-secondary px-4 py-3 text-secondary-foreground transition-colors duration-200 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
             >
               刷新页面
             </button>

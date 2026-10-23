@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-15",
+  "scope": "Frontend structural cleanup and quality checks; preserve existing product behavior and user work.",
+  "boundaries": {
+    "sharedUi": "Moved renderer, atlas/image/font loading, shared node type, stylesheet and browser inspection entry to packages/scene-editor/src/ui-preview.",
+    "dependencies": "Shared UI sources import only scene-editor utilities and their own rendering dependencies. No frontend page, store or API adapter import remains.",
+    "runtime": "content-checker-runtime.ts builds the shared inspection entry. Existing unrelated runtime changes preserved.",
+    "contracts": "beeGameAdapter.ts imports and re-exports the shared UI node type for existing callers; LandingView uses existing Landing/types.ts instead of duplicating contracts.",
+    "page": "Moved translation copy construction to Landing/intakeCopy.ts; page component body unchanged.",
+    "qualityGate": "Added bun run check and .github/workflows/frontend-checks.yml for types, frontend tests, production build and inspector bundling. Workflow uses the locally verified Node 25.2.1/Bun 1.3.14 versions.",
+    "documentation": "apps/frontend/README.md now states code ownership and verification commands."
+  },
+  "moves": {
+    "checks": [
+      {
+        "file": "UiContentRenderer.tsx",
+        "functions": 21,
+        "bodiesUnchanged": true
+      },
+      {
+        "file": "uiStaticInspection.tsx",
+        "functions": 3,
+        "bodiesUnchanged": true
+      },
+      {
+        "file": "uiResourceLoading.ts",
+        "functions": 2,
+        "bodiesUnchanged": true
+      },
+      {
+        "file": "uiAtlas.ts",
+        "functions": 4,
+        "bodiesUnchanged": true
+      }
+    ],
+    "cssUnchanged": true
+  },
+  "landing": {
+    "pageBodyUnchanged": true,
+    "beforeLines": 1549,
+    "afterLines": 1352,
+    "sharedFiles": [
+      "UiContentRenderer.tsx",
+      "uiAtlas.ts",
+      "uiResourceLoading.ts",
+      "UiContentRenderer.css",
+      "uiStaticInspection.tsx",
+      "types.ts"
+    ]
+  },
+  "testEnvironmentFix": {
+    "before": "Baseline and the first full post-move run had all 1001 test assertions pass, but exited 1 due to 7 unhandled Path2D rejections from the loading-page avatar used in App routing/auth tests. JSON success alone missed these errors.",
+    "fix": "App.test.tsx isolates the canvas avatar, as workflow tests already do. Dedicated avatar interaction/renderer tests remain in the full suite. No production graphics code or Vitest error handling disabled.",
+    "after": "App test process exits 0; final full run exits 0 and reports no unhandled errors."
+  },
+  "verification": {
+    "frontendTypes": "bun run typecheck: exit 0",
+    "frontendFullTests": {
+      "passed": 1001,
+      "failed": 0,
+      "pending": 0,
+      "files": 100,
+      "success": true,
+      "processExitCode": 0,
+      "unhandledErrors": 0
+    },
+    "productionBuild": {
+      "command": "vite build --outDir <isolated temporary directory>/dist --logLevel warn",
+      "exitCode": 0,
+      "output": "/private/tmp/bgs-frontend-stage3.W1smPh/dist",
+      "warning": "Existing chunks over 1000 kB remain; no claimed size/performance gain."
+    },
+    "sharedInspectorBuild": {
+      "command": "bun build packages/scene-editor/src/ui-preview/uiStaticInspection.tsx --target=browser --minify",
+      "exitCode": 0,
+      "modules": 35
+    },
+    "contentCheckerRegression": {
+      "files": [
+        "game-content-validation-cli.test.ts",
+        "current-content-validation.test.ts",
+        "draft-edits.test.ts"
+      ],
+      "passed": 69,
+      "failed": 0
+    },
+    "workflowYaml": "Parsed locally; 8 steps, push/pull_request filters and read-only repository permission.",
+    "newCopyModuleLint": "intakeCopy.ts and existing types.ts pass current ESLint.",
+    "diffWhitespaceCheck": "Passed"
+  },
+  "limits": [
+    "GitHub-hosted workflow has not been dispatched; install and Linux behavior remain for the first CI run to verify.",
+    "Existing lint debt is not waived or claimed fixed by relocation; lint remains a separate command until the backlog is resolved.",
+    "No new package, dependency install, lockfile modification or change to rendering semantics.",
+    "No live browser acceptance test, deployment, service restart or generated kitty-project write."
+  ],
+  "backups": "/private/tmp/bgs-frontend-stage3.W1smPh/before.tar",
+  "rawFinalTestReport": "/private/tmp/bgs-frontend-stage3.W1smPh/final-tests.json"
+}

@@ -12,14 +12,14 @@ export type PreviewCapabilityManager = {
   issueCookie(request: Request, sessionId: string, userId: string): string
   issueUrl(url: string, sessionId: string, userId: string): string
   verifyRequest(request: Request, sessionId: string): { userId: string } | undefined
-  allowsSandboxedSubresource(request: Request, sessionId: string): boolean
+  issueRouteId(sessionId: string, userId: string): string
+  resolveRoute(routeId: string): PreviewCapability | undefined
   revokeSession(sessionId: string): void
 }
 
 export function createPreviewCapabilityManager(): PreviewCapabilityManager {
   const capabilities = new Map<string, PreviewCapability>()
   const tokensBySessionOwner = new Map<string, string>()
-  const activeSessions = new Set<string>()
 
   const issueToken = (sessionId: string, userId: string): string => {
     const ownerKey = sessionOwnerKey(sessionId, userId)
@@ -28,11 +28,12 @@ export function createPreviewCapabilityManager(): PreviewCapabilityManager {
     const token = randomBytes(32).toString('base64url')
     capabilities.set(token, { sessionId, userId })
     tokensBySessionOwner.set(ownerKey, token)
-    activeSessions.add(sessionId)
     return token
   }
 
   return {
+    issueRouteId: issueToken,
+    resolveRoute: routeId => capabilities.get(routeId),
     issueCookie(request, sessionId, userId) {
       const token = issueToken(sessionId, userId)
       const secure = requestIsSecure(request) ? '; Secure' : ''
@@ -43,6 +44,9 @@ export function createPreviewCapabilityManager(): PreviewCapabilityManager {
       if (!url) return url
       const token = issueToken(sessionId, userId)
       const parsed = new URL(url, 'http://beegame.invalid')
+      const prefix = previewPath(sessionId)
+      if (parsed.pathname.startsWith(prefix))
+        parsed.pathname = previewPath(token) + parsed.pathname.slice(prefix.length)
       parsed.searchParams.set(PREVIEW_CAPABILITY_QUERY_PARAM, token)
       if (hasAbsoluteScheme(url)) return parsed.toString()
       return `${parsed.pathname}${parsed.search}${parsed.hash}`
@@ -57,12 +61,7 @@ export function createPreviewCapabilityManager(): PreviewCapabilityManager {
       return { userId: capability.userId }
     },
 
-    allowsSandboxedSubresource(request, sessionId) {
-      return activeSessions.has(sessionId) && isSandboxedSubresourceRequest(request)
-    },
-
     revokeSession(sessionId) {
-      activeSessions.delete(sessionId)
       for (const [token, capability] of capabilities) {
         if (capability.sessionId !== sessionId) continue
         capabilities.delete(token)
@@ -97,15 +96,6 @@ function previewPath(sessionId: string): string {
 function requestIsSecure(request: Request): boolean {
   const forwarded = request.headers.get('x-forwarded-proto')?.split(',', 1)[0]?.trim()
   return forwarded === 'https' || new URL(request.url).protocol === 'https:'
-}
-
-function isSandboxedSubresourceRequest(request: Request): boolean {
-  const method = request.method.toUpperCase()
-  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') return false
-  const mode = request.headers.get('sec-fetch-mode') ?? ''
-  const destination = request.headers.get('sec-fetch-dest') ?? ''
-  if (mode === 'navigate' || destination === 'document' || destination === 'iframe') return false
-  return request.headers.get('origin') === 'null' || Boolean(destination)
 }
 
 function readCookie(request: Request, name: string): string | undefined {

@@ -1,20 +1,37 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { SharedLayoutBg } from '../beui/shared-layout-bg';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
-import { Check, ChevronDown, LoaderCircle, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, LayoutTemplate, Lightbulb, Undo2, X } from 'lucide-react';
+import { WorkspaceLoadingPage } from '../Common/WorkspaceLoadingPage';
+import { Button as BeUiButton } from '../beui/project-button';
 import type { Language } from './AgentsConfig';
 import { normalizeI18nLanguage, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../store/projectStore';
 import { useSystemStore } from '../../store/systemStore';
-import { HeroIntro } from './Landing/HeroIntro';
-import { IdeaPromptForm } from './Landing/IdeaPromptForm';
-import { AttachmentBuildReview } from './Landing/AttachmentBuildReview';
-import { LandingActions } from './Landing/LandingActions';
+import { AvatarDialogue, type AvatarMood } from './Landing/AvatarDialogue';
+import { IdeaHomeBackdrop } from './Landing/IdeaHomeBackdrop';
+import avatarStyles from './Landing/AvatarDialogue.module.css';
+import { ClassicIdeaPromptForm } from './Landing/ClassicIdeaPromptForm';
+import { DotsAvatar } from './Landing/DotsAvatar';
+import { useDailyAvatar } from './Landing/useDailyAvatar';
+import classicStyles from './Landing/ClassicIdeaHome.module.css';
+import { IdeaPromptForm, type CreationMode } from './Landing/IdeaPromptForm';
+import { BeeGameLogo } from '../BeeGameLogo';
+import { AccountActionsMenu } from './Landing/AccountActionsMenu';
+import { ThemeToggle } from '../beui/motion/theme-toggle';
+import { LandingImageBackground } from './Landing/LandingImageBackground';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
-import { FaultyTerminalBackground } from './Landing/FaultyTerminalBackground';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
+import { LandingSiteMenu, type LandingPage } from './Landing/LandingSiteMenu';
+import { AuthDialog } from './Landing/AuthDialog';
+import type { AuthMode, AuthFeedbackDialog, LegalDocumentKind, LegalDocumentBundle, Translate } from './Landing/types';
+import { createLandingIntakeCopy } from './Landing/intakeCopy';
+import { ConfirmedBrief, IntakeOptionCards, IntakeSettingsForm } from './Landing/IntakePanels';
+import { Dialog, DialogClose, DialogContent, DialogTitle } from '../ui/dialog';
 import {
   closeResourceLibraryRoute,
   isResourceLibraryRoute,
@@ -32,235 +49,61 @@ import {
   type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
 
-import { getCreditBalance, type BeeGameCreditBalance } from '../../services/creditsApi';
+import { useCredits } from '../../hooks/useCredits';
 import {
   clearSupabaseSession,
   isSupabaseAuthConfigured,
+  resendSupabaseSignupCode,
   sendSupabasePasswordReset,
   signInWithSupabaseOAuth,
   signInWithSupabasePassword,
   signUpWithSupabasePassword,
+  verifySupabaseSignupCode,
   SupabaseAuthApiError,
   type SupabaseOAuthProvider,
 } from '../../services/supabaseAuthApi';
 import { getInvitationPublicSettings } from '../../services/invitationApi';
 import type { ChatAttachmentPayload } from '../../services/api';
-import type { AttachmentBuildAnalysis } from '../../services/attachmentBuild';
+import {
+  readPendingAuthIdeaState,
+  readPendingIdeaDraftState,
+  writePendingIdeaDraftState,
+  clearPendingIdeaDraftState,
+  readPendingIntakeFlowState,
+  writePendingIntakeFlowState,
+  clearPendingIntakeFlowState,
+  readPendingRealtimeBillingIdea,
+  writePendingRealtimeBillingIdea,
+  clearPendingRealtimeBillingIdea,
+  writePendingAuthIdeaState,
+  clearPendingAuthIdeaState,
+  clearIntakeRecoveryState,
+  type PendingIdeaDraftState,
+  type PendingIntakeFlowState,
+  type RestorableIntakePhase,
+} from './Landing/intakeRecovery';
 
 const ResourceLibraryPage = lazy(async () => {
   const module = await import('../ResourceLibrary/ResourceLibraryView');
   return { default: module.ResourceLibraryPage };
 });
 
+// Keep the Avatar experience available in source while the original prompt is active.
+const AVATAR_HOME_ENABLED = false;
+
 type IntakePhase =
   | 'idle'
   | 'generating_options'
-  | 'options_ready'
-  | 'configuring_details'
-  | 'confirming_brief'
+  | RestorableIntakePhase
   | 'starting_build';
 
-type AttachmentBuildPhase = 'idle' | 'analyzing' | 'needs_confirmation' | 'needs_input' | 'ready_to_build' | 'failed';
 
-type IntakeCopy = {
-  modal: {
-    chooseOption: string;
-    productionSettings: string;
-    confirmBuildBrief: string;
-    startBuild: string;
-    close: string;
-  };
-  optionCard: {
-    mode: string;
-    gameplay: string;
-  };
-  fields: {
-    platform: string;
-    engine: string;
-    dimension: string;
-    genre: string;
-    style: string;
-    inputs: string;
-    notes: string;
-    presentation: string;
-    type: string;
-    resourceLibrary: string;
-    selectPlaceholder: string;
-  };
-  resourceLibraryUsage: Record<BeeGameIntakeSettings['resourceLibraryUsage'], string>;
-  actions: {
-    chooseAgain: string;
-    confirmBrief: string;
-    edit: string;
-    building: string;
-    startBuild: string;
-    continue: string;
-    backToLogin: string;
-    cancel: string;
-    confirmGenerate: string;
-    confirmBuild: string;
-  };
-  starting: {
-    title: string;
-    description: string;
-  };
-  errors: {
-    missingPlatformModel: string;
-    projectStartFailed: string;
-    authNotConfigured: string;
-    missingEmailPassword: string;
-    missingDisplayName: string;
-    termsRequired: string;
-    missingProductionSettings: string;
-  };
-  placeholders: {
-    notes: string;
-  };
-  profile: {
-    displayNameFallback: string;
-    emailFallback: string;
-    balance: string;
-    consumed: string;
-    deleteAccount: string;
-    deleteConfirm: string;
-    deleteFailed: string;
-    finish: string;
-    saving: string;
-  };
-  auth: {
-    oauthDivider: string;
-    signingIn: string;
-    sendReset: string;
-    registerAndContinue: string;
-    signInAndContinue: string;
-    oauthFailed: string;
-    successTitle: string;
-    errorTitle: string;
-    loginSuccess: string;
-    registerSuccess: string;
-    resetEmailSent: string;
-    feedbackClose: string;
-    forgotPassword: string;
-    acceptTermsAria: string;
-    acceptTermsPrefix: string;
-    termsLabel: string;
-    privacyLabel: string;
-    acceptTermsConnector: string;
-    acceptTermsSuffix: string;
-  };
-};
 
-type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
-  modal: {
-    chooseOption: translate('modal.chooseOption'),
-    productionSettings: translate('modal.productionSettings'),
-    confirmBuildBrief: translate('modal.confirmBuildBrief'),
-    startBuild: translate('modal.startBuild'),
-    close: translate('modal.close'),
-  },
-  optionCard: {
-    mode: translate('optionCard.mode'),
-    gameplay: translate('optionCard.gameplay'),
-  },
-  fields: {
-    platform: translate('fields.platform'),
-    engine: translate('fields.engine'),
-    dimension: translate('fields.dimension'),
-    genre: translate('fields.genre'),
-    style: translate('fields.style'),
-    inputs: translate('fields.inputs'),
-    notes: translate('fields.notes'),
-    presentation: translate('fields.presentation'),
-    type: translate('fields.type'),
-    resourceLibrary: translate('fields.resourceLibrary'),
-    selectPlaceholder: translate('fields.selectPlaceholder'),
-  },
-  resourceLibraryUsage: {
-    optional: translate('resourceLibraryUsage.optional'),
-    preferred: translate('resourceLibraryUsage.preferred'),
-    required: translate('resourceLibraryUsage.required'),
-  },
-  actions: {
-    chooseAgain: translate('actions.chooseAgain'),
-    confirmBrief: translate('actions.confirmBrief'),
-    edit: translate('actions.edit'),
-    building: translate('actions.building'),
-    startBuild: translate('actions.startBuild'),
-    continue: translate('actions.continue'),
-    backToLogin: translate('actions.backToLogin'),
-    cancel: translate('actions.cancel'),
-    confirmGenerate: translate('actions.confirmGenerate'),
-    confirmBuild: translate('actions.confirmBuild'),
-  },
-  starting: {
-    title: translate('starting.title'),
-    description: translate('starting.description'),
-  },
-  errors: {
-    missingPlatformModel: translate('errors.missingPlatformModel'),
-    projectStartFailed: translate('errors.projectStartFailed'),
-    authNotConfigured: translate('errors.authNotConfigured'),
-    missingEmailPassword: translate('errors.missingEmailPassword'),
-    missingDisplayName: translate('errors.missingDisplayName'),
-    termsRequired: translate('errors.termsRequired'),
-    missingProductionSettings: translate('errors.missingProductionSettings'),
-  },
-  placeholders: {
-    notes: translate('placeholders.notes'),
-  },
-  profile: {
-    displayNameFallback: translate('profile.displayNameFallback'),
-    emailFallback: translate('profile.emailFallback'),
-    balance: translate('profile.balance'),
-    consumed: translate('profile.consumed'),
-    deleteAccount: translate('profile.deleteAccount'),
-    deleteConfirm: translate('profile.deleteConfirm'),
-    deleteFailed: translate('profile.deleteFailed'),
-    finish: translate('profile.finish'),
-    saving: translate('profile.saving'),
-  },
-  auth: {
-    oauthDivider: translate('auth.oauthDivider'),
-    signingIn: translate('auth.signingIn'),
-    sendReset: translate('auth.sendReset'),
-    registerAndContinue: translate('auth.registerAndContinue'),
-    signInAndContinue: translate('auth.signInAndContinue'),
-    oauthFailed: translate('auth.oauthFailed'),
-    successTitle: translate('auth.feedback.successTitle'),
-    errorTitle: translate('auth.feedback.errorTitle'),
-    loginSuccess: translate('auth.feedback.loginSuccess'),
-    registerSuccess: translate('auth.feedback.registerSuccess'),
-    resetEmailSent: translate('auth.feedback.resetEmailSent'),
-    feedbackClose: translate('auth.feedback.close'),
-    forgotPassword: translate('auth.forgotPassword'),
-    acceptTermsAria: translate('auth.acceptTermsAria'),
-    acceptTermsPrefix: translate('auth.acceptTermsPrefix'),
-    termsLabel: translate('auth.termsLabel'),
-    privacyLabel: translate('auth.privacyLabel'),
-    acceptTermsConnector: translate('auth.acceptTermsConnector'),
-    acceptTermsSuffix: translate('auth.acceptTermsSuffix'),
-  },
-});
 
-type LegalDocumentKind = 'terms' | 'privacy';
 
-type AuthFeedbackDialog = {
-  kind: 'success' | 'error';
-  title: string;
-  message: string;
-};
 
-type LegalDocumentBundle = Record<
-  LegalDocumentKind,
-  {
-    title: string;
-    updatedAt: string;
-    intro: string;
-    sections: Array<{ title: string; body: string }>;
-  }
->;
+
 
 interface LandingViewProps {
   onStart: (
@@ -288,15 +131,10 @@ const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings 
     .map(input => pickConfiguredProductionValue(input, CONFIGURED_PRODUCTION_SETTING_OPTIONS.inputs))
     .filter(Boolean),
   scope: option.scope || 'Prototype',
+  orientation: 'Landscape',
   notes: '',
-  resourceLibraryUsage: 'preferred',
+  resourceLibraryUsage: 'optional',
 });
-
-const renderSelectPlaceholder = (label: string) => (
-  <option value="" disabled hidden>
-    {label}
-  </option>
-);
 
 function pickConfiguredProductionValue(value: string | undefined, options: string[]): string {
   const normalized = value?.trim();
@@ -309,6 +147,7 @@ function hasRequiredProductionSettings(settings: BeeGameIntakeSettings): boolean
     settings.platform.trim() &&
       settings.engine?.trim() &&
       settings.dimension.trim() &&
+      (['VR', 'AR'].includes(settings.dimension) || ['Landscape', 'Portrait'].includes(settings.orientation || '')) &&
       settings.genre.trim() &&
       settings.visualStyle.trim() &&
       settings.inputs.length > 0 &&
@@ -316,60 +155,15 @@ function hasRequiredProductionSettings(settings: BeeGameIntakeSettings): boolean
   );
 }
 
-function buildAttachmentBrief(
-  analysis: AttachmentBuildAnalysis,
-  idea: string,
-  language: Language,
-  resourceLibraryUsage: BeeGameIntakeSettings['resourceLibraryUsage'],
-): BeeGameBuildBrief {
-  const title = idea.trim() || 'Uploaded game';
-  const option = {
-    id: `attachment-${analysis.analysisId}`,
-    title,
-    pitch: 'Build directly from the user-confirmed attachment design.',
-    gameplay: analysis.gddDraft,
-    coreGameplayHypothesis: analysis.gddDraft,
-    experienceSnapshot: analysis.gddDraft,
-    playerFirstMinute: analysis.gddDraft,
-    whyFitsIdea: analysis.gddDraft,
-    playablePrototype: analysis.gddDraft,
-    validationTarget: analysis.gddDraft,
-    coreMechanic: analysis.gddDraft,
-    firstBuild: analysis.gddDraft,
-    validationGoal: analysis.gddDraft,
-    risk: 'Resolve only genuinely blocking gaps during implementation.',
-    fit: 'Attachment-confirmed design',
-    firstPlayableValidation: analysis.gddDraft,
-    riskComplexity: 'Review confirmed GDD against implementation.',
-    recommendedPlatform: '',
-    recommendedEngine: '',
-    recommendedDimension: '',
-    recommendedGenre: '',
-    recommendedStyle: '',
-    recommendedInputs: [],
-    scope: 'Attachment-defined scope',
-  } satisfies BeeGameIntakeOption;
+function blueprintOption(idea: string): BeeGameIntakeOption {
   return {
-    idea,
-    option,
-    settings: {
-      platform: '',
-      engine: '',
-      visualStyle: '',
-      dimension: '',
-      genre: '',
-      inputs: [],
-      scope: option.scope,
-      resourceLibraryUsage,
-    },
-    language,
-    documentLanguage: language,
-    gameUserVisibleLanguage: language,
-    agentResponseLanguage: language,
-    title,
-    confirmedGdd: analysis.gddDraft,
-    buildSource: analysis.sourceType,
-    analysisId: analysis.analysisId,
+    id: 'blueprint', title: idea.slice(0, 80), gameplay: idea,
+    pitch: '', coreGameplayHypothesis: '', experienceSnapshot: '', playerFirstMinute: '',
+    whyFitsIdea: '', playablePrototype: '', validationTarget: '', coreMechanic: '',
+    firstBuild: '', validationGoal: '', risk: '', fit: '', firstPlayableValidation: '',
+    riskComplexity: '', recommendedPlatform: '', recommendedEngine: '',
+    recommendedDimension: '', recommendedGenre: '', recommendedStyle: '',
+    recommendedInputs: [], scope: '',
   };
 }
 
@@ -377,280 +171,69 @@ function normalizeEngine(value: string | undefined): string {
   return value === 'Unreal Engine' ? 'Unreal' : value || '';
 }
 
-const pendingAuthIdeaStorageKey = 'beegame.pendingAuthIdea.v1';
-const pendingIdeaDraftStorageKey = 'beegame.pendingIdeaDraft.v1';
-const pendingIntakeFlowStorageKey = 'beegame.pendingIntakeFlow.v1';
-const pendingRealtimeBillingStorageKey = 'beegame.pendingRealtimeBilling.v1';
-const pendingAuthIdeaMaxAgeMs = 30 * 60 * 1000;
-const pendingIntakeFlowMaxAgeMs = 30 * 60 * 1000;
-
-type RestorableIntakePhase = Extract<IntakePhase, 'options_ready' | 'configuring_details' | 'confirming_brief'>;
-
-type PendingAuthIdeaState = {
-  idea: string;
-  createdAt: number;
-};
-
-type PendingIdeaDraftState = {
-  idea: string;
-  createdAt: number;
-};
-
-type PendingIntakeFlowState = {
-  phase: RestorableIntakePhase;
-  idea: string;
-  language: Language;
-  options: BeeGameIntakeOption[];
-  selectedOption?: BeeGameIntakeOption;
-  settings?: BeeGameIntakeSettings;
-  createdAt: number;
-};
-
 type InputMenuPosition = {
   left: number;
   top: number;
   width: number;
 };
 
-function readPendingAuthIdeaState(): PendingAuthIdeaState | null {
-  try {
-    const raw = sessionStorage.getItem(pendingAuthIdeaStorageKey);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as unknown;
-    if (!isPendingAuthIdeaState(value)) return null;
-    if (Date.now() - value.createdAt > pendingAuthIdeaMaxAgeMs) {
-      clearPendingAuthIdeaState();
-      return null;
-    }
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-function readPendingIdeaDraftState(): PendingIdeaDraftState | null {
-  try {
-    const raw = sessionStorage.getItem(pendingIdeaDraftStorageKey);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as unknown;
-    if (!isPendingIdeaDraftState(value)) return null;
-    if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
-      clearPendingIdeaDraftState();
-      return null;
-    }
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-function writePendingIdeaDraftState(idea: string): void {
-  const normalizedIdea = idea.trim();
-  try {
-    if (!normalizedIdea) {
-      clearPendingIdeaDraftState();
-      return;
-    }
-    sessionStorage.setItem(
-      pendingIdeaDraftStorageKey,
-      JSON.stringify({
-        idea: normalizedIdea,
-        createdAt: Date.now(),
-      }),
-    );
-  } catch {
-    // Best-effort draft recovery only.
-  }
-}
-
-function clearPendingIdeaDraftState(): void {
-  try {
-    sessionStorage.removeItem(pendingIdeaDraftStorageKey);
-  } catch {
-    // Ignore storage failures; this cache never drives server state.
-  }
-}
-
-function readPendingIntakeFlowState(): PendingIntakeFlowState | null {
-  try {
-    const raw = sessionStorage.getItem(pendingIntakeFlowStorageKey);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as unknown;
-    if (!isPendingIntakeFlowState(value)) {
-      clearPendingIntakeFlowState();
-      return null;
-    }
-    if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
-      clearPendingIntakeFlowState();
-      return null;
-    }
-    return value;
-  } catch {
-    clearPendingIntakeFlowState();
-    return null;
-  }
-}
-
-function writePendingIntakeFlowState(value: Omit<PendingIntakeFlowState, 'createdAt'>): void {
-  try {
-    sessionStorage.setItem(
-      pendingIntakeFlowStorageKey,
-      JSON.stringify({
-        ...value,
-        createdAt: Date.now(),
-      }),
-    );
-  } catch {
-    // Best-effort UI recovery only. Confirmed builds still go through server state.
-  }
-}
-
-function clearPendingIntakeFlowState(): void {
-  try {
-    sessionStorage.removeItem(pendingIntakeFlowStorageKey);
-  } catch {
-    // Ignore storage failures; this cache never drives server state.
-  }
-}
-
-function readPendingRealtimeBillingIdea(): string {
-  try {
-    const raw = sessionStorage.getItem(pendingRealtimeBillingStorageKey);
-    if (!raw) return '';
-    const value = JSON.parse(raw) as unknown;
-    if (!isRecord(value) || typeof value.idea !== 'string' || typeof value.createdAt !== 'number') return '';
-    if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
-      sessionStorage.removeItem(pendingRealtimeBillingStorageKey);
-      return '';
-    }
-    return value.idea.trim();
-  } catch {
-    return '';
-  }
-}
-
-function writePendingRealtimeBillingIdea(idea: string): void {
-  try {
-    sessionStorage.setItem(
-      pendingRealtimeBillingStorageKey,
-      JSON.stringify({ idea: idea.trim(), createdAt: Date.now() }),
-    );
-  } catch {
-    // Best-effort recovery for a browser refresh.
-  }
-}
-
-function clearPendingRealtimeBillingIdea(): void {
-  try {
-    sessionStorage.removeItem(pendingRealtimeBillingStorageKey);
-  } catch {
-    // Ignore storage failures; the in-memory flow remains authoritative.
-  }
-}
-
-function writePendingAuthIdeaState(idea: string): void {
-  const normalizedIdea = idea.trim();
-  if (!normalizedIdea) return;
-  try {
-    sessionStorage.setItem(
-      pendingAuthIdeaStorageKey,
-      JSON.stringify({
-        idea: normalizedIdea,
-        createdAt: Date.now(),
-      }),
-    );
-  } catch {
-    // OAuth redirects unload the page; this is best-effort recovery only.
-  }
-}
-
-function clearPendingAuthIdeaState(): void {
-  try {
-    sessionStorage.removeItem(pendingAuthIdeaStorageKey);
-  } catch {
-    // Ignore storage failures; the in-memory login flow can still continue.
-  }
-}
-
-function clearIntakeRecoveryState(): void {
-  clearPendingIdeaDraftState();
-  clearPendingIntakeFlowState();
-}
-
-function isPendingAuthIdeaState(value: unknown): value is PendingAuthIdeaState {
-  return (
-    isRecord(value) &&
-    typeof value.idea === 'string' &&
-    value.idea.trim().length > 0 &&
-    typeof value.createdAt === 'number' &&
-    Number.isFinite(value.createdAt)
-  );
-}
-
-function isPendingIdeaDraftState(value: unknown): value is PendingIdeaDraftState {
-  return (
-    isRecord(value) &&
-    typeof value.idea === 'string' &&
-    value.idea.trim().length > 0 &&
-    typeof value.createdAt === 'number' &&
-    Number.isFinite(value.createdAt)
-  );
-}
-
-function isPendingIntakeFlowState(value: unknown): value is PendingIntakeFlowState {
-  if (!isRecord(value)) return false;
-  const phase = value.phase;
-  if (phase !== 'options_ready' && phase !== 'configuring_details' && phase !== 'confirming_brief') return false;
-  if (typeof value.idea !== 'string' || value.idea.trim().length === 0) return false;
-  if (!Array.isArray(value.options) || value.options.length !== 3) return false;
-  if (typeof value.language !== 'string') return false;
-  if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return false;
-  if (
-    (phase === 'configuring_details' || phase === 'confirming_brief') &&
-    (!isRecord(value.selectedOption) || !isRecord(value.settings))
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
+  const reducedMotion = Boolean(useReducedMotion());
+  const dailyAvatar = useDailyAvatar();
+  const measureIntakePage = useCallback((page: HTMLDivElement | null) => {
+    const shell = page?.parentElement;
+    if (!page || !shell) return;
+    shell.scrollTop = 0;
+    // Include padding and the shell's 1px top/bottom borders. A real height lets
+    // the rim resize without scaling text or remounting the dialog/backdrop.
+    const measure = () => shell.style.setProperty('--intake-height', `${page.offsetHeight + 2}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(page);
+    return () => observer.disconnect();
+  }, []);
   const { t: translate, i18n } = useTranslation();
   const [restoredIntakeFlow] = useState<PendingIntakeFlowState | null>(() => readPendingIntakeFlowState());
   const [restoredIdeaDraft] = useState<PendingIdeaDraftState | null>(() => readPendingIdeaDraftState());
   const [restoredRealtimeBillingIdea] = useState(() => readPendingRealtimeBillingIdea());
   const [projectName, setProjectName] = useState(() => restoredIntakeFlow?.idea || restoredIdeaDraft?.idea || '');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [landingPage, setLandingPage] = useState<LandingPage>(() => {
+    const page = window.location.pathname.replace(/^\//, '');
+    return page === 'blog' || page === 'learn' || page === 'about' ? page : 'home';
+  });
   const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(() => isResourceLibraryRoute());
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isCreditStoreOpen, setIsCreditStoreOpen] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceLibraryOpen(isResourceLibraryRoute());
     window.addEventListener('popstate', syncResourceRoute);
     return () => window.removeEventListener('popstate', syncResourceRoute);
   }, []);
+  useEffect(() => {
+    const onPopState = () => {
+      const page = window.location.pathname.replace(/^\//, '');
+      setLandingPage(page === 'blog' || page === 'learn' || page === 'about' ? page : 'home');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
   const [intakePhase, setIntakePhase] = useState<IntakePhase>(restoredIntakeFlow?.phase || 'idle');
   const [intakeOptions, setIntakeOptions] = useState<BeeGameIntakeOption[]>(restoredIntakeFlow?.options || []);
   const [selectedOption, setSelectedOption] = useState<BeeGameIntakeOption | null>(
     restoredIntakeFlow?.selectedOption || null,
   );
-  const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings || null);
+  const [settingsGroup, setSettingsGroup] = useState(0);
+  const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings ? { ...restoredIntakeFlow.settings, orientation: restoredIntakeFlow.settings.orientation || 'Landscape' } : null);
   const [intakeError, setIntakeError] = useState('');
+  const [isIdeaFocused, setIsIdeaFocused] = useState(false);
   const [attachmentBuildAttachments, setAttachmentBuildAttachments] = useState<ChatAttachmentPayload[]>([]);
-  const [attachmentBuildPhase, setAttachmentBuildPhase] = useState<AttachmentBuildPhase>('idle');
-  const [attachmentBuildAnalysis, setAttachmentBuildAnalysis] = useState<AttachmentBuildAnalysis | null>(null);
-  const [attachmentBuildConflictSelections, setAttachmentBuildConflictSelections] = useState<
-    Record<string, 'gdd' | 'image' | 'custom'>
-  >({});
-  const [attachmentResourceLibraryUsage, setAttachmentResourceLibraryUsage] =
-    useState<BeeGameIntakeSettings['resourceLibraryUsage']>('preferred');
-  const [isAttachmentBuildSubmitting, setIsAttachmentBuildSubmitting] = useState(false);
+  const [creationMode, setCreationMode] = useState<CreationMode>(restoredIntakeFlow?.creationMode || readPendingAuthIdeaState()?.creationMode || restoredIdeaDraft?.creationMode || 'creative');
+  const [hasChosenMode, setHasChosenMode] = useState(() => Boolean(restoredIntakeFlow || restoredRealtimeBillingIdea || restoredIdeaDraft?.idea.trim() || restoredIdeaDraft?.referenceNames?.length || readPendingAuthIdeaState()));
+  const [requiredReferenceNames, setRequiredReferenceNames] = useState<string[]>(restoredIntakeFlow?.referenceNames || restoredIdeaDraft?.referenceNames || []);
   const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -662,13 +245,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const [, setLoginNotice] = useState('');
   const [authFeedbackDialog, setAuthFeedbackDialog] = useState<AuthFeedbackDialog | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'resetPassword'>('login');
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [emailVerificationCode, setEmailVerificationCode] = useState('');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentKind | null>(null);
   const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
   const [pendingRealtimeBillingIdea, setPendingRealtimeBillingIdea] = useState(restoredRealtimeBillingIdea);
   const [isRealtimeBillingNoticeOpen, setIsRealtimeBillingNoticeOpen] = useState(Boolean(restoredRealtimeBillingIdea));
-  const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
   const [isInputMenuOpen, setIsInputMenuOpen] = useState(false);
   const inputMenuRef = useRef<HTMLDivElement | null>(null);
   const inputMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -696,8 +279,16 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   }, []);
 
   const t = useCommonText(lang);
+  const navigateLandingPage = (page: LandingPage) => {
+    const pathname = page === 'home' ? '/' : `/${page}`;
+    window.history.pushState({}, '', pathname);
+    setLandingPage(page);
+  };
+  const isChinaVisitor = lang === 'zh' && Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Shanghai';
+  const icpNumber = import.meta.env.VITE_ICP_RECORD_NUMBER as string | undefined;
   const intakeTranslate: Translate = (key, options) => translate(`intake.${key}`, options);
   const intakeText = createLandingIntakeCopy(intakeTranslate);
+  // Login, billing consent and local UI transitions are not Agent thinking.
   const showAuthError = (message: string) => {
     setLoginError(message);
     setAuthFeedbackDialog({
@@ -733,27 +324,35 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
   const legalDocuments = translate('legal', { returnObjects: true }) as LegalDocumentBundle;
   const localizedOptionLabel = (value: string): string => translate(`intake.options.${value}`, { defaultValue: value });
-  const localizedInputs = (inputs: string[]): string =>
-    inputs.length > 0 ? inputs.map(localizedOptionLabel).join(' / ') : intakeText.fields.selectPlaceholder;
   const productionSettingOptions: ProductionSettingOptions = CONFIGURED_PRODUCTION_SETTING_OPTIONS;
-  const shouldShowIntakeModal =
-    (intakePhase !== 'idle' && intakePhase !== 'generating_options' && intakePhase !== 'starting_build') ||
-    attachmentBuildPhase !== 'idle';
+  const showIntakePanels =
+    (intakePhase !== 'idle' && intakePhase !== 'generating_options' && intakePhase !== 'starting_build');
   const modalTitle =
-    attachmentBuildPhase !== 'idle'
-      ? 'Review uploaded design'
-      : intakePhase === 'options_ready'
+    intakePhase === 'options_ready'
         ? intakeText.modal.chooseOption
         : intakePhase === 'configuring_details'
-          ? selectedOption?.title || intakeText.modal.productionSettings
+          ? (creationMode === 'blueprint' ? intakeText.modal.productionSettings : selectedOption?.title || intakeText.modal.productionSettings)
           : intakePhase === 'confirming_brief'
             ? selectedOption?.title || intakeText.modal.confirmBuildBrief
             : intakeText.modal.startBuild;
-  const intakeModalWidthClass =
-    attachmentBuildPhase !== 'idle' || intakePhase === 'options_ready' ? 'max-w-5xl' : 'max-w-[34rem]';
+  const avatarMood: AvatarMood = intakePhase === 'generating_options' || intakePhase === 'starting_build'
+    ? 'thinking' : intakeError ? 'error' : intakePhase !== 'idle' ? 'ready'
+      : hasChosenMode && (isIdeaFocused || projectName.trim() || attachmentBuildAttachments.length) ? 'listening' : 'idle';
+  const avatarHeading = isRealtimeBillingNoticeOpen ? translate('avatar.creditNotice') : intakePhase === 'generating_options' ? translate('avatar.thinkingTitle')
+    : intakePhase === 'starting_build' ? intakeText.starting.title
+    : intakePhase === 'options_ready' ? translate('avatar.optionsTitle')
+    : intakePhase === 'configuring_details' ? translate(`avatar.settingsGroups.${settingsGroup}.title`) : showIntakePanels ? modalTitle : intakeError ? translate('avatar.errorTitle') : hasChosenMode ? translate(creationMode === 'creative' ? 'avatar.creativePrompt' : 'avatar.blueprintPrompt') : undefined;
+  const avatarDescription = isRealtimeBillingNoticeOpen ? '' : intakePhase === 'generating_options' ? translate('avatar.thinkingDescription')
+    : intakePhase === 'starting_build' ? intakeText.starting.description
+    : intakePhase === 'options_ready' ? translate('avatar.optionsDescription')
+    : intakePhase === 'configuring_details' ? translate(`avatar.settingsGroups.${settingsGroup}.description`)
+    : intakePhase === 'confirming_brief' ? translate('avatar.confirmDescription')
+    : intakeError ? translate('avatar.errorDescription') : !hasChosenMode ? translate('avatar.chooseMode') : undefined;
 
   const setActiveProject = useProjectStore(state => state.setActiveProject);
   const currentUser = useSystemStore(state => state.currentUser);
+  const authenticationStatus = useSystemStore(state => state.authenticationStatus);
+  const { creditBalance } = useCredits(undefined, authenticationStatus === 'authenticated', currentUser?.id);
   const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
 
   const persistIntakeFlow = (
@@ -771,45 +370,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       options,
       selectedOption: option || undefined,
       settings: nextSettings || undefined,
+      creationMode,
+      referenceNames: attachmentBuildAttachments.map(item => item.filename || 'image'),
     });
   };
-
-  useEffect(() => {
-    if (!currentUser) {
-      setCreditBalance(null);
-      return;
-    }
-    let cancelled = false;
-    void getCreditBalance()
-      .then(balance => {
-        if (!cancelled) setCreditBalance(balance);
-      })
-      .catch(() => {
-        if (!cancelled) setCreditBalance(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser?.id]);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    const refreshCredits = () => {
-      void getCreditBalance()
-        .then(balance => setCreditBalance(balance))
-        .catch(() => setCreditBalance(null));
-    };
-    window.addEventListener('beegame:credits-updated', refreshCredits);
-    return () => {
-      window.removeEventListener('beegame:credits-updated', refreshCredits);
-    };
-  }, [currentUser?.id]);
 
   const handleSignOut = async () => {
     clearIntakeRecoveryState();
     clearPendingAuthIdeaState();
     clearSupabaseSession();
-    setCreditBalance(null);
     await loadCurrentUser();
   };
 
@@ -834,9 +403,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     await loadCurrentUser();
     const latestUser = useSystemStore.getState().currentUser;
     if (!latestUser) {
-      const pendingIdea = projectName.trim();
+      const pendingIdea = projectName.trim() || attachmentBuildAttachments.map(item => item.filename || 'image').join(', ');
       setPendingIdeaAfterLogin(pendingIdea);
-      writePendingAuthIdeaState(pendingIdea);
+      writePendingAuthIdeaState(pendingIdea, creationMode, attachmentBuildAttachments.map(file => file.filename || 'image'));
       setIsLoginPromptOpen(true);
       return false;
     }
@@ -844,9 +413,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
 
   const startIntake = async (idea: string) => {
+    if (!hasReferenceFiles()) return;
     setIntakeError('');
     clearPendingIntakeFlowState();
-    writePendingIdeaDraftState(idea);
+    writePendingIdeaDraftState(idea, creationMode, requiredReferenceNames);
     await runIntake(idea);
   };
 
@@ -866,7 +436,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setProjectName(pendingAuthIdea.idea);
     setPendingIdeaAfterLogin('');
     setIsLoginPromptOpen(false);
-    requestIntakeStart(pendingAuthIdea.idea);
+    const missingReferences = pendingAuthIdea.referenceNames?.filter(name => !attachmentBuildAttachments.some(file => (file.filename || 'image') === name)) || [];
+    if (missingReferences.length) {
+      setIntakeError(lang.startsWith('zh') ? '登录跳转后请重新添加参考文件，再继续。' : 'Please reattach your references after signing in, then continue.');
+      return;
+    }
+    if (creationMode === 'blueprint') openBlueprintSettings(pendingAuthIdea.idea);
+    else requestIntakeStart(pendingAuthIdea.idea);
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -914,6 +490,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       const intake = await beeGameAdapter.runIdeaIntake({
         idea,
         language: lang,
+        ...(attachmentBuildAttachments.length ? { attachments: attachmentBuildAttachments } : {}),
       });
       const nextOptions = intake.options;
       setIntakeOptions(nextOptions);
@@ -924,6 +501,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         idea: projectName.trim() || idea,
         language: lang,
         options: nextOptions,
+        creationMode,
+        referenceNames: attachmentBuildAttachments.map(item => item.filename || 'image'),
       });
       setIsPreparing(false);
     } catch (error) {
@@ -935,61 +514,29 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     }
   };
 
-  const runAttachmentBuildAnalysis = async () => {
-    setAttachmentBuildPhase('analyzing');
-    setIsPreparing(true);
-    setIntakeError('');
-    try {
-      const analysis = await beeGameAdapter.analyzeAttachmentBuild({
-        idea: projectName.trim(),
-        attachments: attachmentBuildAttachments,
-        language: lang,
-        clientRequestId: `landing_attachment_${Date.now()}`,
-      });
-      setAttachmentBuildAnalysis(analysis);
-      setAttachmentBuildConflictSelections({});
-      setAttachmentBuildPhase(analysis.completeness === 'partial' ? 'needs_input' : 'needs_confirmation');
-    } catch (error) {
-      setAttachmentBuildPhase('failed');
-      setIntakeError(error instanceof Error ? error.message : 'Attachment analysis failed');
-    } finally {
-      setIsPreparing(false);
-    }
-  };
-
-  const handleConfirmAttachmentBuild = async () => {
-    if (!attachmentBuildAnalysis) return;
-    const unresolvedConflict = attachmentBuildAnalysis.conflicts.find(
-      item => !attachmentBuildConflictSelections[item.field],
-    );
-    if (unresolvedConflict) {
-      setIntakeError(`请先确认冲突字段：${unresolvedConflict.field}`);
-      return;
-    }
-    const brief = buildAttachmentBrief(
-      attachmentBuildAnalysis,
-      projectName.trim(),
-      lang,
-      attachmentResourceLibraryUsage,
-    );
-    setIsAttachmentBuildSubmitting(true);
-    setIsPreparing(true);
-    setIntakeError('');
-    try {
-      await startConfirmedBuild(brief);
-    } catch (error) {
-      setIsAttachmentBuildSubmitting(false);
-      setIntakeError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
-    } finally {
-      setIsPreparing(false);
-    }
+  const openBlueprintSettings = (idea: string) => {
+    const option = blueprintOption(idea);
+    const nextSettings = { ...settingsFromOption(option), scope: idea };
+    setSelectedOption(option);
+    setSettings(nextSettings);
+    setIntakeOptions([]);
+    setSettingsGroup(0);
+    setIntakePhase('configuring_details');
+    setIsPreparing(false);
+    writePendingIntakeFlowState({
+      phase: 'configuring_details', idea, language: lang, creationMode: 'blueprint',
+      options: [], selectedOption: option, settings: nextSettings,
+      referenceNames: attachmentBuildAttachments.map(item => item.filename || 'image'),
+    });
   };
 
   const handleStart = async (event: React.FormEvent) => {
     event.preventDefault();
-    const idea = projectName.trim();
+    const idea = projectName.trim() || attachmentBuildAttachments.map(item => item.filename || 'image').join(', ');
     if ((!idea && attachmentBuildAttachments.length === 0) || isTransitioning || isPreparing) return;
-    writePendingIdeaDraftState(idea);
+    if (!hasReferenceFiles()) return;
+    if (!projectName.trim()) setProjectName(idea);
+    writePendingIdeaDraftState(idea, creationMode, requiredReferenceNames);
     clearPendingIntakeFlowState();
     setIntakeError('');
     setIsPreparing(true);
@@ -998,8 +545,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       setIsPreparing(false);
       return;
     }
-    if (attachmentBuildAttachments.length > 0) {
-      await runAttachmentBuildAnalysis();
+    if (creationMode === 'blueprint') {
+      openBlueprintSettings(idea);
       return;
     }
     setIsPreparing(false);
@@ -1020,10 +567,36 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setIsRealtimeBillingNoticeOpen(false);
   };
 
+  const finishAuthentication = async () => {
+    await loadCurrentUser();
+    setAuthFeedbackDialog(null);
+    setIsLoginPromptOpen(false);
+    setLoginPassword('');
+    setEmailVerificationCode('');
+    setRegisterDisplayName('');
+    setInvitationCode('');
+    setHasAcceptedTerms(false);
+    const nextIdea = pendingIdeaAfterLogin.trim();
+    setPendingIdeaAfterLogin('');
+    clearPendingAuthIdeaState();
+    if (nextIdea) {
+      setProjectName(nextIdea);
+      const canGenerate = await ensureGenerationAccess();
+      if (canGenerate) {
+        if (creationMode === 'blueprint') openBlueprintSettings(nextIdea);
+        else requestIntakeStart(nextIdea);
+      }
+    }
+  };
+
   const handleLoginSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (authMode === 'resetPassword') {
       await handleSendPasswordReset();
+      return;
+    }
+    if (authMode === 'verifyEmail') {
+      await handleVerifyEmail();
       return;
     }
     if (isSigningIn) return;
@@ -1055,35 +628,55 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setIsSigningIn(true);
     try {
       if (authMode === 'register') {
-        await signUpWithSupabasePassword({
+        const session = await signUpWithSupabasePassword({
           email,
           password: loginPassword,
           displayName: registerDisplayName,
           ...(isInvitationRequired ? { invitationCode } : {}),
         });
+        if (!session) {
+          setEmailVerificationCode('');
+          setAuthMode('verifyEmail');
+          return;
+        }
         showAuthSuccess(intakeText.auth.registerSuccess);
       } else {
         await signInWithSupabasePassword({ email, password: loginPassword });
         showAuthSuccess(intakeText.auth.loginSuccess);
       }
-      await loadCurrentUser();
-      setIsLoginPromptOpen(false);
-      setLoginPassword('');
-      setRegisterDisplayName('');
-      setInvitationCode('');
-      setHasAcceptedTerms(false);
-      const nextIdea = pendingIdeaAfterLogin.trim();
-      setPendingIdeaAfterLogin('');
-      clearPendingAuthIdeaState();
-      if (nextIdea) {
-        setProjectName(nextIdea);
-        const canGenerate = await ensureGenerationAccess();
-        if (canGenerate) {
-          requestIntakeStart(nextIdea);
-        }
-      }
+      await finishAuthentication();
     } catch (error) {
       showAuthError(localizeAuthError(error, translate('intake.errors.loginFailed')));
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleVerifyEmail = async () => {
+    if (isSigningIn) return;
+    if (!emailVerificationCode.trim()) {
+      showAuthError(translate('intake.errors.verificationCodeRequired'));
+      return;
+    }
+    setIsSigningIn(true);
+    try {
+      await verifySupabaseSignupCode(loginEmail.trim(), emailVerificationCode);
+      await finishAuthentication();
+    } catch (error) {
+      showAuthError(localizeAuthError(error, translate('intake.errors.verificationFailed')));
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleResendEmailCode = async () => {
+    if (isSigningIn) return;
+    setIsSigningIn(true);
+    try {
+      await resendSupabaseSignupCode(loginEmail.trim());
+      showAuthSuccess(translate('intake.auth.verificationResent'));
+    } catch (error) {
+      showAuthError(localizeAuthError(error, translate('intake.errors.verificationFailed')));
     } finally {
       setIsSigningIn(false);
     }
@@ -1115,7 +708,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
     setLoginError('');
     try {
-      writePendingAuthIdeaState(pendingIdeaAfterLogin);
+      writePendingAuthIdeaState(pendingIdeaAfterLogin, creationMode, attachmentBuildAttachments.map(file => file.filename || 'image'));
       if (invitationCode.trim()) {
         await signInWithSupabaseOAuth(provider, { invitationCode });
       } else {
@@ -1129,7 +722,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
   const handleProjectNameChange = (value: string) => {
     setProjectName(value);
-    writePendingIdeaDraftState(value);
+    setIntakeError('');
+    writePendingIdeaDraftState(value, creationMode, requiredReferenceNames);
     if (intakePhase !== 'idle' && !isPreparing && !isTransitioning) {
       setIntakePhase('idle');
       setIntakeOptions([]);
@@ -1144,6 +738,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const nextSettings = settingsFromOption(option);
     setSelectedOption(option);
     setSettings(nextSettings);
+    setSettingsGroup(0);
     setIntakePhase('configuring_details');
     setIsInputMenuOpen(false);
     persistIntakeFlow('configuring_details', intakeOptions, option, nextSettings);
@@ -1183,6 +778,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     if (!selectedOption || !settings) return;
     if (!hasRequiredProductionSettings(settings)) {
       setIntakeError(intakeText.errors.missingProductionSettings);
+      setSettingsGroup(!settings.platform || !settings.engine || !settings.dimension || (!['VR', 'AR'].includes(settings.dimension) && !settings.orientation) ? 0 : !settings.genre || !settings.visualStyle || !settings.inputs.length ? 1 : 2);
       return;
     }
     setIntakeError('');
@@ -1192,6 +788,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
 
   const handleBackToOptions = () => {
+    if (creationMode === 'blueprint') {
+      setIntakePhase('idle');
+      clearPendingIntakeFlowState();
+      return;
+    }
     setIntakePhase('options_ready');
     setSelectedOption(null);
     setSettings(null);
@@ -1207,9 +808,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setSettings(null);
     setIsInputMenuOpen(false);
     setIntakeError('');
-    setAttachmentBuildPhase('idle');
-    setAttachmentBuildAnalysis(null);
-    setAttachmentBuildAttachments([]);
+    // Closing settings does not discard the user's original reference files.
     clearIntakeRecoveryState();
   };
 
@@ -1224,16 +823,32 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       setIsTransitioning(true);
     } catch (error) {
       setIsPreparing(false);
-      setIsAttachmentBuildSubmitting(false);
       setIntakePhase('confirming_brief');
       setIntakeError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
       console.error('Failed to start confirmed project:', error);
     }
   };
 
+  const hasReferenceFiles = (): boolean => {
+    const missing = requiredReferenceNames.filter(name => !attachmentBuildAttachments.some(file => (file.filename || 'image') === name));
+    if (missing.length) {
+      setIntakeError(`${lang.startsWith('zh') ? '刷新后请返回输入重新添加参考文件：' : 'Return to input and reattach references after refreshing: '}${missing.join(', ')}`);
+      return false;
+    }
+    return true;
+  };
+
   const handleStartBuild = async () => {
-    if (!selectedOption || !settings || isTransitioning || isPreparing) return;
+    if (!selectedOption || !settings || isTransitioning || isPreparing || !hasReferenceFiles()) return;
+    if (!hasRequiredProductionSettings(settings)) {
+      setIntakeError(intakeText.errors.missingProductionSettings);
+      setSettingsGroup(0);
+    setIntakePhase('configuring_details');
+      return;
+    }
     const brief: BeeGameBuildBrief = {
+      creationMode,
+      attachments: attachmentBuildAttachments,
       idea: projectName.trim(),
       option: selectedOption,
       settings: {
@@ -1271,62 +886,137 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
 
   const handleSelectProject = async (id: string) => {
-    setIsTransitioning(true);
+    // Replace the landing page immediately so the account avatar and home UI
+    // do not fade away while the project-opening request is still pending.
+    setIsLoadingProject(true);
     setIsHistoryOpen(false);
     try {
       await setActiveProject(id);
     } catch (error) {
-      setIsTransitioning(false);
+      setIsLoadingProject(false);
       console.error('Failed to select project:', error);
     }
   };
+
+  const dialogueBack = isRealtimeBillingNoticeOpen ? { label: intakeText.actions.cancel, onClick: handleCancelRealtimeBilling }
+            : intakePhase === 'configuring_details' ? { label: settingsGroup ? translate('avatar.back') : creationMode === 'blueprint' ? (lang.startsWith('zh') ? '返回输入' : 'Back to input') : intakeText.actions.chooseAgain, onClick: () => { setIsInputMenuOpen(false); setIntakeError(''); if (settingsGroup) setSettingsGroup(value => value - 1); else handleBackToOptions(); } }
+            : intakePhase === 'confirming_brief' ? { label: intakeText.actions.edit, onClick: () => { setSettingsGroup(2); setIntakePhase('configuring_details'); } }
+            : intakePhase === 'options_ready' ? { label: intakeText.modal.close, onClick: handleCloseIntake }
+            : intakePhase === 'idle' && hasChosenMode ? { label: translate('avatar.changeMode'), onClick: () => setHasChosenMode(false), disabled: isPreparing } : undefined;
+  const intakePanels = showIntakePanels ? <section aria-label={modalTitle} className="relative">
+
+              {intakePhase === 'options_ready' ? (
+                <IntakeOptionCards
+                  options={intakeOptions}
+                  copy={intakeText}
+                  localizedOptionLabel={localizedOptionLabel}
+                  onSelect={handleSelectOption}
+                />
+              ) : null}
+
+              {intakePhase === 'configuring_details' && selectedOption && settings ? (
+                <IntakeSettingsForm
+                  settings={settings}
+                  copy={intakeText}
+                  options={productionSettingOptions}
+                  localizedOptionLabel={localizedOptionLabel}
+                  onChange={updateSettings}
+                  isInputMenuOpen={isInputMenuOpen}
+                  onToggleInputMenu={() => setIsInputMenuOpen(value => !value)}
+                  inputMenuRef={inputMenuRef}
+                  inputMenuButtonRef={inputMenuButtonRef}
+                  group={settingsGroup}
+                  onNext={() => { setIsInputMenuOpen(false); setIntakeError(''); setSettingsGroup(value => value + 1); }}
+                  onConfirm={handleConfirmSettings}
+                />
+              ) : null}
+
+              {intakePhase === 'confirming_brief' && selectedOption && settings ? (
+                <ConfirmedBrief
+                  settings={settings}
+                  copy={intakeText}
+                  localizedOptionLabel={localizedOptionLabel}
+                  isPreparing={isPreparing}
+                  onStart={handleStartBuild}
+                />
+              ) : null}
+
+          </section> : null;
+
+  if (isLoadingProject) {
+    return (
+      <WorkspaceLoadingPage
+        title={lang.startsWith('zh') ? '正在打开项目' : 'Opening project'}
+        description={lang.startsWith('zh') ? '正在加载项目工作区' : 'Loading project workspace'}
+        ariaLabel="Opening project workspace"
+        className="fixed inset-0 z-[300]"
+      />
+    );
+  }
+
   return (
     <div
       key="landing"
-      className={`absolute inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-white opacity-100 transition-opacity duration-300 dark:bg-zinc-950 ${isTransitioning ? 'opacity-0' : ''}`}
+      lang={lang}
+      className={`absolute inset-0 z-50 flex flex-col overflow-y-auto ${isResourceLibraryOpen ? '' : 'page-enter'} ${landingPage === 'home' ? `${avatarStyles.home} bg-background text-foreground` : 'bg-[#c97843] text-white'} opacity-100 transition-opacity duration-300 dark:bg-black ${isTransitioning ? 'opacity-0' : ''}`}
     >
-      <FaultyTerminalBackground isTransitioning={isTransitioning} />
-
-      <LandingActions
-        lang={lang}
-        isTransitioning={isTransitioning}
-        isSettingsOpen={isSettingsOpen}
-        isHistoryOpen={isHistoryOpen}
-        isProfileOpen={isProfileOpen}
-        isCreditStoreOpen={isCreditStoreOpen}
-        isResourceLibraryOpen={isResourceLibraryOpen}
-        currentUserId={currentUser?.id}
-        currentUserDisplayName={currentUser?.displayName || currentUser?.email}
-        currentUserEmail={currentUser?.email}
-        currentUserAvatarUrl={currentUser?.avatarUrl}
-        creditBalance={creditBalance?.balanceCredits}
-        onOpenLogin={handleOpenLogin}
-        onOpenProfile={handleOpenProfile}
-        onSignOut={currentUser ? () => void handleSignOut() : undefined}
-        onToggleSettings={() => {
-          setIsSettingsOpen(value => !value);
-          setIsHistoryOpen(false);
-          setIsCreditStoreOpen(false);
-        }}
-        canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
-        onOpenResourceLibrary={() => {
-          openResourceLibraryRoute();
-          setIsResourceLibraryOpen(true);
-          setIsSettingsOpen(false);
-          setIsHistoryOpen(false);
-          setIsCreditStoreOpen(false);
-        }}
-        onToggleHistory={() => {
-          setIsHistoryOpen(value => !value);
-          setIsSettingsOpen(false);
-          setIsCreditStoreOpen(false);
-        }}
-        onOpenCreditStore={() => {
-          setIsCreditStoreOpen(true);
-          setIsSettingsOpen(false);
-          setIsHistoryOpen(false);
-        }}
-      />
+      {landingPage !== 'home' ? <LandingImageBackground /> : null}
+      {landingPage === 'home' ? <IdeaHomeBackdrop /> : null}
+      <header className="absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between px-4 sm:h-20 sm:px-8">
+        <div className={`flex items-center gap-2.5 ${landingPage === 'home' ? classicStyles.brand : 'text-white'}`}>
+          <BeeGameLogo className={`size-8 ${landingPage === 'home' ? 'brightness-0' : 'drop-shadow-sm'}`} />
+          <span className="text-sm font-semibold tracking-[-0.03em] sm:text-lg">Bee Game Studio</span>
+        </div>
+        <div className={`relative z-20 flex items-center ${landingPage === 'home' ? `gap-1 rounded-full border border-border p-1 ${avatarStyles.glassSurface}` : 'gap-2'}`}>
+          {landingPage !== 'home' ? <LandingSiteMenu language={lang} onNavigate={navigateLandingPage} onOpenLegal={setActiveLegalDocument} /> : null}
+          <ThemeToggle
+            darkModeLabel={t.darkMode}
+            lightModeLabel={t.lightMode}
+            className={landingPage === 'home' ? 'text-foreground hover:bg-accent focus-visible:ring-ring' : 'text-white hover:bg-white/15 hover:text-white focus-visible:ring-white/70'}
+          />
+          <AccountActionsMenu
+            lang={lang}
+            isTransitioning={isTransitioning}
+            isSettingsOpen={isSettingsOpen}
+            isHistoryOpen={isHistoryOpen}
+            isProfileOpen={isProfileOpen}
+            isCreditStoreOpen={isCreditStoreOpen}
+            isResourceLibraryOpen={isResourceLibraryOpen}
+            currentUserId={currentUser?.id}
+            currentUserDisplayName={currentUser?.displayName || currentUser?.email}
+            currentUserEmail={currentUser?.email}
+            currentUserAvatarUrl={currentUser?.avatarUrl}
+            className="relative flex items-center gap-2"
+            creditBalance={creditBalance?.balanceCredits}
+            onOpenLogin={handleOpenLogin}
+            onOpenProfile={handleOpenProfile}
+            onSignOut={currentUser ? () => void handleSignOut() : undefined}
+            onToggleSettings={() => {
+              setIsSettingsOpen(value => !value);
+              setIsHistoryOpen(false);
+              setIsCreditStoreOpen(false);
+            }}
+            canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
+            onOpenResourceLibrary={() => {
+              openResourceLibraryRoute();
+              setIsResourceLibraryOpen(true);
+              setIsSettingsOpen(false);
+              setIsHistoryOpen(false);
+              setIsCreditStoreOpen(false);
+            }}
+            onToggleHistory={() => {
+              setIsHistoryOpen(value => !value);
+              setIsSettingsOpen(false);
+              setIsCreditStoreOpen(false);
+            }}
+            onOpenCreditStore={() => {
+              setIsCreditStoreOpen(true);
+              setIsSettingsOpen(false);
+              setIsHistoryOpen(false);
+            }}
+          />
+        </div>
+      </header>
 
       <SettingsMenu
         isOpen={isSettingsOpen}
@@ -1338,8 +1028,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       {isResourceLibraryOpen ? (
         <Suspense
           fallback={
-            <div className="grid min-h-screen place-items-center bg-black">
-              <span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+            <div className="grid min-h-screen place-items-center bg-background">
+              <span className="size-7 animate-spin rounded-full border-2 border-border border-t-foreground/80" />
             </div>
           }
         >
@@ -1372,674 +1062,248 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         }}
       />
 
-      {isLoginPromptOpen ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={translate('intake.auth.dialogLabel')}
-          data-surface="frosted-glass"
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
-        >
-          <form
-            onSubmit={handleLoginSubmit}
-            className="input-surface glass-panel scrollbar-hide h-[min(700px,calc(100vh-2rem))] w-full max-w-[520px] overflow-y-auto rounded-[28px] p-6 text-zinc-100 sm:p-7"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="type-title-3 text-white">
-                  {translate(
-                    `intake.auth.title.${authMode === 'resetPassword' ? 'resetPassword' : authMode === 'register' ? 'register' : 'login'}`,
-                  )}
-                </h2>
-                <p className="type-callout mt-3 text-zinc-300">
-                  {translate(
-                    `intake.auth.description.${authMode === 'resetPassword' ? 'resetPassword' : authMode === 'register' ? 'register' : 'login'}`,
-                  )}
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label={translate('intake.auth.close')}
-                onClick={handleCloseLoginPrompt}
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            {authMode !== 'resetPassword' ? (
-              <div className="mt-6 grid grid-cols-2 gap-1.5 rounded-[22px] border border-white/10 bg-white/[0.03] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),inset_0_-12px_24px_rgba(0,0,0,0.16)]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('login');
-                    setLoginError('');
-                    setLoginNotice('');
-                  }}
-                  className={`type-button h-10 rounded-[18px] px-3 transition ${authMode === 'login' ? 'bg-white text-zinc-950 shadow-[0_10px_28px_rgba(255,255,255,0.12)]' : 'text-zinc-400 hover:bg-white/[0.07] hover:text-white'}`}
-                >
-                  {translate('intake.auth.tabs.login')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('register');
-                    setLoginError('');
-                    setLoginNotice('');
-                  }}
-                  className={`type-button h-10 rounded-[18px] px-3 transition ${authMode === 'register' ? 'bg-white text-zinc-950 shadow-[0_10px_28px_rgba(255,255,255,0.12)]' : 'text-zinc-400 hover:bg-white/[0.07] hover:text-white'}`}
-                >
-                  {translate('intake.auth.tabs.register')}
-                </button>
-              </div>
-            ) : null}
-            <div className={authMode === 'register' ? 'mt-7 space-y-4' : 'mt-6 space-y-3'}>
-              {authMode === 'register' ? (
-                <label className="type-callout block text-zinc-300">
-                  {translate('intake.auth.fields.displayName')}
-                  <input
-                    aria-label={translate('intake.auth.fields.displayNameAria')}
-                    type="text"
-                    value={registerDisplayName}
-                    onChange={event => setRegisterDisplayName(event.target.value)}
-                    className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
-                    autoComplete="nickname"
-                    placeholder={translate('intake.auth.fields.displayNamePlaceholder')}
-                  />
-                </label>
-              ) : null}
-              <label className="type-callout block text-zinc-300">
-                {translate('intake.auth.fields.email')}
-                <input
-                  aria-label={translate('intake.auth.fields.emailAria')}
-                  type="email"
-                  value={loginEmail}
-                  onChange={event => setLoginEmail(event.target.value)}
-                  className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                />
-              </label>
-              {isInvitationRequired && authMode === 'register' ? (
-                <label className="type-callout block text-zinc-300">
-                  {translate('intake.auth.fields.invitationCode')}
-                  <input
-                    aria-label={translate('intake.auth.fields.invitationCodeAria')}
-                    type="text"
-                    value={invitationCode}
-                    onChange={event => setInvitationCode(event.target.value)}
-                    className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
-                    autoComplete="off"
-                    placeholder={translate('intake.auth.fields.invitationCodePlaceholder')}
-                  />
-                </label>
-              ) : null}
-              {authMode !== 'resetPassword' ? (
-                <label className="type-callout block text-zinc-300">
-                  {translate('intake.auth.fields.password')}
-                  <input
-                    aria-label={translate('intake.auth.fields.passwordAria')}
-                    type="password"
-                    value={loginPassword}
-                    onChange={event => setLoginPassword(event.target.value)}
-                    className="glass-control type-input mt-2 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
-                    autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
-                    placeholder={
-                      authMode === 'register'
-                        ? translate('intake.auth.fields.passwordNewPlaceholder')
-                        : translate('intake.auth.fields.passwordPlaceholder')
-                    }
-                  />
-                </label>
-              ) : null}
-              {authMode === 'login' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('resetPassword');
-                    setLoginError('');
-                    setLoginNotice('');
-                  }}
-                  disabled={isSigningIn}
-                  className="type-button mx-auto block text-center text-zinc-300 transition hover:text-white disabled:opacity-60"
-                >
-                  {intakeText.auth.forgotPassword}
-                </button>
-              ) : (
-                <label className="type-callout flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-zinc-300">
-                  <input
-                    aria-label={intakeText.auth.acceptTermsAria}
-                    type="checkbox"
-                    checked={hasAcceptedTerms}
-                    onChange={event => setHasAcceptedTerms(event.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30"
-                  />
-                  <span>
-                    {intakeText.auth.acceptTermsPrefix}{' '}
-                    <button
-                      type="button"
-                      onClick={() => setActiveLegalDocument('terms')}
-                      className="text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
-                    >
-                      {intakeText.auth.termsLabel}
-                    </button>{' '}
-                    {intakeText.auth.acceptTermsConnector}{' '}
-                    <button
-                      type="button"
-                      onClick={() => setActiveLegalDocument('privacy')}
-                      className="text-amber-200 underline decoration-amber-200/40 underline-offset-4 transition hover:text-amber-100"
-                    >
-                      {intakeText.auth.privacyLabel}
-                    </button>
-                    {intakeText.auth.acceptTermsSuffix}
-                  </span>
-                </label>
-              )}
-            </div>
-            {authMode === 'login' ? (
-              <>
-                <div className="type-footnote my-5 flex items-center gap-3 text-zinc-500">
-                  <span className="h-px flex-1 bg-white/10" />
-                  <span>{intakeText.auth.oauthDivider}</span>
-                  <span className="h-px flex-1 bg-white/10" />
-                </div>
-                {isInvitationRequired ? (
-                  <input
-                    aria-label={translate('intake.auth.fields.oauthInvitationCodeAria')}
-                    type="text"
-                    value={invitationCode}
-                    onChange={event => setInvitationCode(event.target.value)}
-                    className="glass-control type-input mb-3 h-11 w-full rounded-2xl px-3 placeholder:text-zinc-500"
-                    autoComplete="off"
-                    placeholder={translate('intake.auth.fields.invitationCodePlaceholder')}
-                  />
-                ) : null}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <OAuthButton provider="github" label="GitHub" onClick={handleOAuthSignIn} />
-                  <OAuthButton provider="google" label="Google" onClick={handleOAuthSignIn} />
-                  <OAuthButton provider="facebook" label="Facebook" onClick={handleOAuthSignIn} />
-                  <OAuthButton provider="x" label="X" onClick={handleOAuthSignIn} iconOnly />
-                  <OAuthButton provider="discord" label="Discord" onClick={handleOAuthSignIn} wide />
-                </div>
-              </>
-            ) : null}
-            <div className="mt-6 flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
-              {authMode === 'resetPassword' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('login');
-                    setLoginError('');
-                    setLoginNotice('');
-                  }}
-                  className="secondary-pill type-button w-full px-5 py-2.5 sm:w-auto"
-                >
-                  {intakeText.actions.backToLogin}
-                </button>
-              ) : null}
-              <button
-                type="submit"
-                disabled={isSigningIn}
-                className="primary-pill type-button w-full px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              >
-                {isSigningIn
-                  ? intakeText.auth.signingIn
-                  : authMode === 'resetPassword'
-                    ? intakeText.auth.sendReset
-                    : authMode === 'register'
-                      ? intakeText.auth.registerAndContinue
-                      : intakeText.auth.signInAndContinue}
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <AuthDialog
+          isOpen={isLoginPromptOpen}
+          authMode={authMode}
+          isInvitationRequired={isInvitationRequired}
+          loginEmail={loginEmail}
+          loginPassword={loginPassword}
+          registerDisplayName={registerDisplayName}
+          invitationCode={invitationCode}
+          hasAcceptedTerms={hasAcceptedTerms}
+          isSigningIn={isSigningIn}
+          intakeText={intakeText}
+          translate={translate}
+          onSubmit={handleLoginSubmit}
+          onClose={handleCloseLoginPrompt}
+          onAuthModeChange={setAuthMode}
+          onResetFeedback={() => {
+            setLoginError('');
+            setLoginNotice('');
+          }}
+          onLoginEmailChange={setLoginEmail}
+          onLoginPasswordChange={setLoginPassword}
+          onRegisterDisplayNameChange={setRegisterDisplayName}
+          onInvitationCodeChange={setInvitationCode}
+          emailVerificationCode={emailVerificationCode}
+          onEmailVerificationCodeChange={setEmailVerificationCode}
+          onResendEmailCode={handleResendEmailCode}
+          onTermsChange={setHasAcceptedTerms}
+          onOpenLegalDocument={setActiveLegalDocument}
+          onOAuthSignIn={handleOAuthSignIn}
+        />
 
       {authFeedbackDialog ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={authFeedbackDialog.title}
-          data-surface="frosted-glass"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
-        >
-          <div className="input-surface glass-panel w-full max-w-md rounded-[28px] p-6 text-zinc-100">
+        <Dialog open onOpenChange={open => !open && setAuthFeedbackDialog(null)}>
+          <DialogContent aria-label={authFeedbackDialog.title} className="max-w-[420px] rounded-2xl border-border bg-popover p-6 sm:p-7">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <h2 className="type-title-3 text-white">{authFeedbackDialog.title}</h2>
-                <p className="type-callout mt-3 text-zinc-300">{authFeedbackDialog.message}</p>
+                <DialogTitle className="text-xl font-semibold">{authFeedbackDialog.title}</DialogTitle>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">{authFeedbackDialog.message}</p>
               </div>
-              <button
-                type="button"
+              <DialogClose
                 aria-label={intakeText.auth.feedbackClose}
-                onClick={() => setAuthFeedbackDialog(null)}
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
+                className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent"
               >
-                <X className="h-5 w-5" />
-              </button>
+                <X className="h-4 w-4" />
+              </DialogClose>
             </div>
-            <div className="mt-6 flex justify-end border-t border-white/10 pt-5">
-              <button
-                type="button"
-                onClick={() => setAuthFeedbackDialog(null)}
-                className="primary-pill type-button px-5 py-2.5"
-              >
+            <div className="mt-6">
+              <BeUiButton type="button" size="lg" onClick={() => setAuthFeedbackDialog(null)} className="h-11 w-full rounded-xl text-sm">
                 {intakeText.auth.feedbackClose}
-              </button>
+              </BeUiButton>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {activeLegalDocument ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={legalDocuments[activeLegalDocument].title}
-          data-surface="frosted-glass"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4 py-6 backdrop-blur-sm"
-        >
-          <div className="input-surface glass-panel flex max-h-[calc(100vh-3rem)] w-full max-w-2xl flex-col rounded-[30px] p-6 text-zinc-100 sm:p-7">
+        <Dialog open onOpenChange={open => !open && setActiveLegalDocument(null)}>
+          <DialogContent aria-label={legalDocuments[activeLegalDocument].title} className="max-h-[calc(100dvh-3rem)] max-w-2xl p-5 text-foreground sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <h2 className="type-title-3 text-white">{legalDocuments[activeLegalDocument].title}</h2>
-                <p className="type-footnote mt-2 text-zinc-500">
+                <DialogTitle>{legalDocuments[activeLegalDocument].title}</DialogTitle>
+                <p className="mt-2 text-xs text-muted-foreground">
                   {translate('intake.auth.legalUpdated', { date: legalDocuments[activeLegalDocument].updatedAt })}
                 </p>
-                <p className="type-callout mt-4 text-zinc-300">{legalDocuments[activeLegalDocument].intro}</p>
+                <p className="mt-4 text-sm text-muted-foreground">{legalDocuments[activeLegalDocument].intro}</p>
               </div>
-              <button
+              <DialogClose
                 type="button"
                 aria-label={translate('intake.auth.legalClose')}
-                onClick={() => setActiveLegalDocument(null)}
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent"
               >
                 <X className="h-5 w-5" />
-              </button>
+              </DialogClose>
             </div>
             <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1">
               <div className="space-y-4">
                 {legalDocuments[activeLegalDocument].sections.map(section => (
-                  <section key={section.title} className="rounded-3xl border border-white/10 bg-white/[0.03] p-4">
-                    <h3 className="type-subheadline text-white">{section.title}</h3>
-                    <p className="type-callout mt-2 text-zinc-300">{section.body}</p>
+                  <section key={section.title} className="rounded-lg border border-border bg-muted/40 p-4">
+                    <h3 className="text-sm font-medium">{section.title}</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">{section.body}</p>
                   </section>
                 ))}
               </div>
             </div>
-            <div className="mt-6 flex justify-end border-t border-white/10 pt-5">
-              <button
+            <div className="mt-6 flex justify-end border-t border-border pt-5">
+              <DialogClose
                 type="button"
-                onClick={() => setActiveLegalDocument(null)}
-                className="primary-pill type-button px-5 py-2.5"
+                className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:opacity-90"
               >
                 {translate('intake.auth.legalUnderstand')}
-              </button>
+              </DialogClose>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
-      <HeroIntro title={t.landingTitle} subtitle={t.landingSubtitle} isTransitioning={isTransitioning} />
+      {landingPage === 'home' ? <main data-testid="idea-home-stage" className={`relative z-10 mx-auto flex min-h-[calc(100dvh-3rem)] w-full flex-none justify-center px-4 pb-8 sm:px-8 ${AVATAR_HOME_ENABLED ? avatarStyles.main : classicStyles.main}`}>
+        {AVATAR_HOME_ENABLED ? <AvatarDialogue mood={avatarMood} heading={avatarHeading} description={avatarDescription} expanded={showIntakePanels} inputValue={intakePhase === 'configuring_details' && settingsGroup === 2 ? settings?.notes || '' : projectName}
+          generatingOptions={intakePhase === 'generating_options'}
+          close={intakePhase === 'confirming_brief' ? { label: translate('avatar.closeFlow'), onClick: () => { handleCloseIntake(); setHasChosenMode(false); setIsIdeaFocused(false); } } : undefined}
+          back={dialogueBack}>
+          {intakePhase === 'idle' && !hasChosenMode ? <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted" className={avatarStyles.modeChoices} data-dialogue-items role="group" aria-label={translate('avatar.chooseMode')} data-testid="creation-mode-choices">
+            {(['creative', 'blueprint'] as const).map(mode => <button key={mode} type="button" aria-label={translate(mode === 'creative' ? 'intake.prompt.creativeMode' : 'intake.prompt.blueprintMode')} className={avatarStyles.modeChoice} onClick={() => {
+              setCreationMode(mode);
+              setHasChosenMode(true);
+              writePendingIdeaDraftState(projectName, mode, requiredReferenceNames);
+            }}>
+              {mode === 'creative' ? <Lightbulb aria-hidden="true" /> : <LayoutTemplate aria-hidden="true" />}
+              <strong>{translate(mode === 'creative' ? 'intake.prompt.creativeMode' : 'intake.prompt.blueprintMode')}</strong>
+              <small>{translate(mode === 'creative' ? 'avatar.creativeModeHint' : 'avatar.blueprintModeHint')}</small>
+              <ChevronRight aria-hidden="true" className={avatarStyles.modeChoiceArrow} />
+            </button>)}
+          </SharedLayoutBg> : null}
+          <div hidden={intakePhase !== 'idle'}>
+          {hasChosenMode ? <IdeaPromptForm
+            onFocusChange={setIsIdeaFocused}
+            value={projectName}
+            placeholder={t.ideaPlaceholder}
+            generateLabel={t.generate}
+            isTransitioning={isTransitioning || isPreparing || intakePhase !== 'idle'}
+            onChange={handleProjectNameChange}
+            onSubmit={handleStart}
+            billingConfirmation={isRealtimeBillingNoticeOpen ? {
+              title: translate('intake.realtimeBillingTitle'),
+              summary: translate('intake.realtimeBillingSummary'),
+              notice: translate('intake.realtimeBillingNotice'),
+              confirmLabel: translate('intake.realtimeBillingConfirm'),
+              cancelLabel: intakeText.actions.cancel,
+              onConfirm: handleConfirmRealtimeBilling,
+              onCancel: handleCancelRealtimeBilling,
+            } : undefined}
+            attachments={attachmentBuildAttachments}
+            onAttachmentsChange={files => {
+              setAttachmentBuildAttachments(files);
+              setRequiredReferenceNames(files.map(item => item.filename || 'image'));
+              writePendingIdeaDraftState(projectName, creationMode, files.map(item => item.filename || 'image'));
+              clearPendingIntakeFlowState();
+            }}
+          /> : null}
 
-      <IdeaPromptForm
-        value={projectName}
-        placeholder={t.ideaPlaceholder}
-        generateLabel={t.generate}
-        isTransitioning={isTransitioning || isPreparing}
-        onChange={handleProjectNameChange}
-        onSubmit={handleStart}
-        attachments={attachmentBuildAttachments}
-        onAttachmentsChange={setAttachmentBuildAttachments}
-      />
-      {shouldShowIntakeModal ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={modalTitle}
-          data-intake-modal="true"
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm"
-        >
-          <div
-            className={`input-surface glass-panel relative flex max-h-[calc(100vh-3rem)] w-full ${intakeModalWidthClass} flex-col overflow-hidden rounded-[32px] text-zinc-100`}
-          >
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,212,54,0.10),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.08),transparent_38%)]" />
-            <div className="relative z-10 flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
-              <div className="min-w-0">
-                <h2 className="type-title-2 text-white">{modalTitle}</h2>
-              </div>
-              <button
-                type="button"
-                aria-label={intakeText.modal.close}
-                disabled={isPreparing || isTransitioning}
-                onClick={handleCloseIntake}
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="scrollbar-premium relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-              {attachmentBuildPhase !== 'idle' ? (
-                attachmentBuildAnalysis ? (
-                  <AttachmentBuildReview
-                    analysis={attachmentBuildAnalysis}
-                    lang={lang}
-                    isSubmitting={isAttachmentBuildSubmitting}
-                    onChangeDraft={draft => setAttachmentBuildAnalysis({ ...attachmentBuildAnalysis, gddDraft: draft })}
-                    onSelectConflict={(field, choice) =>
-                      setAttachmentBuildConflictSelections(current => ({ ...current, [field]: choice }))
-                    }
-                    onRetry={() => void runAttachmentBuildAnalysis()}
-                    onConfirm={handleConfirmAttachmentBuild}
-                    resourceLibraryUsage={attachmentResourceLibraryUsage}
-                    onResourceLibraryUsageChange={setAttachmentResourceLibraryUsage}
-                  />
-                ) : (
-                  <div data-testid="attachment-build-analysis" className="type-callout text-zinc-300">
-                    {attachmentBuildPhase === 'analyzing'
-                      ? '正在分析上传的 GDD 和图片…'
-                      : '附件分析失败，请重试或移除附件。'}
-                  </div>
-                )
-              ) : null}
+          </div>
+          {intakeError ? <p role="alert" className="mt-4 rounded-xl border border-border bg-muted px-4 py-3 text-sm text-foreground">{intakeError}</p> : null}
 
-              {intakePhase === 'options_ready' ? (
-                <div className="space-y-4" data-testid="intake-options">
-                  <div className="grid items-stretch gap-4 md:grid-cols-3">
-                    {intakeOptions.map(option => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => handleSelectOption(option)}
-                        data-testid="intake-option-card"
-                        className="group grid h-[25rem] grid-rows-[5.25rem_1.75rem_minmax(0,1fr)] overflow-hidden rounded-[26px] border border-white/15 bg-black/20 p-5 text-left shadow-[0_18px_54px_rgba(0,0,0,0.32)] transition hover:border-white/35 hover:bg-white/[0.045] focus-visible:border-white/50 focus-visible:outline-none"
-                      >
-                        <div className="min-h-0">
-                          <div className="type-footnote text-white/45 transition-colors group-hover:text-white/60">
-                            {intakeText.optionCard.mode}
-                          </div>
-                          <div
-                            data-testid="intake-option-title"
-                            className="type-title-3 mt-2 line-clamp-2 overflow-hidden text-white"
-                          >
-                            {option.title}
-                          </div>
-                        </div>
-                        <div className="type-footnote self-start text-white/45 transition-colors group-hover:text-white/60">
-                          {intakeText.optionCard.gameplay}
-                        </div>
-                        <div
-                          data-testid="intake-option-gameplay"
-                          className="scroll-fade scroll-fade-y scroll-fade-6 scrollbar-premium type-body min-h-0 overflow-y-auto py-2 pr-2 text-zinc-300"
-                        >
-                          {option.gameplay}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {intakePhase === 'configuring_details' && selectedOption && settings ? (
-                <div className="space-y-4" data-testid="intake-settings" data-panel-depth="single">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="type-callout text-zinc-300">
-                      {intakeText.fields.platform}
-                      <select
-                        aria-label={intakeText.fields.platform}
-                        value={settings.platform}
-                        onChange={event => updateSettings({ platform: event.target.value })}
-                        className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3"
-                      >
-                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                        {productionSettingOptions.platforms.map(option => (
-                          <option key={option} value={option}>
-                            {localizedOptionLabel(option)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="type-callout text-zinc-300">
-                      {intakeText.fields.engine}
-                      <select
-                        aria-label={intakeText.fields.engine}
-                        value={normalizeEngine(settings.engine)}
-                        onChange={event => updateSettings({ engine: event.target.value })}
-                        className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3"
-                      >
-                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                        {productionSettingOptions.engines.map(option => (
-                          <option key={option} value={option}>
-                            {localizedOptionLabel(option)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="type-callout text-zinc-300">
-                      {intakeText.fields.dimension}
-                      <select
-                        aria-label={intakeText.fields.dimension}
-                        value={settings.dimension}
-                        onChange={event => updateSettings({ dimension: event.target.value })}
-                        className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3"
-                      >
-                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                        {productionSettingOptions.dimensions.map(option => (
-                          <option key={option} value={option}>
-                            {localizedOptionLabel(option)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="type-callout text-zinc-300">
-                      {intakeText.fields.genre}
-                      <select
-                        aria-label={intakeText.fields.genre}
-                        value={settings.genre}
-                        onChange={event => updateSettings({ genre: event.target.value })}
-                        className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3"
-                      >
-                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                        {productionSettingOptions.genres.map(option => (
-                          <option key={option} value={option}>
-                            {localizedOptionLabel(option)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="type-callout text-zinc-300">
-                      {intakeText.fields.style}
-                      <select
-                        aria-label={intakeText.fields.style}
-                        value={settings.visualStyle}
-                        onChange={event => updateSettings({ visualStyle: event.target.value })}
-                        className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3"
-                      >
-                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                        {productionSettingOptions.styles.map(option => (
-                          <option key={option} value={option}>
-                            {localizedOptionLabel(option)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="type-callout text-zinc-300">
-                      {intakeText.fields.resourceLibrary}
-                      <select
-                        aria-label={intakeText.fields.resourceLibrary}
-                        value={settings.resourceLibraryUsage || ''}
-                        onChange={event =>
-                          updateSettings({
-                            resourceLibraryUsage: event.target.value as BeeGameIntakeSettings['resourceLibraryUsage'],
-                          })
-                        }
-                        className="glass-control type-input mt-2 h-10 w-full rounded-[20px] px-3"
-                      >
-                        {renderSelectPlaceholder(intakeText.fields.selectPlaceholder)}
-                        {(['preferred', 'optional', 'required'] as const).map(value => (
-                          <option key={value} value={value}>
-                            {intakeText.resourceLibraryUsage[value]}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div ref={inputMenuRef} className="type-callout relative text-zinc-300">
-                      {intakeText.fields.inputs}
-                      <button
-                        ref={inputMenuButtonRef}
-                        type="button"
-                        aria-haspopup="listbox"
-                        aria-expanded={isInputMenuOpen}
-                        onClick={() => setIsInputMenuOpen(value => !value)}
-                        className="glass-control type-input mt-2 flex h-10 w-full items-center justify-between gap-3 rounded-[20px] px-3 text-left"
-                      >
-                        <span className="min-w-0 truncate">{localizedInputs(settings.inputs)}</span>
-                        <ChevronDown
-                          className={`h-4 w-4 shrink-0 text-zinc-400 transition ${isInputMenuOpen ? 'rotate-180' : ''}`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-
-                  <label className="type-callout block text-zinc-300">
-                    {intakeText.fields.notes}
-                    <textarea
-                      aria-label={intakeText.fields.notes}
-                      value={settings.notes || ''}
-                      onChange={event => updateSettings({ notes: event.target.value })}
-                      placeholder={intakeText.placeholders.notes}
-                      className="glass-control type-footnote mt-2 min-h-24 w-full resize-none rounded-[20px] px-3 py-3 placeholder:text-zinc-500"
-                    />
-                  </label>
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={handleBackToOptions}
-                      className="secondary-pill type-button px-5 py-2.5"
-                    >
-                      {intakeText.actions.chooseAgain}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleConfirmSettings}
-                      className="primary-pill type-button px-6 py-2.5"
-                    >
-                      {intakeText.actions.confirmBrief}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              {intakePhase === 'confirming_brief' && selectedOption && settings ? (
-                <div className="space-y-4" data-testid="confirmed-brief" data-panel-depth="single">
-                  <dl className="grid gap-x-8 gap-y-4 py-1 sm:grid-cols-2">
-                    <div>
-                      <dt className="type-footnote text-zinc-500">{intakeText.fields.platform}</dt>
-                      <dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.platform)}</dd>
-                    </div>
-                    <div>
-                      <dt className="type-footnote text-zinc-500">{intakeText.fields.engine}</dt>
-                      <dd className="type-callout mt-1 text-white">
-                        {localizedOptionLabel(settings.engine || 'React')}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="type-footnote text-zinc-500">{intakeText.fields.presentation}</dt>
-                      <dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.dimension)}</dd>
-                    </div>
-                    <div>
-                      <dt className="type-footnote text-zinc-500">{intakeText.fields.type}</dt>
-                      <dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.genre)}</dd>
-                    </div>
-                    <div>
-                      <dt className="type-footnote text-zinc-500">{intakeText.fields.style}</dt>
-                      <dd className="type-callout mt-1 text-white">{localizedOptionLabel(settings.visualStyle)}</dd>
-                    </div>
-                    <div>
-                      <dt className="type-footnote text-zinc-500">{intakeText.fields.inputs}</dt>
-                      <dd className="type-callout mt-1 text-white">{localizedInputs(settings.inputs)}</dd>
-                    </div>
-                    <div>
-                      <dt className="type-footnote text-zinc-500">{intakeText.fields.resourceLibrary}</dt>
-                      <dd className="type-callout mt-1 text-white">
-                        {intakeText.resourceLibraryUsage[settings.resourceLibraryUsage]}
-                      </dd>
-                    </div>
-                  </dl>
-                  {settings.notes ? (
-                    <p className="type-footnote mt-4 rounded-2xl bg-white/5 p-3 text-zinc-300">{settings.notes}</p>
-                  ) : null}
-                  <div className="mt-5 flex flex-wrap justify-end gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setIntakePhase('configuring_details')}
-                      className="secondary-pill type-button px-5 py-2.5"
-                    >
-                      {intakeText.actions.edit}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isPreparing}
-                      onClick={handleStartBuild}
-                      className="primary-pill type-button px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isPreparing ? intakeText.actions.building : intakeText.actions.startBuild}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+          {intakePanels}
+        </AvatarDialogue> : <div className={classicStyles.stage}>
+          <div className={classicStyles.intro}>
+            <h1>{t.landingTitle}</h1>
+            <p>{t.landingSubtitle}</p>
+          </div>
+          <div className={classicStyles.promptStage}>
+          <AnimatePresence mode={reducedMotion ? 'sync' : 'wait'} initial={false}>
+          {intakePhase === 'idle' ? <motion.div key="prompt" className={classicStyles.promptLayer}
+            initial={{ opacity: reducedMotion ? 1 : 0 }} animate={{ opacity: 1 }} exit={reducedMotion ? undefined : { opacity: 0, pointerEvents: 'none' }}
+            transition={{ duration: reducedMotion ? 0 : .24 }}>
+          <ClassicIdeaPromptForm
+            creationMode={creationMode}
+            onCreationModeChange={mode => {
+              setCreationMode(mode);
+              writePendingIdeaDraftState(projectName, mode, requiredReferenceNames);
+              setIntakePhase('idle');
+              setSelectedOption(null);
+              setSettings(null);
+              setIntakeOptions([]);
+              clearPendingIntakeFlowState();
+            }}
+            value={projectName}
+            placeholder={t.ideaPlaceholder}
+            generateLabel={t.generate}
+            isTransitioning={isTransitioning || isPreparing || intakePhase !== 'idle'}
+            onChange={handleProjectNameChange}
+            onSubmit={handleStart}
+            billingConfirmation={isRealtimeBillingNoticeOpen ? {
+              title: translate('intake.realtimeBillingTitle'),
+              summary: translate('intake.realtimeBillingSummary'),
+              notice: translate('intake.realtimeBillingNotice'),
+              confirmLabel: translate('intake.realtimeBillingConfirm'),
+              cancelLabel: intakeText.actions.cancel,
+              onConfirm: handleConfirmRealtimeBilling,
+              onCancel: handleCancelRealtimeBilling,
+            } : undefined}
+            attachments={attachmentBuildAttachments}
+            onAttachmentsChange={files => {
+              setAttachmentBuildAttachments(files);
+              setRequiredReferenceNames(files.map(item => item.filename || 'image'));
+              writePendingIdeaDraftState(projectName, creationMode, files.map(item => item.filename || 'image'));
+              clearPendingIntakeFlowState();
+            }}
+          />
+          </motion.div> : intakePhase === 'generating_options' ? <motion.div key="writing" role="status"
+            aria-label={translate('avatar.thinkingTitle')} className={classicStyles.writing}
+            initial={{ opacity: reducedMotion ? 1 : 0 }} animate={{ opacity: 1 }} exit={reducedMotion ? undefined : { opacity: 0 }}
+            transition={{ duration: reducedMotion ? 0 : .3 }}>
+            <DotsAvatar token={dailyAvatar} mood="writing" label={translate('avatar.thinkingTitle')} />
+          </motion.div> : null}
+          </AnimatePresence>
+          </div>
+          {intakeError && !showIntakePanels ? <p role="alert" className="mt-4 rounded-xl border border-border bg-muted px-4 py-3 text-sm text-foreground">{intakeError}</p> : null}
+        </div>}
+      </main> : <LandingContentPage page={landingPage} language={lang} onBack={() => navigateLandingPage('home')} />}
+      {landingPage === 'home' ? (
+        <footer className="relative z-10 flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-4 text-center text-xs text-muted-foreground">
+          <span>© {new Date().getFullYear()} Bee Game Studio</span>
+          {isChinaVisitor && icpNumber ? <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">{icpNumber}</a> : null}
+        </footer>
+      ) : null}
+      {/* Settings use a separate portal for input choices; keep pointer access to that menu. */}
+      {!AVATAR_HOME_ENABLED ? <Dialog modal="trap-focus" disablePointerDismissal open={showIntakePanels} onOpenChange={open => { if (!open && !isPreparing && !isTransitioning) handleCloseIntake(); }}>
+        <DialogContent lang={lang} className={`${classicStyles.dialog} ${avatarStyles.home}`}>
+          <AnimatePresence mode="wait" initial={false}>
+          <motion.div ref={measureIntakePage} key={reducedMotion ? 'intake' : `${intakePhase}-${settingsGroup}`} className={classicStyles.dialogPage}
+            initial={{ opacity: reducedMotion ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
+            transition={{ duration: reducedMotion ? 0 : .16 }}>
+          <div className={classicStyles.dialogHeader}>
+            <DialogTitle className={avatarStyles.heading}>{avatarHeading || modalTitle}</DialogTitle>
+            <div className="flex shrink-0 items-center gap-1">
+              {dialogueBack ? <button type="button" aria-label={dialogueBack.label} onClick={dialogueBack.onClick} className={classicStyles.iconButton}><Undo2 className="size-5" /></button> : null}
+              {intakePhase === 'confirming_brief' ? <button type="button" aria-label={translate('avatar.closeFlow')} onClick={handleCloseIntake} className={classicStyles.iconButton}><X className="size-5" /></button> : null}
             </div>
           </div>
-        </div>
-      ) : null}
-
-      {isRealtimeBillingNoticeOpen ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="beegame-realtime-billing-title"
-            className="input-surface glass-panel w-full max-w-[520px] rounded-[30px] p-6 text-left text-zinc-100 sm:p-7"
-          >
-            <h2 id="beegame-realtime-billing-title" className="type-title-2 text-white">
-              {translate('intake.realtimeBillingTitle')}
-            </h2>
-            <p className="type-body mt-4 text-zinc-300">{translate('intake.realtimeBillingNotice')}</p>
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={handleCancelRealtimeBilling}
-                className="secondary-pill type-button px-6 py-3"
-              >
-                {intakeText.actions.cancel}
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmRealtimeBilling}
-                className="primary-pill type-button px-7 py-3"
-              >
-                {translate('intake.realtimeBillingConfirm')}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
+          {avatarDescription ? <p className={avatarStyles.description}>{avatarDescription}</p> : null}
+          <div className={avatarStyles.content}>{intakePanels}</div>
+          {intakeError ? <p role="alert" className="text-sm text-destructive">{intakeError}</p> : null}
+          </motion.div>
+          </AnimatePresence>
+        </DialogContent>
+      </Dialog> : null}
+      {!AVATAR_HOME_ENABLED && intakePhase === 'starting_build' ? <WorkspaceLoadingPage title={intakeText.starting.title} description={intakeText.starting.description} ariaLabel={intakeText.starting.title} className="fixed inset-0 z-[300] overflow-hidden" /> : null}
       {isInputMenuOpen && settings && inputMenuPosition && typeof document !== 'undefined'
         ? createPortal(
             <div
               ref={inputMenuDropdownRef}
               role="listbox"
               aria-label={intakeText.fields.inputs}
-              data-surface="frosted-glass"
-              data-glass-density="reinforced"
+              aria-multiselectable="true"
               data-floating-layer="true"
               style={{
                 left: inputMenuPosition.left,
                 top: inputMenuPosition.top,
                 width: inputMenuPosition.width,
               }}
-              className="input-surface glass-panel fixed z-[220] overflow-hidden rounded-3xl p-1.5 text-zinc-100 backdrop-blur-2xl"
+              lang={lang}
+              className={`${avatarStyles.selectMenu} fixed z-[260] overflow-hidden rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-lg`}
             >
               <div className="relative z-10">
                 {productionSettingOptions.inputs.map(input => {
@@ -2051,10 +1315,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                       role="option"
                       aria-selected={active}
                       onClick={() => toggleInput(input)}
-                      className="type-button flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-zinc-200 transition hover:bg-white/10"
+                      className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-accent"
                     >
                       <span>{localizedOptionLabel(input)}</span>
-                      {active ? <Check className="h-4 w-4 text-emerald-200" /> : null}
+                      {active ? <Check className="h-4 w-4 text-foreground" /> : null}
                     </button>
                   );
                 })}
@@ -2064,103 +1328,25 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           )
         : null}
 
-      {intakePhase === 'starting_build' ? (
-        <div
-          className="fixed inset-0 z-[300] flex items-center justify-center overflow-hidden bg-black/95 px-6 backdrop-blur-2xl"
-          role="status"
-          aria-live="polite"
-          aria-label={intakeText.starting.title}
-        >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(52,211,153,0.11),transparent_34%)]" />
-          <div className="relative flex max-w-md flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[0_20px_70px_rgba(16,185,129,0.12)]">
-              <LoaderCircle className="h-6 w-6 animate-spin text-emerald-300" aria-hidden="true" />
-            </div>
-            <h2 className="type-title-2 mt-7 text-white">{intakeText.starting.title}</h2>
-            <p className="type-body mt-3 max-w-sm text-zinc-400">{intakeText.starting.description}</p>
-          </div>
-        </div>
-      ) : null}
 
-      {intakeError ? (
-        <div className="type-footnote relative z-20 mt-4 max-w-xl rounded-xl border border-red-400/30 bg-red-950/60 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
-          {intakeError}
-        </div>
-      ) : null}
     </div>
   );
 }
 
-function OAuthButton({
-  provider,
-  label,
-  onClick,
-  wide = false,
-  iconOnly = false,
-}: {
-  provider: SupabaseOAuthProvider;
-  label: string;
-  onClick: (provider: SupabaseOAuthProvider) => void | Promise<void>;
-  wide?: boolean;
-  iconOnly?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={() => void onClick(provider)}
-      className={`type-button inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-zinc-100 transition hover:bg-white/10 ${iconOnly ? 'gap-0' : 'gap-2.5'} ${wide ? 'sm:col-span-2' : ''}`}
-    >
-      <OAuthProviderIcon provider={provider} />
-      {iconOnly ? <span className="sr-only">{label}</span> : <span>{label}</span>}
-    </button>
-  );
-}
-
-function OAuthProviderIcon({ provider }: { provider: SupabaseOAuthProvider }) {
-  if (provider === 'github') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-current text-white">
-        <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.05c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.74.08-.74 1.21.09 1.85 1.24 1.85 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.66-.3-5.46-1.33-5.46-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.29-1.23 3.29-1.23.66 1.66.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.63-5.48 5.93.43.37.82 1.1.82 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 12 .5Z" />
-      </svg>
-    );
-  }
-  if (provider === 'google') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px]">
-        <path
-          fill="#4285F4"
-          d="M23.49 12.27c0-.79-.07-1.53-.2-2.27H12v4.29h6.47a5.54 5.54 0 0 1-2.4 3.63v2.96h3.88c2.27-2.09 3.54-5.17 3.54-8.61Z"
-        />
-        <path
-          fill="#34A853"
-          d="M12 24c3.24 0 5.96-1.07 7.95-2.91l-3.88-2.96c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.95H1.26v3.05A12 12 0 0 0 12 24Z"
-        />
-        <path fill="#FBBC05" d="M5.27 14.33a7.2 7.2 0 0 1 0-4.66V6.62H1.26a12 12 0 0 0 0 10.76l4.01-3.05Z" />
-        <path
-          fill="#EA4335"
-          d="M12 4.72c1.76 0 3.34.61 4.58 1.79l3.44-3.44A11.55 11.55 0 0 0 12 0 12 12 0 0 0 1.26 6.62l4.01 3.05C6.22 6.83 8.87 4.72 12 4.72Z"
-        />
-      </svg>
-    );
-  }
-  if (provider === 'facebook') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-[#1877F2]">
-        <path d="M24 12.07C24 5.41 18.63 0 12 0S0 5.41 0 12.07C0 18.1 4.39 23.09 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.03 1.79-4.7 4.53-4.7 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.89v2.26h3.32l-.53 3.49h-2.79V24C19.61 23.09 24 18.1 24 12.07Z" />
-      </svg>
-    );
-  }
-  if (provider === 'x') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[17px] w-[17px] fill-current text-white">
-        <path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.59-6.64 7.59H.47l8.6-9.83L0 1.15h7.59l5.24 6.93 6.07-6.93Zm-1.29 19.5h2.04L6.48 3.23H4.29l13.32 17.42Z" />
-      </svg>
-    );
-  }
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[19px] w-[19px] fill-[#5865F2]">
-      <path d="M20.32 4.37A19.8 19.8 0 0 0 15.36 2.8a13.9 13.9 0 0 0-.64 1.32 18.4 18.4 0 0 0-5.44 0 13.9 13.9 0 0 0-.65-1.32 19.7 19.7 0 0 0-4.96 1.57C.53 9.04-.32 13.59.1 18.08a20 20 0 0 0 6.08 3.11 15 15 0 0 0 1.3-2.13 12.9 12.9 0 0 1-2.05-.99c.17-.13.34-.26.5-.39a14.2 14.2 0 0 0 12.14 0c.16.13.33.26.5.39-.65.39-1.33.72-2.05.99.38.76.82 1.48 1.3 2.13a20 20 0 0 0 6.08-3.11c.5-5.2-.84-9.7-3.58-13.71ZM8.02 15.33c-1.18 0-2.15-1.09-2.15-2.43s.95-2.43 2.15-2.43c1.2 0 2.17 1.1 2.15 2.43 0 1.34-.95 2.43-2.15 2.43Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.43s.95-2.43 2.15-2.43c1.2 0 2.17 1.1 2.15 2.43 0 1.34-.95 2.43-2.15 2.43Z" />
-    </svg>
-  );
+function LandingContentPage({ page, language, onBack }: { page: Exclude<LandingPage, 'home'>; language: Language; onBack: () => void }) {
+  const zh = language.startsWith('zh');
+  const content = page === 'blog'
+    ? (zh ? { eyebrow: 'Bee Game Studio', title: '博客', description: '产品动态、游戏创作洞察与团队故事将在这里发布。', note: '首批文章即将上线。' } : { eyebrow: 'Bee Game Studio', title: 'Blog', description: 'Product updates, game-making notes, and stories from the studio will live here.', note: 'The first posts are on their way.' })
+    : page === 'learn'
+      ? (zh ? { eyebrow: 'Bee Game Studio', title: '学习中心', description: '从灵感到可玩的世界，逐步了解每一个创作环节。', note: '教学内容即将上线。' } : { eyebrow: 'Bee Game Studio', title: 'Learn', description: 'Learn each creative step, from an idea to a playable world.', note: 'Learning guides are coming soon.' })
+      : (zh ? { eyebrow: 'Bee Game Studio', title: '关于我们', description: '我们相信游戏创作应该从灵感开始，而不该被工具阻挡。', note: 'Bee Game Studio 正在打造更自然的游戏创作体验。' } : { eyebrow: 'Bee Game Studio', title: 'About', description: 'We believe game making should start with inspiration, not friction.', note: 'Bee Game Studio is building a more natural creative experience.' });
+  return <main className="relative z-10 mx-auto flex min-h-dvh w-full items-center justify-center px-6 pt-20 text-white">
+    <section className="w-full max-w-2xl rounded-[2rem] border border-white/30 bg-black/15 p-8 text-center shadow-2xl backdrop-blur-md sm:p-12">
+      <p className="text-sm font-medium tracking-[.12em] text-white/70">{content.eyebrow}</p>
+      <h1 className="type-hero mt-4 text-white">{content.title}</h1>
+      <p className="type-body-lg mx-auto mt-5 max-w-xl text-white/90">{content.description}</p>
+      <p className="mt-8 text-sm text-white/70">{content.note}</p>
+      <button type="button" onClick={onBack} className="mt-9 inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/12 px-4 py-2.5 text-sm font-medium transition hover:bg-white/20"><ArrowLeft className="size-4" />{zh ? '返回首页' : 'Back to home'}</button>
+    </section>
+  </main>;
 }

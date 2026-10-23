@@ -1,0 +1,194 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-system",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "style": {
+          "background": {
+            "color": "#12102A"
+          }
+        },
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            960,
+            540
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1200,
+              540
+            ],
+            [
+              960,
+              600
+            ],
+            [
+              1280,
+              720
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "loading-group",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            320,
+            180
+          ]
+        },
+        "data": {
+          "container": {
+            "direction": "column",
+            "gap": 16,
+            "justify": "center",
+            "align": "center"
+          },
+          "visibleWhen": "phase:loading"
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "loading-spinner",
+        "role": "shape",
+        "enabled": true,
+        "parentId": "loading-group",
+        "layout": {
+          "size": [
+            40,
+            40
+          ]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#29D3E0"
+        }
+      },
+      {
+        "id": "loading-text",
+        "role": "text",
+        "enabled": true,
+        "parentId": "loading-group",
+        "layout": {
+          "size": [
+            300,
+            30
+          ]
+        },
+        "text": "加载中…",
+        "style": {
+          "fontSize": 20,
+          "color": "#F4F2FF",
+          "align": "center"
+        }
+      },
+      {
+        "id": "error-group",
+        "role": "container",
+        "enabled": false,
+        "layout": {
+          "anchor": "center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            420,
+            220
+          ]
+        },
+        "data": {
+          "container": {
+            "direction": "column",
+            "gap": 16,
+            "justify": "center",
+            "align": "center"
+          },
+          "visibleWhen": "phase:error"
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "error-text",
+        "role": "text",
+        "enabled": true,
+        "parentId": "error-group",
+        "layout": {
+          "size": [
+            400,
+            64
+          ]
+        },
+        "text": "加载失败，请检查网络",
+        "style": {
+          "fontSize": 20,
+          "color": "#FF7A5C",
+          "align": "center",
+          "lineHeight": 28
+        }
+      },
+      {
+        "id": "error-retry",
+        "role": "button",
+        "enabled": true,
+        "parentId": "error-group",
+        "layout": {
+          "size": [
+            200,
+            52
+          ]
+        },
+        "text": "重试",
+        "actions": {
+          "activate": "retry-load"
+        },
+        "style": {
+          "background": {
+            "color": "#29D3E0",
+            "radius": 14
+          },
+          "color": "#0A1030",
+          "fontSize": 22,
+          "fontWeight": "bold"
+        }
+      }
+    ]
+  }
+}

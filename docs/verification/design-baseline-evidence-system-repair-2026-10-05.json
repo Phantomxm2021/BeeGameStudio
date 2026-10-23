@@ -1,0 +1,119 @@
+{
+  "date": "2026-10-05",
+  "kind": "system-root-cause-and-local-repair",
+  "repository": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "paidEvidenceRoot": "/private/tmp/bgs-newidea-stealth-paid-20261005-QKrE8huz",
+  "objective": "修复已证实的系统误阻断、确定性检查缺口和调用诊断问题；不改变原始测试产物，不加入具体游戏规则，不追加付费实验。",
+  "rootCauses": [
+    {
+      "category": "系统实现职责混合",
+      "evidence": "原生 author-5-work-turn15 停止于17条 TECHNICAL_DESIGN→ASSET_PLAN not-delivered-output；实际ASSET_PLAN.outputs中17个ID均存在。",
+      "mechanism": "checkProjectDesignBaseline 用上一轮7文档快照的名称加载当前字节，既比较冻结基线，又验证已获授权改写的技术稿。新资源计划被排除，合法新依赖被误认为不存在。即使换个游戏，计划内后续作者消费新生产者也会复现。",
+      "repair": "基线检查使用基线+当前计划文档作为可见集合；仅将未授权修改、受保护来源问题和版本违规作为作者阻断。当前计划草稿的结构错误进入现有Inspect→Revise→Verify，仍由完整当前版本检查阻止发布。",
+      "code": "packages/agent-workflow-server/src/beegame/project-delivery.ts:252"
+    },
+    {
+      "category": "系统实现的证据权限判断错误",
+      "evidence": "新增通用回归在修复前发现：技术作者重算自己已引用的模型、提升文档版本后仍被全局changedEvidence阻断。",
+      "mechanism": "把‘任何旧证据字节变化’等同于‘越权修改’，忽略当前作者有计划内修订职责。",
+      "repair": "当前作者独占的证据可以随版本修订；其他冻结文档引用的共享证据仍受保护。回归同时覆盖独占证据、共享字节、未升版及无关文档被修改。",
+      "code": "packages/agent-workflow-server/src/beegame/project-delivery.ts:265"
+    },
+    {
+      "category": "确定性检查设计覆盖缺口",
+      "evidence": "场景正文../calc链接解析到workspace/calc，但真实文件在docs/calc。旧检查仅检查解析到docs内部的非.md链接，因此错误路径逃过检查。",
+      "mechanism": "用错误路径的解析结果决定是否需要检查，产生‘越写错越不检查’的漏洞。",
+      "repair": "明确的本地文件引用除既有assets/content计划产物命名空间外，都检查存在性、非空文件、边界与暂存目标；目录链接不伪装为文件证据。未来文档/并行稿仍保持原阶段语义。",
+      "code": "packages/agent-workflow-server/src/beegame/design-document-references.ts:84"
+    },
+    {
+      "category": "系统覆盖规则对象混淆",
+      "evidence": "原始八稿--design-handoff5检出17条ASSET_PLAN自身resourceRequired缺少自覆盖；资源uses实际已指向美术、音频和UI来源。",
+      "mechanism": "覆盖检查把资源计划‘产出的资源’当作其他文档‘需要资源支持的设计用途’，导致虚假的自引用要求。",
+      "repair": "资源覆盖针对专业文档用途，不要求ASSET_PLAN自引用。资源行结构、唯一输出、用途引用、专业需求覆盖和不存在来源仍校验。",
+      "code": "packages/agent-workflow-server/src/beegame/design-handoff.ts:319"
+    },
+    {
+      "category": "LLM调用与归因错误，工具错误信息不足",
+      "evidence": "UI作者在zsh循环将两个尺寸合为一个argv，反复Usage失败后声称工具不支持camera连接；一条正确argv已进入文字尺寸检查，停止后正确调用亦成功。",
+      "mechanism": "实际是调用边界错误，非平台能力缺失。通用Usage消息未明确收到哪些尺寸参数，促使试探不同flag排列；不能证明该消息是模型误判的唯一原因。",
+      "repair": "三个几何命令在读项目文件之前验证宽高为两个独立、正数、有限数值参数，错误返回实际尺寸argv和边界说明。保留Usage兼容提示，不自动拆分错误参数、不伪造成功。",
+      "code": "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts:206",
+      "limit": "这是改善可诊断性，尚未经新的模型运行证明能避免误判。"
+    },
+    {
+      "category": "语义Review执行/判断不可靠",
+      "evidence": "UI Inspect原生日志显示读了UI全文、侧车、GDD、场景和UI计算附录；没有读取其消费的AUDIO/ART/TECH正文，没有校验‘能力不可用’结论。保存的UI正文除版本号外未修。",
+      "assessment": "任务已经要求核对相关来源和不把作者声明当事实；不能把本次漏检简单归为没有prompt。也不能只凭高上下文就断言它造成了此次判断错误。",
+      "status": "未声称已修复",
+      "notImplemented": "未添加游戏专用语义关键词、强行提取自然语言时间表、额外审计角色、更多循环或另一份边界定义。"
+    }
+  ],
+  "verification": {
+    "beforeRepair": {
+      "targetedRegressionFailed": 4,
+      "meaning": "合法同批依赖误阻断、错误草稿无法进入Review、计划证据修订误阻断及错误本地路径漏检分别复现。"
+    },
+    "afterRepair": {
+      "relatedFiles": 9,
+      "passed": 192,
+      "failed": 0,
+      "expectations": 1346,
+      "seconds": 4.35,
+      "typecheck": {
+        "package": "packages/agent-workflow-server",
+        "command": "bun run typecheck",
+        "exitCode": 0
+      },
+      "whitespaceCheckExitCode": 0,
+      "covered": "合法新生产者可见；错误新引用仍进入一次有界修订且不修则停止；升版必需；共享与无关来源保护；非docs证据链接不能漏检；专业资源用途不被自引用掩盖；三个命令收到合并/NaN/Infinity/零尺寸时明确报错；已有相机连接/生成检查器路径仍可用。",
+      "environmentWarning": "project-conversation测试中的浏览器清理探测/bin/ps在沙箱返回EPERM；测试通过，但不代表浏览器游戏验收。"
+    },
+    "readonlyOriginalReplay": {
+      "baselineIntegrityIssues": [],
+      "falseMissingProducerIssues": 0,
+      "falseAssetSelfCoverageIssues": 0,
+      "newlyDetectedBrokenEvidenceLinks": 4,
+      "remainingCurrentDraftDiagnostics": 13,
+      "meaning": "只读系统函数重新检查原始保存字节；真实证据声明和资源截止前未闭环依赖仍阻断后续发布。未调用真实项目advance/save，未启动LLM。",
+      "productSnapshots": {
+        "docsAndCalcEqualFinalRunSnapshot": true,
+        "sidecarsEqualFinalRunSnapshot": true,
+        "comparisonCommand": "diff -qr",
+        "bothExitCodes": 0
+      }
+    },
+    "unrelatedStaleTest": "生成checker的handoff-help原测试断言已退休的字面字符串；改为比较实际输出与现有权威DESIGN_HANDOFF_INSTRUCTION，未改prompt或职责。"
+  },
+  "scope": {
+    "paidRunsStartedThisTurn": 0,
+    "manualProductEdits": false,
+    "rawEvidenceEdits": false,
+    "permissionSystemChanges": false,
+    "gateBypass": false,
+    "newSchemasOrStages": false,
+    "newSkillsOrPromptRules": false,
+    "caseSpecificGameRules": false,
+    "changesCommitted": false,
+    "unrelatedDirtyWorkPreserved": true,
+    "productionFiles": [
+      "packages/agent-workflow-server/src/beegame/project-delivery.ts",
+      "packages/agent-workflow-server/src/beegame/design-document-references.ts",
+      "packages/agent-workflow-server/src/beegame/design-handoff.ts",
+      "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts"
+    ],
+    "testFiles": [
+      "packages/agent-workflow-server/src/beegame/design-release.test.ts",
+      "packages/agent-workflow-server/src/beegame/design-document-references.test.ts",
+      "packages/agent-workflow-server/src/beegame/design-handoff.test.ts",
+      "packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts"
+    ]
+  },
+  "behaviorChangesAndRisks": [
+    "计划内草稿缺陷现在到既有独立Review处理，而非被冻结基线检查提前拦截；这不是放行，未解决错误仍阻断发布。",
+    "本地文件引用检查范围更严格：以前漏掉的缺失文件会被报告；assets/content计划资源仍不要求提前生产。",
+    "ASSET_PLAN不再需要自引用覆盖，但不能省略其他专业文档的真实必需用途。",
+    "模型语义漏检、最终手感、观感和运行时正确性尚未通过新付费流程验证。"
+  ],
+  "nextStep": "系统机制已有本地回归证据；下一次真实验收需用户另行授权，并使用不同idea。不得以本次只读回放或合成Review回执声称八文档/游戏已通过。"
+}

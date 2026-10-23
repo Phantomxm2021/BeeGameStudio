@@ -1,0 +1,242 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-pause",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            960,
+            540
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1200,
+              540
+            ],
+            [
+              960,
+              600
+            ],
+            [
+              1280,
+              720
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "dim",
+        "role": "shape",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "shape": "rect",
+          "color": "#0A0820",
+          "opacity": 0.66
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "panel",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            320,
+            320
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#1B1840",
+            "opacity": 0.96,
+            "radius": 18
+          },
+          "border": {
+            "width": 2,
+            "color": "#3A3580",
+            "radius": 18
+          }
+        },
+        "data": {
+          "container": {
+            "direction": "column",
+            "gap": 16,
+            "justify": "center",
+            "align": "center",
+            "padding": [
+              28,
+              24,
+              28,
+              24
+            ]
+          }
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "pause-title",
+        "role": "text",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "size": [
+            240,
+            48
+          ]
+        },
+        "text": "暂停",
+        "style": {
+          "fontSize": 34,
+          "color": "#F4F2FF",
+          "align": "center",
+          "fontWeight": "bold"
+        }
+      },
+      {
+        "id": "resume-btn",
+        "role": "button",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "size": [
+            240,
+            52
+          ]
+        },
+        "text": "继续",
+        "style": {
+          "background": {
+            "color": "#29D3E0",
+            "radius": 14
+          },
+          "color": "#0A1030",
+          "fontSize": 22,
+          "fontWeight": "bold"
+        }
+      },
+      {
+        "id": "retry-btn",
+        "role": "button",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "size": [
+            240,
+            52
+          ]
+        },
+        "text": "再玩一次",
+        "style": {
+          "background": {
+            "color": "#2C2860",
+            "radius": 14
+          },
+          "color": "#F4F2FF",
+          "fontSize": 20
+        }
+      },
+      {
+        "id": "to-menu-btn",
+        "role": "button",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "size": [
+            240,
+            52
+          ]
+        },
+        "text": "返回开始界面",
+        "style": {
+          "background": {
+            "color": "#2C2860",
+            "radius": 14
+          },
+          "color": "#F4F2FF",
+          "fontSize": 20
+        }
+      },
+      {
+        "id": "mute-btn",
+        "role": "button",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "anchor": "top-right",
+          "position": [
+            -14,
+            12
+          ],
+          "size": [
+            44,
+            44
+          ],
+          "item": {
+            "absolute": true
+          }
+        },
+        "text": "♪",
+        "actions": {
+          "activate": "toggle-mute"
+        },
+        "style": {
+          "fontSize": 18,
+          "color": "#F4F2FF",
+          "background": {
+            "color": "#2C2860",
+            "radius": 10
+          }
+        }
+      }
+    ]
+  }
+}

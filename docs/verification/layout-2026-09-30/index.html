@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>空间与布局验收留存</title>
+<style>:root{color-scheme:light dark;font-family:system-ui,sans-serif}body{max-width:900px;margin:48px auto;padding:0 20px;line-height:1.7}a{display:block;margin:24px 0;font-size:20px}p{max-width:760px}</style></head>
+<body><h1>空间与布局验收留存</h1><p>真实浏览器截图与实测误差，可离线查看。用于验证确定性布局与镜头投影，不是游戏美术展示或完整交付验收。</p>
+<a href="scene-camera.html">Scene：2D Tilemap／3D 透视／3D 正交</a>
+<p>四种取景策略、横竖屏与受限尺寸；3D 计算边界叠加在实际 GLB 截图上。</p>
+<a href="ui-layout.html">UI：菜单／HUD／等宽网格</a>
+<p>四种尺寸下的原生 CSS 对照、实际字体测量与边界误差。</p>
+<p>两份报告均内嵌截图，无需启动 BGS 或测试服务。XR 真机与真实游戏适配不在本次验证范围内。</p>
+<p>本轮以两个独立测试进程验收：UI 89 项断言、Scene 337 项断言均通过，浏览器和临时服务正常退出。同一进程合并运行曾出现收尾超时，具体原因尚未定论；没有据此修改生产服务。</p></body></html>

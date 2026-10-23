@@ -23,14 +23,12 @@ import type {
   BeeGamePermission,
 } from '../services/currentUserApi';
 
-export interface PhaseInfo {
-  current_phase: number;
-  phase_name: string;
-  history: Array<{
-    phase: number;
-    name: string;
-    timestamp: number;
-  }>;
+/** Keep the document theme class and native color-scheme in lockstep. */
+export function applyThemeToDocument(isDark: boolean): void {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.classList.toggle('dark', isDark);
+  root.style.colorScheme = isDark ? 'dark' : 'light';
 }
 
 export interface ProjectTask {
@@ -84,9 +82,6 @@ interface SystemState {
   /** Loading state for async operations */
   isLoading: boolean;
 
-  /** Team OS telemetry phase tracking */
-  phaseInfo: PhaseInfo | null;
-
   /**
    * Load current BeeGame user and role permissions.
    */
@@ -102,8 +97,6 @@ interface SystemState {
   /**
    * Load phase history from backend (Team OS Telemetry)
    */
-  loadPhases: (projectId: string) => Promise<void>;
-
   /**
    * Load cumulative token usage for a project
    */
@@ -134,6 +127,9 @@ interface SystemState {
    * Toggle global theme
    */
   toggleTheme: () => void;
+
+  /** Set the persisted theme explicitly for deterministic bootstrap paths. */
+  setTheme: (isDark: boolean) => void;
 }
 
 
@@ -145,7 +141,6 @@ export const useSystemStore = create<SystemState>()(
       tokenUsage: {},
       isLoading: false,
       isSyncing: false,
-      phaseInfo: null,
       isDark: true, // Default to dark mode
 
       taskUsage: {},
@@ -184,16 +179,6 @@ export const useSystemStore = create<SystemState>()(
         Boolean(get().currentUser?.permissions.includes(permission))
       ),
 
-      loadPhases: async (projectId: string) => {
-        if (!projectId) return;
-        try {
-          const phases = (await api.getWorkflowPhases(projectId)) as unknown as PhaseInfo;
-          set({ phaseInfo: phases });
-        } catch (error) {
-          console.error('Failed to load telemetry phases:', error);
-        }
-      },
-
       loadTokenUsage: async (projectId: string) => {
         if (!projectId) return;
         try {
@@ -229,6 +214,8 @@ export const useSystemStore = create<SystemState>()(
           // Optional task-level mirror for debugging/inspection.
           if (taskId && typeof taskId === 'string' && taskId.trim().length > 0) {
             newTaskUsage[taskId] = {
+              ...(usage.providerUsageIncomplete || newTaskUsage[taskId]?.providerUsageIncomplete
+                ? { providerUsageIncomplete: true } : {}),
               prompt_tokens: Math.max((newTaskUsage[taskId]?.prompt_tokens || 0), safeUsage.prompt_tokens),
               completion_tokens: Math.max((newTaskUsage[taskId]?.completion_tokens || 0), safeUsage.completion_tokens),
               total_tokens: Math.max((newTaskUsage[taskId]?.total_tokens || 0), safeUsage.total_tokens),
@@ -241,6 +228,8 @@ export const useSystemStore = create<SystemState>()(
           // Cumulative usage per project.
           const currentProjectUsage = newTokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
           newTokenUsage[projectId] = {
+            ...(usage.providerUsageIncomplete || currentProjectUsage.providerUsageIncomplete
+              ? { providerUsageIncomplete: true } : {}),
             prompt_tokens: Math.max(currentProjectUsage.prompt_tokens || 0, safeUsage.prompt_tokens),
             completion_tokens: Math.max(currentProjectUsage.completion_tokens || 0, safeUsage.completion_tokens),
             total_tokens: Math.max(currentProjectUsage.total_tokens || 0, safeUsage.total_tokens),
@@ -266,7 +255,11 @@ export const useSystemStore = create<SystemState>()(
 
       toggleTheme: () => {
         set((state) => ({ isDark: !state.isDark }));
-      }
+      },
+
+      setTheme: (isDark: boolean) => {
+        set({ isDark });
+      },
     }),
     {
       name: 'system-storage',

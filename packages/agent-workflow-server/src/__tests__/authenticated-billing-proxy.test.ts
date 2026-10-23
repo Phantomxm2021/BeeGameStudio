@@ -4,11 +4,21 @@ import { proxyAuthenticatedBillingRequest } from '../auth/authenticated-billing-
 
 const billingConfig = {
   mode: 'remote' as const,
-  usageBillingMode: 'realtime' as const,
   remoteApiBaseUrl: 'https://billing.beegame.test',
 }
 
 describe('authenticated billing proxy', () => {
+  test('preserves a transient billing auth failure and its retry delay', async () => {
+    const response = await proxyAuthenticatedBillingRequest(
+      new Request('https://runtime.beegame.test/api/usage-wallet', { headers: { authorization: 'Bearer fixture-token' } }),
+      billingConfig, '/api/usage-wallet', undefined,
+      async () => Response.json({ code: 'authentication_unavailable', recoverable: true, retry_after_ms: 2000 },
+        { status: 503, headers: { 'Retry-After': '2' } }),
+    )
+    expect(response.status).toBe(503)
+    expect(response.headers.get('retry-after')).toBe('2')
+    expect(await response.json()).toMatchObject({ code: 'authentication_unavailable', recoverable: true })
+  })
   test('replaces a stale browser bearer with the refreshed HttpOnly session token', async () => {
     const forwarded: Array<{
       url: string

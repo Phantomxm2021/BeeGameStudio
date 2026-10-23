@@ -1,0 +1,92 @@
+{
+  "version": "bgs-v3-164-offline.1",
+  "scope": "Audit current V3 plan completion, then continue section 6/7 by exposing existing static-Web consumption drivers to autonomous measurement. Not another Token optimization round.",
+  "plan": {
+    "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+    "version": "1.64",
+    "progressSection": "10",
+    "complete": false,
+    "noPercentage": "Historical unchecked entries mix superseded code gaps, real failures and capability limits. Counting them cannot measure overall completion.",
+    "implemented": [
+      "Full confirmed goal, dynamic native planning/tools/delegation, Question, same-project discuss/work/change/continue and native UUID persistence",
+      "Eight-domain responsibilities/default docs organization and related professional Skill transport, not guaranteed adoption or complete design",
+      "Optional Content/Scene/UI, resources/media, asset binding, Preview and image-generation bridges with actual authority/lifecycle",
+      "Autonomous source editing, source-copy build, receipt inspection, current measured Preview/static/editable export and stale-version rejection",
+      "Local cancellation/recovery and real Supabase CAS/normal edit workflow evidence"
+    ],
+    "remainingBlocks": [
+      {"id": "real-game-quality", "status": "not-accepted", "missing": "Real eight-domain design/method use, actual Scene/UI/resource consumption and necessary player flows with current visual/audio/gameplay quality evidence. Existing Maglev findings are not repaired by this system developer."},
+      {"id": "remote-faults-and-external-outcomes", "status": "partially-verified", "missing": "Autonomous source editing with remote cross-process contention plus write-time crash combinations; full external charge/operation uncertain-outcome acceptance."},
+      {"id": "engine-development", "status": "not-verified", "missing": "Actual authorized Unity/Godot project development/build/cancel/resume. Prior version queries or missing tools are not engine acceptance; no installer or engine framework added."},
+      {"id": "formal-product-entry-release", "status": "outside-current-authorization", "missing": "Formal frontend V3 intake/chat/edit/preview/release integration. Existing app mode guards reject old mutating routes for V3; independent debug is not a released formal interface."}
+    ],
+    "cost": "Still a plan acceptance metric; not claimed solved and not the subject of this implementation continuation."
+  },
+  "confirmedGap": {
+    "producer": "runtime-checks.ts runArtifactCheck supports ordinary runtimeArtifact/uiProbes/pixelProbes/audioProbes inputs",
+    "oldConsumer": "checks.ts runChecks obtains those inputs via TaskSpec",
+    "autonomousConsumerBefore": "agent-measurement.ts only called source-copy build and runtime-smoke; no supported selection/receipt for the existing consumption drivers",
+    "whyThisChange": "Agent can reuse established deterministic checks instead of requiring a host Task or independently rebuilding their browser mutation/projection logic. It does not force those checks on every project or guarantee the Agent chooses complete coverage."
+  },
+  "implementation": {
+    "files": [
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-consumption.test.ts"
+    ],
+    "entry": "Existing measure.mjs --request KEY --artifact DIR [--consumption-json JSON]",
+    "selectedChecks": ["ui-data-consumption", "pixel-data-consumption", "font-data-consumption", "audio-data-consumption"],
+    "probeSchema": "Reuse existing Task probe field schemas only; no Task/Plan scheduling. Require unique selected driver IDs and matching actual probe inputs; reject ignored/unselected probe fields and unknown authorization fields.",
+    "lifecycle": "Reserve existing measurement identity before build, use existing native writer/CAS and cancellation signal; run selected drivers only after passed actual source-copy build/smoke. No automatic retry/model/scheduler/source mutation.",
+    "identity": "Record normalized optional configuration in existing measurement JSON; same request-key replay reads saved evidence. Different checks/probes cannot reuse that identity; sameJson avoids JSON object-order conflicts.",
+    "qualification": "Missing, failed, unsupported or obsolete requested consumption checks remain unverified; build/smoke alone does not qualify that explicitly selected measurement. Source/report/dependency/artifact freshness remains required, with latest incomplete/failure preserved.",
+    "visibility": "Existing compact/detail inspection, context/handoff and debug reading show recorded selection/status/observations. Export measurement.json retains selected probe contract and public consumption checks; inputs/requirement metadata remain omitted as with existing exported smoke.",
+    "defaults": "Without explicit consumption parameters, original measurement/context/export behavior and input scope remain. No default full probe list or new production/Review prompt.",
+    "database": "Existing JSON Run/AgentMeasurement metadata only; no SQL/table/RPC added or executed. No new remote fault acceptance inferred."
+  },
+  "regression": {
+    "core": {"pass": 123, "fail": 0, "skip": 0, "expects": 916, "files": 8, "seconds": 337.71, "log": "/private/tmp/bgs-v3-164-core-regression.log"},
+    "transportCompatibility": {"pass": 58, "fail": 0, "skip": 0, "expects": 690, "files": 6, "seconds": 27.86, "log": "/private/tmp/bgs-v3-164-transport-regression.log"},
+    "finalAffected": {"pass": 54, "fail": 0, "skip": 0, "expects": 564, "files": 4, "seconds": 55.42, "log": "/private/tmp/bgs-v3-164-final3-regression.log"},
+    "counting": "Core and transport have disjoint files, 181 distinct cases. Final affected 54 overlap them and are not added. Final rerun includes the export receipt additions and missing/obsolete-check counterexamples.",
+    "environment": {"BEEGAME_TEST_REAL_BROWSER": "1", "BGS_LAYOUT_BROWSER": "1", "model": "Existing local controlled provider only, no paid calls"},
+    "typecheck": {"command": "bun run typecheck", "exit": 0, "log": "/private/tmp/bgs-v3-164-final3-typecheck.log"},
+    "coverage": [
+      "Actual CLI adapter against four independently rendered synthetic target builds: DOM geometry, Scene Canvas pixels with Camera/scale, DOM font/text and decoded HTML audio behavior",
+      "A synthetic renderer ignoring layout or Camera fails consumption even though build and smoke pass; requested failure cannot be silently exported as the selected measurement",
+      "Exact source bytes preserved during browser-response mutations; selected check observations and contract included in editable export, private workflow inputs excluded",
+      "Request replay without reexecution/store change, changed-contract identity conflict, missing result, obsolete driver version and changed source invalidation",
+      "Existing native goal/Skill/Question/delegation/guide/discussion/change/continuation, Task compatibility, source editing, Preview/export permissions and old receipt paths"
+    ],
+    "initialFailures": [
+      "New fixture initially treated sharedSharp metadata as callable; used its actual module URL and corrected the test access rather than changing runtime API.",
+      "Pixel check correctly rejected a new synthetic renderer that ignored transform.scale; fixture was corrected to consume scale. Product geometry checks were not loosened.",
+      "Editable export correctly rejected /var versus /private/var temporary-root alias; canonicalized only the synthetic fixture root, did not weaken alias refusal.",
+      "New test observation union needed property assertion instead of unsafe direct access; canonical root typecheck then passed."
+    ]
+  },
+  "integrity": {
+    "formalFrontend": {"files": 825, "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"},
+    "nativeSrc": {"files": 2445, "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"},
+    "builtinTools": {"files": 383, "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"},
+    "hashMethod": "Existing public nonhidden-file audit, excluding node_modules/transcripts; not a claim to hash all hidden files.",
+    "oldGameExport": {"files": 51, "allOriginalReceiptAndCurrentBytesMatch": true},
+    "runtimeVersion": "1.61",
+    "deployments": 0,
+    "paidRuns": 0,
+    "manualRealProjectChanges": 0,
+    "nativeSourceChanges": 0,
+    "formalFrontendChanges": 0,
+    "settingsOrHooksOpened": false,
+    "agentExecutionLimitsAdded": 0,
+    "productionOrReviewPromptRulesAdded": 0
+  },
+  "limitations": [
+    "Offline tests prove this interface/driver integration, not real Agent selection/use, design sufficiency, all gameplay states, aesthetics, fun or listening quality.",
+    "Scope is the existing static-Web drivers: representative DOM/UI geometry, supported static Canvas image/Tilemap projection, supported DOM font binding or HTML audio. GPU/3D, dynamic occlusion, WebAudio, full mix/listening and arbitrary engines remain outside that proof.",
+    "No native engine development, real database edit crash combination, real external paid recovery or formal product release acceptance was performed.",
+    "Existing real game findings and navigation prose remain untouched and unclosed. No receipt, regression total or new optional endpoint is a whole-game PASS."
+  ]
+}

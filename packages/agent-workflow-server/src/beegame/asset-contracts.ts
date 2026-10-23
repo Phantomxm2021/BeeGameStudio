@@ -1,4 +1,9 @@
+import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
+import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
+import { inspectResourceBytes } from '../../../beegame-resource-server/src/resource-inspection'
+import { assertWorkspacePath } from '../filesystem/workspace-path'
 import { createHash, randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import {
@@ -18,8 +23,8 @@ import {
   RESOURCE_LIBRARY_USAGE,
   RESOURCE_EMBEDDED_COMPONENT_KINDS,
   RESOURCE_RELATION_KINDS,
+  RESOURCE_SOURCE_KINDS,
   RESOURCE_USAGE_TAGS,
-  withResourceExternalTransport,
   type ResourceAcquisitionProfile,
   type ResourceEmbeddedComponentKind,
   type ResourceLibraryUsage,
@@ -29,14 +34,13 @@ import {
   parseBeeGameProgrammaticAudioText,
   type BeeGameProgrammaticAudioResource,
 } from './programmatic-audio-resource'
-import { auditBeeGameContent } from './content-contracts'
 
 export const BEEGAME_RESOURCE_STATUSES = [
   'available',
   'verified',
   'failed',
 ] as const
-const AUDIO_ASSET_KINDS = new Set([
+export const AUDIO_ASSET_KINDS = new Set([
   'audio-clip',
   'audio-cue',
   'audio-bank',
@@ -50,7 +54,7 @@ const PLAYABLE_AUDIO_ASSET_KINDS = new Set([
   'ambience',
   'voice',
 ])
-const AUDIO_FILE_EXTENSIONS = new Set([
+export const AUDIO_FILE_EXTENSIONS = new Set([
   '.aac',
   '.flac',
   '.m4a',
@@ -60,6 +64,12 @@ const AUDIO_FILE_EXTENSIONS = new Set([
   '.wav',
 ])
 
+/** Read compatibility only; new registrations must use canonical audio kinds. */
+export function isReadableAudioResource(kind: string | undefined, rootPath: string): boolean {
+  return AUDIO_ASSET_KINDS.has(kind ?? '') ||
+    (kind === 'audio' && AUDIO_FILE_EXTENSIONS.has(extname(rootPath).toLowerCase()))
+}
+
 export type BeeGameResourceStatus = (typeof BEEGAME_RESOURCE_STATUSES)[number]
 
 export type BeeGameAssetProjectTarget = {
@@ -68,7 +78,6 @@ export type BeeGameAssetProjectTarget = {
   asset_format_capabilities: string[]
   resource_library_usage?: ResourceLibraryUsage
   runtime_asset_root: string
-  content_root: string
   generated_asset_root: string
 }
 
@@ -80,9 +89,16 @@ export type BeeGameAssetRequirement = {
   acquisition_profile: {
     dimensions: ResourceAcquisitionProfile['dimensions']
     asset_kinds: ResourceAcquisitionProfile['assetKinds']
-    usage_tags: ResourceAcquisitionProfile['usageTags']
-    capabilities: ResourceAcquisitionProfile['capabilities']
+    usage_tags?: readonly string[]
+    capabilities?: readonly string[]
     styles: ResourceAcquisitionProfile['styles']
+    acceptance_criteria?: readonly string[]
+    sourcing_policy?: {
+      allowed_source_kinds: readonly string[]
+      license_constraints: readonly string[]
+      responsible_party: string
+      handoff_criteria: readonly string[]
+    }
     coverage?: readonly BeeGameAssetCoverageObligation[]
   }
 }
@@ -119,6 +135,15 @@ export type BeeGameProjectResourceSource =
       reason: string
     }
   | {
+      type: 'web'
+      source_url: string
+      page_url: string
+      license: string
+      license_url?: string
+      author?: string
+      retrieved_at: string
+    }
+  | {
       type: 'user-provided'
       created_at: string
       filename: string
@@ -126,6 +151,7 @@ export type BeeGameProjectResourceSource =
 
 export type BeeGameProjectResource = {
   id: string
+  fulfills: string[]
   source: BeeGameProjectResourceSource
   root_path: string
   file_paths: string[]
@@ -134,8 +160,13 @@ export type BeeGameProjectResource = {
   status: BeeGameResourceStatus
   selected_at: string
   selection_reason: string[]
+  dimension?: string
   asset_kind?: string
   capabilities?: string[]
+  usage_tags?: string[]
+  styles?: string[]
+  relation_kinds?: string[]
+  embedded_kinds?: string[]
   content_profile?: Record<string, unknown>
   technical_facts?: Record<string, string | number | boolean>
   dependencies?: BeeGameResourceDependency[]
@@ -143,14 +174,14 @@ export type BeeGameProjectResource = {
 }
 
 export type BeeGameAssetManifest = {
-  version: 8
+  version: 9
   project_target?: BeeGameAssetProjectTarget
   requirements: BeeGameAssetRequirement[]
   resources: BeeGameProjectResource[]
 }
 
 type BeeGameAssetManifestIndex = {
-  version: 8
+  version: 9
   project_target?: BeeGameAssetProjectTarget
   modules: {
     requirements: string
@@ -160,7 +191,6 @@ type BeeGameAssetManifestIndex = {
 
 export const BEEGAME_RESOURCE_ROOTS = {
   runtime: 'assets/runtime',
-  content: 'assets/content',
   generated: 'assets/generated',
 } as const
 
@@ -175,55 +205,29 @@ export type BeeGameAssetUploadOptions = {
   persist?: (manifest: BeeGameAssetManifest) => Promise<void>
 }
 
-export type BeeGameResolvedLibraryResourceInput = {
-  id: string
-  destination_path: string
-  pack_id: string
-  pack_version: string
-  element_id: string
-  element_path: string
-  source_url: string
-  source_hash: string
-  selection_reason: string[]
-  asset_kind?: string
-  capabilities?: string[]
-  content_profile?: Record<string, unknown>
-  technical_facts?: Record<string, string | number | boolean>
-  delivery?: {
-    disposition: 'direct' | 'convert'
-    source_format: string
-    target_format: string
-    adapter_id?: string
-  }
-  dependencies?: Array<{
-    key: string
-    parent_key: string
-    element_id: string
-    element_path: string
-    reference_path: string
-    source_url: string
-    source_hash: string
-    kind?: string
-  }>
-}
-
 export type BeeGameAuthoredResourceInput = {
   id: string
+  fulfills?: string[]
   root_path: string
   file_paths: string[]
   provisional: boolean
   reason: string
   selection_reason: string[]
+  dimension?: string
   asset_kind?: string
   capabilities?: string[]
+  usage_tags?: string[]
+  styles?: string[]
+  relation_kinds?: string[]
+  embedded_kinds?: string[]
   content_profile?: Record<string, unknown>
   technical_facts?: Record<string, string | number | boolean>
-  replace_existing_provisional?: boolean
+  dependencies?: BeeGameResourceDependency[]
 }
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
 const ASSET_REQUIREMENTS_MODULE_ROOT = 'assets/manifest/requirements'
 const ASSET_RESOURCE_MODULE_ROOT = 'assets/manifest/resources'
-export const CURRENT_ASSET_MANIFEST_VERSION = 8
+export const CURRENT_ASSET_MANIFEST_VERSION = 9
 
 export class BeeGameAssetManifestError extends Error {
   readonly code = 'invalid_asset_manifest'
@@ -234,29 +238,33 @@ export class BeeGameAssetManifestError extends Error {
   }
 }
 
-export const CANONICAL_ASSET_MANIFEST_EXAMPLE = {
-  version: CURRENT_ASSET_MANIFEST_VERSION,
-  project_target: {
-    asset_format_capabilities: ['<actual-target-supported-format>'],
-    resource_library_usage: 'preferred',
-    runtime_asset_root: BEEGAME_RESOURCE_ROOTS.runtime,
-    content_root: BEEGAME_RESOURCE_ROOTS.content,
-    generated_asset_root: BEEGAME_RESOURCE_ROOTS.generated,
-  },
-  modules: {
-    requirements:
-      'assets/manifest/requirements/<content-addressed-record>.json',
-    resources: [
-      'assets/manifest/resources/<identity-and-content-addressed-record>.json',
-    ],
-  },
-} as const
-
 export async function readBeeGameAssetManifest(
   workspacePath: string,
 ): Promise<BeeGameAssetManifest> {
   const root = normalizeWorkspacePath(workspacePath)
-  return readBeeGameAssetManifestSync(root)
+  let source: string
+  try {
+    source = await readFile(resolveInsideWorkspace(root, ASSET_MANIFEST_PATH), 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyManifest()
+    throw new BeeGameAssetManifestError(['manifest must contain valid JSON.'])
+  }
+  let indexValue: unknown
+  try {
+    indexValue = JSON.parse(source)
+  } catch {
+    throw new BeeGameAssetManifestError(['manifest must contain valid JSON.'])
+  }
+  const index = parseManifestIndex(indexValue)
+  let modules: unknown[]
+  try {
+    modules = await Promise.all([index.modules.requirements, ...index.modules.resources].map(async path =>
+      JSON.parse(await readFile(resolveInsideWorkspace(root, path), 'utf8')) as unknown,
+    ))
+  } catch {
+    throw new BeeGameAssetManifestError(['every registered manifest module must exist and contain valid JSON.'])
+  }
+  return parseManifestModules(index, modules[0], modules.slice(1))
 }
 
 export function readBeeGameAssetManifestSync(
@@ -290,6 +298,10 @@ export function readBeeGameAssetManifestSync(
       'every registered manifest module must exist and contain valid JSON.',
     ])
   }
+  return parseManifestModules(index, requirementsValue, resources)
+}
+
+function parseManifestModules(index: ReturnType<typeof parseManifestIndex>, requirementsValue: unknown, resources: unknown[]): BeeGameAssetManifest {
   if (!isRecord(requirementsValue))
     throw new BeeGameAssetManifestError([
       'requirements module root must be an object.',
@@ -410,105 +422,10 @@ export async function writeBeeGameAssetManifest(
   )
 }
 
-export async function publishBeeGameResourceInventoryFromStaging(
-  workspacePath: string,
-  stagingWorkspacePath: string,
-  resourceIds: readonly string[],
-  frozenOutputHashes: Readonly<Record<string, Readonly<Record<string, string>>>>,
-): Promise<BeeGameAssetManifest> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const stagingRoot = normalizeWorkspacePath(stagingWorkspacePath)
-  const current = await readBeeGameAssetManifest(root)
-  const staged = await readBeeGameAssetManifest(stagingRoot)
-  if (
-    JSON.stringify({
-      project_target: current.project_target,
-      requirements: current.requirements,
-    }) !==
-    JSON.stringify({
-      project_target: staged.project_target,
-      requirements: staged.requirements,
-    })
-  ) {
-    throw new Error('Staged resource inventory does not match the current canonical resource plan')
-  }
-  const ids = uniqueStrings(resourceIds)
-  if (ids.length !== resourceIds.length)
-    throw new Error('Staged resource inventory IDs must be unique')
-  const stagedById = new Map(staged.resources.map(resource => [resource.id, resource]))
-  const currentOwnerByPath = new Map(
-    current.resources.flatMap(resource =>
-      resource.file_paths.map(path => [path, resource.id] as const),
-    ),
-  )
-  const selected = ids.map(id => {
-    const resource = stagedById.get(id)
-    if (!resource || resource.status !== 'verified')
-      throw new Error(`Staged resource is not verified: ${id}`)
-    if (!resource.local_file_hashes)
-      throw new Error(`Staged resource has no local file hashes: ${id}`)
-    if (JSON.stringify(resource.local_file_hashes) !== JSON.stringify(frozenOutputHashes[id]))
-      throw new Error(`Staged resource output hashes differ from the durable receipt: ${id}`)
-    const currentResource = current.resources.find(item => item.id === id)
-    const replacingProvisional = Boolean(
-      currentResource?.provisional &&
-      currentResource.source.type === 'agent-authored' &&
-      resource.source.type === 'resource-library',
-    )
-    if (
-      currentResource &&
-      !replacingProvisional &&
-      (currentResource.root_path !== resource.root_path ||
-        currentResource.file_paths.length !== resource.file_paths.length ||
-        currentResource.file_paths.some(path => !resource.file_paths.includes(path)))
-    ) {
-      throw new Error(`Staged resource paths differ from the current stable resource: ${id}`)
-    }
-    return resource
-  })
-  const targetPaths = new Set<string>()
-  const writes: Array<{ targetPath: string; bytes: Uint8Array }> = []
-  for (const resource of selected) {
-    for (const path of resource.file_paths) {
-      if (targetPaths.has(path))
-        throw new Error(`Staged resource file path is shared by multiple resources: ${path}`)
-      targetPaths.add(path)
-      const expected = resource.local_file_hashes?.[path]
-      if (!isSha256(expected))
-        throw new Error(`Staged resource file hash is invalid: ${path}`)
-      const bytes = new Uint8Array(
-        await readFile(resolveInsideWorkspace(stagingRoot, path)),
-      )
-      if (sha256(bytes) !== expected)
-        throw new Error(`Staged resource file differs from its canonical hash: ${path}`)
-      const targetPath = resolveInsideWorkspace(root, path)
-      const currentOwner = currentOwnerByPath.get(path)
-      if (currentOwner && currentOwner !== resource.id)
-        throw new Error(`Staged resource file path belongs to another resource: ${path}`)
-      if (existsSync(targetPath) && !currentOwner) {
-        const existingHash = sha256(new Uint8Array(await readFile(targetPath)))
-        if (existingHash !== expected)
-          throw new Error(`Staged resource file conflicts with an unrelated workspace file: ${path}`)
-      }
-      writes.push({ targetPath, bytes })
-    }
-  }
-  const updated = selected.reduce(replaceResource, current)
-  const rollback = await commitResourceWrites(writes)
-  try {
-    await writeManifestAtomically(root, updated)
-  } catch (error) {
-    await rollback()
-    await writeManifestAtomically(root, current)
-    throw error
-  }
-  return updated
-}
-
 export async function uploadBeeGameAsset(
   workspacePath: string,
   resourceId: string,
-  file: File,
+  input: File | readonly File[],
   options: BeeGameAssetUploadOptions = {},
 ): Promise<BeeGameAssetUploadResult> {
   const root = normalizeWorkspacePath(workspacePath)
@@ -516,30 +433,43 @@ export async function uploadBeeGameAsset(
   const target = requireProjectTarget(manifest)
   const id = normalizeId(resourceId)
   if (!id) throw new Error('Resource id is required')
-  const filename = sanitizeFilename(file.name)
-  assertFilenameFormatAllowed(filename, target.asset_format_capabilities)
-  const targetPath = resolveInsideDeclaredRoot(
-    root,
-    target.runtime_asset_root,
-    join(target.runtime_asset_root, 'user-provided', id, filename),
-  )
-  const relativePath = normalizeRelativePath(root, targetPath)
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  if (!bytes.byteLength) throw new Error('Uploaded resource must not be empty')
+  if (manifest.resources.some(resource => resource.id === id))
+    throw new Error('Resource id already exists; upload a new resource and select it in the Editor: ' + id)
+  const files = Array.isArray(input) ? input : [input as File]
+  if (files.length < 1 || files.length > 2) throw new Error('Upload one file, or a PNG and its JSON atlas together')
+  const writes = await Promise.all(files.map(async file => {
+    const filename = sanitizeFilename(file.name)
+    assertFilenameFormatAllowed(filename, target.asset_format_capabilities)
+    const targetPath = resolveInsideDeclaredRoot(root, target.runtime_asset_root,
+      join(target.runtime_asset_root, 'user-provided', id, filename))
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (!bytes.byteLength) throw new Error('Uploaded resource must not be empty')
+    return { filename, targetPath, path: normalizeRelativePath(root, targetPath), bytes }
+  }))
+  if (new Set(writes.map(file => file.path)).size !== writes.length) throw new Error('Uploaded filenames must be distinct')
+  const image = writes.find(file => /\.png$/i.test(file.path))
+  if (writes.length === 2) {
+    const metadata = writes.find(file => /\.json$/i.test(file.path))
+    if (!image || !metadata || editorAtlasPath({ root_path: image.path, file_paths: writes.map(file => file.path) }, image.path) !== metadata.path)
+      throw new Error('Atlas upload requires a PNG and matching <name>.json or <name>.atlas.json')
+    const sheet = parseSpriteSheet(JSON.parse(new TextDecoder().decode(metadata.bytes)))
+    if (!sheet) throw new Error('Unsupported atlas metadata')
+    const { width, height } = inspectResourceBytes(image.path, image.bytes)
+    if (typeof width !== 'number' || typeof height !== 'number') throw new Error('Invalid PNG atlas image')
+    validateSpriteSheetBounds(sheet, width, height)
+  }
+  const rootFile = writes.length === 2 ? image! : writes[0]!
   const now = new Date().toISOString()
   const resource: BeeGameProjectResource = {
-    id,
-    source: { type: 'user-provided', created_at: now, filename },
-    root_path: relativePath,
-    file_paths: [relativePath],
-    local_file_hashes: { [relativePath]: sha256(bytes) },
-    provisional: false,
-    status: 'verified',
-    selected_at: now,
+    id, fulfills: [], source: { type: 'user-provided', created_at: now, filename: files.map(file => file.name).join(', ') },
+    root_path: rootFile.path, file_paths: writes.map(file => file.path),
+    local_file_hashes: Object.fromEntries(writes.map(file => [file.path, sha256(file.bytes)])),
+    ...(writes.length === 2 ? { asset_kind: 'sprite-atlas' } : {}),
+    provisional: false, status: 'verified', selected_at: now,
     selection_reason: ['User provided this project resource.'],
   }
   const updated = replaceResource(manifest, resource)
-  const rollback = await commitResourceWrites([{ targetPath, bytes }])
+  const rollback = await commitResourceWrites(root, writes)
   try {
     await writeManifestAtomically(root, updated)
     await options.persist?.(updated)
@@ -548,229 +478,30 @@ export async function uploadBeeGameAsset(
     await writeManifestAtomically(root, manifest)
     throw error
   }
-  return {
-    manifest: updated,
-    resource,
-    path: relativePath,
-    message: `Project resource ${id} was added at ${relativePath}.`,
-  }
+  return { manifest: updated, resource, path: rootFile.path, message: `Project resource ${id} was added at ${rootFile.path}.` }
 }
 
-export async function addBeeGameLibraryResourceToWorkspace(
+/** Shared registration for already-produced files; web provenance is preserved.
+ * Mechanical verification is not aesthetic, licensing or runtime approval. */
+export async function registerBeeGameLocalResources(
   workspacePath: string,
-  input: BeeGameResolvedLibraryResourceInput,
-  fetchImpl: (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => Promise<Response> = fetch,
-  deliveryOptions: {
-    convert?: (
-      files: Array<{ name: string; bytes: Uint8Array }>,
-      delivery: NonNullable<BeeGameResolvedLibraryResourceInput['delivery']>,
-    ) => Promise<{ filename: string; bytes: Uint8Array }>
-  } = {},
-): Promise<{
-  manifest: BeeGameAssetManifest
-  resource: BeeGameProjectResource
-}> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const manifest = await readBeeGameAssetManifest(root)
-  const target = requireProjectTarget(manifest)
-  const id = normalizeId(input.id)
-  if (!id) throw new Error('Resource id is required')
-  const existing = manifest.resources.find(resource => resource.id === id)
-  const replacingProvisional = Boolean(
-    existing?.provisional && existing.source.type === 'agent-authored',
-  )
-  if (existing && !isSamePinnedLibraryResource(existing, input) && !replacingProvisional)
-    throw new Error(`Resource id belongs to a different source: ${id}`)
-
-  const filename = sanitizeFilename(input.element_path)
-  const delivery = input.delivery
-  const converts = delivery?.disposition === 'convert'
-  if (!converts) assertFilenameFormatAllowed(filename, target.asset_format_capabilities)
-  if (delivery && normalizeFormat(extname(filename).slice(1)) !== normalizeFormat(delivery.source_format))
-    throw new Error(`Resource source format differs from the selected delivery capability: ${filename}`)
-  if (delivery && !target.asset_format_capabilities.includes(normalizeFormat(delivery.target_format)))
-    throw new Error(`Resource delivery target format is not supported by the target: ${delivery.target_format}`)
-  const sourceTargetPath = converts
-    ? resolveInsideDeclaredRoot(
-        root,
-        target.generated_asset_root,
-        join(target.generated_asset_root, id, 'source', filename),
-      )
-    : resolveResourceDestination(
-        root,
-        target.runtime_asset_root,
-        input.destination_path,
-        filename,
-      )
-  if (existing && !replacingProvisional && (await resourceFilesMatchHashes(root, existing)))
-    return { manifest, resource: existing }
-
-  const rootBytes = await downloadResource(input.source_url, fetchImpl)
-  if (!isSha256(input.source_hash) || sha256(rootBytes) !== input.source_hash)
-    throw new Error(`Resource source differs from the frozen Catalog content hash: ${input.element_id}`)
-  assertDetectedFormat(filename, rootBytes)
-  const dependencies = await prepareDependencies({
-    root,
-    declaredAssetRoot: converts ? target.generated_asset_root : target.runtime_asset_root,
-    rootTargetPath: sourceTargetPath,
-    dependencies: input.dependencies ?? [],
-    ...(converts ? {} : { allowedFormats: target.asset_format_capabilities }),
-    fetchImpl,
-  })
-  const converted = converts
-    ? await (() => {
-        if (!deliveryOptions.convert || !delivery)
-          throw new Error(`Resource delivery adapter is unavailable: ${delivery?.adapter_id ?? 'unknown'}`)
-        return deliveryOptions.convert(
-          [
-            { name: filename, bytes: rootBytes },
-            ...dependencies.map(dependency => ({
-              name: dependency.input.element_path,
-              bytes: dependency.bytes,
-            })),
-          ],
-          delivery,
-        )
-      })()
-    : undefined
-  if (converted) {
-    assertFilenameFormatAllowed(converted.filename, target.asset_format_capabilities)
-    assertDetectedFormat(converted.filename, converted.bytes)
-  }
-  const deliveredTargetPath = converted
-    ? resolveInsideDeclaredRoot(
-        root,
-        target.generated_asset_root,
-        join(target.generated_asset_root, id, 'delivery', sanitizeFilename(converted.filename)),
-      )
-    : sourceTargetPath
-  const rootPath = normalizeRelativePath(root, deliveredTargetPath)
-  if (existing && existing.root_path !== rootPath && !replacingProvisional)
-    throw new Error(`Resource destination changed for pinned resource: ${id}`)
-  const sourcePath = normalizeRelativePath(root, sourceTargetPath)
-  const filePaths = [
-    rootPath,
-    ...(sourcePath === rootPath ? [] : [sourcePath]),
-    ...dependencies.map(dependency =>
-      normalizeRelativePath(root, dependency.targetPath),
-    ),
-  ]
-  const pathOwners = new Map(
-    manifest.resources.flatMap(resource =>
-      resource.file_paths.map(path => [path, resource.id] as const),
-    ),
-  )
-  for (const path of filePaths) {
-    const owner = pathOwners.get(path)
-    if (owner && owner !== id)
-      throw new Error(`Resource destination path belongs to another resource: ${path}`)
-  }
-  const localFileHashes = Object.fromEntries([
-    [rootPath, sha256(converted?.bytes ?? rootBytes)],
-    ...(sourcePath === rootPath ? [] : [[sourcePath, sha256(rootBytes)]]),
-    ...dependencies.map(
-      dependency =>
-        [
-          normalizeRelativePath(root, dependency.targetPath),
-          sha256(dependency.bytes),
-        ] as const,
-    ),
-  ])
-  if (existsSync(deliveredTargetPath) && !existing) {
-    const existingHash = sha256(new Uint8Array(await readFile(deliveredTargetPath)))
-    if (existingHash !== localFileHashes[rootPath])
-      throw new Error(`Resource target already exists with different content: ${rootPath}`)
-  }
-  const resource: BeeGameProjectResource = {
-    id,
-    source: {
-      type: 'resource-library',
-      pack_id: requiredString(input.pack_id, 'Pack id'),
-      pack_version: requiredString(input.pack_version, 'Pack version'),
-      element_id: requiredString(input.element_id, 'Element id'),
-      element_path: requiredString(input.element_path, 'Element path'),
-    },
-    root_path: rootPath,
-    file_paths: filePaths,
-    local_file_hashes: localFileHashes,
-    provisional: false,
-    status: 'verified',
-    selected_at: new Date().toISOString(),
-    selection_reason: nonEmptyStrings(
-      input.selection_reason,
-      'Resource selection reasons',
-    ),
-    ...(input.asset_kind ? { asset_kind: input.asset_kind } : {}),
-    ...(input.capabilities?.length
-      ? { capabilities: uniqueStrings(input.capabilities) }
-      : {}),
-    ...(input.content_profile
-      ? { content_profile: structuredClone(input.content_profile) }
-      : {}),
-    ...(input.technical_facts
-      ? { technical_facts: { ...input.technical_facts } }
-      : {}),
-    ...(dependencies.length
-      ? {
-          dependencies: dependencies.map(dependency => ({
-            key: dependency.input.key,
-            parent_key: dependency.input.parent_key,
-            element_id: dependency.input.element_id,
-            element_path: dependency.input.element_path,
-            reference_path: dependency.input.reference_path,
-            local_path: normalizeRelativePath(root, dependency.targetPath),
-            ...(dependency.input.kind ? { kind: dependency.input.kind } : {}),
-          })),
-        }
-      : {}),
-  }
-  const updated = replaceResource(manifest, resource)
-  const retainedPaths = new Set(updated.resources.flatMap(item => item.file_paths))
-  const obsoletePaths = replacingProvisional
-    ? existing!.file_paths.filter(path => !retainedPaths.has(path))
-    : []
-  const obsoleteSnapshots = await Promise.all(obsoletePaths.map(async path => {
-    try {
-      return { path, bytes: await readFile(resolveInsideWorkspace(root, path)) }
-    } catch {
-      return { path }
-    }
-  }))
-  const rollback = await commitResourceWrites([
-    { targetPath: sourceTargetPath, bytes: rootBytes },
-    ...(converted ? [{ targetPath: deliveredTargetPath, bytes: converted.bytes }] : []),
-    ...dependencies.map(dependency => ({
-      targetPath: dependency.targetPath,
-      bytes: dependency.bytes,
-    })),
-  ])
-  try {
-    await writeManifestAtomically(root, updated)
-    await Promise.all(obsoletePaths.map(path => rm(resolveInsideWorkspace(root, path), { force: true })))
-  } catch (error) {
-    await rollback()
-    await Promise.all(obsoleteSnapshots.map(async snapshot => {
-      if (!snapshot.bytes) return
-      const absolute = resolveInsideWorkspace(root, snapshot.path)
-      await mkdir(dirname(absolute), { recursive: true })
-      await writeFile(absolute, snapshot.bytes)
-    }))
-    await writeManifestAtomically(root, manifest)
-    throw error
-  }
-  return { manifest: updated, resource }
-}
-
-export async function registerBeeGameAuthoredResources(
-  workspacePath: string,
-  inputs: readonly BeeGameAuthoredResourceInput[],
-  options: { additionalFormatCapabilities?: readonly string[] } = {},
+  inputs: readonly (BeeGameAuthoredResourceInput & { source?: Extract<BeeGameProjectResourceSource, { type: 'web' | 'agent-authored' | 'resource-library' }> })[],
+  options: { additionalFormatCapabilities?: readonly string[];
+    projectTarget?: BeeGameAssetManifest['project_target']; requirements?: BeeGameAssetManifest['requirements'] } = {},
 ): Promise<BeeGameAssetManifest> {
   const root = normalizeWorkspacePath(workspacePath)
-  const manifest = await readBeeGameAssetManifest(root)
+  let manifest = await readBeeGameAssetManifest(root)
+  if (options.projectTarget && manifest.project_target && !isDeepStrictEqual(options.projectTarget, manifest.project_target))
+    throw new Error('Registration cannot change the established project target. Omit projectTarget or pass the unchanged target; use files in its supported formats.')
+  for (const requirement of options.requirements ?? []) {
+    const existing = manifest.requirements.find(item => item.id === requirement.id)
+    if (existing && !isDeepStrictEqual(existing, requirement))
+      throw new Error('Registration cannot redefine an existing requirement: ' + requirement.id)
+  }
+  if (options.projectTarget || options.requirements) manifest = parseCanonicalBeeGameAssetManifest({
+    ...manifest, project_target: manifest.project_target ?? options.projectTarget,
+    requirements: [...new Map([...manifest.requirements, ...options.requirements ?? []].map(item => [item.id, item])).values()],
+  })
   const establishedTarget = requireProjectTarget(manifest)
   const additionalFormatCapabilities = uniqueStrings(
     options.additionalFormatCapabilities ?? [],
@@ -789,6 +520,36 @@ export async function registerBeeGameAuthoredResources(
     : establishedTarget
   if (!target)
     throw new Error('Additional authored resource formats are invalid.')
+  // Diagnose independently determinable batch mistakes together, before any
+  // registry write. Use the same format check and programmatic-audio exception
+  // as registration itself; do not invent or extend consumer capabilities.
+  const batchIssues: string[] = []
+  const formatIssues = new Map<string, { message: string; resources: Set<string>; files: number }>()
+  const requirementIds = new Set(manifest.requirements.map(item => item.id))
+  const programmatic = new Map<BeeGameAuthoredResourceInput, BeeGameProgrammaticAudioResource | undefined>()
+  for (const input of inputs) {
+    const existing = manifest.resources.find(item => item.id === input.id)
+    for (const id of input.fulfills ?? existing?.fulfills ?? [])
+      if (!requirementIds.has(id)) batchIssues.push(`resource ${input.id}.fulfills: unknown requirement ID ${id}; use an ID from requirements, not a display name/resource ID`)
+    const paths = uniqueStrings(input.file_paths.map(normalizedProjectPath))
+    validateDependencies(input.dependencies, 'resource ' + input.id + '.dependencies', paths, batchIssues)
+    if ((AUDIO_FILE_EXTENSIONS.has(extname(input.root_path).toLowerCase()) || input.asset_kind?.startsWith('audio')) &&
+        !AUDIO_ASSET_KINDS.has(input.asset_kind ?? ''))
+      batchIssues.push(`resource ${input.id}.asset_kind: unsupported audio type ${input.asset_kind ?? '(missing)'}; use audio-clip for encoded files, audio-cue/audio-bank for structured definitions (music/ambience/voice are also supported).`)
+    const audio = validateAuthoredProgrammaticAudio(root, input, normalizedProjectPath(input.root_path), paths)
+    programmatic.set(input, audio)
+    if (!audio) for (const path of paths) {
+      try { assertFilenameFormatAllowed(path, target.asset_format_capabilities) }
+      catch (error) {
+        const format = normalizeFormat(extname(path).slice(1))
+        const issue = formatIssues.get(format) ?? { message: (error as Error).message, resources: new Set<string>(), files: 0 }
+        issue.resources.add(input.id); issue.files++; formatIssues.set(format, issue)
+      }
+    }
+  }
+  for (const issue of formatIssues.values())
+    batchIssues.push(`resources ${[...issue.resources].join(', ')}; ${issue.files} files with this unsupported extension; first example: ${issue.message}`)
+  if (batchIssues.length) throw new Error('Registration batch rejected; no registry changes:\n' + batchIssues.join('\n'))
   let updated = additionalFormatCapabilities.length
     ? parseCanonicalBeeGameAssetManifest({
         ...manifest,
@@ -796,14 +557,13 @@ export async function registerBeeGameAuthoredResources(
       })
     : manifest
   const now = new Date().toISOString()
-  const obsoletePaths = new Set<string>()
   for (const input of inputs) {
     const id = normalizeId(input.id)
     if (!id) throw new Error('Authored resource id is required')
     const rootPath = normalizedProjectPath(input.root_path)
     const filePaths = uniqueStrings(input.file_paths.map(normalizedProjectPath))
     const existing = updated.resources.find(resource => resource.id === id)
-    if (existing && existing.source.type !== 'agent-authored')
+    if (existing && existing.source.type !== (input.source?.type ?? 'agent-authored'))
       throw new Error(
         `Authored resource id belongs to a different source: ${id}`,
       )
@@ -813,36 +573,18 @@ export async function registerBeeGameAuthoredResources(
           existing.file_paths.length !== filePaths.length ||
           existing.file_paths.some(path => !filePaths.includes(path))),
     )
-    if (changesPaths && !input.replace_existing_provisional)
-      throw new Error(
-        `Authored resource paths are immutable for stable id ${id}; revise the existing files in place or use the explicit replacement operation.`,
-      )
-    if (
-      changesPaths &&
-      (!existing?.provisional ||
-        !input.provisional ||
-        existing.source.type !== 'agent-authored')
-    )
-      throw new Error(
-        `Only an agent-authored provisional resource can be replaced in place: ${id}`,
-      )
+    if (changesPaths)
+      throw new Error(`Resource paths are immutable for stable id ${id}; update its existing files or register a new resource and select it in the Editor.`)
     if (!filePaths.includes(rootPath))
       throw new Error(
         `Authored resource root must be listed in file_paths: ${id}`,
       )
-    const programmaticAudio = validateAuthoredProgrammaticAudio(
-      root,
-      input,
-      rootPath,
-      filePaths,
-    )
+    const programmaticAudio = programmatic.get(input)
     for (const path of filePaths) {
       assertPathInDeclaredRoot(path, target.runtime_asset_root)
       const absolute = resolveInsideWorkspace(root, path)
       if (!existsSync(absolute))
         throw new Error(`Authored resource file does not exist: ${path}`)
-      if (!programmaticAudio)
-        assertFilenameFormatAllowed(path, target.asset_format_capabilities)
       assertAuthoredResourceMediaFile(
         resolveInsideWorkspace(root, path),
         path,
@@ -862,7 +604,8 @@ export async function registerBeeGameAuthoredResources(
     )
     const resource: BeeGameProjectResource = {
       id,
-      source: {
+      fulfills: uniqueStrings(input.fulfills ?? existing?.fulfills ?? []),
+      source: input.source ?? {
         type: 'agent-authored',
         created_at:
           existing?.source.type === 'agent-authored'
@@ -880,114 +623,29 @@ export async function registerBeeGameAuthoredResources(
         input.selection_reason,
         'Authored resource selection reasons',
       ),
+      ...(input.dimension ? { dimension: input.dimension } : {}),
       ...(input.asset_kind ? { asset_kind: input.asset_kind } : {}),
       ...(input.capabilities?.length
         ? { capabilities: uniqueStrings(input.capabilities) }
         : {}),
+      ...(input.usage_tags?.length ? { usage_tags: uniqueStrings(input.usage_tags) } : {}),
+      ...(input.styles?.length ? { styles: uniqueStrings(input.styles) } : {}),
+      ...(input.relation_kinds?.length ? { relation_kinds: uniqueStrings(input.relation_kinds) } : {}),
+      ...(input.embedded_kinds?.length ? { embedded_kinds: uniqueStrings(input.embedded_kinds) } : {}),
       ...(input.content_profile
         ? { content_profile: structuredClone(input.content_profile) }
         : {}),
       ...(input.technical_facts
         ? { technical_facts: { ...input.technical_facts } }
         : {}),
+      ...(input.dependencies ? { dependencies: structuredClone(input.dependencies) } : {}),
     }
-    if (changesPaths)
-      existing?.file_paths
-        .filter(path => !filePaths.includes(path))
-        .forEach(path => obsoletePaths.add(path))
+    if (existing && isDeepStrictEqual({ ...resource, selected_at: existing.selected_at }, existing))
+      resource.selected_at = existing.selected_at
     updated = replaceResource(updated, resource)
   }
-  await writeManifestAtomically(root, updated)
-  const retainedPaths = new Set(
-    updated.resources.flatMap(resource => resource.file_paths),
-  )
-  await Promise.all(
-    [...obsoletePaths]
-      .filter(path => !retainedPaths.has(path))
-      .map(path => rm(resolveInsideWorkspace(root, path), { force: true })),
-  )
-  return updated
-}
-
-export async function removeBeeGameUnboundResources(
-  workspacePath: string,
-  resourceIds: readonly string[],
-): Promise<BeeGameAssetManifest> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const manifest = await readBeeGameAssetManifest(root)
-  requireProjectTarget(manifest)
-  const ids = uniqueStrings(resourceIds.map(normalizeId))
-  if (!ids.length) throw new Error('At least one resource id is required.')
-  const requirementIds = new Set(manifest.requirements.map(item => item.id))
-  const protectedIds = ids.filter(id => requirementIds.has(id))
-  if (protectedIds.length)
-    throw new Error(
-      `Requirement resource identities must be repaired in place: ${protectedIds.join(', ')}.`,
-    )
-  const existingIds = new Set(manifest.resources.map(item => item.id))
-  const missingIds = ids.filter(id => !existingIds.has(id))
-  if (missingIds.length)
-    throw new Error(
-      `Resource identities do not exist: ${missingIds.join(', ')}.`,
-    )
-  const referencedIds = new Set(
-    auditBeeGameContent(root, manifest).referencedResourceIds,
-  )
-  const stillReferenced = ids.filter(id => referencedIds.has(id))
-  if (stillReferenced.length)
-    throw new Error(
-      `Remove resource references from JSON/YAML before pruning inventory: ${stillReferenced.join(', ')}.`,
-    )
-  const removed = manifest.resources.filter(resource =>
-    ids.includes(resource.id),
-  )
-  const updated = parseCanonicalBeeGameAssetManifest({
-    ...manifest,
-    resources: manifest.resources.filter(
-      resource => !ids.includes(resource.id),
-    ),
-  })
-  const retainedPaths = new Set(
-    updated.resources.flatMap(resource => resource.file_paths),
-  )
-  const obsoletePaths = [
-    ...new Set(
-      removed
-        .flatMap(resource => resource.file_paths)
-        .filter(path => !retainedPaths.has(path)),
-    ),
-  ]
-  const snapshots = await Promise.all(
-    obsoletePaths.map(async path => {
-      try {
-        return {
-          path,
-          bytes: await readFile(resolveInsideWorkspace(root, path)),
-        }
-      } catch {
-        return { path }
-      }
-    }),
-  )
-  await writeManifestAtomically(root, updated)
-  try {
-    await Promise.all(
-      obsoletePaths.map(path =>
-        rm(resolveInsideWorkspace(root, path), { force: true }),
-      ),
-    )
-  } catch (error) {
-    await Promise.all(
-      snapshots.map(async snapshot => {
-        if (!snapshot.bytes) return
-        const absolute = resolveInsideWorkspace(root, snapshot.path)
-        await mkdir(dirname(absolute), { recursive: true })
-        await writeFile(absolute, snapshot.bytes)
-      }),
-    )
-    await writeManifestAtomically(root, manifest)
-    throw error
-  }
+  if (!isDeepStrictEqual(await readBeeGameAssetManifest(root), updated))
+    await writeManifestAtomically(root, updated)
   return updated
 }
 
@@ -1018,7 +676,7 @@ function validateManifest(value: unknown): string[] {
   )
   const resourceIds = new Set<string>()
   resources.forEach((item, index) =>
-    validateResource(item, index, target, resourceIds, issues),
+    validateResource(item, index, target, requirementIds, resourceIds, issues),
   )
   return issues
 }
@@ -1040,7 +698,6 @@ function validateTarget(
       'asset_format_capabilities',
       'resource_library_usage',
       'runtime_asset_root',
-      'content_root',
       'generated_asset_root',
     ],
     'project_target',
@@ -1058,16 +715,11 @@ function validateTarget(
     issues.push(
       'project_target.asset_format_capabilities must contain direct lowercase filename extensions using only ASCII letters and digits, without dots or descriptive media labels.',
     )
-  for (const field of [
-    'runtime_asset_root',
-    'content_root',
-    'generated_asset_root',
-  ] as const)
+  for (const field of ['runtime_asset_root', 'generated_asset_root'] as const)
     if (!isProjectPath(value[field]))
       issues.push(`project_target.${field} must be a workspace-relative path.`)
   const expectedRoots = {
     runtime_asset_root: BEEGAME_RESOURCE_ROOTS.runtime,
-    content_root: BEEGAME_RESOURCE_ROOTS.content,
     generated_asset_root: BEEGAME_RESOURCE_ROOTS.generated,
   } as const
   for (const [field, expected] of Object.entries(expectedRoots))
@@ -1094,12 +746,6 @@ function validateRequirement(
     issues.push(`${path} must be an object.`)
     return
   }
-  rejectUnknownKeys(
-    value,
-    ['id', 'name', 'purpose', 'required', 'acquisition_profile'],
-    path,
-    issues,
-  )
   const id = trimmedString(value.id)
   if (!id) issues.push(`${path}.id must be a trimmed non-empty string.`)
   else if (ids.has(id)) issues.push(`${path}.id is duplicated: ${id}.`)
@@ -1121,15 +767,9 @@ function validateAcquisitionProfile(
   issues: string[],
 ): void {
   if (!isRecord(value)) {
-    issues.push(`${path} must be an object.`)
+    issues.push(`${path} must be an object with dimensions, asset_kinds and styles arrays; use resources.mjs --contract registration for exact fields and enums.`)
     return
   }
-  rejectUnknownKeys(
-    value,
-    ['dimensions', 'asset_kinds', 'usage_tags', 'capabilities', 'styles', 'coverage'],
-    path,
-    issues,
-  )
   validateEnumArray(
     value.dimensions,
     RESOURCE_DIMENSIONS,
@@ -1144,25 +784,45 @@ function validateAcquisitionProfile(
     issues,
     true,
   )
-  validateEnumArray(
-    value.usage_tags,
-    RESOURCE_USAGE_TAGS,
-    `${path}.usage_tags`,
-    issues,
-  )
-  validateEnumArray(
-    value.capabilities,
-    RESOURCE_CAPABILITIES,
-    `${path}.capabilities`,
-    issues,
-  )
+  validateDescriptiveTags(value.usage_tags, `${path}.usage_tags`, issues)
+  validateDescriptiveTags(value.capabilities, `${path}.capabilities`, issues)
   if (!Array.isArray(value.styles) || !value.styles.every(isTrimmedString))
     issues.push(`${path}.styles must be an array of trimmed non-empty strings.`)
+  if (
+    value.acceptance_criteria !== undefined &&
+    (!Array.isArray(value.acceptance_criteria) ||
+      value.acceptance_criteria.length === 0 ||
+      !value.acceptance_criteria.every(isTrimmedString))
+  )
+    issues.push(
+      `${path}.acceptance_criteria must be a non-empty array of trimmed non-empty strings when present.`,
+    )
+  if (value.sourcing_policy !== undefined)
+    validateSourcingPolicy(value.sourcing_policy, `${path}.sourcing_policy`, issues)
   if (value.coverage !== undefined) {
     validateCoverage(value.coverage, `${path}.coverage`, issues)
     if (Array.isArray(value.capabilities) && value.capabilities.length > 0)
       issues.push(`${path}.capabilities must be empty when coverage declares multiple resource parts.`)
   }
+}
+
+function validateSourcingPolicy(value: unknown, path: string, issues: string[]): void {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object.`)
+    return
+  }
+  rejectUnknownKeys(
+    value,
+    ['allowed_source_kinds', 'license_constraints', 'responsible_party', 'handoff_criteria'],
+    path,
+    issues,
+  )
+  validateEnumArray(value.allowed_source_kinds, RESOURCE_SOURCE_KINDS, `${path}.allowed_source_kinds`, issues, true)
+  for (const field of ['license_constraints', 'handoff_criteria'] as const)
+    if (!Array.isArray(value[field]) || value[field].length === 0 || !value[field].every(isTrimmedString))
+      issues.push(`${path}.${field} must be a non-empty array of trimmed non-empty strings.`)
+  if (!isTrimmedString(value.responsible_party))
+    issues.push(`${path}.responsible_party must be a trimmed non-empty string.`)
 }
 
 function validateCoverage(value: unknown, path: string, issues: string[]): void {
@@ -1209,17 +869,24 @@ function validateEnumArray(
     )
   )
     issues.push(
-      `${path} must be ${requireOne ? 'a non-empty' : 'an'} array of canonical values.`,
+      `${path} must be ${requireOne ? 'a non-empty' : 'an'} array of canonical values (case-sensitive). ${allowed.length <= 8 || allowed === RESOURCE_ASSET_KINDS ? `Allowed: ${allowed.join(', ')}.` : 'Use resources.mjs --contract for the exact allowed values.'}`,
     )
 }
 
 function isTrimmedString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value === value.trim()
 }
+
+// These describe an already selected asset; they are not catalogue query enums.
+function validateDescriptiveTags(value: unknown, path: string, issues: string[]): void {
+  if (value !== undefined && (!Array.isArray(value) || !value.every(isTrimmedString)))
+    issues.push(`${path} must be an array of non-empty strings when present.`)
+}
 function validateResource(
   value: unknown,
   index: number,
   target: BeeGameAssetProjectTarget | undefined,
+  requirementIds: Set<string>,
   ids: Set<string>,
   issues: string[],
 ): void {
@@ -1228,32 +895,27 @@ function validateResource(
     issues.push(`${path} must be an object.`)
     return
   }
-  rejectUnknownKeys(
-    value,
-    [
-      'id',
-      'source',
-      'root_path',
-      'file_paths',
-      'local_file_hashes',
-      'provisional',
-      'status',
-      'selected_at',
-      'selection_reason',
-      'asset_kind',
-      'capabilities',
-      'content_profile',
-      'technical_facts',
-      'dependencies',
-      'error',
-    ],
-    path,
-    issues,
-  )
+  // Preserve descriptive extensions (notes, toolchain metadata, etc.). They
+  // neither establish readiness nor replace fields consumed by the runtime.
+  if (value.hashes !== undefined)
+    issues.push(`${path}.hashes is not an integrity field; use local_file_hashes: { "workspace-relative-file": "sha256-hex" }.`)
   const id = trimmedString(value.id)
   if (!id) issues.push(`${path}.id must be a trimmed non-empty string.`)
   else if (ids.has(id)) issues.push(`${path}.id is duplicated: ${id}.`)
   else ids.add(id)
+  const fulfills =
+    Array.isArray(value.fulfills) && value.fulfills.every(isTrimmedString)
+      ? (value.fulfills as string[])
+      : []
+  if (
+    !Array.isArray(value.fulfills) ||
+    !value.fulfills.every(isTrimmedString) ||
+    new Set(fulfills).size !== fulfills.length
+  )
+    issues.push(`${path}.fulfills must be an array of unique non-empty requirement IDs.`)
+  for (const requirementId of fulfills)
+    if (!requirementIds.has(requirementId))
+      issues.push(`${path}.fulfills references an unknown requirement: ${requirementId}.`)
   validateResourceSource(value.source, `${path}.source`, issues)
   const rootPath = isProjectPath(value.root_path) ? String(value.root_path) : ''
   if (!rootPath)
@@ -1288,13 +950,35 @@ function validateResource(
     issues.push(
       `${path}.selection_reason must be a non-empty array of non-empty strings.`,
     )
+  if (
+    value.dimension !== undefined &&
+    !(RESOURCE_DIMENSIONS as readonly unknown[]).includes(value.dimension)
+  )
+    issues.push(`${path}.dimension must be a canonical resource dimension (case-sensitive). Allowed: ${RESOURCE_DIMENSIONS.join(', ')}.`)
   const assetKind = trimmedString(value.asset_kind)
   if (value.asset_kind !== undefined && !assetKind)
     issues.push(`${path}.asset_kind must be a trimmed non-empty string.`)
+  // Existing encoded-audio records remain readable, without rewriting their
+  // type or content-addressed modules. New registration stays strict above.
+  if ((AUDIO_FILE_EXTENSIONS.has(extname(rootPath).toLowerCase()) || assetKind?.startsWith('audio')) &&
+      !isReadableAudioResource(assetKind, rootPath))
+    issues.push(`${path}.asset_kind: unsupported audio type ${assetKind ?? '(missing)'}; use audio-clip for encoded files or a canonical audio-cue/audio-bank/music/ambience/voice type.`)
+  if (value.usage_tags !== undefined)
+    validateDescriptiveTags(value.usage_tags, `${path}.usage_tags`, issues)
+  if (value.capabilities !== undefined)
+    validateDescriptiveTags(value.capabilities, `${path}.capabilities`, issues)
+  if (value.styles !== undefined && !nonEmptyStringArray(value.styles))
+    issues.push(`${path}.styles must be a non-empty array of non-empty strings.`)
+  if (value.relation_kinds !== undefined)
+    validateEnumArray(value.relation_kinds, RESOURCE_RELATION_KINDS, `${path}.relation_kinds`, issues)
+  if (value.embedded_kinds !== undefined)
+    validateEnumArray(value.embedded_kinds, RESOURCE_EMBEDDED_COMPONENT_KINDS, `${path}.embedded_kinds`, issues)
   if (assetKind && AUDIO_ASSET_KINDS.has(assetKind)) {
-    const allowedExtensions = PLAYABLE_AUDIO_ASSET_KINDS.has(assetKind)
-      ? AUDIO_FILE_EXTENSIONS
-      : new Set([...AUDIO_FILE_EXTENSIONS, '.json'])
+    const hasEncodedAudio = filePaths.some(filePath =>
+      AUDIO_FILE_EXTENSIONS.has(extname(filePath).toLowerCase()),
+    )
+    // Metadata beside encoded audio is not a provisional synthesis definition.
+    const allowedExtensions = new Set([...AUDIO_FILE_EXTENSIONS, '.json'])
     for (const filePath of filePaths)
       if (!allowedExtensions.has(extname(filePath).toLowerCase()))
         issues.push(
@@ -1304,7 +988,7 @@ function validateResource(
       filePath => extname(filePath).toLowerCase() === '.json',
     )
     if (
-      structuredPaths.length > 0 &&
+      !hasEncodedAudio && structuredPaths.length > 0 &&
       (value.provisional !== true ||
         !['audio-cue', 'audio-bank'].includes(assetKind) ||
         filePaths.length !== 1 ||
@@ -1338,12 +1022,6 @@ function validateResourceSource(
     return
   }
   if (value.type === 'resource-library') {
-    rejectUnknownKeys(
-      value,
-      ['type', 'pack_id', 'pack_version', 'element_id', 'element_path'],
-      path,
-      issues,
-    )
     for (const field of [
       'pack_id',
       'pack_version',
@@ -1355,14 +1033,26 @@ function validateResourceSource(
     return
   }
   if (value.type === 'agent-authored') {
-    rejectUnknownKeys(value, ['type', 'created_at', 'reason'], path, issues)
     if (!trimmedString(value.created_at))
       issues.push(`${path}.created_at is required.`)
     if (!trimmedString(value.reason)) issues.push(`${path}.reason is required.`)
     return
   }
+  if (value.type === 'web') {
+    for (const field of [
+      'source_url',
+      'page_url',
+      'license',
+      'retrieved_at',
+    ])
+      if (!trimmedString(value[field]))
+        issues.push(`${path}.${field} is required.`)
+    for (const field of ['license_url', 'author'])
+      if (value[field] !== undefined && !trimmedString(value[field]))
+        issues.push(`${path}.${field} must be a non-empty string when present.`)
+    return
+  }
   if (value.type === 'user-provided') {
-    rejectUnknownKeys(value, ['type', 'created_at', 'filename'], path, issues)
     if (!trimmedString(value.created_at))
       issues.push(`${path}.created_at is required.`)
     if (!trimmedString(value.filename))
@@ -1466,112 +1156,155 @@ function requireProjectTarget(
 ): BeeGameAssetProjectTarget {
   if (!manifest.project_target)
     throw new Error(
-      'project_target must be established before resource production',
+      'project_target must be established before resource production. The shared owner supplies projectTarget and requirements in a register request (resources may be []), then combines worker requests using the supplied resources.mjs entry with --register-from. Use that entry with --help or --contract; do not infer global formats from one worker.',
     )
   return manifest.project_target
 }
 
-function isSamePinnedLibraryResource(
-  resource: BeeGameProjectResource,
-  input: BeeGameResolvedLibraryResourceInput,
-): boolean {
-  return (
-    resource.source.type === 'resource-library' &&
-    resource.source.pack_id === input.pack_id &&
-    resource.source.pack_version === input.pack_version &&
-    resource.source.element_id === input.element_id &&
-    resource.source.element_path === input.element_path
-  )
+async function commitResourceWrites(
+  root: string,
+  writes: Array<{ targetPath: string; bytes: Uint8Array }>,
+): Promise<() => Promise<void>> {
+  const snapshots: Array<{ targetPath: string; previous?: Uint8Array }> = []
+  const temporaryPaths: string[] = []
+  try {
+    for (const write of writes) {
+      assertWorkspacePath(root, write.targetPath)
+      const previous = existsSync(write.targetPath)
+        ? new Uint8Array(await readFile(write.targetPath))
+        : undefined
+      snapshots.push({
+        targetPath: write.targetPath,
+        ...(previous ? { previous } : {}),
+      })
+      await mkdir(dirname(write.targetPath), { recursive: true })
+      assertWorkspacePath(root, write.targetPath)
+      const temporaryPath = `${write.targetPath}.${randomUUID()}.tmp`
+      temporaryPaths.push(temporaryPath)
+      await writeFile(temporaryPath, write.bytes, { flag: 'wx' })
+      assertWorkspacePath(root, write.targetPath)
+      await rename(temporaryPath, write.targetPath)
+    }
+  } catch (error) {
+    await rollbackResourceWrites(root, snapshots)
+    throw error
+  } finally {
+    await Promise.all(
+      temporaryPaths.map(path => {
+        assertWorkspacePath(root, path)
+        return rm(path, { force: true })
+      }),
+    )
+  }
+  return () => rollbackResourceWrites(root, snapshots)
 }
 
-async function prepareDependencies(input: {
-  root: string
-  declaredAssetRoot: string
-  rootTargetPath: string
-  dependencies: NonNullable<BeeGameResolvedLibraryResourceInput['dependencies']>
-  allowedFormats?: string[]
-  fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-}): Promise<
-  Array<{
-    input: NonNullable<
-      BeeGameResolvedLibraryResourceInput['dependencies']
-    >[number]
-    targetPath: string
-    bytes: Uint8Array
-  }>
-> {
-  const targets = new Map<string, string>([['root', input.rootTargetPath]])
-  const result: Array<{
-    input: NonNullable<
-      BeeGameResolvedLibraryResourceInput['dependencies']
-    >[number]
-    targetPath: string
-    bytes: Uint8Array
-  }> = []
-  for (const dependency of input.dependencies) {
-    if (input.allowedFormats)
-      assertFilenameFormatAllowed(dependency.element_path, input.allowedFormats)
-    const parent = targets.get(dependency.parent_key)
-    if (!parent)
-      throw new Error(
-        `Resource dependency parent is missing: ${dependency.parent_key}`,
-      )
-    const targetPath = resolveInsideDeclaredRoot(
-      input.root,
-      input.declaredAssetRoot,
-      resolve(dirname(parent), dependency.reference_path),
-    )
-    const bytes = await downloadResource(dependency.source_url, input.fetchImpl)
-    if (!isSha256(dependency.source_hash) || sha256(bytes) !== dependency.source_hash)
-      throw new Error(`Resource dependency differs from the frozen Catalog content hash: ${dependency.element_id}`)
-    assertDetectedFormat(dependency.element_path, bytes)
-    targets.set(dependency.key, targetPath)
-    result.push({ input: dependency, targetPath, bytes })
+async function rollbackResourceWrites(
+  root: string,
+  snapshots: Array<{ targetPath: string; previous?: Uint8Array }>,
+): Promise<void> {
+  for (const snapshot of snapshots.reverse()) {
+    assertWorkspacePath(root, snapshot.targetPath)
+    if (snapshot.previous)
+      await writeFile(snapshot.targetPath, snapshot.previous)
+    else await rm(snapshot.targetPath, { force: true })
   }
+}
+
+function resolveInsideDeclaredRoot(
+  workspace: string,
+  declaredRoot: string,
+  candidate: string,
+): string {
+  const rootPath = resolveInsideWorkspace(workspace, declaredRoot)
+  const target = isAbsolute(candidate)
+    ? resolve(candidate)
+    : resolveInsideWorkspace(workspace, candidate)
+  if (target !== rootPath && !target.startsWith(`${rootPath}${sep}`))
+    throw new Error(
+      `Resource path is outside canonical asset root: ${candidate}`,
+    )
+  return target
+}
+
+function resolveInsideWorkspace(workspace: string, candidate: string): string {
+  const target = isAbsolute(candidate)
+    ? resolve(candidate)
+    : resolve(workspace, candidate)
+  if (target !== workspace && !target.startsWith(`${workspace}${sep}`))
+    throw new Error(`Path escapes workspace: ${candidate}`)
+  assertWorkspacePath(workspace, target)
+  return target
+}
+
+function normalizeWorkspacePath(path: string): string {
+  if (!path || !isAbsolute(path))
+    throw new Error('Workspace path must be absolute')
+  return resolve(path)
+}
+
+function normalizeRelativePath(root: string, path: string): string {
+  const result = relative(root, path).split(sep).join('/')
+  if (!isProjectPath(result)) throw new Error(`Invalid project path: ${result}`)
   return result
 }
 
-async function downloadResource(
-  url: string,
-  fetchImpl: (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => Promise<Response>,
-): Promise<Uint8Array> {
-  const resourceUrl = requiredString(url, 'Resource URL')
-  const response = await withResourceExternalTransport({
-    service: 'resource-object',
-    operation: 'download resource content',
-    execute: () => fetchImpl(resourceUrl),
-  })
-  if (!response.ok)
-    throw new Error(`Resource download failed (${response.status})`)
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (!bytes.byteLength)
-    throw new Error('Resource download returned an empty file')
-  return bytes
+function normalizedProjectPath(value: string): string {
+  const normalized = requiredString(value, 'Project path')
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+  if (!isProjectPath(normalized))
+    throw new Error(`Invalid project path: ${value}`)
+  return normalized
 }
 
-async function resourceFilesMatchHashes(
-  root: string,
-  resource: BeeGameProjectResource,
-): Promise<boolean> {
-  if (!resource.local_file_hashes) return false
-  for (const path of resource.file_paths) {
-    const expected = resource.local_file_hashes[path]
-    if (!isSha256(expected)) return false
-    try {
-      const actual = sha256(
-        new Uint8Array(await readFile(resolveInsideWorkspace(root, path))),
-      )
-      if (actual !== expected) return false
-    } catch {
-      return false
-    }
-  }
-  return true
+function pathWithin(scope: string, target: string): boolean {
+  const normalizedScope = scope.replaceAll('\\', '/').replace(/\/$/, '')
+  const normalizedTarget = target.replaceAll('\\', '/').replace(/^\.\//, '')
+  return (
+    normalizedTarget === normalizedScope ||
+    normalizedTarget.startsWith(`${normalizedScope}/`)
+  )
 }
 
+function assertPathInDeclaredRoot(path: string, root: string): void {
+  if (!pathWithin(root, path))
+    throw new Error(`Resource path is outside canonical asset root: ${path}`)
+}
+
+function isProjectPath(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.trim() || value !== value.trim())
+    return false
+  if (isAbsolute(value) || value.startsWith('/') || value.includes('\\'))
+    return false
+  const parts = value.split('/')
+  return parts.every(part => part && part !== '.' && part !== '..')
+}
+
+function sanitizeFilename(path: string): string {
+  const filename = basename(requiredString(path, 'Resource filename'))
+  if (!filename || filename === '.' || filename === '..')
+    throw new Error('Resource filename is invalid')
+  return filename
+}
+
+function assertFilenameFormatAllowed(
+  filename: string,
+  formats: string[],
+): void {
+  const allowed = new Set(formats.map(normalizeFormat).filter(Boolean))
+  if (!allowed.size)
+    throw new Error('Target asset format capabilities are required')
+  const format = normalizeFormat(extname(filename).slice(1))
+  if (!format || !allowed.has(format))
+    throw new Error(
+      `Resource format is not supported by the target: ${filename}; extension=${format || '(none)'}; allowed=${[...allowed].join(', ')}. Use files in the listed formats. Registration cannot change an established projectTarget or add formats.`,
+    )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
 async function writeManifestAtomically(
   root: string,
   manifest: BeeGameAssetManifest,
@@ -1637,12 +1370,15 @@ async function writeManifestAtomically(
   try {
     for (const write of writes) {
       await mkdir(dirname(write.targetPath), { recursive: true })
+      assertWorkspacePath(root, write.targetPath)
       const temporaryPath = `${write.targetPath}.${randomUUID()}.tmp`
       temporaryPaths.push(temporaryPath)
-      await writeFile(temporaryPath, write.bytes)
+      await writeFile(temporaryPath, write.bytes, { flag: 'wx' })
     }
-    for (let index = 0; index < writes.length; index += 1)
+    for (let index = 0; index < writes.length; index += 1) {
+      assertWorkspacePath(root, writes[index]!.targetPath)
       await rename(temporaryPaths[index]!, writes[index]!.targetPath)
+    }
     const currentPaths = new Set(resourceModules.map(module => module.path))
     currentPaths.add(requirementsModulePath)
     await Promise.all(
@@ -1652,192 +1388,16 @@ async function writeManifestAtomically(
     )
   } finally {
     await Promise.all(
-      temporaryPaths.map(path =>
-        rm(path, { force: true }).catch(() => undefined),
-      ),
+      temporaryPaths.map(path => {
+        assertWorkspacePath(root, path)
+        return rm(path, { force: true })
+      }),
     )
   }
 }
 
 function encodeJson(value: unknown): Uint8Array {
   return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`)
-}
-
-async function commitResourceWrites(
-  writes: Array<{ targetPath: string; bytes: Uint8Array }>,
-): Promise<() => Promise<void>> {
-  const snapshots: Array<{ targetPath: string; previous?: Uint8Array }> = []
-  const temporaryPaths: string[] = []
-  try {
-    for (const write of writes) {
-      const previous = existsSync(write.targetPath)
-        ? new Uint8Array(await readFile(write.targetPath))
-        : undefined
-      snapshots.push({
-        targetPath: write.targetPath,
-        ...(previous ? { previous } : {}),
-      })
-      await mkdir(dirname(write.targetPath), { recursive: true })
-      const temporaryPath = `${write.targetPath}.${randomUUID()}.tmp`
-      temporaryPaths.push(temporaryPath)
-      await writeFile(temporaryPath, write.bytes)
-      await rename(temporaryPath, write.targetPath)
-    }
-  } catch (error) {
-    await rollbackResourceWrites(snapshots)
-    throw error
-  } finally {
-    await Promise.all(
-      temporaryPaths.map(path => rm(path, { force: true }).catch(() => undefined)),
-    )
-  }
-  return () => rollbackResourceWrites(snapshots)
-}
-
-async function rollbackResourceWrites(
-  snapshots: Array<{ targetPath: string; previous?: Uint8Array }>,
-): Promise<void> {
-  for (const snapshot of snapshots.reverse()) {
-    if (snapshot.previous)
-      await writeFile(snapshot.targetPath, snapshot.previous)
-    else await rm(snapshot.targetPath, { force: true })
-  }
-}
-
-function resolveResourceDestination(
-  root: string,
-  runtimeAssetRoot: string,
-  destination: string,
-  filename: string,
-): string {
-  const normalized = normalizedProjectPath(destination)
-  const hasExtension = Boolean(extname(normalized))
-  return resolveInsideDeclaredRoot(
-    root,
-    runtimeAssetRoot,
-    hasExtension ? normalized : join(normalized, filename),
-  )
-}
-
-function resolveInsideDeclaredRoot(
-  workspace: string,
-  declaredRoot: string,
-  candidate: string,
-): string {
-  const rootPath = resolveInsideWorkspace(workspace, declaredRoot)
-  const target = isAbsolute(candidate)
-    ? resolve(candidate)
-    : resolveInsideWorkspace(workspace, candidate)
-  if (target !== rootPath && !target.startsWith(`${rootPath}${sep}`))
-    throw new Error(
-      `Resource path is outside canonical asset root: ${candidate}`,
-    )
-  return target
-}
-
-function resolveInsideWorkspace(workspace: string, candidate: string): string {
-  const target = isAbsolute(candidate)
-    ? resolve(candidate)
-    : resolve(workspace, candidate)
-  if (target !== workspace && !target.startsWith(`${workspace}${sep}`))
-    throw new Error(`Path escapes workspace: ${candidate}`)
-  return target
-}
-
-function normalizeWorkspacePath(path: string): string {
-  if (!path || !isAbsolute(path))
-    throw new Error('Workspace path must be absolute')
-  return resolve(path)
-}
-
-function normalizeRelativePath(root: string, path: string): string {
-  const result = relative(root, path).split(sep).join('/')
-  if (!isProjectPath(result)) throw new Error(`Invalid project path: ${result}`)
-  return result
-}
-
-function normalizedProjectPath(value: string): string {
-  const normalized = requiredString(value, 'Project path')
-    .replaceAll('\\', '/')
-    .replace(/^\.\//, '')
-  if (!isProjectPath(normalized))
-    throw new Error(`Invalid project path: ${value}`)
-  return normalized
-}
-
-function pathWithin(scope: string, target: string): boolean {
-  const normalizedScope = scope.replaceAll('\\', '/').replace(/\/$/, '')
-  const normalizedTarget = target.replaceAll('\\', '/').replace(/^\.\//, '')
-  return (
-    normalizedTarget === normalizedScope ||
-    normalizedTarget.startsWith(`${normalizedScope}/`)
-  )
-}
-
-function assertPathInDeclaredRoot(path: string, root: string): void {
-  if (!pathWithin(root, path))
-    throw new Error(`Resource path is outside canonical asset root: ${path}`)
-}
-
-function isProjectPath(value: unknown): value is string {
-  if (typeof value !== 'string' || !value.trim() || value !== value.trim())
-    return false
-  if (isAbsolute(value) || value.startsWith('/') || value.includes('\\'))
-    return false
-  const parts = value.split('/')
-  return parts.every(part => part && part !== '.' && part !== '..')
-}
-
-function sanitizeFilename(path: string): string {
-  const filename = basename(requiredString(path, 'Resource filename'))
-  if (!filename || filename === '.' || filename === '..')
-    throw new Error('Resource filename is invalid')
-  return filename
-}
-
-function assertFilenameFormatAllowed(
-  filename: string,
-  formats: string[],
-): void {
-  const allowed = new Set(formats.map(normalizeFormat).filter(Boolean))
-  if (!allowed.size)
-    throw new Error('Target asset format capabilities are required')
-  const format = normalizeFormat(extname(filename).slice(1))
-  if (!format || !allowed.has(format))
-    throw new Error(
-      `Resource format is not supported by the target: ${filename}`,
-    )
-}
-
-function assertDetectedFormat(filename: string, bytes: Uint8Array): void {
-  const declared = normalizeFormat(extname(filename).slice(1))
-  const detected = detectResourceBinaryFormat(bytes)
-  if (detected && declared && !formatsAgree(declared, detected))
-    throw new Error(`Resource binary format mismatch: ${filename}`)
-}
-
-function detectResourceBinaryFormat(bytes: Uint8Array): string | undefined {
-  const ascii = new TextDecoder('latin1').decode(bytes.subarray(0, 32))
-  if (ascii.startsWith('glTF')) return 'glb'
-  if (ascii.startsWith('OggS')) return 'ogg'
-  if (
-    ascii.startsWith('ID3') ||
-    (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0)
-  )
-    return 'mp3'
-  if (ascii.startsWith('Kaydara FBX Binary')) return 'fbx'
-  if (bytes[0] === 0x89 && ascii.slice(1, 4) === 'PNG') return 'png'
-  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg'
-  if (ascii.startsWith('RIFF') && ascii.slice(8, 12) === 'WAVE') return 'wav'
-  return undefined
-}
-
-function formatsAgree(left: string, right: string): boolean {
-  return (
-    left === right ||
-    (left === 'jpeg' && right === 'jpg') ||
-    (left === 'jpg' && right === 'jpeg')
-  )
 }
 
 function normalizeFormat(value: string): string {
@@ -1964,12 +1524,6 @@ function nonEmptyStringArray(value: unknown): value is string[] {
   )
 }
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.flatMap(item => (trimmedString(item) ? [String(item)] : []))
-    : []
-}
-
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))]
 }
@@ -1994,8 +1548,4 @@ function trimmedString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() && value === value.trim()
     ? value
     : undefined
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

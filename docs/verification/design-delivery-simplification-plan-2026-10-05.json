@@ -1,0 +1,134 @@
+{
+  "status": "implemented-and-locally-verified",
+  "objective": "Deliver a usable game from the confirmed brief with sufficient design decisions, bounded independent review, and actual content/runtime acceptance; document bookkeeping is not proof of game quality.",
+  "scope": "BGS system source, professional instructions, and synthetic regression fixtures only. Existing generated project products and paid-test evidence remain read-only.",
+  "approvedFlow": [
+    "Write necessary design documents in dependency order using scoped author contexts.",
+    "Run one joint independent inspect after all planned design drafts are saved.",
+    "If needed, perform one source-backed correction pass and targeted verification; unresolved blockers stop rather than becoming PASS.",
+    "Create actual resources and formal content, implement, and verify actual game behavior against the original brief and owned acceptance expectations."
+  ],
+  "remove": [
+    "Automatic full inspect/revise/verify after every author batch.",
+    "Design-sidecar copies of gameplay states, audio behavior, tuning values, resource specifications, input mappings, and repeated dependency-status ledgers.",
+    "Model-maintained duplicate document versions and evidence hashes.",
+    "Mandatory temporary Scene/UI/simulation models and generated appendices for every design draft regardless of a concrete feasibility question."
+  ],
+  "retain": [
+    "Eight professional document files, proportionate detail, dependency-aware authorship, and prompt-defined ownership.",
+    "Only downstream-consumed design references and observable acceptance pointers, with original source identity.",
+    "Useful optional calculations for consequential factual or quantitative questions; no unsupported claim of prior verification.",
+    "Explicit original requirements, source-backed blocker findings, affected-scope revision permissions, review independence, and stop rules.",
+    "Program-maintained versions and evidence byte identity, read-only validation, and released-baseline integrity checks.",
+    "Actual resource/content validation, formal layout checks, runtime evidence, and refusal to pass failed or missing acceptance."
+  ],
+  "execution": {
+    "executorModel": "gpt-6.1-sol",
+    "maxConcurrentExecutors": 3,
+    "rootRole": "audit, interface decisions, integration checks, and corrections",
+    "owners": {
+      "workflow_executor": "Scheduling, review scope, host completion boundaries, and workflow regression tests.",
+      "handoff_executor": "Minimal design reference interface, host metadata finalization, downstream consumers, and contract regression tests.",
+      "prompt_executor": "Author/reviewer/native instructions, Skills, removal of compulsory duplicate calculation work, and instruction tests."
+    },
+    "integrationConstraints": [
+      "Keep existing correct work and unrelated dirty changes; no repository reset or broad rollback.",
+      "Do not introduce a new orchestration framework, decision taxonomy, additional review role, or automatic retry loop.",
+      "Do not inflate review turn limits to hide oversized work.",
+      "Legacy interfaces and in-progress sessions must be explicitly handled or safely rejected, never silently passed.",
+      "Host metadata finalization happens only at an authorized write-completion boundary, never inside a read-only checker.",
+      "No case-specific rules or prefilled expected answers from prior paid projects."
+    ]
+  },
+  "localAcceptance": [
+    "All dependency writing batches can advance without intermediate semantic reviews; exactly one initial joint inspect sees all saved documents.",
+    "Missing drafts, incomplete native turns, invalid source references, unresolved blockers, unauthorized revisions, and stale released baselines cannot advance as successful delivery.",
+    "Minimal reference records work without duplicated design tables; runtime acceptance still binds the actual source version and rejects absent or failed required evidence.",
+    "Actual revision increases the document version; unchanged completion does not create version churn; evidence hashes reflect retained bytes without asserting their semantic adequacy.",
+    "Prompts and relevant Skills agree on optional proportional design calculations and mandatory validation of actual consumed content/runtime data.",
+    "Regression tests and type checks pass within the touched system surface; failures are reported without treating test count as semantic quality proof."
+  ],
+  "paidAcceptance": {
+    "started": false,
+    "authorization": "Not included in this implementation turn.",
+    "futureCriterion": "Independent new ideas complete native end-to-end delivery without observer edits to products; actual games satisfy the original brief. Local tests cannot establish this result."
+  },
+  "knownTradeoffs": [
+    "Some cross-document problems will be detected later in drafting and may require document rework.",
+    "Fewer stages and less bookkeeping do not prove better model judgment or lower actual paid cost.",
+    "Joint review still has finite model capacity; an unfinished review must remain unfinished.",
+    "Legacy intermediate-review sessions safe-stop rather than silently migrating. No automatic migration or rewriting of historical project products was introduced."
+  ],
+  "rootAuditCorrections": [
+    {
+      "issue": "Removing intermediate reviews also removes their byte-bound protection of already handed-off drafts.",
+      "resolution": "Retain one current designDrafts snapshot solely for out-of-scope write detection. It never authorizes production and is cleared when the joint review establishes the baseline. No new audit stage or decision ledger."
+    },
+    {
+      "issue": "Host version finalization could become another early quality gate or act on an ordinary chat result.",
+      "resolution": "Bind snapshots to an actually scheduled successful native author/revision turn. Keep finalization in the existing serialized advance gate. Missing/empty/failed/stale turns cannot stamp or advance. Ordinary draft index/reference diagnostics go to the single joint review; unsafe paths and real write failures stop immediately."
+    },
+    {
+      "issue": "Containment checks alone permit a symlink to rewrite a different in-workspace document.",
+      "resolution": "Reject symlinks in the exact document/index target or its ancestors; finalize only the pre-captured authorized document scope. Read-only checks do not mutate files."
+    },
+    {
+      "issue": "Automatically changing the document Version header would invalidate otherwise unchanged calculation source hashes.",
+      "resolution": "For the eight known design documents only, calculation readers and hashes use the same body excluding a unique valid Version line; appendices explicitly state hash scope. Actual body/model changes remain detectable; other inputs and runtime acceptance retain exact-byte identity. Cross-module revision/finalization/verify regression passed."
+    },
+    {
+      "issue": "Actual user Stop records session.stopped, while the new trusted dispatch boundary initially recognized only turn.failed recovery.",
+      "resolution": "Recognize the latest stop or failed terminal event as interruption recovery. A later completed turn supersedes it. Route and lifecycle regressions cover resumed delivery, queued messages and ordinary questions that must not redispatch writers."
+    }
+  ],
+  "verification": {
+    "bgsNativePaidTestModelCalls": 0,
+    "realProjectProductEdits": false,
+    "rootExecutedTestGroups": [
+      {
+        "passed": 203,
+        "failed": 0,
+        "files": [
+          "packages/agent-workflow-server/src/beegame/project-delivery.test.ts",
+          "packages/agent-workflow-server/src/beegame/project-conversation.test.ts",
+          "packages/agent-workflow-server/src/beegame/design-handoff.test.ts",
+          "packages/agent-workflow-server/src/beegame/design-release.test.ts",
+          "packages/agent-workflow-server/src/beegame/runtime-acceptance.test.ts",
+          "packages/agent-workflow-server/src/beegame/content-handoff.test.ts",
+          "packages/agent-workflow-server/src/beegame/design-document-references.test.ts",
+          "packages/agent-workflow-server/src/beegame/project-content-authority.test.ts",
+          "packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts",
+          "packages/agent-workflow-server/src/beegame/design-layout-check.test.ts",
+          "packages/agent-workflow-server/src/__tests__/project-design-resolution-routes.test.ts",
+          "packages/agent-workflow-server/src/__tests__/project-native-delivery-routes.test.ts"
+        ]
+      },
+      {
+        "passed": 99,
+        "failed": 0,
+        "files": [
+          "packages/agent-workflow-server/src/beegame/project-author.test.ts",
+          "packages/agent-workflow-server/src/beegame/balance-calculation.test.ts",
+          "src/beegame/direction-authors.test.ts",
+          "src/beegame/direction-authors-runtime.test.ts",
+          "src/beegame/design-review.test.ts",
+          "packages/agent-workflow/src/native-direction-authors.test.ts",
+          "packages/agent-workflow/src/__tests__/design-review-result.test.ts",
+          "packages/agent-workflow/src/__tests__/native-file-environment.test.ts"
+        ]
+      }
+    ],
+    "otherChecks": [
+      "bun run --cwd packages/agent-workflow-server typecheck: exit 0",
+      "bun run build:bun: exit 0; CLI and bundled Skills rebuilt",
+      "git diff --check: exit 0",
+      "Executor validated all six changed Skill directories with skill-creator quick_validate; all passed"
+    ],
+    "interpretation": "Offline synthetic regressions establish the checked scheduling, permissions, metadata and downstream validation behavior, not semantic design adequacy, truthful model observations or playable-game quality. Native SDK integration tests use mock model transport.",
+    "warnings": [
+      "Sandbox denied /bin/ps in test-browser cleanup; suites still exited 0. This is not a real browser gameplay acceptance run.",
+      "No paid token/cost reduction has been measured. No claim that a generated game now meets the user brief."
+    ]
+  },
+  "preEditSourceBackup": "/private/tmp/bgs-design-simplification-h6SR3Z"
+}

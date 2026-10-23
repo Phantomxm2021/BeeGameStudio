@@ -1,0 +1,144 @@
+{
+  "version": "1.74",
+  "date": "2026-10-12",
+  "status": "offline-verified-not-deployed",
+  "priority": [
+    "workflow correctness and delivery closure",
+    "professional design and actual quality",
+    "applicable engine/environment validation",
+    "token/time optimization last"
+  ],
+  "withdrawn": [
+    {
+      "id": "W-01",
+      "proposal": "Default/mandatory shared Web consumer adoption",
+      "reason": "Tool implementation was being elevated into a required technical solution ahead of user requirements and technical design.",
+      "implemented": false,
+      "codeRollbackRequired": false,
+      "retained": "Existing optional consumer, layout/content helpers, actual consumption checks and 1.73 diagnostics."
+    },
+    {
+      "id": "W-02",
+      "proposal": "Review-until-PASS as delivery acceptance",
+      "reason": "Native choice cannot prove quality; not a BGS scheduled stage. No tool ban, repeated Reviewer prompt or new gate was introduced.",
+      "nativeBehaviorFixed": false
+    },
+    {
+      "id": "W-03",
+      "proposal": "Prioritize consumer migration/context-cost optimization ahead of workflow usability",
+      "reason": "User explicitly prioritizes functional workflow first; cost measurements remain honest but no cost-reduction claim."
+    }
+  ],
+  "changes": [
+    {
+      "files": [
+        "packages/agent-workflow-server/src/beegame/workflow-v3/event-page.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+        "packages/agent-workflow-server/src/beegame/session-manager.ts"
+      ],
+      "result": "Autonomous event diagnostics select the actual native attempt and return a backward page. Summaries expose truncation and SDK payload omission. Full event originals and complete live-branch facts remain available to Question/host decisions; normal Chat projection unchanged. No full-history format/serialization on this diagnostic path.",
+      "boundary": "Only autonomous V3 display endpoint is paged. Legacy Task event compatibility remains, including its historical full listing; disk recovery still uses existing transcript reader/cache. No claim of solving every source of host CPU stalls."
+    },
+    {
+      "files": [
+        "packages/agent-workflow-server/src/beegame/workflow-v3/debug-client.js",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/debug.html"
+      ],
+      "result": "Explicit earlier-page read replaces rather than appends output. Pause remains usable during other actions, aborts only this page's outstanding GETs and sends the normal stop request. Older responses cannot roll back a newer Run or overwrite pause result. GET-only 15s timeout never limits the Agent, mutation or permission answer.",
+      "boundary": "Independent debug only. Does not bypass authorization, retry an uncertain save/dispatch, or kill server/native processes. A saturated server can still delay its own stop handler."
+    },
+    {
+      "files": [
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts"
+      ],
+      "result": "Trimmed 1.73 optional Preview helper metadata to satisfy existing no-input-bloat regression; retained --client discovery.",
+      "boundary": "No responsibility/Review prompt added or native tool description/result rewritten."
+    }
+  ],
+  "validation": {
+    "core": {
+      "log": "/private/tmp/bgs-v3-174-core.log",
+      "pass": 69,
+      "fail": 0,
+      "expects": 776,
+      "files": 10,
+      "seconds": 26.55
+    },
+    "native": {
+      "log": "/private/tmp/bgs-v3-174-native-final.log",
+      "pass": 2,
+      "fail": 0,
+      "expects": 214,
+      "files": 2,
+      "seconds": 24.71,
+      "controlledProviderRequests": 36,
+      "paidCalls": 0
+    },
+    "tools": {
+      "log": "/private/tmp/bgs-v3-174-tools.log",
+      "pass": 8,
+      "fail": 0,
+      "skip": 1,
+      "expects": 120,
+      "files": 1,
+      "seconds": 2.54
+    },
+    "distinct": {
+      "pass": 79,
+      "fail": 0,
+      "skip": 1,
+      "expects": 1110
+    },
+    "typecheck": {
+      "exit": 0,
+      "log": "/private/tmp/bgs-v3-174-typecheck-final.log"
+    },
+    "jsSyntax": {
+      "exit": 0
+    },
+    "diffCheck": {
+      "exit": 0
+    },
+    "initialFailures": "Synthetic createRun starts at version1, driver process type widened, and previous optional metadata was2627 chars versus existing <2600 assertion. Corrected fixtures/typing and condensed redundant metadata; no assertion weakened or real game edited."
+  },
+  "environments": {
+    "unityEditors": [
+      {
+        "version": "6000.3.0f1",
+        "binaryExists": true
+      },
+      {
+        "version": "6000.4.0f1",
+        "binaryExists": true
+      }
+    ],
+    "godot": {
+      "foundOnPath": false,
+      "standardAppExists": false
+    },
+    "engineCommandsOnPath": false,
+    "currentCodexEngineMcpTools": [],
+    "note": "Read-only conventional-path checks, no engine process or installation. No project settings/hooks opened. Existence is not a usable CLI license/MCP or game export proof; other BGS Agent configuration was not inferred."
+  },
+  "protections": {
+    "paidRuns": 0,
+    "serviceRestarts": 0,
+    "deployed": false,
+    "manualGameEdits": 0,
+    "formalFrontendEdits": 0,
+    "claudeCodeEdits": 0,
+    "builtinToolsEdits": 0,
+    "skillsEdits": 0,
+    "newAgentLimits": 0,
+    "newStages": 0,
+    "automaticRetries": 0
+  },
+  "remaining": [
+    "Production frontend entry requires distinct authorization; current no-frontend-edit boundary preserved.",
+    "Real eight-domain design/game quality remains unaccepted; fixed fake model fixtures prove transport, not competence.",
+    "Unity/Godot real native operation and target delivery remain unverified; no speculative engine framework.",
+    "Host high-CPU hot function and every interruption/external-operation fault combination remain unresolved.",
+    "No measured real Token reduction; cost optimization deferred. Existing stopped paid project was not resumed."
+  ],
+  "canonicalDocument": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md#7.0 and #10.11"
+}

@@ -1,0 +1,1116 @@
+{
+  "ok": true,
+  "scope": "layout-draft-inspection",
+  "runtimeVerified": false,
+  "viewport": {
+    "width": 960,
+    "height": 540
+  },
+  "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+  "diagnostics": {
+    "outsideViewport": [],
+    "outsideParent": [],
+    "outsideContentArea": [],
+    "belowMinimumControlSize": [],
+    "overlapCandidates": []
+  },
+  "boundaryChecks": [],
+  "nodes": [
+    {
+      "id": "start-root",
+      "active": true,
+      "layout": {
+        "size": [
+          960,
+          540
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          960,
+          0
+        ],
+        [
+          960,
+          540
+        ],
+        [
+          0,
+          540
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 540
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "start-bg",
+      "parentId": "start-root",
+      "active": true,
+      "layout": {
+        "anchorMin": [
+          0,
+          0
+        ],
+        "anchorMax": [
+          1,
+          1
+        ],
+        "sizeDelta": [
+          0,
+          0
+        ],
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          960,
+          540
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          960,
+          0
+        ],
+        [
+          960,
+          540
+        ],
+        [
+          0,
+          540
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 540
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "start-volume-button",
+      "parentId": "start-root",
+      "active": true,
+      "layout": {
+        "anchor": "top-right",
+        "position": [
+          -24,
+          24
+        ],
+        "size": [
+          128,
+          48
+        ]
+      },
+      "pivot": {
+        "x": 1,
+        "y": 0
+      },
+      "corners": [
+        [
+          808,
+          24
+        ],
+        [
+          936,
+          24
+        ],
+        [
+          936,
+          72
+        ],
+        [
+          808,
+          72
+        ]
+      ],
+      "bounds": {
+        "left": 808,
+        "top": 24,
+        "right": 936,
+        "bottom": 72
+      },
+      "controlSize": [
+        128,
+        48
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "start-volume-icon",
+      "parentId": "start-volume-button",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          16,
+          15
+        ],
+        "size": [
+          20,
+          18
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          824,
+          39
+        ],
+        [
+          844,
+          39
+        ],
+        [
+          844,
+          57
+        ],
+        [
+          824,
+          57
+        ]
+      ],
+      "bounds": {
+        "left": 824,
+        "top": 39,
+        "right": 844,
+        "bottom": 57
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "start-volume-text",
+      "parentId": "start-volume-button",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          44,
+          12
+        ],
+        "size": [
+          64,
+          24
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          852,
+          36
+        ],
+        [
+          916,
+          36
+        ],
+        [
+          916,
+          60
+        ],
+        [
+          852,
+          60
+        ]
+      ],
+      "bounds": {
+        "left": 852,
+        "top": 36,
+        "right": 916,
+        "bottom": 60
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "start-column",
+      "parentId": "start-root",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          600,
+          480
+        ],
+        "container": {
+          "direction": "column",
+          "gap": 18,
+          "padding": [
+            28,
+            24,
+            28,
+            24
+          ],
+          "align": "center"
+        }
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          180,
+          30
+        ],
+        [
+          780,
+          30
+        ],
+        [
+          780,
+          510
+        ],
+        [
+          180,
+          510
+        ]
+      ],
+      "bounds": {
+        "left": 180,
+        "top": 30,
+        "right": 780,
+        "bottom": 510
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "game-title",
+      "parentId": "start-column",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          24,
+          28
+        ],
+        "size": [
+          552,
+          96
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          204,
+          58
+        ],
+        [
+          756,
+          58
+        ],
+        [
+          756,
+          154
+        ],
+        [
+          204,
+          154
+        ]
+      ],
+      "bounds": {
+        "left": 204,
+        "top": 58,
+        "right": 756,
+        "bottom": 154
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "title-motif",
+      "parentId": "start-column",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          24,
+          142
+        ],
+        "size": [
+          552,
+          120
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          204,
+          172
+        ],
+        [
+          756,
+          172
+        ],
+        [
+          756,
+          292
+        ],
+        [
+          204,
+          292
+        ]
+      ],
+      "bounds": {
+        "left": 204,
+        "top": 172,
+        "right": 756,
+        "bottom": 292
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "motif-ball",
+      "parentId": "title-motif",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          140,
+          44
+        ],
+        "size": [
+          64,
+          64
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          344,
+          216
+        ],
+        [
+          408,
+          216
+        ],
+        [
+          408,
+          280
+        ],
+        [
+          344,
+          280
+        ]
+      ],
+      "bounds": {
+        "left": 344,
+        "top": 216,
+        "right": 408,
+        "bottom": 280
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "motif-arc",
+      "parentId": "title-motif",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          180,
+          62
+        ],
+        "size": [
+          220,
+          8
+        ],
+        "rotation": -0.28
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          384,
+          234
+        ],
+        [
+          595.4321964283696,
+          173.20175731589498
+        ],
+        [
+          597.6430416168826,
+          180.89020082238113
+        ],
+        [
+          386.2108451885129,
+          241.68844350648618
+        ]
+      ],
+      "bounds": {
+        "left": 384,
+        "top": 173.20175731589498,
+        "right": 597.6430416168826,
+        "bottom": 241.68844350648618
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "motif-brick-1",
+      "parentId": "title-motif",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          360,
+          18
+        ],
+        "size": [
+          40,
+          26
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          564,
+          190
+        ],
+        [
+          604,
+          190
+        ],
+        [
+          604,
+          216
+        ],
+        [
+          564,
+          216
+        ]
+      ],
+      "bounds": {
+        "left": 564,
+        "top": 190,
+        "right": 604,
+        "bottom": 216
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "motif-brick-2",
+      "parentId": "title-motif",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          406,
+          18
+        ],
+        "size": [
+          40,
+          26
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          610,
+          190
+        ],
+        [
+          650,
+          190
+        ],
+        [
+          650,
+          216
+        ],
+        [
+          610,
+          216
+        ]
+      ],
+      "bounds": {
+        "left": 610,
+        "top": 190,
+        "right": 650,
+        "bottom": 216
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "motif-brick-3",
+      "parentId": "title-motif",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          337,
+          52
+        ],
+        "size": [
+          40,
+          26
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          541,
+          224
+        ],
+        [
+          581,
+          224
+        ],
+        [
+          581,
+          250
+        ],
+        [
+          541,
+          250
+        ]
+      ],
+      "bounds": {
+        "left": 541,
+        "top": 224,
+        "right": 581,
+        "bottom": 250
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "motif-brick-4",
+      "parentId": "title-motif",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          383,
+          52
+        ],
+        "size": [
+          40,
+          26
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          587,
+          224
+        ],
+        [
+          627,
+          224
+        ],
+        [
+          627,
+          250
+        ],
+        [
+          587,
+          250
+        ]
+      ],
+      "bounds": {
+        "left": 587,
+        "top": 224,
+        "right": 627,
+        "bottom": 250
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "motif-brick-5",
+      "parentId": "title-motif",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          429,
+          52
+        ],
+        "size": [
+          40,
+          26
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          633,
+          224
+        ],
+        [
+          673,
+          224
+        ],
+        [
+          673,
+          250
+        ],
+        [
+          633,
+          250
+        ]
+      ],
+      "bounds": {
+        "left": 633,
+        "top": 224,
+        "right": 673,
+        "bottom": 250
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "highscore-box",
+      "parentId": "start-column",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          140,
+          280
+        ],
+        "size": [
+          320,
+          48
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          320,
+          310
+        ],
+        [
+          640,
+          310
+        ],
+        [
+          640,
+          358
+        ],
+        [
+          320,
+          358
+        ]
+      ],
+      "bounds": {
+        "left": 320,
+        "top": 310,
+        "right": 640,
+        "bottom": 358
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "highscore-label",
+      "parentId": "highscore-box",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          20,
+          12
+        ],
+        "size": [
+          72,
+          24
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          340,
+          322
+        ],
+        [
+          412,
+          322
+        ],
+        [
+          412,
+          346
+        ],
+        [
+          340,
+          346
+        ]
+      ],
+      "bounds": {
+        "left": 340,
+        "top": 322,
+        "right": 412,
+        "bottom": 346
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "highscore-value",
+      "parentId": "highscore-box",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          104,
+          10
+        ],
+        "size": [
+          196,
+          28
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          424,
+          320
+        ],
+        [
+          620,
+          320
+        ],
+        [
+          620,
+          348
+        ],
+        [
+          424,
+          348
+        ]
+      ],
+      "bounds": {
+        "left": 424,
+        "top": 320,
+        "right": 620,
+        "bottom": 348
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "start-game-button",
+      "parentId": "start-column",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          160,
+          346
+        ],
+        "size": [
+          280,
+          64
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          340,
+          376
+        ],
+        [
+          620,
+          376
+        ],
+        [
+          620,
+          440
+        ],
+        [
+          340,
+          440
+        ]
+      ],
+      "bounds": {
+        "left": 340,
+        "top": 376,
+        "right": 620,
+        "bottom": 440
+      },
+      "controlSize": [
+        280,
+        64
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "start-game-button-label",
+      "parentId": "start-game-button",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          280,
+          32
+        ]
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          340,
+          392
+        ],
+        [
+          620,
+          392
+        ],
+        [
+          620,
+          424
+        ],
+        [
+          340,
+          424
+        ]
+      ],
+      "bounds": {
+        "left": 340,
+        "top": 392,
+        "right": 620,
+        "bottom": 424
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "start-hints",
+      "parentId": "start-column",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          40,
+          428
+        ],
+        "size": [
+          520,
+          24
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          220,
+          458
+        ],
+        [
+          740,
+          458
+        ],
+        [
+          740,
+          482
+        ],
+        [
+          220,
+          482
+        ]
+      ],
+      "bounds": {
+        "left": 220,
+        "top": 458,
+        "right": 740,
+        "bottom": 482
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import apiClient from './apiClient'
-import { getCreditSummary } from './creditsApi'
+import { getCreditSummary, getCreditBalance } from './creditsApi'
 
 vi.mock('./apiClient', () => ({
   default: {
@@ -44,6 +44,17 @@ describe('creditsApi', () => {
       params: { projectId: 'project-1' },
     })
   })
+
+  it('keeps background balance and summary failures out of the global task toast', async () => {
+    const error = Object.assign(new Error('timeout'), { code: 'request_timeout' });
+    vi.mocked(apiClient.get).mockRejectedValueOnce(error).mockRejectedValueOnce(error);
+    await expect(getCreditSummary('project-1', true)).rejects.toBe(error);
+    await expect(getCreditBalance(true)).rejects.toBe(error);
+    expect(apiClient.get).toHaveBeenCalledWith('/api/usage/summary', {
+      params: { projectId: 'project-1' }, headers: { 'Hide-Error-Toast': 'true' },
+    });
+    expect(apiClient.get).toHaveBeenCalledWith('/api/usage-wallet', { headers: { 'Hide-Error-Toast': 'true' } });
+  });
 
   it('keeps an empty project summary at zero', async () => {
     mockGet.mockResolvedValue({

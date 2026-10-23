@@ -15,6 +15,7 @@ describe('resource model config resolver', () => {
           id: 'model-1',
           owner_id: 'owner-1',
           provider: 'openai-compatible',
+          api_protocol: 'responses',
           base_url: 'https://model.test',
           api_key_ciphertext: encryptSecret('backend-secret', 'model-config:api-key'),
           models: { balanced: 'balanced-model' },
@@ -27,10 +28,10 @@ describe('resource model config resolver', () => {
         runtime: {
           modelType: 'openai',
           env: {
-            CLAUDE_CODE_USE_OPENAI: '1',
+            BEEGAME_API_PROTOCOL: 'responses',
             OPENAI_BASE_URL: 'https://model.test',
             OPENAI_API_KEY: 'backend-secret',
-            OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+            BEEGAME_MODEL: 'balanced-model',
           },
         },
       })

@@ -1,0 +1,44 @@
+{
+  "version": "1.53",
+  "date": "2026-10-11",
+  "scope": "BGS readonly active-user-task/source/evidence handoff; no added Review prompt",
+  "changes": [
+    "Removed dedicated Review authority/checklist paragraph from V3 production/change/continuation prompts",
+    "handoff.mjs reuses bound turn bridge, current Run, reviewSourceSnapshot and inspectAgentMeasurementInputs",
+    "Default returns task identity/text, complete-current-requirement fingerprint, selected source hashes and latest saved measurement; details opt-in returns requirements/source text",
+    "Includes interrupted-turn records and latest failed/pending evidence, never falls back to older success",
+    "Reading does not build, test, dispatch a model, update Run, modify sources or grant quality acceptance",
+    "Repeated tool instructions moved to on-demand help; no new execution stage or agent limit"
+  ],
+  "regression": {
+    "files": 10,
+    "pass": 88,
+    "fail": 0,
+    "skip": 0,
+    "expects": 1046,
+    "browserEnabled": true,
+    "nativeDebug": "existing real CLI + controlled loopback model + independent debug page",
+    "nativeFixtureGoalPromptChars": 4378,
+    "nativeFixtureToolContextChars": 2347,
+    "paidModelCalls": 0,
+    "typecheck": "root tsc --noEmit",
+    "resolvedEarlyFailures": ["restricted-sandbox local-port/build failures", "tool context 2892 chars exceeded existing 2600-char assertion; shortened to 2347 without relaxing assertion", "test source union narrowing"]
+  },
+  "protectedSourceFingerprintsMatchPreviousBaseline": {
+    "apps/frontend": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785",
+    "src": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a",
+    "packages/builtin-tools": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+  },
+  "realGameModified": false,
+  "deployedThisTurn": false,
+  "servicesRestartedThisTurn": false,
+  "quality": "unverified",
+  "limitations": [
+    "No real model adoption or net token reduction measured this turn",
+    "Selected source files do not prove complete professional coverage",
+    "Active parent user turn is not a replacement for a delegated assignment or grant of write scope",
+    "Native authored tests and observations require their actual source/report paths; host measurements only certify their actual build/smoke coverage",
+    "Explicit legacy Task Review/Repair contracts remain compatible; autonomous V3 does not automatically dispatch them",
+    "Readonly snapshots are not filesystem locks or semantic/game-quality certification"
+  ]
+}

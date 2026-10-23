@@ -1,0 +1,94 @@
+{
+  "status": "passed",
+  "scope": "Calculation diagnostic gap only; no claim that the retained document/layout design is now correct",
+  "checks": {
+    "unitAndIntegrationTests": 81,
+    "browserTests": 1,
+    "browserCompositionViewportCases": 25,
+    "backendTypeCheck": "passed"
+  },
+  "newAuditStage": false,
+  "newPublishGate": false,
+  "modelCalls": 0,
+  "privateProjectEdits": false,
+  "limitations": "Sibling text/control bounding boxes only, not cross-container occlusion or glyph/pixel visibility. Boundary probes are not a guarantee of all viewport support. Deliberate overlays remain for Agent interpretation.",
+  "rows": [
+    {
+      "label": "HUD 文字／按钮重叠",
+      "source": "drafts/ui-game.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "diagnostics": {
+        "outsideViewport": [],
+        "outsideParent": [],
+        "outsideContentArea": [],
+        "overlapCandidates": [
+          [
+            "hud-score",
+            "hud-lives"
+          ],
+          [
+            "hud-score",
+            "pause-btn"
+          ],
+          [
+            "hud-lives",
+            "pause-btn"
+          ]
+        ]
+      },
+      "boundaryChecks": [],
+      "sourcePreserved": true,
+      "runtimeVerified": false
+    },
+    {
+      "label": "菜单断点两侧",
+      "source": "drafts/ui-start.json",
+      "viewport": {
+        "width": 667,
+        "height": 375
+      },
+      "diagnostics": {
+        "outsideViewport": [],
+        "outsideParent": [],
+        "outsideContentArea": [],
+        "overlapCandidates": []
+      },
+      "boundaryChecks": [
+        {
+          "trigger": "compact",
+          "viewport": {
+            "width": 680,
+            "height": 375
+          },
+          "diagnostics": {
+            "outsideViewport": [],
+            "outsideParent": [],
+            "outsideContentArea": [],
+            "overlapCandidates": []
+          }
+        },
+        {
+          "trigger": "compact",
+          "viewport": {
+            "width": 681,
+            "height": 375
+          },
+          "diagnostics": {
+            "outsideViewport": [],
+            "outsideParent": [],
+            "outsideContentArea": [
+              "title",
+              "start-btn"
+            ],
+            "overlapCandidates": []
+          }
+        }
+      ],
+      "sourcePreserved": true,
+      "runtimeVerified": false
+    }
+  ]
+}

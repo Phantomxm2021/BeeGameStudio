@@ -1,0 +1,85 @@
+name: Backend checks
+
+on:
+  pull_request:
+    paths:
+      - 'packages/**'
+      - 'scripts/**'
+      - 'supabase/**'
+      - 'docker/**'
+      - 'vendor/bgs'
+      - 'package.json'
+      - 'bun.lock'
+      - 'tsconfig*.json'
+      - '.github/workflows/backend-checks.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/**'
+      - 'scripts/**'
+      - 'supabase/**'
+      - 'docker/**'
+      - 'vendor/bgs'
+      - 'package.json'
+      - 'bun.lock'
+      - 'tsconfig*.json'
+      - '.github/workflows/backend-checks.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BGS_SANDBOX_TESTS: '0'
+      BGS_PGLITE_MODULE: ${{ runner.temp }}/bgs-sql-tests/node_modules/@electric-sql/pglite/dist/index.js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25.2.1'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+      - name: Install locked workspace dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Check backend types
+        run: bun run typecheck
+      - name: Install isolated SQL test engine
+        run: |
+          mkdir -p "$RUNNER_TEMP/bgs-sql-tests"
+          bun add --cwd "$RUNNER_TEMP/bgs-sql-tests" --ignore-scripts --exact @electric-sql/pglite@0.5.10
+      # These suites use temporary files and local fake services. Browser and
+      # native-runtime suites remain separate, explicitly enabled checks.
+      - name: Run backend and deployment regressions
+        run: >-
+          bun test
+          packages/agent-workflow/src
+          packages/beegame-security-core/src
+          packages/beegame-skills-core/src
+          packages/beegame-skills-server/src
+          packages/beegame-billing-core/src
+          packages/beegame-billing-server/src
+          packages/beegame-storage-core/src
+          packages/agent-workflow-server/src/auth
+          packages/agent-workflow-server/src/model-providers
+          packages/agent-workflow-server/src/local-runtime-service.test.ts
+          packages/agent-workflow-server/src/beegame/asset-upload.test.ts
+          packages/agent-workflow-server/src/beegame/model-runtime-security.test.ts
+          packages/agent-workflow-server/src/beegame/session-usage-billing.test.ts
+          packages/agent-workflow-server/src/__tests__/preview-manager.test.ts
+          packages/agent-workflow-server/src/__tests__/preview-authorization.test.ts
+          packages/agent-workflow-server/src/__tests__/asset-manifest-async-read.test.ts
+          packages/agent-workflow-server/src/__tests__/v3-legacy-session-mutation.test.ts
+          packages/agent-workflow-server/src/__tests__/v3-project-delete-route.test.ts
+          scripts/__tests__/saas-preflight.test.ts
+          scripts/__tests__/supabase-rest-pagination.test.ts
+          scripts/__tests__/docker-runtime-permissions.test.ts
+          scripts/__tests__/beegame-owner-bootstrap.test.ts
+          scripts/__tests__/beegame-migration-cli.test.ts

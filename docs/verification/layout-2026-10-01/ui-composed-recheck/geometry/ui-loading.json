@@ -1,0 +1,1905 @@
+{
+  "source": ".beegame/tmp/drafts/ui-loading.json",
+  "connection": [],
+  "authoredSha256": "1fe793c9bb066f92059445e90a050b0753b3a0890433a46b63adcedb6a873d14",
+  "inputPreserved": true,
+  "scope": "Rectangle calculations and independent intersections of resolved boxes, not font, occlusion or runtime acceptance",
+  "cases": [
+    {
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 960,
+          "height": 540
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                960,
+                540
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                960,
+                0
+              ],
+              [
+                960,
+                540
+              ],
+              [
+                0,
+                540
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 960,
+              "bottom": 540
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-group",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                160,
+                88
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 16,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                400,
+                226
+              ],
+              [
+                560,
+                226
+              ],
+              [
+                560,
+                314
+              ],
+              [
+                400,
+                314
+              ]
+            ],
+            "bounds": {
+              "left": 400,
+              "top": 226,
+              "right": 560,
+              "bottom": 314
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-spinner",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                40,
+                40
+              ],
+              "position": [
+                60,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                460,
+                226
+              ],
+              [
+                500,
+                226
+              ],
+              [
+                500,
+                266
+              ],
+              [
+                460,
+                266
+              ]
+            ],
+            "bounds": {
+              "left": 460,
+              "top": 226,
+              "right": 500,
+              "bottom": 266
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-text",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                120,
+                20
+              ],
+              "position": [
+                20,
+                56
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                420,
+                282
+              ],
+              [
+                540,
+                282
+              ],
+              [
+                540,
+                302
+              ],
+              [
+                420,
+                302
+              ]
+            ],
+            "bounds": {
+              "left": 420,
+              "top": 282,
+              "right": 540,
+              "bottom": 302
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                390,
+                844
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                390,
+                0
+              ],
+              [
+                390,
+                844
+              ],
+              [
+                0,
+                844
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 390,
+              "bottom": 844
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-group",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                160,
+                88
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 16,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                115,
+                378
+              ],
+              [
+                275,
+                378
+              ],
+              [
+                275,
+                466
+              ],
+              [
+                115,
+                466
+              ]
+            ],
+            "bounds": {
+              "left": 115,
+              "top": 378,
+              "right": 275,
+              "bottom": 466
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-spinner",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                40,
+                40
+              ],
+              "position": [
+                60,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                175,
+                378
+              ],
+              [
+                215,
+                378
+              ],
+              [
+                215,
+                418
+              ],
+              [
+                175,
+                418
+              ]
+            ],
+            "bounds": {
+              "left": 175,
+              "top": 378,
+              "right": 215,
+              "bottom": 418
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-text",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                120,
+                20
+              ],
+              "position": [
+                20,
+                56
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                135,
+                434
+              ],
+              [
+                255,
+                434
+              ],
+              [
+                255,
+                454
+              ],
+              [
+                135,
+                454
+              ]
+            ],
+            "bounds": {
+              "left": 135,
+              "top": 434,
+              "right": 255,
+              "bottom": 454
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 320,
+          "height": 480
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                320,
+                480
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                320,
+                0
+              ],
+              [
+                320,
+                480
+              ],
+              [
+                0,
+                480
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 320,
+              "bottom": 480
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-group",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                160,
+                88
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 16,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                80,
+                196
+              ],
+              [
+                240,
+                196
+              ],
+              [
+                240,
+                284
+              ],
+              [
+                80,
+                284
+              ]
+            ],
+            "bounds": {
+              "left": 80,
+              "top": 196,
+              "right": 240,
+              "bottom": 284
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-spinner",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                40,
+                40
+              ],
+              "position": [
+                60,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                140,
+                196
+              ],
+              [
+                180,
+                196
+              ],
+              [
+                180,
+                236
+              ],
+              [
+                140,
+                236
+              ]
+            ],
+            "bounds": {
+              "left": 140,
+              "top": 196,
+              "right": 180,
+              "bottom": 236
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-text",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                120,
+                20
+              ],
+              "position": [
+                20,
+                56
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                100,
+                252
+              ],
+              [
+                220,
+                252
+              ],
+              [
+                220,
+                272
+              ],
+              [
+                100,
+                272
+              ]
+            ],
+            "bounds": {
+              "left": 100,
+              "top": 252,
+              "right": 220,
+              "bottom": 272
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 320,
+          "height": 568
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                320,
+                568
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                320,
+                0
+              ],
+              [
+                320,
+                568
+              ],
+              [
+                0,
+                568
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 320,
+              "bottom": 568
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-group",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                160,
+                88
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 16,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                80,
+                240
+              ],
+              [
+                240,
+                240
+              ],
+              [
+                240,
+                328
+              ],
+              [
+                80,
+                328
+              ]
+            ],
+            "bounds": {
+              "left": 80,
+              "top": 240,
+              "right": 240,
+              "bottom": 328
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-spinner",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                40,
+                40
+              ],
+              "position": [
+                60,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                140,
+                240
+              ],
+              [
+                180,
+                240
+              ],
+              [
+                180,
+                280
+              ],
+              [
+                140,
+                280
+              ]
+            ],
+            "bounds": {
+              "left": 140,
+              "top": 240,
+              "right": 180,
+              "bottom": 280
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-text",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                120,
+                20
+              ],
+              "position": [
+                20,
+                56
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                100,
+                296
+              ],
+              [
+                220,
+                296
+              ],
+              [
+                220,
+                316
+              ],
+              [
+                100,
+                316
+              ]
+            ],
+            "bounds": {
+              "left": 100,
+              "top": 296,
+              "right": 220,
+              "bottom": 316
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 600,
+          "height": 800
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                600,
+                800
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                600,
+                0
+              ],
+              [
+                600,
+                800
+              ],
+              [
+                0,
+                800
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 600,
+              "bottom": 800
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-group",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                160,
+                88
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 16,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                220,
+                356
+              ],
+              [
+                380,
+                356
+              ],
+              [
+                380,
+                444
+              ],
+              [
+                220,
+                444
+              ]
+            ],
+            "bounds": {
+              "left": 220,
+              "top": 356,
+              "right": 380,
+              "bottom": 444
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-spinner",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                40,
+                40
+              ],
+              "position": [
+                60,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                280,
+                356
+              ],
+              [
+                320,
+                356
+              ],
+              [
+                320,
+                396
+              ],
+              [
+                280,
+                396
+              ]
+            ],
+            "bounds": {
+              "left": 280,
+              "top": 356,
+              "right": 320,
+              "bottom": 396
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-text",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                120,
+                20
+              ],
+              "position": [
+                20,
+                56
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                240,
+                412
+              ],
+              [
+                360,
+                412
+              ],
+              [
+                360,
+                432
+              ],
+              [
+                240,
+                432
+              ]
+            ],
+            "bounds": {
+              "left": 240,
+              "top": 412,
+              "right": 360,
+              "bottom": 432
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 601,
+          "height": 800
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                601,
+                800
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                800
+              ],
+              [
+                0,
+                800
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 800
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-group",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                160,
+                88
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 16,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                220.5,
+                356
+              ],
+              [
+                380.5,
+                356
+              ],
+              [
+                380.5,
+                444
+              ],
+              [
+                220.5,
+                444
+              ]
+            ],
+            "bounds": {
+              "left": 220.5,
+              "top": 356,
+              "right": 380.5,
+              "bottom": 444
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-spinner",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                40,
+                40
+              ],
+              "position": [
+                60,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                280.5,
+                356
+              ],
+              [
+                320.5,
+                356
+              ],
+              [
+                320.5,
+                396
+              ],
+              [
+                280.5,
+                396
+              ]
+            ],
+            "bounds": {
+              "left": 280.5,
+              "top": 356,
+              "right": 320.5,
+              "bottom": 396
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-text",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                120,
+                20
+              ],
+              "position": [
+                20,
+                56
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                240.5,
+                412
+              ],
+              [
+                360.5,
+                412
+              ],
+              [
+                360.5,
+                432
+              ],
+              [
+                240.5,
+                432
+              ]
+            ],
+            "bounds": {
+              "left": 240.5,
+              "top": 412,
+              "right": 360.5,
+              "bottom": 432
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 700,
+          "height": 500
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                700,
+                500
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                700,
+                0
+              ],
+              [
+                700,
+                500
+              ],
+              [
+                0,
+                500
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 700,
+              "bottom": 500
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-group",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                160,
+                88
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 16,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                270,
+                206
+              ],
+              [
+                430,
+                206
+              ],
+              [
+                430,
+                294
+              ],
+              [
+                270,
+                294
+              ]
+            ],
+            "bounds": {
+              "left": 270,
+              "top": 206,
+              "right": 430,
+              "bottom": 294
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-spinner",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                40,
+                40
+              ],
+              "position": [
+                60,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                330,
+                206
+              ],
+              [
+                370,
+                206
+              ],
+              [
+                370,
+                246
+              ],
+              [
+                330,
+                246
+              ]
+            ],
+            "bounds": {
+              "left": 330,
+              "top": 206,
+              "right": 370,
+              "bottom": 246
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-text",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                120,
+                20
+              ],
+              "position": [
+                20,
+                56
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                290,
+                262
+              ],
+              [
+                410,
+                262
+              ],
+              [
+                410,
+                282
+              ],
+              [
+                290,
+                282
+              ]
+            ],
+            "bounds": {
+              "left": 290,
+              "top": 262,
+              "right": 410,
+              "bottom": 282
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 667,
+          "height": 480
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                667,
+                480
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                667,
+                0
+              ],
+              [
+                667,
+                480
+              ],
+              [
+                0,
+                480
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 667,
+              "bottom": 480
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-group",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                160,
+                88
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 16,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                253.5,
+                196
+              ],
+              [
+                413.5,
+                196
+              ],
+              [
+                413.5,
+                284
+              ],
+              [
+                253.5,
+                284
+              ]
+            ],
+            "bounds": {
+              "left": 253.5,
+              "top": 196,
+              "right": 413.5,
+              "bottom": 284
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-spinner",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                40,
+                40
+              ],
+              "position": [
+                60,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                313.5,
+                196
+              ],
+              [
+                353.5,
+                196
+              ],
+              [
+                353.5,
+                236
+              ],
+              [
+                313.5,
+                236
+              ]
+            ],
+            "bounds": {
+              "left": 313.5,
+              "top": 196,
+              "right": 353.5,
+              "bottom": 236
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "loading-text",
+            "parentId": "loading-group",
+            "active": true,
+            "layout": {
+              "size": [
+                120,
+                20
+              ],
+              "position": [
+                20,
+                56
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                273.5,
+                252
+              ],
+              [
+                393.5,
+                252
+              ],
+              [
+                393.5,
+                272
+              ],
+              [
+                273.5,
+                272
+              ]
+            ],
+            "bounds": {
+              "left": 273.5,
+              "top": 252,
+              "right": 393.5,
+              "bottom": 272
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    }
+  ]
+}

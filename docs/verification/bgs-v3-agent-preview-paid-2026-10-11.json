@@ -1,0 +1,464 @@
+{
+  "schema": "bgs-v3-paid-audit-evidence-v1",
+  "date": "2026-10-11",
+  "verdict": "paid-group-failed-no-paid-retry",
+  "projectId": "v3-paid-cab49c9f-b498-4790-816e-3da680cc8c30",
+  "projectRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/prism-courier-v3--c5209fb2cb24",
+  "runId": "09681bfb-a408-429f-a431-9c7ad6c1e5be",
+  "model": "ark-code-latest",
+  "runtimeState": {
+    "status": "blocked",
+    "version": 9,
+    "deliveryEligible": false,
+    "gameDeliveryComplete": false,
+    "requirementChangePaidTestComplete": false
+  },
+  "usage": {
+    "complete": {
+      "input": 51074,
+      "output": 11877,
+      "cached": 481552,
+      "total": 544503
+    },
+    "completedRequestCount": 15,
+    "startCount": 16,
+    "incompleteStarts": 1,
+    "reportedLowerBound": {
+      "nonCachedInput": 52818,
+      "output": 11878,
+      "cachedInput": 523336,
+      "total": 588032
+    },
+    "billingFinal": false,
+    "requests": [
+      {
+        "index": 1,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:38:47.893Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Bash"
+          }
+        ],
+        "input_tokens": 27691,
+        "output_tokens": 155,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total": 27846
+      },
+      {
+        "index": 2,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:38:56.744Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Skill",
+            "skill": "bgs-builtins:game-plan-execution"
+          }
+        ],
+        "input_tokens": 1779,
+        "output_tokens": 361,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 27448,
+        "total": 29588
+      },
+      {
+        "index": 3,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:39:40.561Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "TodoWrite"
+          }
+        ],
+        "input_tokens": 2687,
+        "output_tokens": 1890,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 27448,
+        "total": 32025
+      },
+      {
+        "index": 4,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:39:46.241Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Write",
+            "file": "package.json"
+          }
+        ],
+        "input_tokens": 2671,
+        "output_tokens": 296,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 29496,
+        "total": 32463
+      },
+      {
+        "index": 5,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:39:50.818Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Write",
+            "file": "vite.config.js"
+          }
+        ],
+        "input_tokens": 1013,
+        "output_tokens": 173,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 31544,
+        "total": 32730
+      },
+      {
+        "index": 6,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:39:56.219Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Write",
+            "file": "index.html"
+          }
+        ],
+        "input_tokens": 1283,
+        "output_tokens": 246,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 31544,
+        "total": 33073
+      },
+      {
+        "index": 7,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:40:30.635Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Write",
+            "file": "engine.js"
+          }
+        ],
+        "input_tokens": 599,
+        "output_tokens": 1771,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 32568,
+        "total": 34938
+      },
+      {
+        "index": 8,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:41:05.215Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Write",
+            "file": "levels.js"
+          }
+        ],
+        "input_tokens": 2467,
+        "output_tokens": 1908,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 32568,
+        "total": 36943
+      },
+      {
+        "index": 9,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:41:22.238Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Write",
+            "file": "engine.test.js"
+          }
+        ],
+        "input_tokens": 2424,
+        "output_tokens": 1013,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 34616,
+        "total": 38053
+      },
+      {
+        "index": 10,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:41:25.587Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Bash"
+          }
+        ],
+        "input_tokens": 1487,
+        "output_tokens": 153,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 36664,
+        "total": 38304
+      },
+      {
+        "index": 11,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:41:52.312Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Edit",
+            "file": "levels.js"
+          }
+        ],
+        "input_tokens": 1328,
+        "output_tokens": 1336,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 37688,
+        "total": 40352
+      },
+      {
+        "index": 12,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:42:00.471Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Edit",
+            "file": "engine.test.js"
+          }
+        ],
+        "input_tokens": 1828,
+        "output_tokens": 426,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 38712,
+        "total": 40966
+      },
+      {
+        "index": 13,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:42:04.551Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Bash"
+          }
+        ],
+        "input_tokens": 1330,
+        "output_tokens": 139,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 39736,
+        "total": 41205
+      },
+      {
+        "index": 14,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:42:41.972Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "TodoWrite"
+          }
+        ],
+        "input_tokens": 508,
+        "output_tokens": 1319,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 40760,
+        "total": 42587
+      },
+      {
+        "index": 15,
+        "turnId": "beegame-turn-beegame_2c4b7cfa5f304956a78b0c56b85d1729-1",
+        "at": "2026-10-10T21:42:57.941Z",
+        "parentToolId": null,
+        "tools": [
+          {
+            "name": "Write",
+            "file": "audio.js"
+          }
+        ],
+        "input_tokens": 1979,
+        "output_tokens": 691,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 40760,
+        "total": 43430
+      }
+    ],
+    "groups": [
+      {
+        "name": "探索、Skill、规划",
+        "requests": [
+          1,
+          3
+        ],
+        "input": 32157,
+        "output": 2406,
+        "cached": 54896,
+        "total": 89459
+      },
+      {
+        "name": "工程入口文件",
+        "requests": [
+          4,
+          6
+        ],
+        "input": 4967,
+        "output": 715,
+        "cached": 92584,
+        "total": 98266
+      },
+      {
+        "name": "规则、关卡、测试、安装",
+        "requests": [
+          7,
+          10
+        ],
+        "input": 6977,
+        "output": 4845,
+        "cached": 136416,
+        "total": 148238
+      },
+      {
+        "name": "修复与复查",
+        "requests": [
+          11,
+          13
+        ],
+        "input": 4486,
+        "output": 1901,
+        "cached": 116136,
+        "total": 122523
+      },
+      {
+        "name": "计划更新与音频",
+        "requests": [
+          14,
+          15
+        ],
+        "input": 2487,
+        "output": 2010,
+        "cached": 81520,
+        "total": 86017
+      },
+      {
+        "name": "被中断的界面请求（只有起始用量）",
+        "requests": [
+          16,
+          16
+        ],
+        "input": 1744,
+        "output": 1,
+        "cached": 41784,
+        "total": 43529
+      }
+    ]
+  },
+  "preservedProjectArtifacts": {
+    "src/game/engine.js": {
+      "bytes": 3399,
+      "sha256": "f62947bfbdc6429c57e942fb32538cdc5dfe33fd7a0e022217a7acbcd27ca3a4"
+    },
+    "src/game/levels.js": {
+      "bytes": 1815,
+      "sha256": "6294e6228d4eaa84bf0bd85c6029b70d0dfe6f7daf364c4d3a5cbcec06339ac0"
+    },
+    "src/game/audio.js": {
+      "bytes": 1369,
+      "sha256": "0c15e1fcccae71290282400c9953ecefe90fea7674e05ea7748491c04571e930"
+    },
+    "tests/engine.test.js": {
+      "bytes": 2975,
+      "sha256": "19bb621f886ebe93900d7716c94cba9fd974c00f6cb30362fc01f660fc70f343"
+    },
+    "package.json": {
+      "bytes": 375,
+      "sha256": "6e0c3230023d377426f350f52ce69e8c2a36df185d7cfe66ee6cd3264dd2bf0a"
+    },
+    "vite.config.js": {
+      "bytes": 162,
+      "sha256": "c578b140c94a92e1d56f9ea4dae5f202dda514f1e06b380744ae698954f28b37"
+    },
+    "index.html": {
+      "bytes": 339,
+      "sha256": "b2739c18d5dfd5bf37b3010dbdbcce6b2530e162cc19c031be4b9cc91c3a9693"
+    }
+  },
+  "sourceHashes": {
+    "additionalSources": {
+      "beegame/native-cli-process-runner.ts": { "bytes": 38410, "sha256": "3ffc4a902c79f61decb1454b6a1ee12b591cf3ddc7dc8f595f52bea40c0f2dc6" },
+      "beegame/native-cli-process-runner.test.ts": { "bytes": 42410, "sha256": "7b3b0bc212b5fbf62395e250d1f1b2b3c9951c34b6ff442287cd6f4fc8771474" },
+      "scripts/serve-workflow-v3-paid-debug.ts": { "bytes": 5702, "sha256": "d7804c0fc8c9a17c1c6608f841e06b5b3927481253a0454f6047d62ee337a2e0" }
+    },
+    "protected": {
+      "src": {
+        "files": 2445,
+        "sha256": "c9ebce9fd4a0a161bd6d686866eca1ca645f39f45e0c4f4bad87e119393534d6"
+      },
+      "packages/builtin-tools": {
+        "files": 383,
+        "sha256": "6ea20f3920b4217d60e6eb11f6adf31bc89dd47859708c83259c68f936f85461"
+      },
+      "apps/frontend": {
+        "files": 508,
+        "sha256": "2ba3b642e4fa584b4b488e912f79853fdba122d8b38c2dcf33fa29928e52e091"
+      }
+    },
+    "sources": {
+      "app.ts": {
+        "bytes": 294907,
+        "sha256": "7d507791795e8566db4aac6bbd2bb8b6e660606e9b2d494bb490cc27b0962167"
+      },
+      "beegame/workflow-v3/agent-goal.ts": {
+        "bytes": 18345,
+        "sha256": "8ee4156b5d16e1d1b94361418f2d48fe646006d3e278124c0195dadf6cb15f43"
+      },
+      "beegame/workflow-v3/agent-tools.ts": {
+        "bytes": 5998,
+        "sha256": "ee0ec8116e80efdc11828f8591f5e09af23ed05ddf14d60e8bd65a2b7b8b5732"
+      },
+      "beegame/workflow-v3/routes.ts": {
+        "bytes": 31098,
+        "sha256": "740fb8d4eccee7bdff5cd0a46c02f09ab1c5ca0f6e42db8ac62e6d3fcb5ee2c4"
+      },
+      "beegame/workflow-v3/store.ts": {
+        "bytes": 12572,
+        "sha256": "6673f689efe9b2a7cf99d323e41100cee2874d8dbfed02301959fda8b3f7ff10"
+      },
+      "beegame/workflow-v3/agent-goal.test.ts": {
+        "bytes": 28688,
+        "sha256": "4b8c144e6c1d0cf46f6ec969676fdc806018a657ffef23c580e8e124a733ae4f"
+      },
+      "beegame/workflow-v3/agent-tools.test.ts": {
+        "bytes": 9673,
+        "sha256": "843318dd259174357bbd062e51af38c4f16894b05e2a78ba83d951037c5b104f"
+      },
+      "beegame/workflow-v3/agent-goal-native.test.ts": {
+        "bytes": 17035,
+        "sha256": "208c784ee55b67d493a6746c2201320b00e616268b96e3c21cff60ae86c78c72"
+      }
+    }
+  },
+  "regression": {
+    "finalAffected": {
+      "passed": 106,
+      "failed": 0,
+      "expects": 646,
+      "files": 10
+    },
+    "earlierCompatibility": {
+      "passed": 321,
+      "skipped": 4,
+      "failed": 0,
+      "files": 39,
+      "finalFrozenVersion": false
+    },
+    "typescriptExitCode": 0
+  },
+  "restrictions": {
+    "dedicatedAcceptanceServiceStopped": true,
+    "formalFrontendUnchanged": true,
+    "claudeCodeSourceUnchanged": true,
+    "builtinToolsUnchanged": true,
+    "projectArtifactsNotManuallyEdited": true,
+    "noAdditionalPaidDispatch": true,
+    "noSQL": true
+  }
+}

@@ -1,5 +1,6 @@
 export {
   createPinnedHttpAgent,
+  createPinnedLookup,
   createPinnedHttpsAgent,
   createPinnedUndiciDispatcher,
   inspectOutboundTarget,
@@ -16,3 +17,4 @@ export {
   type TLSAwareFetch,
   type TLSAwareFetchOptions,
 } from './tls-aware-fetch'
+export { authRequestTimeoutMs, verifiedTokenCacheUntil } from './auth-timing'

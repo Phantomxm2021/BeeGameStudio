@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-13",
+  "basis": "V3 §3.5 / §10.20, Unity dyld blocked Framework reproduction",
+  "existingMechanisms": {
+    "normalPermission": "BGS preserves native stdio decisions; ordinary Bash allow is not OS filesystem grant",
+    "addDir": "Native additionalDirectories is writable and overridden by launch deny-all filesystem; unsuitable for read-only tool installs",
+    "globalSettings": "Trusted user settings remain loaded, but launch denyRead / uses flag allow-list; project settings/hooks remain disabled",
+    "unsandboxedFallback": "Currently forbidden at project boundary; remains forbidden",
+    "mcp": "External server processes/network and secrets are separate; read-only install grant does not certify MCP sandboxing"
+  },
+  "decision": "One optional trusted host environment JSON mapping canonical workspace -> exact read-only tool paths. No new API, table, tool, planning stage, prompt or engine adapter.",
+  "trust": "Read host process.env only, not selected model environment, brief, CLAUDE.md or project settings. Strip map from native child environment.",
+  "validation": "Only matching workspace entry; reject malformed maps/entries, nonabsolute or noncanonical paths, links, missing paths and broad root/home/Applications or ancestors of the project/host. Validate before opening execution scratch. No auto-discovery/grants.",
+  "scope": "Additional allowRead only; no extra allowWrite, Read auto-approval, hook/settings, network, PATH rewrite, runtime choice or non-sandbox execution.",
+  "sideEffects": [
+    "Configured external install bytes become readable to commands in that explicit project, not just an engine binary.",
+    "Removing a grant affects next native launch; already running sandbox policy is immutable until normal exit; no active turn hot mutation.",
+    "CLI version success does not prove licensing/cache access, project editing/build/runtime, MCP isolation or full game delivery.",
+    "Canonical path checks do not authenticate publisher or eliminate privileged administrator/OS races; tool installs must be trusted."
+  ],
+  "simplerAlternativesRejected": [
+    "Implicit installed-engine lookup assigns capabilities without authorization.",
+    "Global allowed tool roots expose unrelated projects.",
+    "--add-dir grants writes; unsandboxed approval removes project isolation.",
+    "Full per-engine roles/schema/authorization database not needed for proven read-only linker gap."
+  ],
+  "verification": "Minimal red/green scope tests, actual macOS sandbox read/write/symlink tests, real native CLI with fixed loopback provider, and optional Unity read-only headless version in explicitly granted fixture; no license/config/project writes.",
+  "deployment": "Implement only; do not edit production root env, restart active services or enable grants for real projects this turn."
+}

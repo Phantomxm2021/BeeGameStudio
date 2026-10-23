@@ -1,0 +1,943 @@
+{
+  "ok": true,
+  "scope": "layout-draft-inspection",
+  "runtimeVerified": false,
+  "viewport": {
+    "width": 2560,
+    "height": 1080
+  },
+  "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+  "diagnostics": {
+    "outsideViewport": [],
+    "outsideParent": [],
+    "outsideContentArea": [],
+    "belowMinimumControlSize": [],
+    "overlapCandidates": [],
+    "outsideCameraView": []
+  },
+  "boundaryChecks": [],
+  "nodes": [
+    {
+      "id": "game-hud-root",
+      "active": true,
+      "layout": {
+        "size": [
+          2560,
+          1080
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          2560,
+          0
+        ],
+        [
+          2560,
+          1080
+        ],
+        [
+          0,
+          1080
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 2560,
+        "bottom": 1080
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "game-view",
+      "parentId": "game-hud-root",
+      "active": true,
+      "layout": {
+        "anchorMin": [
+          0,
+          0
+        ],
+        "anchorMax": [
+          1,
+          1
+        ],
+        "sizeDelta": [
+          0,
+          0
+        ],
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          2560,
+          1080
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          2560,
+          0
+        ],
+        [
+          2560,
+          1080
+        ],
+        [
+          0,
+          1080
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 2560,
+        "bottom": 1080
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "camera-plane",
+      "parentId": "game-view",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          1920,
+          1080
+        ],
+        "item": {
+          "absolute": true
+        }
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          320,
+          0
+        ],
+        [
+          2240,
+          0
+        ],
+        [
+          2240,
+          1080
+        ],
+        [
+          320,
+          1080
+        ]
+      ],
+      "bounds": {
+        "left": 320,
+        "top": 0,
+        "right": 2240,
+        "bottom": 1080
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "worldRootId": "camera-plane",
+      "outsideCameraView": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "ready-prompt-primary",
+      "parentId": "camera-plane",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          620,
+          688
+        ],
+        "size": [
+          680,
+          48
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          940,
+          688
+        ],
+        [
+          1620,
+          688
+        ],
+        [
+          1620,
+          736
+        ],
+        [
+          940,
+          736
+        ]
+      ],
+      "bounds": {
+        "left": 940,
+        "top": 688,
+        "right": 1620,
+        "bottom": 736
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "worldRootId": "camera-plane",
+      "outsideCameraView": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "ready-prompt-sub",
+      "parentId": "camera-plane",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          620,
+          744
+        ],
+        "size": [
+          680,
+          32
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          940,
+          744
+        ],
+        [
+          1620,
+          744
+        ],
+        [
+          1620,
+          776
+        ],
+        [
+          940,
+          776
+        ]
+      ],
+      "bounds": {
+        "left": 940,
+        "top": 744,
+        "right": 1620,
+        "bottom": 776
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "worldRootId": "camera-plane",
+      "outsideCameraView": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "hud-strip",
+      "parentId": "game-view",
+      "active": true,
+      "layout": {
+        "anchorMin": [
+          0,
+          0
+        ],
+        "anchorMax": [
+          1,
+          0
+        ],
+        "sizeDelta": [
+          0,
+          52
+        ],
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          2560,
+          52
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          2560,
+          0
+        ],
+        [
+          2560,
+          52
+        ],
+        [
+          0,
+          52
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 2560,
+        "bottom": 52
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "score-box",
+      "parentId": "hud-strip",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          24,
+          2
+        ],
+        "size": [
+          220,
+          48
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          24,
+          2
+        ],
+        [
+          244,
+          2
+        ],
+        [
+          244,
+          50
+        ],
+        [
+          24,
+          50
+        ]
+      ],
+      "bounds": {
+        "left": 24,
+        "top": 2,
+        "right": 244,
+        "bottom": 50
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "score-label",
+      "parentId": "score-box",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          14,
+          4
+        ],
+        "size": [
+          60,
+          16
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          38,
+          6
+        ],
+        [
+          98,
+          6
+        ],
+        [
+          98,
+          22
+        ],
+        [
+          38,
+          22
+        ]
+      ],
+      "bounds": {
+        "left": 38,
+        "top": 6,
+        "right": 98,
+        "bottom": 22
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "score-value",
+      "parentId": "score-box",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          14,
+          23
+        ],
+        "size": [
+          192,
+          24
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          38,
+          25
+        ],
+        [
+          230,
+          25
+        ],
+        [
+          230,
+          49
+        ],
+        [
+          38,
+          49
+        ]
+      ],
+      "bounds": {
+        "left": 38,
+        "top": 25,
+        "right": 230,
+        "bottom": 49
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "lives-group",
+      "parentId": "hud-strip",
+      "active": true,
+      "layout": {
+        "anchor": "top-center",
+        "position": [
+          0,
+          10
+        ],
+        "size": [
+          120,
+          32
+        ]
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0
+      },
+      "corners": [
+        [
+          1220,
+          10
+        ],
+        [
+          1340,
+          10
+        ],
+        [
+          1340,
+          42
+        ],
+        [
+          1220,
+          42
+        ]
+      ],
+      "bounds": {
+        "left": 1220,
+        "top": 10,
+        "right": 1340,
+        "bottom": 42
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "life-1",
+      "parentId": "lives-group",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          0,
+          2
+        ],
+        "size": [
+          28,
+          28
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          1220,
+          12
+        ],
+        [
+          1248,
+          12
+        ],
+        [
+          1248,
+          40
+        ],
+        [
+          1220,
+          40
+        ]
+      ],
+      "bounds": {
+        "left": 1220,
+        "top": 12,
+        "right": 1248,
+        "bottom": 40
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "life-2",
+      "parentId": "lives-group",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          46,
+          2
+        ],
+        "size": [
+          28,
+          28
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          1266,
+          12
+        ],
+        [
+          1294,
+          12
+        ],
+        [
+          1294,
+          40
+        ],
+        [
+          1266,
+          40
+        ]
+      ],
+      "bounds": {
+        "left": 1266,
+        "top": 12,
+        "right": 1294,
+        "bottom": 40
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "life-3",
+      "parentId": "lives-group",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          92,
+          2
+        ],
+        "size": [
+          28,
+          28
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          1312,
+          12
+        ],
+        [
+          1340,
+          12
+        ],
+        [
+          1340,
+          40
+        ],
+        [
+          1312,
+          40
+        ]
+      ],
+      "bounds": {
+        "left": 1312,
+        "top": 12,
+        "right": 1340,
+        "bottom": 40
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "pause-button",
+      "parentId": "hud-strip",
+      "active": true,
+      "layout": {
+        "anchor": "top-right",
+        "position": [
+          -24,
+          4
+        ],
+        "size": [
+          88,
+          44
+        ]
+      },
+      "pivot": {
+        "x": 1,
+        "y": 0
+      },
+      "corners": [
+        [
+          2448,
+          4
+        ],
+        [
+          2536,
+          4
+        ],
+        [
+          2536,
+          48
+        ],
+        [
+          2448,
+          48
+        ]
+      ],
+      "bounds": {
+        "left": 2448,
+        "top": 4,
+        "right": 2536,
+        "bottom": 48
+      },
+      "controlSize": [
+        88,
+        44
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "pause-bar-1",
+      "parentId": "pause-button",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          24,
+          14
+        ],
+        "size": [
+          6,
+          16
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          2472,
+          18
+        ],
+        [
+          2478,
+          18
+        ],
+        [
+          2478,
+          34
+        ],
+        [
+          2472,
+          34
+        ]
+      ],
+      "bounds": {
+        "left": 2472,
+        "top": 18,
+        "right": 2478,
+        "bottom": 34
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "pause-bar-2",
+      "parentId": "pause-button",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          36,
+          14
+        ],
+        "size": [
+          6,
+          16
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          2484,
+          18
+        ],
+        [
+          2490,
+          18
+        ],
+        [
+          2490,
+          34
+        ],
+        [
+          2484,
+          34
+        ]
+      ],
+      "bounds": {
+        "left": 2484,
+        "top": 18,
+        "right": 2490,
+        "bottom": 34
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "pause-text",
+      "parentId": "pause-button",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          50,
+          12
+        ],
+        "size": [
+          36,
+          20
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          2498,
+          16
+        ],
+        [
+          2534,
+          16
+        ],
+        [
+          2534,
+          36
+        ],
+        [
+          2498,
+          36
+        ]
+      ],
+      "bounds": {
+        "left": 2498,
+        "top": 16,
+        "right": 2534,
+        "bottom": 36
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    }
+  ],
+  "gameView": {
+    "nodeId": "game-view",
+    "bounds": {
+      "left": 0,
+      "top": 0,
+      "right": 2560,
+      "bottom": 1080
+    },
+    "viewport": {
+      "width": 2560,
+      "height": 1080
+    }
+  },
+  "cameraView": {
+    "projection": "orthographic",
+    "framing": "letterbox",
+    "rect": {
+      "x": 320,
+      "y": 0,
+      "width": 1920,
+      "height": 1080
+    },
+    "aspect": 1.7777777777777777,
+    "halfHeight": 5.4,
+    "halfWidth": 9.6
+  }
+}

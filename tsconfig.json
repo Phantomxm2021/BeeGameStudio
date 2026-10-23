@@ -11,60 +11,98 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
-    "types": ["bun"],
+    "types": [
+      "bun"
+    ],
     "paths": {
-      "src/*": ["./src/*"],
-      "@bee-game-studio/builtin-tools/*": ["./packages/builtin-tools/src/*"],
-      "@bee-game-studio/builtin-tools": [
-        "./packages/builtin-tools/src/index.ts"
-      ],
-      "@bee-game-studio/mcp-client/*": ["./packages/mcp-client/src/*"],
-      "@bee-game-studio/mcp-client": ["./packages/mcp-client/src/index.ts"],
-      "@bee-game-studio/agent-tools/*": ["./packages/agent-tools/src/*"],
-      "@bee-game-studio/agent-tools": ["./packages/agent-tools/src/index.ts"],
-      "@bee-game-studio/weixin/*": ["./packages/weixin/src/*"],
-      "@bee-game-studio/weixin": ["./packages/weixin/src/index.ts"],
-      "@bee-game-studio/workflow-engine/*": [
-        "./packages/workflow-engine/src/*"
-      ],
-      "@bee-game-studio/workflow-engine": [
-        "./packages/workflow-engine/src/index.ts"
-      ],
-      "@bee-game-studio/agent-workflow/*": ["./packages/agent-workflow/src/*"],
-      "@bee-game-studio/agent-workflow": [
-        "./packages/agent-workflow/src/index.ts"
+      "@bee-game-studio/agent-workflow-server": [
+        "./packages/agent-workflow-server/src/index.ts"
       ],
       "@bee-game-studio/agent-workflow-server/*": [
         "./packages/agent-workflow-server/src/*"
       ],
-      "@bee-game-studio/agent-workflow-server": [
-        "./packages/agent-workflow-server/src/index.ts"
+      "@bee-game-studio/beegame-storage-core": [
+        "./packages/beegame-storage-core/src/index.ts"
       ],
-      "@bee-game-studio/beegame-billing-server/*": [
-        "./packages/beegame-billing-server/src/*"
+      "@bee-game-studio/beegame-storage-core/*": [
+        "./packages/beegame-storage-core/src/*"
       ],
-      "@bee-game-studio/beegame-billing-server": [
-        "./packages/beegame-billing-server/src/index.ts"
+      "@bee-game-studio/security-core": [
+        "./packages/beegame-security-core/src/index.ts"
       ],
-      "@bee-game-studio/beegame-billing-core/*": [
-        "./packages/beegame-billing-core/src/*"
+      "@bee-game-studio/security-core/*": [
+        "./packages/beegame-security-core/src/*"
       ],
       "@bee-game-studio/beegame-billing-core": [
         "./packages/beegame-billing-core/src/index.ts"
       ],
-      "@bee-game-studio/beegame-skills-core/*": [
-        "./packages/beegame-skills-core/src/*"
+      "@bee-game-studio/beegame-billing-core/*": [
+        "./packages/beegame-billing-core/src/*"
       ],
       "@bee-game-studio/beegame-skills-core": [
         "./packages/beegame-skills-core/src/index.ts"
+      ],
+      "@bee-game-studio/beegame-skills-core/*": [
+        "./packages/beegame-skills-core/src/*"
+      ],
+      "@bee-game-studio/beegame-billing-server": [
+        "./packages/beegame-billing-server/src/index.ts"
+      ],
+      "@bee-game-studio/beegame-billing-server/*": [
+        "./packages/beegame-billing-server/src/*"
+      ],
+      "@bee-game-studio/beegame-resource-server": [
+        "./packages/beegame-resource-server/src/index.ts"
+      ],
+      "@bee-game-studio/beegame-resource-server/*": [
+        "./packages/beegame-resource-server/src/*"
+      ],
+      "@bee-game-studio/beegame-skills-server": [
+        "./packages/beegame-skills-server/src/index.ts"
+      ],
+      "@bee-game-studio/beegame-skills-server/*": [
+        "./packages/beegame-skills-server/src/*"
+      ],
+      "image-processor-napi": [
+        "./packages/image-processor-napi/src/index.ts"
+      ],
+      "image-processor-napi/*": [
+        "./packages/image-processor-napi/src/*"
+      ],
+      "@beegame/scene-editor": [
+        "./packages/scene-editor/src/index.ts"
+      ],
+      "@beegame/scene-editor/*": [
+        "./packages/scene-editor/src/*"
+      ],
+      "@bee-game-studio/agent-workflow": [
+        "./packages/agent-workflow/src/index.ts"
+      ],
+      "@bee-game-studio/agent-workflow/*": [
+        "./packages/agent-workflow/src/*"
+      ],
+      "@bee-game-studio/beegame-resource-core": [
+        "./packages/beegame-resource-core/src/index.ts"
+      ],
+      "@bee-game-studio/beegame-resource-core/*": [
+        "./packages/beegame-resource-core/src/*"
+      ],
+      "@beegame/scene-editor/platform": [
+        "./packages/scene-editor/src/platform.ts"
       ]
     }
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx",
     "packages/**/*.ts",
     "packages/**/*.tsx"
   ],
-  "exclude": ["node_modules", "packages/remote-control-server/web"]
+  "exclude": [
+    "node_modules",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "packages/*/scripts/**",
+    "packages/*/tests/**"
+  ]
 }

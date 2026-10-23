@@ -1,0 +1,12 @@
+complete
+评审结论（2026-10-01）：8 份设计文档 + 6 个最终 UI 输入一致，无开发阻断项。
+
+本轮修订（文档与最终输入同步改正）：
+1. 结算快速重开统一为仅 Enter：UI_UX_SPEC §4.4/§4.5/§6.1、TECHNICAL_DESIGN §4 状态表/4.4/§9 风险项中的 Space/Enter 全部更正；§6.1 补充结算屏 Space 不激活任何焦点按钮。
+2. 退出路径补齐（GDD 4.2 要求）：level-complete.json 增 complete-quit-button、game-over.json 增 gameover-quit-button（game:quit-to-title，Secondary 样式）；UI_UX_SPEC §4.4/§4.5 退出条件与焦点路线同步。
+3. Game Over 新纪录 badge：game-over.json 增 gameover-new-record-badge 条件性子树（visibleWhen: sessionScore > storedBest），与 level-complete 同构；UI_UX_SPEC §4.5、TECHNICAL_DESIGN 4.4、ASSET_PLAN icon-star 双屏共享绑定同步。
+4. 两结算面板高度统一改为 400×344（原 282/240），§3.3 布局描述同步；§11 原待评审遗留项关闭。
+
+复算证据：bun .beegame/delivery/check-content.mjs --design-layouts → valid:true, issues:[]（6 文件，含声明变体）；两结算屏 960×540、800×450 单独复算五类诊断与 boundaryChecks 全空。
+
+仅能在运行时验证、已在文档中明确移交但不阻断开发的检查：真实字体 textFit 与对比度数值；触控真机 44px 热区；iframe/移动端自动播放与手势解锁；结算面板压粒子、HUD 不遮墙内矩形等实际遮挡；360px/s 恒定球速手感及键盘救球约 0.10s 余量（BALANCE 标注为 playtest 假设）；单局时长 1–2 分钟估算。

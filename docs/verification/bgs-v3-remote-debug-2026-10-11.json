@@ -1,0 +1,124 @@
+{
+  "scope": "Real Supabase persistence and normal authenticated Chrome debug interaction; controlled no-model runner; not game-quality acceptance",
+  "date": "2026-10-11",
+  "protected": {
+    "formalFrontendChanged": false,
+    "claudeCodeChanged": false,
+    "builtinToolsChanged": false,
+    "productionServicesRestarted": false,
+    "databaseDDLChanged": false,
+    "paidModelCalls": 0,
+    "diffSha256BeforeAndAfter": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995"
+  },
+  "changes": [
+    "Independent debug supports existing normal HttpOnly BGS login without reading or copying credentials; normal auth remains required",
+    "Restore actual project Chat without dispatch, then explicitly create a Run and initial plan; no invented session IDs or prewritten PASS",
+    "Recheck identity after reading the response body; reject delayed old-project responses and clear stale drafts",
+    "Opt-in retained remote synthetic fixture script; cold resume validates exact fixture identity and does not rewrite the Run or files",
+    "Fixture explicitly configures measured wildcard-localhost Preview origin; no unmeasured development fallback"
+  ],
+  "fixture": {
+    "projectId": "v3-remote-debug-a84270db-47c4-4131-8e49-09099a9141f7",
+    "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-remote-debug-r9wlF3",
+    "runId": "0e390630-a146-470a-82d0-ee9542d732aa",
+    "chatSessionId": "beegame_2c8747d5669643e784c3408ecb957dee",
+    "finalVersion": 42,
+    "planRevision": 6,
+    "requirementsRevision": "aea37285-9918-4eee-b46a-c9bd57d37f98",
+    "writer": null,
+    "pausedAt": "2026-10-10T18:10:59.961Z",
+    "deliveryEligible": false,
+    "retained": true,
+    "temporaryServerStopped": true,
+    "stopLog": "/private/tmp/bgs-v3-remote-debug-recovery-resume.log",
+    "stoppedPID": 40872
+  },
+  "evidence": {
+    "baselineGameAttempt": "85cee3cc-f702-4073-9a40-34a431226444",
+    "savedUIEditAttempt": "21484189-7420-4f7c-9062-c6c6bbdd5e3a",
+    "savedSceneEditAttempt": "322db64e-022c-4476-8b2b-a0eac3756c29",
+    "remeasured64Attempt": "ed8f98ee-dd0f-4741-9c8d-eece9772107e",
+    "observationId": "ae63c0b7-74f4-4a35-a776-c6508c98176a",
+    "blockingReviewAttempt": "03facba5-fc41-4d0a-a363-8639cf4bf1e1",
+    "repairAttempt": "9c4c9fb3-a69e-4a5a-a40c-c79663108537",
+    "question": {
+      "toolUseID": "height-9c4c9fb3-a69e-4a5a-a40c-c79663108537",
+      "finding": "F1",
+      "answer": "80",
+      "authorizationEvent": "workflow.question.validated",
+      "actualChecks": ["build", "runtime-smoke", "rule-tests", "repair-verification"]
+    },
+    "directedFollowupAttempt": "69ff58d8-3c0f-4bd8-be09-1b614cd1fce9",
+    "followup": "F1 closed with current source and actual repair attempt; original report and Preview observation retained",
+    "independentNotes": {
+      "initialAttempt": "f4eadeb0-a663-4328-9097-207701cf4bb5",
+      "preservedDuringLocalEditAndRepair": true,
+      "sha256": "81c69a38644e8ad0d5f7d5cf9ff192970047ee466dfd84dfbe4045977425de2c"
+    },
+    "interruptedSettlement": {
+      "attempt": "d3b9745a-8ee9-409b-9577-36f2f81a1b26",
+      "fence": 9,
+      "failureInjection": "Lost settlement request AFTER actual host quiescence was persisted; no remote settlement commit sent",
+      "quiescedAt": "2026-10-10T18:03:29.595Z",
+      "coldReload": "Version 32 retained writer and paused state; writer liveness unknown; no automatic unlock or execution",
+      "recoveryVersion": 33,
+      "recoveryEvent": "writer.recovered",
+      "recoveryPreservedPause": "2026-10-10T18:03:38.081Z",
+      "result": "failed; no accepted checks; original files and independent successful task retained",
+      "explicitResumeVersion": 34,
+      "automaticRetries": 0
+    },
+    "newRequirementVersion": {
+      "changeVersion": 35,
+      "historyRetained": true,
+      "dispatchedByChange": false,
+      "qualification": "game and notes pending without old accepted attempts; former recovery and Review tasks superseded, historical attempts retained",
+      "freshGameAttempt": "6adc7d72-100b-4e37-8499-be389a88755c",
+      "actualChecks": ["build", "runtime-smoke", "rule-tests"],
+      "freshNotesAttempt": "46d6684c-8138-4023-8bf3-44f7cf8c8edc",
+      "notesBytesPreserved": true,
+      "changeMeaning": "Explicit new confirmation of existing 80px/Scene X42 behavior; not a new feature implementation claim",
+      "oldPreview": "Exact prior Preview host returns HTTP404 Preview not found or revoked after authorization changes; current task also has no selectable old Attempt",
+      "actualDOM": {"buttonHeight": "80px", "sceneX": "42", "clickFeedback": "Clicked"},
+      "pauseReload": "Version 42, same paused timestamp, no writer, 11 retained attempts; no automatic execution"
+    },
+    "exportsAtPlan5": {
+      "measuredAttempt": "9c4c9fb3-a69e-4a5a-a40c-c79663108537",
+      "artifactSha256": "f9b1c5f8cac684f613db67be7242fd99ba8884205c6b159df99f32353e9e1e73",
+      "projectZip": "/Users/nswell/Downloads/bgs-v3-project.zip",
+      "projectZipSha256": "676e4919fbd627332d446b9a07a3cc732626e25758e631a8e1c6c854c2275557",
+      "staticZip": "/Users/nswell/Downloads/bgs-v3-static.zip",
+      "staticZipSha256": "15b7cc1a93923486f1095d3dc07ff3a55ca9b9e80d1ef8ebcc21c27d49eb2779",
+      "unpackedProject": "/private/tmp/bgs-v3-export-check.UQrNhn/project",
+      "actualRebuild": "bun run build exit 0; all 12 source/artifact file hashes agree with the exported measurement receipt",
+      "qualification": "Historical plan5 downloads; not exports certified for the later requirements revision"
+    },
+    "screenshots": [
+      "/private/tmp/bgs-v3-remote-question-2026-10-11.png",
+      "/private/tmp/bgs-v3-remote-final-preview-2026-10-11.png"
+    ]
+  },
+  "regression": {
+    "frozenCode": {"passed":164,"failed":0,"assertions":1388,"files":24,"seconds":160.88,"log":"/private/tmp/bgs-v3-remote-debug-final-regression.log","sha256":"8321a86a9deac3fe13a7330728007a9e0a377af25726c0b1c3eb24b6493d46fc"},
+    "focused": {"passed":4,"failed":0,"assertions":86,"log":"/private/tmp/bgs-v3-remote-debug-final-focused-escalated.log"},
+    "realDatabaseConcurrency": {"passedAssertions":11,"log":"/private/tmp/bgs-v3-remote-debug-database-concurrency.log","sha256":"e1ef1591244db80bd0b8bfe26f13317c8075de521a9829e9cd42034e9448b137"},
+    "typecheck": {"wholeServerPassed":false,"existingDiagnostics":3556,"workflowV3Diagnostics":0,"log":"/private/tmp/bgs-v3-remote-debug-typecheck.log","sha256":"b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb"}
+  },
+  "retainedFailures": [
+    "First fixture wrote an audit file into source after measurement; invalidated its baseline; no accepted dispatch",
+    "Second fixture invented a Chat ID; normal backend rejected chat-not-live HTTP409, no task ran",
+    "Correct fixture initially had no Preview origin, HTTP503; fixed isolated fixture configuration only, no unmeasured fallback",
+    "Sandbox denied test Chromium/loopback binding; same focused regression passed with authorized local permissions",
+    "Native Chrome confirmations, DOM completion-label typos, selector mistakes and screenshot Promise error required checking actual persisted results; none counted as product PASS",
+    "Chrome extension blocked top-level wildcard localhost tab; actual iframe worked; old host revocation checked separately as read-only host diagnostic",
+    "Browser download wait timed out although ordinary UI download completed; actual ZIP files and their receipts verified",
+    "First unpacked-rebuild hash verification used a wrong path; corrected verification of all 12 files passed"
+  ],
+  "unverified": [
+    "Crash BEFORE durable host exit proof, legacy unknown writers, unknown external paid operations",
+    "LLM semantic review competence, game completeness, aesthetics/audio/enjoyment and paid model cost",
+    "Tilemap/3D/animation/fonts/audio/full runtime and fresh dependency installation",
+    "Formal frontend wiring, ordinary Chat creation/change and production default V3 deployment",
+    "V3-06/07/08/09 remain partial; successful debug checks do not confer full-game delivery eligibility"
+  ]
+}

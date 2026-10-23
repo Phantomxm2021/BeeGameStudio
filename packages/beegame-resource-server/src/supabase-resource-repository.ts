@@ -25,8 +25,6 @@ type SupabaseResourceRepositoryOptions = {
   getStorageObjectUrl: (storageObjectId: string, packId: string) => Promise<string | undefined>
 }
 
-const MAX_RESOURCE_MUTATION_URL_LENGTH = 6_000
-
 type PackRow = Omit<ResourcePack, 'gameTypes' | 'primaryCategory' | 'coverPath' | 'styles'
 > & {
   game_types: string[]
@@ -395,30 +393,6 @@ export function createSupabaseResourceRepository(
       return rows.length > 0
     },
   }
-}
-
-function partitionResourceElementIdsForMutation(
-  apiBase: string,
-  packId: string,
-  elementIds: readonly string[],
-): string[][] {
-  const chunks: string[][] = []
-  let current: string[] = []
-  for (const elementId of elementIds) {
-    const candidate = [...current, elementId]
-    const url = new URL(`${apiBase}/beegame_resource_elements`)
-    url.searchParams.set('select', '*')
-    url.searchParams.set('id', `in.(${candidate.map(id => encodeURIComponent(id)).join(',')})`)
-    url.searchParams.set('pack_id', `eq.${encodeURIComponent(packId)}`)
-    if (current.length > 0 && url.toString().length > MAX_RESOURCE_MUTATION_URL_LENGTH) {
-      chunks.push(current)
-      current = [elementId]
-      continue
-    }
-    current = candidate
-  }
-  if (current.length > 0) chunks.push(current)
-  return chunks
 }
 
 async function supabaseErrorDetail(response: Response): Promise<string> {

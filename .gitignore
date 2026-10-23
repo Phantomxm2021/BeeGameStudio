@@ -21,6 +21,9 @@ src/utils/vendor/
 Projects/
 
 # AI tool runtime directories
+.runtime/
+backups/
+/apps/frontend/output/
 .agents/
 .claude/
 .omx/
@@ -37,7 +40,7 @@ Claude-Haiku-*.txt
 # Agent / tool state dirs
 .swarm/
 .beegame/skills/*/
-!.beegame/skills/builtinskills/
+!.beegame/skills/bgs-game-skills/
 .agents/__pycache__/
 
 # Python bytecode
@@ -66,5 +69,9 @@ credentials.json
 .claude-recovery.md
 .test-progress.md
 .squash-tmp/
+dist-vite/
 .git.*-backup
 .worktrees/
+
+# BGS source runtime configuration (operator tools retain their own ignore rules)
+.bgs/

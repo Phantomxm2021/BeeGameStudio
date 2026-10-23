@@ -1,0 +1,3392 @@
+[
+  {
+    "label": "桌面 HUD",
+    "source": "drafts/ui-hud-desktop.json",
+    "viewport": {
+      "width": 1280,
+      "height": 64
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 1280,
+        "height": 64
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              1280,
+              64
+            ],
+            "container": {
+              "direction": "row",
+              "gap": 16,
+              "padding": [
+                12,
+                24,
+                12,
+                24
+              ],
+              "justify": "space-between",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              1280,
+              0
+            ],
+            [
+              1280,
+              64
+            ],
+            [
+              0,
+              64
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 1280,
+            "bottom": 64
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "score",
+          "parentId": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              240,
+              40
+            ],
+            "minSize": [
+              160,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              24,
+              12
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              24,
+              12
+            ],
+            [
+              264,
+              12
+            ],
+            [
+              264,
+              52
+            ],
+            [
+              24,
+              52
+            ]
+          ],
+          "bounds": {
+            "left": 24,
+            "top": 12,
+            "right": 264,
+            "bottom": 52
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "hiscore",
+          "parentId": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              240,
+              40
+            ],
+            "minSize": [
+              160,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              456,
+              12
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              456,
+              12
+            ],
+            [
+              696,
+              12
+            ],
+            [
+              696,
+              52
+            ],
+            [
+              456,
+              52
+            ]
+          ],
+          "bounds": {
+            "left": 456,
+            "top": 12,
+            "right": 696,
+            "bottom": 52
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "mute-btn",
+          "parentId": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              88,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              888,
+              12
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              888,
+              12
+            ],
+            [
+              976,
+              12
+            ],
+            [
+              976,
+              52
+            ],
+            [
+              888,
+              52
+            ]
+          ],
+          "bounds": {
+            "left": 888,
+            "top": 12,
+            "right": 976,
+            "bottom": 52
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pause-btn",
+          "parentId": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              88,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              1168,
+              12
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              1168,
+              12
+            ],
+            [
+              1256,
+              12
+            ],
+            [
+              1256,
+              52
+            ],
+            [
+              1168,
+              52
+            ]
+          ],
+          "bounds": {
+            "left": 1168,
+            "top": 12,
+            "right": 1256,
+            "bottom": 52
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Exact retained Agent draft; geometry only, not game visuals or font measurement."
+  },
+  {
+    "label": "竖屏 HUD",
+    "source": "drafts/ui-hud-portrait.json",
+    "viewport": {
+      "width": 390,
+      "height": 60
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 390,
+        "height": 60
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              390,
+              60
+            ],
+            "container": {
+              "direction": "row",
+              "gap": 8,
+              "padding": [
+                10,
+                12,
+                10,
+                12
+              ],
+              "justify": "space-between",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              390,
+              0
+            ],
+            [
+              390,
+              60
+            ],
+            [
+              0,
+              60
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 390,
+            "bottom": 60
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "score",
+          "parentId": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              116,
+              40
+            ],
+            "minSize": [
+              100,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              12,
+              10
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              12,
+              10
+            ],
+            [
+              128,
+              10
+            ],
+            [
+              128,
+              50
+            ],
+            [
+              12,
+              50
+            ]
+          ],
+          "bounds": {
+            "left": 12,
+            "top": 10,
+            "right": 128,
+            "bottom": 50
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "hiscore",
+          "parentId": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              92,
+              40
+            ],
+            "minSize": [
+              84,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              148.6666717529297,
+              10
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              148.6666717529297,
+              10
+            ],
+            [
+              240.6666717529297,
+              10
+            ],
+            [
+              240.6666717529297,
+              50
+            ],
+            [
+              148.6666717529297,
+              50
+            ]
+          ],
+          "bounds": {
+            "left": 148.6666717529297,
+            "top": 10,
+            "right": 240.6666717529297,
+            "bottom": 50
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "mute-btn",
+          "parentId": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              48,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              261.3333435058594,
+              10
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              261.3333435058594,
+              10
+            ],
+            [
+              309.3333435058594,
+              10
+            ],
+            [
+              309.3333435058594,
+              50
+            ],
+            [
+              261.3333435058594,
+              50
+            ]
+          ],
+          "bounds": {
+            "left": 261.3333435058594,
+            "top": 10,
+            "right": 309.3333435058594,
+            "bottom": 50
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pause-btn",
+          "parentId": "hud-root",
+          "active": true,
+          "layout": {
+            "size": [
+              48,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              330,
+              10
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              330,
+              10
+            ],
+            [
+              378,
+              10
+            ],
+            [
+              378,
+              50
+            ],
+            [
+              330,
+              50
+            ]
+          ],
+          "bounds": {
+            "left": 330,
+            "top": 10,
+            "right": 378,
+            "bottom": 50
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Exact retained Agent draft; geometry only, not game visuals or font measurement."
+  },
+  {
+    "label": "桌面菜单",
+    "source": "drafts/ui-start.json",
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "start-root",
+          "active": true,
+          "layout": {
+            "size": [
+              1280,
+              720
+            ],
+            "container": {
+              "direction": "column",
+              "gap": 40,
+              "padding": [
+                80,
+                40,
+                80,
+                40
+              ],
+              "justify": "center",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              1280,
+              0
+            ],
+            [
+              1280,
+              720
+            ],
+            [
+              0,
+              720
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 1280,
+            "bottom": 720
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "title",
+          "parentId": "start-root",
+          "active": true,
+          "layout": {
+            "size": [
+              480,
+              96
+            ],
+            "minSize": [
+              280,
+              72
+            ],
+            "item": {
+              "shrink": 1
+            },
+            "position": [
+              400,
+              156
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              400,
+              156
+            ],
+            [
+              880,
+              156
+            ],
+            [
+              880,
+              252
+            ],
+            [
+              400,
+              252
+            ]
+          ],
+          "bounds": {
+            "left": 400,
+            "top": 156,
+            "right": 880,
+            "bottom": 252
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "motif",
+          "parentId": "start-root",
+          "active": true,
+          "layout": {
+            "size": [
+              160,
+              160
+            ],
+            "minSize": [
+              120,
+              120
+            ],
+            "item": {
+              "shrink": 1
+            },
+            "position": [
+              560,
+              292
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              560,
+              292
+            ],
+            [
+              720,
+              292
+            ],
+            [
+              720,
+              452
+            ],
+            [
+              560,
+              452
+            ]
+          ],
+          "bounds": {
+            "left": 560,
+            "top": 292,
+            "right": 720,
+            "bottom": 452
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "start-btn",
+          "parentId": "start-root",
+          "active": true,
+          "layout": {
+            "size": [
+              280,
+              72
+            ],
+            "minSize": [
+              200,
+              60
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              500,
+              492
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              500,
+              492
+            ],
+            [
+              780,
+              492
+            ],
+            [
+              780,
+              564
+            ],
+            [
+              500,
+              564
+            ]
+          ],
+          "bounds": {
+            "left": 500,
+            "top": 492,
+            "right": 780,
+            "bottom": 564
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "mute-btn",
+          "parentId": "start-root",
+          "active": true,
+          "layout": {
+            "anchor": "top-right",
+            "position": [
+              -12,
+              12
+            ],
+            "size": [
+              88,
+              44
+            ],
+            "item": {
+              "shrink": 0,
+              "absolute": true
+            }
+          },
+          "pivot": {
+            "x": 1,
+            "y": 0
+          },
+          "corners": [
+            [
+              1180,
+              12
+            ],
+            [
+              1268,
+              12
+            ],
+            [
+              1268,
+              56
+            ],
+            [
+              1180,
+              56
+            ]
+          ],
+          "bounds": {
+            "left": 1180,
+            "top": 12,
+            "right": 1268,
+            "bottom": 56
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Exact retained Agent draft; geometry only, not game visuals or font measurement."
+  },
+  {
+    "label": "竖屏菜单",
+    "source": "drafts/ui-start-portrait.json",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "start-root",
+          "active": true,
+          "layout": {
+            "size": [
+              390,
+              844
+            ],
+            "container": {
+              "direction": "column",
+              "gap": 32,
+              "padding": [
+                120,
+                24,
+                120,
+                24
+              ],
+              "justify": "center",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              390,
+              0
+            ],
+            [
+              390,
+              844
+            ],
+            [
+              0,
+              844
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 390,
+            "bottom": 844
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "title",
+          "parentId": "start-root",
+          "active": true,
+          "layout": {
+            "size": [
+              342,
+              80
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              24,
+              248
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              24,
+              248
+            ],
+            [
+              366,
+              248
+            ],
+            [
+              366,
+              328
+            ],
+            [
+              24,
+              328
+            ]
+          ],
+          "bounds": {
+            "left": 24,
+            "top": 248,
+            "right": 366,
+            "bottom": 328
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "motif",
+          "parentId": "start-root",
+          "active": true,
+          "layout": {
+            "size": [
+              140,
+              140
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              125,
+              360
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              125,
+              360
+            ],
+            [
+              265,
+              360
+            ],
+            [
+              265,
+              500
+            ],
+            [
+              125,
+              500
+            ]
+          ],
+          "bounds": {
+            "left": 125,
+            "top": 360,
+            "right": 265,
+            "bottom": 500
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "start-btn",
+          "parentId": "start-root",
+          "active": true,
+          "layout": {
+            "size": [
+              240,
+              64
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              75,
+              532
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              75,
+              532
+            ],
+            [
+              315,
+              532
+            ],
+            [
+              315,
+              596
+            ],
+            [
+              75,
+              596
+            ]
+          ],
+          "bounds": {
+            "left": 75,
+            "top": 532,
+            "right": 315,
+            "bottom": 596
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "mute-btn",
+          "parentId": "start-root",
+          "active": true,
+          "layout": {
+            "anchor": "top-right",
+            "position": [
+              -12,
+              12
+            ],
+            "size": [
+              56,
+              40
+            ],
+            "item": {
+              "shrink": 0,
+              "absolute": true
+            }
+          },
+          "pivot": {
+            "x": 1,
+            "y": 0
+          },
+          "corners": [
+            [
+              322,
+              12
+            ],
+            [
+              378,
+              12
+            ],
+            [
+              378,
+              52
+            ],
+            [
+              322,
+              52
+            ]
+          ],
+          "bounds": {
+            "left": 322,
+            "top": 12,
+            "right": 378,
+            "bottom": 52
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Exact retained Agent draft; geometry only, not game visuals or font measurement."
+  },
+  {
+    "label": "暂停",
+    "source": "drafts/ui-pause.json",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "pause-root",
+          "active": true,
+          "layout": {
+            "size": [
+              390,
+              844
+            ],
+            "container": {
+              "direction": "column",
+              "padding": [
+                0,
+                20,
+                0,
+                20
+              ],
+              "justify": "center",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              390,
+              0
+            ],
+            [
+              390,
+              844
+            ],
+            [
+              0,
+              844
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 390,
+            "bottom": 844
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "panel",
+          "parentId": "pause-root",
+          "active": true,
+          "layout": {
+            "size": [
+              380,
+              300
+            ],
+            "minSize": [
+              300,
+              300
+            ],
+            "container": {
+              "direction": "column",
+              "gap": 20,
+              "padding": [
+                32,
+                32,
+                32,
+                32
+              ],
+              "justify": "start",
+              "align": "stretch"
+            },
+            "position": [
+              5,
+              272
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              5,
+              272
+            ],
+            [
+              385,
+              272
+            ],
+            [
+              385,
+              572
+            ],
+            [
+              5,
+              572
+            ]
+          ],
+          "bounds": {
+            "left": 5,
+            "top": 272,
+            "right": 385,
+            "bottom": 572
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "panel-title",
+          "parentId": "panel",
+          "active": true,
+          "layout": {
+            "size": [
+              316,
+              48
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              32,
+              32
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              37,
+              304
+            ],
+            [
+              353,
+              304
+            ],
+            [
+              353,
+              352
+            ],
+            [
+              37,
+              352
+            ]
+          ],
+          "bounds": {
+            "left": 37,
+            "top": 304,
+            "right": 353,
+            "bottom": 352
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "resume-btn",
+          "parentId": "panel",
+          "active": true,
+          "layout": {
+            "size": [
+              316,
+              60
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              32,
+              100
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              37,
+              372
+            ],
+            [
+              353,
+              372
+            ],
+            [
+              353,
+              432
+            ],
+            [
+              37,
+              432
+            ]
+          ],
+          "bounds": {
+            "left": 37,
+            "top": 372,
+            "right": 353,
+            "bottom": 432
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "quit-btn",
+          "parentId": "panel",
+          "active": true,
+          "layout": {
+            "size": [
+              316,
+              60
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              32,
+              180
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              37,
+              452
+            ],
+            [
+              353,
+              452
+            ],
+            [
+              353,
+              512
+            ],
+            [
+              37,
+              512
+            ]
+          ],
+          "bounds": {
+            "left": 37,
+            "top": 452,
+            "right": 353,
+            "bottom": 512
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Exact retained Agent draft; geometry only, not game visuals or font measurement."
+  },
+  {
+    "label": "竖屏结算",
+    "source": "drafts/ui-gameover-portrait.json",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "over-root",
+          "active": true,
+          "layout": {
+            "size": [
+              390,
+              844
+            ],
+            "container": {
+              "direction": "column",
+              "padding": [
+                0,
+                16,
+                0,
+                16
+              ],
+              "justify": "center",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              390,
+              0
+            ],
+            [
+              390,
+              844
+            ],
+            [
+              0,
+              844
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 390,
+            "bottom": 844
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "panel",
+          "parentId": "over-root",
+          "active": true,
+          "layout": {
+            "size": [
+              340,
+              440
+            ],
+            "container": {
+              "direction": "column",
+              "gap": 14,
+              "padding": [
+                28,
+                24,
+                28,
+                24
+              ],
+              "justify": "start",
+              "align": "stretch"
+            },
+            "position": [
+              25,
+              202
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              25,
+              202
+            ],
+            [
+              365,
+              202
+            ],
+            [
+              365,
+              642
+            ],
+            [
+              25,
+              642
+            ]
+          ],
+          "bounds": {
+            "left": 25,
+            "top": 202,
+            "right": 365,
+            "bottom": 642
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "end-title",
+          "parentId": "panel",
+          "active": true,
+          "layout": {
+            "size": [
+              292,
+              44
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              24,
+              28
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              49,
+              230
+            ],
+            [
+              341,
+              230
+            ],
+            [
+              341,
+              274
+            ],
+            [
+              49,
+              274
+            ]
+          ],
+          "bounds": {
+            "left": 49,
+            "top": 230,
+            "right": 341,
+            "bottom": 274
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "record-badge",
+          "parentId": "panel",
+          "active": false,
+          "layout": {
+            "size": [
+              292,
+              30
+            ],
+            "item": {
+              "shrink": 0
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              25,
+              202
+            ],
+            [
+              317,
+              202
+            ],
+            [
+              317,
+              232
+            ],
+            [
+              25,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 25,
+            "top": 202,
+            "right": 317,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "score-line",
+          "parentId": "panel",
+          "active": true,
+          "layout": {
+            "size": [
+              292,
+              40
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              24,
+              86
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              49,
+              288
+            ],
+            [
+              341,
+              288
+            ],
+            [
+              341,
+              328
+            ],
+            [
+              49,
+              328
+            ]
+          ],
+          "bounds": {
+            "left": 49,
+            "top": 288,
+            "right": 341,
+            "bottom": 328
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "hiscore-line",
+          "parentId": "panel",
+          "active": true,
+          "layout": {
+            "size": [
+              292,
+              36
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              24,
+              140
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              49,
+              342
+            ],
+            [
+              341,
+              342
+            ],
+            [
+              341,
+              378
+            ],
+            [
+              49,
+              378
+            ]
+          ],
+          "bounds": {
+            "left": 49,
+            "top": 342,
+            "right": 341,
+            "bottom": 378
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "restart-btn",
+          "parentId": "panel",
+          "active": true,
+          "layout": {
+            "size": [
+              292,
+              60
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              24,
+              190
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              49,
+              392
+            ],
+            [
+              341,
+              392
+            ],
+            [
+              341,
+              452
+            ],
+            [
+              49,
+              452
+            ]
+          ],
+          "bounds": {
+            "left": 49,
+            "top": 392,
+            "right": 341,
+            "bottom": 452
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "home-btn",
+          "parentId": "panel",
+          "active": true,
+          "layout": {
+            "size": [
+              292,
+              56
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              24,
+              264
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              49,
+              466
+            ],
+            [
+              341,
+              466
+            ],
+            [
+              341,
+              522
+            ],
+            [
+              49,
+              522
+            ]
+          ],
+          "bounds": {
+            "left": 49,
+            "top": 466,
+            "right": 341,
+            "bottom": 522
+          },
+          "textFit": "unmeasured",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Exact retained Agent draft; geometry only, not game visuals or font measurement."
+  },
+  {
+    "label": "方向键参考构图",
+    "source": "drafts/ui-dpad.json",
+    "viewport": {
+      "width": 390,
+      "height": 394
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 390,
+        "height": 394
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              390,
+              394
+            ],
+            "container": {
+              "direction": "grid",
+              "gap": 8,
+              "padding": [
+                16,
+                16,
+                24,
+                16
+              ],
+              "columns": 3,
+              "justify": "center",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              390,
+              0
+            ],
+            [
+              390,
+              394
+            ],
+            [
+              0,
+              394
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 390,
+            "bottom": 394
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c00",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              16,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              16
+            ],
+            [
+              130,
+              16
+            ],
+            [
+              130,
+              120
+            ],
+            [
+              16,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 16,
+            "right": 130,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-up",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              138,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              138,
+              16
+            ],
+            [
+              252,
+              16
+            ],
+            [
+              252,
+              120
+            ],
+            [
+              138,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 138,
+            "top": 16,
+            "right": 252,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c02",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              260,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              260,
+              16
+            ],
+            [
+              374,
+              16
+            ],
+            [
+              374,
+              120
+            ],
+            [
+              260,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 260,
+            "top": 16,
+            "right": 374,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-left",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              16,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              128
+            ],
+            [
+              130,
+              128
+            ],
+            [
+              130,
+              232
+            ],
+            [
+              16,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 128,
+            "right": 130,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-center",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              138,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              138,
+              128
+            ],
+            [
+              252,
+              128
+            ],
+            [
+              252,
+              232
+            ],
+            [
+              138,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 138,
+            "top": 128,
+            "right": 252,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-right",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              260,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              260,
+              128
+            ],
+            [
+              374,
+              128
+            ],
+            [
+              374,
+              232
+            ],
+            [
+              260,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 260,
+            "top": 128,
+            "right": 374,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c20",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              16,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              240
+            ],
+            [
+              130,
+              240
+            ],
+            [
+              130,
+              344
+            ],
+            [
+              16,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 240,
+            "right": 130,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-down",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              138,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              138,
+              240
+            ],
+            [
+              252,
+              240
+            ],
+            [
+              252,
+              344
+            ],
+            [
+              138,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 138,
+            "top": 240,
+            "right": 252,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c22",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              260,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              260,
+              240
+            ],
+            [
+              374,
+              240
+            ],
+            [
+              374,
+              344
+            ],
+            [
+              260,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 260,
+            "top": 240,
+            "right": 374,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Exact retained Agent draft; geometry only, not game visuals or font measurement."
+  },
+  {
+    "label": "文档新声明的 375×667 方向键区域",
+    "source": "drafts/ui-dpad.json",
+    "viewport": {
+      "width": 375,
+      "height": 232
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 375,
+        "height": 232
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              375,
+              232
+            ],
+            "container": {
+              "direction": "grid",
+              "gap": 8,
+              "padding": [
+                16,
+                16,
+                24,
+                16
+              ],
+              "columns": 3,
+              "justify": "center",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              375,
+              0
+            ],
+            [
+              375,
+              232
+            ],
+            [
+              0,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 375,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c00",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "position": [
+              16,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              16
+            ],
+            [
+              125,
+              16
+            ],
+            [
+              125,
+              120
+            ],
+            [
+              16,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 16,
+            "right": 125,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-up",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              133,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              133,
+              16
+            ],
+            [
+              242,
+              16
+            ],
+            [
+              242,
+              120
+            ],
+            [
+              133,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 133,
+            "top": 16,
+            "right": 242,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c02",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "position": [
+              250,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              250,
+              16
+            ],
+            [
+              359,
+              16
+            ],
+            [
+              359,
+              120
+            ],
+            [
+              250,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 250,
+            "top": 16,
+            "right": 359,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-left",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              16,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              128
+            ],
+            [
+              125,
+              128
+            ],
+            [
+              125,
+              232
+            ],
+            [
+              16,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 128,
+            "right": 125,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-center",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "position": [
+              133,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              133,
+              128
+            ],
+            [
+              242,
+              128
+            ],
+            [
+              242,
+              232
+            ],
+            [
+              133,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 133,
+            "top": 128,
+            "right": 242,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-right",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              250,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              250,
+              128
+            ],
+            [
+              359,
+              128
+            ],
+            [
+              359,
+              232
+            ],
+            [
+              250,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 250,
+            "top": 128,
+            "right": 359,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c20",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "position": [
+              16,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              240
+            ],
+            [
+              125,
+              240
+            ],
+            [
+              125,
+              344
+            ],
+            [
+              16,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 240,
+            "right": 125,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-down",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              133,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              133,
+              240
+            ],
+            [
+              242,
+              240
+            ],
+            [
+              242,
+              344
+            ],
+            [
+              133,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 133,
+            "top": 240,
+            "right": 242,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c22",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              109,
+              104
+            ],
+            "position": [
+              250,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              250,
+              240
+            ],
+            [
+              359,
+              240
+            ],
+            [
+              359,
+              344
+            ],
+            [
+              250,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 250,
+            "top": 240,
+            "right": 359,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Unchanged retained reference draft at the newly declared smaller allocation; no shrink variant was produced by the Agent."
+  },
+  {
+    "label": "文档新声明的最小方向键区域",
+    "source": "drafts/ui-dpad.json",
+    "viewport": {
+      "width": 390,
+      "height": 190
+    },
+    "code": 0,
+    "result": {
+      "ok": true,
+      "scope": "layout-draft-inspection",
+      "runtimeVerified": false,
+      "viewport": {
+        "width": 390,
+        "height": 190
+      },
+      "note": "Geometry only; no content index, resources or acceptance are required or changed. Text metrics remain unmeasured without the actual font. Overlap candidates may be intentional.",
+      "nodes": [
+        {
+          "id": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              390,
+              190
+            ],
+            "container": {
+              "direction": "grid",
+              "gap": 8,
+              "padding": [
+                16,
+                16,
+                24,
+                16
+              ],
+              "columns": 3,
+              "justify": "center",
+              "align": "center"
+            }
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              0,
+              0
+            ],
+            [
+              390,
+              0
+            ],
+            [
+              390,
+              190
+            ],
+            [
+              0,
+              190
+            ]
+          ],
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 390,
+            "bottom": 190
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c00",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              16,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              16
+            ],
+            [
+              130,
+              16
+            ],
+            [
+              130,
+              120
+            ],
+            [
+              16,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 16,
+            "right": 130,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-up",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              138,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              138,
+              16
+            ],
+            [
+              252,
+              16
+            ],
+            [
+              252,
+              120
+            ],
+            [
+              138,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 138,
+            "top": 16,
+            "right": 252,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c02",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              260,
+              16
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              260,
+              16
+            ],
+            [
+              374,
+              16
+            ],
+            [
+              374,
+              120
+            ],
+            [
+              260,
+              120
+            ]
+          ],
+          "bounds": {
+            "left": 260,
+            "top": 16,
+            "right": 374,
+            "bottom": 120
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": false,
+          "outsideParent": false,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-left",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              16,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              128
+            ],
+            [
+              130,
+              128
+            ],
+            [
+              130,
+              232
+            ],
+            [
+              16,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 128,
+            "right": 130,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-center",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              138,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              138,
+              128
+            ],
+            [
+              252,
+              128
+            ],
+            [
+              252,
+              232
+            ],
+            [
+              138,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 138,
+            "top": 128,
+            "right": 252,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-right",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              260,
+              128
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              260,
+              128
+            ],
+            [
+              374,
+              128
+            ],
+            [
+              374,
+              232
+            ],
+            [
+              260,
+              232
+            ]
+          ],
+          "bounds": {
+            "left": 260,
+            "top": 128,
+            "right": 374,
+            "bottom": 232
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c20",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              16,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              16,
+              240
+            ],
+            [
+              130,
+              240
+            ],
+            [
+              130,
+              344
+            ],
+            [
+              16,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 16,
+            "top": 240,
+            "right": 130,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        },
+        {
+          "id": "pad-down",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "item": {
+              "shrink": 0
+            },
+            "position": [
+              138,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              138,
+              240
+            ],
+            [
+              252,
+              240
+            ],
+            [
+              252,
+              344
+            ],
+            [
+              138,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 138,
+            "top": 240,
+            "right": 252,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        },
+        {
+          "id": "c22",
+          "parentId": "dpad-root",
+          "active": true,
+          "layout": {
+            "size": [
+              114,
+              104
+            ],
+            "position": [
+              260,
+              240
+            ]
+          },
+          "pivot": {
+            "x": 0,
+            "y": 0
+          },
+          "corners": [
+            [
+              260,
+              240
+            ],
+            [
+              374,
+              240
+            ],
+            [
+              374,
+              344
+            ],
+            [
+              260,
+              344
+            ]
+          ],
+          "bounds": {
+            "left": 260,
+            "top": 240,
+            "right": 374,
+            "bottom": 344
+          },
+          "textFit": "not-applicable",
+          "outsideViewport": true,
+          "outsideParent": true,
+          "overlapCandidates": []
+        }
+      ]
+    },
+    "caveat": "Unchanged retained reference draft at the newly declared smaller allocation; no shrink variant was produced by the Agent."
+  }
+]

@@ -1,0 +1,109 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-draft",
+  "kind": "ui-screen",
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {}
+      },
+      {
+        "id": "game-view",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0.02,
+            0.02
+          ],
+          "anchorMax": [
+            0.98,
+            0.98
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {}
+      },
+      {
+        "id": "hud-score",
+        "parentId": "game-view",
+        "role": "text",
+        "enabled": true,
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            12,
+            10
+          ],
+          "size": [
+            140,
+            28
+          ]
+        },
+        "text": "分数 0000",
+        "data": {}
+      },
+      {
+        "id": "hud-lives",
+        "parentId": "game-view",
+        "role": "text",
+        "enabled": true,
+        "layout": {
+          "anchor": "top-right",
+          "position": [
+            -152,
+            10
+          ],
+          "size": [
+            140,
+            28
+          ]
+        },
+        "text": "生命 ♥♥♥",
+        "data": {}
+      },
+      {
+        "id": "pause-btn",
+        "parentId": "game-view",
+        "role": "button",
+        "enabled": true,
+        "layout": {
+          "anchor": "top-center",
+          "position": [
+            -32,
+            8
+          ],
+          "size": [
+            64,
+            32
+          ]
+        },
+        "text": "暂停",
+        "data": {}
+      }
+    ]
+  },
+  "assetRefs": []
+}

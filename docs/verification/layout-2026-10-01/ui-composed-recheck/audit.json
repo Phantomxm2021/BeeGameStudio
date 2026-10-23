@@ -1,0 +1,90 @@
+{
+  "status": "partial-pass-not-closed",
+  "scope": "Seven retained documents, fresh UI authoring, one native Review/Revision, independent read-only calculations; not eight-document authoring, implementation, font or runtime acceptance.",
+  "implementationUnderTest": "3bd16414",
+  "nativeReportedReviewComplete": true,
+  "elapsedSeconds": 1336.371,
+  "authoringSeconds": 745.079,
+  "reviewSeconds": 590.832,
+  "model": "ark-code-latest",
+  "usage": {
+    "inputTokens": 319129,
+    "cachedInputTokens": 7601688,
+    "outputTokens": 46521,
+    "note": "Observed provider usage, not account Credit settlement. The initial failed 401 request has unknown usage."
+  },
+  "closedOriginalFindings": [
+    {
+      "id": "F1",
+      "status": "closed-in-this-focused-test",
+      "basis": "Final ui-gameplay.json retains serve-prompt once beneath hud-plane, in the same reusable full-host input as game-view and HUD. Eight host sizes project this unchanged rectangle with maximum independent letterbox-oracle error 5.684341886080802e-14 pixels. There are no per-device prompt projection replacements.",
+      "evidence": ["final-drafts/drafts/ui-gameplay.json", "geometry/ui-gameplay.json", "focused-checks.json", "calculation-trace.json"]
+    },
+    {
+      "id": "F2",
+      "status": "closed-in-this-focused-test",
+      "basis": "Loading and error/retry views have separate authored inputs using existing column layout. The native Agent calculated them; independent resampling of each at eight host sizes found no containment or active foreground intersection issue. Win/lose explicitly share one result composition.",
+      "evidence": ["final/UI_UX_SPEC.md:117", "final/UI_UX_SPEC.md:179", "final/UI_UX_SPEC.md:223", "final-drafts/drafts/ui-loading.json", "final-drafts/drafts/ui-error.json", "geometry/ui-loading.json", "geometry/ui-error.json"]
+    },
+    {
+      "id": "F3",
+      "status": "closed-in-this-focused-test",
+      "basis": "Art section 4.4 keeps letterbox margins free of gameplay information and animation; section 5.3 puts the breathing hint near the waiting ball. UI keeps the hint within the projected reference frame at y548-572 and hides it after serve; this placement/animation no longer contradicts those Art clauses.",
+      "evidence": ["final/ART_DIRECTION.md:169", "final/ART_DIRECTION.md:198", "final/UI_UX_SPEC.md:149", "final/UI_UX_SPEC.md:211", "focused-checks.json"]
+    }
+  ],
+  "passed": [
+    "The native Agent successfully read the full Art Direction input and the updated UI layout reference; author and Review model requests actually contained the new instructions.",
+    "Seven baseline documents were byte-identical during UI authoring. Review revised all documents except Balance; hashes are retained.",
+    "Six final UI compositions at eight host sizes, 48 cases total, have empty containment, outsideCameraView and foreground-intersection diagnostics. The independent resampling did not change inputs.",
+    "Eight independent camera-derived hint projections match the final composed calculation.",
+    "The native Review restored the planned start-screen mute node in the authored input."
+  ],
+  "remainingFindings": [
+    {
+      "id": "F4",
+      "category": "projected-control-usability-and-inconsistent-promise",
+      "summary": "Whole menus and interactive HUD controls were placed in a reference plane meant for non-interactive information. Local control dimensions shrink under camera projection, contradicting UI section 2.5's fixed 44-48px host hit-height promise.",
+      "observedAt320x480": {
+        "btn-start": {"localSize": [200, 48], "projectedSize": [128, 30.72]},
+        "btn-mute-start": {"localSize": [64, 40], "projectedSize": [40.96, 25.6]},
+        "pause-btn": {"localSize": [62, 62], "projectedSize": [39.68, 39.68]}
+      },
+      "basis": "Review changed pause 56 to 62 and explicitly accepted its smallest-host exception, but did not reconcile the fixed-size promise or start/mute controls. Start/mute also fall below 44px at the reference host sizes. No separate authored and calculated hit region was supplied. Rectangle containment is not proof of usable control dimensions.",
+      "evidence": ["final/UI_UX_SPEC.md:70", "final/UI_UX_SPEC.md:133", "final/UI_UX_SPEC.md:195", "final/UI_UX_SPEC.md:250", "focused-checks.json", "native-conclusion.json"]
+    },
+    {
+      "id": "F5",
+      "category": "unsynchronized-hud-region",
+      "summary": "The changed pause rectangle occupies reference y1-63, while UI still says all HUD elements stay at y<=60 and Scene still declares the HUD permitted band as y0-48.",
+      "basis": "The rectangle does not touch bricks at y64; that narrower fact does not resolve the remaining permitted-band and UI bound statements. Review's source/consumer synchronization is incomplete.",
+      "evidence": ["final/UI_UX_SPEC.md:147", "final/UI_UX_SPEC.md:152", "final/UI_UX_SPEC.md:250", "final/LEVEL_SCENE_DESIGN.md:28", "final/LEVEL_SCENE_DESIGN.md:91", "final-drafts/drafts/ui-gameplay.json"]
+    }
+  ],
+  "boundedFollowUpImplementation": {
+    "reason": "Do not broaden an informational camera reference capability into projected interactive menus or relax usability limits to preserve that choice.",
+    "change": "The existing inspector now rejects control roles and nodes with actions beneath camera-reference-2d. Interactive controls stay in existing screen-space layout alongside informational reference-plane nodes. The supplied guidance distinguishes local size/minSize from projected host-pixel dimensions.",
+    "notAdded": ["A new design/review stage", "A universal 44px validation rule", "A new hit-region protocol", "World-space interactive rendering"],
+    "freeVerification": {"unitTests": 46, "backendTests": 65, "browserTests": 1, "backendTypeCheck": "passed"},
+    "nativeAuthorReviewAfterThisFollowUp": "not-rerun",
+    "agentDocumentsAndInputsRepairedByCodex": false
+  },
+  "unverified": [
+    "Actual-font measurement, wrapping, shaping and small-screen readability.",
+    "Target-runtime reference-plane rendering, input, clipping and gameplay occlusion.",
+    "All possible host sizes; finite samples are not an exhaustive viewport proof.",
+    "Whether the native author/Review now chooses feasible screen-space control allocation after the bounded capability restriction."
+  ],
+  "actions": {
+    "mainSessions": 1,
+    "uiRegenerationTurns": 1,
+    "reviewTurns": 1,
+    "extraModelRepairTurns": 0,
+    "resourceTurns": 0,
+    "implementationTurns": 0,
+    "knownFindingsInjectedIntoAgentPrompts": false,
+    "privateProjectEdits": false,
+    "originalFailedEvidenceOverwritten": false
+  },
+  "conclusion": "The original three calculation/Art gaps are closed in this focused native test. Overall design acceptance remains partial because the new projected interactive-control and HUD-region claims are not closed. Preserve this result, keep the capability informational, and do not infer a native whole-design pass from clean rectangle diagnostics."
+}

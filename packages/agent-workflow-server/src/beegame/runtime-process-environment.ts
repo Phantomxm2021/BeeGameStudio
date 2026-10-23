@@ -1,10 +1,8 @@
 const SAFE_INHERITED_ENV_KEYS = [
-  'CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING',
   'HOME',
   'LANG',
   'LC_ALL',
   'LOGNAME',
-  'NODE_ENV',
   'PATH',
   'SHELL',
   'TMPDIR',
@@ -12,6 +10,9 @@ const SAFE_INHERITED_ENV_KEYS = [
 ] as const
 
 export function getSafeRuntimeProcessEnvironment(): Record<string, string> {
+  // The BGS server's mode is not the generated project's build mode. Inheriting
+  // development makes Vite production builds retain development-only code.
+  // Project commands can still explicitly select their own NODE_ENV.
   return Object.fromEntries(
     SAFE_INHERITED_ENV_KEYS.flatMap(key => {
       const value = process.env[key]

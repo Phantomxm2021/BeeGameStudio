@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-11",
+  "scope": "V3-06 explicit registered static DOM text/font consumption in the actual target build; reuses uiProbes and the owned browser, not the BGS preview renderer",
+  "coverageGap": {
+    "reproduced": true,
+    "case": "legacy-gap: target loads and registers the font but draws the text with monospace",
+    "oldGeometryCheckStatus": "passed",
+    "interpretation": "ui-data-consumption correctly checked its geometry-only contract; it never certified fonts. This is a documented coverage gap, not evidence that the geometry checker is broken",
+    "log": "/private/tmp/bgs-v3-font-smoke-2026-10-11.log",
+    "logSha256": "8590004a7ae86e8633144ec979ccc33e1b1ff60ac6925d28bffaf612305dadcc"
+  },
+  "implementation": {
+    "checkId": "font-data-consumption",
+    "checkVersion": "v3-dom-font-consumption.1",
+    "taskContract": "No new task fields: runtimeArtifact, existing uiProbes and the explicitly requested new check. Plan validation requires actual operands; Review/Repair can reference the real consumer check through existing verifyWith",
+    "sourceCoverage": "Every explicitly data.font-bound static node.text in the registered UI documents, at authored target viewports. Shared uiProbes may include known non-font nodes for geometry: the font consumer skips these only after bound-font completeness is established. Unbound/system fonts and Scene/Canvas fonts are outside coverage",
+    "inputs": "Actual registry, UI sources, manifest/module/member resources, selected font and identical packed copies; uses existing resource checker and font cmap parser",
+    "expectations": "Saved text and inherited/responsive fontSize, resolved with existing UI helpers, never an author-supplied expected rectangle or PASS",
+    "targetObservation": "Chromium CDP actual glyph font usage, DOM textContent/fontSize and actual element screenshot hashes. Downloading a font or setting a CSS family is not sufficient",
+    "variants": "Response-only saved-text duplication and effective fontSize +7, plus exact selected-font 404 suppression, then original response restoration",
+    "fontCausality": "Original/changed/restored glyph usage must be one isolated custom font; suppressing the selected registered response must change both actual glyph-font signature and visible screenshot, then restoration must match the original. Mixed/custom fallback or no observation-based identity means unverified",
+    "errorHandling": "Only the deliberately suppressed font URL's known network console error is expected. All original/variant/restored errors remain product observations; inability to observe clean suppression is unverified, not passed",
+    "sharedCapabilityChange": "fontCodePoints accepts an optional host-resolved parser module URL; existing environment-based callers remain compatible. No second font decoder or global environment rewrite",
+    "historicalEvidence": "Existing runtime-smoke, UI/pixel, Review/Repair checker versions unchanged; no old geometry evidence promoted to font proof, no automatic task or paid rerun",
+    "sourceSha256": {
+      "workflow-v3/font-consumption.ts": "c710fad818cbf365870689a386fab552f833e7b0923584431ac516f185df2220",
+      "workflow-v3/font-consumption.test.ts": "9840796fb8e694aac0afeb38cc439876826aec383accf3a55a86964bf421d9dc",
+      "workflow-v3/runtime-browser.mjs": "eca7797eebaac8f4b2b7317c6be6d0e27ae98a8f6a79687fdfb462686e090871",
+      "workflow-v3/runtime-checks.ts": "70b1d9bd7e2922ed846b8093c45626a06a7939d5247fead6aa56902d3ba79faf",
+      "workflow-v3/state.ts": "26e53300ea2e9e65988647c57ea7c78bbc571c8dba4291d79312ebe5b821f4ed",
+      "workflow-v3/checks.ts": "90c59f6ddca779fb89a5b4703b75d2831f5f5fe6477ba87924fd054efdd1bf43",
+      "workflow-v3/check-versions.ts": "8e84f454926d63cd91fd48198c14ca3dd358e182f9d492014d3af5a71999c7f3",
+      "workflow-v3/context.ts": "c3c306c15e2618d3ea0cba3be7f7797c763ecb662578edc9c60170d4fa8be21f",
+      "font-inspection.ts": "6992649b16d72c53d259b138282e3c524a5cbadffd877a98c035a59d61ac9c56"
+    }
+  },
+  "fontCases": {
+    "expectedPassed": ["consume", "combined-probes", "explicit-member", "inherited-size", "responsive", "compact-default"],
+    "expectedFailed": ["wrong-text", "ignore-text", "ignore-size", "compact-default-ignore-size", "unrelated-error"],
+    "expectedUnverified": ["fetch-only", "wrong-member", "missing-glyph", "rich-text", "dynamic", "missing-probe", "missing-viewport", "stale-font", "suppression-error", "same-rendering", "mixed-fonts"],
+    "additionalTests": ["legacy geometry-only coverage gap", "plan operand authorization"],
+    "allFinalExpectedStatusesMatched": true,
+    "sourceProtection": "Synthetic tests assert original UI/font bytes unchanged; passed results become noncurrent when the actual selected font bytes change"
+  },
+  "regression": {
+    "status": "completed; full matrix before font-only isolation/filtering fixes, followed by final focused rerun",
+    "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3 packages/agent-workflow-server/src/beegame/font-inspection.test.ts packages/agent-workflow-server/src/auth/auth-context.test.ts packages/agent-workflow-server/src/beegame/session-routes.test.ts",
+    "passed": 214,
+    "failed": 0,
+    "assertions": 1670,
+    "files": 28,
+    "exitCode": 0,
+    "log": "/private/tmp/bgs-v3-font-complete-regression-2026-10-11.log",
+    "logSha256": "2f5f31f1be1c23a6b6a8026a6e6bbc648bd9d083dc6cdb6f23d4c72d5806e0e9",
+    "stageBoundary": "Full matrix captured font preparation before non-font probe filtering and the font predicate before single-font tightening. The font test module loaded before mixed/combined cases were added. Subsequent changes are confined to the font preparation filter and font status predicate; other browser branches/state/context/sharedFont are unchanged. All final font cases, combined UI consumer, shared fonts and versions were rerun in finalFocused. Do not describe these as one 215/216-case frozen full run",
+    "trialNotes": "Initial fixtures used paths outside their declared manifest roots and a verify-only plan with no develop owner; corrected fixtures, no product authorization weakened. Two local TypeScript narrowing errors were fixed. First full run was interrupted to audit default compact coverage: invalid zero breakpoint was already rejected by existing source validation, not a newly found product bug. Final source reuses the shared breakpoint helper; both valid compact cases passed. All trial logs retained; partial/intermediate runs are not final full evidence"
+  },
+  "checkerSelfAudit": {
+    "case": "mixed-fonts: selected Arial draws 1 glyph; alternate Times draws the remaining 10 glyphs, both custom",
+    "initialStatus": "passed",
+    "requiredFinalStatus": "unverified",
+    "rootCause": "Checking that all reported fonts are custom only proves a selected resource affects some glyphs, not that the bound text uses one isolated font",
+    "fix": "Require exactly one actual custom glyph font in original, source variants and restored observations. No additional semantic Review, framework or per-example font-name rule",
+    "beforeLog": "/private/tmp/bgs-v3-font-mixed-before-2026-10-11.log",
+    "beforeLogSha256": "4daf0c1c0e338587f14690737248154d0d66dce51887f0c48f0e0fbb9e73b1a4"
+  },
+  "consumerHandoffAudit": {
+    "case": "combined-probes: one task asks for font and geometry consumption; probe collection includes a bound text node and an ordinary unbound button",
+    "initialFontStatus": "unverified",
+    "rootCause": "Font preparation required every shared UI probe to be a font binding, incorrectly coupling consumers and forcing unnecessary task splitting",
+    "fix": "Filter known non-font UI nodes after validating every actual saved font binding has complete probe coverage. Unknown nodes and missing/corrupt font bindings remain unverified",
+    "finalStatus": "Both font-data-consumption and ui-data-consumption passed in the same task",
+    "beforeLog": "/private/tmp/bgs-v3-font-combined-before-2026-10-11.log",
+    "beforeLogSha256": "d0dd6704128beb8f55123c54ee161405bc795a81c784ab6306decd61839b026f"
+  },
+  "finalFocused": {
+    "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3/font-consumption.test.ts packages/agent-workflow-server/src/beegame/font-inspection.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.test.ts",
+    "passed": 27,
+    "failed": 0,
+    "assertions": 190,
+    "files": 3,
+    "exitCode": 0,
+    "log": "/private/tmp/bgs-v3-font-handoff-focused-2026-10-11.log",
+    "logSha256": "af63b1c90215f442d047da5679b7727ae13d161e1f7b027e07ce878d78b7ac93",
+    "scope": "Final font preparation filtering and isolation predicate, all 22 font cases including the combined UI consumer, legacy geometry-only gap, plan authorization, existing TTF/WOFF2 cmap callers and checker identities"
+  },
+  "typecheck": {
+    "exitCode": 2,
+    "existingDiagnostics": 3556,
+    "workflowV3OrSharedFontDiagnostics": 0,
+    "wholeRepositoryPassed": false,
+    "log": "/private/tmp/bgs-v3-font-handoff-typecheck-2026-10-11.log",
+    "logSha256": "43a892b87f4a09ac7842ad6479da216bc45ac1db517bc8ae1f2948a2291e9b6c"
+  },
+  "boundaries": {
+    "formalFrontendChanged": false,
+    "claudeCodeSourceChanged": false,
+    "builtinToolsChanged": false,
+    "protectedDiffSha256BeforeAndAfter": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995",
+    "realGeneratedProjectModified": false,
+    "paidModelCalls": 0,
+    "databaseMutations": false,
+    "sqlExecuted": false,
+    "productionServicesRestarted": false,
+    "userChromeUsedThisSlice": false,
+    "browser": "Existing owned Chromium; synthetic OS temporary projects. Full regression includes existing independent debug pages and actual CLI with loopback fake model, not a new remote DB UI acceptance",
+    "deliveryEligible": false,
+    "notProven": ["Canvas/Scene text", "inherited font bindings, dynamic/rich/multiline/pseudo text", "unbound/system fonts", "dynamic consumption of assetRef/member selection fields: current selected file consumption is observed", "all glyph styling/shaping, weight/style/variations, complete UI fit or aesthetics", "all font formats in actual target rendering: this matrix uses actual TTF; existing shared cmap test also covers WOFF2", "audio, animation, 3D, Tilemap collision/sorting or complete gameplay", "semantic Review quality", "paid model token/cost improvement", "production deployment"]
+  }
+}

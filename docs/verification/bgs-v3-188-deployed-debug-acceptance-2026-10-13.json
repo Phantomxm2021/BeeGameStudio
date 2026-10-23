@@ -1,0 +1,316 @@
+{
+  "version": "1.88-deployment-record",
+  "codeBaseline": "1.87",
+  "date": "2026-10-13",
+  "deployment": [
+    {
+      "deployed": "runtime",
+      "pid": 51655,
+      "codeBaseline": "1.87",
+      "sourceHashes": [
+        {
+          "path": "packages/beegame-resource-server/src/app.ts",
+          "sha256": "a9b1c5cedf8cd9cfbf4422c150b73972cf28a2ce47f48ac963189af180d08069"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/project-asset-cli.mjs",
+          "sha256": "c249879af7c4c25ccdc58b0b347c560b5c030db124b4d374c88d3e4b934d9d20"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+          "sha256": "6b996f08e71bdb7dd61b9c40cb04537b0ba7da820cdaa6b3dce5b8093c7489b1"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.ts",
+          "sha256": "10a2a09da683695f00b174bc530e2eb4a503d25f923beaf6e1db13415b8587d2"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs",
+          "sha256": "1137e8d4fb04992ff7dba19621633356f772f6610168681006ef8c2c3480d122"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.ts",
+          "sha256": "54324ec2e29828750abe368dd4c8925c74ad2512044672e924d5e05fb9d143b9"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+          "sha256": "2ca985cbec7d6862198a8241459de1f7946c5cadedde90cfd1fd7d05a581bc9a"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+          "sha256": "bd3853eea96cf068da12d4929cc1d8319858c1d212b98e657304fdc4569fe5a8"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/font-consumption.ts",
+          "sha256": "e98ba26829c0b5276a22e9f3fb5d39f690a79b6ee7f55f459c859c22d8bda0b9"
+        }
+      ]
+    },
+    {
+      "deployed": "resources",
+      "pid": 51656,
+      "codeBaseline": "1.87",
+      "resourceProcessingEnabled": false,
+      "sourceHashes": [
+        {
+          "path": "packages/beegame-resource-server/src/app.ts",
+          "sha256": "a9b1c5cedf8cd9cfbf4422c150b73972cf28a2ce47f48ac963189af180d08069"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/project-asset-cli.mjs",
+          "sha256": "c249879af7c4c25ccdc58b0b347c560b5c030db124b4d374c88d3e4b934d9d20"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+          "sha256": "6b996f08e71bdb7dd61b9c40cb04537b0ba7da820cdaa6b3dce5b8093c7489b1"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.ts",
+          "sha256": "10a2a09da683695f00b174bc530e2eb4a503d25f923beaf6e1db13415b8587d2"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs",
+          "sha256": "1137e8d4fb04992ff7dba19621633356f772f6610168681006ef8c2c3480d122"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.ts",
+          "sha256": "54324ec2e29828750abe368dd4c8925c74ad2512044672e924d5e05fb9d143b9"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+          "sha256": "2ca985cbec7d6862198a8241459de1f7946c5cadedde90cfd1fd7d05a581bc9a"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+          "sha256": "bd3853eea96cf068da12d4929cc1d8319858c1d212b98e657304fdc4569fe5a8"
+        },
+        {
+          "path": "packages/agent-workflow-server/src/beegame/workflow-v3/font-consumption.ts",
+          "sha256": "e98ba26829c0b5276a22e9f3fb5d39f690a79b6ee7f55f459c859c22d8bda0b9"
+        }
+      ]
+    }
+  ],
+  "debug": {
+    "root": "/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-188-debug-JwkTAd",
+    "origin": "http://127.0.0.1:52334",
+    "firstRoot": "/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-188-debug-uVIswE",
+    "paidCalls": 0,
+    "resourceChecks": [
+      {
+        "kind": "CLI",
+        "input": {
+          "query": "train"
+        },
+        "exit": 1,
+        "error": "Unknown catalog request fields: query. Catalog accepts structured filter arrays: packIds, dimensions, primaryCategories, categories, styles, gameTypes, packTags, usageTags, assetKinds, capabilities, formats. No free-text query/search. Use {\"filters\":{\"formats\":[\"png\"]},\"limit\":10,\"cursor\":\"<returned nextCursor>\"}; flat filter arrays with limit/cursor also work.\n",
+        "networkCalls": 0,
+        "pass": true
+      },
+      {
+        "kind": "CLI",
+        "input": {
+          "filters": {
+            "formats": "png"
+          }
+        },
+        "exit": 1,
+        "error": "Catalog filters.formats must be an array of nonempty strings. Catalog accepts structured filter arrays: packIds, dimensions, primaryCategories, categories, styles, gameTypes, packTags, usageTags, assetKinds, capabilities, formats. No free-text query/search. Use {\"filters\":{\"formats\":[\"png\"]},\"limit\":10,\"cursor\":\"<returned nextCursor>\"}; flat filter arrays with limit/cursor also work.\n",
+        "networkCalls": 0,
+        "pass": true
+      },
+      {
+        "kind": "CLI",
+        "input": {
+          "filters": {
+            "limit": 1
+          }
+        },
+        "exit": 1,
+        "error": "Unknown catalog filter: limit. Catalog accepts structured filter arrays: packIds, dimensions, primaryCategories, categories, styles, gameTypes, packTags, usageTags, assetKinds, capabilities, formats. No free-text query/search. Use {\"filters\":{\"formats\":[\"png\"]},\"limit\":10,\"cursor\":\"<returned nextCursor>\"}; flat filter arrays with limit/cursor also work.\n",
+        "networkCalls": 0,
+        "pass": true
+      },
+      {
+        "kind": "deployed API",
+        "input": {
+          "filters": {
+            "query": "train"
+          }
+        },
+        "status": 400,
+        "error": {
+          "error": {
+            "code": "invalid_request",
+            "message": "Unknown resource catalog filters: query. Supported filter arrays: packIds, dimensions, primaryCategories, categories, styles, gameTypes, packTags, usageTags, assetKinds, capabilities, formats. Put limit/cursor outside filters; free-text query/search is not supported."
+          }
+        },
+        "pass": true
+      },
+      {
+        "kind": "deployed API",
+        "input": {
+          "filters": {
+            "formats": "png"
+          }
+        },
+        "status": 400,
+        "error": {
+          "error": {
+            "code": "invalid_request",
+            "message": "Resource catalog filters.formats must be an array of nonempty strings"
+          }
+        },
+        "pass": true
+      },
+      {
+        "kind": "deployed API",
+        "input": {
+          "filters": {
+            "limit": 1
+          }
+        },
+        "status": 400,
+        "error": {
+          "error": {
+            "code": "invalid_request",
+            "message": "Unknown resource catalog filters: limit. Supported filter arrays: packIds, dimensions, primaryCategories, categories, styles, gameTypes, packTags, usageTags, assetKinds, capabilities, formats. Put limit/cursor outside filters; free-text query/search is not supported."
+          }
+        },
+        "pass": true
+      },
+      {
+        "kind": "deployed CLI browse",
+        "status": 0,
+        "count": 1,
+        "total": 25,
+        "pass": true
+      },
+      {
+        "kind": "deployed CLI next page",
+        "exit": 0,
+        "count": 1,
+        "different": true,
+        "pass": true
+      }
+    ],
+    "uiChecks": [
+      {
+        "mode": "window",
+        "expected": "passed",
+        "actual": "passed",
+        "sourceUnchanged": true
+      },
+      {
+        "mode": "scaled",
+        "expected": "passed",
+        "actual": "passed",
+        "sourceUnchanged": true
+      },
+      {
+        "mode": "wrong-position",
+        "expected": "failed",
+        "actual": "failed",
+        "sourceUnchanged": true,
+        "reason": "Observed geometry differs from saved layout at position in saved logical UI pixels"
+      },
+      {
+        "mode": "ignored",
+        "expected": "failed",
+        "actual": "failed",
+        "sourceUnchanged": true,
+        "reason": "Observed geometry differs from saved layout at position in saved logical UI pixels"
+      },
+      {
+        "mode": "overflow",
+        "expected": "failed",
+        "actual": "failed",
+        "sourceUnchanged": true,
+        "reason": "Visible text exceeds node bounds at baseline"
+      },
+      {
+        "mode": "self-root",
+        "expected": "unverified",
+        "actual": "unverified",
+        "sourceUnchanged": true,
+        "reason": "coordinateRoot must be a strict ancestor, not the measured node or an unrelated surface"
+      },
+      {
+        "mode": "no-root",
+        "expected": "failed",
+        "actual": "failed",
+        "sourceUnchanged": true,
+        "reason": "Observed geometry differs from saved layout at baseline in window CSS pixels; a fixed source-sized surface may use an explicit independent coordinateRoot. This mismatch is not proof of the whole-game appearance."
+      }
+    ],
+    "uiReusedFrom": "/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-188-debug-uVIswE/evidence.json",
+    "sourcesMatchDeployed": true,
+    "protectedFiles": 3207,
+    "protectedChanged": []
+  },
+  "initialFailures": {
+    "serviceToken": "Deployed catalog browse failed: Capability HTTP 401: {\"error\":{\"code\":\"unauthorized\",\"message\":\"Authenticated resource user is required\"}}\n",
+    "moduleResolution": "Initial independent script guessed dependency paths; corrected via existing package resolver. No production code changed."
+  },
+  "regression": {
+    "passed": 46,
+    "failed": 0,
+    "assertions": 479,
+    "logs": [
+      "/private/tmp/bgs-v3-188-deployed-boundary-regression.log",
+      "/private/tmp/bgs-v3-188-measure-handoff-regression.log"
+    ],
+    "typecheckPassed": true,
+    "typecheckLog": "/private/tmp/bgs-v3-188-typecheck.log"
+  },
+  "boundaries": {
+    "paidCalls": 0,
+    "nativeAgentStarts": 0,
+    "projectWrites": 0,
+    "formalFrontendChanges": 0,
+    "claudeCodeChanges": 0,
+    "cliRebuilt": false,
+    "frontendRebuilt": false,
+    "enginePrescribed": false,
+    "costOptimization": false
+  },
+  "gameFingerprint": {
+    "checked": 201,
+    "changed": []
+  },
+  "screenshots": [
+    "/private/tmp/bgs-v3-188-debug-resource-proof.jpg",
+    "/private/tmp/bgs-v3-188-debug-ui-proof.jpg"
+  ],
+  "deploymentHealth": [
+    {
+      "port": 62173,
+      "status": 200
+    },
+    {
+      "port": 62174,
+      "status": 200
+    },
+    {
+      "port": 62175,
+      "status": 200
+    },
+    {
+      "port": 62176,
+      "status": 200
+    },
+    {
+      "port": 62177,
+      "status": 200
+    }
+  ],
+  "resourceProcessingEnabled": false,
+  "knownWriterLocksUnchanged": true,
+  "debugServicesClosed": true,
+  "remaining": [
+    "Real Agent adoption and whole-game/eight-domain/Scene/audio/art quality are not verified.",
+    "UI debug invokes identical-source production driver in an isolated host, not a native paid task or normal production measurement HTTP call.",
+    "Actual deployed resource checks cover Pack browse/errors/pagination; elements route is covered by offline regression, not separately exercised live.",
+    "UI fit/rotation/scroll/Canvas and engine operations remain outside this acceptance."
+  ]
+}

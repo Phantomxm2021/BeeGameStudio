@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { unzipSync } from 'fflate'
 import {
   BeeGameSkillDuplicateError,
@@ -24,7 +25,7 @@ const SKILL_METADATA_FILE = 'skill.json'
 const RUNTIME_SKILLS_DIR = join('.runtime', 'app', 'skills')
 const RUNTIME_BUILTINS_MANIFEST = '.beegame-builtins.json'
 const RUNTIME_BUILTIN_MARKER = '.beegame-builtin'
-const RETIRED_BUILTIN_SKILLS_DIR = 'builtinskills'
+const BUILTIN_SKILLS_DIR = 'bgs-game-skills'
 const MAX_ZIP_BYTES = 10 * 1024 * 1024
 const MAX_FILE_BYTES = 96 * 1024
 const MAX_FILE_COUNT = 128
@@ -73,11 +74,26 @@ export function getDefaultBeeGameSkillsStoreDir(): string {
   return getSkillsStoreRootDir({})
 }
 
+/** Resolve host configuration without requiring game Skills for model-only requests. */
+export function resolveBuiltinSkillsDirectory(): string {
+  return resolve(process.env.BEEGAME_BUILTIN_SKILLS_DIR ?? fileURLToPath(
+    new URL('../../../.beegame/skills/bgs-game-skills/', import.meta.url),
+  ))
+}
+
+/** Bundled, read-only Skill catalog; validate when starting a game Agent. */
+export function getBuiltinSkillsDirectory(directory = resolveBuiltinSkillsDirectory()): string {
+  if (!existsSync(directory) || !readdirSync(directory, { withFileTypes: true })
+    .some(entry => entry.isDirectory() && existsSync(join(directory, entry.name, 'SKILL.md')))) {
+    throw new Error(`BeeGameStudio built-in Skills are unavailable: ${directory}`)
+  }
+  return directory
+}
+
 /**
- * Remove only BeeGame-projected built-ins from Claude Code's isolated runtime.
+ * Remove only stale BeeGameStudio-projected built-ins from the isolated runtime.
  * User-imported skills are deliberately left untouched: they are explicit user
- * configuration, while the bundled BeeGame catalog must not silently become
- * part of every Claude Code prompt.
+ * configuration. The bundled catalog is loaded read-only from its source.
  */
 export function clearRuntimeBuiltinSkills(
   options: LocalBeeGameSkillsStoreOptions = {},
@@ -532,7 +548,7 @@ function migrateUnscopedSkillDirs(options: LocalBeeGameSkillsStoreOptions): void
     if (!userEntry.isDirectory()) continue
     if (
       userEntry.name === basename(scopedRoot) ||
-      userEntry.name === RETIRED_BUILTIN_SKILLS_DIR
+      userEntry.name === BUILTIN_SKILLS_DIR || userEntry.name === 'builtinskills'
     ) continue
     if (userEntry.name.startsWith('.') || userEntry.name === '.runtime') continue
     const userDir = join(unscopedRoot, userEntry.name)

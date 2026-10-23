@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "date": "2026-10-10",
+  "scope": "V3-06 static artifact checks and V3-07/08 Question/revision foundations",
+  "sourceRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "filesSha256": {
+    "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts": "c853f8b0fb2af45684d35c3426efc3997f66282925b67e1049e5d9f7a8b0b984",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts": "84f12503906869be3085db207d09085c2c59a60021a0c7c8cb4572cbff02ab12",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/context.ts": "ad1e05ab14649a8d88e33b80f1d82563c42e1c20d2ddfae72a59c733c279d2b6",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts": "2b07d02ed7895fb473be1d2a1e9408aed521aa3347d9fdb3df72a22b0f6f3430",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts": "180545ce02c30f05b625209ebe35fe5e06033d60ff77dee2fcd2e7fe93d27d2f",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.ts": "4e9d7e66a28902b1c849dd91fb5b3e85850392fd6266508a44b9cb57649af84b",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs": "6ac8f38b224adf43b3b3e27b2c5aa00472e3ab661324b77b49ec5422a0191f8d",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.test.ts": "97c39a42d4fde3df7e331d7fafdcf89709b286b66fb03fb6dd33799cb63a1b95",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-integration.test.ts": "198667c352b832339936779ffca5e242ac41585dee643afed3ba172748b8dad1",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/revision.test.ts": "7df50cfbbbdd2f662330a2612c21e89803da5007679896165ec4f9616dd3132f",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/native-integration.test.ts": "7cba1db4c2036a1dd8f79848ecde9e37dac85a2ce5728ab59611075140ab25c3",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/workflow-v3.test.ts": "70d708565cc5f7252223011e69bcc4e734b6a3a6916c3d348a93357c8a3e73e9"
+  },
+  "implemented": [
+    "host-owned Chromium/Node static build observation, actual served byte identities; no author PASS report",
+    "static package registry/Scene/UI/resource closure and current source/copy identities",
+    "file and directory freshness, including artifact/source-content additions",
+    "cancel owned browser/driver; preserve source bytes; no automatic retry",
+    "explicit plan revision preserves unrelated successes and immutable attempts",
+    "changed/stale tasks and declared/recorded consumers invalidated with persisted impact reasons",
+    "unknown current writer prevents plan edits and replacement; late results rejected",
+    "same failed bytes/contract are not silently reset by identical plan",
+    "failed branch does not block unrelated authorized ready work",
+    "development candidate self-revision records old input and checks new saved bytes; verify/read-only/binding inputs remain protected",
+    "request keys cannot reuse earlier plan attempts as new execution",
+    "real native AskUserQuestion: empty answers remain pending; valid answer delivered to task session"
+  ],
+  "tests": {
+    "regression": {
+      "passed": 166,
+      "failed": 0,
+      "assertions": 1051,
+      "files": 14,
+      "log": "/private/tmp/bgs-v3-runtime-revision-regression-final.log"
+    },
+    "realNativeAndBrowser": {
+      "passed": 14,
+      "failed": 0,
+      "assertions": 132,
+      "files": 2,
+      "log": "/private/tmp/bgs-v3-runtime-revision-native-final.log",
+      "provider": "localhost deterministic fake Anthropic-compatible provider only",
+      "nativeCases": [
+        "plain",
+        "skill",
+        "binding",
+        "binding-skill",
+        "runtime",
+        "question",
+        "revision"
+      ],
+      "providerCallsByCase": {
+        "plain": 2,
+        "skill": 3,
+        "binding": 2,
+        "binding-skill": 3,
+        "runtime": 2,
+        "question": 3,
+        "revision": 3
+      },
+      "browserCases": [
+        "surface/container presence",
+        "script error",
+        "missing resource",
+        "external request",
+        "WebSocket",
+        "empty body",
+        "cancel busy runtime"
+      ],
+      "limitations": [
+        "Fake token counts are not measured paid usage or cost-savings evidence",
+        "Container presence does not prove rendered pixels; fetching JSON does not prove its semantics are consumed"
+      ]
+    },
+    "focusedTypes": {
+      "passed": true,
+      "log": "/private/tmp/bgs-v3-runtime-revision-types-final.log",
+      "files": [
+        "state.ts",
+        "context.ts",
+        "checks.ts",
+        "binding.ts",
+        "runtime-checks.ts"
+      ]
+    },
+    "fullServerTypes": {
+      "passed": false,
+      "diagnostics": 3556,
+      "workflowV3PathDiagnostics": 0,
+      "log": "/private/tmp/bgs-v3-runtime-server-type-audit.log",
+      "note": "Do not claim whole-repository type/build success or edit native source to mask diagnostics"
+    },
+    "whitespace": {
+      "diagnostics": 0,
+      "note": "git diff --no-index --check new V3 files; no-index exit 1 reflects new-file differences"
+    }
+  },
+  "driverInvestigation": {
+    "observed": "Installed independent Chromium launches. Pinned Playwright connectOverCDP times out in Bun in-process and in a clean-environment Bun subprocess; equivalent clean-environment Node client connects immediately.",
+    "implementation": "Existing host-owned browser plus Node ESM driver; sanitized child environment; no runtime download or native Claude changes",
+    "scope": "Current Bun 1.3.14 / pinned Playwright 1.63.0 on this host, not a diagnosis for all hosts"
+  },
+  "database": {
+    "newMigrationRequired": false,
+    "productionMigrationApplied": false,
+    "realDatabaseTests": false
+  },
+  "deliveryEligible": false,
+  "unverified": [
+    "formal authored Scene/UI/VFX semantic consumption in actual gameplay",
+    "start/play/finish/restart, input/pause/audio, visual quality/feedback and multi-device behavior",
+    "server/native/XR targets, VFX resource closure, compiled/transformed content mapping",
+    "actual tested deployment/export/installation",
+    "semantic Review/Revision/Repair closed loop, finding/source-bound approval",
+    "complete hidden Bash reads/writes, dependency/checker version coverage",
+    "user pause/resume and confirmed-requirement version changes",
+    "cross-process PostgreSQL CAS/RLS/migration and unknown external operation recovery",
+    "frontend/default V3 flow, paid unseen-idea acceptance and real cost reduction"
+  ],
+  "boundaries": {
+    "nativeClaudeSourceModified": false,
+    "realProjectArtifactsModified": false,
+    "paidCallsMade": false,
+    "servicesRestarted": false,
+    "deployed": false,
+    "oldEvidenceOverwritten": false
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "scope": "design-layout-geometry",
+  "runtimeVerified": false,
+  "note": "Recomputes final inputs; does not prove screen/state coverage, agreement with prose, visual quality or gameplay.",
+  "valid": true,
+  "issues": [],
+  "files": [
+    "content/ui/game-hud.json",
+    "content/ui/game-over-screen.json",
+    "content/ui/loading-error-screen.json",
+    "content/ui/loading-screen.json",
+    "content/ui/pause-screen.json",
+    "content/ui/rotate-screen.json",
+    "content/ui/start-screen.json",
+    "content/ui/volume-settings-screen.json",
+    "content/ui/win-screen.json"
+  ]
+}

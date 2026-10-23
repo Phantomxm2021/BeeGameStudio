@@ -1,0 +1,95 @@
+{
+  "kind": "read-only-native-compaction-audit",
+  "recordedAt": "2026-10-15",
+  "status": "evidence-preserved-not-fixed",
+  "scope": "Existing kitty-fish-catch run. No product edits, model replay, image generation or runtime compaction changes were performed for this audit.",
+  "source": {
+    "nativeTranscriptBasename": "f8e87fb1-25e1-40be-a3ff-ad8c2c4c4d02.jsonl",
+    "sha256": "294d2e277087e496a329daa1069018e1aabe9947f54514f9d430e2864a280fad",
+    "lineCount": 756,
+    "locationHint": "Original project parent's .runtime/app/projects directory; account-specific absolute paths and full conversations omitted.",
+    "runtimeVersion": "2.8.4",
+    "entrypoint": "sdk-cli",
+    "observedModelLabel": "ark-code-latest",
+    "modelIdentityLimitation": "Configured provider model label, not proof that the underlying model is Claude or proof of an upstream Claude Code source defect."
+  },
+  "evidence": [
+    {
+      "line": 4,
+      "timestamp": "2026-10-14T15:41:57.571Z",
+      "fact": "Original injected tool context includes the exact project-local tool directory.",
+      "excerpt": "node \".beegame/tmp/goal-tools-S66Tsk/measure.mjs\" --help"
+    },
+    {
+      "line": 107,
+      "timestamp": "2026-10-14T15:55:39.347Z",
+      "eventUuid": "b8f78118-7cf1-423c-b04b-c9c0f49f941d",
+      "requestId": "kittyfish-bg-v1",
+      "outcome": "unknown",
+      "excerpt": "Image request not delivered. Replaying an unknown/rejected receipt does not resubmit upstream. Do not change requestId merely to retry; report the failure and diagnostic details."
+    },
+    {
+      "line": 111,
+      "timestamp": "2026-10-14T15:55:47.739Z",
+      "requestId": "kittyfish-bg-v1",
+      "fact": "Same request replay returns capability HTTP 409, replayed=true, outcome=unknown, with the same prohibition."
+    },
+    {
+      "line": 113,
+      "timestamp": "2026-10-14T15:55:58.038Z",
+      "eventUuid": "27d6e08f-4675-46c2-9131-f22a40fa6495",
+      "excerpt": "该回执卡在 unknown 且无法重放恢复。按恢复流程用新 requestId 重新提交一次（原请求未交付、未结算）。",
+      "assessment": "Author claim contradicts the tool instruction; unknown does not prove no upstream charge."
+    },
+    {
+      "line": 114,
+      "timestamp": "2026-10-14T15:56:02.146Z",
+      "excerpt": "sed 's/kittyfish-bg-v1/kittyfish-bg-v2/'",
+      "fact": "Author renames the same image request and submits it again before compaction."
+    },
+    {
+      "line": 115,
+      "timestamp": "2026-10-14T15:56:33.884Z",
+      "requestId": "kittyfish-bg-v2",
+      "chargedCreditsMicro": "4000000",
+      "billingState": "settled",
+      "limitation": "This receipt confirms the new request charge only. This audit does not prove the original unknown request was also charged."
+    },
+    {
+      "line": 328,
+      "timestamp": "2026-10-14T16:21:59.705Z",
+      "eventUuid": "1207c6ff-42f3-4fc0-8d60-45c7724ef67a",
+      "type": "compact_boundary",
+      "trigger": "auto",
+      "preTokens": 173719
+    },
+    {
+      "line": 329,
+      "timestamp": "2026-10-14T16:21:59.705Z",
+      "eventUuid": "d4c28e56-cc3a-4c86-af39-1d75a1321f3a",
+      "excerpt": "requestId recovery rule (same requestId replay for transient errors; new requestId only when receipt permanently 409 unknown)",
+      "assessment": "Compacted summary reverses the prohibition into permission. The summary names measure.mjs/preview.mjs but omits goal-tools-S66Tsk entirely."
+    },
+    {
+      "line": 421,
+      "timestamp": "2026-10-14T16:28:56.121Z",
+      "excerpt": "Glob may not access files outside the project workspace."
+    },
+    {
+      "line": 425,
+      "timestamp": "2026-10-14T16:29:05.165Z",
+      "excerpt": "工具就缓存在项目 `.beegame/tmp/goal-tools-S66Tsk/`。先用 check-content 刷新 documentRevision。",
+      "fact": "The existing local directory is rediscovered; no evidence that it was physically lost."
+    }
+  ],
+  "offlineReview": {
+    "method": "Read retained JSONL, verify source hash, compare original tool wording with compacted summary and timestamps. No model calls.",
+    "expected": [
+      "An unknown receipt must not be summarized as permission to rename and retry.",
+      "Exact active tool entry paths should remain recoverable after compaction."
+    ],
+    "observed": "Both expectations are violated in the retained summary.",
+    "causalityLimit": "The demonstrated renamed retry happened before compaction. Compaction did not cause that earlier retry.",
+    "remaining": "Native compaction/model ownership investigation and any model-driven replay require separate work; no Claude Code fix is claimed."
+  }
+}

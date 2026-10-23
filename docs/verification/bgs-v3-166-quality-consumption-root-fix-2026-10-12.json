@@ -1,0 +1,56 @@
+{
+  "version": "bgs-v3-166-offline.1",
+  "scope": "Investigate the one 1.64 paid acceptance's quality omissions and unused optional consumption entry; fix confirmed BGS gaps without changing role/Review prompts, native code, formal frontend or real game.",
+  "paidEvidence": {
+    "audit": "bgs-v3-164-paid-acceptance-2026-10-12.json",
+    "ledger": "bgs-v3-164-paid-requests-2026-10-12.jsonl",
+    "requestKey": "8ed94ed8-8118-4856-ad66-b2f039994f3d",
+    "mainTranscript": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed.jsonl",
+    "childTranscript": "agent-a8e002b869f2cfaec.jsonl",
+    "delegationAt": "2026-10-12T02:41:07.346Z",
+    "actualScope": "Author told verification to rebuild, rerun existing suites, follow par/crash-window/HUD-font to source, and inspect L1/crash screenshots. The opening mentioned eight domains, but the actionable list only traced three facts. Author imposed 500 Chinese characters, not BGS.",
+    "viewing": {"main": ["g-s1-L1-saved.png", "g-s2-L3-saved.png", "h-c01-crash-ring.png", "g-s3-ending.png"], "child": ["g-s1-L1-saved.png", "h-c01-crash-ring.png"], "counterexampleNeitherViewed": "h-k-2star.png"},
+    "sourceReading": "No new design-body read in this turn; review-sources without --details returned source identities/sections, not prose. Earlier history may contain the bodies; lack of a new read does not prove they were never read. Unchanged bytes cannot prove an old semantic judgment correct.",
+    "unusedEntry": "No main/child measure --help or --consumption-json call; actual record contains build/runtime-smoke only. Generated adapter and host dispatch were present. No observed lost argument, unavailable bridge or failed consumption invocation.",
+    "nativeVerification": "Read-only inspection of builtin-tools/AgentTool/built-in/verificationAgent.ts confirms a general implementation verifier: build/tests mandatory, command-backed PASS/FAIL, project writes prohibited. It already warns that passing author tests is not independent proof. This round still repeated author-selected checks and wrote build/test outputs via Bash. Native template/execution is not modified or rewrapped here.",
+    "hostVerdict": "BGS retained quality=unverified and deliveryEligible=false; it did not parse model PASS into game acceptance.",
+    "causalLimits": "There is no controlled comparison proving long context alone caused this miss. No consumption attempt was made, so full-registry prerequisites are a confirmed usability obstacle, not a proven sole cause of this round's omission."
+  },
+  "findings": [
+    {"id": "F1", "class": "Agent task/evidence selection plus LLM judgment", "root": "All-domain acceptance was narrowed into proving the author's selected facts. The verifier repeated the same assertion/screenshot selection, so independence of execution did not produce independent coverage.", "status": "not-claimed-solved", "action": "No additional Reviewer, prompt or forced delegation. Keep host observations/coverage separate from report semantics and model verdicts. Audio promise consistency, numerical optimality and subjective quality remain unverified."},
+    {"id": "F2", "class": "BGS tool discoverability and result-scope gap", "root": "Consumption option/support were only in measure help; the frequently used handoff and compact receipt exposed performed checks but not available/unmeasured checks or full actual coverage.", "status": "fixed-offline", "action": "Existing handoff/inspect now return available checks, option, supported/excluded technologies and unmeasured checks. Existing help has a valid JSON example. Compact check results retain actual coverage. Automatic startup context and role prompt remain unchanged; selecting or reading these facts is still Agent behavior."},
+    {"id": "F3", "class": "Capability applicability, not failed execution", "root": "Pixel driver needs bound static image/Tilemap resources, font driver a bound custom DOM font, audio driver encoded HTML audio. Maglev uses procedural Canvas/system fonts/WebAudio, so these three drivers cannot prove its promises.", "status": "boundary-corrected", "action": "Expose actual exclusions; do not force irrelevant probes, fabricate resources, suppress unsupported findings or claim all consumption/quality has passed."},
+    {"id": "F4", "class": "Confirmed BGS deterministic UI checker gap", "root": "Outer node size/position matched while runtime-inserted child text escaped its rectangle. Static JSON allocation and star count cannot detect this content overflow.", "status": "fixed-offline", "action": "Existing UI driver now observes visible DOM text fragments on selected authored text/button nodes before/change/restoration. Escaping text fails; hidden text and valid wrapping pass; clipping/pseudo-content is unverified. No symbol/game-specific rule; no new stage."},
+    {"id": "F5", "class": "BGS scoped-probe integration gap", "root": "Reusing old prepareUiProbes unconditionally required every registered screen/viewport, inconsistent with a directed autonomous diagnostic. A six-screen Canvas game cannot reach all screens by the simple DOM-click probe path.", "status": "fixed-offline", "action": "One explicit internal UI scope option makes autonomous measurements selected-node/state probes with unobserved screens/viewports recorded. Existing Task full-registry preconditions are preserved. Selected PASS is not whole-game PASS."}
+  ],
+  "changes": {
+    "files": ["workflow-v3/agent-measurement.ts", "workflow-v3/agent-tools.ts", "workflow-v3/ui-consumption.ts", "workflow-v3/runtime-checks.ts", "workflow-v3/runtime-browser.mjs", "workflow-v3/check-versions.ts", "workflow-v3/pixel-consumption.ts (type-only separation of UI text-fit flag)", "workflow-v3/agent-consumption.test.ts", "workflow-v3/agent-measurement.test.ts", "workflow-v3/ui-consumption.test.ts", "workflow-v3/check-versions.test.ts"],
+    "checkerVersion": "v3-ui-dom-consumption.2; old outer-box-only UI receipts are obsolete, not silently upgraded",
+    "whyNotSimpler": "More prompt text cannot mechanically measure dynamic DOM overflow. Globally deleting the old registry prerequisite would change unrelated Task contracts; a single scoped argument reuses the driver without another pipeline. Availability and coverage reuse existing handoff/receipt, not a new framework.",
+    "unchanged": ["Agent role/Review/Skill prompts", "Native history, delegation tool input/results and model configuration", "Project CLAUDE.md", "Formal frontend and debug page", "Claude Code and builtin-tools source", "Real game files and evidence", "Database schema/settings/hooks", "Agent turn/tool/output limits"]
+  },
+  "regression": {
+    "reproductionsBefore": {"path": "/private/tmp/bgs-v3-166-ui-before.log", "failedAsExpected": ["Partial screen/viewport refused by inherited registry mode", "Visible dynamic two-row overflow incorrectly passed", "Clipped overflow incorrectly passed"]},
+    "additionalReproduction": {"path": "/private/tmp/bgs-v3-166-ui-pseudo-before.log", "failedAsExpected": "Nested pseudo-content incorrectly counted as complete text-fit; corrected to unverified"},
+    "finalCore": {"pass": 62, "fail": 0, "files": 6, "expects": 688, "seconds": 106.72, "log": "/private/tmp/bgs-v3-166-final-core2.log"},
+    "dynamicOverflowReceipt": {"pass": 1, "fail": 0, "expects": 6, "seconds": 4.75, "log": "/private/tmp/bgs-v3-166-overflow-receipt.log", "proof": "Correct outer geometry, passed build/smoke, actual overflow retained as failed consumption in handoff; export refuses this failed requested-check receipt; source bytes unchanged"},
+    "finalNativeTransport": {"pass": 31, "fail": 0, "files": 3, "expects": 409, "seconds": 25.58, "log": "/private/tmp/bgs-v3-166-transport-final2.log", "controlledModelOnly": true, "goalPromptChars": 708, "toolContextChars": 2586, "previous164SameFixtureChars": {"goal": 708, "tools": 2586}},
+    "counting": "Final affected/core plus new overflow receipt and native transport: 94 distinct passing cases. Earlier 110-case seven-file driver compatibility run overlaps these and is not added; its unchanged pixel/font/audio branches also passed.",
+    "typecheck": {"status": "passed", "exit": 0, "command": "bun run typecheck", "log": "/private/tmp/bgs-v3-166-final3-typecheck.log"},
+    "initialRepairFailures": ["Required new UI-only property unintentionally entered the pixel type via Omit; exclude it type-only, not change pixel runtime semantics", "Readonly tuple comparison assertions fixed without changing production array contracts", "Full availability metadata inflated startup context to 3249 characters, then a tiny flag still reached 2627; remove it entirely from startup, keep facts in explicit handoff/inspect; existing 2600 regression gate not increased"]
+  },
+  "integrity": {
+    "formalFrontend": {"files": 825, "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"},
+    "nativeSrc": {"files": 2445, "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"},
+    "builtinTools": {"files": 383, "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"},
+    "productionGoalPromptFile": "faf133da01789b9e09c9efc2dc42e12204271844693453d0dc324b57848dd737",
+    "hashMethod": "Existing public nonhidden-file audit excluding node_modules/transcripts; not all hidden bytes",
+    "oldGameExport": {"files": 51, "allOriginalReceiptAndCurrentBytesMatch": true},
+    "deployments": 0, "paidRuns": 0, "manualRealProjectChanges": 0, "runtimeVersion": "1.64"
+  },
+  "limitations": [
+    "Offline tests prove BGS availability/scope/result transport and generic selected-DOM overflow detection, not that a real Agent adopts the probes or covers all screens.",
+    "Canvas gameplay paths, unseen states, sibling occlusion, actual glyph ink/shadows, aesthetics, WebAudio concurrency/listening and prose numerical proofs remain outside this deterministic check.",
+    "Maglev original findings remain untouched; semantic omissions and old long-history cost are not claimed resolved. No automatic paid experiment, source repair or delivery PASS."
+  ]
+}

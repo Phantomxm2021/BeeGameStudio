@@ -1,0 +1,1135 @@
+{
+  "ok": true,
+  "scope": "layout-draft-inspection",
+  "runtimeVerified": false,
+  "viewport": {
+    "width": 960,
+    "height": 540
+  },
+  "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+  "diagnostics": {
+    "outsideViewport": [],
+    "outsideParent": [],
+    "outsideContentArea": [],
+    "belowMinimumControlSize": [],
+    "overlapCandidates": []
+  },
+  "boundaryChecks": [],
+  "nodes": [
+    {
+      "id": "volume-root",
+      "active": true,
+      "layout": {
+        "size": [
+          960,
+          540
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          960,
+          0
+        ],
+        [
+          960,
+          540
+        ],
+        [
+          0,
+          540
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 540
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "volume-dim",
+      "parentId": "volume-root",
+      "active": true,
+      "layout": {
+        "anchorMin": [
+          0,
+          0
+        ],
+        "anchorMax": [
+          1,
+          1
+        ],
+        "sizeDelta": [
+          0,
+          0
+        ],
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          960,
+          540
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          960,
+          0
+        ],
+        [
+          960,
+          540
+        ],
+        [
+          0,
+          540
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 540
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "volume-panel",
+      "parentId": "volume-root",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          480,
+          418
+        ],
+        "container": {
+          "direction": "column",
+          "gap": 14,
+          "padding": [
+            28,
+            32,
+            28,
+            32
+          ],
+          "align": "center"
+        }
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          240,
+          61
+        ],
+        [
+          720,
+          61
+        ],
+        [
+          720,
+          479
+        ],
+        [
+          240,
+          479
+        ]
+      ],
+      "bounds": {
+        "left": 240,
+        "top": 61,
+        "right": 720,
+        "bottom": 479
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "volume-title",
+      "parentId": "volume-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          28
+        ],
+        "size": [
+          416,
+          34
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          272,
+          89
+        ],
+        [
+          688,
+          89
+        ],
+        [
+          688,
+          123
+        ],
+        [
+          272,
+          123
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 89,
+        "right": 688,
+        "bottom": 123
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "mute-row",
+      "parentId": "volume-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          76
+        ],
+        "size": [
+          416,
+          44
+        ],
+        "container": {
+          "direction": "row",
+          "gap": 12,
+          "padding": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "justify": "start",
+          "align": "center"
+        }
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          272,
+          137
+        ],
+        [
+          688,
+          137
+        ],
+        [
+          688,
+          181
+        ],
+        [
+          272,
+          181
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 137,
+        "right": 688,
+        "bottom": 181
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "mute-label",
+      "parentId": "mute-row",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          0,
+          8
+        ],
+        "size": [
+          120,
+          28
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          272,
+          145
+        ],
+        [
+          392,
+          145
+        ],
+        [
+          392,
+          173
+        ],
+        [
+          272,
+          173
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 145,
+        "right": 392,
+        "bottom": 173
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "master-mute-toggle",
+      "parentId": "mute-row",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          132,
+          0
+        ],
+        "size": [
+          56,
+          44
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          404,
+          137
+        ],
+        [
+          460,
+          137
+        ],
+        [
+          460,
+          181
+        ],
+        [
+          404,
+          181
+        ]
+      ],
+      "bounds": {
+        "left": 404,
+        "top": 137,
+        "right": 460,
+        "bottom": 181
+      },
+      "controlSize": [
+        56,
+        44
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "mute-box",
+      "parentId": "master-mute-toggle",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          14,
+          8
+        ],
+        "size": [
+          28,
+          28
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          418,
+          145
+        ],
+        [
+          446,
+          145
+        ],
+        [
+          446,
+          173
+        ],
+        [
+          418,
+          173
+        ]
+      ],
+      "bounds": {
+        "left": 418,
+        "top": 145,
+        "right": 446,
+        "bottom": 173
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "mute-check",
+      "parentId": "mute-box",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          6,
+          7
+        ],
+        "size": [
+          16,
+          12
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          424,
+          152
+        ],
+        [
+          440,
+          152
+        ],
+        [
+          440,
+          164
+        ],
+        [
+          424,
+          164
+        ]
+      ],
+      "bounds": {
+        "left": 424,
+        "top": 152,
+        "right": 440,
+        "bottom": 164
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "music-label",
+      "parentId": "volume-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          134
+        ],
+        "size": [
+          416,
+          24
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          272,
+          195
+        ],
+        [
+          688,
+          195
+        ],
+        [
+          688,
+          219
+        ],
+        [
+          272,
+          219
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 195,
+        "right": 688,
+        "bottom": 219
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "music-slider",
+      "parentId": "volume-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          172
+        ],
+        "size": [
+          416,
+          48
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          272,
+          233
+        ],
+        [
+          688,
+          233
+        ],
+        [
+          688,
+          281
+        ],
+        [
+          272,
+          281
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 233,
+        "right": 688,
+        "bottom": 281
+      },
+      "controlSize": [
+        416,
+        48
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "music-track",
+      "parentId": "music-slider",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          22,
+          19
+        ],
+        "size": [
+          372,
+          10
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          294,
+          252
+        ],
+        [
+          666,
+          252
+        ],
+        [
+          666,
+          262
+        ],
+        [
+          294,
+          262
+        ]
+      ],
+      "bounds": {
+        "left": 294,
+        "top": 252,
+        "right": 666,
+        "bottom": 262
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "music-fill",
+      "parentId": "music-slider",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          22,
+          19
+        ],
+        "size": [
+          180,
+          10
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          294,
+          252
+        ],
+        [
+          474,
+          252
+        ],
+        [
+          474,
+          262
+        ],
+        [
+          294,
+          262
+        ]
+      ],
+      "bounds": {
+        "left": 294,
+        "top": 252,
+        "right": 474,
+        "bottom": 262
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "music-thumb",
+      "parentId": "music-slider",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          190,
+          10
+        ],
+        "size": [
+          28,
+          28
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          462,
+          243
+        ],
+        [
+          490,
+          243
+        ],
+        [
+          490,
+          271
+        ],
+        [
+          462,
+          271
+        ]
+      ],
+      "bounds": {
+        "left": 462,
+        "top": 243,
+        "right": 490,
+        "bottom": 271
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "sfx-label",
+      "parentId": "volume-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          234
+        ],
+        "size": [
+          416,
+          24
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          272,
+          295
+        ],
+        [
+          688,
+          295
+        ],
+        [
+          688,
+          319
+        ],
+        [
+          272,
+          319
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 295,
+        "right": 688,
+        "bottom": 319
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "sfx-slider",
+      "parentId": "volume-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          272
+        ],
+        "size": [
+          416,
+          48
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          272,
+          333
+        ],
+        [
+          688,
+          333
+        ],
+        [
+          688,
+          381
+        ],
+        [
+          272,
+          381
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 333,
+        "right": 688,
+        "bottom": 381
+      },
+      "controlSize": [
+        416,
+        48
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "sfx-track",
+      "parentId": "sfx-slider",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          22,
+          19
+        ],
+        "size": [
+          372,
+          10
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          294,
+          352
+        ],
+        [
+          666,
+          352
+        ],
+        [
+          666,
+          362
+        ],
+        [
+          294,
+          362
+        ]
+      ],
+      "bounds": {
+        "left": 294,
+        "top": 352,
+        "right": 666,
+        "bottom": 362
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "sfx-fill",
+      "parentId": "sfx-slider",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          22,
+          19
+        ],
+        "size": [
+          180,
+          10
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          294,
+          352
+        ],
+        [
+          474,
+          352
+        ],
+        [
+          474,
+          362
+        ],
+        [
+          294,
+          362
+        ]
+      ],
+      "bounds": {
+        "left": 294,
+        "top": 352,
+        "right": 474,
+        "bottom": 362
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "sfx-thumb",
+      "parentId": "sfx-slider",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          190,
+          10
+        ],
+        "size": [
+          28,
+          28
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          462,
+          343
+        ],
+        [
+          490,
+          343
+        ],
+        [
+          490,
+          371
+        ],
+        [
+          462,
+          371
+        ]
+      ],
+      "bounds": {
+        "left": 462,
+        "top": 343,
+        "right": 490,
+        "bottom": 371
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "volume-done-button",
+      "parentId": "volume-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          334
+        ],
+        "size": [
+          416,
+          56
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          272,
+          395
+        ],
+        [
+          688,
+          395
+        ],
+        [
+          688,
+          451
+        ],
+        [
+          272,
+          451
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 395,
+        "right": 688,
+        "bottom": 451
+      },
+      "controlSize": [
+        416,
+        56
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "volume-done-button-label",
+      "parentId": "volume-done-button",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          416,
+          32
+        ]
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          272,
+          407
+        ],
+        [
+          688,
+          407
+        ],
+        [
+          688,
+          439
+        ],
+        [
+          272,
+          439
+        ]
+      ],
+      "bounds": {
+        "left": 272,
+        "top": 407,
+        "right": 688,
+        "bottom": 439
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    }
+  ]
+}

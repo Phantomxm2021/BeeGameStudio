@@ -1,0 +1,103 @@
+{
+  "date": "2026-10-11",
+  "scope": "Withdraw the previous acceptance round's expanded frontend changes; continue V3-08 checker-version freshness in BGS backend only.",
+  "frontendRestore": {
+    "trackedFilesEqualGitBaseline": [
+      "apps/frontend/src/App.test.tsx",
+      "apps/frontend/src/store/projectStore.ts",
+      "apps/frontend/src/store/projectStore.test.ts"
+    ],
+    "removedBehavior": [
+      "Automatic host Chat binding during shared URL restoration and changed public project navigation",
+      "New Revise task plan button and dual-mode plan/requirements form",
+      "workflowRequest /plan PUT special case and its new UI test",
+      "App test-only avatar animation mock"
+    ],
+    "preserved": "Earlier frontend changes and pre-existing untracked V3 files were not deleted or reverted wholesale. Existing requirement-change form is retained.",
+    "matchesPriorEvidenceHashes": {
+      "apps/frontend/src/services/workflowV3Api.ts": "18ee0efd4f9df373174a36e59f8181ba5d45954699bdfcd8082ac0f3c0316ab1",
+      "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.test.tsx": "b855fac7e6b5003395d6aa405c54e4c9b158faae6a71dba8ab8fe87ce8f65c16"
+    },
+    "panel": {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.tsx",
+      "sha256": "eb8108097a893635c6d6b35f013313b192e3f759ec4f121dd79608e6cf2dd103",
+      "qualification": "Known added behavior reversed with apply_patch; not claimed byte-identical to the prior recorded panel hash. Other panel functionality retained."
+    },
+    "previousAcceptanceEvidence": "docs/verification/bgs-v3-database-deployed-acceptance-2026-10-11.json remains unchanged; withdrawn UI behavior is historical, not current implementation."
+  },
+  "confirmedBackendBug": {
+    "location": "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts",
+    "cause": "checkIsCurrent checked input and artifact bytes but not checker identity/version. Dependency dispatch, plan freshness and repair closure could reuse obsolete evidence while bytes stayed unchanged.",
+    "reproduction": {
+      "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3/control.test.ts -t 'obsolete checker'",
+      "beforeFix": "Expected promise that rejects; received promise that resolved from assertFreshDependencies. An earlier fixture setup failure was corrected before reproducing this actual defect.",
+      "afterFix": "Rejects before native submission, preserves history and unrelated UI success; explicit revised plan invalidates affected consumers only."
+    },
+    "solution": "One shared explicit driver-version table, consumed by existing producers and freshness checks. Unknown/obsolete check versions cannot promote current dependency, Preview/export or repair closure. Build mode must match the owning task. No global release hash or automatic retry.",
+    "sourceHashes": {
+      "check-versions.ts": "6daf41fcfc13420e36083a18a01dcedf48805d8707d692810e0fc57418690de1",
+      "checks.ts": "81f4db36e03d3e32afd3f9315902765aadc41597657d87de30eb9503c48c0402"
+    },
+    "migration": "None. Existing CheckResult identity fields reused; persisted histories and remote database untouched."
+  },
+  "validation": {
+    "backendFullSelected": {
+      "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3",
+      "passed": 149,
+      "failed": 0,
+      "files": 19,
+      "assertions": 1246,
+      "log": "/private/tmp/bgs-v3-check-version-backend-host-20261011.log",
+      "coverage": "Includes dedicated local Chromium and real native CLI protocol tests with a local fake provider, not paid model/game-quality acceptance."
+    },
+    "finalAffectedRecheck": {
+      "files": ["check-versions.test.ts", "control.test.ts", "revision.test.ts", "review.test.ts"],
+      "passed": 20,
+      "failed": 0,
+      "assertions": 203,
+      "log": "/private/tmp/bgs-v3-check-version-targeted-final-20261011.log",
+      "qualification": "Covers the final diagnostic and Review changes after the full run began. Overlaps the full suite, not 20 additional distinct tests."
+    },
+    "frontendRelated": {
+      "command": "bun run test:run -- src/store/projectStore.test.ts src/components/Demiurge/Sidebar/WorkflowPanel.test.tsx src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.test.tsx",
+      "passed": 34,
+      "failed": 0,
+      "files": 3,
+      "qualification": "Component/store regression, not a new deployed visual acceptance."
+    },
+    "frontendTypecheck": {"command": "bunx tsc -b", "exitCode": 0},
+    "restoredAppTest": {
+      "log": "/private/tmp/bgs-v3-frontend-restored-app-20261011.log",
+      "assertionTestsPassed": 15,
+      "unhandledErrors": 7,
+      "exitCode": 1,
+      "cause": "Restored test environment lacks Path2D for the avatar animation; no frontend or test mock added to hide it. This run is failed, not counted as passed."
+    },
+    "sandboxAttempt": {
+      "log": "/private/tmp/bgs-v3-check-version-backend-20261011.log",
+      "result": "Browser startup failed in the execution sandbox; stopped only the identified own test runner with SIGINT, then used approved normal host execution. Failed evidence retained."
+    },
+    "backendTypecheck": {
+      "command": "bunx tsc -p packages/agent-workflow-server/tsconfig.json --noEmit",
+      "exitCode": 2,
+      "log": "/private/tmp/bgs-v3-check-version-typecheck-confirmed-20261011.log",
+      "qualification": "Whole server typecheck remains failed with existing diagnostics. Workflow-v3 paths have no final diagnostics; not a whole-repository pass. An intermediate local order-array typing error was fixed, not ignored."
+    }
+  },
+  "boundaries": {
+    "paidModelRuns": 0,
+    "existingGameOutputsModified": false,
+    "claudeCodeNativeSourceModified": false,
+    "servicesRestarted": false,
+    "sqlExecuted": false,
+    "formalFrontendNewFeatures": false,
+    "deliveryEligible": false,
+    "remaining": [
+      "Unknown native writers/external operations recovery",
+      "Full target game content, interaction and quality coverage",
+      "Real model cost improvements",
+      "Normal Chat initial creation/change planning",
+      "Formal frontend wiring requires separate user confirmation; URL restoration issue remains pending"
+    ]
+  }
+}

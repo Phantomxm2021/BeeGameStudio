@@ -12,19 +12,19 @@ Supabase owns durable user and business data:
 - Row Level Security for owner-scoped and member-scoped data access.
 - Realtime usage events, usage summaries, wallet balances, grants, and billing audit events.
 
-The BeeGame runtime host owns local execution only:
+The trusted BeeGame runtime host owns execution and V3 workflow coordination:
 
-- Claude/BeeGame session hosting.
+- BGS session hosting.
 - Workspace filesystem access inside the configured project root.
 - Preview process start/stop.
 - Tool permission policy and transcript/event streaming.
 - API request authorization by validating the user's Supabase JWT and mirroring the permissions returned by Supabase.
+- V3 Run persistence and conditional state transitions, using a server-only Supabase service-role key. Project ownership is checked before accessing this privileged store.
 
 ## Forbidden In Runtime Host
 
 The runtime host must not depend on:
 
-- Supabase service role keys.
 - Supabase Auth admin APIs for account deletion, user creation, or role elevation.
 - Local JSON/SQLite stores as a production fallback when Supabase is configured.
 - User self-assigned admin roles from frontend state or query parameters.
@@ -37,6 +37,13 @@ Admin status must come from Supabase-controlled state only:
 Account deletion also belongs to Supabase. The runtime host may call
 `beegame_delete_current_user()` with the current user's JWT, but it must not use
 Supabase Auth admin APIs or service role keys to delete users.
+
+The V3 persistence key belongs only in the trusted runtime's deployment
+environment. Never forward it to browsers, generated projects, preview scripts,
+native model processes, or user-run local clients. Ordinary dashboard data
+continues to use the user's JWT and RLS; the V3 exception does not grant other
+runtime features general service-role access. In Docker, use a runtime-only
+environment override, not the shared `docker/.env.production` file.
 
 ## Dev And Offline Mode
 
@@ -71,7 +78,13 @@ Every provider response records its token snapshot as a realtime usage event.
 The server derives the incremental weighted-token delta, converts it to
 microcredits, and debits the realtime usage wallet idempotently. The dashboard
 reads usage events and summaries directly; there is no reserve, settle, refund,
-or parallel ledger flow.
+or parallel ledger flow. Summary reads call the server-side
+`beegame_usage_summary` RPC scoped to the authenticated user, with optional
+project and date-window filters. Event detail reads keep the existing array response and use bounded
+`offset`/`limit` pagination (default limit 100, maximum 200); the billing
+service reports `X-Total-Count` and, when another page exists,
+`X-Next-Offset`. The read index and RPC are installed by
+`20261023030000_usage_read_aggregation.sql`.
 
 ## Supabase Smoke Verification
 

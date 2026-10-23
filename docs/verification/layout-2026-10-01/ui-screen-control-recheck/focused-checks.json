@@ -1,0 +1,2764 @@
+{
+  "implementationCommit": "ba2f3e5f",
+  "selectionAuthority": "Final UI_UX_SPEC section 3: A iff width>600 && height>380 && height<=width; otherwise B. status is shared.",
+  "sampledCases": 126,
+  "selectedCases": 72,
+  "diagnostics": [],
+  "controls": [
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-status.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "id": "retry-btn",
+      "size": [
+        180,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "pause-btn",
+      "size": [
+        72.00000000000006,
+        27.999999999999996
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        28
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        28
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        28
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        28.000000000000004
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        28
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "id": "pause-btn",
+      "size": [
+        72,
+        28
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "action-primary",
+      "size": [
+        260,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "action-secondary",
+      "size": [
+        260,
+        40
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "action-primary",
+      "size": [
+        260,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "action-secondary",
+      "size": [
+        260,
+        40
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "action-primary",
+      "size": [
+        260,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "action-secondary",
+      "size": [
+        260,
+        40
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "id": "action-primary",
+      "size": [
+        260,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "id": "action-secondary",
+      "size": [
+        260,
+        40
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "id": "action-primary",
+      "size": [
+        260,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "id": "action-secondary",
+      "size": [
+        260,
+        40
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "id": "action-primary",
+      "size": [
+        260,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "id": "action-secondary",
+      "size": [
+        260,
+        40
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "id": "action-primary",
+      "size": [
+        260,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "id": "action-secondary",
+      "size": [
+        260,
+        40
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": true
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-base.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "start-btn",
+      "size": [
+        220,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "start-btn",
+      "size": [
+        220,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "start-btn",
+      "size": [
+        220,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "id": "start-btn",
+      "size": [
+        220,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "id": "start-btn",
+      "size": [
+        220,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "id": "start-btn",
+      "size": [
+        220,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "id": "start-btn",
+      "size": [
+        220,
+        46
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-base.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "id": "action-primary",
+      "size": [
+        256,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "id": "action-secondary",
+      "size": [
+        256,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-overlay-compact.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "id": "start-btn",
+      "size": [
+        240,
+        48
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    },
+    {
+      "source": ".beegame/tmp/ui-start-compact.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "id": "mute-btn",
+      "size": [
+        64,
+        44
+      ],
+      "inCameraPlane": false,
+      "belowDocument44pxTouchMinimum": false
+    }
+  ],
+  "projections": [
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "expected": {
+        "left": 108,
+        "top": 591,
+        "right": 208,
+        "bottom": 606
+      },
+      "actual": {
+        "left": 108,
+        "top": 591,
+        "right": 208,
+        "bottom": 606
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 780
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "expected": {
+        "left": 108.47619047619047,
+        "top": 407.61904761904765,
+        "right": 207.52380952380952,
+        "bottom": 422.4761904761905
+      },
+      "actual": {
+        "left": 108.47619047619047,
+        "top": 407.61904761904765,
+        "right": 207.52380952380952,
+        "bottom": 422.4761904761905
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 416
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "expected": {
+        "left": 108,
+        "top": 453,
+        "right": 208,
+        "bottom": 468
+      },
+      "actual": {
+        "left": 108,
+        "top": 453,
+        "right": 208,
+        "bottom": 468
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 504
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "expected": {
+        "left": 108,
+        "top": 569,
+        "right": 208,
+        "bottom": 584
+      },
+      "actual": {
+        "left": 108,
+        "top": 569,
+        "right": 208,
+        "bottom": 584
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 736
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "expected": {
+        "left": 108,
+        "top": 569,
+        "right": 208,
+        "bottom": 584
+      },
+      "actual": {
+        "left": 108,
+        "top": 569,
+        "right": 208,
+        "bottom": 584
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 736
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "expected": {
+        "left": 122.76190476190477,
+        "top": 306.19047619047615,
+        "right": 193.23809523809524,
+        "bottom": 316.76190476190476
+      },
+      "actual": {
+        "left": 122.76190476190477,
+        "top": 306.19047619047615,
+        "right": 193.23809523809524,
+        "bottom": 316.7619047619047
+      },
+      "maximumError": 5.684341886080802e-14,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": true,
+      "gameViewHeight": 296
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "expected": {
+        "left": 120.38095238095238,
+        "top": 323.0952380952381,
+        "right": 195.61904761904762,
+        "bottom": 334.38095238095235
+      },
+      "actual": {
+        "left": 120.38095238095238,
+        "top": 323.0952380952381,
+        "right": 195.61904761904762,
+        "bottom": 334.38095238095235
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": true,
+      "gameViewHeight": 316
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "expected": {
+        "left": 118,
+        "top": 340,
+        "right": 198,
+        "bottom": 352
+      },
+      "actual": {
+        "left": 118,
+        "top": 340,
+        "right": 198,
+        "bottom": 352
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 336
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "expected": {
+        "left": 118,
+        "top": 340,
+        "right": 198,
+        "bottom": 352
+      },
+      "actual": {
+        "left": 118,
+        "top": 340,
+        "right": 198,
+        "bottom": 352
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 336
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "expected": {
+        "left": 117.88095238095238,
+        "top": 340.8452380952381,
+        "right": 198.11904761904762,
+        "bottom": 352.88095238095235
+      },
+      "actual": {
+        "left": 117.88095238095238,
+        "top": 340.8452380952381,
+        "right": 198.11904761904762,
+        "bottom": 352.88095238095235
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 337
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "expected": {
+        "left": 108,
+        "top": 494.5,
+        "right": 208,
+        "bottom": 509.5
+      },
+      "actual": {
+        "left": 108,
+        "top": 494.5,
+        "right": 208,
+        "bottom": 509.5
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 587
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "expected": {
+        "left": 387.4285714285714,
+        "top": 448.97142857142853,
+        "right": 572.5714285714284,
+        "bottom": 467.48571428571427
+      },
+      "actual": {
+        "left": 387.4285714285714,
+        "top": 448.97142857142853,
+        "right": 572.5714285714284,
+        "bottom": 467.48571428571427
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 518.4
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "expected": {
+        "left": 264.2857142857143,
+        "top": 415.7142857142857,
+        "right": 435.7142857142857,
+        "bottom": 432.8571428571429
+      },
+      "actual": {
+        "left": 264.2857142857143,
+        "top": 415.7142857142857,
+        "right": 435.7142857142857,
+        "bottom": 432.8571428571429
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 480
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "expected": {
+        "left": 251.2142857142857,
+        "top": 399.08571428571423,
+        "right": 415.7857142857142,
+        "bottom": 415.5428571428571
+      },
+      "actual": {
+        "left": 251.2142857142857,
+        "top": 399.08571428571423,
+        "right": 415.7857142857142,
+        "bottom": 415.5428571428571
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 460.79999999999995
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "expected": {
+        "left": 331.42857142857144,
+        "top": 332.57142857142856,
+        "right": 468.57142857142856,
+        "bottom": 346.2857142857143
+      },
+      "actual": {
+        "left": 331.42857142857144,
+        "top": 332.57142857142856,
+        "right": 468.57142857142856,
+        "bottom": 346.2857142857143
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 384
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "expected": {
+        "left": 235.18571428571425,
+        "top": 316.7742857142857,
+        "right": 365.8142857142857,
+        "bottom": 329.83714285714285
+      },
+      "actual": {
+        "left": 235.18571428571425,
+        "top": 316.7742857142857,
+        "right": 365.8142857142857,
+        "bottom": 329.83714285714285
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 365.76
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "expected": {
+        "left": 231.9285714285714,
+        "top": 332.57142857142856,
+        "right": 369.07142857142856,
+        "bottom": 346.2857142857143
+      },
+      "actual": {
+        "left": 231.9285714285714,
+        "top": 332.57142857142856,
+        "right": 369.07142857142856,
+        "bottom": 346.2857142857143
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 384
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "expected": {
+        "left": 213.57142857142856,
+        "top": 540.4285714285714,
+        "right": 436.42857142857144,
+        "bottom": 562.7142857142858
+      },
+      "actual": {
+        "left": 213.57142857142856,
+        "top": 540.4285714285714,
+        "right": 436.42857142857144,
+        "bottom": 562.7142857142858
+      },
+      "maximumError": 0,
+      "authoredFallbackPresent": false,
+      "projectedHeightBelow12": false,
+      "gameViewHeight": 624
+    }
+  ],
+  "hudRegions": [
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 8,
+        "top": 236,
+        "right": 308,
+        "bottom": 656
+      },
+      "worldBounds": {
+        "left": 0,
+        "top": -368,
+        "right": 480,
+        "bottom": -297.6
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 374
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 9.428571428571416,
+        "top": 56,
+        "right": 306.57142857142856,
+        "bottom": 472
+      },
+      "worldBounds": {
+        "left": -2.307692307692288,
+        "top": -80.76923076923076,
+        "right": 482.30769230769226,
+        "bottom": -9.692307692307692
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 304
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 8,
+        "top": 98,
+        "right": 308,
+        "bottom": 518
+      },
+      "worldBounds": {
+        "left": 0,
+        "top": -147.2,
+        "right": 480,
+        "bottom": -76.8
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 304
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 8,
+        "top": 214,
+        "right": 308,
+        "bottom": 634
+      },
+      "worldBounds": {
+        "left": 0,
+        "top": -332.8,
+        "right": 480,
+        "bottom": -262.4
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 584
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 8,
+        "top": 214,
+        "right": 308,
+        "bottom": 634
+      },
+      "worldBounds": {
+        "left": 0,
+        "top": -332.8,
+        "right": 480,
+        "bottom": -262.4
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 585
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 52.28571428571429,
+        "top": 56,
+        "right": 263.7142857142857,
+        "bottom": 352
+      },
+      "worldBounds": {
+        "left": -100.54054054054056,
+        "top": -113.51351351351352,
+        "right": 580.5405405405405,
+        "bottom": -13.621621621621623
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 584
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 45.14285714285714,
+        "top": 56,
+        "right": 270.8571428571429,
+        "bottom": 372
+      },
+      "worldBounds": {
+        "left": -78.9873417721519,
+        "top": -106.32911392405063,
+        "right": 558.9873417721519,
+        "bottom": -12.759493670886076
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 585
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 38,
+        "top": 56,
+        "right": 278,
+        "bottom": 392
+      },
+      "worldBounds": {
+        "left": -60,
+        "top": -100,
+        "right": 540,
+        "bottom": -12
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 584
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 38,
+        "top": 56,
+        "right": 278,
+        "bottom": 392
+      },
+      "worldBounds": {
+        "left": -60,
+        "top": -100,
+        "right": 540,
+        "bottom": -12
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 384
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 37.64285714285714,
+        "top": 56,
+        "right": 278.3571428571429,
+        "bottom": 393
+      },
+      "worldBounds": {
+        "left": -59.10979228486646,
+        "top": -99.70326409495549,
+        "right": 539.1097922848666,
+        "bottom": -11.96439169139466
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 384
+    },
+    {
+      "source": ".beegame/tmp/ui-game-compact.json",
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "hud": {
+        "left": 8,
+        "top": 6,
+        "right": 308,
+        "bottom": 50
+      },
+      "frame": {
+        "left": 8,
+        "top": 139.5,
+        "right": 308,
+        "bottom": 559.5
+      },
+      "worldBounds": {
+        "left": 0,
+        "top": -213.6,
+        "right": 480,
+        "bottom": -143.2
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 300,
+      "documentColumnAutoWidth": 634
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "hud": {
+        "left": 19.2,
+        "top": 14.8,
+        "right": 924.8,
+        "bottom": 44.8
+      },
+      "frame": {
+        "left": 294.85714285714283,
+        "top": 10.8,
+        "right": 665.1428571428571,
+        "bottom": 529.1999999999999
+      },
+      "worldBounds": {
+        "left": -357.33333333333337,
+        "top": 5.185185185185186,
+        "right": 816.5925925925926,
+        "bottom": 44.074074074074076
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 921.5999999999999,
+      "documentColumnAutoWidth": 944
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "hud": {
+        "left": 14,
+        "top": 14,
+        "right": 670,
+        "bottom": 44
+      },
+      "frame": {
+        "left": 178.57142857142856,
+        "top": 10,
+        "right": 521.4285714285714,
+        "bottom": 490
+      },
+      "worldBounds": {
+        "left": -230.39999999999998,
+        "top": 5.6,
+        "right": 688,
+        "bottom": 47.6
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 672,
+      "documentColumnAutoWidth": 684
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "hud": {
+        "left": 13.34,
+        "top": 13.6,
+        "right": 637.66,
+        "bottom": 43.6
+      },
+      "frame": {
+        "left": 168.92857142857142,
+        "top": 9.6,
+        "right": 498.07142857142856,
+        "bottom": 470.4
+      },
+      "worldBounds": {
+        "left": -226.9,
+        "top": 5.833333333333334,
+        "right": 683.5666666666667,
+        "bottom": 49.58333333333334
+      },
+      "exceedsScene48WorldPixelBand": true,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 640.3199999999999,
+      "documentColumnAutoWidth": 651
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "hud": {
+        "left": 16,
+        "top": 12,
+        "right": 768,
+        "bottom": 42
+      },
+      "frame": {
+        "left": 262.8571428571429,
+        "top": 8,
+        "right": 537.1428571428571,
+        "bottom": 392
+      },
+      "worldBounds": {
+        "left": -432.00000000000006,
+        "top": 7,
+        "right": 884,
+        "bottom": 59.5
+      },
+      "exceedsScene48WorldPixelBand": true,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 768,
+      "documentColumnAutoWidth": 784
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "hud": {
+        "left": 12.02,
+        "top": 11.620000000000001,
+        "right": 572.9799999999999,
+        "bottom": 41.620000000000005
+      },
+      "frame": {
+        "left": 169.87142857142854,
+        "top": 7.62,
+        "right": 431.1285714285714,
+        "bottom": 373.38
+      },
+      "worldBounds": {
+        "left": -290.015748031496,
+        "top": 7.349081364829399,
+        "right": 740.6194225721785,
+        "bottom": 62.46719160104988
+      },
+      "exceedsScene48WorldPixelBand": true,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 576.9599999999999,
+      "documentColumnAutoWidth": 585
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "hud": {
+        "left": 12.02,
+        "top": 12,
+        "right": 572.9799999999999,
+        "bottom": 42
+      },
+      "frame": {
+        "left": 163.35714285714283,
+        "top": 8,
+        "right": 437.6428571428571,
+        "bottom": 392
+      },
+      "worldBounds": {
+        "left": -264.84,
+        "top": 7,
+        "right": 716.8399999999999,
+        "bottom": 59.5
+      },
+      "exceedsScene48WorldPixelBand": true,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 576.9599999999999,
+      "documentColumnAutoWidth": 585
+    },
+    {
+      "source": ".beegame/tmp/ui-game-base.json",
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "hud": {
+        "left": 13,
+        "top": 17,
+        "right": 621,
+        "bottom": 47
+      },
+      "frame": {
+        "left": 102.14285714285714,
+        "top": 13,
+        "right": 547.8571428571429,
+        "bottom": 637
+      },
+      "worldBounds": {
+        "left": -95.99999999999999,
+        "top": 4.3076923076923075,
+        "right": 558.7692307692308,
+        "bottom": 36.61538461538461
+      },
+      "exceedsScene48WorldPixelBand": false,
+      "hudOutsideProjectedFrame": true,
+      "gameViewWidth": 624,
+      "documentColumnAutoWidth": 634
+    }
+  ],
+  "documentChanges": [
+    {
+      "name": "BALANCE_DESIGN.md",
+      "changedDuringReview": false,
+      "beforeSha256": "68f439b41af75730c40d32547b7d8bd03e582ad452f4786f6177e03c77ab3c31",
+      "afterSha256": "68f439b41af75730c40d32547b7d8bd03e582ad452f4786f6177e03c77ab3c31"
+    },
+    {
+      "name": "UI_UX_SPEC.md",
+      "changedDuringReview": true,
+      "beforeSha256": "326d08dcddfb9b169babb774347a0c5c5e8f6f0ec9322155eed2cb329f44906e",
+      "afterSha256": "d858d839d64599ed601af48c9544e1481322ccd9f2e816c8381f2a9d8f925e0d"
+    },
+    {
+      "name": "LEVEL_SCENE_DESIGN.md",
+      "changedDuringReview": true,
+      "beforeSha256": "3416a08ac8ea1eec98b866d276aa39f4324e578c58ba96dc3349463234820eab",
+      "afterSha256": "2a45208c6c9627ca9b132810f259dd6d7ab007b05f15486b1e365342d3ad7765"
+    },
+    {
+      "name": "ART_DIRECTION.md",
+      "changedDuringReview": true,
+      "beforeSha256": "965d39ac2afc8ee0e45b276869201361967edc2f96c3268e1c69b5da22b81559",
+      "afterSha256": "292033e59bb83cfe8a6a4d4657f0bda69f3fdd66924315bef72eff01b34a04b6"
+    },
+    {
+      "name": "GDD.md",
+      "changedDuringReview": true,
+      "beforeSha256": "db2cdb2afb21920051019d7713a8d077bbe44d6bc6e654bf305e0448174dd26f",
+      "afterSha256": "e9280de06b0d32172857a21a525d3fc9ed584ad5ec15390977c0399734f440df"
+    },
+    {
+      "name": "ASSET_PLAN.md",
+      "changedDuringReview": true,
+      "beforeSha256": "dd92a843da95976cbabfd86f86ada6b4c85fdcf547ea3c98126bda112c31f7c7",
+      "afterSha256": "75911f855c4bfdd69ed732c6434d946ad5c8a44a230206d440c4e3907c8a4d4e"
+    },
+    {
+      "name": "AUDIO_DESIGN.md",
+      "changedDuringReview": false,
+      "beforeSha256": "3166db378defa55fd0aeea73d32ee7db0367c9a81941de7b2522ee29bef0196e",
+      "afterSha256": "3166db378defa55fd0aeea73d32ee7db0367c9a81941de7b2522ee29bef0196e"
+    },
+    {
+      "name": "TECHNICAL_DESIGN.md",
+      "changedDuringReview": true,
+      "beforeSha256": "df3070203b6c6aa9c42c2ab5d2656c137be6a748543080723d10b785c824114c",
+      "afterSha256": "c368eb42e2a3427cc4ce69a8ae31c892b664f2f5f87c4145f811f9192788fe5d"
+    }
+  ],
+  "note": "44px and world y0-48 are this test document promises, not universal validator rules. Shape does not restrict touch capability. No separately authored hit regions exist. Geometry does not establish font or runtime acceptance."
+}

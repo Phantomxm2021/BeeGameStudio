@@ -1,12 +1,15 @@
 #!/usr/bin/env bun
 import {
   buildBeeGameDevPlan,
+  waitForBeeGameDevServices,
+  stopBeeGameDevServices,
   DEFAULT_BEEGAME_BILLING_PORT,
   DEFAULT_BEEGAME_FRONTEND_PORT,
   DEFAULT_BEEGAME_RUNTIME_PORT,
   DEFAULT_BEEGAME_RESOURCE_PORT,
   DEFAULT_BEEGAME_SKILLS_PORT,
   type BeeGameDevPorts,
+  type BeeGameDevProcessName,
 } from './beegame-dev-lib'
 import { assertFixedServicePortsAvailable } from '../packages/agent-workflow-server/src/beegame/fixed-service-ports'
 import { loadEnvFile } from './beegame-migration-cli'
@@ -29,18 +32,18 @@ const plan = buildBeeGameDevPlan(argv, {
   ports,
   bunExecutable: process.execPath,
 })
-const children: Array<ReturnType<typeof Bun.spawn>> = []
+const children: Array<{ name: BeeGameDevProcessName; child: ReturnType<typeof Bun.spawn> }> = []
 
 await assertFixedServicePortsAvailable()
-console.log('Building Bee Game Studio native runtime...')
-const nativeRuntimeBuild = Bun.spawnSync(plan.nativeRuntimeBuild.command, {
-  cwd: plan.nativeRuntimeBuild.cwd,
-  env: process.env,
+console.log('Checking BGS runtime...')
+const runtimePreflight = Bun.spawnSync(plan.runtimePreflight.command, {
+  cwd: plan.runtimePreflight.cwd,
+  env: { ...process.env, ...plan.runtimePreflight.env },
   stdout: 'inherit',
   stderr: 'inherit',
 })
-if (nativeRuntimeBuild.exitCode !== 0)
-  throw new Error('Bee Game Studio native runtime build failed')
+if (runtimePreflight.exitCode !== 0)
+  throw new Error('BGS runtime preflight failed')
 console.log('Starting BeeGame local dev stack...')
 console.log(`Workspace: ${plan.workspacePath}`)
 for (const processPlan of plan.processes) {
@@ -51,7 +54,7 @@ for (const processPlan of plan.processes) {
     stdout: 'inherit',
     stderr: 'inherit',
   })
-  children.push(child)
+  children.push({ name: processPlan.name, child })
 }
 
 console.log(`Frontend: http://127.0.0.1:${plan.ports.frontend}`)
@@ -60,22 +63,19 @@ console.log(`Billing:  http://127.0.0.1:${plan.ports.billing}`)
 console.log(`Skills:   http://127.0.0.1:${plan.ports.skills}`)
 console.log(`Resources: http://127.0.0.1:${plan.ports.resources}`)
 
+let shuttingDown = false
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    shutdown()
-    process.exit(signal === 'SIGINT' ? 130 : 143)
+    if (shuttingDown) return
+    shuttingDown = true
+    void stopBeeGameDevServices(children).then(
+      () => process.exit(signal === 'SIGINT' ? 130 : 143),
+      error => { console.error(error.message); process.exit(1) },
+    )
   })
 }
 
-await Promise.race(children.map(child => child.exited))
-shutdown()
-
-function shutdown(): void {
-  for (const child of children) {
-    try {
-      child.kill()
-    } catch {
-      // Child may already be closed.
-    }
-  }
-}
+await waitForBeeGameDevServices(children, event => {
+  console.error(JSON.stringify({ type: 'service.exited', timestamp: new Date().toISOString(), ...event }))
+  if (event.exitCode !== 0) process.exitCode = 1
+})

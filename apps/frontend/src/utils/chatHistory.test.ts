@@ -2,6 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { normalizeChatHistory } from './chatHistory';
 
 describe('normalizeChatHistory semantic metadata', () => {
+    it('does not hide system messages based on their language or wording', () => {
+        const content = '[人工关卡] GDD 已通过内部评审，请查阅并决策';
+        expect(normalizeChatHistory([{ id: 'legacy-notice', sender: 'system', content, timestamp: 1 }]))
+            .toMatchObject([{ content }]);
+    });
+    it('preserves attachment-only user messages', () => {
+        const attachments = [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'scene.png' }];
+        expect(normalizeChatHistory([{ id: 'image', sender: 'user', content: '', timestamp: 1, attachments }])[0])
+            .toMatchObject({ content: '', attachments });
+    });
+    it('retains subagent detail and source metadata through refresh without unsafe links', () => {
+        const [message] = normalizeChatHistory([{ id: 'agent', sender: 'beegame', content: 'Review', timestamp: 1,
+            isSubagentTool: true, subagentPrompt: 'Inspect', subagentOutput: 'Passed', subagentTrace: 'Read file',
+            todoScope: 'reviewer', sources: [{ title: 'Guide', url: 'https://example.com/guide' }],
+            citations: [{ title: 'Unsafe', url: 'javascript:alert(1)' }],
+        }]);
+        expect(message).toMatchObject({ isSubagentTool: true, subagentPrompt: 'Inspect', subagentOutput: 'Passed',
+            subagentTrace: 'Read file', todoScope: 'reviewer', sources: [{ title: 'Guide', url: 'https://example.com/guide' }],
+            citations: [{ title: 'Unsafe' }],
+        });
+    });
     it('maps render and artifact metadata into frontend messages', () => {
         const messages = normalizeChatHistory([
             {
@@ -79,6 +100,52 @@ describe('normalizeChatHistory semantic metadata', () => {
         });
     });
 
+    it('preserves file write diff fields from persisted tool history', () => {
+        const messages = normalizeChatHistory([
+            {
+                id: 'write-1',
+                message_id: 'write-1',
+                sender: 'beegame',
+                content: 'Write completed: src/StartScreen.tsx',
+                type: 'tool_result',
+                tool_name: 'Write',
+                tool_use_id: 'tool-write-1',
+                tool_diff: '--- a/src/StartScreen.tsx\n+++ b/src/StartScreen.tsx\n@@\n-old\n+new',
+                structured_patch: { files: ['src/StartScreen.tsx'] },
+                tool_input: { file_path: 'src/StartScreen.tsx', content: 'new' },
+                timestamp: '2026-06-21T00:00:00Z',
+            },
+        ]);
+
+        expect(messages[0]).toMatchObject({
+            toolName: 'Write',
+            toolDiff: '--- a/src/StartScreen.tsx\n+++ b/src/StartScreen.tsx\n@@\n-old\n+new',
+            toolStructuredPatch: { files: ['src/StartScreen.tsx'] },
+            toolInput: { file_path: 'src/StartScreen.tsx', content: 'new' },
+        });
+    });
+
+    it('preserves completed tool presentation metadata from persisted history', () => {
+        const messages = normalizeChatHistory([{
+            id: 'read-complete',
+            sender: 'system',
+            content: 'Read completed',
+            type: 'tool',
+            tool_name: 'Read',
+            tool_status: 'completed',
+            tool_detail: 'docs/GDD.md',
+            tool_output: 'done',
+            timestamp: 1,
+        }]);
+
+        expect(messages[0]).toMatchObject({
+            toolName: 'Read',
+            toolStatus: 'completed',
+            toolDetail: 'docs/GDD.md',
+            toolOutput: 'done',
+        });
+    });
+
     it('keeps backend message ids and deduplicates optimistic user history by client identity', () => {
         const messages = normalizeChatHistory([
             {
@@ -108,5 +175,63 @@ describe('normalizeChatHistory semantic metadata', () => {
         expect(messages[0].messageId).toBe('msg_backend_1');
         expect(messages[0].clientMessageId).toBe('client-msg-1');
         expect(messages[0].dedupeKey).toBeTruthy();
+    });
+
+    it('orders by timestamp when replay timestamps are reversed', () => {
+        const messages = normalizeChatHistory([
+            { id: 'thought-1', sender: 'beegame', content: 'Thinking', type: 'thought', turnId: 'turn-replay', timestamp: 300 },
+            { id: 'tool-1', sender: 'system', content: 'Read completed', type: 'tool', turnId: 'turn-replay', timestamp: 100 },
+            { id: 'agent-1', sender: 'agent', content: 'Final response', turnId: 'turn-replay', timestamp: 200 },
+        ]);
+
+        expect(messages.map((message) => message.id)).toEqual(['tool-1', 'agent-1', 'thought-1']);
+        expect(messages.every((message) => message.turnId === 'turn-replay')).toBe(true);
+    });
+
+    it('uses full timestamps ahead of journal append IDs across transcript pages', () => {
+        const messages = normalizeChatHistory([
+            { id: 'latest', sender: 'agent', content: '17:59 final', turnId: 'latest-turn', timestamp: 1000, sequence: 500 },
+            { id: 'older-thought', sender: 'beegame', content: 'Thinking', type: 'thought', turnId: 'older-turn', timestamp: 3000, sequence: 400 },
+            { id: 'older-final', sender: 'agent', content: '17:42 final', turnId: 'older-turn', timestamp: 4000, sequence: 401 },
+        ]);
+        expect(messages.map(message => message.id)).toEqual(['latest', 'older-thought', 'older-final']);
+    });
+
+    it('preserves the persisted thinking duration for the Chat activity', () => {
+        const messages = normalizeChatHistory([
+            {
+                id: 'thought-duration',
+                sender: 'beegame',
+                content: 'Checking references.',
+                type: 'thought',
+                timestamp: 300,
+                thinking_duration_ms: 379_000,
+            },
+        ]);
+
+        expect(messages[0].thinkingDurationMs).toBe(379_000);
+    });
+
+    it('preserves adapter-normalized camelCase tool block fields', () => {
+        const messages = normalizeChatHistory([{
+            id: 'assistant-tool',
+            sender: 'beegame',
+            content: '',
+            type: 'text',
+            timestamp: 1,
+            contentBlocks: [{
+                type: 'tool_use',
+                toolUseId: 'tool-canonical-1',
+                toolName: 'Write',
+                toolInput: { file_path: 'docs/checklist.md' },
+            }],
+        }]);
+
+        expect(messages[0].contentBlocks?.[0]).toMatchObject({
+            type: 'tool_use',
+            toolUseId: 'tool-canonical-1',
+            toolName: 'Write',
+            toolInput: { file_path: 'docs/checklist.md' },
+        });
     });
 });

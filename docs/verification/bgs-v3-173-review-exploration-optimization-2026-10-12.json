@@ -1,0 +1,77 @@
+{
+  "version": "173-review-exploration-optimization",
+  "date": "2026-10-12",
+  "status": "offline-verified-not-deployed",
+  "basis": {
+    "paidAudit": "docs/verification/bgs-v3-170-paid-acceptance-2026-10-12.json",
+    "totalTokens": 6536757,
+    "verificationChildTokens": 4289315,
+    "verificationChildRequests": 62,
+    "cause": "Native parent autonomously assigned broad verification and then planned review-until-PASS. Dynamic BGS did not schedule a fixed Review/Revision loop. This implementation does not remove the autonomous native strategy."
+  },
+  "scope": {
+    "paidCalls": 0,
+    "deployment": false,
+    "serviceRestarts": 0,
+    "formalFrontendChanges": 0,
+    "claudeCodeChanges": 0,
+    "builtinToolChanges": 0,
+    "testGameChanges": 0,
+    "skillsChanges": 0,
+    "responsibilityPromptChanges": 0,
+    "newAgentLimits": 0,
+    "newReviewStages": 0
+  },
+  "changes": [
+    {
+      "entry": "check-content.mjs --authority --inputs",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/project-content-authority.ts",
+        "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts"
+      ],
+      "result": "On-demand byte lengths/SHA-256s for exact legacy prose/handoff operands, explicit missing markers, manifest normalized representation and absent runtime coverage. Default output stays compact. The aggregate hash, markers and legacy gates remain unchanged. requiredForAutonomousCurrent=false exposes the existing boundary; no automatic source/index rewriting.",
+      "limitation": "No historical source snapshot is invented; current fingerprints cannot locate a historical edit unless prior operands were retained. Does not force the Agent to stop investigating or repair its judgment."
+    },
+    {
+      "entry": "preview.mjs --client",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts"
+      ],
+      "result": "On-demand Node runtime, actual importable helper/pinned Playwright module URLs and relevant environment variable names. No environment values, capability URL or credential dump. Does not start a browser, install dependencies or execute a test/model.",
+      "limitation": "Discovery is simpler, but a Node script still requires valid active workspace capability and caller-selected interactions/observations. No user setting/hook access added."
+    }
+  ],
+  "validation": {
+    "core": {
+      "log": "/private/tmp/bgs-v3-173-core-final.log",
+      "exit": 0,
+      "pass": 111,
+      "fail": 0,
+      "skip": 1,
+      "expects": 1277,
+      "files": 6,
+      "seconds": 25.19,
+      "skipped": "Unrelated opt-in browser rendering test was not enabled. No whole-game acceptance inferred."
+    },
+    "typecheck": {
+      "command": "bun run typecheck at integration repository root",
+      "exit": 0,
+      "log": "/private/tmp/bgs-v3-173-typecheck.log"
+    },
+    "diffCheck": {
+      "exit": 0
+    },
+    "initialFailures": "Sandbox local listeners were denied; rerun approved offline tests with loopback access. Package-local typecheck used the wrong root path configuration; fixed the new test array typing and root typecheck passed. A changed help-string assertion was updated to the actual optional diagnostic contract before final clean suite."
+  },
+  "remaining": [
+    "Wide autonomous semantic Review and review-until-PASS strategy remain unresolved; interface fixes are not proof of measured Token savings.",
+    "No native tool/delegation restriction or Review prompt was added. Deterministic checks and runtime viewing/listening/play remain necessary and distinct from LLM approval.",
+    "No paid model rerun or interrupted game continuation occurred. Previously stopped Run remains untouched.",
+    "Previously confirmed giant debug event display/runtime CPU stall and shared consumer adoption gaps were not in this narrow change."
+  ],
+  "sideEffects": [
+    "Optional operand output is larger, so it is not returned by default or copied into the persistent production context.",
+    "Preview tool discovery includes an optional --client entry in tool metadata; no review responsibility instruction was appended.",
+    "Module locations are test tooling, not assets to commit into the delivered game."
+  ]
+}

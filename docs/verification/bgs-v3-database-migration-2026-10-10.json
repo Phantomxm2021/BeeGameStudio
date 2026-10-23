@@ -1,0 +1,85 @@
+{
+  "protocol": "bgs.verification.v3-database-migration.1",
+  "date": "2026-10-10",
+  "documentVersion": "1.15",
+  "scope": "User-confirmed actual Supabase SQL migration through Chrome; structure/function/permission and no-write REST verification. Not a successful workflow or deployed game acceptance.",
+  "database": {
+    "projectUrl": "https://bgs.phantominfra.com/project/default",
+    "databaseName": "postgres",
+    "editorRole": "postgres",
+    "preflight": {
+      "queryUrl": "https://bgs.phantominfra.com/project/default/sql/3826f862-1811-492b-ae1a-f5d03d4190cf",
+      "existingProjectsTable": "beegame_projects",
+      "workflowTable": null,
+      "eventsTable": null,
+      "readRpc": null,
+      "commitRpc": null,
+      "standardMigrationHistory": null,
+      "note": "Direct SQL confirms absence, unlike previous REST/cache-only preflight. Self-hosted instance has no supabase_migrations.schema_migrations; no history table/framework fabricated."
+    },
+    "migrations": [
+      {"file": "supabase/migrations/20261010010000_workflow_v3_vertical_slice.sql", "queryUrl": "https://bgs.phantominfra.com/project/default/sql/eec4e902-ebe3-4124-8d3b-9549f753ca92", "result": "Success. No rows returned", "pastedSqlMatchesFile": true, "sha256": "c425c3e5041c97a6740408df97a23fe2a4fe4f4a690f972078e44759f9050cdb"},
+      {"file": "supabase/migrations/20261010020000_workflow_v3_authorized_changes.sql", "queryUrl": "https://bgs.phantominfra.com/project/default/sql/4236ae39-e043-4560-b21e-9ca1de151111", "result": "Success. No rows returned", "pastedSqlMatchesFile": true, "sha256": "fec36be5a40f5b9c244c2ca3938b7c9cf7114c158b487a823104d58140329107"}
+    ],
+    "verificationUrl": "https://bgs.phantominfra.com/project/default/sql/eda38deb-074d-4f01-888a-e06bcd82c69f",
+    "sqlChecksPassed": 14,
+    "sqlChecks": [
+      {"name": "empty_events", "passed": true, "detail": "0"},
+      {"name": "empty_workflows", "passed": true, "detail": "0"},
+      {"name": "exclusive_workspace_index", "passed": true, "detail": "Unique, valid partial index on workspacePath when writer exists and is not JSON null"},
+      {"name": "no_client_policies", "passed": true, "detail": "0"},
+      {"name": "rpc_definer_search_path:beegame_workflow_v3_commit", "passed": true},
+      {"name": "rpc_definer_search_path:beegame_workflow_v3_read", "passed": true},
+      {"name": "rpc_permissions:beegame_workflow_v3_commit", "passed": true, "detail": "service_role allowed; anon/authenticated denied"},
+      {"name": "rpc_permissions:beegame_workflow_v3_read", "passed": true, "detail": "service_role allowed; anon/authenticated denied"},
+      {"name": "rpc_source:beegame_workflow_v3_commit", "passed": true, "bodyMd5": "67777dc73615da652aea0a9d389f3323"},
+      {"name": "rpc_source:beegame_workflow_v3_read", "passed": true, "bodyMd5": "b9df094bc07b6b9a7ea61f65e4ce12f8"},
+      {"name": "table_permissions:beegame_workflow_v3", "passed": true},
+      {"name": "table_permissions:beegame_workflow_v3_events", "passed": true},
+      {"name": "table_rls:beegame_workflow_v3", "passed": true},
+      {"name": "table_rls:beegame_workflow_v3_events", "passed": true}
+    ],
+    "postgrestSchemaRefresh": "NOTIFY pgrst, 'reload schema' executed",
+    "restDiscoveryMissingObjects": [],
+    "restChecks": [
+      {"role": "host", "rpc": "beegame_workflow_v3_read", "status": 403, "code": "42501", "expected": "workflow_project_forbidden"},
+      {"role": "host", "rpc": "beegame_workflow_v3_commit", "status": 403, "code": "42501", "expected": "workflow_project_forbidden"},
+      {"role": "host", "table": "beegame_workflow_v3", "status": 200, "empty": true},
+      {"role": "host", "table": "beegame_workflow_v3_events", "status": 200, "empty": true},
+      {"role": "anon", "rpc": "beegame_workflow_v3_read", "status": 401, "code": "42501"},
+      {"role": "anon", "rpc": "beegame_workflow_v3_commit", "status": 401, "code": "42501"},
+      {"role": "anon", "table": "beegame_workflow_v3", "status": 401, "code": "42501"},
+      {"role": "anon", "table": "beegame_workflow_v3_events", "status": 401, "code": "42501"}
+    ],
+    "restProbeLog": "/private/tmp/bgs-v3-db-migration-rest-checks.log",
+    "probeScope": "Nonexistent project id and zero actor UUID only; no real project mutation or synthetic success injection."
+  },
+  "failedVerificationQuery": {
+    "error": "42883: operator does not exist: unknown + name",
+    "cause": "Audit query used + instead of PostgreSQL || to concatenate labels; neither migration failed.",
+    "resolution": "Corrected only the audit query; all 14 SQL checks passed on rerun."
+  },
+  "changes": {
+    "existingProjectDataModified": false,
+    "gameArtifactsModified": false,
+    "billingDataModified": false,
+    "sourceCodeChanged": false,
+    "claudeCodeModified": false,
+    "modelsCalled": 0,
+    "servicesRestarted": false,
+    "nativeCliRebuilt": false,
+    "documentationUpdated": true
+  },
+  "remaining": [
+    "Successful Run commit, atomic Run/event/project mode persistence and two-connection CAS/workspace writer contention not tested against PostgreSQL.",
+    "Actual deployed editor and authorized requirement-change workflow -> stale qualifications rejected -> fresh native execution/source-copy build/browser measurements -> current-version Preview/export remains unverified.",
+    "No unknown-writer recovery, full game quality acceptance or default V3 activation. deliveryEligible remains false."
+  ],
+  "hashes": [
+    {"path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md", "sha256": "cc3407bca264d28629eaa131a3dcd4c234bd980886771e442e3bdcd807b229f1"},
+    {"path": "supabase/migrations/20261010010000_workflow_v3_vertical_slice.sql", "sha256": "c425c3e5041c97a6740408df97a23fe2a4fe4f4a690f972078e44759f9050cdb"},
+    {"path": "supabase/migrations/20261010020000_workflow_v3_authorized_changes.sql", "sha256": "fec36be5a40f5b9c244c2ca3938b7c9cf7114c158b487a823104d58140329107"},
+    {"path": "/private/tmp/bgs-v3-db-migration-rest-checks.log", "sha256": "3d142cd3dd23d655ebb2dde47640b125cbe4c3256170cf11ab6fb38970b0c82b"},
+    {"path": "/private/tmp/bgs-v3-database-migration-verified.png", "sha256": "a24be1db45f2d08b02a83ebfcbea5eda6a049a97a4c09e66a8a3943ee1918324"}
+  ]
+}

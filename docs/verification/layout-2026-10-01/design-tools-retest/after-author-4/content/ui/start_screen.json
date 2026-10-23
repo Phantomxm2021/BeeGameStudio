@@ -1,0 +1,257 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui.start-screen",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "name": "开始界面根",
+        "layout": {
+          "size": [1280, 720]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [1280, 720],
+          "targetViewports": [[1280, 720], [1024, 576], [960, 540]],
+          "minimumControlSize": [88, 44],
+          "compactMaxWidth": 1024
+        }
+      },
+      {
+        "id": "marquee",
+        "parentId": "root",
+        "role": "container",
+        "name": "霓虹灯箱招牌组",
+        "layout": {
+          "anchor": "top-center",
+          "position": [0, 88],
+          "size": [640, 130],
+          "container": {
+            "direction": "column",
+            "gap": 10,
+            "align": "center"
+          }
+        },
+        "data": {
+          "component": "marquee-sign",
+          "note": "灯箱结构与灯管字处理遵循 ART_DIRECTION 1.3；深色底+青色外框光"
+        }
+      },
+      {
+        "id": "title-text",
+        "parentId": "marquee",
+        "role": "text",
+        "text": "霓虹打砖块",
+        "layout": {
+          "size": [640, 72]
+        },
+        "style": {
+          "fontSize": 56,
+          "fontWeight": 900,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 4,
+          "neonTube": true,
+          "glow": { "color": "#2DE2FF", "radius": 12, "opacity": 0.6 }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [560, 60] },
+            "style": { "fontSize": 46 }
+          }
+        }
+      },
+      {
+        "id": "subtitle-text",
+        "parentId": "marquee",
+        "role": "text",
+        "text": "NEON BREAKOUT",
+        "layout": {
+          "size": [400, 28]
+        },
+        "style": {
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "#FF2E88",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 8,
+          "glow": { "color": "#FF2E88", "radius": 6, "opacity": 0.4 }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [360, 22] },
+            "style": { "fontSize": 17 }
+          }
+        }
+      },
+      {
+        "id": "light-strip",
+        "parentId": "marquee",
+        "role": "container",
+        "name": "灯箱砖块灯带（装饰）",
+        "layout": {
+          "size": [376, 10],
+          "container": {
+            "direction": "row",
+            "gap": 8,
+            "align": "center"
+          }
+        },
+        "data": {
+          "component": "light-strip",
+          "note": "6 段颜色与砖块 6 行一一对应，装饰而非可玩物"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [328, 8] }
+          }
+        }
+      },
+      {
+        "id": "strip-1",
+        "parentId": "light-strip",
+        "role": "shape",
+        "layout": { "size": [56, 10] },
+        "style": { "shape": "rounded-rectangle", "cornerRadius": 2, "background": { "color": "#FF2E88", "opacity": 0.95 }, "glow": { "color": "#FF2E88", "radius": 4, "opacity": 0.4 } },
+        "responsive": { "compact": { "layout": { "size": [48, 8] } } }
+      },
+      {
+        "id": "strip-2",
+        "parentId": "light-strip",
+        "role": "shape",
+        "layout": { "size": [56, 10] },
+        "style": { "shape": "rounded-rectangle", "cornerRadius": 2, "background": { "color": "#FF6A2B", "opacity": 0.95 }, "glow": { "color": "#FF6A2B", "radius": 4, "opacity": 0.4 } },
+        "responsive": { "compact": { "layout": { "size": [48, 8] } } }
+      },
+      {
+        "id": "strip-3",
+        "parentId": "light-strip",
+        "role": "shape",
+        "layout": { "size": [56, 10] },
+        "style": { "shape": "rounded-rectangle", "cornerRadius": 2, "background": { "color": "#FFC531", "opacity": 0.95 }, "glow": { "color": "#FFC531", "radius": 4, "opacity": 0.35 } },
+        "responsive": { "compact": { "layout": { "size": [48, 8] } } }
+      },
+      {
+        "id": "strip-4",
+        "parentId": "light-strip",
+        "role": "shape",
+        "layout": { "size": [56, 10] },
+        "style": { "shape": "rounded-rectangle", "cornerRadius": 2, "background": { "color": "#3DF57A", "opacity": 0.95 }, "glow": { "color": "#3DF57A", "radius": 4, "opacity": 0.35 } },
+        "responsive": { "compact": { "layout": { "size": [48, 8] } } }
+      },
+      {
+        "id": "strip-5",
+        "parentId": "light-strip",
+        "role": "shape",
+        "layout": { "size": [56, 10] },
+        "style": { "shape": "rounded-rectangle", "cornerRadius": 2, "background": { "color": "#27D8FF", "opacity": 0.95 }, "glow": { "color": "#27D8FF", "radius": 4, "opacity": 0.3 } },
+        "responsive": { "compact": { "layout": { "size": [48, 8] } } }
+      },
+      {
+        "id": "strip-6",
+        "parentId": "light-strip",
+        "role": "shape",
+        "layout": { "size": [56, 10] },
+        "style": { "shape": "rounded-rectangle", "cornerRadius": 2, "background": { "color": "#7A5BFF", "opacity": 0.95 }, "glow": { "color": "#7A5BFF", "radius": 4, "opacity": 0.3 } },
+        "responsive": { "compact": { "layout": { "size": [48, 8] } } }
+      },
+      {
+        "id": "hero-ball",
+        "parentId": "root",
+        "role": "shape",
+        "name": "大号暖白球（灯箱右侧定格装饰）",
+        "layout": {
+          "anchor": "top-center",
+          "position": [308, 108],
+          "size": [44, 44]
+        },
+        "style": {
+          "shape": "ellipse",
+          "background": { "color": "#FFFDF5", "opacity": 1 },
+          "glow": { "color": "#FFB548", "radius": 16, "opacity": 0.7 }
+        },
+        "data": {
+          "component": "hero-ball-decoration",
+          "note": "第二视觉点；短拖尾由实现按 ART_DIRECTION 1.3 补充，compact 下隐藏"
+        },
+        "responsive": {
+          "compact": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "id": "start-button",
+        "parentId": "root",
+        "role": "button",
+        "name": "开始游戏（主按钮，音频解锁点）",
+        "text": "开始游戏",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 40],
+          "size": [260, 56]
+        },
+        "style": {
+          "fontSize": 22,
+          "fontWeight": 700,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 6,
+          "background": { "color": "#123244", "opacity": 0.9 },
+          "border": { "width": 2, "color": "#2DE2FF", "radius": 8 },
+          "glow": { "color": "#2DE2FF", "radius": 8, "opacity": 0.4 }
+        },
+        "actions": {
+          "action": "startGame",
+          "audioEvent": "ui.click",
+          "audioUnlock": "true"
+        },
+        "bindings": {
+          "defaultFocus": "true"
+        },
+        "data": {
+          "component": "neon-button",
+          "variant": "primary",
+          "note": "用户手势处理中调用 audio.unlock()，见 AUDIO_DESIGN 8.2"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [240, 52] },
+            "style": { "fontSize": 20 }
+          }
+        }
+      },
+      {
+        "id": "start-hint",
+        "parentId": "root",
+        "role": "text",
+        "text": "Enter / 空格 开始游戏 · 方向键或 A/D 移动挡板",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 112],
+          "size": [560, 24]
+        },
+        "style": {
+          "fontSize": 14,
+          "color": "#7B88B8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 2
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [520, 22] },
+            "style": { "fontSize": 13 }
+          }
+        }
+      }
+    ]
+  }
+}

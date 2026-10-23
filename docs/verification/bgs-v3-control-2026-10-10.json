@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "date": "2026-10-10",
+  "scope": "V3-08 durable pause/resume and current dependency evidence before dispatch",
+  "sourceRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "filesSha256": {
+    "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts": "24548165f7e0d601d0bf62094d709a9011eed136fa1cb22bd01b45c34a79cc55",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts": "faecddcd399f18fdbbbc51f0ffbb4e51af767dbe9bb210072fc21ff05d9ef95e",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts": "169dc2576b7f917643d5ef24edb2cc03acb0d7d9adf4d079f63e45a19abcff7b",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts": "e3bc995a1961698f9c48dd542424d755b74e1e962e676f499b163aaf65794da5",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/control.test.ts": "583b0f8c3f08ddb0b6a42102117040d8234ef741213d92430dc570b5834b08cf",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/workflow-v3.test.ts": "a6a5067fe2190a33a2f19acc6bfdcb199301dc4ab47db33eabc658db5069d92f",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.test.ts": "ebc8cd59446a38642077690a1d3f5609d60fb6419f3653ab4e0ca390e2e5371e",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/native-integration.test.ts": "9862341bdc4f9c2afa931fda6493a1536837c1a40a34f50f84ab90cf28c23a0a"
+  },
+  "implemented": [
+    "Persist user pause before cancelling an owned native/check execution; idle pause also persists",
+    "Replanning, settlement and local reconstruction preserve pause",
+    "Explicit current-plan resume does not dispatch, accept partial outputs or reset failed work",
+    "Unknown old writer remains fenced; pause/resume never unlocks it",
+    "One CAS rebase of pure control/settlement records; no native execution, check or binding repetition",
+    "Check required upstream attempts/checks/files/directories and transitive declared ancestors before starting consumer",
+    "Changed source/resource/artifact blocks affected consumer before any native start; unrelated branch unchanged",
+    "Use accepted authorized candidate outputs for freshness, while preserving immutable pre-revision snapshots",
+    "Real native AskUserQuestion cancellation closes pending question, refuses late answer and retains usage"
+  ],
+  "tests": {
+    "regression": {
+      "passed": 172,
+      "failed": 0,
+      "assertions": 1114,
+      "files": 15,
+      "log": "/private/tmp/bgs-v3-control-regression-final-20261010.log"
+    },
+    "nativeAndBrowser": {
+      "passed": 15,
+      "failed": 0,
+      "assertions": 152,
+      "files": 2,
+      "log": "/private/tmp/bgs-v3-control-native-final-20261010.log",
+      "provider": "Loopback deterministic fake Anthropic SSE, actual native CLI; no paid model",
+      "browser": "Dedicated host-owned Chromium on synthetic static builds"
+    },
+    "focusedTypes": {
+      "exitCode": 0,
+      "files": [
+        "state.ts",
+        "context.ts",
+        "checks.ts",
+        "binding.ts",
+        "runtime-checks.ts"
+      ],
+      "log": "/private/tmp/bgs-v3-control-types-final-20261010.log"
+    },
+    "fullServerTypes": {
+      "exitCode": 2,
+      "diagnostics": 3556,
+      "workflowV3PathDiagnostics": 0,
+      "log": "/private/tmp/bgs-v3-control-server-types-final-20261010.log",
+      "conclusion": "Full server typecheck remains failed; not evidence of a green repository build"
+    },
+    "whitespace": {
+      "trackedDiff": "no diagnostics",
+      "eightScopedUntrackedFiles": "no whitespace diagnostics; no-index exit 1 denotes a diff"
+    },
+    "processCleanup": "Readonly process snapshot matched only the inspection command and rg, not owned test browser/CLI processes"
+  },
+  "limitations": [
+    "Only declared transitive task dependencies and saved observed check inputs are revalidated; Bash indirect reads remain incomplete",
+    "Check implementation/version changes are not yet part of automatic freshness",
+    "No complete original-requirement revision or unknown external-operation recovery",
+    "No formal Scene/UI/resource semantic consumption or complete gameplay evidence; static smoke/package checks are limited",
+    "Finding/source-bound Question and full directed Review/Repair not yet implemented",
+    "No frontend pause/resume integration, database migration execution, cross-worker or real database permission verification",
+    "No measured paid-token improvement; tests establish absence of redundant fake-provider dispatch, not real model quality/cost"
+  ],
+  "operations": {
+    "paidModelCalls": false,
+    "nativeClaudeSourceEdited": false,
+    "generatedRealProjectArtifactsEdited": false,
+    "historicalEvidenceOverwritten": false,
+    "databaseMigrationApplied": false,
+    "newMigrationRequired": false,
+    "deployed": false,
+    "servicesRestarted": false,
+    "deliveryEligible": false
+  },
+  "document": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+  "documentVersion": "1.6"
+}

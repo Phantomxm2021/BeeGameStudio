@@ -36,16 +36,21 @@ export interface ContinueTaskResponse {
 export interface StopTaskResponse {
   command_id: string
   task_id: string
-  state: 'stopped'
+  state: 'stopped' | 'stop_requested'
   trace_id: string
 }
 
 export interface ProjectBaselineStatusPayload {
+  execution_time?: { elapsed_ms: number; running: boolean } | null
   project_id: string
   phase: string
+  delivery_phase?: string
   blocked: boolean
   blocked_reason?: string | null
+  blocked_reason_code?: string | null
+  blocked_reason_diagnostic_id?: string | null
   active_agents?: string[]
+  active_subagents?: string[]
   updated_at?: string
   next_action?: string
   acceptance?: {
@@ -56,8 +61,6 @@ export interface ProjectBaselineStatusPayload {
   context?: ContextVisibilityPayload | null
   build_report?: BuildReportPayload | null
   project_target?: BeeGameAssetManifestPayload['project_target'] | null
-  /** Untrusted backend workflow payload; normalize before it reaches display models. */
-  workflow?: unknown
   model_config_id?: string | null
 }
 
@@ -78,6 +81,7 @@ export interface ContextVisibilityPayload {
     status?: string
   }>
   token_budget?: {
+    providerUsageIncomplete?: boolean
     status?: string
     input_tokens?: number
     cached_input_tokens?: number
@@ -90,6 +94,7 @@ export interface ContextVisibilityPayload {
     role_tokens?: {
       mainAgent?: number
       otherSubagents?: number
+      unattributed?: number
     }
   }
   counters?: Record<string, number>
@@ -147,6 +152,23 @@ export interface BeeGameDeploymentPayload {
   deployedAt?: string
 }
 
+export interface BeeGameDeploymentReadiness {
+  allowed: boolean
+  issues: string[]
+  destination: 'remote' | 'local'
+  confirmationRequired?: {
+    measurementId: string
+    requirementsRevision: string
+    messages: Array<{ requestKey: string; text: string }>
+  }
+}
+
+export type BeeGameDeploymentDiscussionConfirmation = {
+  measurementId: string
+  requirementsRevision: string
+  discussionConfirmation: { messageRequestKeys: string[] }
+}
+
 export interface BeeGameAssetRequirementPayload {
   id: string
   name?: string
@@ -199,7 +221,7 @@ export interface BeeGameProjectResourcePayload {
 
 export interface BeeGameAssetManifestPayload {
   contract_state?: 'missing' | 'ready'
-  version: 8
+  version: 9
   project_target?: {
     platform?: string
     runtime?: string
@@ -268,6 +290,7 @@ export interface PendingToolPermissionItem {
   created_at?: string
   artifact?: {
     content?: string
+    designChangeAllowed?: boolean
     input?: Record<string, unknown>
   }
   summary?: {
@@ -326,6 +349,7 @@ const normalizeContextVisibilityPayload = (
     failure_reason: String(payload.failure_reason ?? '').trim(),
     blackboard_record_count: Number(payload.blackboard_record_count ?? 0),
     memory_hits: Number(payload.memory_hits ?? 0),
+    ...(payload.token_budget ? { token_budget: { ...payload.token_budget } } : {}),
     rag_sources: Array.isArray(payload.rag_sources)
       ? payload.rag_sources.map(item => String(item).trim()).filter(Boolean)
       : [],
@@ -386,19 +410,24 @@ export const normalizeProjectBaselineStatusPayload = (
       project_target: null,
     }
   }
-  const workflow =
-    normalizedPayload.workflow && typeof normalizedPayload.workflow === 'object'
-      ? normalizedPayload.workflow
-      : undefined
   return {
     project_id: String(normalizedPayload.project_id ?? '').trim(),
+    execution_time: normalizedPayload.execution_time &&
+      Number.isFinite(normalizedPayload.execution_time.elapsed_ms) && normalizedPayload.execution_time.elapsed_ms >= 0 &&
+      typeof normalizedPayload.execution_time.running === 'boolean' ? normalizedPayload.execution_time : null,
     phase: String(normalizedPayload.phase ?? '').trim(),
     blocked: Boolean(normalizedPayload.blocked),
     blocked_reason: normalizedPayload.blocked_reason ?? null,
+    blocked_reason_code: normalizedPayload.blocked_reason_code ?? null,
+    blocked_reason_diagnostic_id:
+      normalizedPayload.blocked_reason_diagnostic_id ?? null,
     active_agents: Array.isArray(normalizedPayload.active_agents)
       ? normalizedPayload.active_agents
           .map(item => String(item).trim())
           .filter(Boolean)
+      : [],
+    active_subagents: Array.isArray(normalizedPayload.active_subagents)
+      ? normalizedPayload.active_subagents.map(item => String(item).trim()).filter(Boolean)
       : [],
     updated_at: String(normalizedPayload.updated_at ?? '').trim(),
     next_action: String(normalizedPayload.next_action ?? '').trim(),
@@ -412,16 +441,17 @@ export const normalizeProjectBaselineStatusPayload = (
       typeof normalizedPayload.project_target === 'object'
         ? (normalizedPayload.project_target as ProjectBaselineStatusPayload['project_target'])
         : null,
-    workflow,
   }
 }
 
 export interface ResolveToolPermissionPayload {
+  intent?: 'change'
   project_id: string
   gate_id: string
   decision: 'allow' | 'deny'
   message?: string
   scope?: 'once' | 'session'
+  answers?: Record<string, string>
 }
 
 // API 方法定义
@@ -447,17 +477,12 @@ export const api = {
    * @param data - 包含项目 ID 和可选的任务 ID
    * @returns 返回任务 ID 和状态
    */
-  continueTask: (data: { project_id: string; task_id?: string }) =>
+  continueTask: (data: { project_id: string; task_id?: string; failed_turn_id?: string; automatic_retry?: boolean }) =>
     beeGameAdapter.continueTask(data),
-
-  resumeWorkflow: (projectId: string) =>
-    beeGameAdapter.resumeWorkflow(projectId),
-
-  retryWorkflow: (projectId: string) => beeGameAdapter.retryWorkflow(projectId),
 
   requestProjectAction: (data: {
     project_id: string
-    kind: 'build_error_repair' | 'deployment_failure_repair'
+    kind: 'deployment_failure_repair'
   }) => beeGameAdapter.requestProjectAction(data),
 
   /**
@@ -489,6 +514,12 @@ export const api = {
    * @returns 返回项目列表
    */
   getProjects: () => beeGameAdapter.getProjects(),
+
+  getProjectPage: (offset: number, search = '') => beeGameAdapter.getProjectPage(offset, search),
+
+  cloneProject: (projectId: string, language: string) => beeGameAdapter.cloneProject(projectId, language),
+
+  getProjectMetadata: (projectId: string) => beeGameAdapter.getProjectMetadata(projectId),
 
   bootstrapProjectFromBrief: (
     data: Parameters<typeof beeGameAdapter.bootstrapProjectFromBrief>[0],
@@ -525,9 +556,6 @@ export const api = {
   ): Promise<ProjectRuntimeStatePayload> =>
     beeGameAdapter.getProjectRuntimeState(projectId),
 
-  getWorkflowPhases: async (projectId: string) =>
-    (await beeGameAdapter.getProjectRuntimeState(projectId)).status,
-
   getProjectTokenUsage: async (projectId: string) =>
     (await beeGameAdapter.getProjectRuntimeState(projectId)).status.context
       ?.token_budget ?? {},
@@ -538,9 +566,6 @@ export const api = {
    * @returns 返回操作状态
    */
   deleteProject: (projectId: string) => beeGameAdapter.deleteProject(projectId),
-
-  createReviewCopy: (projectId: string) =>
-    beeGameAdapter.createReviewCopy(projectId),
 
   getCurrentUser: (): Promise<BeeGameCurrentUser> => getBeeGameCurrentUser(),
 
@@ -596,7 +621,8 @@ export const api = {
   stopProjectPreview: (projectId: string) =>
     beeGameAdapter.stopProjectPreview(projectId),
 
-  deployProject: (projectId: string) => beeGameAdapter.deployProject(projectId),
+  deployProject: (projectId: string, confirmation?: BeeGameDeploymentDiscussionConfirmation) => beeGameAdapter.deployProject(projectId, confirmation),
+  getDeploymentReadiness: (projectId: string) => beeGameAdapter.getDeploymentReadiness(projectId),
 
   listProjectDeployments: (projectId: string) =>
     beeGameAdapter.listProjectDeployments(projectId),
@@ -607,7 +633,7 @@ export const api = {
   getProjectAssets: (projectId: string) =>
     beeGameAdapter.getProjectAssets(projectId),
 
-  uploadProjectAsset: (projectId: string, resourceId: string, file: File) =>
+  uploadProjectAsset: (projectId: string, resourceId: string, file: File | readonly File[]) =>
     beeGameAdapter.uploadProjectAsset(projectId, resourceId, file),
 
   getResourcePackImpact: (packId: string) =>

@@ -1,4 +1,5 @@
 import { isAbsolute, resolve } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   BEEGAME_FIXED_SERVICE_PORTS,
   assertFixedServicePortConfiguration,
@@ -24,6 +25,38 @@ export type BeeGameDevPorts = {
 
 export type BeeGameDevProcessName = 'billing' | 'skills' | 'resources' | 'runtime' | 'frontend'
 
+/** Give the runtime its existing drain/receipt/settlement opportunity before
+ * the launcher exits. This does not claim safety after SIGKILL or a crash. */
+export async function stopBeeGameDevServices(services: Array<{ child: {
+  kill(signal: 'SIGTERM'): unknown; exited: Promise<number>; exitCode?: number | null
+} }>): Promise<void> {
+  const results = await Promise.allSettled(services.map(async ({ child }) => {
+    if (child.exitCode == null) child.kill('SIGTERM')
+    await child.exited
+  }))
+  const failures = results.filter(result => result.status === 'rejected')
+  if (failures.length) throw new Error('Some local services did not confirm shutdown')
+}
+
+/** A failed service is observable, not an instruction to stop its siblings. */
+export async function waitForBeeGameDevServices(
+  services: Array<{ name: BeeGameDevProcessName; child: {
+    pid: number
+    exited: Promise<number>
+    signalCode: string | null
+  } }>,
+  report: (event: { service: BeeGameDevProcessName; pid: number; exitCode: number | null; signal: string | null; error?: string }) => void,
+): Promise<void> {
+  await Promise.all(services.map(async ({ name, child }) => {
+    try {
+      const exitCode = await child.exited
+      report({ service: name, pid: child.pid, exitCode, signal: child.signalCode })
+    } catch (error) {
+      report({ service: name, pid: child.pid, exitCode: null, signal: child.signalCode, error: String(error) })
+    }
+  }))
+}
+
 export type BeeGameDevProcessPlan = {
   name: BeeGameDevProcessName
   command: string[]
@@ -34,9 +67,10 @@ export type BeeGameDevProcessPlan = {
 export type BeeGameDevPlan = {
   workspacePath: string
   frontendDir: string
-  nativeRuntimeBuild: {
+  runtimePreflight: {
     command: string[]
     cwd: string
+    env: Record<string, string>
   }
   ports: BeeGameDevPorts
   urls: {
@@ -78,6 +112,17 @@ export function buildBeeGameDevPlan(
   const workspacePath = resolve(configuredWorkspace)
   const frontendDir = resolve(input.cwd, values.frontend || 'apps/frontend')
   const bunExecutable = input.bunExecutable ?? 'bun'
+  const frontendCommand = [
+    bunExecutable,
+    'run',
+    'dev',
+    '--',
+    '--host',
+    '127.0.0.1',
+    '--port',
+    String(ports.frontend),
+    ...(needsViteDependencyRefresh(frontendDir) ? ['--force'] : []),
+  ]
   const urls = {
     frontend: `http://127.0.0.1:${ports.frontend}`,
     runtime: `http://127.0.0.1:${ports.runtime}`,
@@ -89,13 +134,15 @@ export function buildBeeGameDevPlan(
   return {
     workspacePath,
     frontendDir,
-    nativeRuntimeBuild: {
-      command: [bunExecutable, 'run', 'build.ts'],
+    runtimePreflight: {
+      command: [bunExecutable, 'run', 'scripts/check-bgs.ts'],
       cwd: input.cwd,
+      // Capabilities stay in the binary; the runtime settings panel selects usage.
+      env: {},
     },
     ports,
     urls,
-    processes: [
+    processes: ([
       {
         name: 'billing',
         command: [bunExecutable, 'packages/beegame-billing-server/src/index.ts'],
@@ -110,9 +157,6 @@ export function buildBeeGameDevPlan(
       },
       {
         name: 'runtime',
-        // The runtime writes durable workflow state under the workspace. A
-        // repository-wide watcher would treat those writes as source changes
-        // and restart the runtime during an active workflow dispatch.
         command: [bunExecutable, 'scripts/dashboard-server-dev.ts'],
         cwd: input.cwd,
         env: buildRuntimeEnv({
@@ -123,35 +167,44 @@ export function buildBeeGameDevPlan(
       },
       {
         name: 'resources',
-        // Start the workflow runtime before the resource worker so durable
-        // semantic-curation jobs can resume through the shared model bridge.
-        // The resource worker still owns the queue; it does not own a second
-        // model provider or configuration path.
-        // Do not use a repository-wide watcher here either: resource job
-        // receipts and previews are durable files written by this process.
+        // The resource worker owns its queue and uses the runtime model bridge.
         command: [bunExecutable, 'packages/beegame-resource-server/src/index.ts'],
         cwd: input.cwd,
         env: buildResourceEnv(input.env, ports),
       },
       {
         name: 'frontend',
-        command: [
-          bunExecutable,
-          'run',
-          'dev',
-          '--',
-          '--host',
-          '127.0.0.1',
-          '--port',
-          String(ports.frontend),
-        ],
+        command: frontendCommand,
         cwd: frontendDir,
         env: buildFrontendEnv({
           baseEnv: input.env,
           ports,
         }),
       },
-    ],
+    ] satisfies BeeGameDevProcessPlan[]).map(process=>{
+      // This per-project authorization belongs only to the execution host.
+      if(process.name!=='runtime')delete process.env.BEEGAME_PROJECT_TOOL_READ_PATHS
+      return process
+    }),
+  }
+}
+
+/**
+ * A partially written Vite dependency manifest makes lazy route imports fail
+ * with an opaque "Failed to fetch dynamically imported module" error. This
+ * only forces Vite's normal optimizer when its cache is absent or empty; a
+ * healthy cache keeps the regular fast startup path.
+ */
+function needsViteDependencyRefresh(frontendDir: string): boolean {
+  const metadataPath = resolve(frontendDir, 'node_modules/.vite/deps/_metadata.json')
+  if (!existsSync(metadataPath)) return true
+  try {
+    const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as {
+      optimized?: Record<string, unknown>
+    }
+    return !metadata.optimized || Object.keys(metadata.optimized).length === 0
+  } catch {
+    return true
   }
 }
 
@@ -195,7 +248,7 @@ function buildResourceEnv(
   })
 }
 
-function buildRuntimeEnv(input: {
+export function buildRuntimeEnv(input: {
   baseEnv: Record<string, string | undefined>
   ports: BeeGameDevPorts
   workspacePath: string
@@ -205,9 +258,17 @@ function buildRuntimeEnv(input: {
   )
   return compactEnv({
     ...serviceEnv,
+    // V3 persistence is host-only. Native model environments still use their
+    // separate allowlist, and the frontend never receives these credentials.
+    BEEGAME_SUPABASE_SERVICE_ROLE_KEY: input.baseEnv.BEEGAME_SUPABASE_SERVICE_ROLE_KEY,
+    SUPABASE_SERVICE_ROLE_KEY: input.baseEnv.SUPABASE_SERVICE_ROLE_KEY,
     NODE_ENV: input.baseEnv.NODE_ENV || 'development',
     AGENT_WORKFLOW_PORT: String(input.ports.runtime),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,
+    // The local runtime serves measured V3 Preview on isolated *.localhost
+    // hosts. Production still requires its explicitly configured HTTPS origin.
+    BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN:
+      input.baseEnv.BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN || `http://localhost:${input.ports.runtime}`,
     BEEGAME_API_CORS_ORIGINS: appendApiCorsOrigin(
       input.baseEnv.BEEGAME_API_CORS_ORIGINS,
       `http://127.0.0.1:${input.ports.frontend}`,
@@ -282,7 +343,6 @@ function buildFrontendEnv(input: {
     ...omitFrontendAndRuntimeForbiddenEnv(input.baseEnv),
     PORT: String(input.ports.frontend),
     VITE_API_BASE_URL: `http://127.0.0.1:${input.ports.runtime}`,
-    VITE_WS_BASE_URL: `ws://127.0.0.1:${input.ports.runtime}`,
   })
 }
 

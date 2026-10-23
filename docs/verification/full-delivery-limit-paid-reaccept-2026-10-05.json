@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-05",
+  "kind": "Independent read-only observer report, not a native acceptance receipt",
+  "authorization": "User explicitly allowed one fresh paid test; no additional paid run or manual product repair.",
+  "root": "/private/tmp/bgs-full-delivery-limit-reaccept-20261005-w8n9S4b3",
+  "projectId": "full-limit-reaccept-fruit-20261005-w8n9S4b3",
+  "model": "ark-code-latest",
+  "modelConfigId": "llm_ac40e5d1be394ffe925e3f2532dedd34",
+  "entry": "Actual server session/conversation/delivery workflow with freshly built native CLI; not Dashboard UI bootstrap.",
+  "originalBrief": "我想做一个浏览器里的水果接篮小游戏：玩家左右移动篮子接住下落的水果、避开杂物，完成一局后能重新开始。键盘和触屏都能操作。",
+  "result": {
+    "passed": false,
+    "outcome": "handoff-incomplete",
+    "elapsedSeconds": 589.842,
+    "completedModelCalls": 28,
+    "lastStage": "review-1-revise-turn3",
+    "nativeShouldContinue": false,
+    "nativeIssue": "Review has no valid version-bound result for its current step.",
+    "deliveredFiles": ["GDD.md"],
+    "reachedGddVerify": false,
+    "reachedThreeDocuments": false,
+    "reachedResourcesOrRuntime": false,
+    "releaseAllowed": false,
+    "executionLimitReached": false
+  },
+  "stages": [
+    {
+      "stage": "author-1-work-turn1",
+      "elapsedSeconds": 216.854,
+      "modelCalls": 5,
+      "inputTokens": 44799,
+      "cacheReadTokens": 168984,
+      "outputTokens": 8195,
+      "totalObservedTokens": 221978
+    },
+    {
+      "stage": "review-1-inspect-turn2",
+      "actor": "a66ccc0ca06947b2a",
+      "elapsedSeconds": 166.73,
+      "modelCalls": 6,
+      "inputTokens": 27588,
+      "cacheReadTokens": 88400,
+      "outputTokens": 6535,
+      "totalObservedTokens": 122523
+    },
+    {
+      "stage": "review-1-revise-turn3",
+      "actor": "ae856a50dddf19b12",
+      "elapsedSeconds": 205.831,
+      "modelCalls": 17,
+      "inputTokens": 35679,
+      "cacheReadTokens": 447160,
+      "outputTokens": 9636,
+      "totalObservedTokens": 492475
+    }
+  ],
+  "cost": {
+    "basis": "Final usage per intercepted provider message request; not cumulative SDK usage or settled Credits.",
+    "inputTokens": 108066,
+    "cacheReadTokens": 704544,
+    "outputTokens": 24366,
+    "cacheCreationTokens": 0,
+    "totalObservedTokens": 836976,
+    "finalUsageForAllModelRequests": true,
+    "missingUsageRequestIds": [1],
+    "missingUsageNote": "Initial non-message metadata/count request has no usage; unavailable usage is not zero spend.",
+    "billingAvailable": false,
+    "billingReason": "billing_observation_transport_failed",
+    "afterFirstRejectedReceipt": {
+      "requestIds": [23, 24, 25, 26, 27, 28, 29],
+      "calls": 7,
+      "observedTokens": 246884,
+      "note": "Includes repeated wrong-path submission, disallowed directory probing, undoing an ancillary limits edit, duplicate structural check and final failure report; not seven necessary design fixes. This is observed failure-path cost, not a guaranteed achievable saving."
+    },
+    "comparison": "Stopped at an earlier stage than previous paid runs. A lower whole-run total does not establish improved efficiency or equivalent quality."
+  },
+  "nativeReview": {
+    "found": [
+      "GDD wrongly included resources table owned by ASSET_PLAN.md.",
+      "GDD wrongly included inputs table owned by UI_UX_SPEC.md.",
+      "Broad feedback output duplicated concrete sound-trigger producer declarations."
+    ],
+    "savedRevision": "234bcd8f2ceaee20f472f3f10ede0944a5daa8ae8fa9550500eed12f733b3e5c",
+    "gddSnapshot": "0cf3e2256a12dea89482fe9ebabc91e86c8d633f891b9e707eb06402526aa8ca",
+    "structuralCheck": {"valid": true, "issues": [], "runtimeVerified": false},
+    "semanticAcceptance": "Not completed: no revise receipt and no verify step. Structural success alone is not acceptance."
+  },
+  "confirmedFailure": {
+    "directCauseCategory": "LLM execution/copy error",
+    "expectedReceiptBasename": "milestone-c6964d2b-7e05-493b-a458-a9c1ea26cad5.txt",
+    "attemptedReceiptBasename": "milestone-c6964d2b-7e05-493b-a458-a9c1ea265cad5.txt",
+    "attempts": 4,
+    "difference": "Model inserted an extra 5 in the last UUID group; every Write used that wrong path.",
+    "evidence": "Original task Read result line 53 specifies the correct basename. Child transcript records four wrong-path Write calls and four scope denials. src/beegame/design-review.ts allows only the exact host-owned receipt or recorded writable documents.",
+    "guardVerdict": "Correct rejection; no evidence that the correct receipt path or valid receipt content was rejected.",
+    "systemContributionCategory": "Insufficient permission-denial diagnostics",
+    "systemContribution": "Path mismatch returns only Outside the current bounded BGS design review step, so the child guesses at unrelated causes instead of being told which allowed path was mismatched.",
+    "proposedMinimalFollowup": "Diagnose receipt-target mismatch with actionable expected-path information within the existing boundary; retain exact-path validation. Verify offline wrong-path rejection and correct resubmission before requesting another paid test. No automatic file redirection, permission bypass, receipt synthesis or extra review loop."
+  },
+  "observerSemanticFinding": {
+    "discoveredBy": "Codex observer, not native Inspect reviewer",
+    "document": "GDD.md",
+    "lines": [116, 118],
+    "conflict": "首版无任何跨局持久化：不保存分数、不保存设置、不保存进度。 versus 音量等玩家偏好设置是否提供及其保存方式，属专业负责人决策，本文件不预设。",
+    "downstreamImpact": "Audio/UI owner cannot determine whether preference persistence is forbidden by GDD or left to their professional decision. A structurally valid handoff does not close this ownership/semantic contradiction.",
+    "nativeFindingPresent": false,
+    "fedIntoPaidRun": false
+  },
+  "integrity": {
+    "watchedFiles": 3828,
+    "changedWatchedFiles": [],
+    "manualProductEdits": false,
+    "injectedFindings": false,
+    "rawEvidenceRewritten": false,
+    "continuedAfterStop": false,
+    "paidRuns": 1
+  },
+  "limitations": [
+    "Paid run never reached the 32-call execution ceiling; that fix remains supported by prior offline native tests, not this paid run.",
+    "No Audio events.source correction or joint review was exercised because GDD revision stopped first.",
+    "Image configuration preflight reported config-service-network; resources were never reached, so it did not cause this stop.",
+    "No general stability or complete-game acceptance claim."
+  ]
+}

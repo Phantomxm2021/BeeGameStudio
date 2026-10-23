@@ -1,11 +1,15 @@
 import type { McpServerConfig, McpServerInput } from './mcp-servers-store'
+import { tmpdir } from 'node:os'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import {
   createPinnedUndiciDispatcher,
   resolveApprovedOutboundTarget,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
 
-export type McpServerHealthStatus = 'available' | 'unavailable'
+export type McpServerHealthStatus = 'available' | 'unavailable' | 'untested'
 
 export type McpServerTestResult = {
   ok: boolean
@@ -98,9 +102,7 @@ export async function testMcpServerConnection(
   options: ActiveMcpDiscoveryOptions = {},
 ): Promise<McpServerTestResult> {
   if (input.transport === 'stdio') {
-    return unavailable(
-      'Stdio MCP requires launching a process and cannot be verified from the dashboard.',
-    )
+    return testStdioServer(input, options.timeoutMs ?? 10_000)
   }
   if (!input.url?.trim()) {
     return unavailable('MCP URL is required.')
@@ -109,6 +111,43 @@ export async function testMcpServerConnection(
     return testSseEndpoint(input.url, options.timeoutMs ?? 1600, options)
   }
   return testMcpEndpoint(input.url, options.timeoutMs ?? 1600, options)
+}
+
+async function testStdioServer(input: McpServerInput, timeoutMs: number): Promise<McpServerTestResult> {
+  if (!input.command?.trim()) return unavailable('MCP command is required.')
+  const client = new Client({ name: 'BeeGame Dashboard', version: '0.1.0' })
+  const transport = new StdioClientTransport({
+    command: input.command,
+    args: input.args ?? [],
+    cwd: input.cwd || tmpdir(),
+    // The SDK inherits only basic OS variables, never the host's service keys.
+    env: Object.fromEntries((input.env ?? []).filter(item => item.value !== undefined)
+      .map(item => [item.key, item.value!])),
+    stderr: 'ignore',
+  })
+  try {
+    // Only protocol initialization: never invoke an arbitrary server tool.
+    await client.connect(transport, { timeout: timeoutMs })
+    const server = client.getServerVersion()
+    return {
+      ok: true,
+      status: 'available',
+      message: 'MCP initialize succeeded.',
+      checkedAt: new Date().toISOString(),
+      ...(server ? { serverInfo: { name: server.name, version: server.version } } : {}),
+      capabilities: client.getServerCapabilities(),
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code
+    const message = code === 'ENOENT' ? 'MCP executable was not found. Check the command and PATH.'
+      : code === 'EACCES' ? 'MCP executable permission denied.'
+      : error instanceof McpError && error.code === ErrorCode.RequestTimeout ? 'MCP initialize timed out.'
+      : 'MCP initialize failed. Check the server command, arguments, and environment.'
+    return unavailable(message)
+  } finally {
+    await client.close()
+    await transport.close()
+  }
 }
 
 export function parsePortList(value: string | undefined): number[] | undefined {

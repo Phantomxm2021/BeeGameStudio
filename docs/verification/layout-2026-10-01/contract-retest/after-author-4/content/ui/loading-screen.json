@@ -1,0 +1,191 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "breakout-loading",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "loading-root",
+    "nodes": [
+      {
+        "id": "loading-root",
+        "role": "screen-root",
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            1920,
+            1080
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1920,
+              1080
+            ],
+            [
+              2560,
+              1080
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "loading-bg",
+        "parentId": "loading-root",
+        "role": "shape",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ],
+          "position": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "gradient": [
+            "#1E1E42",
+            "#13132B"
+          ]
+        }
+      },
+      {
+        "id": "loading-column",
+        "parentId": "loading-root",
+        "role": "container",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            360,
+            204
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 20,
+            "padding": [
+              24,
+              24,
+              24,
+              24
+            ],
+            "align": "center",
+            "justify": "center"
+          }
+        }
+      },
+      {
+        "id": "loading-spinner",
+        "parentId": "loading-column",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            48,
+            48
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFD166",
+            "radius": 24
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 24
+          }
+        }
+      },
+      {
+        "id": "loading-text",
+        "parentId": "loading-column",
+        "role": "text",
+        "text": "加载中…",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            60,
+            8
+          ],
+          "size": [
+            240,
+            32
+          ]
+        },
+        "style": {
+          "fontSize": 24,
+          "color": "#F3F4FF",
+          "align": "center",
+          "lineHeight": 32
+        }
+      },
+      {
+        "id": "progress-track",
+        "parentId": "loading-column",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            24,
+            0
+          ],
+          "size": [
+            312,
+            14
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#2A2D5C",
+            "radius": 7
+          }
+        }
+      },
+      {
+        "id": "progress-fill",
+        "parentId": "progress-track",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            2,
+            2
+          ],
+          "size": [
+            150,
+            10
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFD166",
+            "radius": 5
+          }
+        }
+      }
+    ]
+  }
+}

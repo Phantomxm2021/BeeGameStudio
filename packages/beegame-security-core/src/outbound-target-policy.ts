@@ -131,9 +131,13 @@ export function createPinnedUndiciDispatcher(
   target: ApprovedOutboundTarget,
   options: { tls?: PinnedUndiciTlsOptions } = {},
 ): UndiciAgent {
+  if (typeof target.lookup !== 'function') throw new Error('Approved outbound target has no pinned DNS lookup')
   return new UndiciAgent({
     connect: {
       ...options.tls,
+      // The approved lookup returns one pinned address. Family autodetection
+      // requests an array (`all: true`), which is a different DNS callback contract.
+      autoSelectFamily: false,
       lookup: target.lookup as never,
     },
   })
@@ -181,7 +185,8 @@ async function resolveAddresses(resolver: Resolver, hostname: string): Promise<s
   }
 }
 
-function createPinnedLookup(hostname: string, addresses: string[]) {
+export function createPinnedLookup(hostname: string, addresses: string[]) {
+  hostname = normalizeHostname(hostname)
   let nextAddress = 0
   return (requestedHostname: string, _options: unknown, callback: LookupCallback): void => {
     if (normalizeHostname(requestedHostname) !== hostname) {

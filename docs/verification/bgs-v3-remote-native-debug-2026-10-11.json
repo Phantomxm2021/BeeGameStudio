@@ -1,0 +1,343 @@
+{
+  "date": "2026-10-11",
+  "scope": "One real Supabase Run + normal user Chrome HttpOnly auth + actual native CLI + offline loopback model: Preview issue -> source-backed Review -> actual Question -> original owner Repair -> fresh host measurements -> directed followup -> measured editable export -> pause/reload",
+  "model": "Deterministic native tool-call fixture, NOT real-model semantic quality or token/cost measurement. Synthetic input_tokens/output_tokens are transport values only.",
+  "proof": {
+    "projectId": "v3-remote-debug-cbf9d935-d29e-4b1c-bc92-6a208106f065",
+    "runId": "169597bb-e138-40c2-9bfd-7deb17f72a41",
+    "version": 21,
+    "planRevision": 3,
+    "requirementsRevision": "2d1395bd-cf20-4e2c-8c29-fc830099520e",
+    "realDatabase": true,
+    "actualNativeAttempts": [
+      {
+        "taskId": "game",
+        "attemptId": "73dca7d9-9afa-484e-bae1-6264f1c3a5d3",
+        "nativeSessionId": "f01dae5a-2314-4f00-ac97-ff846b02f3dd",
+        "status": "succeeded",
+        "checks": [
+          {
+            "id": "build",
+            "status": "passed",
+            "version": "v3-editable-build.1"
+          },
+          {
+            "id": "runtime-smoke",
+            "status": "passed",
+            "version": "v3-static-artifact.2"
+          },
+          {
+            "id": "ui-data-consumption",
+            "status": "passed",
+            "version": "v3-ui-dom-consumption.1"
+          },
+          {
+            "id": "skill-use",
+            "status": "passed",
+            "version": "native-tool-lifecycle.1"
+          }
+        ]
+      },
+      {
+        "taskId": "notes",
+        "attemptId": "7ad7d99f-4a17-4ee6-bf85-2288693c3854",
+        "nativeSessionId": "9c9ec124-e759-4fc7-b721-7a6f7b065cf2",
+        "status": "succeeded",
+        "checks": [
+          {
+            "id": "artifact-json",
+            "status": "passed",
+            "version": "v3-slice.1"
+          }
+        ]
+      },
+      {
+        "taskId": "preview-review.67cffe35-8380-4605-b72d-77fa6095e473",
+        "attemptId": "d492ac9c-a1da-4cbc-b4ea-8cac7564836f",
+        "nativeSessionId": "0ffa7f38-d041-45e5-b416-cbc631e716a7",
+        "status": "failed",
+        "checks": [
+          {
+            "id": "review-findings",
+            "status": "failed",
+            "version": "v3-directed-review.2"
+          }
+        ]
+      },
+      {
+        "taskId": "game",
+        "attemptId": "01073e28-9b98-48ea-acbc-d7ddba1a8cc8",
+        "nativeSessionId": "44877b57-d3a3-47fd-843e-fa723027478d",
+        "status": "succeeded",
+        "checks": [
+          {
+            "id": "build",
+            "status": "passed",
+            "version": "v3-editable-build.1"
+          },
+          {
+            "id": "runtime-smoke",
+            "status": "passed",
+            "version": "v3-static-artifact.2"
+          },
+          {
+            "id": "ui-data-consumption",
+            "status": "passed",
+            "version": "v3-ui-dom-consumption.1"
+          },
+          {
+            "id": "rule-tests",
+            "status": "passed",
+            "version": "v3-slice.1"
+          },
+          {
+            "id": "repair-verification",
+            "status": "passed",
+            "version": "v3-directed-repair.1"
+          },
+          {
+            "id": "skill-use",
+            "status": "passed",
+            "version": "native-tool-lifecycle.1"
+          }
+        ]
+      },
+      {
+        "taskId": "preview-review.67cffe35-8380-4605-b72d-77fa6095e473",
+        "attemptId": "b51251fe-20da-4f3a-9566-a65880e63be2",
+        "nativeSessionId": "9c4ff8fa-7fcb-4fdd-864a-ae7143964cfa",
+        "status": "succeeded",
+        "checks": [
+          {
+            "id": "review-findings",
+            "status": "passed",
+            "version": "v3-directed-review.2"
+          }
+        ]
+      }
+    ],
+    "uniqueNativeSessions": 5,
+    "decision": {
+      "type": "workflow.question.validated",
+      "answers": {
+        "Choose the confirmed synthetic play-button height?": "80"
+      },
+      "sources": [
+        {
+          "path": "reviews/preview-67cffe35-8380-4605-b72d-77fa6095e473.json",
+          "sha256": "134dbf0dd364a2776c901a28c1005c91e0a70e556cb48d80c2be4bb58260c1a1"
+        },
+        {
+          "path": "content/ui/menu.json",
+          "sha256": "9847becb78f657ac120ac80b8bf9ff3c092491ae5ad15a04635e0d83affd9c96"
+        }
+      ],
+      "questions": [
+        {
+          "header": "F1",
+          "options": [
+            {
+              "label": "80",
+              "description": "80 pixels"
+            },
+            {
+              "label": "96",
+              "description": "96 pixels"
+            }
+          ],
+          "question": "Choose the confirmed synthetic play-button height?",
+          "multiSelect": false
+        }
+      ],
+      "toolUseID": "offline-native-13",
+      "findingIds": [
+        "F1"
+      ],
+      "planRevision": 3,
+      "workflowExecution": {
+        "runId": "169597bb-e138-40c2-9bfd-7deb17f72a41",
+        "taskId": "game",
+        "attemptId": "01073e28-9b98-48ea-acbc-d7ddba1a8cc8"
+      },
+      "requirementsRevision": "2d1395bd-cf20-4e2c-8c29-fc830099520e"
+    },
+    "consumerProof": {
+      "driver": "host-owned Chromium; actual target build; in-memory source response mutation",
+      "probes": [
+        {
+          "document": "content/ui/menu.json",
+          "nodeId": "play",
+          "viewport": [
+            1280,
+            720
+          ],
+          "status": "passed",
+          "before": {
+            "left": 540,
+            "top": 320,
+            "right": 740,
+            "bottom": 400
+          },
+          "changed": [
+            {
+              "property": "position",
+              "actual": {
+                "left": 553,
+                "top": 327,
+                "right": 753,
+                "bottom": 407
+              },
+              "expected": {
+                "left": 553,
+                "top": 327,
+                "right": 753,
+                "bottom": 407
+              }
+            },
+            {
+              "property": "size",
+              "actual": {
+                "left": 532,
+                "top": 316,
+                "right": 748,
+                "bottom": 404
+              },
+              "expected": {
+                "left": 532,
+                "top": 316,
+                "right": 748,
+                "bottom": 404
+              }
+            }
+          ],
+          "restored": {
+            "left": 540,
+            "top": 320,
+            "right": 740,
+            "bottom": 400
+          },
+          "expectedBefore": {
+            "left": 540,
+            "top": 320,
+            "right": 740,
+            "bottom": 400
+          }
+        }
+      ],
+      "errors": [],
+      "missingFiles": [],
+      "unsupported": [],
+      "limitations": "Declared DOM or static Canvas image probes only; response-only position/size/resource changes and restoration, not Tilemap/3D/fonts/audio/full gameplay acceptance."
+    },
+    "reportRetained": true,
+    "notesPreserved": "81c69a38644e8ad0d5f7d5cf9ff192970047ee466dfd84dfbe4045977425de2c",
+    "sourceHeight": 80,
+    "closed": [
+      {
+        "id": "F1",
+        "repairAttemptId": "01073e28-9b98-48ea-acbc-d7ddba1a8cc8"
+      }
+    ],
+    "export": {
+      "file": "/Users/nswell/Downloads/bgs-v3-project (1).zip",
+      "bytes": 11206,
+      "sha256": "8e3bd3bc572c6d0310a9c44ee44b8c34c22bfa19ef15ca82af5979655efa1185",
+      "allFileHashesMatch": true,
+      "measurementAttemptId": "01073e28-9b98-48ea-acbc-d7ddba1a8cc8",
+      "artifact": {
+        "path": "dist",
+        "sha256": "7a3e4d989544f2d2994b693e20f168bcdf3ec25b803b2241b3a280cdb7ba2eb6"
+      }
+    },
+    "paused": {
+      "at": "2026-10-10T18:44:15.196Z"
+    },
+    "noWriter": true,
+    "deliveryEligible": false,
+    "fixtureRoot": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-remote-debug-tFrsfp"
+  },
+  "browser": {
+    "controlledVia": "cua_repl Chrome",
+    "questionAnswerActor": "Development agent selected 80 in this explicitly synthetic acceptance case via normal debug permission UI; no host decision prefill",
+    "preview": {
+      "height": 80,
+      "feedback": "Clicked",
+      "screenshot": "/private/tmp/bgs-v3-remote-native-debug-2026-10-11.png"
+    },
+    "pauseReload": {
+      "version": 21,
+      "pausedEqual": true,
+      "noWriter": true,
+      "notesTaskUnchanged": true
+    },
+    "limitations": [
+      "Browser download event tracking timed out; actual Chrome download file independently found, receipt and every entry hash verified",
+      "Some native dialog confirmations left stale extension dialog state; read current UI/database before further actions. No duplicate execution"
+    ]
+  },
+  "nativeTransport": {
+    "requests": 19,
+    "attempts": 5,
+    "uniqueSessions": 5,
+    "actualQuestions": 1,
+    "actualNativeTools": [
+      "Skill",
+      "Read",
+      "Write",
+      "AskUserQuestion"
+    ],
+    "controlledRunnerSubmits": 0,
+    "log": "/private/tmp/bgs-v3-remote-native-debug-service-2026-10-11.log"
+  },
+  "regression": {
+    "passed": 173,
+    "failed": 0,
+    "assertions": 1469,
+    "files": 25,
+    "seconds": 193.8,
+    "log": "/private/tmp/bgs-v3-remote-native-debug-regression-2026-10-11.log",
+    "sha256": "94af9eda99f21de60603aa0539ef93298a2d6784b65b5db11648ce48e14f6f4b",
+    "focused": {
+      "passed": 2,
+      "failed": 0,
+      "assertions": 60,
+      "log": "/private/tmp/bgs-v3-native-review-debug-focused-2026-10-11.log"
+    },
+    "typecheck": {
+      "exitCode": 2,
+      "diagnostics": 3556,
+      "newWorkflowV3OrFixtureDiagnostics": 0,
+      "wholeRepoPassed": false,
+      "log": "/private/tmp/bgs-v3-remote-native-debug-typecheck-final-2026-10-11.log"
+    }
+  },
+  "protected": {
+    "formalFrontendChanged": false,
+    "claudeCodeChanged": false,
+    "builtinToolsChanged": false,
+    "productionServicesRestarted": false,
+    "databaseDDLChanged": false,
+    "paidModelCalls": 0,
+    "diffSha256BeforeAndAfter": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995"
+  },
+  "earlierFailure": {
+    "log": "/private/tmp/bgs-v3-native-review-debug-first-2026-10-11.log",
+    "classification": "Test-provider bug, not production system bug",
+    "rootCause": "Pending actual Question decision is persisted only at Attempt settlement. Test provider incorrectly looked for it in live Run and refused the fourth request.",
+    "correction": "Consume actual native AskUserQuestion tool_result text, not a preset choice. Real host correctly failed unchanged 52px rule check before the fixture correction."
+  },
+  "sourceSha256": {
+    "scripts/workflow-v3-offline-native.ts": "7a60edf432a1b4b6c02ef7a8f50cc89aaa1bf44e2c1d584f17e1a8f5b89d2a9d",
+    "scripts/verify-workflow-v3-remote-debug.ts": "65d3c749052103789a7ac2890cf72b7bb576aee818799ed5b4bd4ceb38ae6fd5",
+    "workflow-v3/debug-native.test.ts": "84a3ba51c3e6386f590da14342c2cb8f562243982c6254dc2c451775b64baed2",
+    "workflow-v3/debug-native-review-browser.mjs": "3a1edc86a7dee1850ad4c59b518f0b9acdfdf4d4e21941274ca925ac3c5134a4"
+  },
+  "notVerified": [
+    "Real LLM reviewer ability or professional Skill application quality",
+    "Full Scene/Tilemap/3D/animation/font/audio/gameplay consumption or game quality",
+    "Crash before exit evidence or unknown external paid operation recovery in this combined fixture",
+    "Ordinary Chat creation/change, production deployment, fresh dependency installation or real cost improvement",
+    "Remote native composite edit and requirement-change sequence; prior separate evidence remains separate"
+  ],
+  "cleanup": "Only this turn's owned Chrome debug tab and PID 45804 temporary service closed. New synthetic fixture and real database history retained; original source project metadata read only. User Chrome other tabs, production services, old remote fixture history unchanged."
+}

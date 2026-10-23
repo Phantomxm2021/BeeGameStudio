@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-11",
+  "scope": "V3-09 independent opt-in loopback debug shell and synthetic API/browser acceptance. No production frontend or Claude Code change.",
+  "implementation": [
+    "packages/agent-workflow-server/src/beegame/workflow-v3/debug-page.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/debug.html",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/debug-client.js"
+  ],
+  "wiring": "packages/agent-workflow-server/src/app.ts: registerV3DebugPage(app, process.env.BEEGAME_WORKFLOW_V3_DEBUG === '1')",
+  "activation": {
+    "default": "off",
+    "path": "/debug/workflow-v3",
+    "allowedHosts": [
+      "localhost",
+      "127.0.0.1",
+      "[::1]"
+    ],
+    "credentials": "Normal user bearer only, page memory, never rendered, no storage or service key",
+    "runningServicesEnabled": false
+  },
+  "regression": {
+    "fullV3": {
+      "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3",
+      "passed": 151,
+      "failed": 0,
+      "assertions": 1269,
+      "seconds": 149.97
+    },
+    "additionalDistinctTest": "actual BGS app opt-in debug shell leaves normal API authentication intact",
+    "totalDistinctTests": 152,
+    "typecheck": {
+      "command": "bunx tsc -p packages/agent-workflow-server/tsconfig.json --noEmit --pretty false",
+      "exitCode": 2,
+      "existingDiagnosticCount": 3556,
+      "touchedPathDiagnostics": 0,
+      "log": "/private/tmp/bgs-v3-debug-typecheck-final.log"
+    },
+    "protectedDiffSha256": {
+      "before": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995",
+      "after": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995",
+      "command": "git diff -- apps/frontend src packages/builtin-tools | shasum -a 256",
+      "qualification": "Existing dirty differences preserved; not a claim those directories equal HEAD."
+    }
+  },
+  "browserCoverage": [
+    "Inert page load",
+    "401 without normal identity",
+    "version/hash-bound saved UI candidate",
+    "409 stale draft preserved, no retry",
+    "unrelated notes state and bytes preserved",
+    "actual source-copy build and fresh independent Chromium measurement",
+    "static and editable project ZIP responses",
+    "cross-origin allow-scripts-only sandbox Preview consumes new saved JSON",
+    "changed requirements revoke prior Preview URL with 409",
+    "explicit requirement confirmation and no automatic dispatch",
+    "pause remains on reload",
+    "project/identity change clears old state and download object URLs"
+  ],
+  "newBrowserTestNativeProviderCalls": 1,
+  "provider": "synthetic local stub; no paid provider",
+  "earlyHarnessFailures": [
+    {
+      "cause": "Invalid preview capability import",
+      "fix": "Use existing auth/preview-capability factory"
+    },
+    {
+      "cause": "Incomplete synthetic registry lacked entryScene and sceneModel",
+      "fix": "Use legal registered Scene/UI fixture; no production schema relaxation"
+    },
+    {
+      "cause": "Async page predicate did not reliably await server settlement in this test",
+      "fix": "Explicit bounded read-only test observation; no polling added to debug client"
+    },
+    {
+      "cause": "Synthetic mutable host state placed inside exportable source folders",
+      "fix": "Keep synthetic host state in reserved .beegame; do not weaken build/export provenance checks"
+    }
+  ],
+  "unverified": [
+    "Debug interface against deployed Supabase",
+    "Question answer and Preview issue controls",
+    "Unknown native writer/unknown external operation recovery",
+    "Full game quality and real paid token costs"
+  ],
+  "operations": {
+    "paidModelCalls": 0,
+    "serviceRestart": false,
+    "databaseWrite": false,
+    "actualGameArtifactWrite": false,
+    "productionFrontendWrite": false,
+    "claudeCodeSourceWrite": false
+  }
+}

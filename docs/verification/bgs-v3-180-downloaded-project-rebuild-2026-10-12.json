@@ -1,0 +1,144 @@
+{
+  "version": "1.80-record",
+  "runtimeCodeBaseline": "1.78",
+  "date": "2026-10-12",
+  "status": "downloaded-synthetic-package-fresh-rebuild-verified-not-whole-workflow-complete",
+  "scope": {
+    "productionCodeChanges": 0,
+    "formalFrontendChanges": 0,
+    "claudeCodeChanges": 0,
+    "builtinToolsChanges": 0,
+    "manualOriginalGameChanges": 0,
+    "modelCalls": 0,
+    "paidCalls": 0,
+    "dependencyInstalls": 0,
+    "databaseWrites": 0,
+    "automaticRetries": 0,
+    "serviceRestarts": 0,
+    "newStages": 0,
+    "newAgentLimits": 0,
+    "newReviewPrompts": 0
+  },
+  "artifact": {
+    "archive": "/Users/nswell/Downloads/bgs-v3-project.zip",
+    "archiveBytes": 11510,
+    "archiveSha256": "3f183bb40c6da739bb8595fc3f79a3acdfcc10520302731ba199b69c76edd0fb",
+    "measurementId": "1862fbf8-c5bb-4af4-920a-4da59630957b",
+    "runId": "6b0c7d27-b8ae-4536-b261-01308a4f4c88",
+    "projectId": "v3-agent-edit-d40674ca-b28d-4ae7-9d20-dd9f50d57ef1",
+    "originalVersionBeforeAndAfter": 29,
+    "deliveryEligible": false
+  },
+  "freshRebuild": {
+    "auditScript": "/private/tmp/bgs-v3-179-downloaded-rebuild.ts",
+    "temporaryCopy": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-179-downloaded-rebuild-5OlFiU",
+    "sourceFiles": 10,
+    "previousIncludedOutputNeverExtracted": true,
+    "noNodeModules": true,
+    "declaredDependencies": 0,
+    "buildCommand": "existing package.json bun run build.mjs via existing BGS OS/network sandbox",
+    "buildExit": 0,
+    "buildOutput": "$ bun run build.mjs\n",
+    "sourceBytesBeforeAndAfterIdentical": true,
+    "rebuiltArtifact": {
+      "path": "dist",
+      "sha256": "7dc1a86d717baac0ebb35037195e66159d267be59429e1ff876c09b1e92b9c08"
+    },
+    "sameMeasuredArtifact": true,
+    "allFourRebuiltOutputFilesMatchReceipt": true,
+    "runtime": {
+      "driver": "existing runArtifactCheck runtime-smoke / host-owned Chromium",
+      "status": "passed",
+      "createdAt": "2026-10-12T13:07:59.742Z",
+      "viewport": [
+        1280,
+        720
+      ],
+      "requestedFiles": [
+        "index.html",
+        "content/ui/menu.json",
+        "content/scenes/level.json"
+      ],
+      "errors": [],
+      "missingFiles": [],
+      "unsupported": []
+    },
+    "originalArchiveUnchanged": true
+  },
+  "readOnlyRemoteRecheck": {
+    "script": "scripts/verify-workflow-v3-export-bytes.ts",
+    "passed": true,
+    "version": 29,
+    "originalSourceFiles": 10,
+    "allSourceAndOutputBytesMatch": true,
+    "originalRunWriter": "none",
+    "noRemeasurement": true
+  },
+  "finalReadOnlyState": {
+    "script": "/private/tmp/bgs-v3-178-final-state.ts",
+    "originalPaidProject": { "version": 121, "paused": true, "writer": null },
+    "sourceExitFixture": { "version": 4, "status": "failed", "writer": null, "sameSourceBytes": true },
+    "noStartExitFixture": { "version": 5, "status": "interrupted", "paused": true, "writer": null, "sameSourceBytes": true },
+    "beforeExitFixture": { "version": 2, "originalWriterRetained": true, "sameSourceBytes": true },
+    "serviceHealth": [{"port":62173,"status":200},{"port":62174,"status":200},{"port":62175,"status":200},{"port":62176,"status":200},{"port":62177,"status":200}]
+  },
+  "regression": {
+    "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3/editable-project.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/export-feedback.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/debug-page.test.ts",
+    "pass": 22,
+    "fail": 0,
+    "assertions": 170,
+    "files": 3,
+    "seconds": 7.48,
+    "coverage": [
+      "Measured source/output byte identities and independent extracted rebuild",
+      "Source/add/remove/writer/alias/check-version changes refuse stale export",
+      "Build source mutation/cancellation/hidden configuration cannot replace prior artifact",
+      "Measured dependency closure requires exported lockfile",
+      "Normal export permission, CAS, read-only state and debug isolation",
+      "Legacy feedback compatibility, not restoring a default Review stage"
+    ],
+    "protectedGitPathsClean": [
+      "apps/frontend",
+      "src",
+      "packages/builtin-tools"
+    ],
+    "diffCheck": 0
+  },
+  "limits": [
+    "Only a dependency-free, explicitly synthetic package on this Bun/macOS host. No cross-machine/OS or dependency-install guarantee.",
+    "A fresh build and initial browser load do not prove complete UI/Scene layout/hierarchy/behavior consumption, assets, gameplay, art, audio or eight-domain design quality.",
+    "This new downloaded bundle does not recreate unavailable historical 1.75 download evidence.",
+    "No new measurement or delivery eligibility written to the original Run; reconstructed copy evidence is separate."
+  ],
+  "remaining": [
+    {
+      "item": "Real eight-domain/Skills/resource/Scene/UI/full-game quality",
+      "status": "not-accepted",
+      "needs": "Separate authorized real Agent execution and independent actual observation; no manual repair or synthetic substitute."
+    },
+    {
+      "item": "Host CPU stall that delayed pause/health",
+      "status": "not-localized",
+      "next": "Offline replay of retained event facts and bounded profiling before modifying the responsible host code; page fix is not a complete root-cause proof."
+    },
+    {
+      "item": "Unknown writer without trusted exit proof / unknown external operations",
+      "status": "bounded-safe-refusal-not-universal-recovery",
+      "needs": "Actual operation-specific facts; no inference or automatic retry."
+    },
+    {
+      "item": "Applicable Unity/Godot native tools and export",
+      "status": "unverified",
+      "needs": "Actual usable tool environment and project/target evidence; no prescribed runtime or speculative adapters."
+    },
+    {
+      "item": "Formal frontend/product publish integration",
+      "status": "outside-authorization"
+    },
+    {
+      "item": "Actual Token net improvement",
+      "status": "deferred-unverified",
+      "needs": "After workflow and quality, separately authorized cost comparison; fixed synthetic requests not evidence."
+    }
+  ]
+}

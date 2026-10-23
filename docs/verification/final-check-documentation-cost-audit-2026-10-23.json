@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-23",
+  "objective": "Attribute final-check and documentation token consumption to observed execution and system responsibilities before selecting any further BGS change.",
+  "reviewedSystemCommit": "89d619525",
+  "decision": "Audit only. No additional runtime defect with a justified, proportionate fix was established. Preserve earlier fixes and record the explicit-details truncation limitation without adding a workflow or changing evidence contracts.",
+  "scope": {
+    "projectArtifacts": "read-only",
+    "productionChanges": false,
+    "promptOrSkillChanges": false,
+    "newWorkflowStages": false,
+    "realModelCalls": 0,
+    "realProjectReruns": 0,
+    "serviceRestarts": 0
+  },
+  "evidence": {
+    "nativeSnapshotSha256": "b40e14f52f9cc49d48e0446ac123751ab101f3ded2e9aedb5ea807dbd6e86cf3",
+    "hostSnapshotSha256": "039612e0fbc0ead02821c0013ed0687715dbd6aeff0689501132e6d75fc29e92",
+    "phase": {
+      "fromUTCExclusive": "2026-10-23T08:21:18.549Z",
+      "toUTCInclusive": "2026-10-23T08:32:43.734Z",
+      "elapsedSeconds": 685.185,
+      "providerResponses": 24,
+      "inputTokensIncludingCache": 3757384,
+      "cachedInputTokens": 3658624,
+      "uncachedInputTokens": 98760,
+      "outputTokensIncludingReasoning": 28265,
+      "reasoningOutputTokens": 7583,
+      "totalTokens": 3785649
+    },
+    "accountingBoundary": "Sum per-response token_usage_record usage once. Cached input is part of input, and reasoning is part of output. These are cumulative context-processing counts, not unique generated content or a monetary bill. Uncached input can also contain repeated material. Host events, native output and structuredContent copies of the same result are not added together."
+  },
+  "planAndSelfReview": [
+    "Trace final checks, document edits, source reads, local commands, measurement, result inspection and provider usage against the same fixed snapshots.",
+    "Separate agent-selected tool sequences from host-enforced execution. Do not infer an automatic loop from repeated commands or high cumulative usage.",
+    "Check actual default output contracts before proposing reductions; earlier resource projection and CLI whitespace fixes already apply to this stage.",
+    "Preserve failed/unverified/freshness facts and explicit detailed evidence. Do not reuse an arbitrary console PASS as an isolated host measurement.",
+    "Reject prompt additions, summary-model calls, new pagination, semantic-document heuristics and higher global output limits without a confirmed benefit that justifies their contract and maintenance cost.",
+    "Treat explicit-details truncation as an unresolved integration limitation. This run contains no subsequent retry, so it does not establish that truncation caused the large phase cost.",
+    "Stop at the evidence boundary rather than inventing a runtime patch. Validate this audit with snapshot arithmetic and source inspection only."
+  ],
+  "findings": [
+    {
+      "id": "document-edit-cost-is-not-receipt-volume",
+      "observed": "Nine successful EditProjectFile calls performed 32 replacements across four design documents. Their tool receipts total 829 characters. The initial 17 source/document/resource reads returned 61047 characters, including one failed path lookup. Agent commands also reread updated documents later.",
+      "causeBoundary": "The repeated large model inputs include accumulated context. BGS protects document writes, but neither its edit tool nor verification reader requires this particular reread/edit sequence. Selective document/section reads already exist.",
+      "sources": [
+        "packages/agent-workflow-server/src/beegame/workflow-read-tools.ts",
+        "packages/agent-workflow-server/src/beegame/design-source-reading.ts",
+        "packages/agent-workflow-server/src/bgs/runner.ts"
+      ],
+      "decision": "No new compulsory closeout/summary protocol or source-read restriction. Tiny edit receipts are not the root of the phase's cumulative token count."
+    },
+    {
+      "id": "invalid-edit-arguments-originated-at-provider",
+      "nativeCallOrdinal": 2715,
+      "nativeOutputOrdinal": 2719,
+      "observed": "Native tool arguments and the original chat-completions provider tool arguments are identical: 5762 Unicode characters and 10777 UTF-8 bytes. Both fail JSON parsing at the same location. A trailing comma is followed by further content and a complete ending; the bridge did not truncate the arguments.",
+      "decision": "Do not repair mutation arguments heuristically or add a retry layer. The later smaller edit calls were agent recovery, not an automatic BGS retry."
+    },
+    {
+      "id": "no-final-measurement-invalidated-by-closeout",
+      "hostFinalReadEvent": 4626,
+      "observed": "All successful documentation edits preceded the final measurement. Its saved readback has freshness.current=true; build, content-structure, content-layout and runtime-smoke passed, while content-resources and runtime acceptance remain unverified.",
+      "causeBoundary": "ReadVerificationResults inspects saved results and current freshness; it does not run verification. Direct npm test/build commands and static prechecks do not have the same source-copy, input-hash and retained-evidence boundary as a host measurement. Their apparent overlap does not justify blindly substituting one for the other.",
+      "sources": [
+        "packages/agent-workflow-server/src/beegame/workflow-read-tools.ts:156",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts:292",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts:90",
+        "packages/agent-workflow-server/src/beegame/design-handoff.ts:667"
+      ],
+      "decision": "Preserve freshness and evidence boundaries. No observed document-change/measurement loop supports changing raw-byte design hashing in this task."
+    },
+    {
+      "id": "explicit-detailed-read-exceeds-native-output-budget",
+      "nativeCallOrdinal": 2837,
+      "nativeOutputOrdinal": 2842,
+      "hostEvent": 4626,
+      "request": { "details": true },
+      "fullResultCharacters": 54876,
+      "nativeBodyCharacters": 47979,
+      "nativeWrapperCharacters": 33,
+      "truncationMarker": "…6919 chars truncated…",
+      "observed": "The original BGS JSON is parseable; the model-visible body is cut in the middle of JSON. UI and Scene coverage contain 101 nodes; node lists alone occupy 28802 characters. The default reader is already compact. These full inventories were explicitly requested and are not also duplicated inside nested checks.",
+      "versionBoundary": "The run used vendor 858b78aacc / BGS 0.163.0, before the separate 89d619525 upgrade. Both old and current native code apply the existing 20% serialization allowance: runner tool_output_token_limit=10000 becomes fallback_token_limit_override=12000. This is not evidence that the configured limit was ignored.",
+      "sources": [
+        "packages/agent-workflow-server/src/beegame/ui-layout-tool.ts:26",
+        "packages/agent-workflow-server/src/beegame/workflow-read-tools.ts:157",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts:387",
+        "packages/agent-workflow-server/src/bgs/runner.ts:156",
+        "vendor/bgs/bgs-rs/core/src/tools/handlers/mcp.rs",
+        "vendor/bgs/bgs-rs/core/src/tools/context.rs",
+        "vendor/bgs/bgs-rs/utils/output-truncation/src/lib.rs"
+      ],
+      "decision": "Record the limitation without claiming it is fixed. Raising the global limit increases context cost; dropping detailed facts changes the request; structured partial reads would introduce a new contract. None is justified by evidence of a retry loop in this phase."
+    },
+    {
+      "id": "small-duplicate-scope-does-not-explain-large-output",
+      "observed": "The detailed handoff repeats the same 1428-character checkScope value at the top level and inside measurement. Removing one field would save 1442 serialized characters, about 2.6%, and would still exceed the native output budget. Existing callers/tests depend on the handoff and exact-ID shapes.",
+      "decision": "Do not change the public result shape for a saving that cannot resolve the observed truncation. This is distinct from the already removed nested binding inventories."
+    },
+    {
+      "id": "previous-fixes-already-cover-default-output-overhead",
+      "observed": "Commit 1f19a477b compacted default CLI JSON. Applied to this saved final measurement, it removes 6598 formatting bytes from 25777 bytes while preserving the parsed value. Commit 542a5813d already compacted default resource binding output.",
+      "references": [
+        "initial-implementation-read-output-fix-2026-10-23.json",
+        "current-project-context-iteration-fix-2026-10-23.json"
+      ],
+      "decision": "Keep these changes and do not count their benefits again as a new fix or as measured end-to-end token savings."
+    }
+  ],
+  "validation": {
+    "method": "Recomputed all 24 usage records, checked snapshot SHA-256 identities, parsed original event 4626, inspected native output blocks and compared result fields/source contracts. JSON syntax and arithmetic assertions plus git diff --check passed.",
+    "applicationTests": "Not rerun: this task changes only this audit record.",
+    "limitations": "No paid calls, project reruns or end-to-end savings measurement. High cached-input counts still represent repeated processing; they are not zero cost. No claim that all agent reads/edits were unnecessary or that detailed-result truncation is resolved."
+  }
+}

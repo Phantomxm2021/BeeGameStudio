@@ -13,20 +13,24 @@
   "scripts": {
     "dev": "bun ../../scripts/dashboard-server-dev.ts",
     "test": "bun test src/__tests__",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:browser:install": "playwright-core install chromium --only-shell"
   },
   "dependencies": {
+    "playwright-core": "1.63.0",
+    "mammoth": "^1.11.0",
+    "pdfjs-dist": "^5.4.0",
+    "exceljs": "^4.4.0",
     "@bee-game-studio/agent-workflow": "workspace:*",
     "@bee-game-studio/beegame-billing-core": "workspace:*",
     "@bee-game-studio/beegame-resource-core": "workspace:*",
     "@bee-game-studio/beegame-skills-core": "workspace:*",
     "@bee-game-studio/beegame-storage-core": "workspace:*",
     "@bee-game-studio/security-core": "workspace:*",
-    "@bee-game-studio/workflow-engine": "workspace:*",
-    "@xmldom/xmldom": "^0.8.11",
-    "assimpjs": "^0.0.10",
-    "fonteditor-core": "^2.6.2",
     "hono": "^4.12.15",
+    "mdast-util-from-markdown": "^2.0.3",
+    "sharp": "^0.34.5",
+    "fonteditor-core": "2.6.3",
     "zod": "^4.3.6"
   }
 }

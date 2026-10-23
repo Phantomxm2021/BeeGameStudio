@@ -9,6 +9,9 @@ import {
 } from '../../../services/supabaseAuthApi';
 import { deleteCurrentUser } from '../../../services/currentUserApi';
 import type { BeeGameCreditBalance } from '../../../services/creditsApi';
+import { Button } from '../../beui/project-button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
+import { useToastContext } from '../../../contexts/ToastContext';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -32,43 +35,42 @@ interface ProfileModalProps {
 
 export function ProfileModal({
   isOpen,
-  lang: _lang,
   currentUser,
   creditBalance,
   onClose,
   onUserChanged,
 }: ProfileModalProps) {
+  const { showError } = useToastContext();
   const { t: translate } = useTranslation();
   const profileText = getProfileText(translate);
   const [avatarDraft, setAvatarDraft] = useState('');
   const [avatarDraftFailed, setAvatarDraftFailed] = useState(false);
-  const [profileError, setProfileError] = useState('');
   const [profileNotice, setProfileNotice] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !currentUser) return;
-    setProfileError('');
+    // Rehydrate editable fields whenever a profile session opens.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setProfileNotice('');
     setAvatarDraft(currentUser.avatarUrl || '');
     setAvatarDraftFailed(false);
-  }, [currentUser?.id, currentUser?.avatarUrl, isOpen]);
+  }, [currentUser, isOpen]);
 
-  if (!isOpen || !currentUser) return null;
+  if (!currentUser) return null;
 
   const handleAvatarFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
     setAvatarDraftFailed(false);
-    setProfileError('');
     setProfileNotice('');
     if (!file.type.startsWith('image/')) {
-      setProfileError(translate('intake.errors.profileImageRequired'));
+      showError(translate('intake.errors.profileImageRequired'));
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      setProfileError(translate('intake.errors.profileImageTooLarge'));
+      showError(translate('intake.errors.profileImageTooLarge'));
       return;
     }
     setIsSavingProfile(true);
@@ -78,7 +80,7 @@ export function ProfileModal({
         setProfileNotice(translate('intake.errors.profileAvatarSelected'));
       })
       .catch(error => {
-        setProfileError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUploadFailed'));
+        showError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUploadFailed'));
       })
       .finally(() => setIsSavingProfile(false));
   };
@@ -91,7 +93,6 @@ export function ProfileModal({
       onClose();
       return;
     }
-    setProfileError('');
     setProfileNotice('');
     setIsSavingProfile(true);
     try {
@@ -99,14 +100,13 @@ export function ProfileModal({
       await onUserChanged();
       onClose();
     } catch (error) {
-      setProfileError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUpdateFailed'));
+      showError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUpdateFailed'));
     } finally {
       setIsSavingProfile(false);
     }
   };
 
   const handleDeleteAccount = async () => {
-    setProfileError('');
     setProfileNotice('');
     const confirmed = window.confirm(profileText.deleteConfirm);
     if (!confirmed) return;
@@ -116,37 +116,30 @@ export function ProfileModal({
       onClose();
       await onUserChanged();
     } catch (error) {
-      setProfileError(error instanceof Error ? error.message : profileText.deleteFailed);
+      showError(error instanceof Error ? error.message : profileText.deleteFailed);
     }
   };
 
   return (
-    <>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={translate('intake.profile.title')}
-        data-surface="frosted-glass"
-        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
-      >
-        <div className="input-surface glass-panel w-full max-w-md rounded-[28px] p-6 text-zinc-100">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="type-title-3 text-white">{translate('intake.profile.title')}</h2>
-              <p className="type-callout mt-3 text-zinc-300">{translate('intake.profile.description')}</p>
+              <DialogTitle className="type-title-3 text-foreground">{translate('intake.profile.title')}</DialogTitle>
+              <DialogDescription className="type-callout mt-3 text-foreground">{translate('intake.profile.description')}</DialogDescription>
             </div>
             <button
               type="button"
               aria-label={translate('intake.profile.close')}
               onClick={onClose}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full glass-icon-button"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full grid place-items-center border border-border bg-background"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
 
           <div className="mt-8 flex flex-col items-center text-center">
-            <label className="type-title-3 group relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-amber-300/35 bg-white/5 text-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition hover:border-amber-200/70">
+            <label className="type-title-3 group relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-[var(--border-strong)] bg-muted text-foreground shadow-lg transition hover:border-[var(--ring)]">
               {avatarDraft && !avatarDraftFailed ? (
                 <img
                   src={avatarDraft}
@@ -166,65 +159,59 @@ export function ProfileModal({
                 onChange={handleAvatarFileChange}
                 className="sr-only"
               />
-              <span className="absolute inset-0 flex items-center justify-center bg-black/55 opacity-0 transition group-hover:opacity-100">
-                <Camera className="h-6 w-6 text-white" />
+              <span className="absolute inset-0 flex items-center justify-center bg-background/80 opacity-0 transition group-hover:opacity-100">
+                <Camera className="h-6 w-6 text-foreground" />
               </span>
             </label>
-            <div className="type-headline mt-5 max-w-full truncate text-white">
+            <div className="type-headline mt-5 max-w-full truncate text-foreground">
               {currentUser.displayName || profileText.displayNameFallback}
             </div>
-            <div className="type-footnote mt-1 max-w-full truncate text-zinc-400">
+            <div className="type-footnote mt-1 max-w-full truncate text-muted-foreground">
               {currentUser.email || profileText.emailFallback}
             </div>
           </div>
 
-          {profileError ? (
-            <div className="type-footnote mt-4 rounded-2xl border border-red-400/30 bg-red-950/50 px-4 py-3 text-red-100">
-              {profileError}
-            </div>
-          ) : null}
           {profileNotice ? (
-            <div className="type-footnote mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-950/40 px-4 py-3 text-emerald-100">
+            <div className="type-footnote mt-4 rounded-lg border border-[var(--success)] bg-[var(--surface-2)] px-4 py-3 text-[var(--success)]">
               {profileNotice}
             </div>
           ) : null}
 
-          <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-left">
+          <div className="mt-6 rounded-lg border border-border bg-muted/40 p-4 text-left">
             <div className="flex items-center justify-between gap-3">
-              <div className="type-callout text-white">{translate('intake.profile.creditUsage')}</div>
+              <div className="type-callout text-foreground">{translate('intake.profile.creditUsage')}</div>
               {creditBalance ? (
-                <div className="type-footnote text-emerald-200">{creditBalance.balanceCredits} credits</div>
+                <div className="type-footnote text-[var(--text-secondary)]">{creditBalance.balanceCredits} credits</div>
               ) : null}
             </div>
             {creditBalance ? (
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                <CreditMetric label={profileText.balance} value={creditBalance.balanceCredits} tone="positive" />
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <CreditMetric label={profileText.balance} value={creditBalance.balanceCredits} />
                 <CreditMetric label={profileText.consumed} value={creditBalance.consumedCredits} />
               </div>
             ) : null}
           </div>
 
           <div className="mt-6 flex justify-between gap-3">
-            <button
+            <Button
               type="button"
+              variant="destructive"
+              size="sm"
               onClick={() => void handleDeleteAccount()}
-              className="type-button rounded-full border border-red-300/25 px-5 py-2.5 text-red-200 transition hover:border-red-200/50 hover:bg-red-500/10"
             >
               {profileText.deleteAccount}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              size="sm"
               onClick={() => void handleFinishProfile()}
               disabled={isSavingProfile}
-              className="primary-pill type-button px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSavingProfile ? profileText.saving : profileText.finish}
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
-
-    </>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -252,9 +239,9 @@ function CreditMetric({
   tone?: 'neutral' | 'positive';
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/15 px-3 py-2">
-      <div className="type-footnote text-zinc-500">{label}</div>
-      <div className={`type-headline mt-1 truncate ${tone === 'positive' ? 'text-emerald-200' : 'text-zinc-100'}`}>
+    <div className="rounded-lg border border-border bg-background px-3 py-2">
+      <div className="type-footnote text-muted-foreground">{label}</div>
+      <div className={`type-headline mt-1 truncate ${tone === 'positive' ? 'text-[var(--success)]' : 'text-foreground'}`}>
         {value}
       </div>
     </div>

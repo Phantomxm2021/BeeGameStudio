@@ -5,6 +5,23 @@ import {
 } from './session-manager'
 
 describe('runtime error display', () => {
+  test('explains model refusal for live and persisted events without changing raw payloads', () => {
+    const raw = 'API Error: 400 Upstream request failed: [model_coming_soon] This model is coming soon.'
+    const event = { id: 1, sessionId: 'session', type: 'assistant.message' as const,
+      text: raw, payload: { type: 'assistant' as const, message: { content: raw } }, createdAt: new Date() }
+    const displayed = formatBeeGameEventForDisplay(event, 'zh')
+    expect(displayed.text).toContain('上游暂未开放当前模型（model_coming_soon）')
+    expect(displayed.text).toContain('当前模型不变')
+    expect(displayed.text).toContain('可重试原任务')
+    expect(displayed.payload).toEqual(event.payload)
+    expect(event.text).toBe(raw)
+    expect(formatRuntimeErrorForDisplay(displayed.text, 'zh')).toBe(displayed.text)
+    expect(formatRuntimeErrorForDisplay('400 {"error":{"code":"model_coming_soon","message":"Not enabled"}}', 'en'))
+      .toContain('Retry the same task when ready')
+    const prose = 'Example API Error: 400 [model_coming_soon] is a provider error.'
+    expect(formatRuntimeErrorForDisplay(prose, 'en')).toBe(prose)
+  })
+
   test('formats a structured provider error without exposing its JSON envelope', () => {
     const displayed = formatRuntimeErrorForDisplay(
       'API Error: 429 {"error":{"code":"AccountQuotaExceeded","message":"Weekly quota exceeded. Reset at midnight.","type":"TooManyRequests"}}',

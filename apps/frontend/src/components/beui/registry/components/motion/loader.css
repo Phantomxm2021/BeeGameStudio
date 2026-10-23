@@ -1,0 +1,12 @@
+.beui-dot-matrix-cell {
+  opacity: 0.2;
+  transform: scale(0.7);
+  animation-name: beui-dot-matrix-wave;
+  animation-timing-function: cubic-bezier(0.77, 0, 0.175, 1);
+  animation-iteration-count: infinite;
+}
+
+@keyframes beui-dot-matrix-wave {
+  0%, 100% { opacity: 0.2; transform: scale(0.7); }
+  50% { opacity: 1; transform: scale(1); }
+}

@@ -1,0 +1,130 @@
+{
+  "schema": "bgs.verification.record.v1",
+  "date": "2026-10-11",
+  "specVersion": "1.32",
+  "scope": "autonomous-goal-optional-professional-tools",
+  "paidModelCalls": 0,
+  "productionDeployed": false,
+  "regressions": {
+    "passed": 129,
+    "failed": 0,
+    "skipped": 2,
+    "files": 19,
+    "seconds": 15.05,
+    "typescriptExitCode": 0,
+    "skippedReason": "BGS_DESIGN_BROWSER=1 not set for two legacy design-browser-inspection tests",
+    "fullV3Rerun": false
+  },
+  "nativeDebug": {
+    "realCli": true,
+    "independentBrowser": true,
+    "controlledLoopbackProvider": true,
+    "localStore": true,
+    "requests": 12,
+    "goalPromptChars": 870,
+    "toolContextChars": 1311,
+    "reportedSyntheticUsage": {
+      "prompt_tokens": 120,
+      "completion_tokens": 60,
+      "total_tokens": 180
+    },
+    "usageIsRealCostEvidence": false,
+    "professionalExecutions": [
+      "authenticated-library-catalog",
+      "pure-format-coordinates-without-materialization",
+      "actual-UI-draft-layout"
+    ],
+    "nativeControls": [
+      "TodoWrite",
+      "Skill",
+      "Question-and-answer",
+      "failed-rule-check",
+      "Read",
+      "Edit",
+      "rule-retest",
+      "duplicate-intake-no-rerun",
+      "pause-resume-no-dispatch"
+    ],
+    "hostTasksCreated": 0,
+    "automaticSuccessorCalls": 0,
+    "deliveryEligible": false
+  },
+  "failuresBeforeFinal": {
+    "incorrectTestAssumptions": [
+      "prompt now uses text blocks",
+      "asset CLI errors are stderr text",
+      "layout scope is layout-draft-inspection"
+    ],
+    "typecheck": "Synthetic resource runtime config was missing required serviceToken; corrected fake config, token absence asserted in actual native requests",
+    "bundle": "64 Zod locales due to new imports; named imports fixed both namespace consumers, final bundle regression retains English only"
+  },
+  "boundaryChecks": [
+    "refreshable-user-token-not-service-token",
+    "native-requests-exclude-host-service-token",
+    "read-only-library-whitelist",
+    "bridge-revoked-on-pause-and-terminal",
+    "no-symlink-parent-escape",
+    "existing-format-preserved",
+    "corrupt-format-not-hidden",
+    "pure-format-no-project-versions",
+    "missing-authority-fails"
+  ],
+  "protectedBefore": [
+    {
+      "dir": "src",
+      "files": 2445,
+      "sha256": "1dc71528428a756b7da7d3b61a3925d9c9643048567eacfefd9f0c9b4764c17e"
+    },
+    {
+      "dir": "packages/builtin-tools",
+      "files": 383,
+      "sha256": "9fcb6a813747ba4e0afffdcf76bbc8a2f49982e7041de8f21a6a09d237b25203"
+    },
+    {
+      "dir": "apps/frontend",
+      "files": 508,
+      "sha256": "bd449eef76746e7b09f79b8f4623482549b43843a1ea25b1aa11e2602cfceba8"
+    }
+  ],
+  "protectedAfter": [
+    {
+      "dir": "src",
+      "files": 2445,
+      "sha256": "1dc71528428a756b7da7d3b61a3925d9c9643048567eacfefd9f0c9b4764c17e"
+    },
+    {
+      "dir": "packages/builtin-tools",
+      "files": 383,
+      "sha256": "9fcb6a813747ba4e0afffdcf76bbc8a2f49982e7041de8f21a6a09d237b25203"
+    },
+    {
+      "dir": "apps/frontend",
+      "files": 508,
+      "sha256": "bd449eef76746e7b09f79b8f4623482549b43843a1ea25b1aa11e2602cfceba8"
+    }
+  ],
+  "changes": [
+    "packages/agent-workflow-server/src/app.ts (resource base URL wiring only this turn)",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+    "packages/agent-workflow-server/src/beegame/project-asset-command.ts",
+    "packages/agent-workflow-server/src/beegame/project-asset-cli.mjs",
+    "packages/agent-workflow-server/src/beegame/scene-ui-content-authoring.ts",
+    "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+    "packages/agent-workflow-server/src/beegame/asset-manifest-authoring-contract.ts",
+    "packages/agent-workflow-server/src/beegame/resource-production.ts",
+    "packages/agent-workflow-server/src/beegame/content-runtime-contract.ts"
+  ],
+  "unverified": [
+    "real-model-planning-quality-and-cost",
+    "complete-Content-authority-and-binding",
+    "paid-image-bridge",
+    "real-resource-service-response",
+    "remote-new-goal-concurrency",
+    "same-project-follow-up-and-interrupted-continuation",
+    "actual-game-delivery-and-engine-runtime"
+  ],
+  "auditFile": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration/docs/verification/bgs-v3-agent-tools-audit-2026-10-11.md",
+  "previousSpecArchive": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/verification/BGS_V3_Agent_Driven_Workflow_Implementation_v1.31_before_optional_tools_2026-10-11.md"
+}

@@ -14,6 +14,7 @@ import type {
   BeeGameUsageBillingRecordResult,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { createTLSAwareFetch } from '@bee-game-studio/security-core'
+import type { ImageBillingInput, ImageBillingReceipt } from '@bee-game-studio/beegame-billing-core/image-billing'
 
 type JsonObject = Record<string, unknown>
 
@@ -32,6 +33,7 @@ type SupabaseUsageWalletRow = {
   user_id: string
   included_credits_micro: number
   consumed_credits_micro: number
+  reserved_credits_micro?: number
   updated_at: string
 }
 
@@ -41,15 +43,46 @@ export type BeeGameUsageWallet = {
   userId: string
   includedCreditsMicro: number
   consumedCreditsMicro: number
+  reservedCreditsMicro?: number
   balanceCreditsMicro: number
 }
 
+export type BeeGameUsageSummary = {
+  eventsCount: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  totalTokens: number
+  weightedTokens: number
+  creditsMicro: number
+}
+
+export type BeeGameUsageEventsPage = {
+  items: BeeGameUsageBillingEvent[]
+  total: number | null
+}
+
+export const DEFAULT_USAGE_EVENTS_PAGE_SIZE = 100
+export const MAX_USAGE_EVENTS_PAGE_SIZE = 200
+
 export interface BeeGameBillingServerRepository
   extends BeeGameBillingRouteRepository {
-  listUsageEventsForUser(
+  listUsageEventsPageForUser(
     userId: string,
     projectId?: string,
-  ): Promise<BeeGameUsageBillingEvent[]>
+    from?: Date,
+    to?: Date,
+    offset?: number,
+    limit?: number,
+  ): Promise<BeeGameUsageEventsPage>
+  /** Server-side aggregation avoids reading the complete usage ledger. */
+  getUsageSummaryForUser(
+    userId: string,
+    projectId?: string,
+    from?: Date,
+    to?: Date,
+  ): Promise<BeeGameUsageSummary>
   getUsageWalletForUser(userId: string): Promise<BeeGameUsageWallet>
 }
 
@@ -114,8 +147,20 @@ type SupabaseUsageBillingResult = {
   credits_micro: number
 }
 
+type SupabaseUsageSummaryRow = {
+  events_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  total_tokens: number
+  weighted_tokens: number
+  credits_micro: number
+}
+
 export function createBeeGameSupabaseBillingRepositoryFromEnv(
   env: NodeJS.ProcessEnv = process.env,
+  fetchImpl: BillingFetch = createTLSAwareFetch(),
 ): BeeGameBillingServerRepository {
   const url = trimString(
     env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL ?? env.VITE_SUPABASE_URL,
@@ -124,7 +169,7 @@ export function createBeeGameSupabaseBillingRepositoryFromEnv(
     env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY,
   )
   if (!url || !serviceRoleKey) return new MissingSupabaseBillingRepository()
-  return new SupabaseBillingRepository({ url, serviceRoleKey, fetchImpl: createTLSAwareFetch() })
+  return new SupabaseBillingRepository({ url, serviceRoleKey, fetchImpl })
 }
 
 class SupabaseBillingRepository implements BeeGameBillingServerRepository {
@@ -136,6 +181,33 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
     this.baseUrl = removeTrailingSlashes(config.url)
     this.serviceRoleKey = config.serviceRoleKey
     this.fetchImpl = config.fetchImpl ?? fetch
+  }
+
+  async applyImageBilling(userId: string, input: ImageBillingInput): Promise<ImageBillingReceipt> {
+    return this.rpc<ImageBillingReceipt>('beegame_image_billing', {
+      p_user_id: userId, p_project_id: input.projectId, p_request_id: input.requestId,
+      p_digest: input.digest, p_action: input.action, p_amount: input.amountCreditsMicro,
+      p_budget: input.projectBudgetCreditsMicro, p_metadata: input.metadata ?? {},
+    })
+  }
+
+  async readImageGenerationSettings(): Promise<import('@bee-game-studio/beegame-billing-core/image-billing').ImageConfigRead> {
+    const source = 'supabase-platform' as const
+    const databaseHost = new URL(this.baseUrl).host
+    let response: Response
+    try {
+      response = await this.fetchImpl(this.baseUrl + '/rest/v1/beegame_image_generation_settings?id=eq.platform&select=config&limit=1', {
+        headers: { apikey: this.serviceRoleKey, authorization: 'Bearer ' + this.serviceRoleKey },
+        redirect: 'error',
+      })
+    } catch { return { source, databaseHost, code: 'database-network' } }
+    const facts = { source, databaseHost, httpStatus: response.status }
+    if (!response.ok) return { ...facts, code: 'database-http' }
+    let rows: unknown
+    try { rows = await response.json() } catch { return { ...facts, code: 'database-response' } }
+    if (!Array.isArray(rows)) return { ...facts, code: 'database-response' }
+    if (!rows.length || !rows[0]?.config) return { ...facts, rowExists: rows.length > 0, code: 'platform-row-missing' }
+    return { ...facts, rowExists: true, config: rows[0].config }
   }
 
   async recordUsageForUser(
@@ -180,22 +252,59 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
     return toUsageBillingRecordResult(result)
   }
 
-  async listUsageEventsForUser(
+  async listUsageEventsPageForUser(
     userId: string,
     projectId?: string,
-  ): Promise<BeeGameUsageBillingEvent[]> {
-    const projectFilter = projectId
-      ? `&project_id=eq.${encodeURIComponent(projectId)}`
-      : ''
-    const rows = await this.rest<SupabaseUsageBillingEventRow[]>(
-      `/rest/v1/beegame_usage_events?user_id=eq.${encodeURIComponent(userId)}${projectFilter}&select=*&order=created_at.asc,id.asc`,
+    from?: Date,
+    to?: Date,
+    offset = 0,
+    limit = DEFAULT_USAGE_EVENTS_PAGE_SIZE,
+  ): Promise<BeeGameUsageEventsPage> {
+    const boundedOffset = normalizeUsageEventsOffset(offset)
+    const boundedLimit = normalizeUsageEventsLimit(limit)
+    const filters = [
+      `user_id=eq.${encodeURIComponent(userId)}`,
+      ...(projectId ? [`project_id=eq.${encodeURIComponent(projectId)}`] : []),
+      ...(from ? [`created_at=gte.${encodeURIComponent(from.toISOString())}`] : []),
+      ...(to ? [`created_at=lte.${encodeURIComponent(to.toISOString())}`] : []),
+    ].join('&')
+    const response = await this.restResponse(
+      `/rest/v1/beegame_usage_events?${filters}&select=*&order=created_at.asc,id.asc&offset=${boundedOffset}&limit=${boundedLimit}`,
+      { headers: { Prefer: 'count=exact' } },
     )
-    return rows.map(toUsageBillingEvent)
+    const rows = await response.json() as SupabaseUsageBillingEventRow[]
+    const totalText = response.headers.get('content-range')?.split('/')[1]
+    const total = totalText && /^\d+$/.test(totalText) ? Number(totalText) : null
+    return { items: rows.map(toUsageBillingEvent), total }
+  }
+
+  async getUsageSummaryForUser(
+    userId: string,
+    projectId?: string,
+    from?: Date,
+    to?: Date,
+  ): Promise<BeeGameUsageSummary> {
+    const row = await this.rpc<SupabaseUsageSummaryRow>('beegame_usage_summary', {
+      p_user_id: userId,
+      p_project_id: projectId ?? null,
+      p_from: from?.toISOString() ?? null,
+      p_to: to?.toISOString() ?? null,
+    })
+    return {
+      eventsCount: normalizeNonNegativeInteger(row.events_count),
+      promptTokens: normalizeNonNegativeInteger(row.prompt_tokens),
+      completionTokens: normalizeNonNegativeInteger(row.completion_tokens),
+      cacheReadTokens: normalizeNonNegativeInteger(row.cache_read_tokens),
+      cacheCreationTokens: normalizeNonNegativeInteger(row.cache_creation_tokens),
+      totalTokens: normalizeNonNegativeInteger(row.total_tokens),
+      weightedTokens: normalizeNonNegativeInteger(row.weighted_tokens),
+      creditsMicro: normalizeNonNegativeInteger(row.credits_micro),
+    }
   }
 
   async getUsageWalletForUser(userId: string): Promise<BeeGameUsageWallet> {
     const rows = await this.rest<SupabaseUsageWalletRow[]>(
-      `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(userId)}&select=user_id,included_credits_micro,consumed_credits_micro,updated_at&limit=1`,
+      `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`,
     )
     const row = rows[0] ?? {
       user_id: userId,
@@ -214,8 +323,9 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
       balanceCreditsMicro: Math.max(
         0,
         normalizeNonNegativeInteger(row.included_credits_micro) -
-          normalizeNonNegativeInteger(row.consumed_credits_micro),
+          normalizeNonNegativeInteger(row.consumed_credits_micro) - normalizeNonNegativeInteger(row.reserved_credits_micro ?? 0),
       ),
+      reservedCreditsMicro: normalizeNonNegativeInteger(row.reserved_credits_micro ?? 0),
     }
   }
 
@@ -302,26 +412,12 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
     targetUserId: string,
     input: BeeGameManualCreditGrantInput,
   ): Promise<BeeGameCreditGrant> {
-    const rows = await this.rest<SupabaseUsageWalletRow[]>(
-      `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(targetUserId)}&select=*&limit=1`,
-    )
-    const current = rows[0] ?? {
-      user_id: targetUserId,
-      included_credits_micro: 300_000_000,
-      consumed_credits_micro: 0,
-      updated_at: new Date().toISOString(),
-    }
     const grantedCredits = normalizePositiveInteger(input.credits)
-    const updated = await this.upsert<SupabaseUsageWalletRow>(
-      'beegame_usage_wallets',
-      {
-        user_id: targetUserId,
-        included_credits_micro: current.included_credits_micro + grantedCredits * 1_000_000,
-        consumed_credits_micro: current.consumed_credits_micro,
-        updated_at: new Date().toISOString(),
-      },
-      'user_id',
-    )
+    const amountMicro = grantedCredits * 1_000_000
+    if (!Number.isSafeInteger(amountMicro)) throw new Error('Credit grant amount is out of range')
+    const updated = await this.rpc<SupabaseUsageWalletRow>('beegame_increment_credit_wallet', {
+      p_user_id: targetUserId, p_amount: amountMicro,
+    })
     return {
       grantedCredits,
       balance: toCreditBalance(updated),
@@ -370,7 +466,7 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
     return rows[0]
   }
 
-  private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  private async restResponse(path: string, init: RequestInit = {}): Promise<Response> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -386,15 +482,34 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
         `Supabase request failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
       )
     }
+    return response
+  }
+
+  private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await this.restResponse(path, init)
     if (response.status === 204) return undefined as T
     return (await response.json()) as T
   }
 }
 
+function normalizeUsageEventsOffset(value: number): number {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0
+}
+
+function normalizeUsageEventsLimit(value: number): number {
+  return Number.isSafeInteger(value) && value > 0
+    ? Math.min(value, MAX_USAGE_EVENTS_PAGE_SIZE)
+    : DEFAULT_USAGE_EVENTS_PAGE_SIZE
+}
+
 class MissingSupabaseBillingRepository
   implements BeeGameBillingServerRepository
 {
-  listUsageEventsForUser(): Promise<BeeGameUsageBillingEvent[]> {
+  listUsageEventsPageForUser(): Promise<BeeGameUsageEventsPage> {
+    return Promise.reject(missingSupabaseError())
+  }
+
+  getUsageSummaryForUser(): Promise<BeeGameUsageSummary> {
     return Promise.reject(missingSupabaseError())
   }
 
@@ -434,7 +549,6 @@ class MissingSupabaseBillingRepository
   }
 }
 
-const DEFAULT_FREE_CREDITS = 300
 const CREDIT_UNIT_WEIGHTED_TOKENS = 10_000
 
 function toCreditBalance(row: SupabaseUsageWalletRow): BeeGameCreditBalance {
@@ -445,7 +559,7 @@ function toCreditBalance(row: SupabaseUsageWalletRow): BeeGameCreditBalance {
     plan: 'free',
     balanceCredits: Math.max(
       0,
-      includedCredits - consumedCredits,
+      includedCredits - consumedCredits - normalizeNonNegativeInteger(row.reserved_credits_micro ?? 0) / 1_000_000,
     ),
     includedCredits,
     consumedCredits,
@@ -632,10 +746,6 @@ function missingSupabaseError(): Error {
   return new Error(
     'BEEGAME_SUPABASE_URL and BEEGAME_SUPABASE_SERVICE_ROLE_KEY are required for BeeGame billing server',
   )
-}
-
-function q(value: string): string {
-  return encodeURIComponent(value)
 }
 
 function removeTrailingSlashes(value: string): string {

@@ -1,0 +1,229 @@
+{
+  "date": "2026-10-15",
+  "outcome": "Completed all four authorized requests without model retries or tool execution. Neither arm passes the predeclared correctness gate; no accepted winner or deployment switch.",
+  "scope": {
+    "A": "Unchanged repaired GitHub candidate from pinned third-party commit 34b3dc99bf40c57c0b78f3b5b1d70471ebc2d06d (not official Anthropic source or verified latest main)",
+    "B": "Current local including receipt selection fix, SHA256 7b53eea5dcb5a56d57f5a9f1ec06c01b0b702d2ecc3c94ddfe8aeab46c04c47c",
+    "model": "ark-code-latest",
+    "summaryRequests": 2,
+    "handoffRequests": 2,
+    "temperature": 0,
+    "thinking": "disabled",
+    "question": "Same five handoff questions as the previous comparison",
+    "source": "Same original prefix through physical line 327; later original summary and future events excluded"
+  },
+  "protocolFile": "evaluation-protocol.json",
+  "metrics": {
+    "arms": {
+      "A": {
+        "summaryUsage": {
+          "input_tokens": 106137,
+          "output_tokens": 6991,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0
+        },
+        "handoffUsage": {
+          "input_tokens": 6074,
+          "output_tokens": 1585,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 2872
+        },
+        "fullSummaryInput": 106137,
+        "fullHandoffInput": 8946,
+        "total": {
+          "input_tokens": 112211,
+          "output_tokens": 8576,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 2872
+        },
+        "unweightedTokenTotal": 123659,
+        "modelElapsedSumMs": 189684,
+        "formattedSummaryCharacters": 18519,
+        "stopReasons": [
+          "end_turn",
+          "end_turn"
+        ]
+      },
+      "B": {
+        "summaryUsage": {
+          "input_tokens": 0,
+          "output_tokens": 3784,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 105138
+        },
+        "handoffUsage": {
+          "input_tokens": 13708,
+          "output_tokens": 1980,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 2872
+        },
+        "fullSummaryInput": 105138,
+        "fullHandoffInput": 16580,
+        "total": {
+          "input_tokens": 13708,
+          "output_tokens": 5764,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 108010
+        },
+        "unweightedTokenTotal": 127482,
+        "modelElapsedSumMs": 147326,
+        "formattedSummaryCharacters": 9058,
+        "stopReasons": [
+          "end_turn",
+          "end_turn"
+        ]
+      }
+    },
+    "requestCount": 4,
+    "toolExecutions": 0,
+    "sourceHashUnchanged": true,
+    "failures": []
+  },
+  "findings": {
+    "A": {
+      "summary": [
+        {
+          "criterion": "user-attribution",
+          "status": "fail",
+          "quote": "Confirmed scope: 1 cat, 3 fish types (小黄鱼+10, 蓝大鱼+20, 金鱼+50)",
+          "reason": "Specific point values and slowdown durations are implementation decisions, not confirmed user choices; final handoff does distinguish them correctly."
+        },
+        {
+          "criterion": "unknown-outcomes",
+          "status": "unsupported-claim",
+          "quote": "remains \"unknown\" (not delivered, not proven billed)",
+          "reason": "Unresolved generation-or-billing receipts do not establish a definitive upstream delivery outcome. No confirmed delivery would be the supported formulation."
+        },
+        {
+          "criterion": "retry-authorization",
+          "status": "misleading-framing",
+          "quote": "Fix/action: resubmitted as NEW requestId kittyfish-bg-v2",
+          "reason": "The action occurred in original history but labeling it a fix is misleading alongside the original no-change-ID retry restriction. Other summary text explicitly retains that restriction; do not claim the final handoff authorizes a retry."
+        },
+        {
+          "criterion": "stale-validation",
+          "status": "fail",
+          "quote": "content/index.json (FINAL, valid)",
+          "reason": "Source line 317 edits the scene after the latest current check at line 307; later success for these updated inputs is absent."
+        }
+      ],
+      "handoff": [
+        {
+          "criterion": "user-attribution",
+          "status": "pass",
+          "evidence": "Explicitly labels +10/+20/+50 and other implementation numbers as non-user-specified."
+        },
+        {
+          "criterion": "unknown-outcomes",
+          "status": "partial-fail",
+          "evidence": "Retains both exact unknown request IDs, uncertainty about billing, and no-ID-change restriction; still uses categorical 未交付 rather than no confirmed delivery."
+        },
+        {
+          "criterion": "stale-orientation",
+          "status": "pass",
+          "evidence": "Does not reintroduce orientation repairs."
+        },
+        {
+          "criterion": "stale-validation",
+          "status": "fail",
+          "quote": "内容文档若后续随布局改动需重算 documentRevision 并复验",
+          "reason": "Makes revalidation conditional on future changes, missing the already recorded scene modification."
+        },
+        {
+          "criterion": "handoff",
+          "status": "pass",
+          "evidence": "Exact helper paths, saved engine and pending React/build/runtime tasks retained; explicitly notes no fresh tool-existence check."
+        }
+      ],
+      "verdict": "Not accepted."
+    },
+    "B": {
+      "summary": [
+        {
+          "criterion": "unknown-outcomes",
+          "status": "fail",
+          "quote": "Failed requestIds kittyfish-bg-v1 ... and kittyfish-sprites-v1 ... no delivery ... were abandoned in favor of v2",
+          "reason": "Unknown business outcome is not established failure or definitive no-delivery."
+        },
+        {
+          "criterion": "stale-validation",
+          "status": "fail",
+          "quote": "Content (all pass check-content --current, --design-layouts, --scene-layouts 1280×720)",
+          "reason": "No recognition of later scene edit invalidating applicability of last current check."
+        },
+        {
+          "criterion": "user-attribution",
+          "status": "ambiguous",
+          "reason": "Current-work section combines original brief and implementation values without explicit separation; final handoff separates them."
+        }
+      ],
+      "handoff": [
+        {
+          "criterion": "user-attribution",
+          "status": "pass",
+          "evidence": "Separates specified goal and implementation scores/slow durations."
+        },
+        {
+          "criterion": "unknown-outcomes",
+          "status": "fail",
+          "quote": "两个失败的 AI 图片请求，结果永久未知",
+          "reason": "Neither definitive failure nor permanent unknowability is established by the original unknown receipts. It also correctly states billing and final upstream generation cannot be confirmed, leaving a contradiction rather than curing the claim."
+        },
+        {
+          "criterion": "retry-authorization",
+          "status": "pass-with-overrestriction",
+          "evidence": "Does not permit changing requestId merely to retry. Its permanent prohibition/unknown framing goes beyond the supported unresolved status."
+        },
+        {
+          "criterion": "stale-orientation",
+          "status": "pass",
+          "evidence": "No longer claims the repaired orientation is outstanding, unlike the prior B handoff."
+        },
+        {
+          "criterion": "stale-validation",
+          "status": "fail",
+          "quote": "内容包全部通过校验 ... 最终 check-content --current 为 valid:True",
+          "reason": "Treats historical success as final current-state evidence, despite later scene edit; next steps omit the already needed content revision refresh."
+        },
+        {
+          "criterion": "handoff",
+          "status": "pass-core",
+          "evidence": "Exact helper paths and saved-engine/pending React/build/runtime checkpoint retained."
+        }
+      ],
+      "verdict": "Not accepted; observed orientation improvement does not establish overall superiority."
+    }
+  },
+  "costInterpretation": {
+    "handoffInputDifference": 7634,
+    "handoffInputReductionForA": "46.04% relative to B for this handoff only",
+    "unweightedTotalDifference": 3823,
+    "unweightedTotalReductionForA": "3.00% relative to B; not monetary savings",
+    "cacheConfounder": "A has 112211 ordinary input tokens and 2872 cache-read tokens; B has 13708 ordinary input and 108010 cache-read tokens. Output also differs (8576 vs 5764). Do not rank currency cost using the unweighted sum.",
+    "attribution": "Different fresh summaries and model nondeterminism are confounders; the change versus prior B is not attributable entirely to the receipt repair."
+  },
+  "verification": {
+    "preflightBeforeRequests": "Passed",
+    "preflightAfterRequests": "Passed; relevant local and A source fingerprints unchanged",
+    "originalLogHashUnchanged": true,
+    "allResponsesEndTurn": true,
+    "paidModelRequests": 4,
+    "modelRetries": 0,
+    "toolExecutions": 0,
+    "configurationReadAttempt": "Initial sandbox connection failed before any model request or run output creation; approved network execution then completed the four-call run."
+  },
+  "conclusion": {
+    "localizedResult": "The known orientation handoff mistake did not recur with the revised retained evidence.",
+    "selection": "Neither scheme meets the defined acceptance gate. A has a smaller handoff context and avoids B's invented permanent-unknown claim in this sample, but also fails freshness and contains unsupported summary claims; this is not an accepted cost winner.",
+    "operational": "Do not deploy or switch based on this run. Stop the experiment here; no automatic fifth request, prompt patch, threshold change or repeated model search.",
+    "boundary": "The observed evidence-retention fix cannot guarantee faithful generated summaries or reconcile validation with subsequent edits. Merely preserving more records is not a complete correctness solution."
+  },
+  "limitations": [
+    "One fixture and one fresh paired run, not a statistical or general quality ranking.",
+    "API projection strips historical thinking and substitutes image markers; not full native runtime compaction or visual evaluation.",
+    "No game build, browser execution or production session-resume test.",
+    "Provider alias does not pin an immutable underlying model.",
+    "No billing-rate evidence or actual monetary savings measurement."
+  ],
+  "changedThisTurn": "Only audit harness support for a separate non-overwriting retest output and comparison audit artifacts. No production compaction source changes, deployment, GitHub writes or kitty project edits."
+}

@@ -1,0 +1,408 @@
+import type { z } from 'zod/v4'
+import { string, number, array, strictObject, tuple, enum as enumeration, record, unknown, boolean, literal, discriminatedUnion } from 'zod/v4'
+import { UI_ANCHORS } from '../../../scene-editor/src/content-coordinates'
+import { parseGridData, parseTilemapData, parseTilemapRendererData } from '../../../scene-editor/src/tilemap-data'
+
+// Pure contract shared by authoring validation, editors and optional game consumers.
+export const BEEGAME_CONTENT_ROOT = 'content' as const
+export const BEEGAME_CONTENT_INDEX = 'content/index.json' as const
+export const BEEGAME_CONTENT_PACKAGE_SCHEMA =
+  'beegame-content-package.v2' as const
+export const BEEGAME_CONTENT_DOCUMENT_SCHEMA = 'beegame-content.v1' as const
+
+/**
+ * Canonical UI object roles accepted by the engine-neutral content contract.
+ *
+ * A role describes the node's authored purpose; it is not an asset kind. Keep
+ * this vocabulary closed so an author cannot silently invent a runtime type.
+ */
+export const BEEGAME_UI_NODE_ROLES = [
+  'screen-root',
+  'hud-root',
+  'flow-root',
+  'flow-screen',
+  'container',
+  'text',
+  'image',
+  'sprite',
+  'nineSlicePanel',
+  'button',
+  'slider',
+  'toggle',
+  'dropdown',
+  'tab',
+  'shape',
+  'keycap',
+  'toast',
+  'worldPrompt',
+  'capsuleSegment',
+  'emitter',
+] as const
+
+export type BeeGameUiNodeRole = (typeof BEEGAME_UI_NODE_ROLES)[number]
+
+export const BEEGAME_UI_ASSET_BACKED_ROLES = [
+  'image',
+  'sprite',
+  'nineSlicePanel',
+] as const satisfies readonly BeeGameUiNodeRole[]
+
+export const BEEGAME_SCENE_MODEL = 'game-object-v2' as const
+export const BEEGAME_SCENE_COMPONENT_TYPES = [
+  'sprite-renderer',
+  'mesh-filter',
+  'mesh-renderer',
+  'skinned-mesh-renderer',
+  'grid',
+  'tilemap',
+  'tilemap-renderer',
+  'animator',
+  'box-collider-2d',
+  'circle-collider-2d',
+  'capsule-collider-2d',
+  'polygon-collider-2d',
+  'rigidbody-2d',
+  'box-collider',
+  'sphere-collider',
+  'capsule-collider',
+  'mesh-collider',
+  'rigidbody',
+  'audio-source',
+  'audio-listener',
+  'particle-system',
+  'particle-system-renderer',
+  'light-2d',
+  'light',
+  'camera',
+  'canvas',
+  'canvas-renderer',
+  'rect-transform',
+  'image',
+  'text',
+] as const
+export const BEEGAME_SCENE_ASSET_COMPONENT_TYPES = [
+  'sprite-renderer',
+  'mesh-filter',
+  'mesh-renderer',
+  'skinned-mesh-renderer',
+  'tilemap',
+  'animator',
+  'audio-source',
+  'particle-system-renderer',
+  'image',
+] as const satisfies readonly (typeof BEEGAME_SCENE_COMPONENT_TYPES)[number][]
+
+// Resource locators, not arbitrary same-named fields deeper in gameplay data.
+export const CONTENT_RESOURCE_LOCATOR_KEYS = ['assetRef', 'member', 'atlasMember', 'frame'] as const
+export function withoutResourceLocators(value: Record<string, unknown> = {}, keys: readonly string[] = CONTENT_RESOURCE_LOCATOR_KEYS) {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)))
+}
+/** The same design-only input is consumed by numerical models and frozen-source
+ * checks. Models never receive fields excluded from their freshness identity. */
+export function sceneDesignSource(doc: Extract<BeeGameContentDocument, { kind: 'scene-2d' | 'scene-3d' }>) {
+  const types = new Set<string>(BEEGAME_SCENE_ASSET_COMPONENT_TYPES)
+  return { schema: doc.schema, id: doc.id, kind: doc.kind,
+    data: { ...doc.data, nodes: doc.data.nodes.map(node => ({ ...node,
+      components: node.components?.map(component => {
+        if (component.type === 'text') {
+          const data = { ...component.data }
+          const font = data.font
+          if (font && typeof font === 'object' && !Array.isArray(font)) {
+            const decision = withoutResourceLocators(font as Record<string, unknown>, ['assetRef', 'member'])
+            if (Object.keys(decision).length) data.font = decision
+            else delete data.font
+          }
+          return { ...component, data: Object.keys(data).length ? data : undefined }
+        }
+        if (!types.has(component.type)) return component
+        const { assetRef: _assetRef, ...decision } = component
+        const data = { ...withoutResourceLocators(component.data),
+          ...(component.data?.assetRef !== undefined ? { assetRef: component.data.assetRef } : {}) }
+        return { ...decision, data: Object.keys(data).length ? data : undefined }
+      }),
+    })) } }
+}
+export function uiDesignData(value: Record<string, unknown> = {}, scope: 'data' | 'style' = 'data', assetRole = false) {
+  const data = { ...value }
+  // These are the existing font/image/texture consumer locations. Keep all
+  // non-locator parameters (crop, tint, font treatment, etc.) protected.
+  for (const key of scope === 'data' ? ['font', 'image', 'texture'] : ['image', 'texture']) {
+    const ref = data[key]
+    if (ref && typeof ref === 'object' && !Array.isArray(ref)) {
+      const decision = withoutResourceLocators(ref as Record<string, unknown>, key === 'font' ? ['assetRef', 'member'] : CONTENT_RESOURCE_LOCATOR_KEYS)
+      if (Object.keys(decision).length) data[key] = decision
+      else delete data[key]
+    }
+  }
+  if (assetRole) for (const key of ['member', 'atlasMember', 'frame']) delete data[key]
+  return Object.keys(data).length ? data : undefined
+}
+
+const digestSchema = string().regex(/^[a-f0-9]{64}$/)
+const finiteNumber = number().finite()
+const identifier = string().trim().min(1).max(256)
+const uniqueIdentifiers = array(identifier)
+  .superRefine((values, context) => {
+    if (new Set(values).size !== values.length)
+      context.addIssue({ code: 'custom', message: 'values must be unique' })
+  })
+
+export const contentDocumentRegistryEntrySchema = strictObject({
+    id: identifier,
+    kind: enumeration(['scene-2d', 'scene-3d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx']),
+    path: identifier,
+    loadPhase: enumeration(['startup', 'on-demand']),
+  })
+
+export const contentIndexSchema = strictObject({
+    schema: literal(BEEGAME_CONTENT_PACKAGE_SCHEMA),
+    id: identifier,
+    dimension: enumeration(['2d', '3d']),
+    // Legacy snapshots may retain these tags. Current authoring and measurement
+    // identify the actual saved bytes; authors need not manufacture/copy hashes.
+    documentRevision: digestSchema.optional(),
+    assetManifestRevision: digestSchema.optional(),
+    entryScene: identifier,
+    files: uniqueIdentifiers.min(1),
+    /** Optional on existing v2 packages; new packages use this to avoid loading every document at startup. */
+    documents: array(contentDocumentRegistryEntrySchema).optional(),
+    sceneModel: literal(BEEGAME_SCENE_MODEL).default(BEEGAME_SCENE_MODEL),
+  })
+
+/** The existing entry ID can name a world or a standalone visual UI. A flow
+ * graph/VFX document is not itself a renderable entry. */
+export function isContentEntryKind(kind: string, dimension: '2d' | '3d') {
+  return kind === `scene-${dimension}` || kind === 'ui-screen' || kind === 'ui-hud'
+}
+
+const transformSchema = strictObject({
+    position: tuple([finiteNumber, finiteNumber, finiteNumber]),
+    rotation: tuple([finiteNumber, finiteNumber, finiteNumber]).optional(),
+    scale: tuple([finiteNumber, finiteNumber, finiteNumber]).optional(),
+  })
+
+const sceneComponentSchema = strictObject({
+    /** Stable identity: editor/runtime references must not depend on array order. */
+    id: identifier,
+    type: enumeration(BEEGAME_SCENE_COMPONENT_TYPES),
+    assetRef: identifier.optional(),
+    data: record(string(), unknown()).optional(),
+  }).superRefine((component, context) => {
+    try {
+      if (component.type === 'grid') parseGridData(component.data)
+      if (component.type === 'tilemap') parseTilemapData(component.data)
+      if (component.type === 'tilemap-renderer') parseTilemapRendererData(component.data)
+    } catch (error) { context.addIssue({ code: 'custom', path: ['data'], message: String(error) }) }
+  })
+
+const behaviorMetadataSchema = strictObject({
+    id: identifier,
+    /** Closed at the shape level, intentionally open at the behavior vocabulary level. */
+    kind: identifier,
+    config: record(string(), unknown()),
+  })
+
+const sceneNodeDataSchema = record(string(), unknown())
+  .superRefine((value, context) => {
+    if (value.behaviors === undefined) return
+    if (!Array.isArray(value.behaviors)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['behaviors'],
+        message: 'behaviors must be an array of authored behavior metadata.',
+      })
+      return
+    }
+    const ids = new Set<string>()
+    value.behaviors.forEach((behavior, index) => {
+      const parsed = behaviorMetadataSchema.safeParse(behavior)
+      if (!parsed.success) {
+        context.addIssue({
+          code: 'custom',
+          path: ['behaviors', index],
+          message: 'behavior entries require id, kind and config.',
+        })
+        return
+      }
+      if (ids.has(parsed.data.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['behaviors', index, 'id'],
+          message: `duplicate behavior id ${parsed.data.id}.`,
+        })
+      }
+      ids.add(parsed.data.id)
+    })
+  })
+
+const componentSceneNodeSchema = strictObject({
+    id: identifier,
+    parentId: identifier.optional(),
+    name: string().trim().min(1).max(512).optional(),
+    semantic: uniqueIdentifiers.optional(),
+    enabled: boolean().optional(),
+    transform: transformSchema.optional(),
+    layer: identifier.optional(),
+    zIndex: finiteNumber.optional(),
+    components: array(sceneComponentSchema).optional(),
+    data: sceneNodeDataSchema.optional(),
+  })
+
+const uiLayoutFieldsSchema = strictObject({
+    anchor: enumeration(Object.keys(UI_ANCHORS) as [keyof typeof UI_ANCHORS, ...(keyof typeof UI_ANCHORS)[]]).optional(),
+    anchorMin: tuple([finiteNumber.min(0).max(1), finiteNumber.min(0).max(1)]).optional(),
+    anchorMax: tuple([finiteNumber.min(0).max(1), finiteNumber.min(0).max(1)]).optional(),
+    sizeDelta: tuple([finiteNumber, finiteNumber]).optional(),
+    position: tuple([finiteNumber, finiteNumber]).optional(),
+    size: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
+    rotation: finiteNumber.optional(),
+    scale: tuple([finiteNumber, finiteNumber]).optional(),
+    minSize: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
+    maxSize: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
+    container: strictObject({
+      direction: enumeration(['row', 'column', 'grid']),
+      gap: finiteNumber.nonnegative().optional(),
+      padding: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative(), finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
+      wrap: boolean().optional(),
+      columns: finiteNumber.int().positive().optional(),
+      justify: enumeration(['start', 'center', 'end', 'space-between']).optional(),
+      align: enumeration(['start', 'center', 'end', 'stretch']).optional(),
+    }).refine(container => container.direction !== 'grid' || container.columns !== undefined,
+      { message: 'grid container requires columns' }).optional(),
+    item: strictObject({
+      grow: finiteNumber.nonnegative().optional(),
+      shrink: finiteNumber.nonnegative().optional(),
+      basis: finiteNumber.nonnegative().optional(),
+      absolute: boolean().optional(),
+    }).optional(),
+  })
+const uiLayoutSchema = uiLayoutFieldsSchema.refine(layout => Boolean(layout.anchorMin) === Boolean(layout.anchorMax), {
+    message: 'anchorMin and anchorMax must be provided together',
+  }).refine(layout => !layout.sizeDelta || Boolean(layout.anchorMin), {
+    message: 'sizeDelta requires anchorMin and anchorMax',
+  }).refine(layout => !layout.anchorMin || !layout.anchorMax ||
+    layout.anchorMin.every((value, index) => value <= layout.anchorMax![index]), {
+    message: 'anchorMin must not exceed anchorMax',
+  }).refine(layout => !layout.minSize || !layout.maxSize || layout.minSize.every((value, axis) => value <= layout.maxSize![axis]), {
+    message: 'minSize must not exceed maxSize',
+  })
+
+const uiResponsiveOverrideSchema = strictObject({
+    enabled: boolean().optional(),
+    layout: uiLayoutFieldsSchema.optional(),
+    style: record(string(), unknown()).optional(),
+  })
+
+// Layout owns these fields. Arbitrary task metadata must not silently turn a
+// misspelled/misplaced layout into a different composition. data.anchor is the
+// existing normalized pivot override, not layout.anchor's named attachment.
+const uiLayoutFieldNames = Object.keys(uiLayoutFieldsSchema.shape).filter(key => key !== 'anchor')
+const uiPivotOverrideSchema = strictObject({ x: finiteNumber.optional(), y: finiteNumber.optional() })
+const uiLayoutOcclusionSchema = enumeration(['protected', 'occluder'])
+const positivePair = tuple([finiteNumber.positive(), finiteNumber.positive()])
+const uiNodeDataSchema = strictObject({
+  referenceResolution: positivePair.optional(),
+  targetViewports: array(positivePair).min(1).optional(),
+  minimumControlSize: positivePair.optional(),
+  orientation: enumeration(['Landscape', 'Portrait']).optional(),
+  compactMaxWidth: finiteNumber.positive().optional(),
+}).catchall(unknown()).superRefine((data, context) => {
+  for (const key of uiLayoutFieldNames) {
+    if (Object.hasOwn(data, key)) context.addIssue({ code: 'custom', path: [key],
+      message: `UI layout field belongs in layout.${key}, not data.${key}; it would not be consumed there` })
+  }
+  if (data.anchor !== undefined && !uiPivotOverrideSchema.safeParse(data.anchor).success)
+    context.addIssue({ code: 'custom', path: ['anchor'], message: 'data.anchor must be a normalized pivot object with finite x/y; named anchors belong in layout.anchor' })
+  if (data.layoutOcclusion !== undefined && !uiLayoutOcclusionSchema.safeParse(data.layoutOcclusion).success)
+    context.addIssue({ code: 'custom', path: ['layoutOcclusion'], message: 'layoutOcclusion must be protected or occluder' })
+  if (data.layoutUnderlay !== undefined && !strictObject({ path: string().min(1),
+    clearance: enumeration(['preserve', 'allow-cover']) }).safeParse(data.layoutUnderlay).success)
+    context.addIssue({ code: 'custom', path: ['layoutUnderlay'], message: 'layoutUnderlay requires path and explicit clearance: preserve or allow-cover' })
+})
+
+const uiNodeSchema = strictObject({
+    id: identifier,
+    parentId: identifier.optional(),
+    role: enumeration(BEEGAME_UI_NODE_ROLES),
+    enabled: boolean().optional(),
+    name: string().trim().min(1).max(512).optional(),
+    text: string().optional(),
+    assetRef: identifier.optional(),
+    layout: uiLayoutSchema.optional(),
+    responsive: strictObject({
+      compact: uiResponsiveOverrideSchema.optional(),
+      portrait: uiResponsiveOverrideSchema.optional(),
+    }).optional(),
+    bindings: record(string(), string()).optional(),
+    actions: record(string(), identifier).optional(),
+    style: record(string(), unknown()).optional(),
+    data: uiNodeDataSchema.optional(),
+  })
+
+const vfxNodeSchema = strictObject({
+    id: identifier,
+    parentId: identifier.optional(),
+    name: string().trim().min(1).max(512).optional(),
+    type: identifier,
+    assetRef: identifier.optional(),
+    data: record(string(), unknown()).optional(),
+  })
+
+const contentHeader = {
+  schema: literal(BEEGAME_CONTENT_DOCUMENT_SCHEMA),
+  id: identifier,
+  assetRefs: uniqueIdentifiers,
+} as const
+
+const sceneDocumentBaseSchema = strictObject({
+    ...contentHeader,
+    kind: string(),
+    data: strictObject({
+        nodes: array(componentSceneNodeSchema).min(1),
+        cameraNodeId: identifier.optional(),
+        settings: record(string(), unknown()).optional(),
+      }),
+  })
+const scene2dDocumentSchema = sceneDocumentBaseSchema.extend({ kind: literal('scene-2d') })
+const scene3dDocumentSchema = sceneDocumentBaseSchema.extend({ kind: literal('scene-3d') })
+
+const uiDocumentSchema = strictObject({
+    ...contentHeader,
+    kind: enumeration(['ui-screen', 'ui-hud', 'ui-flow']),
+    data: strictObject({
+        rootId: identifier,
+        nodes: array(uiNodeSchema).min(1),
+      }),
+  })
+
+const vfxDocumentSchema = strictObject({
+    ...contentHeader,
+    kind: literal('vfx'),
+    data: strictObject({
+        nodes: array(vfxNodeSchema).min(1),
+      }),
+  })
+
+export const contentDocumentSchema = discriminatedUnion('kind', [
+  scene2dDocumentSchema,
+  scene3dDocumentSchema,
+  uiDocumentSchema,
+  vfxDocumentSchema,
+])
+
+export type BeeGameContentIndex = z.infer<typeof contentIndexSchema>
+export type BeeGameContentDocument = z.infer<typeof contentDocumentSchema>
+export type BeeGameSceneContentDocument = Extract<
+  BeeGameContentDocument,
+  { kind: 'scene-2d' | 'scene-3d' }
+>
+
+export function parseBeeGameContentIndex(value: unknown): BeeGameContentIndex {
+  return contentIndexSchema.parse(structuredClone(value))
+}
+
+export function parseBeeGameContentDocument(
+  value: unknown,
+): BeeGameContentDocument {
+  return contentDocumentSchema.parse(structuredClone(value))
+}

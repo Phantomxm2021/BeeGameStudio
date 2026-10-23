@@ -1,7 +1,4 @@
-import {
-  decryptSecret,
-  isSecretEnvelope,
-} from './security/secret-crypto'
+import { decryptSecret, isSecretEnvelope } from './security/secret-crypto'
 import {
   createTLSAwareFetch,
   type TLSAwareFetch,
@@ -11,6 +8,7 @@ type BeeGameFetch = TLSAwareFetch
 
 const MODEL_SECRET_ENV_KEYS = new Set([
   'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
   'GEMINI_API_KEY',
   'GROK_API_KEY',
@@ -123,9 +121,7 @@ export class SupabaseRuntimeEnvClient {
 
 export function createSupabaseRuntimeEnvClientFromEnv(
   fetchImpl: BeeGameFetch = createTLSAwareFetch(),
-):
-  | SupabaseRuntimeEnvClient
-  | undefined {
+): SupabaseRuntimeEnvClient | undefined {
   const client = new SupabaseRuntimeEnvClient({ fetchImpl })
   return client.isConfigured() ? client : undefined
 }
@@ -136,9 +132,10 @@ function normalizeRuntimeEnv(value: unknown): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, raw] of Object.entries(payload)) {
     if (typeof raw !== 'string') continue
-    env[key] = MODEL_SECRET_ENV_KEYS.has(key) && isSecretEnvelope(raw)
-      ? decryptSecret(raw, 'model-config:api-key')
-      : raw
+    env[key] =
+      MODEL_SECRET_ENV_KEYS.has(key) && isSecretEnvelope(raw)
+        ? decryptSecret(raw, 'model-config:api-key')
+        : raw
   }
   return env
 }

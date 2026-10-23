@@ -11,10 +11,13 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Hono } from 'hono'
 import {
+  BeeGameAuthUnavailableError,
   getBearerToken,
   type BeeGameUserContext,
 } from './user-context'
 import { decryptSecret, encryptSecret } from '../security/secret-crypto'
+import { safeErrorFacts } from '../security/safe-error-facts'
+import { authRequestTimeoutMs } from '@bee-game-studio/security-core'
 
 export const SESSION_COOKIE_NAME = 'beegame_session'
 const SESSION_RECORD_TYPE = 'auth:session'
@@ -52,6 +55,7 @@ export type BeeGameSessionRouteOptions = {
   supabaseAnonKey?: string
   fetchImpl?: SessionFetch
   sessionStorePath?: string
+  refreshTimeoutMs?: number
   isOriginAllowed?: (origin: string) => boolean
 }
 
@@ -108,6 +112,7 @@ export function registerBeeGameSessionRoutes(
   const fetchImpl = options.fetchImpl ?? fetch
   const sessionStorePath = resolveSessionStorePath(options.sessionStorePath)
   const pendingRefreshes = new Map<string, Promise<SessionRefreshOutcome>>()
+  const refreshFailures = new Map<string, { attempts: number; retryAt: number }>()
 
   const getRecordById = (
     id: string,
@@ -156,7 +161,21 @@ export function registerBeeGameSessionRoutes(
   ): Promise<SessionRefreshOutcome> => {
     const pending = pendingRefreshes.get(current.id)
     if (pending) return pending
+    if ((refreshFailures.get(current.id)?.retryAt ?? 0) > Date.now()) {
+      return Promise.resolve({ status: 'unavailable' })
+    }
     const refresh = (async (): Promise<SessionRefreshOutcome> => {
+      const startedAt = Date.now()
+      // Shared by all callers of this session: one caller disconnecting must
+      // not cancel another caller's refresh. Bound the upstream operation itself.
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), authRequestTimeoutMs(options.refreshTimeoutMs))
+      const logFailure = (code: string, facts: ReturnType<typeof safeErrorFacts> = {}) => {
+        console.error('[BeeGame session refresh]', JSON.stringify({
+          timestamp: new Date().toISOString(), code,
+          elapsedMs: Math.max(0, Date.now() - startedAt), ...facts,
+        }))
+      }
       try {
         const response = await fetchImpl(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
           method: 'POST',
@@ -165,8 +184,11 @@ export function registerBeeGameSessionRoutes(
             'content-type': 'application/json',
           },
           body: JSON.stringify({ refresh_token: current.record.refreshToken }),
+          signal: controller.signal,
         })
         if (!response.ok) {
+          logFailure([400, 401, 403].includes(response.status)
+            ? 'refresh_rejected' : 'refresh_service_unavailable', { httpStatus: response.status })
           if ([400, 401, 403].includes(response.status)) {
             deleteRecord(sessionStorePath, current.id)
             return { status: 'invalid' }
@@ -176,8 +198,8 @@ export function registerBeeGameSessionRoutes(
         const value = await response.json() as Record<string, unknown>
         const accessToken = readString(value, 'access_token')
         if (!accessToken) {
-          deleteRecord(sessionStorePath, current.id)
-          return { status: 'invalid' }
+          logFailure('refresh_response_missing_token')
+          return { status: 'unavailable' }
         }
         const refreshToken = readString(value, 'refresh_token') ?? current.record.refreshToken
         const expiresIn = readNumber(value, 'expires_in') ?? 3600
@@ -189,10 +211,20 @@ export function registerBeeGameSessionRoutes(
         }
         saveRecord(record, current.id)
         return { status: 'ok', record }
-      } catch {
+      } catch (error) {
+        logFailure(controller.signal.aborted ? 'refresh_timeout' : 'refresh_request_failed', safeErrorFacts(error))
         return { status: 'unavailable' }
+      } finally {
+        clearTimeout(timer)
       }
-    })().finally(() => {
+    })().then(outcome => {
+      if (outcome.status === 'unavailable') {
+        const attempts = (refreshFailures.get(current.id)?.attempts ?? 0) + 1
+        if (refreshFailures.size >= 256) refreshFailures.delete(refreshFailures.keys().next().value!)
+        refreshFailures.set(current.id, { attempts, retryAt: Date.now() + Math.min(30_000, 2_000 * 2 ** Math.min(attempts - 1, 4)) })
+      } else refreshFailures.delete(current.id)
+      return outcome
+    }).finally(() => {
       pendingRefreshes.delete(current.id)
     })
     pendingRefreshes.set(current.id, refresh)
@@ -217,8 +249,13 @@ export function registerBeeGameSessionRoutes(
         apikey: supabaseAnonKey,
         authorization: `Bearer ${accessToken}`,
       },
+      signal: AbortSignal.timeout(authRequestTimeoutMs()),
+    }).catch(error => {
+      console.error('[BeeGame session verify]', safeErrorFacts(error))
+      throw new BeeGameAuthUnavailableError(undefined, 'network')
     })
-    if (!userResponse.ok) return c.json({ error: 'Invalid Supabase session' }, 401)
+    if (userResponse.status === 401 || userResponse.status === 403) return c.json({ error: 'Invalid Supabase session' }, 401)
+    if (!userResponse.ok) throw new BeeGameAuthUnavailableError(undefined, 'upstream', userResponse.status)
     const user = toSessionUser(await userResponse.json())
     if (!user) return c.json({ error: 'Invalid Supabase user' }, 401)
     const expiresIn = readNumber(body, 'expires_in') ?? 3600
@@ -244,13 +281,15 @@ export function registerBeeGameSessionRoutes(
     const csrfError = validateOrigin(c.req.raw, options.isOriginAllowed)
     if (csrfError) return csrfError
     const current = getRecord(c.req.raw)
-    if (!current || !supabaseUrl || !supabaseAnonKey) {
+    if (!current) {
       return c.json({ error: 'Session unavailable' }, 401)
     }
+    if (!supabaseUrl || !supabaseAnonKey) throw new BeeGameAuthUnavailableError()
     const outcome = await refreshRecord(current)
     if (outcome.status === 'invalid') return clearSessionResponse(401)
     if (outcome.status === 'unavailable') {
-      return c.json({ error: 'Session refresh temporarily unavailable' }, 503)
+      return c.json({ error: 'Session refresh temporarily unavailable', code: 'authentication_unavailable',
+        recoverable: true, retry_after_ms: 2000 }, 503, { 'Retry-After': '2' })
     }
     return c.json(sessionResponse(outcome.record))
   })
@@ -278,8 +317,9 @@ export function registerBeeGameSessionRoutes(
       if (accessTokenIsFresh(current.record)) {
         return current.record.accessToken
       }
-      if (!supabaseUrl || !supabaseAnonKey) return undefined
+      if (!supabaseUrl || !supabaseAnonKey) throw new BeeGameAuthUnavailableError()
       const outcome = await refreshRecord(current)
+      if (outcome.status === 'unavailable') throw new BeeGameAuthUnavailableError()
       return outcome.status === 'ok' ? outcome.record.accessToken : undefined
     },
     getCredential: request => {
@@ -292,8 +332,9 @@ export function registerBeeGameSessionRoutes(
           if (!options?.forceRefresh && accessTokenIsFresh(current.record)) {
             return current.record.accessToken
           }
-          if (!supabaseUrl || !supabaseAnonKey) return undefined
+          if (!supabaseUrl || !supabaseAnonKey) throw new BeeGameAuthUnavailableError()
           const outcome = await refreshRecord(current)
+          if (outcome.status === 'unavailable') throw new BeeGameAuthUnavailableError()
           return outcome.status === 'ok' ? outcome.record.accessToken : undefined
         },
       }

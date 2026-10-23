@@ -1,0 +1,90 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "overlay-compact-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": { "anchorMin": [0, 0], "anchorMax": [1, 1], "sizeDelta": [0, 0] }
+      },
+      {
+        "id": "dim",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "item": { "absolute": true }
+        },
+        "style": { "background": { "color": "#05040f", "opacity": 0.72 } }
+      },
+      {
+        "id": "card",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "center",
+          "position": [0, 0],
+          "size": [288, 236],
+          "container": { "direction": "column", "gap": 12, "padding": [20, 16, 20, 16], "justify": "start", "align": "center" }
+        },
+        "style": { "background": { "color": "#16132e", "radius": 16 }, "border": { "width": 1, "color": "#2c2756", "radius": 16 } }
+      },
+      {
+        "id": "card-title",
+        "parentId": "card",
+        "role": "text",
+        "enabled": true,
+        "text": "胜利！",
+        "layout": { "size": [256, 36] },
+        "style": { "fontSize": 28, "align": "center", "color": "#ffe08a" }
+      },
+      {
+        "id": "card-body",
+        "parentId": "card",
+        "role": "text",
+        "enabled": true,
+        "text": "最终分数 4000",
+        "layout": { "size": [256, 24] },
+        "style": { "fontSize": 16, "align": "center", "color": "#b9b6d9" }
+      },
+      {
+        "id": "action-primary",
+        "parentId": "card",
+        "role": "button",
+        "enabled": true,
+        "text": "再来一局",
+        "layout": { "size": [256, 48] },
+        "actions": { "onActivate": "RESTART" },
+        "style": { "fontSize": 17 }
+      },
+      {
+        "id": "action-secondary",
+        "parentId": "card",
+        "role": "button",
+        "enabled": true,
+        "text": "退出",
+        "layout": { "size": [256, 44] },
+        "actions": { "onActivate": "EXIT_TO_START" },
+        "style": { "fontSize": 16 }
+      },
+      {
+        "id": "mute-btn",
+        "parentId": "root",
+        "role": "button",
+        "enabled": true,
+        "text": "静音",
+        "layout": { "anchor": "bottom-right", "position": [-12, -12], "size": [64, 44], "item": { "absolute": true } },
+        "actions": { "onActivate": "TOGGLE_MUTE" }
+      }
+    ]
+  }
+}

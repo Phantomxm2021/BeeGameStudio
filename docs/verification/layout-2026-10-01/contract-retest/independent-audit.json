@@ -1,0 +1,109 @@
+{
+  "verdict": "Incomplete real test; BGS/native background handoff stalled, then normal cancellation. No combined Review or Asset Plan was produced.",
+  "sourceChangesDuringRun": [],
+  "runtimeVerified": false,
+  "fontMeasured": false,
+  "lifecycle": {
+    "parentForegroundReturn": "2026-10-01T11:42:36.771Z",
+    "autoBackgroundAfterSeconds": 120,
+    "childEndTurnAndCompletionEnqueue": "2026-10-01T12:10:58.625Z",
+    "resumedParentAfterCompletion": false,
+    "normalCancellation": true,
+    "currentTurnCompletedCount": 0,
+    "stateBeforeCancel": {
+      "phase": "author",
+      "authorBatch": 3
+    },
+    "stateAfterCancel": {
+      "phase": "author",
+      "authorBatch": 4
+    },
+    "interpretation": "Cancellation caused settlement to see the previous turn.completed via an unscoped findLast in project-conversation.ts. This state advancement is not a successful batch-4 completion.",
+    "rootCauseScope": "Observed native completion queue was not consumed while the BGS runner awaited parent completion. Precise CLI scheduling defect is not yet isolated."
+  },
+  "geometry": {
+    "hostCheck": {
+      "valid": true,
+      "issues": [],
+      "files": [
+        "content/ui/game-hud.json",
+        "content/ui/game-over-screen.json",
+        "content/ui/loading-error-screen.json",
+        "content/ui/loading-screen.json",
+        "content/ui/pause-screen.json",
+        "content/ui/rotate-screen.json",
+        "content/ui/start-screen.json",
+        "content/ui/volume-settings-screen.json",
+        "content/ui/win-screen.json"
+      ]
+    },
+    "declaredOcclusionRegionCount": 0,
+    "misplacedCanonicalLayoutFieldsRecurred": false,
+    "scope": "Nine current UI files parse and pass supported geometric checks. No protected/occluder declarations means the added occlusion check was not exercised.",
+    "hud": {
+      "viewport": [
+        960,
+        540
+      ],
+      "hudBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 52
+      },
+      "cameraPlaneBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 540
+      },
+      "sceneProposedWorldBand": [
+        0,
+        60
+      ],
+      "projectedBandBottom": 30,
+      "hudBottom": 52,
+      "comparison": "UI sections 5.3 and 16 call its fixed 52 host-pixel HUD inside the proposed 60 world-pixel band; at scale .5 the latter is only 30 host pixels. This is an incorrect unit comparison, not proof of ball/brick occlusion."
+    }
+  },
+  "numeric": {
+    "speed": 540,
+    "paddleSpeed": 1080,
+    "radius": 14,
+    "paddleHalfWidth": 110,
+    "paddleY": 960,
+    "paddleHeight": 28,
+    "brickBottom": 478,
+    "angleDeg": 5,
+    "reactionDelay": 0.25,
+    "actualBrickToPaddleCenterContactDistance": 440,
+    "actualTimeAt5Deg": 0.8179272750353201,
+    "documentUsedCorridorDistance": 402,
+    "documentClaimedMinimumDownwardTime": 0.74,
+    "counterexample": {
+      "atBrick": {
+        "ballX": 1716,
+        "ballY": 492,
+        "paddleX": 960
+      },
+      "ballAtPaddleX": 1754.4950119514065,
+      "minimumPaddleCenterForOverlap": 1630.4950119514065,
+      "maximumPaddleCenterAfterReaction": 1573.3614570381458,
+      "reachablePrecedingState": "A prior centered paddle bounce at x=1716-440*tan(5deg) sends the ball upward/right at 5deg. During its ~.818s upward trip the paddle can move left to x=960 before the right-bottom brick contact.",
+      "scope": "Refutes the stated universal interception proof under its .25s reaction assumption; does not establish global game unfairness or impossibility."
+    }
+  },
+  "authority": {
+    "gdd": "GDD line 115 still delegates to an unnamed interaction contract as well as UI/UX.",
+    "tech": "Technical draft lines 195/248 retain interaction-contract references. No such deliverable exists in the eight-document workflow.",
+    "status": "Draft authority-reference risk remains; final Tech batch and combined Review were not reached."
+  },
+  "notVerified": [
+    "Final Asset frame/core size mapping",
+    "Final Tech/Asset SFX production/loading consistency",
+    "Combined Review reconciliation",
+    "Resource production",
+    "Game runtime and fonts"
+  ],
+  "nextStep": "First repair native background completion/parent handoff and prevent stopped turns from advancing with another turn’s completion; use deterministic local regression evidence before authorizing another paid run. Then examine the missing geometric declaration handoff without case-specific numeric answers."
+}

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="840" viewBox="0 0 1200 840" role="img" aria-labelledby="title description">
+  <title id="title">Three purpose-driven screen composition comparisons</title>
+  <desc id="description">Original schematics: show a completed puzzle rather than cover it with statistics; preserve platform landing space rather than cover it with a central HUD; give a route map room rather than competing equal-weight cards. These are conditional examples, not game templates.</desc>
+  <defs>
+    <pattern id="board" width="24" height="24" patternUnits="userSpaceOnUse"><rect width="24" height="24" fill="#45596a"/><rect x="2" y="2" width="20" height="20" rx="3" fill="#839b93"/></pattern>
+    <style>
+      text{font-family:Arial,sans-serif;fill:#233342;font-size:17px}.heading{font-size:22px;font-weight:700}.label{font-size:16px;fill:#556473}.small{font-size:13px}.onDark{fill:#f4f1e8}.world{fill:#233342}.panel{fill:#eee9df;stroke:#abacaa;stroke-width:2}.cue{fill:#dab86e}.muted{fill:#718594}.route{fill:none;stroke:#dab86e;stroke-width:5;stroke-linejoin:round}
+    </style>
+  </defs>
+  <rect width="1200" height="840" fill="#faf8f3"/>
+  <text x="24" y="34" class="heading">Composition serves the player task</text>
+  <text x="24" y="59" class="label">Original schematics only — not final art, measured geometry or a universal layout</text>
+  <text x="30" y="90" class="label">Weak for the stated purpose</text>
+  <text x="620" y="90" class="label">A more deliberate arrangement</text>
+
+  <text x="24" y="123" class="heading">1. Puzzle completion: show what the player achieved</text>
+  <g transform="translate(24 138)">
+    <rect width="552" height="166" rx="8" class="world"/>
+    <rect x="143" y="10" width="264" height="146" fill="url(#board)"/>
+    <rect x="102" y="12" width="348" height="143" rx="8" class="panel"/>
+    <text x="218" y="40">RESULT</text>
+    <rect x="135" y="51" width="282" height="15" class="muted"/><rect x="135" y="76" width="282" height="15" class="muted"/>
+    <rect x="192" y="107" width="166" height="30" rx="5" class="cue"/><text x="247" y="128" class="small">NEXT</text>
+  </g>
+  <g transform="translate(620 138)">
+    <rect width="552" height="166" rx="8" class="world"/>
+    <rect x="26" y="14" width="264" height="138" fill="url(#board)" stroke="#dab86e" stroke-width="3"/>
+    <text x="337" y="45" class="onDark">COMPLETE</text><text x="322" y="73" class="small onDark">The board is the outcome</text>
+    <rect x="330" y="104" width="170" height="34" rx="5" class="cue"/><text x="389" y="127" class="small">NEXT</text>
+  </g>
+  <text x="30" y="325" class="small">The card obscures the visual achievement.</text>
+  <text x="626" y="325" class="small">Preserve board prominence; place the next action in quiet space.</text>
+
+  <text x="24" y="366" class="heading">2. Precision platformer: keep the landing space readable</text>
+  <g transform="translate(24 381)">
+    <rect width="552" height="166" rx="8" class="world"/>
+    <rect x="30" y="133" width="127" height="15" class="muted"/><rect x="310" y="97" width="140" height="15" class="muted"/>
+    <circle cx="143" cy="116" r="11" class="cue"/>
+    <path d="M143 105 Q244 15 347 85" fill="none" stroke="#dab86e" stroke-width="3" stroke-dasharray="7 5"/>
+    <rect x="171" y="23" width="290" height="100" rx="8" class="panel"/><text x="203" y="54">STATUS / INVENTORY</text>
+    <rect x="207" y="70" width="214" height="25" class="muted"/>
+  </g>
+  <g transform="translate(620 381)">
+    <rect width="552" height="166" rx="8" class="world"/>
+    <rect x="30" y="133" width="127" height="15" class="muted"/><rect x="310" y="97" width="140" height="15" class="muted"/>
+    <circle cx="143" cy="116" r="11" class="cue"/>
+    <path d="M143 105 Q244 15 347 85" fill="none" stroke="#dab86e" stroke-width="3" stroke-dasharray="7 5"/>
+    <rect x="15" y="13" width="100" height="28" rx="5" class="panel"/><text x="27" y="33" class="small">HP / STATUS</text>
+    <rect x="489" y="13" width="45" height="28" rx="5" class="panel"/><text x="505" y="32" class="small">II</text>
+    <text x="296" y="145" class="small onDark">Visible landing target</text>
+  </g>
+  <text x="30" y="568" class="small">A central HUD competes with movement information.</text>
+  <text x="626" y="568" class="small">Keep the relevant world view clear, including while moving.</text>
+
+  <text x="24" y="609" class="heading">3. Route planning: make the route and selected stop legible</text>
+  <g transform="translate(24 624)">
+    <rect width="552" height="166" rx="8" class="world"/>
+    <rect x="15" y="15" width="164" height="136" rx="6" class="panel"/><text x="59" y="48">MAP</text>
+    <path d="M41 125 L93 76 L155 110" class="route"/>
+    <rect x="194" y="15" width="164" height="136" rx="6" class="panel"/><text x="226" y="48">DETAILS</text>
+    <rect x="373" y="15" width="164" height="136" rx="6" class="panel"/><text x="409" y="48">OTHER</text>
+    <rect x="213" y="65" width="126" height="18" class="muted"/><rect x="392" y="65" width="126" height="18" class="muted"/>
+  </g>
+  <g transform="translate(620 624)">
+    <rect width="552" height="166" rx="8" class="world"/>
+    <path d="M35 128 L115 59 L205 126 L301 40" class="route"/>
+    <circle cx="35" cy="128" r="8" class="muted"/><circle cx="115" cy="59" r="10" class="cue"/>
+    <circle cx="205" cy="126" r="8" class="muted"/><circle cx="301" cy="40" r="8" class="muted"/>
+    <circle cx="115" cy="59" r="19" fill="none" stroke="#f4f1e8" stroke-width="2"/>
+    <rect x="362" y="14" width="174" height="138" rx="6" class="panel"/><text x="379" y="44" class="small">SELECTED STOP</text>
+    <rect x="379" y="59" width="139" height="18" class="muted"/><rect x="379" y="105" width="139" height="30" rx="5" class="cue"/><text x="415" y="125" class="small">CONFIRM</text>
+    <text x="21" y="24" class="small onDark">Route remains continuous</text>
+  </g>
+  <text x="30" y="811" class="small">Equal-weight cards crowd out the actual player task.</text>
+  <text x="626" y="811" class="small">Allocate space by purpose, not by a generic component template.</text>
+</svg>

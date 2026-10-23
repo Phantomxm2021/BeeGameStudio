@@ -1,0 +1,8091 @@
+{
+  "source": ".beegame/tmp/ui-overlay-compact.json",
+  "connection": [],
+  "authoredSha256": "f2b0760b1b9fd5ce3895c7c2d6ec4422370d8acb02e806475e799b93f8e8ae7d",
+  "inputPreserved": true,
+  "scope": "Rectangle calculations and independent intersections of resolved boxes, not font, occlusion or runtime acceptance",
+  "cases": [
+    {
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 960,
+          "height": 540
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                960,
+                540
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                960,
+                0
+              ],
+              [
+                960,
+                540
+              ],
+              [
+                0,
+                540
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 960,
+              "bottom": 540
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                960,
+                540
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                960,
+                0
+              ],
+              [
+                960,
+                540
+              ],
+              [
+                0,
+                540
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 960,
+              "bottom": 540
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                336,
+                152
+              ],
+              [
+                624,
+                152
+              ],
+              [
+                624,
+                388
+              ],
+              [
+                336,
+                388
+              ]
+            ],
+            "bounds": {
+              "left": 336,
+              "top": 152,
+              "right": 624,
+              "bottom": 388
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                352,
+                172
+              ],
+              [
+                608,
+                172
+              ],
+              [
+                608,
+                208
+              ],
+              [
+                352,
+                208
+              ]
+            ],
+            "bounds": {
+              "left": 352,
+              "top": 172,
+              "right": 608,
+              "bottom": 208
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                352,
+                220
+              ],
+              [
+                608,
+                220
+              ],
+              [
+                608,
+                244
+              ],
+              [
+                352,
+                244
+              ]
+            ],
+            "bounds": {
+              "left": 352,
+              "top": 220,
+              "right": 608,
+              "bottom": 244
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                352,
+                256
+              ],
+              [
+                608,
+                256
+              ],
+              [
+                608,
+                304
+              ],
+              [
+                352,
+                304
+              ]
+            ],
+            "bounds": {
+              "left": 352,
+              "top": 256,
+              "right": 608,
+              "bottom": 304
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                352,
+                316
+              ],
+              [
+                608,
+                316
+              ],
+              [
+                608,
+                360
+              ],
+              [
+                352,
+                360
+              ]
+            ],
+            "bounds": {
+              "left": 352,
+              "top": 316,
+              "right": 608,
+              "bottom": 360
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                884,
+                484
+              ],
+              [
+                948,
+                484
+              ],
+              [
+                948,
+                528
+              ],
+              [
+                884,
+                528
+              ]
+            ],
+            "bounds": {
+              "left": 884,
+              "top": 484,
+              "right": 948,
+              "bottom": 528
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                390,
+                844
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                390,
+                0
+              ],
+              [
+                390,
+                844
+              ],
+              [
+                0,
+                844
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 390,
+              "bottom": 844
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                390,
+                844
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                390,
+                0
+              ],
+              [
+                390,
+                844
+              ],
+              [
+                0,
+                844
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 390,
+              "bottom": 844
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                51,
+                304
+              ],
+              [
+                339,
+                304
+              ],
+              [
+                339,
+                540
+              ],
+              [
+                51,
+                540
+              ]
+            ],
+            "bounds": {
+              "left": 51,
+              "top": 304,
+              "right": 339,
+              "bottom": 540
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                67,
+                324
+              ],
+              [
+                323,
+                324
+              ],
+              [
+                323,
+                360
+              ],
+              [
+                67,
+                360
+              ]
+            ],
+            "bounds": {
+              "left": 67,
+              "top": 324,
+              "right": 323,
+              "bottom": 360
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                67,
+                372
+              ],
+              [
+                323,
+                372
+              ],
+              [
+                323,
+                396
+              ],
+              [
+                67,
+                396
+              ]
+            ],
+            "bounds": {
+              "left": 67,
+              "top": 372,
+              "right": 323,
+              "bottom": 396
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                67,
+                408
+              ],
+              [
+                323,
+                408
+              ],
+              [
+                323,
+                456
+              ],
+              [
+                67,
+                456
+              ]
+            ],
+            "bounds": {
+              "left": 67,
+              "top": 408,
+              "right": 323,
+              "bottom": 456
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                67,
+                468
+              ],
+              [
+                323,
+                468
+              ],
+              [
+                323,
+                512
+              ],
+              [
+                67,
+                512
+              ]
+            ],
+            "bounds": {
+              "left": 67,
+              "top": 468,
+              "right": 323,
+              "bottom": 512
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                314,
+                788
+              ],
+              [
+                378,
+                788
+              ],
+              [
+                378,
+                832
+              ],
+              [
+                314,
+                832
+              ]
+            ],
+            "bounds": {
+              "left": 314,
+              "top": 788,
+              "right": 378,
+              "bottom": 832
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 320,
+          "height": 480
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                320,
+                480
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                320,
+                0
+              ],
+              [
+                320,
+                480
+              ],
+              [
+                0,
+                480
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 320,
+              "bottom": 480
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                320,
+                480
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                320,
+                0
+              ],
+              [
+                320,
+                480
+              ],
+              [
+                0,
+                480
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 320,
+              "bottom": 480
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                16,
+                122
+              ],
+              [
+                304,
+                122
+              ],
+              [
+                304,
+                358
+              ],
+              [
+                16,
+                358
+              ]
+            ],
+            "bounds": {
+              "left": 16,
+              "top": 122,
+              "right": 304,
+              "bottom": 358
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                32,
+                142
+              ],
+              [
+                288,
+                142
+              ],
+              [
+                288,
+                178
+              ],
+              [
+                32,
+                178
+              ]
+            ],
+            "bounds": {
+              "left": 32,
+              "top": 142,
+              "right": 288,
+              "bottom": 178
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                32,
+                190
+              ],
+              [
+                288,
+                190
+              ],
+              [
+                288,
+                214
+              ],
+              [
+                32,
+                214
+              ]
+            ],
+            "bounds": {
+              "left": 32,
+              "top": 190,
+              "right": 288,
+              "bottom": 214
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                32,
+                226
+              ],
+              [
+                288,
+                226
+              ],
+              [
+                288,
+                274
+              ],
+              [
+                32,
+                274
+              ]
+            ],
+            "bounds": {
+              "left": 32,
+              "top": 226,
+              "right": 288,
+              "bottom": 274
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                32,
+                286
+              ],
+              [
+                288,
+                286
+              ],
+              [
+                288,
+                330
+              ],
+              [
+                32,
+                330
+              ]
+            ],
+            "bounds": {
+              "left": 32,
+              "top": 286,
+              "right": 288,
+              "bottom": 330
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                244,
+                424
+              ],
+              [
+                308,
+                424
+              ],
+              [
+                308,
+                468
+              ],
+              [
+                244,
+                468
+              ]
+            ],
+            "bounds": {
+              "left": 244,
+              "top": 424,
+              "right": 308,
+              "bottom": 468
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 320,
+          "height": 568
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                320,
+                568
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                320,
+                0
+              ],
+              [
+                320,
+                568
+              ],
+              [
+                0,
+                568
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 320,
+              "bottom": 568
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                320,
+                568
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                320,
+                0
+              ],
+              [
+                320,
+                568
+              ],
+              [
+                0,
+                568
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 320,
+              "bottom": 568
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                16,
+                166
+              ],
+              [
+                304,
+                166
+              ],
+              [
+                304,
+                402
+              ],
+              [
+                16,
+                402
+              ]
+            ],
+            "bounds": {
+              "left": 16,
+              "top": 166,
+              "right": 304,
+              "bottom": 402
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                32,
+                186
+              ],
+              [
+                288,
+                186
+              ],
+              [
+                288,
+                222
+              ],
+              [
+                32,
+                222
+              ]
+            ],
+            "bounds": {
+              "left": 32,
+              "top": 186,
+              "right": 288,
+              "bottom": 222
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                32,
+                234
+              ],
+              [
+                288,
+                234
+              ],
+              [
+                288,
+                258
+              ],
+              [
+                32,
+                258
+              ]
+            ],
+            "bounds": {
+              "left": 32,
+              "top": 234,
+              "right": 288,
+              "bottom": 258
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                32,
+                270
+              ],
+              [
+                288,
+                270
+              ],
+              [
+                288,
+                318
+              ],
+              [
+                32,
+                318
+              ]
+            ],
+            "bounds": {
+              "left": 32,
+              "top": 270,
+              "right": 288,
+              "bottom": 318
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                32,
+                330
+              ],
+              [
+                288,
+                330
+              ],
+              [
+                288,
+                374
+              ],
+              [
+                32,
+                374
+              ]
+            ],
+            "bounds": {
+              "left": 32,
+              "top": 330,
+              "right": 288,
+              "bottom": 374
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                244,
+                512
+              ],
+              [
+                308,
+                512
+              ],
+              [
+                308,
+                556
+              ],
+              [
+                244,
+                556
+              ]
+            ],
+            "bounds": {
+              "left": 244,
+              "top": 512,
+              "right": 308,
+              "bottom": 556
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 600,
+          "height": 800
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                600,
+                800
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                600,
+                0
+              ],
+              [
+                600,
+                800
+              ],
+              [
+                0,
+                800
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 600,
+              "bottom": 800
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                600,
+                800
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                600,
+                0
+              ],
+              [
+                600,
+                800
+              ],
+              [
+                0,
+                800
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 600,
+              "bottom": 800
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                156,
+                282
+              ],
+              [
+                444,
+                282
+              ],
+              [
+                444,
+                518
+              ],
+              [
+                156,
+                518
+              ]
+            ],
+            "bounds": {
+              "left": 156,
+              "top": 282,
+              "right": 444,
+              "bottom": 518
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                302
+              ],
+              [
+                428,
+                302
+              ],
+              [
+                428,
+                338
+              ],
+              [
+                172,
+                338
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 302,
+              "right": 428,
+              "bottom": 338
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                350
+              ],
+              [
+                428,
+                350
+              ],
+              [
+                428,
+                374
+              ],
+              [
+                172,
+                374
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 350,
+              "right": 428,
+              "bottom": 374
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                386
+              ],
+              [
+                428,
+                386
+              ],
+              [
+                428,
+                434
+              ],
+              [
+                172,
+                434
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 386,
+              "right": 428,
+              "bottom": 434
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                446
+              ],
+              [
+                428,
+                446
+              ],
+              [
+                428,
+                490
+              ],
+              [
+                172,
+                490
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 446,
+              "right": 428,
+              "bottom": 490
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                524,
+                744
+              ],
+              [
+                588,
+                744
+              ],
+              [
+                588,
+                788
+              ],
+              [
+                524,
+                788
+              ]
+            ],
+            "bounds": {
+              "left": 524,
+              "top": 744,
+              "right": 588,
+              "bottom": 788
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 601,
+          "height": 800
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                601,
+                800
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                800
+              ],
+              [
+                0,
+                800
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 800
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                601,
+                800
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                800
+              ],
+              [
+                0,
+                800
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 800
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                156.5,
+                282
+              ],
+              [
+                444.5,
+                282
+              ],
+              [
+                444.5,
+                518
+              ],
+              [
+                156.5,
+                518
+              ]
+            ],
+            "bounds": {
+              "left": 156.5,
+              "top": 282,
+              "right": 444.5,
+              "bottom": 518
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                302
+              ],
+              [
+                428.5,
+                302
+              ],
+              [
+                428.5,
+                338
+              ],
+              [
+                172.5,
+                338
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 302,
+              "right": 428.5,
+              "bottom": 338
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                350
+              ],
+              [
+                428.5,
+                350
+              ],
+              [
+                428.5,
+                374
+              ],
+              [
+                172.5,
+                374
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 350,
+              "right": 428.5,
+              "bottom": 374
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                386
+              ],
+              [
+                428.5,
+                386
+              ],
+              [
+                428.5,
+                434
+              ],
+              [
+                172.5,
+                434
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 386,
+              "right": 428.5,
+              "bottom": 434
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                446
+              ],
+              [
+                428.5,
+                446
+              ],
+              [
+                428.5,
+                490
+              ],
+              [
+                172.5,
+                490
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 446,
+              "right": 428.5,
+              "bottom": 490
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                525,
+                744
+              ],
+              [
+                589,
+                744
+              ],
+              [
+                589,
+                788
+              ],
+              [
+                525,
+                788
+              ]
+            ],
+            "bounds": {
+              "left": 525,
+              "top": 744,
+              "right": 589,
+              "bottom": 788
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 700,
+          "height": 500
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                700,
+                500
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                700,
+                0
+              ],
+              [
+                700,
+                500
+              ],
+              [
+                0,
+                500
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 700,
+              "bottom": 500
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                700,
+                500
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                700,
+                0
+              ],
+              [
+                700,
+                500
+              ],
+              [
+                0,
+                500
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 700,
+              "bottom": 500
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                206,
+                132
+              ],
+              [
+                494,
+                132
+              ],
+              [
+                494,
+                368
+              ],
+              [
+                206,
+                368
+              ]
+            ],
+            "bounds": {
+              "left": 206,
+              "top": 132,
+              "right": 494,
+              "bottom": 368
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                222,
+                152
+              ],
+              [
+                478,
+                152
+              ],
+              [
+                478,
+                188
+              ],
+              [
+                222,
+                188
+              ]
+            ],
+            "bounds": {
+              "left": 222,
+              "top": 152,
+              "right": 478,
+              "bottom": 188
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                222,
+                200
+              ],
+              [
+                478,
+                200
+              ],
+              [
+                478,
+                224
+              ],
+              [
+                222,
+                224
+              ]
+            ],
+            "bounds": {
+              "left": 222,
+              "top": 200,
+              "right": 478,
+              "bottom": 224
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                222,
+                236
+              ],
+              [
+                478,
+                236
+              ],
+              [
+                478,
+                284
+              ],
+              [
+                222,
+                284
+              ]
+            ],
+            "bounds": {
+              "left": 222,
+              "top": 236,
+              "right": 478,
+              "bottom": 284
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                222,
+                296
+              ],
+              [
+                478,
+                296
+              ],
+              [
+                478,
+                340
+              ],
+              [
+                222,
+                340
+              ]
+            ],
+            "bounds": {
+              "left": 222,
+              "top": 296,
+              "right": 478,
+              "bottom": 340
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                624,
+                444
+              ],
+              [
+                688,
+                444
+              ],
+              [
+                688,
+                488
+              ],
+              [
+                624,
+                488
+              ]
+            ],
+            "bounds": {
+              "left": 624,
+              "top": 444,
+              "right": 688,
+              "bottom": 488
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 667,
+          "height": 480
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                667,
+                480
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                667,
+                0
+              ],
+              [
+                667,
+                480
+              ],
+              [
+                0,
+                480
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 667,
+              "bottom": 480
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                667,
+                480
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                667,
+                0
+              ],
+              [
+                667,
+                480
+              ],
+              [
+                0,
+                480
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 667,
+              "bottom": 480
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                189.5,
+                122
+              ],
+              [
+                477.5,
+                122
+              ],
+              [
+                477.5,
+                358
+              ],
+              [
+                189.5,
+                358
+              ]
+            ],
+            "bounds": {
+              "left": 189.5,
+              "top": 122,
+              "right": 477.5,
+              "bottom": 358
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                205.5,
+                142
+              ],
+              [
+                461.5,
+                142
+              ],
+              [
+                461.5,
+                178
+              ],
+              [
+                205.5,
+                178
+              ]
+            ],
+            "bounds": {
+              "left": 205.5,
+              "top": 142,
+              "right": 461.5,
+              "bottom": 178
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                205.5,
+                190
+              ],
+              [
+                461.5,
+                190
+              ],
+              [
+                461.5,
+                214
+              ],
+              [
+                205.5,
+                214
+              ]
+            ],
+            "bounds": {
+              "left": 205.5,
+              "top": 190,
+              "right": 461.5,
+              "bottom": 214
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                205.5,
+                226
+              ],
+              [
+                461.5,
+                226
+              ],
+              [
+                461.5,
+                274
+              ],
+              [
+                205.5,
+                274
+              ]
+            ],
+            "bounds": {
+              "left": 205.5,
+              "top": 226,
+              "right": 461.5,
+              "bottom": 274
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                205.5,
+                286
+              ],
+              [
+                461.5,
+                286
+              ],
+              [
+                461.5,
+                330
+              ],
+              [
+                205.5,
+                330
+              ]
+            ],
+            "bounds": {
+              "left": 205.5,
+              "top": 286,
+              "right": 461.5,
+              "bottom": 330
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                591,
+                424
+              ],
+              [
+                655,
+                424
+              ],
+              [
+                655,
+                468
+              ],
+              [
+                591,
+                468
+              ]
+            ],
+            "bounds": {
+              "left": 591,
+              "top": 424,
+              "right": 655,
+              "bottom": 468
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 800,
+        "height": 400
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 800,
+          "height": 400
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                800,
+                400
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                800,
+                0
+              ],
+              [
+                800,
+                400
+              ],
+              [
+                0,
+                400
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 800,
+              "bottom": 400
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                800,
+                400
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                800,
+                0
+              ],
+              [
+                800,
+                400
+              ],
+              [
+                0,
+                400
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 800,
+              "bottom": 400
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                256,
+                82
+              ],
+              [
+                544,
+                82
+              ],
+              [
+                544,
+                318
+              ],
+              [
+                256,
+                318
+              ]
+            ],
+            "bounds": {
+              "left": 256,
+              "top": 82,
+              "right": 544,
+              "bottom": 318
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                272,
+                102
+              ],
+              [
+                528,
+                102
+              ],
+              [
+                528,
+                138
+              ],
+              [
+                272,
+                138
+              ]
+            ],
+            "bounds": {
+              "left": 272,
+              "top": 102,
+              "right": 528,
+              "bottom": 138
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                272,
+                150
+              ],
+              [
+                528,
+                150
+              ],
+              [
+                528,
+                174
+              ],
+              [
+                272,
+                174
+              ]
+            ],
+            "bounds": {
+              "left": 272,
+              "top": 150,
+              "right": 528,
+              "bottom": 174
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                272,
+                186
+              ],
+              [
+                528,
+                186
+              ],
+              [
+                528,
+                234
+              ],
+              [
+                272,
+                234
+              ]
+            ],
+            "bounds": {
+              "left": 272,
+              "top": 186,
+              "right": 528,
+              "bottom": 234
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                272,
+                246
+              ],
+              [
+                528,
+                246
+              ],
+              [
+                528,
+                290
+              ],
+              [
+                272,
+                290
+              ]
+            ],
+            "bounds": {
+              "left": 272,
+              "top": 246,
+              "right": 528,
+              "bottom": 290
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                724,
+                344
+              ],
+              [
+                788,
+                344
+              ],
+              [
+                788,
+                388
+              ],
+              [
+                724,
+                388
+              ]
+            ],
+            "bounds": {
+              "left": 724,
+              "top": 344,
+              "right": 788,
+              "bottom": 388
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 600,
+        "height": 360
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 600,
+          "height": 360
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                600,
+                360
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                600,
+                0
+              ],
+              [
+                600,
+                360
+              ],
+              [
+                0,
+                360
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 600,
+              "bottom": 360
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                600,
+                360
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                600,
+                0
+              ],
+              [
+                600,
+                360
+              ],
+              [
+                0,
+                360
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 600,
+              "bottom": 360
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                156,
+                62
+              ],
+              [
+                444,
+                62
+              ],
+              [
+                444,
+                298
+              ],
+              [
+                156,
+                298
+              ]
+            ],
+            "bounds": {
+              "left": 156,
+              "top": 62,
+              "right": 444,
+              "bottom": 298
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                82
+              ],
+              [
+                428,
+                82
+              ],
+              [
+                428,
+                118
+              ],
+              [
+                172,
+                118
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 82,
+              "right": 428,
+              "bottom": 118
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                130
+              ],
+              [
+                428,
+                130
+              ],
+              [
+                428,
+                154
+              ],
+              [
+                172,
+                154
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 130,
+              "right": 428,
+              "bottom": 154
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                166
+              ],
+              [
+                428,
+                166
+              ],
+              [
+                428,
+                214
+              ],
+              [
+                172,
+                214
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 166,
+              "right": 428,
+              "bottom": 214
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                226
+              ],
+              [
+                428,
+                226
+              ],
+              [
+                428,
+                270
+              ],
+              [
+                172,
+                270
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 226,
+              "right": 428,
+              "bottom": 270
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                524,
+                304
+              ],
+              [
+                588,
+                304
+              ],
+              [
+                588,
+                348
+              ],
+              [
+                524,
+                348
+              ]
+            ],
+            "bounds": {
+              "left": 524,
+              "top": 304,
+              "right": 588,
+              "bottom": 348
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 601,
+        "height": 380
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 601,
+          "height": 380
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                601,
+                380
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                380
+              ],
+              [
+                0,
+                380
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 380
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                601,
+                380
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                380
+              ],
+              [
+                0,
+                380
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 380
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                156.5,
+                72
+              ],
+              [
+                444.5,
+                72
+              ],
+              [
+                444.5,
+                308
+              ],
+              [
+                156.5,
+                308
+              ]
+            ],
+            "bounds": {
+              "left": 156.5,
+              "top": 72,
+              "right": 444.5,
+              "bottom": 308
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                92
+              ],
+              [
+                428.5,
+                92
+              ],
+              [
+                428.5,
+                128
+              ],
+              [
+                172.5,
+                128
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 92,
+              "right": 428.5,
+              "bottom": 128
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                140
+              ],
+              [
+                428.5,
+                140
+              ],
+              [
+                428.5,
+                164
+              ],
+              [
+                172.5,
+                164
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 140,
+              "right": 428.5,
+              "bottom": 164
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                176
+              ],
+              [
+                428.5,
+                176
+              ],
+              [
+                428.5,
+                224
+              ],
+              [
+                172.5,
+                224
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 176,
+              "right": 428.5,
+              "bottom": 224
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                236
+              ],
+              [
+                428.5,
+                236
+              ],
+              [
+                428.5,
+                280
+              ],
+              [
+                172.5,
+                280
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 236,
+              "right": 428.5,
+              "bottom": 280
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                525,
+                324
+              ],
+              [
+                589,
+                324
+              ],
+              [
+                589,
+                368
+              ],
+              [
+                525,
+                368
+              ]
+            ],
+            "bounds": {
+              "left": 525,
+              "top": 324,
+              "right": 589,
+              "bottom": 368
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 601,
+        "height": 381
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 601,
+          "height": 381
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                601,
+                381
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                381
+              ],
+              [
+                0,
+                381
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 381
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                601,
+                381
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                381
+              ],
+              [
+                0,
+                381
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 381
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                156.5,
+                72.5
+              ],
+              [
+                444.5,
+                72.5
+              ],
+              [
+                444.5,
+                308.5
+              ],
+              [
+                156.5,
+                308.5
+              ]
+            ],
+            "bounds": {
+              "left": 156.5,
+              "top": 72.5,
+              "right": 444.5,
+              "bottom": 308.5
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                92.5
+              ],
+              [
+                428.5,
+                92.5
+              ],
+              [
+                428.5,
+                128.5
+              ],
+              [
+                172.5,
+                128.5
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 92.5,
+              "right": 428.5,
+              "bottom": 128.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                140.5
+              ],
+              [
+                428.5,
+                140.5
+              ],
+              [
+                428.5,
+                164.5
+              ],
+              [
+                172.5,
+                164.5
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 140.5,
+              "right": 428.5,
+              "bottom": 164.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                176.5
+              ],
+              [
+                428.5,
+                176.5
+              ],
+              [
+                428.5,
+                224.5
+              ],
+              [
+                172.5,
+                224.5
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 176.5,
+              "right": 428.5,
+              "bottom": 224.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                236.5
+              ],
+              [
+                428.5,
+                236.5
+              ],
+              [
+                428.5,
+                280.5
+              ],
+              [
+                172.5,
+                280.5
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 236.5,
+              "right": 428.5,
+              "bottom": 280.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                525,
+                325
+              ],
+              [
+                589,
+                325
+              ],
+              [
+                589,
+                369
+              ],
+              [
+                525,
+                369
+              ]
+            ],
+            "bounds": {
+              "left": 525,
+              "top": 325,
+              "right": 589,
+              "bottom": 369
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 600,
+        "height": 400
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 600,
+          "height": 400
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                600,
+                400
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                600,
+                0
+              ],
+              [
+                600,
+                400
+              ],
+              [
+                0,
+                400
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 600,
+              "bottom": 400
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                600,
+                400
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                600,
+                0
+              ],
+              [
+                600,
+                400
+              ],
+              [
+                0,
+                400
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 600,
+              "bottom": 400
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                156,
+                82
+              ],
+              [
+                444,
+                82
+              ],
+              [
+                444,
+                318
+              ],
+              [
+                156,
+                318
+              ]
+            ],
+            "bounds": {
+              "left": 156,
+              "top": 82,
+              "right": 444,
+              "bottom": 318
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                102
+              ],
+              [
+                428,
+                102
+              ],
+              [
+                428,
+                138
+              ],
+              [
+                172,
+                138
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 102,
+              "right": 428,
+              "bottom": 138
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                150
+              ],
+              [
+                428,
+                150
+              ],
+              [
+                428,
+                174
+              ],
+              [
+                172,
+                174
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 150,
+              "right": 428,
+              "bottom": 174
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                186
+              ],
+              [
+                428,
+                186
+              ],
+              [
+                428,
+                234
+              ],
+              [
+                172,
+                234
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 186,
+              "right": 428,
+              "bottom": 234
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172,
+                246
+              ],
+              [
+                428,
+                246
+              ],
+              [
+                428,
+                290
+              ],
+              [
+                172,
+                290
+              ]
+            ],
+            "bounds": {
+              "left": 172,
+              "top": 246,
+              "right": 428,
+              "bottom": 290
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                524,
+                344
+              ],
+              [
+                588,
+                344
+              ],
+              [
+                588,
+                388
+              ],
+              [
+                524,
+                388
+              ]
+            ],
+            "bounds": {
+              "left": 524,
+              "top": 344,
+              "right": 588,
+              "bottom": 388
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 601,
+        "height": 400
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 601,
+          "height": 400
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                601,
+                400
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                400
+              ],
+              [
+                0,
+                400
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 400
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                601,
+                400
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                400
+              ],
+              [
+                0,
+                400
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 400
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                156.5,
+                82
+              ],
+              [
+                444.5,
+                82
+              ],
+              [
+                444.5,
+                318
+              ],
+              [
+                156.5,
+                318
+              ]
+            ],
+            "bounds": {
+              "left": 156.5,
+              "top": 82,
+              "right": 444.5,
+              "bottom": 318
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                102
+              ],
+              [
+                428.5,
+                102
+              ],
+              [
+                428.5,
+                138
+              ],
+              [
+                172.5,
+                138
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 102,
+              "right": 428.5,
+              "bottom": 138
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                150
+              ],
+              [
+                428.5,
+                150
+              ],
+              [
+                428.5,
+                174
+              ],
+              [
+                172.5,
+                174
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 150,
+              "right": 428.5,
+              "bottom": 174
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                186
+              ],
+              [
+                428.5,
+                186
+              ],
+              [
+                428.5,
+                234
+              ],
+              [
+                172.5,
+                234
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 186,
+              "right": 428.5,
+              "bottom": 234
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                172.5,
+                246
+              ],
+              [
+                428.5,
+                246
+              ],
+              [
+                428.5,
+                290
+              ],
+              [
+                172.5,
+                290
+              ]
+            ],
+            "bounds": {
+              "left": 172.5,
+              "top": 246,
+              "right": 428.5,
+              "bottom": 290
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                525,
+                344
+              ],
+              [
+                589,
+                344
+              ],
+              [
+                589,
+                388
+              ],
+              [
+                525,
+                388
+              ]
+            ],
+            "bounds": {
+              "left": 525,
+              "top": 344,
+              "right": 589,
+              "bottom": 388
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 400,
+        "height": 400
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 400,
+          "height": 400
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                400,
+                400
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                400,
+                0
+              ],
+              [
+                400,
+                400
+              ],
+              [
+                0,
+                400
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 400,
+              "bottom": 400
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                400,
+                400
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                400,
+                0
+              ],
+              [
+                400,
+                400
+              ],
+              [
+                0,
+                400
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 400,
+              "bottom": 400
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                56,
+                82
+              ],
+              [
+                344,
+                82
+              ],
+              [
+                344,
+                318
+              ],
+              [
+                56,
+                318
+              ]
+            ],
+            "bounds": {
+              "left": 56,
+              "top": 82,
+              "right": 344,
+              "bottom": 318
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                72,
+                102
+              ],
+              [
+                328,
+                102
+              ],
+              [
+                328,
+                138
+              ],
+              [
+                72,
+                138
+              ]
+            ],
+            "bounds": {
+              "left": 72,
+              "top": 102,
+              "right": 328,
+              "bottom": 138
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                72,
+                150
+              ],
+              [
+                328,
+                150
+              ],
+              [
+                328,
+                174
+              ],
+              [
+                72,
+                174
+              ]
+            ],
+            "bounds": {
+              "left": 72,
+              "top": 150,
+              "right": 328,
+              "bottom": 174
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                72,
+                186
+              ],
+              [
+                328,
+                186
+              ],
+              [
+                328,
+                234
+              ],
+              [
+                72,
+                234
+              ]
+            ],
+            "bounds": {
+              "left": 72,
+              "top": 186,
+              "right": 328,
+              "bottom": 234
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                72,
+                246
+              ],
+              [
+                328,
+                246
+              ],
+              [
+                328,
+                290
+              ],
+              [
+                72,
+                290
+              ]
+            ],
+            "bounds": {
+              "left": 72,
+              "top": 246,
+              "right": 328,
+              "bottom": 290
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                324,
+                344
+              ],
+              [
+                388,
+                344
+              ],
+              [
+                388,
+                388
+              ],
+              [
+                324,
+                388
+              ]
+            ],
+            "bounds": {
+              "left": 324,
+              "top": 344,
+              "right": 388,
+              "bottom": 388
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 400,
+        "height": 401
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 400,
+          "height": 401
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                400,
+                401
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                400,
+                0
+              ],
+              [
+                400,
+                401
+              ],
+              [
+                0,
+                401
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 400,
+              "bottom": 401
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                400,
+                401
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                400,
+                0
+              ],
+              [
+                400,
+                401
+              ],
+              [
+                0,
+                401
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 400,
+              "bottom": 401
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                56,
+                82.5
+              ],
+              [
+                344,
+                82.5
+              ],
+              [
+                344,
+                318.5
+              ],
+              [
+                56,
+                318.5
+              ]
+            ],
+            "bounds": {
+              "left": 56,
+              "top": 82.5,
+              "right": 344,
+              "bottom": 318.5
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                72,
+                102.5
+              ],
+              [
+                328,
+                102.5
+              ],
+              [
+                328,
+                138.5
+              ],
+              [
+                72,
+                138.5
+              ]
+            ],
+            "bounds": {
+              "left": 72,
+              "top": 102.5,
+              "right": 328,
+              "bottom": 138.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                72,
+                150.5
+              ],
+              [
+                328,
+                150.5
+              ],
+              [
+                328,
+                174.5
+              ],
+              [
+                72,
+                174.5
+              ]
+            ],
+            "bounds": {
+              "left": 72,
+              "top": 150.5,
+              "right": 328,
+              "bottom": 174.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                72,
+                186.5
+              ],
+              [
+                328,
+                186.5
+              ],
+              [
+                328,
+                234.5
+              ],
+              [
+                72,
+                234.5
+              ]
+            ],
+            "bounds": {
+              "left": 72,
+              "top": 186.5,
+              "right": 328,
+              "bottom": 234.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                72,
+                246.5
+              ],
+              [
+                328,
+                246.5
+              ],
+              [
+                328,
+                290.5
+              ],
+              [
+                72,
+                290.5
+              ]
+            ],
+            "bounds": {
+              "left": 72,
+              "top": 246.5,
+              "right": 328,
+              "bottom": 290.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                324,
+                345
+              ],
+              [
+                388,
+                345
+              ],
+              [
+                388,
+                389
+              ],
+              [
+                324,
+                389
+              ]
+            ],
+            "bounds": {
+              "left": 324,
+              "top": 345,
+              "right": 388,
+              "bottom": 389
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 650,
+        "height": 650
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 650,
+          "height": 650
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                650,
+                650
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                650,
+                0
+              ],
+              [
+                650,
+                650
+              ],
+              [
+                0,
+                650
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 650,
+              "bottom": 650
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                650,
+                650
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                650,
+                0
+              ],
+              [
+                650,
+                650
+              ],
+              [
+                0,
+                650
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 650,
+              "bottom": 650
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                181,
+                207
+              ],
+              [
+                469,
+                207
+              ],
+              [
+                469,
+                443
+              ],
+              [
+                181,
+                443
+              ]
+            ],
+            "bounds": {
+              "left": 181,
+              "top": 207,
+              "right": 469,
+              "bottom": 443
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                197,
+                227
+              ],
+              [
+                453,
+                227
+              ],
+              [
+                453,
+                263
+              ],
+              [
+                197,
+                263
+              ]
+            ],
+            "bounds": {
+              "left": 197,
+              "top": 227,
+              "right": 453,
+              "bottom": 263
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                197,
+                275
+              ],
+              [
+                453,
+                275
+              ],
+              [
+                453,
+                299
+              ],
+              [
+                197,
+                299
+              ]
+            ],
+            "bounds": {
+              "left": 197,
+              "top": 275,
+              "right": 453,
+              "bottom": 299
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                197,
+                311
+              ],
+              [
+                453,
+                311
+              ],
+              [
+                453,
+                359
+              ],
+              [
+                197,
+                359
+              ]
+            ],
+            "bounds": {
+              "left": 197,
+              "top": 311,
+              "right": 453,
+              "bottom": 359
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                197,
+                371
+              ],
+              [
+                453,
+                371
+              ],
+              [
+                453,
+                415
+              ],
+              [
+                197,
+                415
+              ]
+            ],
+            "bounds": {
+              "left": 197,
+              "top": 371,
+              "right": 453,
+              "bottom": 415
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                574,
+                594
+              ],
+              [
+                638,
+                594
+              ],
+              [
+                638,
+                638
+              ],
+              [
+                574,
+                638
+              ]
+            ],
+            "bounds": {
+              "left": 574,
+              "top": 594,
+              "right": 638,
+              "bottom": 638
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 650,
+        "height": 651
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 650,
+          "height": 651
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                650,
+                651
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                650,
+                0
+              ],
+              [
+                650,
+                651
+              ],
+              [
+                0,
+                651
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 650,
+              "bottom": 651
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "dim",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "item": {
+                "absolute": true
+              },
+              "size": [
+                650,
+                651
+              ],
+              "position": [
+                0,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                650,
+                0
+              ],
+              [
+                650,
+                651
+              ],
+              [
+                0,
+                651
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 650,
+              "bottom": 651
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                288,
+                236
+              ],
+              "container": {
+                "direction": "column",
+                "gap": 12,
+                "padding": [
+                  20,
+                  16,
+                  20,
+                  16
+                ],
+                "justify": "start",
+                "align": "center"
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                181,
+                207.5
+              ],
+              [
+                469,
+                207.5
+              ],
+              [
+                469,
+                443.5
+              ],
+              [
+                181,
+                443.5
+              ]
+            ],
+            "bounds": {
+              "left": 181,
+              "top": 207.5,
+              "right": 469,
+              "bottom": 443.5
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-title",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                36
+              ],
+              "position": [
+                16,
+                20
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                197,
+                227.5
+              ],
+              [
+                453,
+                227.5
+              ],
+              [
+                453,
+                263.5
+              ],
+              [
+                197,
+                263.5
+              ]
+            ],
+            "bounds": {
+              "left": 197,
+              "top": 227.5,
+              "right": 453,
+              "bottom": 263.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "card-body",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                24
+              ],
+              "position": [
+                16,
+                68
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                197,
+                275.5
+              ],
+              [
+                453,
+                275.5
+              ],
+              [
+                453,
+                299.5
+              ],
+              [
+                197,
+                299.5
+              ]
+            ],
+            "bounds": {
+              "left": 197,
+              "top": 275.5,
+              "right": 453,
+              "bottom": 299.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-primary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                48
+              ],
+              "position": [
+                16,
+                104
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                197,
+                311.5
+              ],
+              [
+                453,
+                311.5
+              ],
+              [
+                453,
+                359.5
+              ],
+              [
+                197,
+                359.5
+              ]
+            ],
+            "bounds": {
+              "left": 197,
+              "top": 311.5,
+              "right": 453,
+              "bottom": 359.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "action-secondary",
+            "parentId": "card",
+            "active": true,
+            "layout": {
+              "size": [
+                256,
+                44
+              ],
+              "position": [
+                16,
+                164
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                197,
+                371.5
+              ],
+              [
+                453,
+                371.5
+              ],
+              [
+                453,
+                415.5
+              ],
+              [
+                197,
+                415.5
+              ]
+            ],
+            "bounds": {
+              "left": 197,
+              "top": 371.5,
+              "right": 453,
+              "bottom": 415.5
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "mute-btn",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchor": "bottom-right",
+              "position": [
+                -12,
+                -12
+              ],
+              "size": [
+                64,
+                44
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 1
+            },
+            "corners": [
+              [
+                574,
+                595
+              ],
+              [
+                638,
+                595
+              ],
+              [
+                638,
+                639
+              ],
+              [
+                574,
+                639
+              ]
+            ],
+            "bounds": {
+              "left": 574,
+              "top": 595,
+              "right": 638,
+              "bottom": 639
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ]
+      },
+      "independentIntersections": []
+    }
+  ]
+}

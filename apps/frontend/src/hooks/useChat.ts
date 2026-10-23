@@ -2,7 +2,7 @@
  * useChat Hook
  *
  * Manages chat functionality including:
- * - WebSocket message routing and processing
+ * - Runtime event streaming with polling fallback and message routing
  * - Message type handling (token, status, tool_start, tool_end, usage, error_paused)
  * - Chat operations (sendMessage, continueTask, stopTask)
  * - Loading state management
@@ -10,23 +10,25 @@
  * Requirements: 1.1, 1.2, 1.3, 6.1, 6.2, 6.3, 6.4, 6.5, 7.1, 7.2
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useProjectEventPolling } from './useProjectEventPolling'
+import { useProjectSession } from './useProjectSession'
 import { useChatStore } from '../store/chatStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSystemStore } from '../store/systemStore'
 import {
   api,
   type ChatAttachmentPayload,
-  type ProjectBaselineStatusPayload,
 } from '../services/api'
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api'
-import type { ProjectEventMessage } from '../types/message'
+import type { ProjectEventMessage, TokenUsage } from '../types/message'
+import { isProjectExecutionActive } from '../utils/chatActivity'
 import type { ProjectEventPollingState } from './useProjectEventPolling'
 import { normalizeChatHistory } from '../utils/chatHistory'
 import { normalizeProjectEventSemanticType } from '../utils/messageSemantics'
+import { canAutomaticallyRetryModelFailure } from '../utils/modelRequestFailure'
 import { getWaitingPermissionState } from '../utils/waitingPermission'
-import { toProjectRuntimeDisplayModel } from '../viewModels/displayModels'
 
 const newClientMessageId = (): string =>
   `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -43,17 +45,12 @@ function getErrorDisplayMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
-function isProjectWorkflowActive(
-  status?: ProjectBaselineStatusPayload | null,
-): boolean {
-  const workflowStatus = toProjectRuntimeDisplayModel(status)?.workflow?.status
-  return workflowStatus === 'running' || workflowStatus === 'verifying'
-}
-
 /**
  * Options for useChat hook
  */
 export interface UseChatOptions {
+  /** Initial history must establish the resume cursor before opening SSE. */
+  eventsEnabled?: boolean
   /** Project ID for the chat session */
   projectId: string
 
@@ -85,12 +82,14 @@ export interface UseChatReturn {
     terminationNode?: string,
     attachments?: ChatAttachmentPayload[],
     supersedesMessageId?: string,
-  ) => Promise<void>
+  ) => Promise<boolean>
 
   /**
    * Continue a paused task
    */
-  continueTask: () => Promise<void>
+  continueTask: (failedTurnId?: string, automatic?: boolean) => Promise<void>
+  autoRetryTurnId: string | null
+  cancelAutoRetry: () => void
 
   /**
    * Stop the current task
@@ -103,6 +102,7 @@ export interface UseChatReturn {
   resolveToolPermission: (
     permission: {
       gate_id: string
+      intent?: 'change'
     },
     decision?: 'allow' | 'deny',
     scope?: 'once' | 'session',
@@ -123,17 +123,20 @@ export interface UseChatReturn {
   /** Current task ID (if any) */
   currentTaskId: string | null
 
+  /** Last acknowledged session usage, including after the turn stops. */
+  sessionTokenUsage: TokenUsage | undefined
+
   /** Whether the task is paused and can be continued */
   canContinue: boolean
 
-  /** WebSocket connection state */
+  /** Runtime event transport state */
   wsState: ProjectEventPollingState
 }
 
 /**
  * Custom hook for managing chat functionality
  *
- * This hook integrates WebSocket communication, message routing,
+ * This hook integrates runtime event streaming, message routing,
  * and chat operations (send, continue, stop) into a single interface.
  *
  * @param options - Configuration options for the chat
@@ -160,18 +163,48 @@ export interface UseChatReturn {
  */
 export const useChat = ({
   projectId,
+  eventsEnabled = true,
   onError,
   onTaskComplete,
   onTaskEvent,
   showToastError,
   showToastSuccess,
 }: UseChatOptions): UseChatReturn => {
+  // A project id alone is insufficient for async guards: navigating A → B → A
+  // must still invalidate work started by the first A instance, and an
+  // unmounted hook must not write into the shared stores when its request
+  // eventually settles.
+  const lifecycleRef = useRef({ projectId, generation: 0, mounted: true })
+  useEffect(() => {
+    const lifecycle = lifecycleRef.current
+    lifecycle.projectId = projectId
+    lifecycle.generation += 1
+    lifecycle.mounted = true
+    return () => {
+      lifecycle.mounted = false
+      lifecycle.generation += 1
+    }
+  }, [projectId])
+
   // State management
   const [isLoading, setIsLoading] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const submissionBoundaryAt = useRef(0)
   const [isStopping, setIsStopping] = useState(false)
   const isStoppingRef = useRef(false)
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
+  const [usageSession, setUsageSession] = useState<{ projectId: string; sessionId: string } | null>(null)
+  const sessionTokenUsage = useSystemStore(state => usageSession?.projectId === projectId
+    ? state.taskUsage[usageSession.sessionId] : undefined)
   const [canContinue, setCanContinue] = useState(false)
+  const [autoRetryTurnId, setAutoRetryTurnId] = useState<string | null>(null)
+  const autoRetryUsed = useRef(false)
+  const lastFailure = useRef<string | undefined>(undefined)
+  const continuing = useRef(false)
+  const cancelAutoRetry = useCallback(() => {
+    autoRetryUsed.current = true
+    setAutoRetryTurnId(null)
+  }, [])
   const [permissionState, setPermissionState] = useState<
     UseChatReturn['permissionState']
   >({
@@ -191,9 +224,24 @@ export const useChat = ({
     setCurrentSender,
     setIsStreaming,
     loadHistory,
-  } = useChatStore()
-  const pendingPermissions = useProjectStore(state => state.pendingPermissions)
-  const projectStatus = useProjectStore(state => state.projectStatus)
+  } = useChatStore(
+    useShallow(state => ({
+      addMessage: state.addMessage,
+      updateMessage: state.updateMessage,
+      updateThought: state.updateThought,
+      removeMessage: state.removeMessage,
+      finalizeMessage: state.finalizeMessage,
+      setCurrentSender: state.setCurrentSender,
+      setIsStreaming: state.setIsStreaming,
+      loadHistory: state.loadHistory,
+    })),
+  )
+  const { pendingPermissions, projectStatus } = useProjectStore(
+    useShallow(state => ({
+      pendingPermissions: state.pendingPermissions,
+      projectStatus: state.projectStatus,
+    })),
+  )
   const removePendingPermission = useProjectStore(
     state => state.removePendingPermission,
   )
@@ -204,13 +252,14 @@ export const useChat = ({
     updateTokenUsage,
     updateLastP2PRoute,
     loadCurrentUser,
-    setIsSyncing,
-  } = useSystemStore()
-  const projectRuntimeDisplay = toProjectRuntimeDisplayModel(projectStatus)
-  const waitingPermission = getWaitingPermissionState(
-    projectRuntimeDisplay,
-    pendingPermissions,
+  } = useSystemStore(
+    useShallow(state => ({
+      updateTokenUsage: state.updateTokenUsage,
+      updateLastP2PRoute: state.updateLastP2PRoute,
+      loadCurrentUser: state.loadCurrentUser,
+    })),
   )
+  const waitingPermission = getWaitingPermissionState(pendingPermissions)
 
   useEffect(() => {
     // These values describe one project's active turn. The hook remains
@@ -222,8 +271,14 @@ export const useChat = ({
     isStoppingRef.current = false
     setIsStopping(false)
     setIsLoading(false)
+    setIsSubmitting(false)
+    submissionBoundaryAt.current = 0
+    continuing.current = false
     setCurrentTaskId(null)
     setCanContinue(false)
+    setAutoRetryTurnId(null)
+    autoRetryUsed.current = false
+    lastFailure.current = undefined
     setPermissionState({
       gateId: null,
       action: null,
@@ -260,6 +315,10 @@ export const useChat = ({
     await store.loadProjectRuntimeState(projectId)
   }, [projectId])
 
+  const { historyReady, synchronize: syncAfterReconnect, onTransportOpen } = useProjectSession({
+    projectId, enabled: eventsEnabled, refreshRuntime: refreshProjectVisibility,
+  })
+
   const emitWaitingPermissionBlock = useCallback(
     (message: string) => {
       setIsLoading(false)
@@ -279,7 +338,7 @@ export const useChat = ({
     [addMessage, onError, showToastError],
   )
 
-  // Use refs to avoid handleProjectEventMessage dependency churn and event polling restarts
+  // Use refs to avoid handleProjectEventMessage dependency churn and transport restarts
   const latestRefs = useRef({
     projectId,
     onError,
@@ -292,21 +351,23 @@ export const useChat = ({
     refreshProjectVisibility,
   })
 
-  // Update refs on every render
-  latestRefs.current = {
-    projectId,
-    onError,
-    onTaskComplete,
-    onTaskEvent,
-    showToastError,
-    showToastSuccess,
-    permissionState,
-    loadCurrentUser,
-    refreshProjectVisibility,
-  }
+  // Publish callbacks only after commit, before the transport effects run.
+  useLayoutEffect(() => {
+    latestRefs.current = {
+      projectId,
+      onError,
+      onTaskComplete,
+      onTaskEvent,
+      showToastError,
+      showToastSuccess,
+      permissionState,
+      loadCurrentUser,
+      refreshProjectVisibility,
+    }
+  })
 
   /**
-   * Handle incoming WebSocket messages
+   * Handle incoming runtime events
    * Routes messages to appropriate handlers based on type
    *
    * Requirements: 1.2, 7.1, 7.2
@@ -330,11 +391,21 @@ export const useChat = ({
               message.artifact_id,
               message.document_title,
               {
+                contentMode: message.content_mode,
+                sequence: message.sequence,
+                turnId: message.turnId || message.turn_id,
+                contentBlocks: message.content_blocks,
                 renderHint: message.render_hint,
                 artifactType: message.artifact_type,
                 taskKind: message.task_kind,
                 nextAction: message.next_action,
                 requiresUserAction: message.requires_user_action,
+                sources: message.sources,
+                citations: message.citations,
+                subagentPrompt: message.subagent_prompt,
+                subagentOutput: message.subagent_output,
+                subagentTrace: message.subagent_trace,
+                subagentActivity: message.subagent_activity,
               },
               message.timestamp,
               message.message_id,
@@ -344,27 +415,49 @@ export const useChat = ({
           break
 
         case 'agent_message':
-          if (message.content && message.sender) {
+          if ((message.content || message.attachments?.length) && message.sender) {
             const semanticType = normalizeProjectEventSemanticType(message)
             finalizeMessage(
               message.task_id,
-              message.content,
+              message.content || '',
               message.sender,
               semanticType,
               message.is_document,
               message.artifact_id,
               message.document_title,
               {
+                sequence: message.sequence,
+                clientMessageId: message.client_message_id,
+                supersedesMessageId: message.supersedes_message_id,
+                rewindAvailable: message.rewind_available,
+                attachments: message.attachments,
+                turnId: message.turnId || message.turn_id,
+                contentBlocks: message.content_blocks,
                 renderHint: message.render_hint,
                 artifactType: message.artifact_type,
                 taskKind: message.task_kind,
                 nextAction: message.next_action,
                 requiresUserAction: message.requires_user_action,
+                sources: message.sources,
+                citations: message.citations,
+                subagentPrompt: message.subagent_prompt,
+                subagentOutput: message.subagent_output,
+                subagentTrace: message.subagent_trace,
+                subagentActivity: message.subagent_activity,
               },
               message.timestamp,
               message.message_id,
             )
             setCurrentSender(message.sender)
+            if (message.sender === 'user' && message.supersedes_message_id) {
+              const generation = lifecycleRef.current.generation
+              const requestProjectId = refs.projectId
+              void api.getChatHistory(requestProjectId).then(history => {
+                if (lifecycleRef.current.mounted && lifecycleRef.current.projectId === requestProjectId &&
+                    lifecycleRef.current.generation === generation)
+                  loadHistory(normalizeChatHistory(history))
+              }).catch(error => console.warn('[useChat] Could not refresh edited conversation:', error))
+            }
           }
           break
 
@@ -377,6 +470,9 @@ export const useChat = ({
               message.sender,
               message.timestamp,
               message.message_id,
+              message.turnId || message.turn_id,
+              message.content_mode,
+              message.sequence,
             )
             setCurrentSender(message.sender)
           }
@@ -384,27 +480,56 @@ export const useChat = ({
 
         case 'think_start':
           if (message.sender && message.message_id) {
-            finalizeMessage(
-              message.task_id,
-              message.content || 'Thinking',
-              message.sender,
-              'thought',
-              false,
-              undefined,
-              undefined,
-              { taskKind: 'assistant_thinking' },
-              message.timestamp,
-              message.message_id,
-            )
+            updateThought(message.task_id, '', message.sender, message.timestamp, message.message_id,
+              message.turnId || message.turn_id, 'snapshot', message.sequence)
             setCurrentSender(message.sender)
           }
           break
 
         case 'think_end':
-          if (message.message_id) removeMessage(message.message_id)
+          if (message.message_id) {
+            const thoughtMessage = useChatStore.getState().messages.find(candidate => (
+              candidate.id === message.message_id || candidate.messageId === message.message_id
+            ))
+            const thought = thoughtMessage?.thought?.trim() || ''
+            const eventContent = message.content?.trim() || ''
+            const hasActualThought = Boolean(thought || (eventContent && eventContent !== 'Thinking'))
+
+            if (!hasActualThought) {
+              removeMessage(message.message_id)
+              break
+            }
+
+            finalizeMessage(
+              thoughtMessage?.taskId || message.task_id,
+              thoughtMessage?.content || (eventContent && eventContent !== 'Thinking' ? eventContent : 'Thinking'),
+              thoughtMessage?.sender || message.sender || 'beegame',
+              'thought',
+              thoughtMessage?.isDocument,
+              thoughtMessage?.artifactId,
+              thoughtMessage?.documentTitle,
+              {
+                taskKind: thoughtMessage?.taskKind || 'assistant_thinking',
+                turnId: thoughtMessage?.turnId || message.turnId || message.turn_id,
+                ...(typeof message.thinking_duration_ms === 'number' && Number.isFinite(message.thinking_duration_ms)
+                  ? { thinkingDurationMs: Math.max(0, message.thinking_duration_ms) }
+                  : {}),
+              },
+              thoughtMessage?.timestamp || message.timestamp,
+              thoughtMessage?.messageId || thoughtMessage?.id || message.message_id,
+            )
+          }
           break
 
         case 'status':
+          // Old turn statuses do not describe a newly submitted request.
+          if (message.timestamp && message.timestamp <= submissionBoundaryAt.current) break
+          if (['finished', 'stopped', 'idle', 'failed'].includes(message.status || '')) {
+            const completedAt = message.timestamp || Date.now()
+            useChatStore.getState().settleActivity(message.task_id, message.turnId || message.turn_id,
+              message.status === 'stopped' ? 'stopped' : message.status === 'failed' ? 'failed' : 'incomplete',
+              completedAt, completedAt)
+          }
           // Task status update
           // Requirements: 6.2
           if (
@@ -431,6 +556,7 @@ export const useChat = ({
             message.status === 'resuming'
           ) {
             setIsLoading(true)
+            setAutoRetryTurnId(null)
             if (message.sender) {
               setCurrentSender(message.sender)
             }
@@ -440,6 +566,9 @@ export const useChat = ({
             message.status === 'failed'
           ) {
             setIsLoading(false)
+            setCurrentTaskId(null)
+            setCurrentSender(null)
+            setIsStreaming(false)
             if (message.content) {
               addMessage({
                 id: `status-${message.status}-${message.task_id || 'na'}-${String(message.content).substring(0, 48)}`,
@@ -523,6 +652,15 @@ export const useChat = ({
           break
 
         case 'context_update': {
+          if (message.task_kind === 'delivery_error' && message.content &&
+              (!message.project_id || message.project_id === refs.projectId)) {
+            addMessage({
+              id: message.message_id || `delivery-error-${message.task_id}-${message.timestamp}`,
+              sender: 'system', content: message.content, timestamp: message.timestamp || Date.now(),
+              type: 'system_status', taskKind: 'delivery_error',
+            })
+            break
+          }
           const context = message.context
           if (
             !context ||
@@ -552,7 +690,29 @@ export const useChat = ({
           break
         }
 
+        case 'context_compaction':
+          if (!message.project_id || message.project_id === refs.projectId) {
+            addMessage({
+              id: message.message_id || `beegame-compaction-${message.task_id}-${message.turnId || message.turn_id || 'session'}`,
+              messageId: message.message_id,
+              sender: 'system',
+              content: message.content || 'compacting',
+              timestamp: message.timestamp || Date.now(),
+              sequence: message.sequence,
+              turnId: message.turnId || message.turn_id,
+              type: 'system_status',
+              taskKind: 'context_compaction',
+              streamStatus: message.status === 'running' ? 'streaming' : 'complete',
+            })
+          }
+          break
+
         case 'error': {
+          if (message.timestamp && message.timestamp <= submissionBoundaryAt.current) break
+          if (message.project_id && message.project_id !== refs.projectId) break
+          const completedAt = message.timestamp || Date.now()
+          useChatStore.getState().settleActivity(message.task_id, message.turnId || message.turn_id,
+            'failed', completedAt, completedAt)
           const errContent =
             message.content ||
             message.message ||
@@ -563,8 +723,18 @@ export const useChat = ({
             refs.permissionState.phase === 'submitting'
               ? `权限决定已提交，但后续执行失败：${errContent}`
               : errContent
+          const failedTurnId = message.turnId || message.turn_id
+          const failureId = message.message_id || `error-${message.task_id || 'na'}-${failedTurnId || contextualError.substring(0, 32)}`
+          if (failureId !== lastFailure.current) {
+            lastFailure.current = failureId
+            setAutoRetryTurnId(failedTurnId && canAutomaticallyRetryModelFailure(errContent) && !autoRetryUsed.current
+              ? failedTurnId : null)
+          }
           addMessage({
-            id: `error-${message.task_id || 'na'}-${contextualError.substring(0, 32)}`,
+            id: failureId,
+            messageId: failureId,
+            taskId: message.task_id,
+            turnId: failedTurnId,
             sender: 'system',
             content: contextualError,
             timestamp: Date.now(),
@@ -573,6 +743,9 @@ export const useChat = ({
             errorDetails: message.error || message.message || message.code,
           })
           setIsLoading(false)
+          setCurrentTaskId(null)
+          setCurrentSender(null)
+          setIsStreaming(false)
           setPermissionState(prev => {
             if (
               prev.phase !== 'awaiting_runtime' &&
@@ -606,19 +779,36 @@ export const useChat = ({
             addMessage({
               id: toolMessageId,
               messageId: toolMessageId,
+              taskId: message.task_id,
               sender: 'system',
               content:
                 message.content || `Tool: ${message.tool}\nStatus: running`,
               timestamp: message.timestamp || Date.now(),
               type: 'tool',
-              taskKind: 'tool_execution',
+              taskKind: message.task_kind || 'tool_execution',
               toolName: message.tool,
+              sequence: message.sequence,
+              toolUseId: message.tool_use_id,
               toolStatus: message.tool_status || 'running',
+              toolExitCode: message.tool_exit_code,
+              toolDurationMs: message.tool_duration_ms,
               toolDetail: message.tool_detail,
               toolOutput: message.tool_output,
+              toolDiff: message.tool_diff,
+              toolPatch: message.tool_patch,
+              toolBefore: message.tool_before,
+              toolAfter: message.tool_after,
+              toolStructuredPatch: message.structured_patch,
+              toolInput: message.tool_input,
+              todoScope: message.todoScope,
               artifactId: message.artifact_id,
               artifactPath: message.artifact_path,
+              turnId: message.turnId || message.turn_id,
               isSubagentTool: message.is_subagent_tool,
+              subagentPrompt: message.subagent_prompt,
+              subagentOutput: message.subagent_output,
+              subagentTrace: message.subagent_trace,
+              subagentActivity: message.subagent_activity,
             })
             refs.onTaskEvent?.('tool_start', message)
           }
@@ -648,20 +838,38 @@ export const useChat = ({
             addMessage({
               id: toolMessageId,
               messageId: toolMessageId,
+              taskId: message.task_id,
               sender: 'system',
               content:
                 message.content ||
                 `Tool: ${message.tool}\nStatus: ${status}\nOutput: ${outputSummary}`,
               timestamp: message.timestamp || Date.now(),
               type: 'tool',
-              taskKind: 'tool_execution',
+              taskKind: message.task_kind || 'tool_execution',
               toolName: message.tool,
+              toolUseId: message.tool_use_id,
               toolStatus: message.tool_status || status,
+              toolExitCode: message.tool_exit_code,
+              toolDurationMs: message.tool_duration_ms,
               toolDetail: message.tool_detail,
-              toolOutput: message.tool_output || outputSummary,
+              toolOutput: message.subagent_output || message.tool_output || toolResult,
+              attachments: message.attachments,
+              sequence: message.sequence,
+              toolDiff: message.tool_diff,
+              toolPatch: message.tool_patch,
+              toolBefore: message.tool_before,
+              toolAfter: message.tool_after,
+              toolStructuredPatch: message.structured_patch,
+              toolInput: message.tool_input,
               artifactId: message.artifact_id,
+              todoScope: message.todoScope,
               artifactPath: message.artifact_path,
+              turnId: message.turnId || message.turn_id,
               isSubagentTool: message.is_subagent_tool,
+              subagentPrompt: message.subagent_prompt,
+              subagentOutput: message.subagent_output,
+              subagentTrace: message.subagent_trace,
+              subagentActivity: message.subagent_activity,
             })
             refs.onTaskEvent?.('tool_end', message)
           }
@@ -672,9 +880,14 @@ export const useChat = ({
           // Requirements: 4.3
           if (message.usage) {
             updateTokenUsage(message.usage, refs.projectId, message.task_id)
+            setUsageSession({ projectId: refs.projectId, sessionId: message.task_id })
             refs.onTaskEvent?.('usage', message.usage)
           }
 
+          break
+
+        case 'billing_update':
+          refs.onTaskEvent?.('billing_update', message)
           break
 
         case 'p2p_route':
@@ -721,6 +934,7 @@ export const useChat = ({
     },
     [
       addMessage,
+      loadHistory,
       updateMessage,
       finalizeMessage,
       removeMessage,
@@ -733,51 +947,9 @@ export const useChat = ({
   )
 
   /**
-   * Synchronize all state with backend after reconnection
-   * Requirements: 7.2
+   * Handle runtime event transport disconnect
    */
-  const syncAfterReconnect = useCallback(async () => {
-    if (!projectId) return
-
-    setIsSyncing(true)
-
-    try {
-      // BeeGame has one server-owned runtime-state snapshot.
-      await refreshProjectVisibility()
-      const projectStatus = useProjectStore.getState().projectStatus
-      if (isProjectWorkflowActive(projectStatus)) {
-        setCurrentTaskId(currentTaskId || projectId)
-        setIsLoading(true)
-        setCanContinue(false)
-      }
-
-      // Sync chat history only after the authoritative runtime state.
-      const { isStreaming } = useChatStore.getState()
-      if (!isStreaming) {
-        const history = (await api.getChatHistory(projectId)) as unknown
-        const messages = normalizeChatHistory(history)
-        const currentMessages = useChatStore.getState().messages
-        if (messages.length > 0 || currentMessages.length === 0) {
-          loadHistory(messages)
-        }
-      }
-    } catch (error) {
-      console.error('[useChat] Failed to synchronize state:', error)
-    } finally {
-      setIsSyncing(false)
-    }
-  }, [
-    projectId,
-    currentTaskId,
-    loadHistory,
-    setIsSyncing,
-    refreshProjectVisibility,
-  ])
-
-  /**
-   * Handle WebSocket close
-   */
-  const handleWebSocketClose = useCallback(() => {
+  const handleTransportClose = useCallback(() => {
     // A transport disconnect does not mean the server-owned BeeGame turn
     // stopped. Keep the runtime lock until the authoritative runtime snapshot
     // or a terminal status event says otherwise.
@@ -786,27 +958,38 @@ export const useChat = ({
 
   useEffect(() => {
     if (!projectStatus || projectStatus.project_id !== projectId) return
-    if (isProjectWorkflowActive(projectStatus)) {
+    if (Date.parse(projectStatus.updated_at ?? '') <= submissionBoundaryAt.current) return
+    if (isProjectExecutionActive(projectStatus) || projectStatus.active_subagents?.length) {
       setIsLoading(true)
       setCanContinue(false)
       setCurrentTaskId(current => current || projectId)
       return
     }
+    // Resume preflight precedes native acceptance. Its old idle snapshot is
+    // not evidence that the newly submitted request stopped.
+    if (isSubmitting) return
     // The backend snapshot is authoritative for whether a native turn is
     // alive. In particular, a server restart recovers an unterminated turn as
     // paused/failed. Leaving the previous local loading flag untouched for
     // those phases permanently locks the composer even though no BeeGame
     // worker exists. Approval state has its own explicit UI lock.
+    const observedAt = Date.parse(projectStatus.updated_at ?? '')
+    if (historyReady && Number.isFinite(observedAt) && projectStatus.active_subagents?.length === 0 && !pendingPermissions.length) {
+      useChatStore.getState().settleInactiveActivity(observedAt)
+    }
     setIsLoading(false)
     setCurrentTaskId(null)
-  }, [projectId, projectStatus])
+    setCurrentSender(null)
+    setIsStreaming(false)
+  }, [projectId, projectStatus, isSubmitting, historyReady, pendingPermissions.length, setCurrentSender, setIsStreaming])
 
-  // Initialize WebSocket connection
+  // Initialize the reconnect-safe runtime event transport
   const { state: wsState, reconnect } = useProjectEventPolling({
     projectId,
+    enabled: eventsEnabled && historyReady,
     onMessage: handleProjectEventMessage,
-    onClose: handleWebSocketClose,
-    onOpen: syncAfterReconnect, // Trigger sync on connect/reconnect
+    onClose: handleTransportClose,
+    onOpen: onTransportOpen,
     showToastError,
   })
 
@@ -821,11 +1004,25 @@ export const useChat = ({
       attachments?: ChatAttachmentPayload[],
       supersedesMessageId?: string,
     ) => {
+      if (isSubmitting) return false
       if (waitingPermission.isBlockingChat) {
         emitWaitingPermissionBlock(waitingPermission.message)
-        return
+        return false
       }
+      setAutoRetryTurnId(null)
+      autoRetryUsed.current = false
+      const requestProjectId = projectId
+      const requestGeneration = lifecycleRef.current.generation
+      const isCurrentRequest = () =>
+        lifecycleRef.current.mounted &&
+        lifecycleRef.current.projectId === requestProjectId &&
+        lifecycleRef.current.generation === requestGeneration
+      const runtime = useProjectStore.getState().projectStatus
+      const wasBusy = isLoading || (runtime?.project_id === projectId &&
+        (isProjectExecutionActive(runtime) || Boolean(runtime.active_subagents?.length)))
       try {
+        submissionBoundaryAt.current = Date.parse(runtime?.updated_at ?? '') || Date.now()
+        setIsSubmitting(true)
         setIsLoading(true)
         setCanContinue(false)
         if (wsState !== 'connected') {
@@ -835,8 +1032,7 @@ export const useChat = ({
         const clientMessageId = newClientMessageId()
         const optimisticTimestamp = Date.now()
 
-        // Add user message to chat history
-        addMessage({
+        const showUserMessage = () => addMessage({
           id: clientMessageId,
           clientMessageId,
           supersedesMessageId,
@@ -846,6 +1042,9 @@ export const useChat = ({
           timestamp: optimisticTimestamp,
           type: 'text',
         })
+        // An active turn accepts new input as Queue by default. Do not briefly
+        // render it as a sent chat bubble before the server confirms its fate.
+        if (!wasBusy && !supersedesMessageId) showUserMessage()
 
         // Send message to backend via REST API
         const response = (await api.sendMessage({
@@ -857,10 +1056,28 @@ export const useChat = ({
           supersedes_message_id: supersedesMessageId,
         })) as SendMessageResponse
 
+        if (!isCurrentRequest()) return false
+        if (supersedesMessageId) {
+          // A replacement rewinds the whole visible turn, not just its bubble.
+          // Reload the server's live branch before streaming its new output.
+          try {
+            const history = (await api.getChatHistory(projectId)) as unknown
+            if (isCurrentRequest()) loadHistory(normalizeChatHistory(history))
+          } catch (refreshError) {
+            // The edit was already accepted. A history refresh failure must
+            // not make the composer invite a duplicate replacement request.
+            console.warn('[useChat] Edited conversation refresh deferred:', refreshError)
+            void syncAfterReconnect()
+          }
+        } else if (response?.state === 'queued') {
+          if (!wasBusy) removeMessage(clientMessageId)
+        } else if (wasBusy) showUserMessage()
         setCurrentTaskId(response.task_id)
-        void syncAfterReconnect()
+        if (!supersedesMessageId) void syncAfterReconnect()
+        return true
       } catch (error) {
         console.error('[useChat] Failed to send message:', error)
+        if (!isCurrentRequest()) return false
         setIsLoading(false)
         const errorMessage = getErrorDisplayMessage(
           error,
@@ -877,18 +1094,25 @@ export const useChat = ({
 
         showToastError?.(errorMessage)
         onError?.(error instanceof Error ? error : new Error(errorMessage))
+        return false
+      } finally {
+        if (isCurrentRequest()) setIsSubmitting(false)
       }
     },
     [
       projectId,
       addMessage,
+      removeMessage,
       onError,
       showToastError,
       wsState,
       reconnect,
       syncAfterReconnect,
+      loadHistory,
       waitingPermission,
       emitWaitingPermissionBlock,
+      isLoading,
+      isSubmitting,
     ],
   )
 
@@ -896,27 +1120,42 @@ export const useChat = ({
    * Continue a paused task
    * Requirements: 6.4
    */
-  const continueTask = useCallback(async () => {
+  const continueTask = useCallback(async (failedTurnId?: string, automatic = false) => {
+    const generation = lifecycleRef.current.generation
+    const isCurrent = () => lifecycleRef.current.mounted &&
+      lifecycleRef.current.projectId === projectId && lifecycleRef.current.generation === generation
+    if (!isCurrent() || continuing.current || isSubmitting) return
+    cancelAutoRetry()
+    const runtime = useProjectStore.getState().projectStatus
+    if (runtime?.project_id === projectId &&
+      (isProjectExecutionActive(runtime) || Boolean(runtime.active_subagents?.length))) return
     if (waitingPermission.isBlockingChat) {
       emitWaitingPermissionBlock(waitingPermission.message)
       return
     }
     try {
+      submissionBoundaryAt.current = Date.parse(runtime?.updated_at ?? '') || Date.now()
+      setIsSubmitting(true)
       setIsLoading(true)
       setCanContinue(false)
       if (wsState !== 'connected') {
         reconnect()
       }
 
-      // Send continue request to backend
+      continuing.current = true
+      // The adapter binds retries to this exact failed turn before dispatch.
       const response = (await api.continueTask({
         project_id: projectId,
         task_id: currentTaskId || undefined,
+        ...(failedTurnId ? { failed_turn_id: failedTurnId } : {}),
+        ...(automatic ? { automatic_retry: true } : {}),
       })) as ContinueTaskResponse
+      if (!isCurrent()) return
 
       setCurrentTaskId(response.resume_task_id)
       void syncAfterReconnect()
     } catch (error) {
+      if (!isCurrent()) return
       console.error('[useChat] Failed to continue task:', error)
       setIsLoading(false)
       setCanContinue(true)
@@ -928,12 +1167,18 @@ export const useChat = ({
         content: errorMessage,
         timestamp: Date.now(),
         type: 'error',
+        turnId: failedTurnId,
+        taskKind: 'runtime_error',
       })
 
       showToastError?.(errorMessage)
       onError?.(error instanceof Error ? error : new Error(errorMessage))
+    } finally {
+      if (isCurrent()) { continuing.current = false; setIsSubmitting(false) }
     }
   }, [
+    isSubmitting,
+    cancelAutoRetry,
     projectId,
     currentTaskId,
     addMessage,
@@ -951,6 +1196,7 @@ export const useChat = ({
    * Requirements: 6.1
    */
   const stopTask = useCallback(async () => {
+    cancelAutoRetry()
     if (isStoppingRef.current) return
     const stopTargetId = currentTaskId || projectId
     if (!stopTargetId) {
@@ -963,21 +1209,26 @@ export const useChat = ({
       setIsStopping(true)
 
       // Send stop request to backend
-      await api.stopTask({ task_id: stopTargetId, project_id: projectId })
+      const response = await api.stopTask({ task_id: stopTargetId, project_id: projectId })
 
-      setIsLoading(false)
-      setCurrentTaskId(null)
-      setCurrentSender(null)
+      const stopped = response.state === 'stopped'
+      if (stopped) {
+        setIsLoading(false)
+        setCurrentTaskId(null)
+        setCurrentSender(null)
+        setIsStreaming(false)
+      }
       setCanContinue(false)
+      void refreshProjectVisibility().catch(error => console.warn('[useChat] Stop state refresh failed:', error))
 
       // Add system message
       addMessage({
         id: `stop-${stopTargetId}-${Date.now()}`,
         sender: 'system',
-        content: '任务已停止',
+        content: stopped ? '任务已停止' : '停止请求已提交，正在等待执行退出或清理确认。',
         timestamp: Date.now(),
         type: 'system_status',
-        taskKind: 'task_stopped',
+        ...(stopped ? { taskKind: 'task_stopped' } : {}),
       })
     } catch (error) {
       console.error('[useChat] Failed to stop task:', error)
@@ -996,13 +1247,15 @@ export const useChat = ({
       isStoppingRef.current = false
       setIsStopping(false)
     }
-  }, [currentTaskId, projectId, addMessage, setCurrentSender, onError])
+  }, [
+    cancelAutoRetry, currentTaskId, projectId, addMessage, setCurrentSender, setIsStreaming, onError, refreshProjectVisibility])
 
   const resolveToolPermission = useCallback(
     async (
-      permission: { gate_id: string },
+      permission: { gate_id: string; intent?: 'change' },
       decision: 'allow' | 'deny' = 'allow',
       scope: 'once' | 'session' = 'once',
+      answers?: Record<string, string>,
     ) => {
       const permissionSnapshot = pendingPermissions.find(
         item =>
@@ -1019,15 +1272,16 @@ export const useChat = ({
           message: submittedMessage,
         })
 
-        showToastSuccess?.(submittedMessage)
-
         await api.resolveToolPermission({
           project_id: projectId,
           gate_id: permission.gate_id,
           decision,
           scope,
+          ...(answers ? { answers } : {}),
+          ...(permission.intent ? { intent: permission.intent } : {}),
         })
 
+        if (!answers) showToastSuccess?.(submittedMessage)
         removePendingPermission(permission.gate_id)
         await refreshProjectVisibility()
         setPermissionState({
@@ -1039,6 +1293,15 @@ export const useChat = ({
         onTaskEvent?.('permission_resolved', { gate_id: permission.gate_id, decision })
       } catch (error) {
         console.error('[useChat] Failed to resolve tool permission:', error)
+        if ((error as { code?: string } | null)?.code === 'permission_not_pending') {
+          removePendingPermission(permission.gate_id)
+          setPermissionState({ gateId: null, action: null, phase: 'idle', message: '' })
+          await refreshProjectVisibility().catch(refreshError =>
+            console.error('[useChat] Failed to refresh expired permission:', refreshError),
+          )
+          showToastError?.('该权限请求已失效，已更新任务状态。')
+          return
+        }
         if (permissionSnapshot) {
           upsertPendingPermission(permissionSnapshot)
         }
@@ -1072,13 +1335,16 @@ export const useChat = ({
   return {
     sendMessage,
     continueTask,
+    autoRetryTurnId,
+    cancelAutoRetry,
     stopTask,
     resolveToolPermission,
     permissionState,
-    isLoading,
+    isLoading: isLoading || isSubmitting,
     isStopping,
     currentTaskId,
     canContinue,
     wsState,
+    sessionTokenUsage,
   }
 }

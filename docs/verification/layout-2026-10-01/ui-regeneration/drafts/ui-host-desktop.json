@@ -1,0 +1,68 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "host-desktop-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "host-root",
+    "nodes": [
+      {
+        "id": "host-root",
+        "role": "screen-root",
+        "layout": {
+          "size": [1280, 720],
+          "container": { "direction": "column", "gap": 0, "padding": [0, 0, 0, 0], "justify": "start", "align": "stretch" }
+        }
+      },
+      {
+        "id": "hud",
+        "role": "container",
+        "parentId": "host-root",
+        "layout": {
+          "size": [1280, 64],
+          "item": { "shrink": 0 },
+          "container": { "direction": "row", "gap": 16, "padding": [12, 24, 12, 24], "justify": "space-between", "align": "center" }
+        }
+      },
+      {
+        "id": "score",
+        "role": "text",
+        "parentId": "hud",
+        "text": "分数 3970",
+        "layout": { "size": [240, 40], "item": { "shrink": 0 } },
+        "style": { "fontSize": 28, "color": "#EAF0F8", "align": "left", "verticalAlign": "middle" }
+      },
+      {
+        "id": "hiscore",
+        "role": "text",
+        "parentId": "hud",
+        "text": "最高分 3970",
+        "layout": { "size": [240, 40], "item": { "shrink": 0 } },
+        "style": { "fontSize": 22, "color": "#93A3BC", "align": "center", "verticalAlign": "middle" }
+      },
+      {
+        "id": "mute-btn",
+        "role": "button",
+        "parentId": "hud",
+        "layout": { "size": [88, 40], "item": { "shrink": 0 } },
+        "style": { "cornerRadius": 8 }
+      },
+      {
+        "id": "pause-btn",
+        "role": "button",
+        "parentId": "hud",
+        "layout": { "size": [88, 40], "item": { "shrink": 0 } },
+        "style": { "cornerRadius": 8 }
+      },
+      {
+        "id": "game-view",
+        "role": "container",
+        "parentId": "host-root",
+        "layout": {
+          "size": [1280, 656],
+          "item": { "grow": 1, "shrink": 1 }
+        }
+      }
+    ]
+  }
+}

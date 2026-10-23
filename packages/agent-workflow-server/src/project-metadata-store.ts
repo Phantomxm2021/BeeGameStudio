@@ -11,6 +11,8 @@ export type BeeGameProjectMetadata = {
 }
 
 export type BeeGameProjectRuntimeSnapshot = {
+  workflow_protocol?: 'bgs.workflow.v3'
+  workflow_chat_session_id?: string
   usage?: {
     prompt_tokens: number
     completion_tokens: number
@@ -64,6 +66,63 @@ export class BeeGameProjectMetadataStore {
         created_at: row.created_at,
         ...parseRuntimeSnapshot(row.runtime_snapshot),
       }))
+  }
+
+  listProjectsPage(offset: number, limit: number, search = ''): BeeGameProjectMetadata[] {
+    const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`
+    return this.db
+      .query<{
+        id: string
+        name: string
+        root_path: string | null
+        created_at: number
+        runtime_snapshot: string | null
+      }, [string, string, number, number]>(
+        `SELECT id, name, root_path, created_at, runtime_snapshot
+         FROM projects
+         WHERE name LIKE ? ESCAPE '\\' OR root_path LIKE ? ESCAPE '\\'
+         ORDER BY created_at DESC, updated_at DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(pattern, pattern, limit, offset)
+      .map(row => ({
+        id: row.id,
+        name: row.name,
+        ...(row.root_path ? { root_path: row.root_path } : {}),
+        created_at: row.created_at,
+        ...parseRuntimeSnapshot(row.runtime_snapshot),
+      }))
+  }
+
+  countProjects(search = ''): number {
+    const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`
+    return this.db
+      .query<{ total: number }, [string, string]>(
+        `SELECT COUNT(*) AS total FROM projects
+         WHERE name LIKE ? ESCAPE '\\' OR root_path LIKE ? ESCAPE '\\'`,
+      )
+      .get(pattern, pattern)?.total ?? 0
+  }
+
+  getProject(id: string): BeeGameProjectMetadata | undefined {
+    const row = this.db
+      .query<{
+        id: string
+        name: string
+        root_path: string | null
+        created_at: number
+        runtime_snapshot: string | null
+      }, [string]>(
+        `SELECT id, name, root_path, created_at, runtime_snapshot FROM projects WHERE id = ?`,
+      )
+      .get(id)
+    return row ? {
+      id: row.id,
+      name: row.name,
+      ...(row.root_path ? { root_path: row.root_path } : {}),
+      created_at: row.created_at,
+      ...parseRuntimeSnapshot(row.runtime_snapshot),
+    } : undefined
   }
 
   upsertProject(project: BeeGameProjectMetadata): BeeGameProjectMetadata {
@@ -149,6 +208,8 @@ function normalizeRuntimeSnapshot(
       }
     : undefined
   const normalized: BeeGameProjectRuntimeSnapshot = {
+    ...(snapshot.workflow_protocol === 'bgs.workflow.v3' ? { workflow_protocol: 'bgs.workflow.v3' as const,
+      ...(snapshot.workflow_chat_session_id ? { workflow_chat_session_id: snapshot.workflow_chat_session_id } : {}) } : {}),
     ...(normalizedUsage ? { usage: normalizedUsage } : {}),
     ...(snapshot.phase_name?.trim()
       ? { phase_name: snapshot.phase_name.trim() }

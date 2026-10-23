@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "date": "2026-10-11",
+  "scope": "V3 1.46 system follow-up; synthetic/offline only",
+  "tests": [
+    {
+      "command": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/runtime-observability.test.ts packages/agent-workflow-server/src/beegame/standard-cli-debug.test.ts packages/agent-workflow-server/src/beegame/shared-playwright.test.ts packages/agent-workflow-server/src/beegame/preview-test-access.test.ts packages/agent-workflow-server/src/beegame/project-execution-access.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts packages/agent-workflow-server/src/beegame/game-content-package.test.ts packages/agent-workflow-server/src/beegame/design-layout-check.test.ts",
+      "exitCode": 0,
+      "pass": 121,
+      "fail": 0,
+      "expects": 758,
+      "files": 9
+    },
+    {
+      "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal-native.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/context-content.test.ts",
+      "exitCode": 0,
+      "pass": 34,
+      "fail": 0,
+      "expects": 398,
+      "files": 4,
+      "nativeFixtureRequests": 25,
+      "paidModelCalls": 0
+    },
+    {
+      "command": "bunx tsc --noEmit --pretty false",
+      "exitCode": 0
+    },
+    {
+      "command": "git diff --check -- <affected BGS source/test files>",
+      "exitCode": 0
+    }
+  ],
+  "protectedTrees": {
+    "apps/frontend": {
+      "files": 508,
+      "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+    },
+    "src": {
+      "files": 2445,
+      "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+    },
+    "packages/builtin-tools": {
+      "files": 383,
+      "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+    }
+  },
+  "actualCoverage": [
+    "Observed compact request before delayed SDK status; explicit timing basis; no inferred HTTP header ownership",
+    "Request-only cancellation and status-clear without boundary remain unfinished/usage unknown",
+    "Known child and late compact requests do not contaminate main/next turn",
+    "Preview startup error listener and JSON route installed before first navigation",
+    "Node-only helper entry, failure cleanup and current-turn capability reuse",
+    "Shared consumer numeric font, stretch, actions, subtree, Camera center and zoom pixel/projection tests",
+    "Actionable revision-authority and docs-relative source-link feedback without modifying checked sources",
+    "Same native UUID goal/discussion/change/interruption/continuation and fresh build/measurement after Scene/UI saves"
+  ],
+  "unverified": [
+    "Real project font and Camera corrections; full gameplay and audio listening quality",
+    "Earlier stalled compact provider/network cause",
+    "Paid Token reduction or game delivery acceptance"
+  ],
+  "boundaries": {
+    "officialFrontendChanged": false,
+    "claudeCodeSourceChanged": false,
+    "builtinToolsChanged": false,
+    "manualGameRepair": false,
+    "paidModelCalls": 0,
+    "normalServicesRestarted": false
+  }
+}

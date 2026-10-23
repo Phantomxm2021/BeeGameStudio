@@ -2,6 +2,13 @@ import { describe, expect, test } from 'bun:test'
 import { uploadPolicyResponse } from '../app'
 import { validateBeeGameAttachments, BeeGameUploadPolicyError } from '../security/upload-policy'
 
+test('accepts canonical base64 with either one or two padding characters', () => {
+  for (const value of ['a', 'ab', 'abc']) {
+    expect(validateBeeGameAttachments([{ type: 'file', filename: 'reference.txt', mediaType: 'text/plain',
+      data: Buffer.from(value).toString('base64') }])).toHaveLength(1)
+  }
+})
+
 const encoded = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64')
 const attachment = (data: string, filename = 'image.png', mediaType = 'image/png') => ({ type: 'image', data, filename, mediaType })
 

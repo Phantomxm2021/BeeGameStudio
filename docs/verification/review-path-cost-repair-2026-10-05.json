@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-05",
+  "scope": "System repair and cost follow-up after the latest paid test; offline validation only.",
+  "paidReference": "docs/verification/full-delivery-limit-paid-reaccept-2026-10-05.json",
+  "paidRoot": "/private/tmp/bgs-full-delivery-limit-reaccept-20261005-w8n9S4b3",
+  "changes": [
+    {
+      "cause": "Wrong receipt basename submitted four times, with only a generic scope denial.",
+      "category": "LLM copy error amplified by insufficient system diagnostics",
+      "repair": "The existing permission boundary now reports the exact expected Write.file_path for a rejected sibling receipt target. It states that no file was written and receipt content was not validated, so the child can correct the target without undoing unrelated edits or rerunning checks.",
+      "bounds": "No target substitution, automatic resubmission, permission waiver, synthetic receipt or new recovery stage. External targets and symlinks remain rejected; correct paths still require valid receipt content."
+    },
+    {
+      "cause": "Reviewer missed a broad exclusion contradicting an explicitly delegated professional decision, despite receiving the relevant responsibility prompt.",
+      "category": "LLM semantic omission; checking-method weakness, not missing ownership input",
+      "repair": "Replace existing common Consistency/Responsibility guidance with explicit comparison of broad policies, exclusions, actual category members, exceptions and pending choices. Prohibitions are also consequential decisions. Use the current prompt to identify ownership.",
+      "bounds": "No fruit-game answer, keyword rejection rule, new ownership definition, required report, semantic gate or extra reviewer. Skill still supplies methods only. This change is not proof of improved real-model detection."
+    },
+    {
+      "cause": "Reviser runs structural checks already performed automatically by the host before progression.",
+      "category": "Duplicated work and repeated-history cost",
+      "repair": "Clarify the existing task/Skill: submitting a revision receipt does not require a duplicate agent checker invocation. The host still checks saved bytes before revise advances to verify. A concrete unresolved question may still use the checker.",
+      "bounds": "No check removed from the host, source-read truncation, restricted author tool pool, forced batching, early release or omitted independent verification. Existing independent-edit batching guidance is retained, not duplicated."
+    },
+    {
+      "cause": "Repeated manual reconstruction of stage/actor costs obscures history growth and partial usage.",
+      "category": "Test observability gap",
+      "repair": "The existing transparent usage observer now also saves stageUsage grouped by actual stage and actor, with calls, usage completeness and observed input-context first/last/min/max. Unknown actor/context stays null. Metadata requests are not presented as model calls.",
+      "bounds": "Observer-only aggregation; no prompt/body/header retention, production billing estimate, credit limit, additional model request or modified provider bytes. Existing all-request totals and raw records are unchanged."
+    }
+  ],
+  "modifiedFiles": [
+    "src/beegame/design-review.ts",
+    "src/beegame/design-review.test.ts",
+    ".beegame/skills/builtinskills/game-design-check/SKILL.md",
+    "packages/agent-workflow-server/src/beegame/project-author.ts",
+    "packages/agent-workflow-server/src/beegame/design-release.test.ts",
+    "packages/agent-workflow-server/scripts/model-usage-proxy.ts",
+    "packages/agent-workflow-server/scripts/model-usage-proxy.test.ts"
+  ],
+  "observedCostReference": {
+    "basis": "Read-only aggregation of the original paid provider ledger, not a repaired paid run.",
+    "totalTokens": 836976,
+    "cacheReadTokens": 704544,
+    "afterFirstReceiptDenialTokens": 246884,
+    "afterFirstReceiptDenialCalls": 7,
+    "stages": [
+      {"stage": "GDD author", "calls": 5, "tokens": 221978, "firstInputContext": 37813, "lastInputContext": 46503},
+      {"stage": "GDD inspect", "calls": 6, "tokens": 122523, "firstInputContext": 10698, "lastInputContext": 30420},
+      {"stage": "GDD revise", "calls": 17, "tokens": 492475, "firstInputContext": 11155, "lastInputContext": 37155}
+    ],
+    "interpretation": "The seven-call failure path is an observed optimization target, not a promised saving. Fewer stage calls can reduce repeated-history tokens. Prompt caching does not remove those tokens from provider observation, and cached tokens do not imply equal Credit pricing to fresh input.",
+    "remaining": "Main-author initial context is still about 37.8K. This change does not blindly remove author tools, required source clauses or evidence to shrink it. Actual token reduction and semantic quality require a separately authorized representative paid run."
+  },
+  "verification": {
+    "distinctTestsPassed": 91,
+    "files": 6,
+    "primaryCommand": "bun test src/beegame/design-review.test.ts packages/agent-workflow-server/src/beegame/project-author.test.ts packages/agent-workflow-server/src/beegame/design-release.test.ts packages/agent-workflow-server/src/beegame/project-delivery.test.ts packages/agent-workflow/src/__tests__/design-review-result.test.ts",
+    "primaryTestsPassed": 78,
+    "observerCommand": "bun test packages/agent-workflow-server/scripts/model-usage-proxy.test.ts",
+    "observerTestsPassed": 13,
+    "environment": "Initial loopback tests could not bind inside the sandbox (EADDRINUSE). The same observer tests passed under approved escalation using only local fake responses, without account credentials or paid models.",
+    "regressions": [
+      "Inspect/revise/verify reject a mistyped receipt and identify its expected target; corrected path reaches original permission adjudication.",
+      "Correcting a target does not bypass malformed receipt content, symlink or out-of-scope checks.",
+      "Host automatically rejects an invalid saved revision even without an agent checker invocation; no baseline or verify progression is granted.",
+      "Stage/actor aggregation keeps missing and partial usage explicit, preserves concurrency attribution and excludes metadata from model-work groups.",
+      "Transparent observer still forwards unchanged responses and retains no prompt, header or stream content."
+    ],
+    "serverTypecheck": "passed",
+    "rootTypecheck": {
+      "passed": false,
+      "errorsInChangedFiles": false,
+      "remaining": "Same previously recorded frontend @beegame/scene-editor resolution/types, older authorDocuments fixture, SystemPrompt-brand tests and SDK notification literal test errors. Unrelated code preserved."
+    },
+    "skillValidation": {
+      "pythonQuickValidate": "Unavailable: PyYAML missing in both system and bundled Python. No dependency installed or validator shimmed.",
+      "fallback": "Bun YAML frontmatter parse; allowed properties, naming, description, unfinished scaffold and linked-reference checks passed. Manual review confirms no ownership definitions or case-specific answers were added.",
+      "behavioralValidation": "No independent real-model forward test performed; semantic improvements remain unproven."
+    },
+    "diffWhitespaceCheck": "passed for tracked edited file; other edited source/Skill files are already untracked in this dirty integration worktree."
+  },
+  "integrity": {
+    "manualProductEdits": false,
+    "paidReceiptsOrLogsRewritten": false,
+    "newPaidRequests": 0,
+    "executionCeiling": 32,
+    "executionCeilingChanged": false,
+    "extraReviewStages": false,
+    "automaticRetriesAdded": false,
+    "previousRolledBackOptimizationsReapplied": false
+  },
+  "skills": [
+    {"name": "skill-creator", "influence": "Narrow method update in the existing review Skill, not a new case-specific rule or ownership framework."},
+    {"name": "OpenAI Docs", "influence": "Actionable invalid-input diagnostics and evaluating token savings alongside correctness/evidence; not automatic retry or lower acceptance quality.",
+      "sources": ["https://developers.openai.com/api/docs/guides/agents-api/errors", "https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling"]}
+  ],
+  "next": "Use a separately authorized fresh paid run to verify actual recovery and semantic review, comparing equivalent stage completeness and total/input/cache/output tokens. Do not manually continue or repair the failed product to manufacture a passing result."
+}

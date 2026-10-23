@@ -1,0 +1,4365 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "scene.breakout-level",
+  "assetRefs": [],
+  "kind": "scene-2d",
+  "data": {
+    "settings": {
+      "coordinateSystem": {
+        "origin": "top-left",
+        "units": "logical-pixels",
+        "width": 1280,
+        "height": 720,
+        "pixelsPerUnit": 100
+      }
+    },
+    "nodes": [
+      {
+        "id": "field-walls",
+        "name": "场地边界组",
+        "semantic": [
+          "playfield-boundaries"
+        ],
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        },
+        "data": {
+          "authoredMetadata": "墙厚 16；内界 x[160,1120] y[64,672]；底部不封边"
+        }
+      },
+      {
+        "id": "wall-left",
+        "parentId": "field-walls",
+        "name": "场地left边界",
+        "semantic": [
+          "boundary",
+          "wall"
+        ],
+        "transform": {
+          "position": [
+            152,
+            368,
+            0
+          ]
+        },
+        "zIndex": 0,
+        "components": [
+          {
+            "id": "comp.wall-left.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                16,
+                640
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "note": "草稿占位：最终替换为已验证 assetRef，几何不变"
+            }
+          },
+          {
+            "id": "comp.wall-left.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                16,
+                640
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "boundary.wall",
+              "config": {
+                "edge": "left",
+                "restitution": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "wall-right",
+        "parentId": "field-walls",
+        "name": "场地right边界",
+        "semantic": [
+          "boundary",
+          "wall"
+        ],
+        "transform": {
+          "position": [
+            1128,
+            368,
+            0
+          ]
+        },
+        "zIndex": 0,
+        "components": [
+          {
+            "id": "comp.wall-right.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                16,
+                640
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "note": "草稿占位：最终替换为已验证 assetRef，几何不变"
+            }
+          },
+          {
+            "id": "comp.wall-right.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                16,
+                640
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "boundary.wall",
+              "config": {
+                "edge": "right",
+                "restitution": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "wall-top",
+        "parentId": "field-walls",
+        "name": "场地top边界",
+        "semantic": [
+          "boundary",
+          "wall"
+        ],
+        "transform": {
+          "position": [
+            640,
+            56,
+            0
+          ]
+        },
+        "zIndex": 0,
+        "components": [
+          {
+            "id": "comp.wall-top.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                992,
+                16
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "note": "草稿占位：最终替换为已验证 assetRef，几何不变"
+            }
+          },
+          {
+            "id": "comp.wall-top.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                992,
+                16
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "boundary.wall",
+              "config": {
+                "edge": "top",
+                "restitution": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "wall-bottom",
+        "parentId": "field-walls",
+        "name": "失误线（底部开口）",
+        "semantic": [
+          "boundary",
+          "miss-line"
+        ],
+        "transform": {
+          "position": [
+            640,
+            672,
+            0
+          ]
+        },
+        "zIndex": 0,
+        "components": [
+          {
+            "id": "comp.wall-bottom.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                960,
+                8
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "note": "草稿占位：最终替换为已验证 assetRef，几何不变"
+            }
+          },
+          {
+            "id": "comp.wall-bottom.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                960,
+                8
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": true
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "boundary.miss",
+              "config": {
+                "lineY": 672,
+                "restitution": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "bricks",
+        "name": "砖块阵列（6 行规则矩形阵列）",
+        "semantic": [
+          "brick-array"
+        ],
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        },
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.array",
+              "config": {
+                "rows": 6,
+                "columns": 10,
+                "brickSize": [
+                  80,
+                  28
+                ],
+                "gap": [
+                  8,
+                  8
+                ],
+                "arrayOrigin": [
+                  204,
+                  96
+                ],
+                "destroyedBricksStayDestroyed": true,
+                "note": "阵列参数几何初值；最终数值以平衡文档为准"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c1",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第1列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            244,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c1.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c1.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 1,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c2",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第2列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            332,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c2.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c2.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 2,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c3",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第3列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            420,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c3.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c3.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 3,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c4",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第4列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            508,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c4.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c4.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 4,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c5",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第5列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            596,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c5.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c5.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 5,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c6",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第6列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            684,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c6.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c6.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 6,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c7",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第7列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            772,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c7.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c7.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 7,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c8",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第8列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            860,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c8.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c8.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 8,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c9",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第9列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            948,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c9.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c9.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 9,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r1-c10",
+        "parentId": "bricks",
+        "name": "普通砖块 第1行 第10列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            1036,
+            110,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r1-c10.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 1,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r1-c10.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 1,
+                "column": 10,
+                "pointsRef": "tuning.brickPoints.row1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c1",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第1列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            244,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c1.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c1.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 1,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c2",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第2列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            332,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c2.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c2.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 2,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c3",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第3列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            420,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c3.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c3.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 3,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c4",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第4列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            508,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c4.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c4.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 4,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c5",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第5列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            596,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c5.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c5.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 5,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c6",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第6列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            684,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c6.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c6.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 6,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c7",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第7列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            772,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c7.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c7.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 7,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c8",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第8列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            860,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c8.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c8.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 8,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c9",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第9列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            948,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c9.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c9.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 9,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r2-c10",
+        "parentId": "bricks",
+        "name": "普通砖块 第2行 第10列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            1036,
+            146,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r2-c10.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 2,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r2-c10.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 2,
+                "column": 10,
+                "pointsRef": "tuning.brickPoints.row2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c1",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第1列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            244,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c1.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c1.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 1,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c2",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第2列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            332,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c2.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c2.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 2,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c3",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第3列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            420,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c3.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c3.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 3,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c4",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第4列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            508,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c4.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c4.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 4,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c5",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第5列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            596,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c5.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c5.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 5,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c6",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第6列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            684,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c6.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c6.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 6,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c7",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第7列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            772,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c7.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c7.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 7,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c8",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第8列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            860,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c8.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c8.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 8,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c9",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第9列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            948,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c9.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c9.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 9,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r3-c10",
+        "parentId": "bricks",
+        "name": "普通砖块 第3行 第10列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            1036,
+            182,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r3-c10.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 3,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r3-c10.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 3,
+                "column": 10,
+                "pointsRef": "tuning.brickPoints.row3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c1",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第1列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            244,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c1.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c1.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 1,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c2",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第2列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            332,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c2.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c2.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 2,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c3",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第3列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            420,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c3.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c3.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 3,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c4",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第4列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            508,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c4.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c4.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 4,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c5",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第5列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            596,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c5.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c5.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 5,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c6",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第6列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            684,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c6.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c6.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 6,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c7",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第7列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            772,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c7.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c7.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 7,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c8",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第8列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            860,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c8.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c8.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 8,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c9",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第9列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            948,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c9.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c9.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 9,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r4-c10",
+        "parentId": "bricks",
+        "name": "普通砖块 第4行 第10列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            1036,
+            218,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r4-c10.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 4,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r4-c10.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 4,
+                "column": 10,
+                "pointsRef": "tuning.brickPoints.row4"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c1",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第1列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            244,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c1.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c1.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 1,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c2",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第2列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            332,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c2.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c2.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 2,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c3",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第3列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            420,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c3.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c3.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 3,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c4",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第4列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            508,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c4.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c4.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 4,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c5",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第5列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            596,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c5.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c5.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 5,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c6",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第6列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            684,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c6.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c6.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 6,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c7",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第7列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            772,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c7.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c7.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 7,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c8",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第8列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            860,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c8.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c8.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 8,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c9",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第9列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            948,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c9.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c9.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 9,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r5-c10",
+        "parentId": "bricks",
+        "name": "普通砖块 第5行 第10列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            1036,
+            254,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r5-c10.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 5,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r5-c10.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 5,
+                "column": 10,
+                "pointsRef": "tuning.brickPoints.row5"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c1",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第1列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            244,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c1.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c1.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 1,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c2",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第2列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            332,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c2.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c2.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 2,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c3",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第3列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            420,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c3.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c3.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 3,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c4",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第4列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            508,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c4.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c4.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 4,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c5",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第5列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            596,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c5.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c5.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 5,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c6",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第6列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            684,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c6.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c6.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 6,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c7",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第7列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            772,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c7.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c7.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 7,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c8",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第8列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            860,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c8.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c8.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 8,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c9",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第9列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            948,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c9.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c9.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 9,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "brick-r6-c10",
+        "parentId": "bricks",
+        "name": "普通砖块 第6行 第10列",
+        "semantic": [
+          "brick"
+        ],
+        "transform": {
+          "position": [
+            1036,
+            290,
+            0
+          ]
+        },
+        "zIndex": 10,
+        "components": [
+          {
+            "id": "comp.brick-r6-c10.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "colorRow": 6,
+              "note": "草稿占位：行视觉/行分值最终绑定资源与调值文件，几何不变"
+            }
+          },
+          {
+            "id": "comp.brick-r6-c10.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                80,
+                28
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "brick.destructible",
+              "config": {
+                "maxHits": 1,
+                "row": 6,
+                "column": 10,
+                "pointsRef": "tuning.brickPoints.row6"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "paddle",
+        "name": "玩家挡板",
+        "semantic": [
+          "paddle",
+          "player"
+        ],
+        "transform": {
+          "position": [
+            640,
+            608,
+            0
+          ]
+        },
+        "zIndex": 20,
+        "components": [
+          {
+            "id": "comp.paddle.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                120,
+                16
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "note": "胶囊外形；最终绑定已验证 assetRef"
+            }
+          },
+          {
+            "id": "comp.paddle.collider",
+            "type": "box-collider-2d",
+            "data": {
+              "size": [
+                120,
+                16
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "paddle.movement",
+              "config": {
+                "axis": "horizontal",
+                "followPointer": true,
+                "bounds": {
+                  "minX": 160,
+                  "maxX": 1120
+                },
+                "keyboardSpeedRef": "tuning.paddleKeyboardSpeed"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "ball",
+        "name": "球",
+        "semantic": [
+          "ball"
+        ],
+        "transform": {
+          "position": [
+            640,
+            588,
+            0
+          ]
+        },
+        "zIndex": 30,
+        "components": [
+          {
+            "id": "comp.ball.sprite",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                16,
+                16
+              ],
+              "anchor": [
+                0.5,
+                0.5
+              ],
+              "placeholder": true,
+              "note": "最终绑定已验证 assetRef"
+            }
+          },
+          {
+            "id": "comp.ball.collider",
+            "type": "circle-collider-2d",
+            "data": {
+              "radius": 8,
+              "offset": [
+                0,
+                0
+              ],
+              "isTrigger": false
+            }
+          }
+        ],
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "ball.movement",
+              "config": {
+                "attachTo": "paddle",
+                "attachOffset": [
+                  0,
+                  -20
+                ],
+                "speedRef": "tuning.ballSpeed",
+                "speedupRef": "tuning.ballSpeedup",
+                "serveAngleRef": "tuning.serveAngleRange",
+                "bounceRef": "tuning.paddleBounce"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "game-director",
+        "name": "局面记账节点",
+        "semantic": [
+          "game-director"
+        ],
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        },
+        "data": {
+          "behaviors": [
+            {
+              "id": "beh",
+              "kind": "game.session",
+              "config": {
+                "livesRef": "tuning.startLives",
+                "scoreRef": "session.score",
+                "clearCondition": "all-bricks-destroyed"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "main-camera",
+        "name": "主正交相机",
+        "semantic": [
+          "main-camera"
+        ],
+        "transform": {
+          "position": [
+            640,
+            360,
+            10
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "components": [
+          {
+            "id": "comp.camera",
+            "type": "camera",
+            "data": {
+              "enabled": true,
+              "orthographic": true,
+              "coordinateSpace": "logical-pixels",
+              "orthographicSize": 3.6,
+              "viewport": {
+                "width": 1280,
+                "height": 720
+              },
+              "framing": "keep-height",
+              "nearClip": 1,
+              "farClip": 100
+            }
+          }
+        ]
+      }
+    ],
+    "cameraNodeId": "main-camera"
+  }
+}

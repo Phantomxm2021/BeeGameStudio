@@ -3,12 +3,11 @@ import { parseCanonicalBeeGameAssetManifest } from '../beegame/asset-contracts'
 
 describe('BeeGame canonical modular resource contract', () => {
   const manifest = {
-    version: 8,
+    version: 9,
     project_target: {
       asset_format_capabilities: ['png', 'json', 'yaml'],
       resource_library_usage: 'preferred',
       runtime_asset_root: 'assets/runtime',
-      content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
     requirements: [{ id: 'visual.player', required: true, acquisition_profile: {
@@ -17,9 +16,9 @@ describe('BeeGame canonical modular resource contract', () => {
     resources: [],
   }
 
-  it('accepts the single resource-content manifest', () => {
+  it('accepts the single resource manifest', () => {
     expect(parseCanonicalBeeGameAssetManifest(manifest)).toMatchObject({
-      version: 8,
+      version: 9,
       requirements: [{ id: 'visual.player', required: true, acquisition_profile: expect.any(Object) }],
       resources: [],
     })
@@ -33,10 +32,10 @@ describe('BeeGame canonical modular resource contract', () => {
     })).toThrow(/unknown fields|unknown field/i)
   })
 
-  it('requires the canonical resource, content and generated roots', () => {
+  it('rejects the retired resource content root', () => {
     expect(() => parseCanonicalBeeGameAssetManifest({
       ...manifest,
-      project_target: { ...manifest.project_target, content_root: 'assets/runtime' },
-    })).toThrow(/content_root must be assets\/content/i)
+      project_target: { ...manifest.project_target, content_root: 'assets/content' },
+    })).toThrow(/unknown fields/i)
   })
 })

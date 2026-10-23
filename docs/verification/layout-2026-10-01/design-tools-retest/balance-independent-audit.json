@@ -1,0 +1,25 @@
+{
+  "method": "Read-only independent first face-hit and return-to-paddle calculation; no product or simulation model edited.",
+  "sourceHashes": {
+    "model": "010186cf815acd95f5330b8204604dc35389d1cba06194386fe358069ed9b2e9",
+    "scene": "d9eec7fdcbb9a03aa016f1c2e80dfdc609df8d3a516b8ef3d9553eba09bedbd9"
+  },
+  "firstBrick": {
+    "id": "brick-r6-c8",
+    "t": 1.000812255154747,
+    "xAt": 871.5914982049293,
+    "bottom": 312,
+    "faceInterior": true
+  },
+  "returnContact": {
+    "xAt": 1106.5393949345676,
+    "paddleContactY": 592,
+    "paddleCenter": 1060,
+    "requestedH": -0.95,
+    "observedH": 0.7756565822427925,
+    "claimedAngleDegrees": -57,
+    "angleFromAuthoredHitPointRule": 46.539394934567554
+  },
+  "interveningWallCollision": false,
+  "consistent": false
+}

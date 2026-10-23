@@ -1,0 +1,246 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-hud",
+  "kind": "ui-hud",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "hud-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            960,
+            540
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1200,
+              540
+            ],
+            [
+              960,
+              600
+            ],
+            [
+              1280,
+              720
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "bar",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            0
+          ],
+          "sizeDelta": [
+            0,
+            56
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#0E0C26",
+            "opacity": 0.72
+          }
+        },
+        "data": {
+          "container": {
+            "direction": "row",
+            "gap": 0,
+            "justify": "space-between",
+            "align": "center"
+          }
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "score-label",
+        "role": "text",
+        "enabled": true,
+        "parentId": "bar",
+        "layout": {
+          "anchor": "middle-left",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            180,
+            32
+          ]
+        },
+        "text": "分数 0",
+        "style": {
+          "fontSize": 22,
+          "color": "#F4F2FF",
+          "align": "left",
+          "verticalAlign": "middle"
+        }
+      },
+      {
+        "id": "lives",
+        "role": "container",
+        "enabled": true,
+        "parentId": "bar",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            120,
+            28
+          ]
+        },
+        "data": {
+          "container": {
+            "direction": "row",
+            "gap": 8,
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "life-0",
+        "role": "shape",
+        "enabled": true,
+        "name": "life-icon-0",
+        "parentId": "lives",
+        "layout": {
+          "size": [
+            24,
+            24
+          ]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#5CFFB0"
+        }
+      },
+      {
+        "id": "life-1",
+        "role": "shape",
+        "enabled": true,
+        "name": "life-icon-1",
+        "parentId": "lives",
+        "layout": {
+          "size": [
+            24,
+            24
+          ]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#5CFFB0"
+        }
+      },
+      {
+        "id": "life-2",
+        "role": "shape",
+        "enabled": true,
+        "name": "life-icon-2",
+        "parentId": "lives",
+        "layout": {
+          "size": [
+            24,
+            24
+          ]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#5CFFB0"
+        }
+      },
+      {
+        "id": "pause-btn",
+        "role": "button",
+        "enabled": true,
+        "parentId": "bar",
+        "layout": {
+          "anchor": "middle-right",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            44,
+            44
+          ]
+        },
+        "text": "II",
+        "style": {
+          "fontSize": 18,
+          "color": "#F4F2FF",
+          "background": {
+            "color": "#2C2860",
+            "radius": 10
+          }
+        }
+      },
+      {
+        "id": "serve-hint",
+        "role": "text",
+        "enabled": true,
+        "layout": {
+          "anchor": "bottom-center",
+          "position": [
+            0,
+            -120
+          ],
+          "size": [
+            420,
+            32
+          ]
+        },
+        "text": "点击 / 空格 发球",
+        "style": {
+          "fontSize": 20,
+          "color": "#9E9AC8",
+          "align": "center",
+          "verticalAlign": "middle"
+        },
+        "data": {
+          "visibleWhen": "state:ball-stuck"
+        },
+        "parentId": "root"
+      }
+    ]
+  }
+}

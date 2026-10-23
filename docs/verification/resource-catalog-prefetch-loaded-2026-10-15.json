@@ -1,0 +1,185 @@
+{
+  "restart": {
+    "requestedService": "runtime only",
+    "oldRuntimePid": 50048,
+    "newRuntimePid": 54326,
+    "unchangedObservedPids": { "frontend": 50050, "billing": 47439, "skills": 47440 },
+    "resourcePidObservation": "Resource PID changed from 51578 to 53689 during inspection, outside this restart operation. Its health is 200 and background processing remains disabled."
+  },
+  "historicalWriterEvidence": [
+    "bgs-v3-176-reservation-fault-workflow-2026-10-12.json",
+    "bgs-v3-178-deployed-recovery-export-2026-10-12.json"
+  ],
+  "observedAt": "2026-10-14T21:02:06.118Z",
+  "health": [
+    {
+      "port": 62173,
+      "httpStatus": 200
+    },
+    {
+      "port": 62174,
+      "httpStatus": 200
+    },
+    {
+      "port": 62175,
+      "httpStatus": 200
+    },
+    {
+      "port": 62176,
+      "httpStatus": 200
+    },
+    {
+      "port": 62177,
+      "httpStatus": 200,
+      "resourceProcessingEnabled": false
+    }
+  ],
+  "loaded": {
+    "observedAt": "2026-10-14T21:01:29.481Z",
+    "pid": 54326,
+    "cwd": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+    "hashes": {
+      "agent-tools.ts": "67f771adf004ae72bdfdf8e2f7d94d3b50f110844c2f47ed46ece9900a7ecb66",
+      "agent-goal.ts": "ebaa192a9adc1cca4b15109a2c581715b1f7340110563548840e187371e3bee7"
+    },
+    "initialOnlyHookLoaded": true,
+    "catalog": {
+      "total": 25,
+      "shown": 25,
+      "packs": [
+        {
+          "name": "kenney_1-bit-pack",
+          "count": 8
+        },
+        {
+          "name": "kenney_blaster-kit_2.1",
+          "count": 41
+        },
+        {
+          "name": "kenney_blocky-characters_20",
+          "count": 35
+        },
+        {
+          "name": "kenney_casino-audio",
+          "count": 54
+        },
+        {
+          "name": "kenney_castle-kit",
+          "count": 77
+        },
+        {
+          "name": "kenney_factory-kit_3.0",
+          "count": 287
+        },
+        {
+          "name": "kenney_food-kit",
+          "count": 401
+        },
+        {
+          "name": "kenney_impact-sounds",
+          "count": 130
+        },
+        {
+          "name": "kenney_micro-roguelike",
+          "count": 2
+        },
+        {
+          "name": "kenney_mini-characters",
+          "count": 53
+        },
+        {
+          "name": "kenney_modular-cave-kit_1.0",
+          "count": 81
+        },
+        {
+          "name": "kenney_modular-dungeon-kit_1.0",
+          "count": 81
+        },
+        {
+          "name": "kenney_nature-kit",
+          "count": 329
+        },
+        {
+          "name": "kenney_pirate-kit",
+          "count": 145
+        },
+        {
+          "name": "kenney_platformer-kit",
+          "count": 307
+        },
+        {
+          "name": "kenney_sci-fi-sounds",
+          "count": 73
+        },
+        {
+          "name": "kenney_space-station-kit",
+          "count": 195
+        },
+        {
+          "name": "kenney_survival-kit",
+          "count": 81
+        },
+        {
+          "name": "kenney_tiny-dungeon",
+          "count": 1
+        },
+        {
+          "name": "kenney_tiny-farm",
+          "count": 1
+        },
+        {
+          "name": "kenney_tower-defense-kit",
+          "count": 151
+        },
+        {
+          "name": "kenney_train-kit",
+          "count": 207
+        },
+        {
+          "name": "kenney_ui-pack-adventure",
+          "count": 128
+        },
+        {
+          "name": "kenney_watercraft-pack",
+          "count": 47
+        },
+        {
+          "name": "Starter-Kit-FPS",
+          "count": 29
+        }
+      ]
+    },
+    "requestCount": 1,
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/api/resource-catalog/packs",
+        "status": 200
+      }
+    ],
+    "success": true,
+    "generationTasksStarted": 0,
+    "modelCalls": 0,
+    "imageCalls": 0,
+    "existingProjectsModified": false
+  },
+  "sourceStillMatches": true,
+  "after": {
+    "observedAt": "2026-10-14T21:02:06.114Z",
+    "sessions": 0,
+    "activeSessions": 0,
+    "inspectedRuns": 59,
+    "unsettledWriters": [
+      "v3-edit-fault-8741b8db-84ea-437f-80cd-15c1c6f1f522",
+      "v3-edit-fault-bf1512d1-196f-48cc-a723-49685333fc2e",
+      "v3-host-restart-c4b3872f-5099-4535-a954-6134b8d8210b"
+    ],
+    "pendingResourceJobs": 0,
+    "inspectedIntakeFiles": 103,
+    "runningIntakeJobs": [],
+    "idle": false
+  },
+  "retainedHistoricalWriterIdsUnchanged": true,
+  "noLiveUserWork": true,
+  "note": "Three deliberately killed synthetic fault-test writers remain unresolved; not released, resumed or changed."
+}

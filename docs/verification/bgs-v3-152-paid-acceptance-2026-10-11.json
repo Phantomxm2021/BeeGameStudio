@@ -1,0 +1,201 @@
+{
+  "version": "bgs-v3-152-paid.1",
+  "status": "completed-not-accepted",
+  "authorization": {
+    "paidMessages": 1,
+    "automaticExtraPaidRuns": 0,
+    "manualGameEdits": 0,
+    "formalFrontendChanges": false,
+    "claudeCodeChanges": false
+  },
+  "projectId": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+  "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+  "requestKey": "6a868119-28d9-4448-93b6-ad44d70ff1e3",
+  "attemptId": "1e6d30d0-1d27-43bf-86af-288cddd31142",
+  "startedAt": "2026-10-11T12:22:41.265Z",
+  "finishedAt": "2026-10-11T13:15:46.820Z",
+  "nativeModel": "ark-code-latest",
+  "deployment": {
+    "runtimePID": 51775,
+    "resourcesPID": 51776,
+    "health": [
+      {
+        "port": 62173,
+        "http": 200
+      },
+      {
+        "port": 62174,
+        "http": 200
+      },
+      {
+        "port": 62175,
+        "http": 200
+      },
+      {
+        "port": 62176,
+        "http": 200
+      },
+      {
+        "port": 62177,
+        "http": 200
+      }
+    ],
+    "regression": {
+      "pass": 9,
+      "fail": 0,
+      "files": 3,
+      "expectations": 134,
+      "restrictedFailure": "OS sandbox launch denied; allowed-environment rerun passed"
+    }
+  },
+  "cost": {
+    "sdk": {
+      "total_tokens": 15137852,
+      "prompt_tokens": 587009,
+      "cache_read_tokens": 14455304,
+      "completion_tokens": 95539,
+      "cache_creation_tokens": 0
+    },
+    "transcript": {
+      "requests": 152,
+      "total": 15136930,
+      "input": 587009,
+      "cached": 14455304,
+      "output": 94617,
+      "roles": {
+        "main": {
+          "requests": 112,
+          "tokens": 12171977
+        },
+        "compact": {
+          "requests": 1,
+          "tokens": 165803
+        },
+        "review": {
+          "requests": 39,
+          "tokens": 2799150
+        }
+      }
+    },
+    "unattributedOutputTokens": 922,
+    "ledgerMatchesSDK": false,
+    "ledgerInputCacheMatchSDK": true,
+    "counting": "First provider-message ID across original main/subagent files, dedup before timestamp filtering; maximum streamed usage within each original message. SDK total is authoritative; 922 output-token difference remains unattributed, not silently allocated.",
+    "phases": {
+      "准备与八领域初读": {
+        "requests": 15,
+        "tokens": 1878382
+      },
+      "测试编写与首轮运行": {
+        "requests": 13,
+        "tokens": 1892704
+      },
+      "保存值核对与焦点修复": {
+        "requests": 11,
+        "tokens": 1726972
+      },
+      "十三次零碎文档修订": {
+        "requests": 13,
+        "tokens": 2131914
+      },
+      "原生历史压缩": {
+        "requests": 1,
+        "tokens": 165803
+      },
+      "压缩后重查JSON与订正": {
+        "requests": 7,
+        "tokens": 365465
+      },
+      "测试修订与重复运行": {
+        "requests": 10,
+        "tokens": 588053
+      },
+      "报告、版本、首次测量与交接": {
+        "requests": 21,
+        "tokens": 1534075
+      },
+      "初次独立Review": {
+        "requests": 30,
+        "tokens": 1972496
+      },
+      "Review后修订与重复测量收尾": {
+        "requests": 22,
+        "tokens": 2054412
+      },
+      "L2定向复核": {
+        "requests": 9,
+        "tokens": 826654
+      }
+    },
+    "statistics": {
+      "firstInput": 108336,
+      "maxInput": 166793,
+      "lastInput": 100303,
+      "docFragmentOutput": 5381
+    },
+    "previousSDKTotal": 10719833,
+    "changePercent": 41.21350584472725,
+    "comparisonLimit": "Same project/history preserved, but tasks differ; not a controlled A/B marginal cost estimate."
+  },
+  "review": {
+    "initial": "FAIL: stale L2 topology adjacent to corrected default paragraph",
+    "targeted": "PASS: closed L2 only",
+    "missed": [
+      "AUDIO_DESIGN same-type polyphony max 2 is not implemented; src/audio.ts unchanged and no cap assertion",
+      "Fullflow camera oracle still uses s1 world x540 rather than saved x560; screen x640 rather than x664; broad probe can pass",
+      "REPORT_V24 claims actual listening without retained listening evidence; audio source design explicitly says isolated browser muted"
+    ],
+    "limits": "No leak rate or universal reviewer reliability inferred from one project."
+  },
+  "closure": {
+    "runVersion": 59,
+    "status": "blocked",
+    "writerLiveness": "none",
+    "turnStatus": "ended",
+    "deliveryEligible": false,
+    "quality": "unverified",
+    "measurements": 4,
+    "finalMeasurementId": "69e61987-9830-4028-a4e0-d6a701b596aa",
+    "freshness": {
+      "current": true
+    },
+    "artifact": {
+      "path": "dist",
+      "sha256": "325ade7361db13cab53afba81435659568a651933874784bd73ddd2abdf34558"
+    },
+    "checks": [
+      "build:passed",
+      "runtime-smoke:passed"
+    ],
+    "browser": "Final measured title screen rendered in independent debug iframe. Not gameplay/aesthetic/listening acceptance."
+  },
+  "toolUse": {
+    "sourceBatchUsed": false,
+    "scenePointUsed": true,
+    "bunGuardObserved": true,
+    "runtimeErrorPolicyFailUsed": false,
+    "numericSampleBoundsUsed": false
+  },
+  "nativeOutput": {
+    "outsideGame": true,
+    "directory": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-native-output-e5860e7fc7d3f7178d26f51ad405ec05",
+    "files": 579,
+    "bytes": 2849745,
+    "maxBytes": 1363684
+  },
+  "protectedAfter": {
+    "frontend": {
+      "files": 825,
+      "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+    },
+    "claude": {
+      "files": 2445,
+      "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+    },
+    "builtin": {
+      "files": 383,
+      "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+    }
+  },
+  "oldEvidenceUnchanged": true
+}

@@ -1,0 +1,115 @@
+{
+  "date": "2026-10-15",
+  "scope": "First incremental frontend cleanup in the integration worktree; preserve existing uncommitted work and current user-facing features.",
+  "changes": [
+    "Export canvasReferenceSize from the frontend scene-editor type facade to match the real shared module export.",
+    "Add frontend typecheck script: tsc -b --pretty false.",
+    "Move sessionStorage draft, OAuth and intake recovery functions from LandingView.tsx into Landing/intakeRecovery.ts; no new state framework.",
+    "Remove unreferenced HeroIntro.tsx, AttachmentBuildReview.tsx and PromptModelIcon.tsx and the test file dedicated only to AttachmentBuildReview.",
+    "Remove unreferenced public/assets/beegame_avatar.png (57439 bytes), with a recovery copy."
+  ],
+  "equivalence": {
+    "landingComponentBodyUnchanged": true,
+    "movedFunctionCount": 17,
+    "allMovedFunctionBodiesIdentical": true,
+    "oldLines": 1777,
+    "newLines": 1549,
+    "removedAssetBytes": 57439
+  },
+  "verification": {
+    "typecheck": {
+      "command": "bun run typecheck",
+      "exitCode": 0
+    },
+    "build": {
+      "command": "node_modules/.bin/vite build --outDir <isolated temporary directory>/dist",
+      "exitCode": 0,
+      "vite": "7.3.6",
+      "modules": 4234,
+      "elapsedSeconds": 8.34,
+      "productionDistUntouched": true,
+      "notes": "Build still warns about >1000 kB chunks. No before/after bundle savings or browser-performance measurement."
+    },
+    "tests": {
+      "tests": 144,
+      "passed": 143,
+      "failed": 1,
+      "pending": 0,
+      "files": [
+        {
+          "file": "App.test.tsx",
+          "status": "passed",
+          "total": 15,
+          "failures": []
+        },
+        {
+          "file": "components/Demiurge/LandingView.test.tsx",
+          "status": "failed",
+          "total": 71,
+          "failures": [
+            {
+              "name": "LandingView bootstrap submission keeps the history modal content area stable for empty and populated project lists",
+              "message": "Error: expect(element).toHaveClass(\"h-[min(620px,calc(100dvh-2rem))]\")\n\nExpected the element to have class:\n  h-[min(620px,calc(100dvh-2rem))]\nReceived:\n  fixed left-1/2 top-1/2 z-[241] w-[calc(100%_-_2rem)] -translate-x-1/2 -translate-y-1/2 border border-border bg-popover text-popover-foreground shadow-[0_8px_24px_rgb(0_0_0/24%)] outline-none transition-[opacity,transform,scale] duration-[var(--motion-dialog)] data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 flex h-[min(680px,calc(100dvh-2rem))] max-h-[min(680px,calc(100dvh-2rem))] max-w-xl flex-col overflow-hidden rounded-2xl p-6 data-[starting-style]:translate-y-[calc(-50%+4px)] data-[ending-style]:translate-y-[calc(-50%+4px)] motion-reduce:data-[starting-style]:scale-100 motion-reduce:data-[ending-style]:scale-100 motion-reduce:data-[starting-style]:-translate-y-1/2 motion-reduce:data-[ending-style]:-translate-y-1/2\n    at Proxy.__VITEST_EXTEND_ASSERTION__ (file:///Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration/node_modules/.bun/@vitest+expect@4.1.11/node_modules/"
+            }
+          ]
+        },
+        {
+          "file": "components/Workspace/sceneContentAdapter.test.ts",
+          "status": "passed",
+          "total": 16,
+          "failures": []
+        },
+        {
+          "file": "components/Demiurge/Landing/SettingsMenu.test.tsx",
+          "status": "passed",
+          "total": 38,
+          "failures": []
+        },
+        {
+          "file": "components/Demiurge/Landing/intakeRecovery.test.ts",
+          "status": "passed",
+          "total": 4,
+          "failures": []
+        }
+      ]
+    },
+    "preRefactorLandingTests": {
+      "total": 71,
+      "passed": 70,
+      "failed": 1,
+      "failure": "History modal test expects h-[min(620px,calc(100dvh-2rem))], current markup uses 680px. Same failure after extraction."
+    },
+    "lint": {
+      "changedOrNewSourceAndTestFiles": "Passed for intakeRecovery.ts, intakeRecovery.test.ts and scene-editor-runtime.ts.",
+      "productionBaseline": {
+        "errors": 95,
+        "warnings": 22
+      },
+      "productionAfter": {
+        "errors": 94,
+        "warnings": 21
+      },
+      "note": "Existing lint debt remains. Reduction comes from removing an unused component, not a claim that all lint defects were fixed."
+    },
+    "diffWhitespaceCheck": "Passed",
+    "locks": {
+      "bun.lock": true,
+      "apps/frontend/package-lock.json": true
+    }
+  },
+  "deferred": [
+    "Removal of bot-avatars, ogl and react-router-dom: reverted our package manifest removals after lockfile-only attempts could not resolve packages with restricted cache/network access. Both lockfiles and these dependency declarations remain unchanged; no dependency upgrade/install was performed.",
+    "Retirement of AVATAR_HOME_ENABLED=false branch requires a product decision. Active DotsAvatar and shared styles are retained.",
+    "Broad SettingsMenu/beeGameAdapter refactoring, frontend CI gates and remaining lint debt are not completed in this first increment.",
+    "Existing history-modal assertion failure belongs to prior uncommitted UI work; no unrelated changes made to it.",
+    "No production page/browser interaction test, deployment or service restart."
+  ],
+  "safety": {
+    "kittyArtifacts": "Not touched",
+    "backups": "/private/tmp/bgs-frontend-cleanup.mwdaOs/before.tar",
+    "removedImageCopy": "/private/tmp/bgs-frontend-cleanup.mwdaOs/beegame_avatar.png",
+    "recovery": "Deleted files are tracked in Git; the archive additionally preserves exact pre-turn source state, including pre-existing LandingView edits. Temporary backup may be cleared by the OS.",
+    "noPaidModelOrGameReruns": true
+  },
+  "nextRecommendedStep": "Review/fix the pre-existing history-modal expectation and prioritize genuine Hooks/interaction lint issues before further page splitting. Keep dependent build/test gates honest rather than suppressing lint rules."
+}

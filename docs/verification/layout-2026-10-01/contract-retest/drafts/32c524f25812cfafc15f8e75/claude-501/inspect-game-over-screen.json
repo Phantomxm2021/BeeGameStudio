@@ -1,0 +1,718 @@
+{
+  "ok": true,
+  "scope": "layout-draft-inspection",
+  "runtimeVerified": false,
+  "viewport": {
+    "width": 960,
+    "height": 540
+  },
+  "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+  "diagnostics": {
+    "outsideViewport": [],
+    "outsideParent": [],
+    "outsideContentArea": [],
+    "belowMinimumControlSize": [],
+    "overlapCandidates": []
+  },
+  "boundaryChecks": [],
+  "nodes": [
+    {
+      "id": "gameover-root",
+      "active": true,
+      "layout": {
+        "size": [
+          960,
+          540
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          960,
+          0
+        ],
+        [
+          960,
+          540
+        ],
+        [
+          0,
+          540
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 540
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-dim",
+      "parentId": "gameover-root",
+      "active": true,
+      "layout": {
+        "anchorMin": [
+          0,
+          0
+        ],
+        "anchorMax": [
+          1,
+          1
+        ],
+        "sizeDelta": [
+          0,
+          0
+        ],
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          960,
+          540
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          960,
+          0
+        ],
+        [
+          960,
+          540
+        ],
+        [
+          0,
+          540
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 540
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-panel",
+      "parentId": "gameover-root",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          520,
+          420
+        ],
+        "container": {
+          "direction": "column",
+          "gap": 16,
+          "padding": [
+            28,
+            32,
+            28,
+            32
+          ],
+          "align": "center"
+        }
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          220,
+          60
+        ],
+        [
+          740,
+          60
+        ],
+        [
+          740,
+          480
+        ],
+        [
+          220,
+          480
+        ]
+      ],
+      "bounds": {
+        "left": 220,
+        "top": 60,
+        "right": 740,
+        "bottom": 480
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-title",
+      "parentId": "gameover-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          28
+        ],
+        "size": [
+          456,
+          44
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          252,
+          88
+        ],
+        [
+          708,
+          88
+        ],
+        [
+          708,
+          132
+        ],
+        [
+          252,
+          132
+        ]
+      ],
+      "bounds": {
+        "left": 252,
+        "top": 88,
+        "right": 708,
+        "bottom": 132
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-score-box",
+      "parentId": "gameover-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          88
+        ],
+        "size": [
+          456,
+          112
+        ],
+        "container": {
+          "direction": "column",
+          "gap": 4,
+          "padding": [
+            12,
+            16,
+            12,
+            16
+          ],
+          "align": "center"
+        }
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          252,
+          148
+        ],
+        [
+          708,
+          148
+        ],
+        [
+          708,
+          260
+        ],
+        [
+          252,
+          260
+        ]
+      ],
+      "bounds": {
+        "left": 252,
+        "top": 148,
+        "right": 708,
+        "bottom": 260
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-score-label",
+      "parentId": "gameover-score-box",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          16,
+          12
+        ],
+        "size": [
+          424,
+          24
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          268,
+          160
+        ],
+        [
+          692,
+          160
+        ],
+        [
+          692,
+          184
+        ],
+        [
+          268,
+          184
+        ]
+      ],
+      "bounds": {
+        "left": 268,
+        "top": 160,
+        "right": 692,
+        "bottom": 184
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-score-value",
+      "parentId": "gameover-score-box",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          16,
+          40
+        ],
+        "size": [
+          424,
+          60
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          268,
+          188
+        ],
+        [
+          692,
+          188
+        ],
+        [
+          692,
+          248
+        ],
+        [
+          268,
+          248
+        ]
+      ],
+      "bounds": {
+        "left": 268,
+        "top": 188,
+        "right": 692,
+        "bottom": 248
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-record-badge",
+      "parentId": "gameover-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          216
+        ],
+        "size": [
+          456,
+          40
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          252,
+          276
+        ],
+        [
+          708,
+          276
+        ],
+        [
+          708,
+          316
+        ],
+        [
+          252,
+          316
+        ]
+      ],
+      "bounds": {
+        "left": 252,
+        "top": 276,
+        "right": 708,
+        "bottom": 316
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-record-text",
+      "parentId": "gameover-record-badge",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          456,
+          24
+        ]
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          252,
+          284
+        ],
+        [
+          708,
+          284
+        ],
+        [
+          708,
+          308
+        ],
+        [
+          252,
+          308
+        ]
+      ],
+      "bounds": {
+        "left": 252,
+        "top": 284,
+        "right": 708,
+        "bottom": 308
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-retry-button",
+      "parentId": "gameover-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          272
+        ],
+        "size": [
+          456,
+          56
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          252,
+          332
+        ],
+        [
+          708,
+          332
+        ],
+        [
+          708,
+          388
+        ],
+        [
+          252,
+          388
+        ]
+      ],
+      "bounds": {
+        "left": 252,
+        "top": 332,
+        "right": 708,
+        "bottom": 388
+      },
+      "controlSize": [
+        456,
+        56
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-retry-button-label",
+      "parentId": "gameover-retry-button",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          456,
+          32
+        ]
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          252,
+          344
+        ],
+        [
+          708,
+          344
+        ],
+        [
+          708,
+          376
+        ],
+        [
+          252,
+          376
+        ]
+      ],
+      "bounds": {
+        "left": 252,
+        "top": 344,
+        "right": 708,
+        "bottom": 376
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-back-button",
+      "parentId": "gameover-panel",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          32,
+          344
+        ],
+        "size": [
+          456,
+          48
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          252,
+          404
+        ],
+        [
+          708,
+          404
+        ],
+        [
+          708,
+          452
+        ],
+        [
+          252,
+          452
+        ]
+      ],
+      "bounds": {
+        "left": 252,
+        "top": 404,
+        "right": 708,
+        "bottom": 452
+      },
+      "controlSize": [
+        456,
+        48
+      ],
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "gameover-back-button-label",
+      "parentId": "gameover-back-button",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          456,
+          32
+        ]
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          252,
+          412
+        ],
+        [
+          708,
+          412
+        ],
+        [
+          708,
+          444
+        ],
+        [
+          252,
+          444
+        ]
+      ],
+      "bounds": {
+        "left": 252,
+        "top": 412,
+        "right": 708,
+        "bottom": 444
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    }
+  ]
+}

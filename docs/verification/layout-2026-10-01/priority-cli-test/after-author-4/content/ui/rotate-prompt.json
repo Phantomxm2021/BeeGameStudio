@@ -1,0 +1,147 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-rotate-prompt",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "rotate-root",
+    "nodes": [
+      {
+        "id": "rotate-root",
+        "role": "screen-root",
+        "enabled": true,
+        "name": "Rotate/Size Prompt Root",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "position": [0, 0]
+        },
+        "style": {
+          "gradient": ["#150C30", "#0A1226"]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [960, 540],
+          "targetViewports": [
+            [960, 540],
+            [800, 450],
+            [1024, 576]
+          ],
+          "minimumControlSize": [44, 44]
+        }
+      },
+      {
+        "id": "rotate-group",
+        "parentId": "rotate-root",
+        "role": "container",
+        "enabled": true,
+        "name": "Rotate Prompt Group",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [420, 248],
+          "container": {
+            "direction": "column",
+            "gap": 22,
+            "padding": [0, 0, 0, 0],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "rotate-graphic",
+        "parentId": "rotate-group",
+        "role": "container",
+        "enabled": true,
+        "name": "Device Rotation Graphic",
+        "layout": {
+          "size": [170, 100]
+        }
+      },
+      {
+        "id": "rotate-device-frame",
+        "parentId": "rotate-graphic",
+        "role": "shape",
+        "enabled": true,
+        "name": "Landscape Device Frame",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 6],
+          "size": [120, 66]
+        },
+        "style": {
+          "shape": "rect",
+          "color": "rgba(0,0,0,0)",
+          "border": { "width": 3, "color": "#2CE6E0", "radius": 10 },
+          "cornerRadius": 10
+        }
+      },
+      {
+        "id": "rotate-device-ball",
+        "parentId": "rotate-graphic",
+        "role": "shape",
+        "enabled": true,
+        "name": "Ball Inside Device",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [-24, 2],
+          "size": [14, 14]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#EAF6FF"
+        }
+      },
+      {
+        "id": "rotate-arrow",
+        "parentId": "rotate-graphic",
+        "role": "text",
+        "enabled": true,
+        "text": "↻",
+        "name": "Rotation Arc Arrow",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [50, -20],
+          "size": [40, 40]
+        },
+        "style": {
+          "fontSize": 32,
+          "color": "#2CE6E0",
+          "align": "center"
+        }
+      },
+      {
+        "id": "rotate-main-text",
+        "parentId": "rotate-group",
+        "role": "text",
+        "enabled": true,
+        "text": "请旋转设备至横屏",
+        "layout": {
+          "size": [420, 34]
+        },
+        "style": {
+          "fontSize": 24,
+          "color": "#EAF6FF",
+          "align": "center"
+        }
+      },
+      {
+        "id": "rotate-sub-text",
+        "parentId": "rotate-group",
+        "role": "text",
+        "enabled": true,
+        "text": "窗口尺寸不足",
+        "layout": {
+          "size": [420, 26]
+        },
+        "style": {
+          "fontSize": 17,
+          "color": "#7C89B0",
+          "align": "center"
+        }
+      }
+    ]
+  }
+}

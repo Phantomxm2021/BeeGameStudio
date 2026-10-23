@@ -13,6 +13,19 @@ const resourceStorage: R2ResourceStorage = {
   listPackObjects: async () => [],
 }
 
+test('paused processing does not disable authenticated catalog browsing', async () => {
+  const app = createBeeGameResourceServerApp({ repository: createInMemoryResourceRepository({ packs: [], elements: [] }),
+    currentUser: { id: 'owner', role: 'owner' }, processingEnabled: false })
+  const health = await app.fetch(new Request('http://resource/health'))
+  expect(await health.json()).toEqual({ status: 'ok', processingEnabled: false })
+  expect((await app.fetch(new Request('http://resource/api/resource-search?status=published'))).status).toBe(200)
+  for (const suffix of ['processing-jobs', 'processing-jobs/job/retry', 'semantic-curation', 'semantic-curation/job/retry']) {
+    const response = await app.fetch(new Request(`http://resource/api/resource-packs/pack/${suffix}`, { method: 'POST' }))
+    expect(response.status).toBe(503)
+    expect(await response.text()).toContain('processing_paused')
+  }
+})
+
 const repository = createInMemoryResourceRepository({
   packs: [{
     id: 'pack-1', name: 'Example Pack',
@@ -113,7 +126,7 @@ describe('resource service app', () => {
     const app = createBeeGameResourceServerApp({ repository })
     const response = await app.fetch(new Request('http://resource.test/health'))
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ status: 'ok' })
+    expect(await response.json()).toEqual({ status: 'ok', processingEnabled: true })
   })
 
   test('allows browser cross-origin requests and preflight checks', async () => {
@@ -144,9 +157,16 @@ describe('resource service app', () => {
       elements: [
         { id: 'selectable', packId: 'count-pack', name: 'Selectable', path: 'selectable.glb', category: 'models', kind: 'model', assetKind: 'model', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['environment'], dependencies: [], status: 'ready' },
         { id: 'uncurated', packId: 'count-pack', name: 'Uncurated', path: 'uncurated.glb', category: 'models', kind: 'model', assetKind: 'model', specs: { contentHash: 'b'.repeat(64) }, dependencies: [], status: 'ready' },
+        { id: 'unresolved', packId: 'count-pack', name: 'Unresolved', path: 'unresolved.glb', category: 'models', kind: 'model', assetKind: 'model',
+          specs: { contentHash: 'c'.repeat(64), externalReferences: '["Textures/base.png"]', unresolvedTextureReferences: 'base.png' },
+          dependencies: ['selectable'], dependencyBindings: [{ referencePath: 'Textures/base.png', dependencyElementId: 'selectable' }], status: 'ready' },
       ],
     })
-    const app = createBeeGameResourceServerApp({ repository: localRepository })
+    // A database summary checking direct dependencies alone would count the
+    // unresolved root. All public catalog paths must use element readiness.
+    const app = createBeeGameResourceServerApp({ repository: { ...localRepository,
+      listCatalogPacks: async () => { throw Error('Do not substitute incomplete SQL readiness') },
+    } })
 
     const response = await app.fetch(new Request('http://resource.test/api/resource-catalog/packs', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
@@ -154,8 +174,22 @@ describe('resource service app', () => {
 
     expect(response.status).toBe(200)
     expect((await response.json()).items).toEqual([
-      expect.objectContaining({ packId: 'count-pack', readyElementCount: 1 }),
+      expect.objectContaining({ packId: 'count-pack', readyElementCount: 2 }),
     ])
+    const elementsResponse = await app.fetch(new Request('http://resource.test/api/resource-catalog/packs/count-pack/elements', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    }))
+    expect((await elementsResponse.json()).items).toEqual([
+      expect.objectContaining({ elementId: 'selectable', usageTags: ['environment'] }),
+      expect.objectContaining({ elementId: 'uncurated', usageTags: [] }),
+    ])
+    const filtered = await app.fetch(new Request('http://resource.test/api/resource-catalog/packs', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filters: { formats: ['glb'] } }),
+    }))
+    expect((await filtered.json()).items[0].readyElementCount).toBe(2)
+    const detail = await app.fetch(new Request('http://resource.test/api/resource-catalog/packs/count-pack'))
+    expect(detail.status).toBe(200)
+    expect((await detail.json()).summary.readyElementCount).toBe(2)
   })
 
   test('writes a Pack creation audit event without exposing audit storage to the browser', async () => {

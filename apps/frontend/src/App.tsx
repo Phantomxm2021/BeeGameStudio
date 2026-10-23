@@ -4,19 +4,20 @@
  * Root component for the BeeGame frontend.
  */
 
-import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import ErrorBoundary from './components/Common/ErrorBoundary';
+import { WorkspaceLoadingPage } from './components/Common/WorkspaceLoadingPage';
 import { useProjectStore } from './store/projectStore';
-import { useSystemStore } from './store/systemStore';
-import { useChatStore } from './store/chatStore';
+import { applyThemeToDocument, useSystemStore } from './store/systemStore';
 import { useToastContext } from './contexts/ToastContext';
-import { setToastErrorCallback, api } from './services/api';
+import { setToastErrorCallback } from './services/api';
 import {
   AUTHENTICATION_REQUIRED_EVENT,
   hasEnvAuthToken,
   isAuthenticationServiceUnavailable,
 } from './services/apiClient';
-import { normalizeChatHistory } from './utils/chatHistory';
+import { authRetryDelay } from './services/authRetry';
 import type { StartProjectResult } from './types/project';
 import type { BeeGameBuildBrief } from './services/beeGameAdapter';
 import {
@@ -27,65 +28,94 @@ import {
 // New Demiurge Views
 import { LandingView } from './components/Demiurge/LandingView';
 import type { Language } from './components/Demiurge/AgentsConfig';
+import i18n, { getInitialUiLanguage } from './i18n';
 import { isResourceLibraryRoute } from './components/ResourceLibrary/resourceLibraryRoute';
-import i18n, { supportedI18nLanguages } from './i18n';
+import { getProjectRouteId, WORKSPACE_ROUTE_CHANGE_EVENT } from './navigation/workspaceRoute';
+
+const loadDashboardView = () => import('./components/Demiurge/DashboardView');
 
 const DashboardView = lazy(async () => {
-  const module = await import('./components/Demiurge/DashboardView');
+  const module = await loadDashboardView();
   return { default: module.DashboardView };
 });
-
-function getInitialLanguage(): Language {
-  const persistedLanguage = typeof window === 'undefined' ? null : window.localStorage.getItem('i18nextLng');
-  return supportedI18nLanguages.includes(persistedLanguage as Language) ? persistedLanguage as Language : 'zh';
-}
 
 function App() {
   const {
     loadProjects,
     projects,
     activeProjectId,
+    hasLoadedProjects,
     bootstrapProjectFromBrief,
     setToastCallbacks,
     clearActiveProject,
-  } = useProjectStore();
+    syncActiveProjectFromRoute,
+  } = useProjectStore(useShallow((state) => ({
+    loadProjects: state.loadProjects,
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+    hasLoadedProjects: state.hasLoadedProjects,
+    bootstrapProjectFromBrief: state.bootstrapProjectFromBrief,
+    setToastCallbacks: state.setToastCallbacks,
+    clearActiveProject: state.clearActiveProject,
+    syncActiveProjectFromRoute: state.syncActiveProjectFromRoute,
+  })));
   const {
     loadCurrentUser,
     authenticationStatus,
     setAuthenticationStatus,
     currentUser,
     isDark,
-  } = useSystemStore();
-  const { loadHistory } = useChatStore();
+  } = useSystemStore(useShallow((state) => ({
+    loadCurrentUser: state.loadCurrentUser,
+    authenticationStatus: state.authenticationStatus,
+    setAuthenticationStatus: state.setAuthenticationStatus,
+    currentUser: state.currentUser,
+    isDark: state.isDark,
+  })));
   const { showError, showSuccess } = useToastContext();
 
-  const [lang, setLang] = useState<Language>(getInitialLanguage);
+  const [lang, setLang] = useState<Language>(getInitialUiLanguage);
+  const handleSetLang = (language: Language) => {
+    setLang(language);
+    void i18n.changeLanguage(language);
+  };
   const [isResourceRoute, setIsResourceRoute] = useState(() => isResourceLibraryRoute());
   const [authenticationRetryVersion, setAuthenticationRetryVersion] = useState(0);
   const [authenticationInitializationError, setAuthenticationInitializationError] = useState('');
-  const loadedHistoryProjectRef = useRef<string | null>(null);
-  const authenticationInitializationStartedRef = useRef(false);
+  const authenticationInitializationStartedRef = useRef<typeof loadCurrentUser | null>(null);
   const authenticationRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadedProtectedDataUserRef = useRef<string | null>(null);
+  const loadedProtectedDataUserRef = useRef<{ userId: string; loadProjects: typeof loadProjects } | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
-
-  useEffect(() => {
-    void i18n.changeLanguage(lang);
-  }, [lang]);
+  const requestedProjectId = getProjectRouteId();
+  const isProjectRouteRestoring = Boolean(
+    authenticationStatus === 'authenticated' && requestedProjectId && !hasLoadedProjects,
+  );
+  const isDashboardVisible = Boolean(
+    authenticationStatus === 'authenticated' && activeProjectId && activeProject && !isResourceRoute,
+  );
 
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceRoute(isResourceLibraryRoute());
-    window.addEventListener('popstate', syncResourceRoute);
-    return () => window.removeEventListener('popstate', syncResourceRoute);
-  }, []);
+    const syncPopState = () => {
+      syncResourceRoute();
+      syncActiveProjectFromRoute();
+    };
+    window.addEventListener('popstate', syncPopState);
+    window.addEventListener(WORKSPACE_ROUTE_CHANGE_EVENT, syncResourceRoute);
+    return () => {
+      window.removeEventListener('popstate', syncPopState);
+      window.removeEventListener(WORKSPACE_ROUTE_CHANGE_EVENT, syncResourceRoute);
+    };
+  }, [syncActiveProjectFromRoute]);
 
-  // Sync dark mode class to root element
   useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    if (authenticationStatus === 'anonymous' || (!requestedProjectId && !activeProjectId)) return;
+    void loadDashboardView().catch(() => undefined);
+  }, [activeProjectId, authenticationStatus, requestedProjectId]);
+
+  // Keep the persisted theme across Idea Home, the project workspace, and the resource library.
+  useLayoutEffect(() => {
+    applyThemeToDocument(isDark);
   }, [isDark]);
 
   // Initialize toast callbacks
@@ -100,10 +130,19 @@ function App() {
     return () => window.removeEventListener(AUTHENTICATION_REQUIRED_EVENT, handleAuthenticationRequired);
   }, [setAuthenticationStatus]);
 
+  useEffect(() => {
+    const handleOAuthError = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: unknown }>).detail;
+      showError(typeof detail?.message === 'string' ? detail.message : '登录失败，请重试');
+    };
+    window.addEventListener('beegame-oauth-error', handleOAuthError);
+    return () => window.removeEventListener('beegame-oauth-error', handleOAuthError);
+  }, [showError]);
+
   // Initialize app data on mount
   useEffect(() => {
-    if (authenticationInitializationStartedRef.current) return;
-    authenticationInitializationStartedRef.current = true;
+    if (authenticationInitializationStartedRef.current === loadCurrentUser) return;
+    authenticationInitializationStartedRef.current = loadCurrentUser;
     const initializeApp = async () => {
       try {
         setAuthenticationInitializationError('');
@@ -117,14 +156,16 @@ function App() {
       } catch (error) {
         if (isAuthenticationServiceUnavailable(error)) {
           setAuthenticationInitializationError('认证服务暂时不可用，正在重新连接…');
-          authenticationInitializationStartedRef.current = false;
+          if (authenticationInitializationStartedRef.current === loadCurrentUser) {
+            authenticationInitializationStartedRef.current = null;
+          }
           if (authenticationRetryTimerRef.current) {
             clearTimeout(authenticationRetryTimerRef.current);
           }
           authenticationRetryTimerRef.current = setTimeout(() => {
             authenticationRetryTimerRef.current = null;
             setAuthenticationRetryVersion(version => version + 1);
-          }, 2_000);
+          }, authRetryDelay(authenticationRetryVersion + 1, error));
           return;
         }
         setAuthenticationStatus('anonymous');
@@ -146,42 +187,16 @@ function App() {
       if (authenticationStatus === 'anonymous') loadedProtectedDataUserRef.current = null;
       return;
     }
-    if (loadedProtectedDataUserRef.current === currentUser.id) return;
-    loadedProtectedDataUserRef.current = currentUser.id;
+    if (loadedProtectedDataUserRef.current?.userId === currentUser.id &&
+        loadedProtectedDataUserRef.current.loadProjects === loadProjects) return;
+    const load = { userId: currentUser.id, loadProjects };
+    loadedProtectedDataUserRef.current = load;
     loadProjects().catch((error) => {
-      loadedProtectedDataUserRef.current = null;
+      if (loadedProtectedDataUserRef.current === load) loadedProtectedDataUserRef.current = null;
       console.error('Failed to load authenticated app data:', error);
       showError(error instanceof Error ? error.message : '登录数据加载失败');
     });
   }, [authenticationStatus, currentUser?.id, loadProjects, showError]);
-
-  // Load chat history when active project changes
-  useEffect(() => {
-    const loadChatHistory = async () => {
-      if (!activeProjectId || !activeProject) {
-        loadedHistoryProjectRef.current = null;
-        return;
-      }
-      if (loadedHistoryProjectRef.current === activeProjectId) return;
-
-      try {
-        const history = await api.getChatHistory(activeProjectId) as unknown;
-        const normalized = normalizeChatHistory(history);
-        const currentMessages = useChatStore.getState().messages;
-        const hasStreamingMessages = currentMessages.some((msg) => msg.id?.startsWith('streaming-'));
-
-        // Keep locally injected bootstrap/system hints until backend has real history.
-        if (!hasStreamingMessages && (normalized.length > 0 || currentMessages.length === 0)) {
-          loadHistory(normalized);
-        }
-        loadedHistoryProjectRef.current = activeProjectId;
-      } catch (error) {
-        console.error('[App] Failed to load chat history:', error);
-      }
-    };
-
-    loadChatHistory();
-  }, [activeProjectId, activeProject, loadHistory]); // Read messages from the store at resolve time to avoid history-load races.
 
   const handleStartProject = async (
     _projectName: string,
@@ -201,32 +216,32 @@ function App() {
   };
 
   if (authenticationStatus === 'initializing') {
+    if (requestedProjectId && !isResourceRoute && !authenticationInitializationError) {
+      return <WorkspaceLoadingPage />;
+    }
     return (
-      <div
-        className="flex min-h-screen items-center justify-center bg-black px-6 text-center text-white"
-        role="status"
-        aria-label="Initializing BeeGame"
-      >
-        <div className="flex max-w-sm flex-col items-center gap-4">
-          <span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" aria-hidden="true" />
-          <p className="text-sm font-medium tracking-[-0.01em] text-white/80">
-            {authenticationInitializationError || '正在恢复登录状态…'}
-          </p>
-        </div>
-      </div>
+      <WorkspaceLoadingPage
+        title={authenticationInitializationError || '正在恢复登录状态…'}
+        description=""
+        ariaLabel="Initializing BeeGame"
+      />
     );
+  }
+
+  if (isProjectRouteRestoring) {
+    return <WorkspaceLoadingPage />;
   }
 
   return (
     <ErrorBoundary>
       {/* If we have an active project ID and valid project, render the Dashboard */}
-      {authenticationStatus === 'authenticated' && activeProjectId && activeProject && !isResourceRoute ? (
-        <Suspense fallback={<div className="grid min-h-screen place-items-center bg-black"><span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" /></div>}>
+      {isDashboardVisible ? (
+        <Suspense fallback={<WorkspaceLoadingPage />}>
           <DashboardView
-            projectId={activeProjectId}
-            projectName={activeProject.name || 'Untitled Project'}
+            projectId={activeProjectId!}
+            projectName={activeProject?.name || 'Untitled Project'}
             lang={lang}
-            onSetLang={setLang}
+            onSetLang={handleSetLang}
             onBack={clearActiveProject}
           />
         </Suspense>
@@ -234,7 +249,7 @@ function App() {
         /* Otherwise, render the Landing View */
         <LandingView
           lang={lang}
-          onSetLang={setLang}
+          onSetLang={handleSetLang}
           onStart={handleStartProject}
         />
       )}

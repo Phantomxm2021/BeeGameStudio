@@ -1,0 +1,52 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-prompt-check",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "data": { "referenceResolution": [960, 540] },
+        "layout": { "anchorMin": [0, 0], "anchorMax": [1, 1], "sizeDelta": [0, 0] }
+      },
+      {
+        "id": "game-view",
+        "role": "container",
+        "parentId": "root",
+        "layout": { "anchorMin": [0.02, 0.02], "anchorMax": [0.98, 0.98], "sizeDelta": [0, 0] }
+      },
+      {
+        "id": "frame",
+        "role": "container",
+        "parentId": "game-view",
+        "layout": {
+          "anchor": "top-left",
+          "position": [275.6571, 0],
+          "size": [370.2857, 518.4],
+          "container": { "direction": "column", "gap": 0, "padding": [0, 0, 0, 0] }
+        }
+      },
+      {
+        "id": "paddle-top-marker",
+        "role": "shape",
+        "parentId": "frame",
+        "layout": { "anchor": "top-left", "position": [0, 478.2857], "size": [370.2857, 2], "item": { "absolute": true } }
+      },
+      {
+        "id": "serve-prompt",
+        "role": "worldPrompt",
+        "parentId": "frame",
+        "text": "按 空格 / 点击 发球",
+        "layout": {
+          "anchor": "top-left",
+          "position": [92.5714, 438.1714],
+          "size": [185.1429, 18.5143],
+          "item": { "absolute": true }
+        }
+      }
+    ]
+  }
+}

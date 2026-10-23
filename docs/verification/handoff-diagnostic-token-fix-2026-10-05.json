@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-05",
+  "scope": "System repair and token-efficiency changes after the full-delivery paid run; no new paid model calls",
+  "baselineEvidence": "docs/verification/full-delivery-paid-accept-2026-10-05.json",
+  "confirmedProblems": [
+    "Audio-owned soundRequired flags produce impossible required-source mapping diagnostics, directing revision to the wrong field.",
+    "A schema type error in an inapplicable Art sound table hides its table ownership error until another revision/check cycle.",
+    "Review treats different document-local professional IDs as necessarily conflicting; its close conditions fail to target structural causes.",
+    "--design-handoff-help returns useful instructions but no ok/valid flag, so the real bundled CLI exits 1 on success.",
+    "Technical author repeats official-document fetch/extraction work; its WebFetch calls fail because Tavily configuration is missing, and its fallback repeatedly searches an artificially truncated prefix.",
+    "A finite review-step count does not prevent many internal speculative edits/checks: Joint Revise performed 32 model calls, 31 Edit calls and six handoff checks."
+  ],
+  "implemented": [
+    {
+      "source": "packages/agent-workflow-server/src/beegame/design-handoff.ts",
+      "change": "Check existing field applicability before item-type parsing; report the exact field and preserve legitimate professional prose/values/ownership. Validate soundRequired only on GDD/UI producers and reject its misuse elsewhere with one scoped diagnostic rather than seven impossible Audio-source mapping errors.",
+      "boundary": "Invalid handoffs still fail. Actual missing GDD/UI mapping, unknown sources, type errors, source hashes and due dependencies are not relaxed. No new tables, taxonomy, protocol or automatic repair."
+    },
+    {
+      "source": "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+      "change": "Successful --design-handoff-help returns ok:true and a scope; real bundled CLI exits 0."
+    },
+    {
+      "source": "packages/agent-workflow-server/src/beegame/project-author.ts",
+      "change": "Review acceptance distinguishes document-local names from conflicting decisions; structural findings must close the actual field error without inventing source IDs or transferring professional ownership.",
+      "boundary": "Existing Inspect/Revise/Verify sequence and host stop rules are unchanged."
+    },
+    {
+      "source": ".beegame/skills/builtinskills/game-design-check/SKILL.md",
+      "change": "Revise the existing tool-work guidance: understand the diagnosed field before edits, group related changes and invalidated checks, retain complete results, and stop speculative ID/prose experiments. Judge producer/consumer behavior rather than name similarity.",
+      "boundary": "Method only; no additional edit/retry/release authority and no second ownership definition."
+    },
+    {
+      "source": ".beegame/skills/builtinskills/gameplay-programmer/SKILL.md",
+      "change": "Batch justified platform evidence retrieval, retain actual bytes once, extract relevant complete passages without iterative searches of truncated prefixes, and distinguish missing tool configuration from URL/content failure.",
+      "boundary": "Evidence obligations remain; unsupported consequential claims cannot become confirmed facts to save tokens. No new network helper, account configuration change or blanket evidence-fetch requirement."
+    }
+  ],
+  "verification": {
+    "firstSuite": {"files": 2, "testsPassed": 40, "testsFailed": 0, "assertions": 174},
+    "relatedSuite": {"files": 6, "testsPassed": 98, "testsFailed": 0, "assertions": 963},
+    "serverTypecheck": "passed",
+    "skillCreatorQuickValidation": {"game-design-check": "passed", "gameplay-programmer": "passed"},
+    "regressions": [
+      "Field ownership remains visible alongside invalid types, rather than being hidden by them.",
+      "Audio misuse fails at the flag; an actually valid GDD-to-Audio mapping passes after using the appropriate flag scope in a synthetic fixture.",
+      "Unknown GDD source and unmapped real producer still fail; no weakening of coverage.",
+      "Owned visual values in prose and differently named visual/audio outputs remain valid without a shared global namespace.",
+      "Actual bundled handoff-help command exits 0 without design/resource prerequisites."
+    ],
+    "readOnlyPaidArtifactCheck": {
+      "workspace": "/private/tmp/bgs-full-delivery-accept-20261005-fqNuF4om/projects/users/design-test/full-accept-fruit-20261005-fqNuF4om",
+      "documents": ["GDD.md", "TECHNICAL_DESIGN.md", "ART_DIRECTION.md", "AUDIO_DESIGN.md"],
+      "valid": false,
+      "issues": ["AUDIO_DESIGN.md: outputs[].soundRequired is only for GDD/UI sound producers; remove this flag from owned outputs (EV-start, EV-catch-fruit, EV-hit-junk, EV-miss-fruit, EV-clear, EV-over, EV-restart). Audio describes required sounds in events and binds events.source to the actual GDD/UI producer; changing source IDs cannot fix this flag"],
+      "documentHashesUnchanged": true,
+      "note": "No generated file was edited. Earlier observer doc-only snapshots lack the retained .beegame content contract, so their missing-contract diagnostics are observer snapshot incompleteness, not product findings; final check uses the intact original workspace."
+    }
+  },
+  "tokenEffect": {
+    "targetedCosts": {"jointRevisionObservedTokens": 1987668, "technicalAuthorObservedTokens": 1265598},
+    "expectedMechanism": "Direct correct-field diagnostics remove the proven wrong repair path; grouped evidence retrieval and related edits/checks reduce model round trips carrying accumulated history.",
+    "measuredReduction": null,
+    "warning": "Local tests establish deterministic correctness, not model compliance, semantic review quality or a token-saving percentage. A new authorized paid run is required to measure these.",
+    "notChanged": ["complete assigned draft inspection", "independent Review", "required runtime acceptance", "existing host stop gates", "model configuration", "credit limits", "context compaction", "tool-pool restrictions", "previously rolled-back optimizations"]
+  },
+  "tradeoffs": [
+    "Clearer grouped field diagnostics change diagnostic text but not the handoff format or valid source data.",
+    "Batching related work can reduce intermediate feedback; necessary source inspection and dependent operations remain sequential where needed.",
+    "Skill guidance still depends on the model executing it. No guaranteed cost cap or semantic correctness claim is made.",
+    "The original stopped paid project remains stopped and unmodified. No case-specific substitute draft or forced receipt was used."
+  ]
+}

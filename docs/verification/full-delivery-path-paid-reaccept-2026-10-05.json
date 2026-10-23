@@ -1,0 +1,610 @@
+{
+  "date": "2026-10-05",
+  "kind": "observer-only-paid-acceptance-audit",
+  "run": {
+    "root": "/private/tmp/bgs-full-delivery-path-reaccept-20261005-mVaxrxNA",
+    "projectId": "full-path-reaccept-fruit-20261005-mVaxrxNA",
+    "workspace": "/private/tmp/bgs-full-delivery-path-reaccept-20261005-mVaxrxNA/projects/users/design-test/full-path-reaccept-fruit-20261005-mVaxrxNA",
+    "sessionId": "beegame_6692163c457c4be2aada4d81cfd5b947",
+    "model": "ark-code-latest",
+    "modelConfigId": "llm_ac40e5d1be394ffe925e3f2532dedd34",
+    "startedAt": "2026-10-04T22:40:09.181Z",
+    "finishedAt": "2026-10-04T23:27:29.674Z",
+    "elapsedSeconds": 2840.493,
+    "outcome": "host-blocked",
+    "delivered": [
+      "BALANCE_DESIGN.md",
+      "LEVEL_SCENE_DESIGN.md",
+      "ART_DIRECTION.md",
+      "GDD.md",
+      "AUDIO_DESIGN.md",
+      "TECHNICAL_DESIGN.md"
+    ],
+    "releaseGate": {
+      "allowed": false,
+      "layer": "acceptance-record",
+      "issues": [
+        "Current project has no verified delivery acceptance."
+      ]
+    }
+  },
+  "usage": {
+    "usage": {
+      "input_tokens": 650856,
+      "output_tokens": 134729,
+      "cache_read_input_tokens": 7647872,
+      "cache_creation_input_tokens": 0
+    },
+    "totalObservedTokens": 8433457,
+    "startedRequests": 180,
+    "startedModelRequests": 179,
+    "runningRequestIds": [],
+    "partialUsageRequestIds": [],
+    "missingUsageRequestIds": [
+      1
+    ],
+    "usageComplete": false,
+    "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations."
+  },
+  "modelCallsWithFinalUsage": 179,
+  "nonModelMissingUsage": [
+    {
+      "id": 1,
+      "kind": "other",
+      "outcome": "failed"
+    }
+  ],
+  "stages": [
+    {
+      "stage": "author-1-work-turn1",
+      "elapsedSeconds": 176.138,
+      "firstRequest": 1,
+      "lastRequest": 7,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-1-inspect-turn2",
+      "elapsedSeconds": 120.368,
+      "firstRequest": 8,
+      "lastRequest": 13,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-1-revise-turn3",
+      "elapsedSeconds": 93.369,
+      "firstRequest": 14,
+      "lastRequest": 23,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-1-verify-turn4",
+      "elapsedSeconds": 59.619,
+      "firstRequest": 24,
+      "lastRequest": 29,
+      "failed": false,
+      "phase": "author",
+      "shouldContinue": true
+    },
+    {
+      "stage": "author-2-work-turn5",
+      "elapsedSeconds": 443.741,
+      "firstRequest": 30,
+      "lastRequest": 68,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-2-inspect-turn6",
+      "elapsedSeconds": 143.754,
+      "firstRequest": 69,
+      "lastRequest": 77,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-2-revise-turn7",
+      "elapsedSeconds": 84.756,
+      "firstRequest": 78,
+      "lastRequest": 85,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-2-verify-turn8",
+      "elapsedSeconds": 96.203,
+      "firstRequest": 86,
+      "lastRequest": 94,
+      "failed": false,
+      "phase": "author",
+      "shouldContinue": true
+    },
+    {
+      "stage": "author-3-work-turn9",
+      "elapsedSeconds": 791.759,
+      "firstRequest": 95,
+      "lastRequest": 140,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-3-inspect-turn10",
+      "elapsedSeconds": 302.746,
+      "firstRequest": 141,
+      "lastRequest": 150,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-3-revise-turn11",
+      "elapsedSeconds": 355.061,
+      "firstRequest": 151,
+      "lastRequest": 171,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": true
+    },
+    {
+      "stage": "review-3-verify-turn12",
+      "elapsedSeconds": 172.541,
+      "firstRequest": 172,
+      "lastRequest": 180,
+      "failed": false,
+      "phase": "review",
+      "shouldContinue": false
+    }
+  ],
+  "stageActors": [
+    {
+      "stage": "author-1-work-turn1",
+      "actor": "main",
+      "calls": 6,
+      "tokens": 275463,
+      "usage": {
+        "input_tokens": 48943,
+        "output_tokens": 7048,
+        "cache_read_input_tokens": 219472,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 37748,
+        "last": 50293,
+        "min": 37748,
+        "max": 50293
+      }
+    },
+    {
+      "stage": "review-1-inspect-turn2",
+      "actor": "ac236492ff06cafec",
+      "calls": 6,
+      "tokens": 116117,
+      "usage": {
+        "input_tokens": 23431,
+        "output_tokens": 4798,
+        "cache_read_input_tokens": 87888,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 10745,
+        "last": 26532,
+        "min": 10745,
+        "max": 26532
+      }
+    },
+    {
+      "stage": "review-1-revise-turn3",
+      "actor": "aa4995c8d98890965",
+      "calls": 10,
+      "tokens": 221712,
+      "usage": {
+        "input_tokens": 26409,
+        "output_tokens": 4791,
+        "cache_read_input_tokens": 190512,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 11202,
+        "last": 28464,
+        "min": 11202,
+        "max": 28464
+      }
+    },
+    {
+      "stage": "review-1-verify-turn4",
+      "actor": "a921d8b8d0bdbbe5d",
+      "calls": 6,
+      "tokens": 107494,
+      "usage": {
+        "input_tokens": 20225,
+        "output_tokens": 2453,
+        "cache_read_input_tokens": 84816,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 10745,
+        "last": 23090,
+        "min": 10745,
+        "max": 23090
+      }
+    },
+    {
+      "stage": "author-2-work-turn5",
+      "actor": "a6fa721e8032799e1",
+      "calls": 6,
+      "tokens": 178693,
+      "usage": {
+        "input_tokens": 38408,
+        "output_tokens": 7653,
+        "cache_read_input_tokens": 132632,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 18639,
+        "last": 37428,
+        "min": 18639,
+        "max": 37428
+      }
+    },
+    {
+      "stage": "author-2-work-turn5",
+      "actor": "af5f02674f67f1dde",
+      "calls": 8,
+      "tokens": 308911,
+      "usage": {
+        "input_tokens": 53470,
+        "output_tokens": 13641,
+        "cache_read_input_tokens": 241800,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 17331,
+        "last": 51609,
+        "min": 17331,
+        "max": 51609
+      }
+    },
+    {
+      "stage": "author-2-work-turn5",
+      "actor": "a6a916f2dfed9a84b",
+      "calls": 25,
+      "tokens": 1002109,
+      "usage": {
+        "input_tokens": 59135,
+        "output_tokens": 15934,
+        "cache_read_input_tokens": 927040,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 18082,
+        "last": 53294,
+        "min": 18082,
+        "max": 53294
+      }
+    },
+    {
+      "stage": "review-2-inspect-turn6",
+      "actor": "a65c75cc47005f0e4",
+      "calls": 9,
+      "tokens": 261767,
+      "usage": {
+        "input_tokens": 48896,
+        "output_tokens": 5263,
+        "cache_read_input_tokens": 207608,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 10760,
+        "last": 51062,
+        "min": 10760,
+        "max": 51062
+      }
+    },
+    {
+      "stage": "review-2-revise-turn7",
+      "actor": "afd77ef5fc419bb1d",
+      "calls": 8,
+      "tokens": 184003,
+      "usage": {
+        "input_tokens": 28112,
+        "output_tokens": 3891,
+        "cache_read_input_tokens": 152000,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 11204,
+        "last": 30448,
+        "min": 11204,
+        "max": 30448
+      }
+    },
+    {
+      "stage": "review-2-verify-turn8",
+      "actor": "a7c7c9fb21d9f5936",
+      "calls": 9,
+      "tokens": 218007,
+      "usage": {
+        "input_tokens": 29487,
+        "output_tokens": 3952,
+        "cache_read_input_tokens": 184568,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 10747,
+        "last": 30908,
+        "min": 10747,
+        "max": 30908
+      }
+    },
+    {
+      "stage": "author-3-work-turn9",
+      "actor": "main",
+      "calls": 46,
+      "tokens": 3922627,
+      "usage": {
+        "input_tokens": 95075,
+        "output_tokens": 29008,
+        "cache_read_input_tokens": 3798544,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 37874,
+        "last": 110117,
+        "min": 37874,
+        "max": 110117
+      }
+    },
+    {
+      "stage": "review-3-inspect-turn10",
+      "actor": "a3f5d45e9c2455384",
+      "calls": 10,
+      "tokens": 404612,
+      "usage": {
+        "input_tokens": 68685,
+        "output_tokens": 12295,
+        "cache_read_input_tokens": 323632,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 10755,
+        "last": 70658,
+        "min": 10755,
+        "max": 70658
+      }
+    },
+    {
+      "stage": "review-3-revise-turn11",
+      "actor": "a9be67ad3df12af31",
+      "calls": 21,
+      "tokens": 930931,
+      "usage": {
+        "input_tokens": 63622,
+        "output_tokens": 15957,
+        "cache_read_input_tokens": 851352,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 11212,
+        "last": 62522,
+        "min": 11212,
+        "max": 62522
+      }
+    },
+    {
+      "stage": "review-3-verify-turn12",
+      "actor": "ad4e4175a2e789327",
+      "calls": 9,
+      "tokens": 301011,
+      "usage": {
+        "input_tokens": 46958,
+        "output_tokens": 8045,
+        "cache_read_input_tokens": 246008,
+        "cache_creation_input_tokens": 0
+      },
+      "inputContext": {
+        "first": 10755,
+        "last": 49409,
+        "min": 10755,
+        "max": 49409
+      }
+    }
+  ],
+  "author3CostBreakdown": [
+    {
+      "label": "preparation-reading-and-recovery",
+      "calls": 13,
+      "firstRequest": 95,
+      "lastRequest": 107,
+      "tokens": 808778
+    },
+    {
+      "label": "scene-document-write",
+      "calls": 1,
+      "firstRequest": 108,
+      "lastRequest": 108,
+      "tokens": 79560
+    },
+    {
+      "label": "scene-draft-geometry-and-appendix",
+      "calls": 12,
+      "firstRequest": 109,
+      "lastRequest": 120,
+      "tokens": 994630
+    },
+    {
+      "label": "balance-model-calculation-and-preparation",
+      "calls": 10,
+      "firstRequest": 121,
+      "lastRequest": 130,
+      "tokens": 963867
+    },
+    {
+      "label": "balance-document-write-and-edit",
+      "calls": 2,
+      "firstRequest": 131,
+      "lastRequest": 132,
+      "tokens": 210093
+    },
+    {
+      "label": "reference-handoff-checks-and-closeout",
+      "calls": 8,
+      "firstRequest": 133,
+      "lastRequest": 140,
+      "tokens": 865699
+    }
+  ],
+  "sourceIntegrity": {
+    "beforeCount": 3828,
+    "afterCount": 3828,
+    "changed": []
+  },
+  "billingBefore": {
+    "available": false,
+    "reason": "billing_observation_transport_failed"
+  },
+  "billingAfter": {
+    "available": false,
+    "reason": "billing_observation_transport_failed"
+  },
+  "decision": {
+    "fullAcceptance": "not-passed",
+    "nativeStop": "review-3-verify-turn12: one revision pass exhausted with F_CATCH_GEOMETRY still blocking",
+    "noAdditionalPaidRun": true,
+    "manualProductEdits": false,
+    "injectedFindings": false,
+    "systemEditedDuringRun": false,
+    "finalGameOrEightDocumentCertification": false
+  },
+  "nativeFindings": [
+    {
+      "id": "F1",
+      "batch": 1,
+      "result": "closed",
+      "problem": "GDD heading anchors did not match handoff section names"
+    },
+    {
+      "id": "F2",
+      "batch": 1,
+      "result": "closed",
+      "problem": "GDD round-over movement wording conflicted with state/input rules"
+    },
+    {
+      "id": "F_AUDIO_RESOURCES_TABLE",
+      "batch": 2,
+      "result": "closed",
+      "problem": "AUDIO_DESIGN illegally owned the ASSET_PLAN resources table"
+    },
+    {
+      "id": "F_ART_PROPS_CATEGORY",
+      "batch": 2,
+      "result": "follow-up still open, needed before resources",
+      "problem": "Art consistency listed a props category not present in the category table / excluded from gameplay scope"
+    },
+    {
+      "id": "F_CATCH_GEOMETRY",
+      "batch": 3,
+      "result": "blocking, partially corrected",
+      "problem": "AABB contact geometry disagreed with the retained balance model and generated appendix"
+    }
+  ],
+  "rootCauseClassification": [
+    {
+      "category": "LLM author correctness",
+      "evidence": "Original LEVEL_SCENE_DESIGN placed a centered 96x24 catch region at basket y=486 but declared first contact y=436; BALANCE model used catchY=436, catchDepth=24, catchHalfW=48 rather than full AABB overlap. Independent native Review caught this.",
+      "qualification": "An author calculation/design error; not evidence that every model or document is incapable."
+    },
+    {
+      "category": "Agent/system implementation capability mismatch",
+      "evidence": "Revision closure required docs/calc/balance-model.mjs update and appendix regeneration, but project-conversation.ts supplies only reviewDocuments as reviewWritableDocuments. design-review.ts permits only docs/<assigned document> edits and read-only checker commands / calculate-balance --help. Edit call_9w0lnlwevyopo1ltu4mxdmdl targeting the model was rejected. Model and appendix remained byte-identical across author and Verify snapshots.",
+      "impact": "The assigned revision could change prose but lacked capabilities to close its required evidence update. Actual immediate cause of the native stop."
+    },
+    {
+      "category": "Workflow cost control / execution granularity",
+      "evidence": "Author batch 3 ran 46 main-session calls without a document-owner subagent, growing input context from 37874 to 110117. It spent 3922627 tokens including 3798544 cache-read tokens. Technical author spent 20 preparation calls before writing its document.",
+      "qualification": "Necessary calculations and authoritative platform evidence are included; the entire preparation/calculation total is not proven waste. Wrong commands, retries and fragmented operations amplified repeated history."
+    },
+    {
+      "category": "LLM Reviewer semantic miss",
+      "evidence": "Joint Inspect loaded game-design-check and saved drafts, but did not report AUDIO_DESIGN section 4 allowing final-batch tails under the result phrase vs section 5 declaring only the result phrase in S_ROUND_OVER. Both clauses remain after joint Verify.",
+      "impact": "The implementer must choose whether final gameplay tails survive round-over. Observer finding, not a native discovered/closed item. No observer hints were supplied to the run."
+    },
+    {
+      "category": "Receipt validation friction",
+      "evidence": "Verify-3 first receipt updated unresolved finding impact/closeWhen to describe partial repair; guard rejected redefinition. Resubmission restored original fields. Therefore the persisted stop diagnostic repeats the original defect rather than describing the current partial correction.",
+      "qualification": "Blocking outcome is correct; the current-state diagnostic is stale. The guard's protection against evading closure does not itself justify rejecting every factual status update."
+    }
+  ],
+  "repairObservations": [
+    {
+      "repair": "mistyped receipt path diagnostic",
+      "result": "not exercised",
+      "reason": "No mistyped sibling receipt filename was observed; cannot claim real-model efficacy from this run"
+    },
+    {
+      "repair": "revision does not need its own static checker invocation before receipt",
+      "result": "observed",
+      "reason": "GDD and joint revision handed off without an agent-side checker prerequisite; host checks still ran"
+    },
+    {
+      "repair": "Skill comparison of broad rules/exceptions/exclusions",
+      "result": "insufficient",
+      "reason": "Native Review caught geometry/category issues but missed the audio lifecycle contradiction"
+    },
+    {
+      "repair": "stage/actor usage breakdown",
+      "result": "observed",
+      "reason": "All 179 model calls have final usage; grouped actor and stage totals reconcile to 8433457 tokens"
+    },
+    {
+      "repair": "execution-limit failure signaling",
+      "result": "not exercised",
+      "reason": "No Review step reached its 32-call ceiling"
+    }
+  ],
+  "technicalAuthorCostBreakdown": [
+    {
+      "label": "preparation-probing-evidence",
+      "calls": 20,
+      "tokens": 737073,
+      "input": 48171,
+      "cacheRead": 680744,
+      "output": 8158
+    },
+    {
+      "label": "document-write",
+      "calls": 1,
+      "tokens": 52244,
+      "input": 2312,
+      "cacheRead": 43320,
+      "output": 6612
+    },
+    {
+      "label": "validation-and-handoff",
+      "calls": 4,
+      "tokens": 212792,
+      "input": 8652,
+      "cacheRead": 202976,
+      "output": 1164
+    }
+  ],
+  "usageQualification": "8433457 is observed input + cache input + output, not settled credits. All 179 messages requests have final usage; the aggregate usageComplete=false is caused by one failed non-model metadata request. Billing before and after were unavailable, not zero. Cache input has different charging semantics; no financial amount is inferred.",
+  "scopeLimitations": [
+    "One fresh fruit-basket case only; not general stability evidence",
+    "Only six design documents saved; UI_UX_SPEC and ASSET_PLAN, final technical consumption, resources, Content, implementation and runtime acceptance were not reached",
+    "No full-game or completed-eight-document comparison against an earlier partial run"
+  ],
+  "nextWorkRecommendation": [
+    "Fix the assigned revision/evidence capability mismatch in the system, with bounded ownership rather than broad script/shell access",
+    "Reassess actual necessity and granularity of author preparation/calculation operations and history reuse; do not remove necessary correctness checks merely to reduce a token count",
+    "Keep the successful stop rule; do not add another automatic review/revision loop or paid retry"
+  ]
+}

@@ -1,0 +1,195 @@
+{
+  "date": "2026-10-15",
+  "decision": "Keep the current local deployment. Do not deploy the repaired upstream candidate: neither arm passes every factual acceptance criterion. This is an operational decision, not proof that local is universally superior.",
+  "scope": {
+    "upstreamRepository": "https://github.com/claude-code-best/claude-code",
+    "upstreamCommit": "34b3dc99bf40c57c0b78f3b5b1d70471ebc2d06d",
+    "upstreamLimitation": "Pinned locally available third-party snapshot, not verified latest GitHub main and not official Anthropic source.",
+    "local": "Fresh local snapshot including successful Write body omission; fingerprints in baseline.json.",
+    "changed": "Isolated upstream candidate source, its tests and patch, audit harness and comparison artifacts only.",
+    "unchanged": "No deployment, restart, production compression code change, GitHub write or kitty project artifact modification.",
+    "sample": "One original pre-compaction prefix, two fresh summaries, two fixed one-shot handoffs. No full game rerun or production resume."
+  },
+  "candidateChanges": [
+    "Preserve original user instructions and structured unresolved external receipts as source-labelled historical evidence.",
+    "Deduplicate retained evidence by original source UUID across repeated compaction.",
+    "Generic summary instructions distinguish user authorization, unknown outcomes, prohibited retry workarounds, exact paths and validation freshness.",
+    "Keep upstream nine-section format. No kitty-specific answers embedded in candidate source."
+  ],
+  "protocol": {
+    "model": "ark-code-latest",
+    "provider": "Anthropic-compatible Volcengine Ark",
+    "temperature": 0,
+    "thinking": false,
+    "requests": 4,
+    "retries": 0,
+    "toolExecutions": 0,
+    "summaryMaxTokens": 16384,
+    "handoffMaxTokens": 4096,
+    "normalizedInputSha256": "0f74529599cb1688d53fcfd295bb4279312872f34729ff0b261b8efd1e0d1e5b",
+    "sourceSha256": "294d2e277087e496a329daa1069018e1aabe9947f54514f9d430e2864a280fad",
+    "sourceHashUnchanged": true,
+    "sourceRange": "physical lines 1-327; original compacted summary and subsequent events excluded",
+    "caveats": [
+      "Provider model label is not an immutable model version.",
+      "Historical thinking stripped; five images replaced by common fallback markers.",
+      "Single bounded sample, no statistical ranking or multi-compaction end-to-end evidence.",
+      "Frozen sources and isolated replay, not a complete native client deployment test."
+    ]
+  },
+  "measured": {
+    "arms": {
+      "A": {
+        "summaryUsage": {
+          "input_tokens": 1889,
+          "output_tokens": 7891,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 104248
+        },
+        "handoffUsage": {
+          "input_tokens": 7568,
+          "output_tokens": 1828,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 1848
+        },
+        "fullHandoffInput": 9416,
+        "total": {
+          "input_tokens": 9457,
+          "output_tokens": 9719,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 106096
+        },
+        "unweightedTokenTotal": 125272,
+        "modelElapsedSumMs": 169341,
+        "formattedSummaryCharacters": 19901
+      },
+      "B": {
+        "summaryUsage": {
+          "input_tokens": 0,
+          "output_tokens": 2867,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 105138
+        },
+        "handoffUsage": {
+          "input_tokens": 4181,
+          "output_tokens": 1752,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 6968
+        },
+        "fullHandoffInput": 11149,
+        "total": {
+          "input_tokens": 4181,
+          "output_tokens": 4619,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 112106
+        },
+        "unweightedTokenTotal": 120906,
+        "modelElapsedSumMs": 110175,
+        "formattedSummaryCharacters": 6611
+      }
+    },
+    "requestCount": 4,
+    "toolExecutions": 0,
+    "sourceHashUnchanged": true,
+    "failures": []
+  },
+  "interpretation": {
+    "handoffInput": "A 9416 vs B 11149 tokens including cache reads; A is 1733 tokens (15.54%) smaller for this handoff.",
+    "boundedTotal": "A 125272 vs B 120906 unweighted input+cache+output tokens across summary and handoff. B is 4366 tokens (3.49%) lower.",
+    "costs": "These are observed API usage counters, not currency costs or proven savings. Cache/input/output have different prices; differing cache warmth is a confounder.",
+    "threshold": "No threshold change justified: demonstrated failures concern evidence selection, unsupported inference and freshness, not an observed threshold overflow."
+  },
+  "correctness": {
+    "A": {
+      "finalHandoffPasses": [
+        "Unknown requests remain unresolved; new request IDs do not settle earlier unknowns.",
+        "No rename-only retry permission.",
+        "Exact tool paths retained.",
+        "User choices distinguished from implementation choices.",
+        "Does not revive the resolved orientation defect."
+      ],
+      "remainingFailures": [
+        {
+          "phase": "summary",
+          "quote": "bg-v1 stays an unresolved unknown (never billed/settled)",
+          "issue": "Unknown receipt does not establish that it was never billed; surrounding 'Resolution' also legitimizes the new-ID workaround."
+        },
+        {
+          "phase": "handoff",
+          "issue": "Treats previously passed content checks as current and makes revision refresh conditional on future changes, although scene changed at source line 317 after the last current check at line 307."
+        }
+      ],
+      "verdict": "Not accepted for deployment; protected raw facts improved final answers but did not guarantee truthful summary or current-state reconciliation."
+    },
+    "B": {
+      "finalHandoffPasses": [
+        "Unknown requests and retry restrictions retained.",
+        "Exact paths and user-vs-implementation attribution retained.",
+        "Correctly flags scene modification after current-check revision."
+      ],
+      "remainingFailures": [
+        {
+          "phase": "handoff",
+          "quote": "修复 5 个 UI JSON 的 orientation 声明",
+          "issue": "Revives an already corrected defect; line 303 records later design-layout success."
+        }
+      ],
+      "rootCause": {
+        "file": "local-preservedContext.ts",
+        "line": 394,
+        "detector": "/\"(?:outcome|status|valid|unverified|measurementId)\"\\s*:/",
+        "oldReceipt": {
+          "sourcePhysicalLine": 281,
+          "sourceMessageUuid": "d30b45af-0d83-442e-bbb4-433f253ed085",
+          "bodyRetention": "latest",
+          "recognized": true
+        },
+        "laterOutputs": [
+          {
+            "sourcePhysicalLine": 303,
+            "text": "valid: True\n[]",
+            "recognized": false
+          },
+          {
+            "sourcePhysicalLine": 307,
+            "text": "rev 9ae049f46b79\ncurrent valid: True []",
+            "recognized": false
+          }
+        ],
+        "evidence": "Actual B-post-compact-context.json retains old mixed JSON failure body as latest; quoted JSON detector misses newer plain-text check results.",
+        "qualification": "This identifies a concrete selection defect and misleading retained context, not proof that it is the sole cause of the model's answer."
+      },
+      "verdict": "Keep existing deployment pending narrow local evidence-selection correction; not a full correctness pass."
+    }
+  },
+  "offlineChecks": {
+    "combinedTests": {
+      "passed": 15,
+      "skipped": 1,
+      "failed": 0,
+      "assertions": 177,
+      "skippedReason": "Opt-in original fixture test was not enabled."
+    },
+    "candidateTests": {
+      "passed": 4,
+      "assertions": 23
+    },
+    "repeatedOriginalFixtureRetention": {
+      "rounds": 5,
+      "protectedMessages": 4,
+      "serializedContentCharacters": [
+        9053,
+        9053,
+        9053,
+        9053,
+        9053
+      ],
+      "kind": "JSON roundtrip and helper selection, not native multi-compaction replay"
+    },
+    "syntaxTranspileFiles": 3,
+    "patchApplyCheck": "Passed against isolated pinned baseline.",
+    "finalPreflight": "Passed after the four requests; source and relevant local fingerprints unchanged."
+  },
+  "nextMinimalAction": "Separately fix local receipt selection using demonstrated source examples: retain later same-check text results with their tool-call/check identity; do not infer fresh validation after source edits or globally treat any 'valid: True' as superseding unrelated failures. Verify offline before considering any further paid tests.",
+  "stop": "No further model calls, deployment or threshold adjustment performed."
+}

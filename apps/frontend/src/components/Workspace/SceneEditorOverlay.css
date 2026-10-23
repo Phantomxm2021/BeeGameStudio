@@ -1,0 +1,124 @@
+.scene-editor-host .editor-shell {
+  height: 100%;
+}
+
+.scene-loading-view {
+  /* This surface is always dark, independent of the surrounding app theme.
+     Keep BeUI components on their native semantic classes by supplying the
+     matching dark-surface tokens locally. */
+  --foreground: #f4f4f5;
+  --primary: #f4f4f5;
+  --primary-foreground: #202126;
+  --border: color-mix(in srgb, #ffffff 14%, transparent);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #f5f5f7;
+  background: #202126;
+  animation: scene-loading-enter 180ms ease-out both;
+}
+
+.scene-loading-action:focus-visible {
+  outline: 2px solid #69aef7;
+  outline-offset: 2px;
+}
+
+.scene-loading-content {
+  width: min(360px, calc(100vw - 48px));
+  transform: translateY(-3vh);
+}
+
+.scene-loading-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  text-align: center;
+}
+
+.scene-loading-copy strong {
+  color: #f7f7f9;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.scene-loading-detail {
+  display: block;
+  overflow: hidden;
+  min-height: 19px;
+  margin-top: 8px;
+  color: rgba(235, 236, 241, 0.46);
+  font-size: 12px;
+  line-height: 19px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-loading-detail.error-detail {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.scene-loading-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 22px;
+  color: rgba(235, 236, 241, 0.48);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scene-loading-progress-meta strong {
+  overflow: hidden;
+  color: rgba(247, 247, 249, 0.82);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-loading-progress {
+  height: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.scene-loading-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #fff;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
+  transition: width 220ms ease;
+}
+
+.scene-loading-stop-row {
+  display: flex;
+  justify-content: center;
+  margin: 24px auto 0;
+}
+
+.scene-loading-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+@keyframes scene-loading-enter {
+  from { opacity: 0; transform: scale(1.01); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-loading-view { animation: none; }
+  .scene-loading-progress > span { transition: none; }
+}
+
+@media (max-width: 640px) {
+  .scene-loading-view { padding: 24px; }
+}

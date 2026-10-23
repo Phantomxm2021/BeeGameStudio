@@ -1,0 +1,230 @@
+{
+  "schema": "beegame-content.v1",
+  "kind": "ui-screen",
+  "id": "ui-gameplay",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "referenceResolution": [
+            480,
+            672
+          ],
+          "compactMaxWidth": 600
+        }
+      },
+      {
+        "id": "game-view",
+        "role": "container",
+        "parentId": "root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0.02,
+            0.02
+          ],
+          "anchorMax": [
+            0.98,
+            0.98
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "parentId": "game-view",
+        "id": "hud-plane",
+        "role": "container",
+        "enabled": true,
+        "data": {
+          "space": "camera-reference-2d"
+        },
+        "layout": {
+          "size": [
+            480,
+            672
+          ],
+          "item": {
+            "absolute": true
+          },
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "hud-score",
+        "role": "text",
+        "text": "0000",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            12,
+            14
+          ],
+          "size": [
+            96,
+            28
+          ],
+          "item": {
+            "absolute": true
+          }
+        },
+        "style": {
+          "fontSize": 22,
+          "align": "left"
+        },
+        "parentId": "hud-plane"
+      },
+      {
+        "id": "pause-btn",
+        "role": "button",
+        "text": "暂停",
+        "layout": {
+          "anchor": "top-center",
+          "position": [
+            0,
+            1
+          ],
+          "size": [
+            62,
+            62
+          ],
+          "minSize": [
+            62,
+            62
+          ],
+          "item": {
+            "absolute": true
+          }
+        },
+        "parentId": "hud-plane"
+      },
+      {
+        "id": "hud-lives",
+        "role": "container",
+        "layout": {
+          "anchor": "top-right",
+          "position": [
+            -12,
+            14
+          ],
+          "size": [
+            88,
+            28
+          ],
+          "item": {
+            "absolute": true
+          },
+          "container": {
+            "direction": "row",
+            "gap": 8,
+            "padding": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "justify": "end"
+          }
+        },
+        "parentId": "hud-plane"
+      },
+      {
+        "id": "life-icon-0",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "icon-life"
+        },
+        "layout": {
+          "size": [
+            20,
+            20
+          ]
+        },
+        "parentId": "hud-lives"
+      },
+      {
+        "id": "life-icon-1",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "icon-life"
+        },
+        "layout": {
+          "size": [
+            20,
+            20
+          ]
+        },
+        "parentId": "hud-lives"
+      },
+      {
+        "id": "life-icon-2",
+        "role": "sprite",
+        "enabled": true,
+        "assetRef": "RES-SPRITE-GAMEPLAY",
+        "data": {
+          "frame": "icon-life"
+        },
+        "layout": {
+          "size": [
+            20,
+            20
+          ]
+        },
+        "parentId": "hud-lives"
+      },
+      {
+        "id": "serve-prompt",
+        "role": "text",
+        "text": "按 空格 / 点击 发球",
+        "layout": {
+          "anchor": "top-center",
+          "position": [
+            0,
+            548
+          ],
+          "size": [
+            240,
+            24
+          ],
+          "item": {
+            "absolute": true
+          }
+        },
+        "style": {
+          "fontSize": 16,
+          "align": "center"
+        },
+        "parentId": "hud-plane"
+      }
+    ]
+  }
+}

@@ -13,8 +13,6 @@ import {
   resolveResourceSemanticVisualKind,
   browseResourcePackElements,
   browseResourceCatalogPacks,
-  browseResourceCatalogPackSummaries,
-  hasElementCatalogFilters,
   ResourceCatalogCursorError,
   evaluateResourcePackPublishReadiness,
   matchResourceRequirements,
@@ -51,6 +49,7 @@ export class ResourceRequestValidationError extends Error {}
 
 export type BeeGameResourceServerAppOptions = {
   repository: ResourceRepository
+  processingEnabled?: boolean
   currentUser?: ResourceUserContext
   currentUserResolver?: ResourceUserResolver
   /** Required when the backing repository uses a service-role credential that bypasses RLS. */
@@ -90,7 +89,7 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       const pathname = new URL(request.url).pathname
       if (request.method === 'GET' && pathname === '/health') {
-        return corsResponse(Response.json({ status: 'ok' }), options.corsOrigin)
+        return corsResponse(Response.json({ status: 'ok', processingEnabled: options.processingEnabled ?? true }), options.corsOrigin)
       }
       const serviceSelectionRequest = (
         (request.method === 'POST' && [
@@ -104,6 +103,9 @@ export function createBeeGameResourceServerApp(
       if (!serviceSelectionRequest && !hasResourceAdminPermission(user!)) {
         return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
       }
+      if (options.processingEnabled === false && request.method === 'POST' &&
+          /^\/api\/resource-packs\/[^/]+\/(semantic-curation|processing-jobs)(\/[^/]+\/retry)?$/.test(pathname))
+        return corsResponse(jsonError(503, 'processing_paused', 'Background processing is paused; resource browsing and downloads remain available'), options.corsOrigin)
       const packPathMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)(?:\/|$)/)
       if (!serviceSelectionRequest && packPathMatch && options.canManagePack) {
         try {
@@ -137,13 +139,9 @@ export function createBeeGameResourceServerApp(
       }
       if (request.method === 'POST' && pathname === '/api/resource-catalog/packs') {
         const catalogRequest = parseCatalogRequest(await request.json())
-        if (
-          options.repository.listCatalogPacks &&
-          !hasElementCatalogFilters(catalogRequest.filters)
-        ) {
-          return corsResponse(Response.json(browseResourceCatalogPackSummaries(await options.repository.listCatalogPacks(), catalogRequest)), options.corsOrigin)
-        }
-        const packs = await options.repository.listPacks()
+        // Use the same readiness as element browsing. The SQL summary omits
+        // unresolved external references and can otherwise overstate counts.
+        const packs = (await options.repository.listPacks()).filter(pack => pack.status === 'published')
         const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
         return corsResponse(Response.json(browseResourceCatalogPacks(packs, elements, catalogRequest)), options.corsOrigin)
       }
@@ -174,11 +172,11 @@ export function createBeeGameResourceServerApp(
         const packId = decodeURIComponent(explorePackMatch[1])
         const pack = await options.repository.getPack(packId)
         if (!pack || pack.status !== 'published') return corsResponse(jsonError(404, 'not_found', 'Published Resource Pack not found'), options.corsOrigin)
-        const [catalog, folders] = await Promise.all([
-          options.repository.listCatalogPacks?.(),
+        const [elements, folders] = await Promise.all([
+          options.repository.listElements(packId),
           options.repository.listFolders(packId),
         ])
-        const summary = catalog?.find(candidate => candidate.packId === packId)
+        const summary = browseResourceCatalogPacks([pack], elements, {}).items[0]
         return corsResponse(Response.json({ pack, folders, summary: summary ?? null }), options.corsOrigin)
       }
       if (request.method === 'POST' && pathname === '/api/resource-library/resolve'
@@ -575,11 +573,21 @@ function parseCatalogRequest(value: unknown): ResourceCatalogRequest {
     throw new ResourceRequestValidationError('Resource catalog request must be an object')
   }
   const record = value as Record<string, unknown>
+  const requestKeys = ['filters', 'limit', 'cursor']
+  const unknownRequest = Object.keys(record).filter(key => !requestKeys.includes(key))
+  if (unknownRequest.length) throw new ResourceRequestValidationError('Unknown resource catalog request fields: '+unknownRequest.join(', ')+'. Use {filters:{...},limit,cursor}; free-text query/search is not supported.')
   const filtersValue = record.filters
   if (filtersValue !== undefined && (!filtersValue || typeof filtersValue !== 'object' || Array.isArray(filtersValue))) {
     throw new ResourceRequestValidationError('Resource catalog filters must be an object')
   }
   const filters = (filtersValue ?? {}) as Record<string, unknown>
+  const filterKeys = ['packIds','dimensions','primaryCategories','categories','styles','gameTypes','packTags','usageTags','assetKinds','capabilities','formats']
+  const unknownFilters = Object.keys(filters).filter(key => !filterKeys.includes(key))
+  if (unknownFilters.length) throw new ResourceRequestValidationError('Unknown resource catalog filters: '+unknownFilters.join(', ')+'. Supported filter arrays: '+filterKeys.join(', ')+'. Put limit/cursor outside filters; free-text query/search is not supported.')
+  for (const [key, list] of Object.entries(filters)) {
+    if (!Array.isArray(list) || list.some(item => typeof item !== 'string' || !item.trim()))
+      throw new ResourceRequestValidationError('Resource catalog filters.'+key+' must be an array of nonempty strings')
+  }
   const packIds = stringList(filters.packIds)
   const dimensions = validatedEnumList(filters.dimensions, RESOURCE_DIMENSIONS, 'Resource catalog dimensions') as ResourceDimension[] | undefined
   const primaryCategories = validatedEnumList(filters.primaryCategories, RESOURCE_PACK_PRIMARY_CATEGORIES, 'Resource catalog primaryCategories') as ResourcePack['primaryCategory'][] | undefined
@@ -797,13 +805,6 @@ function validatedEnumList(
     throw new ResourceRequestValidationError(`${label} contain unsupported values`)
   }
   return values
-}
-
-function validatedEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T {
-  if (typeof value !== 'string' || !allowed.includes(value as T)) {
-    throw new ResourceRequestValidationError(`${label} is unsupported`)
-  }
-  return value as T
 }
 
 function assertElementUsageTags(body: Record<string, unknown>): void {

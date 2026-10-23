@@ -1,0 +1,378 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "breakout-win",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "win-root",
+    "nodes": [
+      {
+        "id": "win-root",
+        "role": "screen-root",
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            1920,
+            1080
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1920,
+              1080
+            ],
+            [
+              2560,
+              1080
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "win-dim",
+        "parentId": "win-root",
+        "role": "shape",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ],
+          "position": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#0C0C1E",
+            "opacity": 0.62
+          }
+        }
+      },
+      {
+        "id": "win-panel",
+        "parentId": "win-root",
+        "role": "container",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            520,
+            420
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 16,
+            "padding": [
+              28,
+              32,
+              28,
+              32
+            ],
+            "align": "center"
+          }
+        },
+        "style": {
+          "background": {
+            "color": "#1B1D3D",
+            "opacity": 0.9,
+            "radius": 18
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 18
+          }
+        }
+      },
+      {
+        "id": "win-title",
+        "parentId": "win-panel",
+        "role": "text",
+        "text": "通关！",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            32,
+            0
+          ],
+          "size": [
+            456,
+            44
+          ]
+        },
+        "style": {
+          "fontSize": 36,
+          "color": "#FFD166",
+          "align": "center",
+          "lineHeight": 44
+        }
+      },
+      {
+        "id": "win-score-box",
+        "parentId": "win-panel",
+        "role": "container",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            456,
+            112
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 4,
+            "padding": [
+              12,
+              16,
+              12,
+              16
+            ],
+            "align": "center"
+          }
+        },
+        "style": {
+          "background": {
+            "color": "#1B1D3D",
+            "opacity": 0.85,
+            "radius": 10
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 10
+          }
+        }
+      },
+      {
+        "id": "win-score-label",
+        "parentId": "win-score-box",
+        "role": "text",
+        "text": "本局得分",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            16,
+            0
+          ],
+          "size": [
+            424,
+            24
+          ]
+        },
+        "style": {
+          "fontSize": 16,
+          "color": "#9FA3C7",
+          "align": "center",
+          "lineHeight": 24
+        }
+      },
+      {
+        "id": "win-score-value",
+        "parentId": "win-score-box",
+        "role": "text",
+        "text": "3250",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            16,
+            0
+          ],
+          "size": [
+            424,
+            60
+          ]
+        },
+        "style": {
+          "fontSize": 52,
+          "color": "#F3F4FF",
+          "align": "center",
+          "lineHeight": 60,
+          "fontVariant": "tabular-nums"
+        },
+        "bindings": {
+          "text": "result.score"
+        }
+      },
+      {
+        "id": "win-record-badge",
+        "parentId": "win-panel",
+        "role": "container",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            456,
+            40
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFD166",
+            "opacity": 0.18,
+            "radius": 10
+          },
+          "border": {
+            "width": 3,
+            "color": "#FFD166",
+            "radius": 10
+          }
+        }
+      },
+      {
+        "id": "win-record-text",
+        "parentId": "win-record-badge",
+        "role": "text",
+        "text": "新纪录！",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            456,
+            24
+          ]
+        },
+        "style": {
+          "fontSize": 20,
+          "color": "#FFD166",
+          "align": "center",
+          "lineHeight": 24
+        }
+      },
+      {
+        "id": "win-retry-button",
+        "parentId": "win-panel",
+        "role": "button",
+        "actions": {
+          "activate": "retry"
+        },
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            456,
+            56
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFD166",
+            "radius": 12
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 12
+          }
+        }
+      },
+      {
+        "id": "win-retry-button-label",
+        "parentId": "win-retry-button",
+        "role": "text",
+        "text": "再来一局",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            456,
+            32
+          ]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#0F0F22",
+          "align": "center",
+          "lineHeight": 32
+        }
+      },
+      {
+        "id": "win-back-button",
+        "parentId": "win-panel",
+        "role": "button",
+        "actions": {
+          "activate": "back-to-start"
+        },
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            456,
+            48
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#1B1D3D",
+            "opacity": 0.85,
+            "radius": 12
+          },
+          "border": {
+            "width": 3,
+            "color": "#F3F4FF",
+            "radius": 12
+          }
+        }
+      },
+      {
+        "id": "win-back-button-label",
+        "parentId": "win-back-button",
+        "role": "text",
+        "text": "返回开始界面",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            456,
+            32
+          ]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#F3F4FF",
+          "align": "center",
+          "lineHeight": 32
+        }
+      }
+    ]
+  }
+}

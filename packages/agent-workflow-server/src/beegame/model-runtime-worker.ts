@@ -1,204 +1,199 @@
-import type { ApprovedOutboundTarget } from '@bee-game-studio/security-core'
+import { providerConfig } from '../model-providers/config'
+import { requestProvider } from '../model-providers/request'
+import { modelRuntimeFetch } from './model-runtime-transport'
 import {
-  createPinnedRuntimeFetch,
-  ensureBeeGameMacroGlobals,
-} from './model-runtime-network'
-import { getTLSFetchOptions } from '@bee-game-studio/security-core'
+  getTLSFetchOptions,
+  createPinnedLookup,
+  type ApprovedOutboundTarget,
+} from '@bee-game-studio/security-core'
+import { createPinnedRuntimeFetch } from './model-runtime-network'
 import type {
-  BeeGameModelRuntimeFailureStage,
-  BeeGameModelUsage,
   ModelRuntimeWorkerRequest,
   ModelRuntimeWorkerResponse,
+  BeeGameModelRuntimeFailureStage,
+  BeeGameModelUsage,
 } from './model-runtime-host'
-import { serializeStructuredModelToolResult } from './model-runtime-host'
+import {
+  createChatGPTResponsesStream,
+  getDefaultBgsModel,
+} from '../bgs/auth'
 
+// BGS intake/classification calls keep the verified outbound network path;
+// they have no dependency on the coding agent or its tool loop.
 process.on('message', raw => {
-  void handleMessage(raw as ModelRuntimeWorkerRequest)
+  void generate(raw as ModelRuntimeWorkerRequest)
 })
-
-async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> {
+async function generate(message: ModelRuntimeWorkerRequest) {
   if (message.type !== 'model.generate') return
-  const previousCwd = process.cwd()
-  const previousFetch = globalThis.fetch
-  const previousEnv = new Map<string, string | undefined>()
+  const input = message.input,
+    env = input.runtimeEnv
+  let stage: BeeGameModelRuntimeFailureStage = 'model_request'
+  let usage: BeeGameModelUsage | undefined
+  const unknownUsage: BeeGameModelUsage = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
+    cache_creation_tokens: 0, total_tokens: 0, incomplete: true }
   const targets = Object.fromEntries(
-    Object.entries(message.input.approvedOutboundTargets).map(([key, target]) => [
+    Object.entries(input.approvedOutboundTargets).map(([key, target]) => [
       key,
-      createApprovedTarget(
-        target.url,
-        target.addresses,
-        target.trustedDevelopmentProxy,
-      ),
+      { ...target, url: new URL(target.url),
+        lookup: createPinnedLookup(new URL(target.url).hostname, target.addresses) } satisfies ApprovedOutboundTarget,
     ]),
   )
-  let pinnedFetch: ReturnType<typeof createPinnedRuntimeFetch> | undefined
-  let failureStage: BeeGameModelRuntimeFailureStage = 'model_request'
-
+  const request = createPinnedRuntimeFetch(
+    modelRuntimeFetch,
+    targets,
+    { tls: getTLSFetchOptions().tls },
+  )
+  const send = (value: ModelRuntimeWorkerResponse) => process.send?.(value)
   try {
-    for (const [key, value] of Object.entries(message.input.runtimeEnv)) {
-      previousEnv.set(key, process.env[key])
-      process.env[key] = value
-    }
-    pinnedFetch = createPinnedRuntimeFetch(previousFetch, targets, {
-      tls: getTLSFetchOptions().tls,
-    })
-    process.chdir(message.input.cwd)
-    globalThis.fetch = pinnedFetch
-    ensureBeeGameMacroGlobals()
-
-    // sideQuery is a Bee Game Studio native service and intentionally rejects any
-    // configuration read before the native configuration gate is enabled.
-    // This isolated entrypoint bypasses the CLI bootstrap, so mirror the same
-    // minimal native initialization used by the bridge and query-engine paths.
-    const configModule = await loadRootModule('utils/config.js')
-    getFunction(configModule, 'enableConfigs')()
-    const [sideQueryModule, modelModule] = await Promise.all([
-      loadRootModule('utils/sideQuery.js'),
-      loadRootModule('utils/model/model.js'),
-    ])
-    const sideQuery = getFunction(sideQueryModule, 'sideQuery')
-    const getDefaultSonnetModel = getFunction(
-      modelModule,
-      'getDefaultSonnetModel',
-    )
-    const result = await sideQuery({
-      model: String(getDefaultSonnetModel()),
-      system: message.input.systemPrompt,
-      messages: message.input.messages,
-      ...(message.input.maxTokens !== undefined
-        ? { max_tokens: message.input.maxTokens }
+    const subscription = env.OPENAI_AUTH_MODE === 'chatgpt'
+    const config = subscription
+      ? undefined
+      : {
+          ...providerConfig(env, input.modelType),
+          sessionId: message.requestId,
+        }
+    const model =
+      config?.model ||
+      env.BEEGAME_MODEL ||
+      (subscription && env.BEEGAME_CONFIG_DIR
+        ? await getDefaultBgsModel(env.BEEGAME_CONFIG_DIR)
+        : undefined)
+    if (!model) throw Error('The selected model connection is incomplete')
+    const body = {
+      model,
+      instructions: input.systemPrompt,
+      store: false,
+      input: input.messages.map(message => ({
+        role: message.role,
+        content:
+          typeof message.content === 'string'
+            ? message.content
+            : message.content.map(block =>
+                block.type === 'text'
+                  ? { type: 'input_text', text: block.text }
+                  : {
+                      type: 'input_image',
+                      image_url: `data:${block.source.media_type};base64,${block.source.data}`,
+                    },
+              ),
+      })),
+      ...(!subscription && input.maxTokens
+        ? { max_output_tokens: input.maxTokens }
         : {}),
-      temperature: message.input.temperature,
-      thinking: false,
-      skipSystemPromptPrefix: true,
-      querySource: message.input.querySource,
-      ...(message.input.structuredOutput
+      ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+      ...(input.structuredOutput
         ? {
-            tools: [{
-              name: message.input.structuredOutput.name,
-              description: message.input.structuredOutput.description,
-              input_schema: message.input.structuredOutput.inputSchema,
-            }],
+            tools: [
+              {
+                type: 'function',
+                name: input.structuredOutput.name,
+                description: input.structuredOutput.description,
+                parameters: input.structuredOutput.inputSchema,
+                strict: false,
+              },
+            ],
             tool_choice: {
-              type: 'tool' as const,
-              name: message.input.structuredOutput.name,
+              type: 'function',
+              name: input.structuredOutput.name,
             },
           }
         : {}),
-    })
-    failureStage = 'model_response'
-    const content = message.input.structuredOutput
-      ? serializeStructuredModelToolResult(result, message.input.structuredOutput.name)
-      : extractText(result)
-    const usage = extractUsage(result)
-    send({
-      type: 'model.result',
-      requestId: message.requestId,
-      content,
-      ...(usage ? { usage } : {}),
-    })
+    }
+    let result: Record<string, any>
+    if (subscription) {
+      if (!env.BEEGAME_CONFIG_DIR)
+        throw Error('Owner-specific ChatGPT login directory is required')
+      const stream = await createChatGPTResponsesStream({
+        configDirectory: env.BEEGAME_CONFIG_DIR,
+        request: { ...body, stream: true },
+        signal: AbortSignal.timeout(120_000),
+        fetchOverride: request,
+      })
+      usage = unknownUsage
+      let completed: Record<string, any> | undefined
+      for await (const event of stream) {
+        if (event.response?.usage) usage = { ...responseUsage(event.response.usage),
+          ...(!['response.completed', 'response.incomplete', 'response.failed'].includes(event.type) ? { incomplete: true as const } : {}) }
+        if (
+          [
+            'error',
+            'response.error',
+            'response.failed',
+            'response.incomplete',
+          ].includes(event.type)
+        )
+          throw Error('ChatGPT model response failed')
+        if (event.type === 'response.completed') {
+          completed = event.response
+          break
+        }
+      }
+      if (!completed) throw Error('ChatGPT model response was incomplete')
+      result = completed
+    } else {
+      const response = await requestProvider(
+        config!,
+        body,
+        request,
+        AbortSignal.timeout(120_000),
+        reported => { usage = reported },
+      )
+      if (!response.ok) throw Error(`Model request failed (${response.status})`)
+      usage ??= unknownUsage
+      result = (await response.json()) as Record<string, any>
+    }
+    if (result.usage) usage = responseUsage(result.usage)
+    stage = 'model_response'
+    if (result.status !== 'completed' || !Array.isArray(result.output))
+      throw Error('Model response was incomplete')
+    let content: string
+    if (input.structuredOutput) {
+      const calls = result.output.filter(
+        (item: any) =>
+          item.type === 'function_call' &&
+          item.name === input.structuredOutput!.name,
+      )
+      if (calls.length !== 1)
+        throw Error(
+          'Structured model response must contain exactly one required function call',
+        )
+      content = JSON.stringify(JSON.parse(calls[0].arguments))
+    } else
+      content = result.output
+        .flatMap((item: any) =>
+          item.type === 'message'
+            ? (item.content ?? [])
+                .filter((block: any) => block.type === 'output_text')
+                .map((block: any) => block.text)
+            : [],
+        )
+        .join('\n')
+    send({ type: 'model.result', requestId: message.requestId, content, ...(usage ? { usage } : {}) })
   } catch (error) {
     send({
       type: 'model.error',
       requestId: message.requestId,
-      message: error instanceof Error ? error.message : 'Model runtime failed',
-      stage: failureStage,
+      ...(usage ? { usage } : {}),
+      message:
+        error instanceof SyntaxError
+          ? 'Model provider returned invalid JSON'
+          : error instanceof Error
+            ? error.message
+            : 'Model request failed',
+      stage,
     })
   } finally {
-    process.chdir(previousCwd)
-    globalThis.fetch = previousFetch
-    if (pinnedFetch) await pinnedFetch.close()
-    for (const [key, value] of previousEnv) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
+    await request.close()
   }
 }
 
-function extractUsage(value: unknown): BeeGameModelUsage | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return undefined
-  const usage = (value as { usage?: unknown }).usage
-  if (!usage || typeof usage !== 'object' || Array.isArray(usage))
-    return undefined
-  const record = usage as Record<string, unknown>
-  const input = nonNegative(record.input_tokens ?? record.prompt_tokens)
-  const output = nonNegative(record.output_tokens ?? record.completion_tokens)
-  const cacheRead = nonNegative(
-    record.cache_read_input_tokens ?? record.cache_read_tokens,
-  )
-  const cacheCreation = nonNegative(
-    record.cache_creation_input_tokens ?? record.cache_creation_tokens,
-  )
-  return {
-    input_tokens: input,
-    output_tokens: output,
-    cache_read_tokens: cacheRead,
-    cache_creation_tokens: cacheCreation,
-    total_tokens:
-      nonNegative(record.total_tokens) ||
-      input + output + cacheRead + cacheCreation,
-  }
-}
-
-function nonNegative(value: unknown): number {
-  const number = Number(value)
-  return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0
-}
-
-type DynamicModule = Record<string, unknown>
-
-function loadRootModule(path: string): Promise<DynamicModule> {
-  return import(`../../../../src/${path}`) as Promise<DynamicModule>
-}
-
-function getFunction(
-  module: DynamicModule,
-  name: string,
-): (...args: unknown[]) => unknown {
-  const value = module[name]
-  if (typeof value !== 'function') {
-    throw new Error(`Bee Game Studio runtime module is missing ${name}`)
-  }
-  return value as (...args: unknown[]) => unknown
-}
-
-function extractText(value: unknown): string {
-  if (!value || typeof value !== 'object' || !('content' in value)) return ''
-  const content = (value as { content?: unknown }).content
-  if (!Array.isArray(content)) return ''
-  return content
-    .flatMap(block => {
-      if (!block || typeof block !== 'object') return []
-      const record = block as Record<string, unknown>
-      return record.type === 'text' && typeof record.text === 'string'
-        ? [record.text]
-        : []
-    })
-    .join('')
-}
-
-function createApprovedTarget(
-  value: string,
-  addresses: string[],
-  trustedDevelopmentProxy?: true,
-): ApprovedOutboundTarget {
-  const url = new URL(value)
-  return {
-    url,
-    addresses,
-    ...(trustedDevelopmentProxy ? { trustedDevelopmentProxy } : {}),
-    lookup(hostname, _options, callback) {
-      if (hostname !== url.hostname || addresses.length === 0) {
-        callback(new Error('Outbound URL is not permitted'), '', 4)
-        return
-      }
-      const address = addresses[0]!
-      callback(null, address, address.includes(':') ? 6 : 4)
-    },
-  }
-}
-
-function send(message: ModelRuntimeWorkerResponse): void {
-  process.send?.(message)
+function responseUsage(value: Record<string, any>): BeeGameModelUsage {
+  const input = value.input_tokens, output = value.output_tokens,
+    read = value.input_tokens_details?.cached_tokens ?? 0,
+    write = value.input_tokens_details?.cache_creation_tokens ?? 0
+  if ([input, output, read, write].some(count => !Number.isSafeInteger(count) || count < 0) || read + write > input)
+    throw Error('Provider reported invalid token usage')
+  return { input_tokens: input - read - write, output_tokens: output, cache_read_tokens: read,
+    cache_creation_tokens: write, total_tokens: input + output,
+    ...(value.incomplete === true ? { incomplete: true as const } : {}) }
 }

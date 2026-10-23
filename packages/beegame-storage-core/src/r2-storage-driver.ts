@@ -114,7 +114,7 @@ export function createR2StorageDriver(
 
   return {
     provider: 'r2',
-    async putObject(locator, bytes, contentType, metadata) {
+    async putObject(locator, bytes, contentType, metadata, httpMetadata) {
       const { bucket, key } = checked(locator)
       await client.send(
         new PutObjectCommand({
@@ -123,6 +123,7 @@ export function createR2StorageDriver(
           Body: bytes,
           ContentType: contentType,
           Metadata: metadata,
+          CacheControl: httpMetadata?.cacheControl,
         }),
       )
     },

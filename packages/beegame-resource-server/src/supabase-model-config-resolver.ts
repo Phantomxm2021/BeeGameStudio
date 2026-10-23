@@ -2,7 +2,6 @@ import {
   mapStoredModelConfigToRuntime,
   type RuntimeModelConfig,
   type ModelProviderKind,
-  type ModelTierMap,
 } from '@bee-game-studio/agent-workflow'
 import { decryptSecret } from '@bee-game-studio/agent-workflow-server/security/secret-crypto'
 
@@ -12,6 +11,7 @@ type ModelConfigRow = {
   id: string
   owner_id: string
   provider: string
+  api_protocol?:import('@bee-game-studio/agent-workflow').ModelApiProtocol | null
   base_url: string | null
   api_key_ciphertext: string | null
   models: Record<string, unknown>
@@ -39,7 +39,7 @@ export function createSupabaseResourceModelConfigResolver(options: {
       const ownerFilter = `owner_id=eq.${encodeURIComponent(ownerId)}`
       const idFilter = requestedId ? `&id=eq.${encodeURIComponent(requestedId)}` : ''
       const response = await fetchImpl(
-        `${rest}/beegame_model_configs?${ownerFilter}${idFilter}&select=id,owner_id,provider,base_url,api_key_ciphertext,models,is_default&order=is_default.desc,updated_at.desc&limit=1`,
+        `${rest}/beegame_model_configs?${ownerFilter}${idFilter}&select=id,owner_id,provider,api_protocol,base_url,api_key_ciphertext,models,is_default&order=is_default.desc,updated_at.desc&limit=1`,
         { headers },
       )
       if (!response.ok) throw new Error(`Model config lookup failed (${response.status})`)
@@ -52,15 +52,15 @@ export function createSupabaseResourceModelConfigResolver(options: {
         throw new Error('Selected model config ownership is invalid')
       }
       const provider = parseProvider(row.provider)
-      const models = parseModelTierMap(row.models)
+      const model = typeof row.models?.balanced === 'string' ? row.models.balanced.trim() : undefined
       const apiKey = row.api_key_ciphertext
         ? decryptSecret(row.api_key_ciphertext, 'model-config:api-key')
         : ''
       const runtime = mapStoredModelConfigToRuntime({
         provider,
-        ...(row.base_url ? { baseUrl: row.base_url } : {}),
+        ...(row.api_protocol?{apiProtocol:row.api_protocol}:{}),        ...(row.base_url ? { baseUrl: row.base_url } : {}),
         apiKey,
-        models,
+        model,
       })
       if (!Object.keys(runtime.env).length) throw new Error('Selected model config has no runtime settings')
       return { id: row.id, runtime }
@@ -71,14 +71,4 @@ export function createSupabaseResourceModelConfigResolver(options: {
 function parseProvider(value: unknown): ModelProviderKind {
   if (value === 'anthropic-compatible' || value === 'openai-compatible' || value === 'gemini' || value === 'grok') return value
   throw new Error('Selected model config provider is unsupported')
-}
-
-function parseModelTierMap(value: unknown): ModelTierMap {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const record = value as Record<string, unknown>
-  return {
-    ...(typeof record.fast === 'string' && record.fast.trim() ? { fast: record.fast.trim() } : {}),
-    ...(typeof record.balanced === 'string' && record.balanced.trim() ? { balanced: record.balanced.trim() } : {}),
-    ...(typeof record.strong === 'string' && record.strong.trim() ? { strong: record.strong.trim() } : {}),
-  }
 }

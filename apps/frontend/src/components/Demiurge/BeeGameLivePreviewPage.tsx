@@ -1,22 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AlertTriangle,
-  ChevronLeft,
-  ExternalLink,
-  FileText,
-  Info,
-  MonitorPlay,
-  Play,
-  RefreshCw,
-  Rocket,
-  Square,
-  X,
-} from 'lucide-react';
-import { BsStars } from 'react-icons/bs';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Check, ChevronDown, ChevronLeft, Copy, LoaderCircle, Play, Square, Upload } from 'lucide-react';
+import { AnimatePresence, useReducedMotion } from 'motion/react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
-import { Button } from '../ui/button';
-import { ButtonGroup } from '../ui/button-group';
+import { Button } from '../beui/project-button';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import {
   closeResourceLibraryRoute,
@@ -25,33 +12,36 @@ import {
 } from '../ResourceLibrary/resourceLibraryRoute';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
-import { AccountActionsMenu } from './Landing/AccountActionsMenu';
 import { ProfileModal } from './Landing/ProfileModal';
-import type { BeeGameDeploymentPayload, BuildReportPayload } from '../../services/api';
+import type { BeeGameDeploymentDiscussionConfirmation, BeeGameDeploymentPayload, BuildReportPayload, ProjectBaselineStatusPayload } from '../../services/api';
 import type { TokenUsage } from '../../types/message';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { clearSupabaseSession } from '../../services/supabaseAuthApi';
 import { buildApiUrl } from '../../services/apiClient';
+import { WorkspaceShell } from '../Workspace/WorkspaceShell';
+import { WorkspacePreviewPanel } from '../Workspace/WorkspacePreviewPanel';
+import { WorkspaceDeploymentDialog } from '../Workspace/WorkspaceDeploymentDialog';
+import { ThemeToggle } from '../beui/motion/theme-toggle';
+import { AccountActionsMenu } from './Landing/AccountActionsMenu';
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../beui/registry/components/motion/popover-morph';
+import { AnimatedBadge } from '../beui/registry/components/motion/animated-badge';
 
 const ResourceLibraryPage = lazy(async () => {
   const module = await import('../ResourceLibrary/ResourceLibraryView');
   return { default: module.ResourceLibraryPage };
 });
 
-type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
+export type DashboardStatus = 'starting' | 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
-type PreviewConsoleEntry = {
-  level: string;
-  message: string;
-  createdAt?: string;
-};
 
 interface BeeGameLivePreviewPageProps {
+  projectId: string;
   lang: Language;
   projectName: string;
   status: DashboardStatus;
   phaseLabel: string;
+  handoffNotice?: string;
   credits?: {
     consumedCredits: number;
     weightedTokens?: number;
@@ -63,22 +53,26 @@ interface BeeGameLivePreviewPageProps {
   isSyncing: boolean;
   isInteractionLocked?: boolean;
   isWorkspaceBusy?: boolean;
+  isAgentWorking?: boolean;
   buildReport?: BuildReportPayload | null;
   projectTarget?: string;
   tokenUsage?: TokenUsage | null;
+  tokenUsageScope?: 'project' | 'session';
+  settledProjectTokens?: number;
+  projectExecutionTime?: ProjectBaselineStatusPayload['execution_time'];
   deployments?: BeeGameDeploymentPayload[];
   previewRefreshNonce?: number;
   onStartPreview?: () => void | Promise<void>;
-  onRestartPreview?: () => void | Promise<void>;
   onStopPreview?: () => void | Promise<void>;
-  onDeployProject?: () => void | Promise<void>;
+  onDeployProject?: (confirmation?: BeeGameDeploymentDiscussionConfirmation) => void | Promise<void>;
   onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
-  onFixBuildErrors?: () => void | Promise<void>;
   onFixDeploymentFailure?: () => void | Promise<void>;
+  onFixConsoleError?: (message: string) => Promise<boolean | void>;
   onOpenExternal?: (url: string) => void;
   isDeploying?: boolean;
   onBack?: () => void;
   onSetLang: (lang: Language) => void;
+  collaboration?: ReactNode;
 }
 
 const normalizeUrl = (url?: string): string => {
@@ -87,94 +81,88 @@ const normalizeUrl = (url?: string): string => {
   return value.startsWith('/') ? buildApiUrl(value) : value;
 };
 
-const getPreviewSessionId = (url?: string): string => {
-  const value = normalizeUrl(url);
-  if (!value || typeof window === 'undefined') return '';
-  try {
-    const parsed = new URL(value, window.location.origin);
-    const parts = parsed.pathname.split('/').filter(Boolean);
-    if (parts[0] !== 'previews') return '';
-    return decodeURIComponent(parts[1] || '');
-  } catch {
-    return '';
-  }
-};
-
-const displayDeploymentUrl = (url?: string): string => {
-  const value = normalizeUrl(url);
-  if (!value) return '';
-  if (/^https?:\/\//i.test(value)) return value.toLowerCase();
-  if (value.startsWith('/') && typeof window !== 'undefined') {
-    return `${window.location.origin}${value}`.toLowerCase();
-  }
-  return value.toLowerCase();
-};
-
 const getPreviewState = (status: DashboardStatus, buildReport?: BuildReportPayload | null): PreviewState => {
   const reportStatus = String(buildReport?.status || '').toLowerCase();
   const url = normalizeUrl(buildReport?.build_url);
 
   if (reportStatus === 'failed' || reportStatus === 'error') return 'failed';
   if (url) return 'live';
-  if (status === 'running' || status === 'waiting_approval') return 'starting';
   if (status === 'paused' || status === 'stopped' || status === 'offline') return 'stopped';
   return 'idle';
 };
 
-const collectBuildErrorLogs = (buildReport?: BuildReportPayload | null): string[] => {
-  const reportStatus = String(buildReport?.status || '').toLowerCase();
-  const isFailedReport = reportStatus === 'failed' || reportStatus === 'error';
-  const logs = new Set<string>();
-  const failureReason = String(buildReport?.failure_reason || '').trim();
-  if (failureReason) logs.add(failureReason);
-
-  for (const check of buildReport?.checks || []) {
-    const checkStatus = String(check.status || '').toLowerCase();
-    const isFailedCheck = checkStatus === 'failed' || checkStatus === 'error';
-    const detail = String(check.detail || '').trim();
-    if (!detail || (!isFailedReport && !isFailedCheck)) continue;
-    const name = String(check.name || '').trim();
-    logs.add(name ? `${name}: ${detail}` : detail);
+function ProjectSyncBadge({ active, syncingLabel, syncedLabel }: {
+  active: boolean;
+  syncingLabel: string;
+  syncedLabel: string;
+}) {
+  const reduceMotion = useReducedMotion();
+  const [state, setState] = useState({ active, showCompletion: false });
+  if (state.active !== active) {
+    setState({ active, showCompletion: !active });
   }
 
-  return Array.from(logs);
-};
+  useEffect(() => {
+    if (!state.showCompletion) return;
+    const timer = window.setTimeout(() => setState(current => ({ ...current, showCompletion: false })), 1_000);
+    return () => window.clearTimeout(timer);
+  }, [state.showCompletion]);
 
-const previewControlButtonClass =
-  'border-white/[0.08] bg-white/[0.025] text-zinc-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-white/15 hover:bg-white/[0.055] hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-white/25 disabled:text-zinc-600 disabled:opacity-45';
+  return <AnimatePresence initial={false}>
+    {active || state.showCompletion ? <AnimatedBadge
+      key="project-sync"
+      status={active ? 'loading' : 'success'}
+      size="md"
+      contentKey={active ? 'syncing' : 'synced'}
+      data-testid="beegame-sync-status"
+      className="max-[899px]:hidden"
+      aria-live="polite"
+      exit={reduceMotion ? { opacity: 0, transition: { duration: 0 } } : {
+        opacity: 0, y: -4, scale: 0.96, transition: { duration: 0.2 },
+      }}
+    >
+      {active ? syncingLabel : syncedLabel}
+    </AnimatedBadge> : null}
+  </AnimatePresence>;
+}
 
 export function BeeGameLivePreviewPage({
+  projectId,
   lang,
   projectName,
   status,
+  handoffNotice,
   credits,
   accountCreditBalance,
+  tokenUsage,
+  tokenUsageScope = 'project',
+  settledProjectTokens,
+  projectExecutionTime,
   isSyncing,
   isInteractionLocked = false,
   isWorkspaceBusy = false,
+  isAgentWorking = false,
   buildReport,
-  tokenUsage,
   deployments = [],
   previewRefreshNonce = 0,
   onStartPreview,
-  onRestartPreview,
   onStopPreview,
   onDeployProject,
   onRollbackDeployment,
-  onFixBuildErrors,
   onFixDeploymentFailure,
+  onFixConsoleError,
   onOpenExternal,
   isDeploying = false,
   onBack,
   onSetLang,
+  collaboration,
 }: BeeGameLivePreviewPageProps) {
-  const [isProjectHintOpen, setProjectHintOpen] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(() => isResourceLibraryRoute());
   const [isCreditStoreOpen, setCreditStoreOpen] = useState(false);
   const [isHistoryOpen, setHistoryOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
-  const projectTokenCounts = normalizeProjectTokenUsage(tokenUsage);
+  const [isProjectMenuOpen, setProjectMenuOpen] = useState(false);
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceLibraryOpen(isResourceLibraryRoute());
     window.addEventListener('popstate', syncResourceRoute);
@@ -183,11 +171,16 @@ export function BeeGameLivePreviewPage({
   const [isDeploymentDialogOpen, setDeploymentDialogOpen] = useState(false);
   const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
   const [isStartingPreview, setStartingPreview] = useState(false);
+  const [previewStartError, setPreviewStartError] = useState<{ projectId: string; message: string } | null>(null);
   const [isStoppingPreview, setStoppingPreview] = useState(false);
-  const [previewConsoleEntries, setPreviewConsoleEntries] = useState<PreviewConsoleEntry[]>([]);
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const uiText = useBeeGameText(lang);
   const labels = uiText.livePreview as Record<string, string>;
+  const tokenScopeSuffix = tokenUsageScope === 'session'
+    ? lang.startsWith('zh') ? '（当前会话）' : lang.startsWith('ja') ? '（現在のセッション）' : ' (current session)'
+    : '';
+  const settledTokenLabel = lang.startsWith('zh') ? '项目已结算 Tokens' : lang.startsWith('ja') ? 'プロジェクト決済済み Tokens' : 'Project settled Tokens';
+  const backHomeLabel = lang.startsWith('zh') ? '返回主页' : 'Back to home';
   const currentUser = useSystemStore(state => state.currentUser);
   const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
   const previewUrl = normalizeUrl(buildReport?.build_url);
@@ -202,9 +195,10 @@ export function BeeGameLivePreviewPage({
     }
   }, [previewRefreshNonce, previewUrl]);
   const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
+  const startError = previewStartError?.projectId === projectId ? previewStartError.message : '';
   const previewState = isStartingPreview
     ? 'starting'
-    : isPreviewLocallyStopped
+    : startError ? 'failed' : isPreviewLocallyStopped
       ? 'stopped'
       : getPreviewState(status, buildReport);
   const canShowPreview = previewState === 'live' && Boolean(previewUrl);
@@ -215,25 +209,21 @@ export function BeeGameLivePreviewPage({
     !isStoppingPreview &&
     !isInteractionLocked &&
     !isWorkspaceBusy;
-  const canStopPreview = canShowPreview && !isStoppingPreview && !isInteractionLocked;
+  const canStopPreview = Boolean(onStopPreview) && canShowPreview && !isStoppingPreview && !isInteractionLocked && !isWorkspaceBusy;
   const canDeploy = Boolean(onDeployProject) && !isDeploying && !isInteractionLocked && !isWorkspaceBusy;
-  const buildErrorLogs = collectBuildErrorLogs(buildReport);
-  const runtimeErrorLogs = previewConsoleEntries
-    .filter(entry => entry.level === 'error' || entry.level === 'warn')
-    .map(entry => `[preview ${entry.level}] ${entry.message}`);
-  const buildErrorLog = [...buildErrorLogs, ...runtimeErrorLogs].join('\n\n');
+  const showsAgentWorkingStatus = isAgentWorking && !canShowPreview;
   const statusText =
-    previewState === 'live'
-      ? labels.live
-      : previewState === 'failed'
-        ? labels.failed
-        : previewState === 'stopped'
-          ? labels.stopped
-          : previewState === 'starting'
-            ? labels.starting
-            : labels.waiting;
+    showsAgentWorkingStatus
+      ? labels.agentWorking
+      : isStartingPreview
+        ? labels.starting
+        : previewState === 'failed'
+          ? labels.failed
+          : previewState === 'live'
+            ? labels.live
+            : labels.standby;
   const previewDetailText =
-    previewState === 'failed' ? buildReport?.failure_reason || buildReport?.summary || labels.noPreview : '';
+    previewState === 'failed' ? startError || buildReport?.failure_reason || buildReport?.summary || labels.noPreview : '';
   const handleStop = async () => {
     if (!canStopPreview || isInteractionLocked) return;
     setStoppingPreview(true);
@@ -247,21 +237,19 @@ export function BeeGameLivePreviewPage({
   const handlePlay = async () => {
     if (isInteractionLocked || isWorkspaceBusy || isStartingPreview) return;
     setStoppedPreviewUrl('');
+    setPreviewStartError(null);
     setStartingPreview(true);
     try {
       await onStartPreview?.();
+    } catch (error) {
+      setPreviewStartError({ projectId, message: error instanceof Error ? error.message : String(error) });
     } finally {
       setStartingPreview(false);
     }
   };
-  const handleRestart = async () => {
+  const handleDeploy = async (confirmation?: BeeGameDeploymentDiscussionConfirmation) => {
     if (isInteractionLocked || isWorkspaceBusy) return;
-    setStoppedPreviewUrl('');
-    await onRestartPreview?.();
-  };
-  const handleDeploy = async () => {
-    if (isInteractionLocked || isWorkspaceBusy) return;
-    await onDeployProject?.();
+    await onDeployProject?.(confirmation);
   };
   const closeAccountSurfaces = () => {
     setSettingsOpen(false);
@@ -281,306 +269,156 @@ export function BeeGameLivePreviewPage({
     onBack?.();
   };
   useEffect(() => {
+    // A new preview identity must not inherit the locally stopped state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStoppedPreviewUrl('');
-    setPreviewConsoleEntries([]);
   }, [previewRefreshNonce, previewUrl]);
 
-  useEffect(() => {
-    const handlePreviewConsoleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin && event.origin !== 'null') return;
-      if (event.source !== previewFrameRef.current?.contentWindow) return;
-      const data = event.data;
-      if (!data || typeof data !== 'object') return;
-      if ((data as { type?: unknown }).type !== 'beegame.preview.console') return;
-      const expectedSessionId = getPreviewSessionId(previewUrl);
-      const sessionId = String((data as { sessionId?: unknown }).sessionId || '').trim();
-      if (expectedSessionId && sessionId !== expectedSessionId) return;
-      const level = String((data as { level?: unknown }).level || '').trim();
-      const message = String((data as { message?: unknown }).message || '').trim();
-      if (!level || !message) return;
-      setPreviewConsoleEntries(entries => [
-        ...entries.slice(-9),
-        {
-          level,
-          message,
-          createdAt: String((data as { createdAt?: unknown }).createdAt || '').trim(),
-        },
-      ]);
-    };
-
-    window.addEventListener('message', handlePreviewConsoleMessage);
-    return () => window.removeEventListener('message', handlePreviewConsoleMessage);
-  }, [previewUrl]);
-
-  return (
-    <main
-      data-testid="beegame-live-preview-page"
-      className="relative h-full flex-1 overflow-hidden bg-zinc-950 text-zinc-50"
-    >
+  const workspaceHeader = (
+    <div className="workspace-header flex min-w-0 items-center">
       <header
         data-testid="beegame-shell-top-nav"
-        className="absolute left-0 right-0 top-0 z-[90] flex h-20 items-center border-b border-zinc-800/80 bg-zinc-950/95 px-7 backdrop-blur-xl"
+        className="relative z-[90] flex h-12 min-w-0 flex-1 items-center px-2 sm:h-14"
       >
-        <div className="relative flex min-w-0 items-center gap-4">
+        <div className="relative flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
           <button
             type="button"
-            aria-label={labels.back}
+            aria-label={backHomeLabel}
+            title={backHomeLabel}
             onClick={onBack}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-transparent bg-transparent text-zinc-500 transition hover:border-zinc-800 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:border-zinc-600 focus-visible:bg-zinc-900 focus-visible:text-zinc-100 focus-visible:outline-none"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-transparent bg-transparent text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--surface-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-none sm:h-10 sm:w-10"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
           </button>
-          <div
-            data-testid="beegame-project-trigger"
-            className="type-title-3 min-w-0 max-w-[34rem] truncate text-zinc-100"
-          >
-            {projectName}
-          </div>
-          <div
-            className="relative shrink-0"
-            onMouseEnter={() => setProjectHintOpen(true)}
-            onMouseLeave={() => setProjectHintOpen(false)}
-          >
-            <button
-              type="button"
-              data-testid="beegame-project-info-trigger"
-              aria-label={labels.projectInfo || 'Project info'}
-              aria-describedby={isProjectHintOpen ? 'beegame-project-hint' : undefined}
-              onFocus={() => setProjectHintOpen(true)}
-              onBlur={() => setProjectHintOpen(false)}
-              className="grid h-7 w-7 place-items-center rounded-lg border border-transparent bg-transparent text-zinc-500 transition hover:border-zinc-800 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:border-zinc-700 focus-visible:bg-zinc-900 focus-visible:text-zinc-100 focus-visible:outline-none"
+          <MorphPopover open={isProjectMenuOpen} onOpenChange={setProjectMenuOpen} className="min-w-0 max-w-[min(52vw,28rem)]">
+            <MorphPopoverTrigger>
+              <button type="button" data-testid="beegame-project-info-trigger" aria-label={`${projectName}, ${labels.projectInfo || 'Project info'}`}
+              className="group flex min-w-0 max-w-[min(52vw,28rem)] flex-[0_1_auto] items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left transition hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             >
-              <Info className="h-4 w-4" />
-            </button>
-            {isProjectHintOpen ? (
-              <div
-                id="beegame-project-hint"
-                role="tooltip"
-                data-testid="beegame-project-hint"
-                className="absolute right-0 top-[calc(100%+0.75rem)] z-[110] w-80 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl"
-              >
-                <span
-                  className="absolute -top-1.5 right-2 h-3 w-3 rotate-45 border-l border-t border-zinc-800 bg-zinc-950"
-                  aria-hidden="true"
-                />
-                <ProjectHintRow
-                  label={labels.freshInputTokens || 'Input'}
-                  value={formatTokenCount(projectTokenCounts.input)}
-                />
-                <ProjectHintRow
-                  label={labels.cacheReadTokens || 'Cached Input'}
-                  value={formatTokenCount(projectTokenCounts.cachedInput)}
-                />
-                <ProjectHintRow
-                  label={labels.outputTokens || 'Output'}
-                  value={formatTokenCount(projectTokenCounts.output)}
-                />
-                <ProjectHintRow
-                  label={labels.credits || 'Credit'}
-                  value={formatCreditAmount(credits?.consumedCredits ?? 0)}
-                />
+              <span data-testid="beegame-project-trigger" className="type-body-lg min-w-0 flex-1 truncate font-semibold text-[var(--text-primary)]">{projectName}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition-transform group-data-[open]:rotate-180" aria-hidden="true" />
+              </button>
+            </MorphPopoverTrigger>
+            <MorphPopoverContent align="start" radius={16} className="w-[min(20rem,calc(100vw-1rem))] bg-popover text-popover-foreground">
+              <div id="beegame-project-hint" data-testid="beegame-project-hint" className="px-4 py-3">
+                <ProjectNameCopy name={projectName} copyLabel={labels.copyProjectName} copiedLabel={labels.projectNameCopied} failedLabel={labels.projectNameCopyFailed} />
+                <div className="mt-2">
+                  <ProjectElapsedRow timing={projectExecutionTime} label={labels.projectRunTime} detail={labels.projectRunTimeDetail} lang={lang} />
+                  <ProjectHintRow label={labels.consumedCredits} value={formatCreditAmount(credits?.consumedCredits)} />
+                  <ProjectHintRow label={`${labels.inputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.input_tokens ?? tokenUsage?.prompt_tokens)} />
+                  <ProjectHintRow label={`${labels.cachedInputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.cached_input_tokens ?? tokenUsage?.cache_read_tokens)} />
+                  <ProjectHintRow label={`${labels.outputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.output_tokens ?? tokenUsage?.completion_tokens)} />
+                  {tokenUsage?.providerUsageIncomplete ? <p role="status" className="type-footnote mt-2 text-[var(--text-secondary)]">
+                    {lang.startsWith('zh') ? '用量回执不完整，以上仅为已确认 Tokens。' : lang.startsWith('ja')
+                      ? '使用量の報告が不完全です。上記は確認済みの Tokens のみです。'
+                      : 'Usage receipts are incomplete. Only confirmed tokens are shown above.'}
+                  </p> : null}
+                  {settledProjectTokens !== undefined ? <ProjectHintRow label={settledTokenLabel} value={formatUsage(settledProjectTokens)} /> : null}
+                </div>
               </div>
-            ) : null}
-          </div>
-          {isSyncing ? (
+            </MorphPopoverContent>
+          </MorphPopover>
+          <ProjectSyncBadge active={isSyncing || status === 'starting'} syncingLabel={labels.syncing} syncedLabel={labels.synced} />
+          {handoffNotice ? (
             <div
-              data-testid="beegame-sync-status"
-              className="type-footnote flex items-center gap-2 rounded-xl bg-zinc-800/80 px-3 py-1 text-zinc-400"
+              data-testid="beegame-foundation-handoff-notice"
+              className="type-footnote max-w-[24rem] truncate rounded-md border border-[var(--success)] bg-[var(--surface-2)] px-3 py-1 text-[var(--success)] max-[899px]:hidden"
             >
-              <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              <span>{labels.syncing}</span>
+              {handoffNotice}
             </div>
           ) : null}
         </div>
+        <div className="workspace-header-actions ml-1 flex shrink-0 items-center gap-2 sm:ml-auto sm:gap-3">
+          <ThemeToggle />
+          <div data-testid="beegame-preview-deploy-control" className="flex h-10 min-w-10 shrink-0 items-stretch overflow-hidden rounded-full border border-[var(--border)] bg-[var(--surface-2)] min-[900px]:min-w-[204px]">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={canShowPreview ? labels.stop : labels.play}
+              aria-busy={isStartingPreview || isStoppingPreview}
+              disabled={canShowPreview ? !canStopPreview : !canStartPreview}
+              onClick={() => void (canShowPreview ? handleStop() : handlePlay())}
+              className="h-full min-w-0 flex-1 justify-center rounded-none border-0 px-3 text-[var(--text-primary)] hover:bg-[var(--surface-hover)] sm:px-5"
+            >
+              {isStartingPreview || isStoppingPreview ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : canShowPreview ? <Square className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5 fill-current" />}
+              <span className="max-[899px]:hidden">{canShowPreview ? labels.stop : uiText.preview}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              aria-label={isDeploying ? labels.deploying : labels.deploy}
+              disabled={!canDeploy}
+              onClick={() => { if (canDeploy) setDeploymentDialogOpen(true); }}
+              className="h-full min-w-10 shrink-0 rounded-none border-0 border-l border-[var(--border)] px-3 min-[900px]:w-[84px] min-[900px]:min-w-[84px]"
+            >
+              <Upload className="h-3.5 w-3.5 min-[900px]:hidden" />
+              <span className="max-[899px]:hidden">{isDeploying ? labels.deploying : labels.deploy}</span>
+            </Button>
+          </div>
+          <AccountActionsMenu
+            lang={lang}
+            isSettingsOpen={isSettingsOpen}
+            isHistoryOpen={isHistoryOpen}
+            isProfileOpen={isProfileOpen}
+            isCreditStoreOpen={isCreditStoreOpen}
+            isResourceLibraryOpen={isResourceLibraryOpen}
+            currentUserId={currentUser?.id}
+            currentUserDisplayName={currentUser?.displayName}
+            currentUserEmail={currentUser?.email}
+            currentUserAvatarUrl={currentUser?.avatarUrl}
+            creditBalance={accountCreditBalance?.balanceCredits}
+            canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
+            onOpenProfile={() => { closeAccountSurfaces(); setProfileOpen(true); }}
+            onOpenCreditStore={() => { closeAccountSurfaces(); setCreditStoreOpen(true); }}
+            onToggleSettings={() => { closeAccountSurfaces(); setSettingsOpen(true); }}
+            onOpenResourceLibrary={() => { openResourceLibraryRoute(); closeAccountSurfaces(); setIsResourceLibraryOpen(true); }}
+            onToggleHistory={() => { closeAccountSurfaces(); setHistoryOpen(true); }}
+            onOpenLogin={() => setProfileOpen(true)}
+            onSignOut={currentUser ? () => void handleSignOut() : undefined}
+          />
+        </div>
       </header>
 
-      <AccountActionsMenu
-        lang={lang}
-        className="absolute right-7 top-5 z-[150]"
-        isSettingsOpen={isSettingsOpen}
-        isHistoryOpen={isHistoryOpen}
-        isProfileOpen={isProfileOpen}
-        isCreditStoreOpen={isCreditStoreOpen}
-        isResourceLibraryOpen={isResourceLibraryOpen}
-        currentUserId={currentUser?.id}
-        currentUserDisplayName={currentUser?.displayName || currentUser?.email}
-        currentUserEmail={currentUser?.email}
-        currentUserAvatarUrl={currentUser?.avatarUrl}
-        creditBalance={accountCreditBalance?.balanceCredits}
-        onOpenLogin={() => setSettingsOpen(true)}
-        onOpenProfile={() => {
-          closeAccountSurfaces();
-          setProfileOpen(true);
-        }}
-        onOpenCreditStore={() => {
-          closeAccountSurfaces();
-          setCreditStoreOpen(true);
-        }}
-        onToggleSettings={() => {
-          closeAccountSurfaces();
-          setSettingsOpen(true);
-        }}
-        canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
-        onOpenResourceLibrary={() => {
-          openResourceLibraryRoute();
-          closeAccountSurfaces();
-          setIsResourceLibraryOpen(true);
-          setSettingsOpen(false);
-        }}
-        onToggleHistory={() => {
-          closeAccountSurfaces();
-          setHistoryOpen(true);
-        }}
-        onSignOut={currentUser ? () => void handleSignOut() : undefined}
+    </div>
+  );
+
+  const workspacePreview = (
+    <WorkspacePreviewPanel
+      title={uiText.previewTitle}
+      labels={labels}
+      embeddedPreviewUrl={embeddedPreviewUrl}
+      previewState={previewState}
+      statusText={statusText}
+      previewDetailText={previewDetailText}
+      previewFrameRef={previewFrameRef}
+      canShowPreview={canShowPreview}
+      isAgentWorking={showsAgentWorkingStatus}
+      onOpenExternal={onOpenExternal}
+      onFixConsoleError={onFixConsoleError}
+    />
+  );
+
+  return (
+    <div data-testid="beegame-live-preview-page" className="contents">
+      <WorkspaceShell
+        header={workspaceHeader}
+        preview={workspacePreview}
+        collaboration={collaboration ?? <div className="workspace-collaboration-panel" />}
       />
-
-      <div className="absolute bottom-4 left-4 right-[29rem] top-24 flex flex-col">
-        <section className="flex min-h-0 flex-1 flex-col overflow-visible rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-[0_32px_80px_-48px_rgba(0,0,0,0.8)]">
-          <div className="relative z-10 flex h-20 items-center justify-between overflow-visible px-9">
-            <div className="min-w-0">
-              <div className="flex items-baseline gap-3">
-                <h1 className="type-title-3 text-zinc-100">{uiText.previewTitle}</h1>
-              </div>
-            </div>
-            <div className="relative z-20 flex shrink-0 items-center justify-end gap-2">
-              <ButtonGroup aria-label={labels.actions || 'Actions'}>
-                {!canShowPreview ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-lg"
-                    aria-label={isStartingPreview ? labels.starting : labels.play}
-                    title={isStartingPreview ? labels.starting : labels.play}
-                    disabled={!canStartPreview}
-                    onClick={handlePlay}
-                    className={previewControlButtonClass}
-                  >
-                    {isStartingPreview ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Play className="h-4 w-4 fill-current" />
-                    )}
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-lg"
-                    aria-label={labels.stop}
-                    title={labels.stop}
-                    disabled={!canStopPreview}
-                    onClick={handleStop}
-                    className={previewControlButtonClass}
-                  >
-                    <Square className="h-3.5 w-3.5 fill-current" />
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-lg"
-                  aria-label={isDeploying ? labels.deploying : labels.deploy}
-                  title={isDeploying ? labels.deploying : labels.deploy}
-                  disabled={!canDeploy}
-                  onClick={() => setDeploymentDialogOpen(true)}
-                  className={previewControlButtonClass}
-                >
-                  <Rocket className="h-4 w-4" />
-                </Button>
-              </ButtonGroup>
-              <ButtonGroup aria-label={labels.openLive || labels.open}>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-lg"
-                  aria-label={labels.reload}
-                  title={labels.reload}
-                  disabled={!canShowPreview || isInteractionLocked}
-                  onClick={handleRestart}
-                  className={previewControlButtonClass}
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-lg"
-                  aria-label={labels.openLive || labels.open}
-                  title={labels.openLive || labels.open}
-                  disabled={!canShowPreview}
-                  onClick={() => {
-                    if (previewUrl) onOpenExternal?.(previewUrl);
-                  }}
-                  className={previewControlButtonClass}
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </Button>
-              </ButtonGroup>
-            </div>
-          </div>
-
-          <div
-            data-testid="beegame-preview-surface"
-            className="relative mx-9 mb-9 min-h-0 flex-1 overflow-hidden rounded-xl border border-zinc-800 bg-black p-4"
-          >
-            {canShowPreview ? (
-              <iframe
-                ref={previewFrameRef}
-                key={`${previewUrl}:${previewRefreshNonce}`}
-                title={uiText.previewTitle}
-                data-testid="beegame-live-preview-frame"
-                src={embeddedPreviewUrl}
-                sandbox="allow-forms allow-pointer-lock allow-popups allow-scripts"
-                className="h-full w-full rounded-lg border-0 bg-white"
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center px-8 text-center">
-                <div className="max-w-md">
-                  <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-zinc-900 text-zinc-300 ring-1 ring-zinc-800">
-                    {previewState === 'failed' ? (
-                      <AlertTriangle className="h-8 w-8 text-red-300" />
-                    ) : (
-                      <MonitorPlay className="h-8 w-8" />
-                    )}
-                  </div>
-                  <div className="type-caption-1 mt-6 text-zinc-400">{statusText}</div>
-                  {previewDetailText ? <p className="type-callout mt-3 text-zinc-500">{previewDetailText}</p> : null}
-                </div>
-              </div>
-            )}
-
-            {buildErrorLog ? (
-              <div
-                data-testid="beegame-preview-error-overlay"
-                className="absolute bottom-4 left-4 right-4 z-20 overflow-hidden rounded-xl border border-red-300/20 bg-zinc-950/88 shadow-2xl shadow-black/45 backdrop-blur-xl"
-              >
-                <div className="flex h-11 items-center justify-between gap-4 border-b border-red-300/10 px-4">
-                  <div className="type-caption-1 text-zinc-300">{labels.console}</div>
-                  <button
-                    type="button"
-                    aria-label={labels.fixBuildErrors}
-                    onClick={() => void onFixBuildErrors?.()}
-                    className="type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
-                  >
-                    <BsStars className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>{labels.fixBuildErrors}</span>
-                  </button>
-                </div>
-                <pre className="type-code-sm max-h-28 overflow-auto whitespace-pre-wrap break-words px-4 py-3 text-red-200/85">
-                  {buildErrorLog}
-                </pre>
-              </div>
-            ) : null}
-          </div>
-        </section>
-      </div>
 
       <SettingsMenu isOpen={isSettingsOpen} lang={lang} onClose={() => setSettingsOpen(false)} onSetLang={onSetLang} />
       {isResourceLibraryOpen ? (
         <Suspense
           fallback={
-            <div className="grid min-h-screen place-items-center bg-black">
-              <span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+            <div
+              role="status"
+              aria-label="Loading resource library"
+              aria-busy="true"
+              className="fixed inset-0 z-[200] grid place-items-center bg-[var(--surface-1)] text-[var(--text-primary)]"
+            >
+              <span className="size-7 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--primary)]" />
             </div>
           }
         >
@@ -609,7 +447,9 @@ export function BeeGameLivePreviewPage({
           await loadCurrentUser();
         }}
       />
-      <DeploymentDialog
+      <WorkspaceDeploymentDialog
+        projectId={projectId}
+        projectName={projectName}
         isOpen={isDeploymentDialogOpen}
         deployments={deployments}
         labels={labels}
@@ -621,270 +461,89 @@ export function BeeGameLivePreviewPage({
         isDeploying={isDeploying}
         canDeploy={canDeploy}
       />
-    </main>
-  );
-}
-
-function DeploymentDialog({
-  isOpen,
-  deployments,
-  labels,
-  onClose,
-  onOpenExternal,
-  onFixDeploymentFailure,
-  onDeploy,
-  onRollback,
-  isDeploying,
-  canDeploy,
-}: {
-  isOpen: boolean;
-  deployments: BeeGameDeploymentPayload[];
-  labels: Record<string, string>;
-  onClose: () => void;
-  onOpenExternal?: (url: string) => void;
-  onFixDeploymentFailure?: () => void | Promise<void>;
-  onDeploy: () => void | Promise<void>;
-  onRollback?: (deploymentId: string) => void | Promise<void>;
-  isDeploying: boolean;
-  canDeploy: boolean;
-}) {
-  if (!isOpen) return null;
-  const latest = deployments[0];
-  const versionList = deployments;
-  const latestUrl = normalizeUrl(latest?.url);
-  const latestDisplayUrl = displayDeploymentUrl(latest?.url);
-  const failureLog = latest?.status === 'failed' ? latest.buildLog || latest.message || labels.deploymentFailed : '';
-  return (
-    <div
-      className="fixed inset-0 z-[180] grid place-items-center bg-black/55 px-6 py-8 backdrop-blur-2xl"
-      role="presentation"
-      onMouseDown={event => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="beegame-deployment-dialog-title"
-        className="relative w-full max-w-2xl overflow-hidden rounded-[2.25rem] border border-white/18 bg-zinc-950/76 p-7 text-zinc-50 shadow-[0_32px_100px_rgba(0,0,0,0.7)] backdrop-blur-2xl"
-      >
-        <button
-          type="button"
-          aria-label={labels.close || 'Close'}
-          onClick={onClose}
-          className="glass-icon-button absolute right-6 top-6 h-11 w-11 rounded-full text-zinc-300"
-        >
-          <X className="h-5 w-5" />
-        </button>
-
-        <div className="pr-16">
-          <h2 id="beegame-deployment-dialog-title" className="type-title-2 text-zinc-50">
-            {labels.deploy}
-          </h2>
-          <p className="type-callout mt-2 max-w-xl text-zinc-400">{labels.deploymentDialogDescription}</p>
-        </div>
-
-        <div className="mt-7 rounded-[1.75rem] border border-white/12 bg-white/[0.045] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-          <div className="min-w-0">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="type-caption-1 text-zinc-500">{labels.deploymentLatest}</div>
-                <div className="mt-2 flex min-w-0 items-center gap-2">
-                  <span
-                    className={`h-2 w-2 rounded-full ${latest?.status === 'succeeded' ? 'bg-emerald-300' : latest?.status === 'failed' ? 'bg-red-300' : latest ? 'bg-amber-300' : 'bg-zinc-600'}`}
-                  />
-                  <span className="type-headline truncate text-zinc-100">
-                    {latest ? deploymentStatusLabel(latest.status, labels) : labels.deploymentNotPublished}
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label={isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}
-                title={isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}
-                onClick={onDeploy}
-                disabled={!canDeploy}
-                className="secondary-pill type-button inline-flex shrink-0 items-center gap-2 px-4 py-2 text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isDeploying ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : latest ? (
-                  <RefreshCw className="h-4 w-4" />
-                ) : (
-                  <Rocket className="h-4 w-4" />
-                )}
-                <span>{isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}</span>
-              </button>
-            </div>
-            {latest?.deployedAt || latest?.updatedAt ? (
-              <div className="type-footnote mt-1 text-zinc-500">
-                {formatDeploymentTime(latest.deployedAt || latest.updatedAt)}
-              </div>
-            ) : null}
-            {failureLog ? (
-              <p className="type-footnote mt-2 line-clamp-2 text-red-200/80">{failureLog}</p>
-            ) : latestDisplayUrl ? (
-              <div className="mt-3 flex min-w-0 items-end justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="type-caption-2 text-zinc-600">URL</div>
-                  <div className="type-footnote mt-1 truncate text-zinc-400">{latestDisplayUrl}</div>
-                </div>
-                {latestUrl ? (
-                  <button
-                    type="button"
-                    aria-label={labels.openLive}
-                    title={labels.openLive}
-                    onClick={() => onOpenExternal?.(latestUrl)}
-                    className="secondary-pill grid h-10 w-10 shrink-0 place-items-center p-0 text-zinc-200"
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </button>
-                ) : null}
-              </div>
-            ) : (
-              <p className="type-footnote mt-2 text-zinc-500">{labels.deploymentNotPublishedHint}</p>
-            )}
-          </div>
-          {failureLog ? (
-            <div className="mt-4 rounded-2xl border border-red-200/10 bg-red-950/10 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="type-caption-2 text-red-100/70">{labels.deploymentFailureLog}</div>
-                <button
-                  type="button"
-                  aria-label={labels.fixBuildErrors}
-                  onClick={() => void onFixDeploymentFailure?.()}
-                  className="type-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-2.5 text-emerald-200 transition hover:border-emerald-300/40 hover:bg-emerald-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/30"
-                >
-                  <BsStars className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>{labels.fixBuildErrors}</span>
-                </button>
-              </div>
-              <pre className="type-code-sm max-h-36 overflow-auto whitespace-pre-wrap break-words text-red-100/80">
-                {failureLog}
-              </pre>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="mt-6">
-          <div className="type-caption-1 mb-3 text-zinc-500">{labels.deploymentVersions}</div>
-          {versionList.length > 0 ? (
-            <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-              {versionList.map((deployment, index) => {
-                const canRollback = index > 0 && deployment.status === 'succeeded' && Boolean(onRollback);
-                const deploymentUrl = normalizeUrl(deployment.url);
-                const deploymentDisplayUrl = displayDeploymentUrl(deployment.url);
-                return (
-                  <div
-                    key={deployment.id}
-                    className="flex min-w-0 items-center justify-between gap-3 rounded-[1.25rem] border border-white/[0.08] bg-black/24 px-4 py-3"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-zinc-500">
-                        <FileText className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="type-callout truncate text-zinc-200">
-                          {labels.version} {versionList.length - index}
-                        </div>
-                        <div className="type-footnote mt-0.5 flex min-w-0 items-center gap-2 text-zinc-500">
-                          <span>{deploymentStatusLabel(deployment.status, labels)}</span>
-                          {deployment.deployedAt || deployment.updatedAt ? (
-                            <span className="truncate">
-                              {formatDeploymentTime(deployment.deployedAt || deployment.updatedAt)}
-                            </span>
-                          ) : null}
-                        </div>
-                        {deploymentDisplayUrl ? (
-                          <div className="type-caption-2 mt-1 truncate text-zinc-600">{deploymentDisplayUrl}</div>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      {deploymentUrl ? (
-                        <button
-                          type="button"
-                          aria-label={labels.open}
-                          title={labels.open}
-                          onClick={() => onOpenExternal?.(deploymentUrl)}
-                          className="secondary-pill grid h-9 w-9 place-items-center p-0 text-zinc-300"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
-                      {canRollback ? (
-                        <button
-                          type="button"
-                          onClick={() => onRollback?.(deployment.id)}
-                          disabled={isDeploying}
-                          className="type-button px-2 py-1.5 text-emerald-200/80 transition-colors hover:text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {labels.rollback || 'Rollback'}
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-5 text-zinc-500">
-              <div className="type-callout">{labels.deploymentNoVersions}</div>
-            </div>
-          )}
-        </div>
-      </section>
     </div>
   );
 }
 
-function deploymentStatusLabel(
-  status: BeeGameDeploymentPayload['status'] | undefined,
-  labels: Record<string, string>,
-): string {
-  if (status === 'succeeded') return labels.deploymentSucceeded;
-  if (status === 'failed') return labels.deploymentFailed;
-  if (status === 'building') return labels.deploymentBuilding;
-  if (status === 'publishing') return labels.deploymentPublishing;
-  return labels.deploymentQueued;
+
+
+function formatCreditAmount(value?: number): string {
+  return value === undefined ? '—' : Math.max(0, value).toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
-function formatDeploymentTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+function formatUsage(value?: number): string {
+  return value === undefined ? '—' : Math.max(0, value).toLocaleString();
 }
 
-function formatTokenCount(value: number | undefined): string {
-  return Math.max(0, Number(value) || 0).toLocaleString();
+function ProjectNameCopy({ name, copyLabel, copiedLabel, failedLabel }: {
+  name: string;
+  copyLabel: string;
+  copiedLabel: string;
+  failedLabel: string;
+}) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (copyState === 'idle') return;
+    const timer = window.setTimeout(() => setCopyState('idle'), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [copyState]);
+  const buttonLabel = copyState === 'copied' ? copiedLabel : copyState === 'failed' ? failedLabel : copyLabel;
+
+  return <div className="flex min-w-0 items-center justify-between gap-2">
+    <span className="type-footnote min-w-0 truncate text-[var(--text-primary)]" title={name}>{name}</span>
+    <button
+      type="button"
+      aria-label={buttonLabel}
+      title={buttonLabel}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(name);
+          setCopyState('copied');
+        } catch {
+          setCopyState('failed');
+        }
+      }}
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+    >
+      {copyState === 'copied' ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+    </button>
+  </div>;
 }
 
-function formatCreditAmount(value: number): string {
-  return Math.round(Math.max(0, Number(value) || 0)).toLocaleString();
-}
+function ProjectElapsedRow({ timing, label, detail, lang }: {
+  timing?: ProjectBaselineStatusPayload['execution_time'];
+  label: string;
+  detail: string;
+  lang: Language;
+}) {
+  const [tick, setTick] = useState({ timing, deltaMs: 0 });
+  useEffect(() => {
+    if (!timing?.running) return;
+    // Advance from receipt locally; a client/server clock offset must not inflate the total.
+    const receivedAt = Date.now();
+    const timer = window.setInterval(() => setTick({ timing, deltaMs: Math.max(0, Date.now() - receivedAt) }), 1_000);
+    return () => window.clearInterval(timer);
+  }, [timing]);
 
-function normalizeProjectTokenUsage(usage?: TokenUsage | null): {
-  input: number;
-  cachedInput: number;
-  output: number;
-} {
-  const input = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0) || 0;
-  const combinedCached = Number(usage?.cached_input_tokens ?? 0) || 0;
-  const explicitCacheRead = Number(usage?.cache_read_tokens ?? 0) || 0;
-  const cacheCreation = Number(usage?.cache_creation_tokens ?? 0) || 0;
-  const cachedInput =
-    explicitCacheRead > 0 || cacheCreation > 0
-      ? explicitCacheRead + cacheCreation
-      : combinedCached;
-  const output = Number(usage?.output_tokens ?? usage?.completion_tokens ?? 0) || 0;
-  return { input, cachedInput, output };
+  if (!timing || !Number.isFinite(timing.elapsed_ms) || timing.elapsed_ms < 0) {
+    return <ProjectHintRow label={label} value="—" detail={detail} />;
+  }
+  const deltaMs = timing.running && tick.timing === timing ? tick.deltaMs : 0;
+  const totalMinutes = Math.floor((timing.elapsed_ms + deltaMs) / 60_000);
+  const days = Math.floor(totalMinutes / 1_440);
+  const hours = Math.floor((totalMinutes % 1_440) / 60);
+  const minutes = totalMinutes % 60;
+  const value = lang.startsWith('zh')
+    ? [days && `${days}天`, (days || hours) && `${hours}小时`, `${minutes}分钟`].filter(Boolean).join(' ')
+    : [days && `${days}d`, (days || hours) && `${hours}h`, `${minutes}m`].filter(Boolean).join(' ');
+  return <ProjectHintRow label={label} value={value} detail={detail} />;
 }
 
 function ProjectHintRow({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-zinc-800/70 py-2 last:border-b-0">
-      <div className="type-caption-1 shrink-0 text-zinc-500">{label}</div>
-      <div className="type-callout min-w-0 truncate text-right text-zinc-100" title={detail}>
+    <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] py-2 last:border-b-0">
+      <div className="type-caption-1 shrink-0 text-[var(--text-muted)]">{label}</div>
+      <div className="type-callout min-w-0 truncate text-right text-[var(--text-primary)]" title={detail}>
         {value}
       </div>
     </div>

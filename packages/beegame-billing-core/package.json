@@ -15,6 +15,7 @@
     "./billing-route-types": "./src/billing-route-types.ts",
     "./credit-pack-helpers": "./src/credit-pack-helpers.ts",
     "./usage-control-client": "./src/usage-control-client.ts",
+    "./image-billing": "./src/image-billing.ts",
     "./usage-control-routes": "./src/usage-control-routes.ts",
     "./usage-control-request-helpers": "./src/usage-control-request-helpers.ts",
     "./http-helpers": "./src/http-helpers.ts",

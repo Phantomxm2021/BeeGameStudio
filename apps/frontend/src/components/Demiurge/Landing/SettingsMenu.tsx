@@ -1,37 +1,43 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
-import { createPortal } from 'react-dom';
+import {resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { motion } from 'motion/react';
+import { EASE_OUT } from '../../beui/registry/lib/ease';
+import { ModelConnectionsPanel, type ModelConnectionsHandle, type ModelConnectionsSaveState } from '../../Settings/ModelConnectionsPanel';
+import { BgsSettingsPanel, type BgsSettingsHandle, type BgsSettingsSaveState } from '../../Settings/BgsSettingsPanel';
+import { PersonalImageConnectionPanel, type PersonalImageConnectionHandle, type PersonalImageConnectionSaveState } from '../../Settings/PersonalImageConnectionPanel';
 import {
-  Bot,
-  Brain,
   BookOpenText,
   Cpu,
   FolderOpen,
   Globe,
   KeyRound,
+  Info,
+  Image,
   MoreHorizontal,
+  Pencil,
   Network,
   Plus,
   Plus as FaPlus,
   ReceiptText,
-  Search,
   ShieldCheck,
   Ticket,
   Trash2,
-  X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { ImageGenerationSettingsPanel, type ImageSettingsHandle, type ImageSettingsState } from '../../Settings/ImageGenerationSettingsPanel';
 import { LANGUAGE_OPTIONS, type Language } from '../AgentsConfig';
 import { Switch } from '../../ui/switch';
 import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { getBeeGameWorkspaceSettings } from '../../../services/beeGameAdapter';
 import {
   createModelConfig,
+  deleteModelConfig,
   listModelConfigs,
   updateModelConfig,
   type ModelConfig,
   type ModelProviderKind,
+  type ModelAuthMethod,
 } from '../../../services/modelConfigApi';
-import { getWebToolsConfig, saveWebToolsConfig, type WebSearchAdapter } from '../../../services/webToolsApi';
 import {
   getRuntimeSettings,
   saveRuntimeSettings,
@@ -41,6 +47,8 @@ import {
   createMcpServer,
   deleteMcpServer,
   discoverActiveMcpServers,
+  discoverMcpServers,
+  importDiscoveredMcpServer,
   listMcpServers,
   testMcpServer,
   updateMcpServer,
@@ -49,16 +57,9 @@ import {
   type McpServerConfig,
   type McpServerInput,
   type McpServerTestResult,
-  type McpServerScope,
-  type McpServerTransport,
 } from '../../../services/mcpServersApi';
-import {
-  deleteUserSkill,
-  importUserSkillPackage,
-  listUserSkills,
-  updateUserSkillEnabled,
-  type UserSkill,
-} from '../../../services/userSkillsApi';
+import { useUserSkillsSettings } from '../../../hooks/useUserSkillsSettings';
+import { useSettingsSectionLoad } from '../../../hooks/useSettingsSectionLoad';
 import {
   createInvitation,
   deleteInvitation,
@@ -81,20 +82,40 @@ import {
   getProjectLifecycleOverview,
   planProjectRetention,
   runProjectRetention,
-  type BeeGameProjectLifecycleDeletion,
   type BeeGameProjectLifecycleOverview,
-  type BeeGameProjectLifecycleProject,
   type BeeGameProjectRetentionResult,
 } from '../../../services/projectLifecycleApi';
 import { useSystemStore } from '../../../store/systemStore';
 import { useToastContext } from '../../../contexts/ToastContext';
+import { InvitationSettingsPanel } from '../../Settings/InvitationSettingsPanel';
+import { UserSkillsSettingsPanel } from '../../Settings/UserSkillsSettingsPanel';
+import { ModelConfigPanel } from '../../Settings/ModelConfigPanel';
+import { getOpenCodeGoProvider, OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
+import { Dialog, DialogContent } from '../../ui/dialog';
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../../beui/registry/components/motion/popover-morph';
+import { CloseIconButton } from '../../ui/CloseIconButton';
+import { Tabs, TabsList, TabsTrigger } from '../../beui/motion/tabs';
+import { ProjectSelect } from '../../beui/project-select';
+import { UsageBillingPanel, type BillingPackFormState, type BillingSettingsCopy } from '../../Settings/BillingSettingsPanel';
+import { ProjectLifecyclePanel, type ProjectLifecycleSettingsCopy } from '../../Settings/ProjectLifecycleSettingsPanel';
+import { RuntimeSettingsPanel, type RuntimeCapabilityCopy } from '../../Settings/RuntimeSettingsPanel';
+import {
+  McpServerFormPopover,
+  McpSettingsPanel,
+  type McpSettingsCopy,
+} from '../../Settings/McpSettingsPanel';
+import {
+  isMcpFormSaveable,
+  toPopoverAnchorRect,
+  type McpServerForm,
+  type PopoverAnchorRect,
+} from '../../Settings/McpSettingsPanel.types';
 interface SettingsMenuProps {
   isOpen: boolean;
   lang: Language;
   onClose: () => void;
   onSetLang: (lang: Language) => void;
   canManageWorkspace?: boolean;
-  canManageSecrets?: boolean;
   canManageRuntimeSettings?: boolean;
   canManageMcp?: boolean;
   canManageSkills?: boolean;
@@ -105,41 +126,13 @@ interface SettingsMenuProps {
   canManageCredits?: boolean;
 }
 
-type SettingsSection = 'personal' | 'skills' | 'platform';
-type SettingsTab = 'general' | 'runtime' | 'mcp' | 'skills' | 'model' | 'invitations' | 'projects' | 'credit';
-type PopoverAnchorRect = {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-  width: number;
-};
+type SettingsSection = 'personal' | 'connections' | 'image-connection' | 'skills' | 'mcp' | 'platform';
+type SettingsTab = 'general' | 'runtime' | 'skills' | 'model' | 'image' | 'invitations' | 'projects' | 'credit';
 type McpFormAnchor =
   | { kind: 'new'; rect: PopoverAnchorRect }
   | { kind: 'edit'; serverId: string; rect: PopoverAnchorRect }
   | null;
 
-type McpServerForm = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  transport: McpServerTransport;
-  scope: McpServerScope;
-  command: string;
-  argsText: string;
-  url: string;
-  cwd: string;
-  envText: string;
-  autoStart: boolean;
-};
-
-type BillingPackFormState = {
-  priceId: string;
-  credits: string;
-  displayName: string;
-  sortOrder: string;
-  enabled: boolean;
-};
 
 export function SettingsMenu({
   isOpen,
@@ -147,7 +140,6 @@ export function SettingsMenu({
   onClose,
   onSetLang,
   canManageWorkspace,
-  canManageSecrets,
   canManageRuntimeSettings,
   canManageMcp,
   canManageSkills,
@@ -167,16 +159,19 @@ export function SettingsMenu({
   const billingCopy = getBillingSettingsCopy(translateSettings);
   const projectLifecycleCopy = getProjectLifecycleSettingsCopy(translateSettings);
   const userSkillsCopy = getUserSkillsSettingsCopy(translateSettings);
-  const { showError, showSuccess } = useToastContext();
+  const adminCopy = getAdminSettingsCopy(translateSettings);
+  const { showError, showSuccess, showWarning } = useToastContext();
   const currentUser = useSystemStore(state => state.currentUser);
+  const isDark = useSystemStore(state => state.isDark);
+  const toggleTheme = useSystemStore(state => state.toggleTheme);
   const hasPermission = useSystemStore(state => state.hasPermission);
   const canOpenPlatformSettings = currentUser?.role === 'owner';
   const effectiveCanManageWorkspace =
     canManageWorkspace ?? (canOpenPlatformSettings && hasPermission('workspace.manage'));
-  const effectiveCanManageSecrets = canManageSecrets ?? (canOpenPlatformSettings && hasPermission('secrets.manage'));
   const effectiveCanManageRuntimeSettings =
     canManageRuntimeSettings ?? (canOpenPlatformSettings && hasPermission('runtime_settings.manage'));
-  const effectiveCanManageMcp = canManageMcp ?? (canOpenPlatformSettings && hasPermission('mcp.manage'));
+  const effectiveCanManageMcp = canManageMcp ?? Boolean(currentUser && hasPermission('mcp.manage'));
+  const canDiscoverHostMcp = canOpenPlatformSettings && hasPermission('workspace.manage');
   const effectiveCanManageSkills = canManageSkills ?? Boolean(currentUser);
   const effectiveCanManageModelConfig =
     canManageModelConfig ?? (canOpenPlatformSettings && hasPermission('model_config.manage'));
@@ -187,9 +182,7 @@ export function SettingsMenu({
   const effectiveCanManageCredits = canManageCredits ?? (canOpenPlatformSettings && hasPermission('credits.admin'));
   const hasPlatformSettings =
     effectiveCanManageWorkspace ||
-    effectiveCanManageSecrets ||
     effectiveCanManageRuntimeSettings ||
-    effectiveCanManageMcp ||
     effectiveCanManageModelConfig ||
     effectiveCanManageInvitations ||
     effectiveCanReadAudit ||
@@ -197,26 +190,35 @@ export function SettingsMenu({
     effectiveCanManageCredits;
   const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
   const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
+  const [modelAction, setModelAction] = useState<'create' | 'details' | 'rename' | 'delete' | null>(null);
+  const [activeModelPopoverId, setActiveModelPopoverId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [provider, setProvider] = useState<ModelProviderKind>('openai-compatible');
+  const [apiProtocol,setApiProtocol]=useState<ModelApiProtocol>('responses');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [fastModel, setFastModel] = useState('');
-  const [balancedModel, setBalancedModel] = useState('');
-  const [strongModel, setStrongModel] = useState('');
+  const [model, setModel] = useState('');
   const [apiKeyPreview, setApiKeyPreview] = useState('');
   const [isDefault, setIsDefault] = useState(true);
+  const [published, setPublished] = useState(true);
+  const [authMethods, setAuthMethods] = useState<ModelAuthMethod[]>(['platform']);
+  const goProvider = getOpenCodeGoProvider(baseUrl);
+  const goProfile = goProvider ? OPENCODE_GO_PROFILES[goProvider] : undefined;
+  const [goModelsReady, setGoModelsReady] = useState(false);
+  const goModelsComplete = !goProfile || goModelsReady;
   const [status, setStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const imageSettingsRef = useRef<ImageSettingsHandle>(null);
+  const [imageSettingsState, setImageSettingsState] = useState<ImageSettingsState>({ busy: false, canSave: false });
+  const bgsSettingsRef = useRef<BgsSettingsHandle>(null);
+  const [bgsSettingsSaveState, setBgsSettingsSaveState] = useState<BgsSettingsSaveState>({ disabled: true, busy: false });
+  const modelConnectionsRef = useRef<ModelConnectionsHandle>(null);
+  const [modelConnectionSaveState, setModelConnectionSaveState] = useState<ModelConnectionsSaveState>({ visible: false, disabled: true, busy: false });
+  const imageConnectionRef = useRef<PersonalImageConnectionHandle>(null);
+  const [imageConnectionSaveState, setImageConnectionSaveState] = useState<PersonalImageConnectionSaveState>({ disabled: true, busy: false });
   const [workspacePath, setWorkspacePath] = useState('');
   const [workspaceStatus, setWorkspaceStatus] = useState('');
-  const [webSearchAdapter, setWebSearchAdapter] = useState<WebSearchAdapter>('tavily');
-  const [braveApiKey, setBraveApiKey] = useState('');
-  const [braveApiKeyPreview, setBraveApiKeyPreview] = useState('');
-  const [exaApiKey, setExaApiKey] = useState('');
-  const [exaApiKeyPreview, setExaApiKeyPreview] = useState('');
-  const [webToolsStatus, setWebToolsStatus] = useState('');
-  const [isSavingWebTools, setIsSavingWebTools] = useState(false);
+
   const [runtimeSettings, setRuntimeSettings] = useState<Required<RuntimeSettingsConfig>>(() =>
     normalizeRuntimeSettings({}),
   );
@@ -233,10 +235,12 @@ export function SettingsMenu({
   const [mcpHealthById, setMcpHealthById] = useState<Record<string, McpServerTestResult>>({});
   const [testingMcpServerId, setTestingMcpServerId] = useState('');
   const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
-  const [userSkills, setUserSkills] = useState<UserSkill[]>([]);
-  const [isSavingUserSkill, setIsSavingUserSkill] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
+  const {
+    userSkills, loading: skillsLoading, isSavingUserSkill, handleImportUserSkill, handleToggleUserSkill, handleDeleteUserSkill,
+  } = useUserSkillsSettings({ isOpen, allowed: effectiveCanManageSkills, selected: activeSection === 'skills',
+    userId: currentUser?.id, copy: userSkillsCopy });
   const userSkillImportInputRef = useRef<HTMLInputElement | null>(null);
   const [invitationRequired, setInvitationRequired] = useState(false);
   const [invitations, setInvitations] = useState<InvitationRecord[]>([]);
@@ -259,81 +263,81 @@ export function SettingsMenu({
   const [isSavingBillingPack, setIsSavingBillingPack] = useState(false);
   const mcpAutoSaveTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    if (effectiveCanManageModelConfig) {
-      void listModelConfigs()
+  const modelsLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageModelConfig,
+    selected: activeSection === 'platform' && activeTab === 'model', userId: currentUser?.id,
+    load: isCurrent => {
+      setModelAction(null);
+      setActiveModelPopoverId(null);
+      setApiKey('');
+      return listModelConfigs()
         .then(configs => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setExistingConfigs(configs);
           const defaultConfig = configs.find(config => config.isDefault) || configs[0];
           if (!defaultConfig) return;
           setSelectedModelConfigId(defaultConfig.id);
           setName(defaultConfig.name);
           setProvider(defaultConfig.provider);
+          setApiProtocol(defaultConfig.apiProtocol ?? resolveModelApiProtocol(defaultConfig.provider));
           setBaseUrl(defaultConfig.baseUrl || '');
-          setFastModel(defaultConfig.models.fast || '');
-          setBalancedModel(defaultConfig.models.balanced || '');
-          setStrongModel(defaultConfig.models.strong || '');
+          setModel(defaultConfig.model || '');
           setApiKeyPreview(defaultConfig.apiKeyPreview || '');
           setIsDefault(defaultConfig.isDefault);
+          setPublished(defaultConfig.published ?? true);
+          setAuthMethods(defaultConfig.authMethods ?? ['platform']);
         })
         .catch(() => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setExistingConfigs([]);
             setSelectedModelConfigId('');
             setApiKeyPreview('');
+            setStatus(lang.startsWith('zh') ? '无法读取模型配置，请关闭设置后重试。' : 'Could not load model configurations. Reopen Settings to try again.');
           }
         });
-    }
-    if (effectiveCanManageWorkspace) {
-      void getBeeGameWorkspaceSettings()
+    },
+  });
+  const workspaceLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageWorkspace,
+    selected: activeSection === 'platform' && activeTab === 'general', userId: currentUser?.id,
+    load: isCurrent => {
+      return getBeeGameWorkspaceSettings()
         .then(settings => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setWorkspacePath(settings.workspacePath);
           setWorkspaceStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setWorkspaceStatus(error instanceof Error ? error.message : text.workspaceReadFailed);
           }
         });
-    }
-    if (effectiveCanManageSecrets) {
-      void getWebToolsConfig()
+    },
+  });
+  const runtimeLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageRuntimeSettings,
+    selected: activeSection === 'platform' && activeTab === 'runtime', userId: currentUser?.id,
+    load: isCurrent => {
+      return getRuntimeSettings()
         .then(config => {
-          if (cancelled) return;
-          setWebSearchAdapter(config.webSearchAdapter || 'tavily');
-          setBraveApiKeyPreview(config.braveApiKeyPreview || '');
-          setExaApiKeyPreview(config.exaApiKeyPreview || '');
-          setBraveApiKey('');
-          setExaApiKey('');
-          setWebToolsStatus('');
-        })
-        .catch(error => {
-          if (!cancelled) {
-            setWebToolsStatus(error instanceof Error ? error.message : text.webToolsReadFailed);
-          }
-        });
-    }
-    if (effectiveCanManageRuntimeSettings) {
-      void getRuntimeSettings()
-        .then(config => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setRuntimeSettings(normalizeRuntimeSettings(config));
           setRuntimeSettingsStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setRuntimeSettingsStatus(error instanceof Error ? error.message : 'Runtime settings unavailable');
           }
         });
-    }
-    if (effectiveCanManageInvitations) {
-      void Promise.all([getInvitationPublicSettings(), listInvitations()])
+    },
+  });
+  const invitationsLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageInvitations,
+    selected: activeSection === 'platform' && activeTab === 'invitations', userId: currentUser?.id,
+    load: isCurrent => {
+      return Promise.all([getInvitationPublicSettings(), listInvitations()])
         .then(([settings, records]) => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setInvitationRequired(settings.required);
           setInvitations(records);
           setNewInvitationCode('');
@@ -342,15 +346,19 @@ export function SettingsMenu({
           setInvitationStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.unavailable);
           }
         });
-    }
-    if (effectiveCanManageMcp) {
-      void listMcpServers()
+    },
+  });
+  const mcpLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageMcp,
+    selected: activeSection === 'mcp', userId: currentUser?.id,
+    load: isCurrent => {
+      return listMcpServers()
         .then(servers => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setMcpServers(servers);
           setMcpForm(createEmptyMcpForm());
           setMcpFormAnchor(null);
@@ -359,108 +367,122 @@ export function SettingsMenu({
           setMcpStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
-            setMcpStatus(error instanceof Error ? error.message : 'MCP settings unavailable');
+          if (isCurrent()) {
+            showError(error instanceof Error ? error.message : 'MCP settings unavailable');
           }
         });
-    }
-    if (effectiveCanManageSkills) {
-      void listUserSkills()
-        .then(skills => {
-          if (cancelled) return;
-          setUserSkills(uniqueUserSkills(skills));
-        })
-        .catch(error => {
-          if (!cancelled) {
-            setUserSkills([]);
-            showError(error instanceof Error ? error.message : userSkillsCopy.unavailable);
-          }
-        });
-    }
-    if (effectiveCanManageLifecycle) {
-      void getProjectLifecycleOverview()
+    },
+  });
+  const lifecycleLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageLifecycle,
+    selected: activeSection === 'platform' && activeTab === 'projects', userId: currentUser?.id,
+    load: isCurrent => {
+      return getProjectLifecycleOverview()
         .then(overview => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setProjectLifecycleOverview(overview);
           setProjectLifecycleStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setProjectLifecycleOverview(null);
             setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.unavailable);
           }
         });
-    }
-    if (effectiveCanManageCredits) {
-      void getCreditSummary()
+    },
+  });
+  const creditsLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageCredits,
+    selected: activeSection === 'platform' && activeTab === 'credit', userId: currentUser?.id,
+    load: isCurrent => {
+      const summary = getCreditSummary()
         .then(summary => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setUsageSummary(summary);
           setBillingStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setUsageSummary(null);
             setBillingStatus(error instanceof Error ? error.message : billingCopy.auditUnavailable);
           }
         });
-      void Promise.all([getBillingCreditPacks(), getBillingEvents()])
+      const billing = Promise.all([getBillingCreditPacks(), getBillingEvents()])
         .then(([packs, events]) => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setBillingCreditPacks(packs.packs);
           setBillingEvents(events.events);
           setBillingPackForm(createEmptyBillingPackForm());
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setBillingCreditPacks([]);
             setBillingEvents([]);
             setBillingStatus(error instanceof Error ? error.message : billingCopy.billingUnavailable);
           }
         });
-    }
+      return Promise.all([summary, billing]);
+    },
+  });
+
+  const isLoadingCurrentSection = activeSection === 'skills' ? skillsLoading
+    : activeSection === 'mcp' ? mcpLoading
+    : activeSection !== 'platform' ? false
+    : activeTab === 'general' ? workspaceLoading
+    : activeTab === 'runtime' ? runtimeLoading
+    : activeTab === 'model' ? modelsLoading
+    : activeTab === 'invitations' ? invitationsLoading
+    : activeTab === 'projects' ? lifecycleLoading
+    : activeTab === 'credit' ? creditsLoading : false;
+
+  useEffect(() => {
     return () => {
-      cancelled = true;
       if (mcpAutoSaveTimerRef.current !== null) {
         window.clearTimeout(mcpAutoSaveTimerRef.current);
         mcpAutoSaveTimerRef.current = null;
       }
     };
-  }, [
-    effectiveCanManageMcp,
-    effectiveCanManageSkills,
-    effectiveCanManageModelConfig,
-    effectiveCanManageInvitations,
-    effectiveCanManageCredits,
-    effectiveCanManageLifecycle,
-    effectiveCanManageRuntimeSettings,
-    effectiveCanManageSecrets,
-    effectiveCanManageWorkspace,
-    effectiveCanReadAudit,
-    isOpen,
-    billingCopy.auditUnavailable,
-    billingCopy.billingUnavailable,
-    projectLifecycleCopy.unavailable,
-    showError,
-    text.webToolsReadFailed,
-    text.workspaceReadFailed,
-    userSkillsCopy.unavailable,
-  ]);
+  }, [isOpen, effectiveCanManageMcp, currentUser?.id]);
+
+  const openModelConfig = (action: NonNullable<typeof modelAction>, config?: ModelConfig) => {
+    setSelectedModelConfigId(config?.id ?? ''); setName(config?.name ?? ''); setProvider(config?.provider ?? 'openai-compatible');setApiProtocol(config ? config.apiProtocol ?? resolveModelApiProtocol(config.provider) : 'responses');
+    setBaseUrl(config?.baseUrl ?? ''); setApiKey(''); setApiKeyPreview(config?.apiKeyPreview ?? '');
+    setModel(config?.model ?? '');
+    setIsDefault(config?.isDefault ?? existingConfigs.length === 0); setPublished(config?.published ?? true); setAuthMethods(config?.authMethods ?? ['platform']);
+    setStatus(''); setModelAction(action);
+  };
+  const closeModelConfig = () => { if (!isSaving) { setModelAction(null); setActiveModelPopoverId(null); setApiKey(''); setStatus(''); } };
+  const handleModelListAction = async () => {
+    if (!selectedModelConfigId || (modelAction === 'rename' && !name.trim())) return;
+    setIsSaving(true); setStatus('');
+    try {
+      if (modelAction === 'delete') {
+        const result = await deleteModelConfig(selectedModelConfigId);
+        if (!result.deleted) throw new Error(lang.startsWith('zh') ? '模型未删除，请刷新后核对。' : 'Model was not deleted. Refresh and check again.');
+        setExistingConfigs(current => current.filter(config => config.id !== selectedModelConfigId));
+      } else {
+        const saved = await updateModelConfig(selectedModelConfigId, { name: name.trim() });
+        setExistingConfigs(current => current.map(config => config.id === saved.id ? saved : config));
+      }
+      setModelAction(null);
+      setActiveModelPopoverId(null);
+    } catch (error) { showError(formatModelConfigError(error, text)); }
+    finally { setIsSaving(false); }
+  };
 
   const handleSaveModelConfig = async () => {
     setStatus('');
     setIsSaving(true);
     try {
       const payload = {
-        name: name.trim() || 'BeeGame LLM',
+        name: name.trim() || (goProfile ? 'OpenCode Go' : 'BeeGame LLM'),
+        published,
+        authMethods,
         provider,
-        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+        apiProtocol,
+        baseUrl: baseUrl.trim(),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        models: {
-          ...(fastModel.trim() ? { fast: fastModel.trim() } : {}),
-          balanced: balancedModel.trim(),
-          ...(strongModel.trim() ? { strong: strongModel.trim() } : {}),
-        },
+        model: model.trim(),
         isDefault,
       };
       const saved = selectedModelConfigId
@@ -470,44 +492,23 @@ export function SettingsMenu({
             apiKey: apiKey.trim(),
           });
       setSelectedModelConfigId(saved.id);
-      setExistingConfigs([saved, ...existingConfigs.filter(config => config.id !== saved.id)]);
+      setExistingConfigs(current => {
+        const others = current.filter(config => config.id !== saved.id).map(config => saved.isDefault ? { ...config, isDefault: false } : config);
+        return [...others, saved];
+      });
       setName(saved.name);
       setProvider(saved.provider);
+      setApiProtocol(saved.apiProtocol ?? resolveModelApiProtocol(saved.provider));
       setBaseUrl(saved.baseUrl || '');
-      setFastModel(saved.models.fast || '');
-      setBalancedModel(saved.models.balanced || '');
-      setStrongModel(saved.models.strong || '');
+      setModel(saved.model || '');
       setApiKeyPreview(saved.apiKeyPreview || apiKeyPreview);
       setApiKey('');
       return true;
     } catch (error) {
-      setStatus(formatModelConfigError(error, text));
+      showError(formatModelConfigError(error, text));
       return false;
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleSaveWebTools = async () => {
-    setWebToolsStatus('');
-    setIsSavingWebTools(true);
-    try {
-      const saved = await saveWebToolsConfig({
-        webSearchAdapter,
-        ...(braveApiKey.trim() ? { braveApiKey: braveApiKey.trim() } : {}),
-        ...(exaApiKey.trim() ? { exaApiKey: exaApiKey.trim() } : {}),
-      });
-      setWebSearchAdapter(saved.webSearchAdapter || webSearchAdapter);
-      setBraveApiKeyPreview(saved.braveApiKeyPreview || '');
-      setExaApiKeyPreview(saved.exaApiKeyPreview || '');
-      setBraveApiKey('');
-      setExaApiKey('');
-      return true;
-    } catch (error) {
-      setWebToolsStatus(error instanceof Error ? error.message : text.webSearchSaveFailed);
-      return false;
-    } finally {
-      setIsSavingWebTools(false);
     }
   };
 
@@ -519,7 +520,7 @@ export function SettingsMenu({
       setRuntimeSettings(normalizeRuntimeSettings(saved));
       return true;
     } catch (error) {
-      setRuntimeSettingsStatus(error instanceof Error ? error.message : 'Runtime settings save failed');
+      showError(error instanceof Error ? error.message : 'Runtime settings save failed');
       return false;
     } finally {
       setIsSavingRuntimeSettings(false);
@@ -535,7 +536,7 @@ export function SettingsMenu({
       setInvitationStatus(saved.required ? adminCopy.invitation.enabledStatus : adminCopy.invitation.disabledStatus);
       return true;
     } catch (error) {
-      setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.saveFailed);
+      showError(error instanceof Error ? error.message : adminCopy.invitation.saveFailed);
       return false;
     } finally {
       setIsSavingInvitations(false);
@@ -545,12 +546,12 @@ export function SettingsMenu({
   const handleCreateInvitation = async () => {
     const code = newInvitationCode.trim();
     if (!code) {
-      setInvitationStatus(adminCopy.invitation.codeRequired);
+      showError(adminCopy.invitation.codeRequired);
       return;
     }
     const maxUses = parsePositiveInteger(newInvitationMaxUses);
     if (newInvitationMaxUses.trim() && maxUses === null) {
-      setInvitationStatus(adminCopy.invitation.maxUsesInvalid);
+      showError(adminCopy.invitation.maxUsesInvalid);
       return;
     }
     setInvitationStatus('');
@@ -566,7 +567,7 @@ export function SettingsMenu({
       setNewInvitationLabel('');
       setNewInvitationMaxUses('');
     } catch (error) {
-      setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.createFailed);
+      showError(error instanceof Error ? error.message : adminCopy.invitation.createFailed);
     } finally {
       setIsSavingInvitations(false);
     }
@@ -579,7 +580,7 @@ export function SettingsMenu({
       const updated = await updateInvitation({ id: invitation.id, enabled: !invitation.enabled });
       setInvitations(current => current.map(item => (item.id === updated.id ? updated : item)));
     } catch (error) {
-      setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.updateFailed);
+      showError(error instanceof Error ? error.message : adminCopy.invitation.updateFailed);
     } finally {
       setIsSavingInvitations(false);
     }
@@ -592,7 +593,7 @@ export function SettingsMenu({
       await deleteInvitation(id);
       setInvitations(current => current.filter(item => item.id !== id));
     } catch (error) {
-      setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.deleteFailed);
+      showError(error instanceof Error ? error.message : adminCopy.invitation.deleteFailed);
     } finally {
       setIsSavingInvitations(false);
     }
@@ -612,7 +613,7 @@ export function SettingsMenu({
       setProjectRetentionResult(result);
       setProjectLifecycleStatus(projectLifecycleCopy.dryRunStatus(result.summary.deploymentRecordsPlannedForDeletion));
     } catch (error) {
-      setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.dryRunFailed);
+      showError(error instanceof Error ? error.message : projectLifecycleCopy.dryRunFailed);
     } finally {
       setIsProjectRetentionRunning(false);
     }
@@ -627,7 +628,7 @@ export function SettingsMenu({
       setProjectLifecycleStatus(projectLifecycleCopy.runStatus(result.summary.deploymentRecordsDeleted));
       await refreshProjectLifecycleOverview();
     } catch (error) {
-      setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.runFailed);
+      showError(error instanceof Error ? error.message : projectLifecycleCopy.runFailed);
     } finally {
       setIsProjectRetentionRunning(false);
     }
@@ -652,7 +653,7 @@ export function SettingsMenu({
       if (testAfterSave) void handleTestMcpServer(saved);
       return true;
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP server save failed');
+      showError(error instanceof Error ? error.message : 'MCP server save failed');
       return false;
     } finally {
       setIsSavingMcp(false);
@@ -689,28 +690,12 @@ export function SettingsMenu({
         return next;
       });
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP server delete failed');
+      showError(error instanceof Error ? error.message : 'MCP server delete failed');
     } finally {
       setIsSavingMcp(false);
     }
   };
 
-  const handleImportUserSkill = async (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.zip')) {
-      showError(userSkillsCopy.importFailed);
-      return;
-    }
-    setIsSavingUserSkill(true);
-    try {
-      const saved = await importUserSkillPackage(file);
-      setUserSkills(current => uniqueUserSkills([saved, ...current.filter(skill => skill.id !== saved.id)]));
-      showSuccess(userSkillsCopy.imported(file.name));
-    } catch (error) {
-      showError(error instanceof Error ? error.message : userSkillsCopy.importFailed);
-    } finally {
-      setIsSavingUserSkill(false);
-    }
-  };
 
   const handleImportUserSkillInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
@@ -718,30 +703,7 @@ export function SettingsMenu({
     if (file) void handleImportUserSkill(file);
   };
 
-  const handleToggleUserSkill = async (skill: UserSkill) => {
-    setIsSavingUserSkill(true);
-    try {
-      const saved = await updateUserSkillEnabled(skill.id, !skill.enabled);
-      setUserSkills(current => uniqueUserSkills(current.map(item => (item.id === saved.id ? saved : item))));
-    } catch (error) {
-      showError(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
-    } finally {
-      setIsSavingUserSkill(false);
-    }
-  };
 
-  const handleDeleteUserSkill = async (skill: UserSkill) => {
-    setIsSavingUserSkill(true);
-    try {
-      await deleteUserSkill(skill.id);
-      setUserSkills(current => current.filter(item => item.id !== skill.id));
-      showSuccess(userSkillsCopy.deleted);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : userSkillsCopy.deleteFailed);
-    } finally {
-      setIsSavingUserSkill(false);
-    }
-  };
 
   const handleTestMcpServer = async (server: McpServerConfig) => {
     setMcpStatus('');
@@ -749,16 +711,20 @@ export function SettingsMenu({
     try {
       const result = await testMcpServer(mcpServerToInput(server));
       setMcpHealthById(current => ({ ...current, [server.id]: result }));
+      if (result.status === 'untested') showWarning(result.message);
+      else if (!result.ok) showError(result.message || 'MCP connection test failed');
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'MCP connection test failed';
       setMcpHealthById(current => ({
         ...current,
         [server.id]: {
           ok: false,
           status: 'unavailable',
-          message: error instanceof Error ? error.message : 'MCP connection test failed',
+          message,
           checkedAt: new Date().toISOString(),
         },
       }));
+      showError(message);
     } finally {
       setTestingMcpServerId('');
     }
@@ -768,11 +734,22 @@ export function SettingsMenu({
     setMcpStatus('');
     setIsScanningActiveMcp(true);
     try {
-      const discovered = await discoverActiveMcpServers();
-      setActiveMcpServers(discovered);
-      if (!discovered.length) setMcpStatus(mcpCopy.form.noActiveDiscovered);
-    } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP active scan failed');
+      const [configs, active] = await Promise.allSettled([discoverMcpServers(), discoverActiveMcpServers()]);
+      const activeServers = active.status === 'fulfilled' ? active.value : [];
+      // HTTP configurations already found by the live scan need only one row.
+      const configuredServers = configs.status === 'fulfilled'
+        ? configs.value.filter(server => !server.url || !activeServers.some(item => item.url === server.url))
+        : [];
+      setDiscoveredMcpServers(configuredServers);
+      setActiveMcpServers(activeServers);
+      const failure = [configs, active].find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') {
+        showError(failure.reason instanceof Error ? failure.reason.message : 'MCP discovery failed');
+      } else {
+        const count = configuredServers.length + activeServers.length;
+        if (!count) showWarning(mcpCopy.form.noActiveDiscovered);
+        else showSuccess(translateSettings('mcp.form.discoveryFound', { count }));
+      }
     } finally {
       setIsScanningActiveMcp(false);
     }
@@ -782,17 +759,15 @@ export function SettingsMenu({
     setMcpStatus('');
     setIsSavingMcp(true);
     try {
-      const payload = discoveredMcpServerToInput(server);
-      const saved = await createMcpServer(payload);
+      const saved = await importDiscoveredMcpServer(server);
       setMcpServers(current => [saved, ...current.filter(item => item.id !== saved.id)]);
-      void handleTestMcpServer(saved);
       setDiscoveredMcpServers(current =>
         current.map(item =>
           item.name === server.name && item.sourcePath === server.sourcePath ? { ...item, exists: true } : item,
         ),
       );
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP server import failed');
+      showError(error instanceof Error ? error.message : 'MCP server import failed');
     } finally {
       setIsSavingMcp(false);
     }
@@ -810,27 +785,25 @@ export function SettingsMenu({
         current.map(item => (item.endpoint === server.endpoint ? { ...item, exists: true } : item)),
       );
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP server import failed');
+      showError(error instanceof Error ? error.message : 'MCP server import failed');
     } finally {
       setIsSavingMcp(false);
     }
   };
 
-  const webSearchKeyField = getWebSearchKeyField(webSearchAdapter);
-  const webSearchKeyPreview =
-    webSearchKeyField === 'brave' ? braveApiKeyPreview : webSearchKeyField === 'exa' ? exaApiKeyPreview : '';
-  const webSearchKeyValue = webSearchKeyField === 'brave' ? braveApiKey : webSearchKeyField === 'exa' ? exaApiKey : '';
   const savedPrefix = `${text.savedPrefix}${text.savedPrefixSeparator}`;
   const capabilityCopy = settingsObject<RuntimeCapabilityCopy>('runtimeCapabilities');
   const mcpCopy = settingsObject<McpSettingsCopy>('mcp');
-  const adminCopy = getAdminSettingsCopy(translateSettings);
   const sectionTabs = useMemo(
     () => [
       { id: 'personal' as const, label: text.settingsGeneral, icon: Globe },
+      ...(currentUser ? [{ id: 'connections' as const, label: lang.startsWith('zh') ? '模型连接' : 'Model connections', icon: KeyRound }] : []),
+      ...(currentUser ? [{ id: 'image-connection' as const, label: lang.startsWith('zh') ? 'AI 生图' : 'AI Images', icon: Image }] : []),
       ...(effectiveCanManageSkills ? [{ id: 'skills' as const, label: userSkillsCopy.tab, icon: BookOpenText }] : []),
+      ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
       ...(hasPlatformSettings ? [{ id: 'platform' as const, label: adminCopy.platform, icon: ShieldCheck }] : []),
     ],
-    [adminCopy.platform, effectiveCanManageSkills, hasPlatformSettings, text.settingsGeneral, userSkillsCopy.tab],
+    [adminCopy.platform, currentUser, lang, effectiveCanManageSkills, effectiveCanManageMcp, hasPlatformSettings, mcpCopy.title, text.settingsGeneral, userSkillsCopy.tab],
   );
   const platformTabs = useMemo(() => {
     return [
@@ -841,42 +814,43 @@ export function SettingsMenu({
       ...(effectiveCanManageRuntimeSettings
         ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }]
         : []),
-      ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
       ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
+      ...(effectiveCanManageModelConfig ? [{ id: 'image' as const, label: lang.startsWith('zh') ? '生图服务' : 'Image service', icon: Cpu }] : []),
       ...(effectiveCanManageLifecycle
         ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }]
         : []),
       ...(effectiveCanManageCredits ? [{ id: 'credit' as const, label: billingCopy.tab, icon: ReceiptText }] : []),
     ];
   }, [
-    effectiveCanManageWorkspace,
-    effectiveCanManageSecrets,
-    effectiveCanManageMcp,
     effectiveCanManageModelConfig,
+    lang,
     effectiveCanManageInvitations,
     effectiveCanManageCredits,
     effectiveCanManageLifecycle,
     effectiveCanManageRuntimeSettings,
-    effectiveCanReadAudit,
     adminCopy.deployment,
+    adminCopy.invitation.tab,
     billingCopy.tab,
     capabilityCopy.title,
-    mcpCopy.title,
     projectLifecycleCopy.tab,
     text.settingsModel,
   ]);
   const activeTabLabel =
-    activeSection === 'personal'
+    activeSection === 'connections' ? (lang.startsWith('zh') ? '模型连接' : 'Model connections') : activeSection === 'personal'
       ? text.settingsGeneral
+      : activeSection === 'image-connection'
+        ? (lang.startsWith('zh') ? 'AI 生图' : 'AI Images')
       : activeSection === 'skills'
         ? userSkillsCopy.title
+        : activeSection === 'mcp'
+          ? mcpCopy.title
+        : activeTab === 'image'
+          ? (lang.startsWith('zh') ? '生图服务' : 'Image service')
         : activeTab === 'general'
           ? adminCopy.deployment
           : activeTab === 'runtime'
             ? capabilityCopy.title
-            : activeTab === 'mcp'
-              ? mcpCopy.title
-              : activeTab === 'skills'
+            : activeTab === 'skills'
                 ? userSkillsCopy.title
                 : activeTab === 'invitations'
                   ? adminCopy.invitation.tab
@@ -886,13 +860,12 @@ export function SettingsMenu({
                       ? billingCopy.title
                       : text.settingsModel;
   const isSavingCurrentTab =
+    activeTab === 'image' ? imageSettingsState.busy :
     activeSection === 'platform' && activeTab === 'general'
-      ? effectiveCanManageSecrets && isSavingWebTools
+      ? false
       : activeTab === 'runtime'
         ? isSavingRuntimeSettings
-        : activeTab === 'mcp'
-          ? false
-          : activeTab === 'skills'
+        : activeTab === 'skills'
             ? false
             : activeTab === 'invitations'
               ? isSavingInvitations
@@ -901,17 +874,14 @@ export function SettingsMenu({
                 : activeTab === 'credit'
                   ? false
                   : isSaving;
-  const hasGeneralSaveAction = activeSection === 'platform' && effectiveCanManageSecrets;
+  const hasGeneralSaveAction = false;
   const isSaveDisabled =
+    activeTab === 'image' ? imageSettingsState.busy || !imageSettingsState.canSave :
     activeSection === 'platform' && activeTab === 'general'
-      ? !hasGeneralSaveAction ||
-        isSavingCurrentTab ||
-        (effectiveCanManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
+      ? !hasGeneralSaveAction || isSavingCurrentTab
       : activeTab === 'runtime'
         ? isSavingCurrentTab
-        : activeTab === 'mcp'
-          ? false
-          : activeTab === 'skills'
+        : activeTab === 'skills'
             ? true
             : activeTab === 'invitations'
               ? isSavingCurrentTab
@@ -919,13 +889,13 @@ export function SettingsMenu({
                 ? true
                 : activeTab === 'credit'
                   ? true
-                  : isSavingCurrentTab || !balancedModel.trim() || (!selectedModelConfigId && !apiKey.trim());
+                  : isSavingCurrentTab || !authMethods.length || !model.trim() || !goModelsComplete || (!selectedModelConfigId && authMethods.includes('platform') && !apiKey.trim());
 
   const handleSaveSettings = async () => {
     if (activeSection !== 'platform') return;
     if (activeTab === 'model') {
       const saved = await handleSaveModelConfig();
-      if (saved) onClose();
+      if (saved) { setModelAction(null); setActiveModelPopoverId(null); }
       return;
     }
     if (activeTab === 'runtime') {
@@ -938,12 +908,14 @@ export function SettingsMenu({
       if (saved) onClose();
       return;
     }
-    if (activeTab === 'mcp') return;
+    if (activeTab === 'image') {
+      if (await imageSettingsRef.current?.save()) onClose();
+      return;
+    }
     if (activeTab === 'skills') return;
     if (activeTab === 'projects') return;
     if (activeTab === 'credit') return;
-    const webToolsSaved = effectiveCanManageSecrets ? await handleSaveWebTools() : true;
-    if (webToolsSaved) onClose();
+    onClose();
   };
 
   const updateRuntimeSetting = (key: keyof RuntimeSettingsConfig) => {
@@ -957,7 +929,7 @@ export function SettingsMenu({
     const priceId = billingPackForm.priceId.trim();
     const credits = Number(billingPackForm.credits);
     if (!priceId || !Number.isFinite(credits) || credits <= 0) {
-      setBillingStatus(billingCopy.positiveCreditsRequired);
+      showError(billingCopy.positiveCreditsRequired);
       return;
     }
     setIsSavingBillingPack(true);
@@ -977,7 +949,7 @@ export function SettingsMenu({
       setBillingPackForm(createEmptyBillingPackForm());
       setBillingStatus(billingCopy.packSaved);
     } catch (error) {
-      setBillingStatus(error instanceof Error ? error.message : billingCopy.packSaveFailed);
+      showError(error instanceof Error ? error.message : billingCopy.packSaveFailed);
     } finally {
       setIsSavingBillingPack(false);
     }
@@ -993,105 +965,180 @@ export function SettingsMenu({
       setActiveTab('general');
       return;
     }
+    if (!effectiveCanManageMcp && activeSection === 'mcp') {
+      setActiveSection('personal');
+      setActiveTab('general');
+      return;
+    }
     if (activeSection === 'platform' && !platformTabs.some(tab => tab.id === activeTab)) {
       setActiveTab(platformTabs[0]?.id ?? 'general');
     }
-  }, [activeSection, activeTab, effectiveCanManageSkills, hasPlatformSettings, platformTabs]);
+  }, [activeSection, activeTab, effectiveCanManageSkills, effectiveCanManageMcp, hasPlatformSettings, platformTabs]);
 
-  if (!isOpen) return null;
+  const modelConfigEditor = (
+    <>
+      <ModelConfigPanel
+        language={lang}
+        onGoModelsReady={setGoModelsReady}
+        enableOpenCodeGo
+        labels={{
+          provider: text.provider,
+          protocol: lang.startsWith('zh') ? '协议' : 'Protocol',
+          baseUrl: text.baseUrl,
+          apiKey: text.apiKey,
+          model: text.model,
+        }}
+        provider={provider}
+        apiProtocol={apiProtocol}
+        onApiProtocolChange={setApiProtocol}
+        baseUrl={baseUrl}
+        apiKey={apiKey}
+        model={model}
+        apiKeyPreview={apiKeyPreview}
+        savedPrefix={savedPrefix}
+        onProviderChange={value => { setProvider(value); setAuthMethods(current => current.filter(method => method === 'platform' || method === 'byok')); }}
+        onBaseUrlChange={setBaseUrl}
+        onApiKeyChange={setApiKey}
+        onModelChange={setModel}
+        onSubmit={event => {
+          event.preventDefault();
+          if (!isSaveDisabled) void handleSaveSettings();
+        }}
+      />
+      <div className="space-y-1 border-t border-border pt-4">
+        <div className="flex min-h-11 items-center justify-between gap-4 text-sm">
+          <span>{lang.startsWith('zh') ? '向普通用户发布' : 'Publish to users'}</span>
+          <Switch checked={published} onCheckedChange={setPublished} ariaLabel={lang.startsWith('zh') ? '向普通用户发布' : 'Publish to users'} size="sm" />
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-4 text-sm">
+          <span>{lang.startsWith('zh') ? '平台默认模型' : 'Platform default model'}</span>
+          <Switch checked={isDefault} onCheckedChange={setIsDefault} ariaLabel={lang.startsWith('zh') ? '平台默认模型' : 'Platform default model'} size="sm" />
+        </div>
+        <fieldset className="border-t border-border pt-3">
+          <legend className="text-sm text-muted-foreground">{lang.startsWith('zh') ? '允许的接入方式' : 'Allowed authentication methods'}</legend>
+          {(['platform', 'byok', ...(goProfile ? [] : provider === 'openai-compatible' ? ['chatgpt-subscription'] : [])] as ModelAuthMethod[]).map(method => {
+            const label = method === 'platform' ? (lang.startsWith('zh') ? '平台凭据' : 'Platform credentials') : method === 'byok' ? 'BYOK' : 'ChatGPT subscription';
+            return <div key={method} className="flex min-h-11 items-center justify-between gap-4 text-sm">
+              <span>{label}</span>
+              <Switch checked={authMethods.includes(method)} onCheckedChange={checked => setAuthMethods(current => checked ? [...current, method] : current.filter(item => item !== method))} ariaLabel={label} size="sm" />
+            </div>;
+          })}
+        </fieldset>
+      </div>
+      <div className="mt-5 flex justify-end gap-3">
+        <button type="button" disabled={isSaving} onClick={closeModelConfig} className="rounded-lg px-3 py-2 text-sm text-muted-foreground disabled:opacity-50">{lang.startsWith('zh') ? '取消' : 'Cancel'}</button>
+        <button type="button" disabled={isSaveDisabled} onClick={() => void handleSaveSettings()} className="rounded-full bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{isSaving ? text.saving : text.saveSettings}</button>
+      </div>
+    </>
+  );
+  const modelActionTitle = modelAction === 'create' ? (lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration')
+    : modelAction === 'details' ? (lang.startsWith('zh') ? '模型详情' : 'Model details')
+      : modelAction === 'rename' ? (lang.startsWith('zh') ? '编辑名称' : 'Edit name')
+        : (lang.startsWith('zh') ? '删除模型配置' : 'Delete model configuration');
+  const modelActionContent = modelAction ? (
+    <div data-testid="model-config-popover" className="max-h-[min(560px,calc(100dvh-2rem))] overflow-y-auto p-5 text-popover-foreground">
+      <h3 className="mb-3 text-lg font-semibold">{modelActionTitle}</h3>
+      {modelAction === 'delete' ? <p className="text-sm text-muted-foreground">{lang.startsWith('zh') ? `确认删除平台模型「${name}」？使用此配置的用户和后续任务将无法继续使用它。此操作不会删除项目。` : `Delete platform model “${name}”? Users and future tasks using this configuration will lose access to it. Projects will not be deleted.`}</p> : null}
+      {modelAction === 'rename' ? <form className="mt-4" onSubmit={event => { event.preventDefault(); if (!isSaving) void handleModelListAction(); }}>
+        <input autoFocus aria-label={lang.startsWith('zh') ? '模型显示名称' : 'Model display name'} maxLength={100} value={name} onChange={event => setName(event.target.value)} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" />
+      </form> : null}
+      {modelAction === 'create' || modelAction === 'details' ? modelConfigEditor : null}
+      {modelAction === 'rename' || modelAction === 'delete' ? <>
+        <div className="mt-5 flex justify-end gap-3">
+          <button type="button" disabled={isSaving} onClick={closeModelConfig} className="rounded-lg px-3 py-2 text-sm text-muted-foreground disabled:opacity-50">{lang.startsWith('zh') ? '取消' : 'Cancel'}</button>
+          <button type="button" disabled={isSaving || (modelAction === 'rename' && !name.trim())} onClick={() => void handleModelListAction()} className={`${modelAction === 'delete' ? 'rounded-lg' : 'rounded-full'} bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50`}>{isSaving ? text.saving : modelAction === 'delete' ? (lang.startsWith('zh') ? '删除' : 'Delete') : text.saveSettings}</button>
+        </div>
+      </> : null}
+    </div>
+  ) : null;
 
   return (
-    <div
-      role="dialog"
-      aria-label={t.settings}
-      className="fixed inset-0 z-[220] flex items-center justify-center bg-zinc-950/55 p-4 text-zinc-950 backdrop-blur-sm dark:text-white"
-    >
-      <div
-        onClick={event => event.stopPropagation()}
-        data-surface="frosted-glass"
-        data-style-source="pixelfork"
-        data-glass-density="reinforced"
-        data-testid="settings-modal-shell"
-        className="input-surface glass-panel h-[min(620px,calc(100vh-2rem))] w-[min(820px,calc(100vw-2rem))] overflow-hidden rounded-[32px] text-zinc-100"
+    <Dialog open={isOpen} onOpenChange={open => { if (!open && !modelAction && !activeModelPopoverId) onClose(); }}>
+      <DialogContent
+        aria-label={t.settings}
+        className="h-[min(680px,calc(100dvh-1rem))] w-[min(820px,calc(100vw-1rem))] max-w-none overflow-hidden p-0 text-foreground sm:h-[min(620px,calc(100dvh-2rem))] sm:w-[min(820px,calc(100vw-2rem))]"
       >
-        <div className="relative z-10 flex h-full min-h-0">
+        <div
+          onClick={event => event.stopPropagation()}
+          data-testid="settings-modal-shell"
+          className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground sm:flex-row"
+        >
           <aside
             data-testid="settings-modal-sidebar"
-            className="flex w-44 shrink-0 flex-col border-r border-white/10 bg-white/[0.025] p-3 backdrop-blur-xl"
+            className="flex h-auto w-full shrink-0 flex-col border-b border-border bg-muted/30 p-2 sm:h-full sm:w-44 sm:border-b-0 sm:border-r sm:p-3"
           >
-            <div className="mb-4 flex items-center justify-between">
-              <button
-                type="button"
-                aria-label={text.closeSettings}
-                onClick={onClose}
-                className="glass-icon-button inline-flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
-              >
-                <X className="h-4 w-4" />
-              </button>
+            <div className="mb-2 flex items-center justify-between sm:mb-4">
+              <CloseIconButton label={text.closeSettings} onClick={onClose} />
             </div>
-            <div className="space-y-1.5" role="tablist" aria-label={t.systemSettings}>
+            <Tabs value={activeSection} onValueChange={value => { setActiveSection(value as typeof activeSection); setActiveTab('general'); }}>
+            <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={t.systemSettings}>
               {sectionTabs.map(tab => {
                 const Icon = tab.icon;
-                const selected = activeSection === tab.id;
                 return (
-                  <button
+                  <TabsTrigger
                     key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={selected}
-                    onClick={() => {
-                      setActiveSection(tab.id);
-                      setActiveTab('general');
-                    }}
-                    className={`type-button flex h-10 w-full items-center gap-2.5 rounded-2xl px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${selected ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+                    value={tab.id}
+                    className="flex h-9 min-w-max items-center justify-start gap-2 rounded-lg px-3 text-left text-sm data-[active]:bg-accent sm:w-full"
                   >
                     <Icon className="h-4 w-4" />
                     {tab.label}
-                  </button>
+                  </TabsTrigger>
                 );
               })}
-            </div>
+            </TabsList>
+            </Tabs>
             {activeSection === 'platform' ? (
-              <div className="mt-4 border-t border-white/10 pt-3">
-                <div className="type-caption-1 mb-2 px-3 text-zinc-500">{adminCopy.platform}</div>
-                <div className="space-y-1.5" role="tablist" aria-label={adminCopy.platform}>
+                <div className="mt-2 border-t border-border pt-2 sm:mt-4 sm:pt-3">
+                <div className="type-caption-1 mb-2 px-3 text-muted-foreground">{adminCopy.platform}</div>
+                <Tabs value={activeTab} onValueChange={value => setActiveTab(value as typeof activeTab)}>
+                <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={adminCopy.platform}>
                   {platformTabs.map(tab => {
                     const Icon = tab.icon;
-                    const selected = activeTab === tab.id;
                     return (
-                      <button
+                      <TabsTrigger
                         key={tab.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={selected}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={`type-button flex h-10 w-full items-center gap-2.5 rounded-2xl px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${selected ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+                        value={tab.id}
+                        className="flex h-9 min-w-max items-center justify-start gap-2 rounded-lg px-3 text-left text-sm data-[active]:bg-accent sm:w-full"
                       >
                         <Icon className="h-4 w-4" />
                         {tab.label}
-                      </button>
+                      </TabsTrigger>
                     );
                   })}
-                </div>
+                </TabsList>
+                </Tabs>
               </div>
             ) : null}
           </aside>
 
-          <main data-testid="settings-modal-content" className="relative flex min-w-0 flex-1 flex-col">
-            <header className="shrink-0 px-6 pb-3 pt-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="type-caption-1 text-zinc-500">
+          <main data-testid="settings-modal-content" className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <fieldset disabled={isLoadingCurrentSection} aria-busy={isLoadingCurrentSection} className="contents">
+            <header className={`shrink-0 px-6 ${activeSection === 'mcp' ? 'pb-5 pt-6' : 'pb-3 pt-5'}`}>
+              <div className="flex items-end justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-xs text-muted-foreground">
                     {activeSection === 'platform'
                       ? adminCopy.platform
                       : activeSection === 'skills'
                         ? userSkillsCopy.tab
                         : t.systemSettings}
                   </div>
-                  <h2 className="type-title-3 mt-3 text-zinc-100">{activeTabLabel}</h2>
+                  <h2 className={`mt-2 font-semibold text-foreground ${activeSection === 'mcp' ? 'text-2xl tracking-tight' : 'text-xl'}`}>{activeTabLabel}</h2>
                 </div>
-                {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
-                  <div className="relative mt-2">
+                {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
+                  <MorphPopover open={modelAction === 'create'} onOpenChange={open => open ? openModelConfig('create') : closeModelConfig()}>
+                    <MorphPopoverTrigger>
+                      <button type="button" aria-label={lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration'} title={lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration'} disabled={modelsLoading || isSaving} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-transparent text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+                        <Plus className="size-5" />
+                      </button>
+                    </MorphPopoverTrigger>
+                    <MorphPopoverContent side="bottom" align="end" ariaLabel={modelActionTitle} onOpenAutoFocus={content => content.focus()} className="w-[min(480px,calc(100vw-2rem))] rounded-xl border-border bg-popover shadow-xl">
+                      {modelAction === 'create' ? modelActionContent : null}
+                    </MorphPopoverContent>
+                  </MorphPopover>
+                ) : null}
+                {activeSection === 'mcp' && effectiveCanManageMcp ? (
+                  <div className="relative">
                     <button
                       type="button"
                       aria-label={mcpCopy.form.actions}
@@ -1104,19 +1151,19 @@ export function SettingsMenu({
                         setIsMcpActionMenuOpen(current => !current);
                         event.currentTarget.dataset.anchor = 'mcp-actions';
                       }}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-zinc-100 shadow-sm shadow-black/20 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                      className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <Plus className="h-4 w-4" />
+                      <Plus className="size-5" />
                     </button>
                     {isMcpActionMenuOpen ? (
                       <>
                         <div className="fixed inset-0 z-[250]" onMouseDown={() => setIsMcpActionMenuOpen(false)} />
                         <div
                           role="menu"
-                          className="input-surface absolute right-0 top-12 z-[260] w-56 overflow-hidden rounded-3xl border border-white/15 p-1.5 shadow-2xl shadow-black/40"
+                          className="absolute right-0 top-12 z-[260] w-56 overflow-hidden rounded-lg border border-border bg-background p-1.5 shadow-lg"
                           onMouseDown={event => event.stopPropagation()}
                         >
-                          <button
+                          {canDiscoverHostMcp ? <button
                             type="button"
                             role="menuitem"
                             onClick={() => {
@@ -1124,12 +1171,12 @@ export function SettingsMenu({
                               void handleDiscoverActiveMcpServers();
                             }}
                             disabled={isScanningActiveMcp}
-                            className="type-button flex h-10 w-full items-center gap-3 rounded-2xl px-3 text-left text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <Network className="h-4 w-4 text-orange-300" />
                             {isScanningActiveMcp ? mcpCopy.form.scanning : mcpCopy.form.scanActive}
-                          </button>
-                          <div className="my-1 h-px bg-white/10" />
+                          </button> : null}
+                          {canDiscoverHostMcp ? <div className="my-1 h-px bg-border" /> : null}
                           <button
                             type="button"
                             role="menuitem"
@@ -1143,9 +1190,9 @@ export function SettingsMenu({
                                 rect: toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()),
                               });
                             }}
-                            className="type-button flex h-10 w-full items-center gap-3 rounded-2xl px-3 text-left text-zinc-100 transition-colors hover:bg-white/10"
+                            className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-foreground transition-colors hover:bg-accent"
                           >
-                            <Plus className="h-4 w-4 text-zinc-400" />
+                            <Plus className="h-4 w-4 text-muted-foreground" />
                             {mcpCopy.newServer}
                           </button>
                         </div>
@@ -1170,7 +1217,7 @@ export function SettingsMenu({
                   </div>
                 ) : null}
                 {activeSection === 'skills' && effectiveCanManageSkills ? (
-                  <div>
+                  <div className="shrink-0">
                     <input
                       ref={userSkillImportInputRef}
                       aria-label={userSkillsCopy.importFileLabel}
@@ -1185,107 +1232,64 @@ export function SettingsMenu({
                       title={userSkillsCopy.importFileLabel}
                       onClick={() => userSkillImportInputRef.current?.click()}
                       disabled={isSavingUserSkill}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-zinc-100 shadow-sm shadow-black/20 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex size-9 items-center justify-center rounded-full bg-transparent text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <FaPlus className="h-4 w-4" />
+                      <FaPlus className="size-5" />
                     </button>
                   </div>
                 ) : null}
               </div>
             </header>
 
-            <div className="mx-6 h-px shrink-0 bg-white/10" />
+            {activeSection !== 'mcp' ? <div className="mx-6 h-px shrink-0 bg-border" /> : null}
 
-            <div
+            <motion.div
+              key={`${activeSection}-${activeTab}`}
               data-testid="settings-modal-scroll-area"
-              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 [scrollbar-gutter:stable]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.16, ease: EASE_OUT }}
+              className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 ${activeSection === 'mcp' || activeSection === 'connections' || activeSection === 'skills' ? 'flex flex-col' : ''}`}
             >
               {activeSection === 'personal' && activeTab === 'general' ? (
-                <div className="divide-y divide-white/10">
-                  <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                    <span className="type-subheadline flex items-center gap-2.5 text-zinc-100">
-                      <Globe className="h-4 w-4 text-zinc-400" />
+                <div className="divide-y divide-border">
+                  <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
+                    <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
                       {t.language}
                     </span>
-                    <select
-                      value={lang}
-                      onChange={event => onSetLang(event.target.value as Language)}
-                      className="glass-control type-input h-11 w-full rounded-2xl px-3"
-                    >
-                      {LANGUAGE_OPTIONS.map(option => (
-                        <option key={option.code} value={option.code}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <ProjectSelect ariaLabel={t.language} value={lang} onValueChange={value => onSetLang(value as Language)} options={LANGUAGE_OPTIONS.map(option => ({ value: option.code, label: option.label }))} className="w-full" triggerClassName="h-10 rounded-lg type-input min-[900px]:text-md" />
+                  </div>
+                  <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
+                    <span className="text-sm font-medium text-foreground">{t.theme}</span>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                      <span className="text-sm text-muted-foreground">{isDark ? t.darkMode : t.lightMode}</span>
+                      <Switch checked={isDark} aria-label={t.theme} onCheckedChange={() => toggleTheme()} />
+                    </div>
+                  </div>
                 </div>
               ) : null}
 
+              {activeSection === 'personal' && currentUser ? <BgsSettingsPanel key={currentUser.id} ref={bgsSettingsRef} language={lang} onSaveStateChange={setBgsSettingsSaveState} /> : null}
+              {activeSection === 'connections' && currentUser ? <ModelConnectionsPanel key={currentUser.id} ref={modelConnectionsRef} language={lang} onSaveStateChange={setModelConnectionSaveState} /> : null}
+              {activeSection === 'image-connection' && currentUser ? <PersonalImageConnectionPanel key={currentUser.id} ref={imageConnectionRef} language={lang} onSaveStateChange={setImageConnectionSaveState} /> : null}
+
               {activeSection === 'platform' && activeTab === 'general' ? (
-                <div className="divide-y divide-white/10">
+                <div className="divide-y divide-border">
                   {effectiveCanManageWorkspace ? (
                     <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                      <span className="type-subheadline flex items-center gap-2.5 text-zinc-100">
-                        <FolderOpen className="h-4 w-4 text-zinc-400" />
+                      <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <FolderOpen className="h-4 w-4 text-muted-foreground" />
                         {text.workspacePath}
                       </span>
                       <div className="min-w-0 space-y-2">
-                        <div className="type-code-sm max-w-full whitespace-normal break-all rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-3 text-zinc-100">
+                        <div className="max-w-full whitespace-normal break-all rounded-lg border border-border bg-muted px-3 py-3 font-mono text-xs text-foreground">
                           {workspacePath || adminCopy.workspaceManaged}
                         </div>
-                        <div className="type-footnote text-zinc-500">{adminCopy.workspaceNote}</div>
+                        <div className="text-xs text-muted-foreground">{adminCopy.workspaceNote}</div>
                         {workspaceStatus ? (
-                          <div className="type-footnote text-emerald-400">{workspaceStatus}</div>
+                          <div className="text-xs text-foreground dark:text-foreground">{workspaceStatus}</div>
                         ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {effectiveCanManageSecrets ? (
-                    <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
-                      <span className="type-subheadline flex items-center gap-2.5 text-zinc-100 sm:mt-2.5">
-                        <Search className="h-4 w-4 text-zinc-400" />
-                        {text.webSearch}
-                      </span>
-                      <div className="min-w-0 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <select
-                            aria-label={text.searchBackend}
-                            value={webSearchAdapter}
-                            onChange={event => setWebSearchAdapter(event.target.value as WebSearchAdapter)}
-                            className="type-input h-11 min-w-0 flex-1 rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          >
-                            <option value="tavily">Tavily</option>
-                            <option value="api">Anthropic API</option>
-                            <option value="bing">Bing</option>
-                            <option value="brave">Brave</option>
-                            <option value="exa">Exa</option>
-                          </select>
-                        </div>
-                        {webSearchKeyField ? (
-                          <input
-                            aria-label={webSearchKeyField === 'brave' ? 'BRAVE_SEARCH_API_KEY' : 'EXA_API_KEY'}
-                            type="password"
-                            value={webSearchKeyValue}
-                            onChange={event => {
-                              if (webSearchKeyField === 'brave') {
-                                setBraveApiKey(event.target.value);
-                              } else {
-                                setExaApiKey(event.target.value);
-                              }
-                            }}
-                            placeholder={
-                              webSearchKeyPreview
-                                ? `${savedPrefix}${webSearchKeyPreview}`
-                                : webSearchKeyField === 'brave'
-                                  ? 'BRAVE_SEARCH_API_KEY'
-                                  : 'EXA_API_KEY'
-                            }
-                            className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        ) : null}
-                        {webToolsStatus ? <div className="type-footnote text-emerald-400">{webToolsStatus}</div> : null}
                       </div>
                     </div>
                   ) : null}
@@ -1339,113 +1343,56 @@ export function SettingsMenu({
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'runtime' && effectiveCanManageRuntimeSettings ? (
-                <div className="divide-y divide-white/10">
-                  {getRuntimeCapabilityItems(capabilityCopy).map(item => (
-                    <CapabilityToggleRow
-                      key={item.key}
-                      item={item}
-                      checked={runtimeSettings[item.key]}
-                      onToggle={() => updateRuntimeSetting(item.key)}
-                    />
-                  ))}
-                  {runtimeSettingsStatus ? (
-                    <div className="type-footnote py-2 text-amber-300">{runtimeSettingsStatus}</div>
-                  ) : null}
-                </div>
+                <RuntimeSettingsPanel
+                  copy={capabilityCopy}
+                  settings={runtimeSettings}
+                  status={runtimeSettingsStatus}
+                  onToggle={updateRuntimeSetting}
+                />
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
                 <>
-                  <form
-                    className="divide-y divide-white/10"
-                    autoComplete="off"
-                    onSubmit={event => {
-                      event.preventDefault();
-                      if (!isSaveDisabled) void handleSaveSettings();
-                    }}
-                  >
-                    <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                      <span className="type-subheadline text-zinc-100">{text.provider}</span>
-                      <select
-                        aria-label={text.provider}
-                        value={provider}
-                        onChange={event => setProvider(event.target.value as ModelProviderKind)}
-                        className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      >
-                        <option value="openai-compatible">OpenAI Compatible</option>
-                        <option value="anthropic-compatible">Anthropic API Compatible</option>
-                        <option value="gemini">Gemini</option>
-                        <option value="grok">Grok</option>
-                      </select>
-                    </label>
-
-                    <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                      <span className="type-subheadline text-zinc-100">{text.baseUrl}</span>
-                      <input
-                        aria-label={text.baseUrl}
-                        value={baseUrl}
-                        onChange={event => setBaseUrl(event.target.value)}
-                        placeholder="https://api.example.com/v1"
-                        className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      />
-                    </label>
-
-                    <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                      <span className="type-subheadline text-zinc-100">{text.apiKey}</span>
-                      <input
-                        aria-label={text.apiKey}
-                        type="password"
-                        autoComplete="new-password"
-                        value={apiKey}
-                        onChange={event => setApiKey(event.target.value)}
-                        placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'}
-                        className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      />
-                    </label>
-
-                    <div className="grid gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
-                      <span className="type-subheadline text-zinc-100 sm:mt-2.5">{text.models}</span>
-                      <div className="grid gap-2">
-                        <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                          <span className="type-caption-1 text-zinc-500">{text.fast}</span>
-                          <input
-                            aria-label={text.fastModel}
-                            value={fastModel}
-                            onChange={event => setFastModel(event.target.value)}
-                            placeholder="qwen3.5-flash"
-                            className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        </label>
-                        <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                          <span className="type-caption-1 text-zinc-500">{text.balanced}</span>
-                          <input
-                            aria-label={text.balancedModel}
-                            value={balancedModel}
-                            onChange={event => setBalancedModel(event.target.value)}
-                            placeholder="qwen3.7-plus"
-                            className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        </label>
-                        <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                          <span className="type-caption-1 text-zinc-500">{text.strong}</span>
-                          <input
-                            aria-label={text.strongModel}
-                            value={strongModel}
-                            onChange={event => setStrongModel(event.target.value)}
-                            placeholder="qwen3.7-max"
-                            className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  </form>
-
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="type-footnote text-emerald-400">{status}</span>
-                  </div>
+                {currentUser?.role === 'owner' && <section aria-label={lang.startsWith('zh') ? '管理员 ChatGPT 订阅' : 'Administrator ChatGPT subscription'} className="border-b border-border py-3">
+                  <h3 className="text-sm font-medium">{lang.startsWith('zh') ? '管理员 ChatGPT 订阅' : 'Administrator ChatGPT subscription'}</h3>
+                  <p className="mt-2 text-xs text-muted-foreground">{lang.startsWith('zh') ? '与模型连接、生图服务共用同一份账户授权，无需重复登录。登录仅授权；模型及生图的启用、默认选择与计费仍分别配置。' : 'Shares the same account authorization with Model connections and Image service; no second sign-in is needed. Signing in does not change model or image activation, defaults, or billing settings.'}</p>
+                  <ModelConnectionsPanel key={currentUser.id} language={lang} chatgptAuthorizationOnly />
+                </section>}
+                {modelsLoading ? <p role="status" className="py-5 text-sm text-muted-foreground">{lang.startsWith('zh') ? '加载中…' : 'Loading…'}</p> : !existingConfigs.length && !status ? <p className="py-5 text-sm text-muted-foreground">{lang.startsWith('zh') ? '暂无模型配置，点击右上角 + 添加。' : 'No model configurations. Use + to add one.'}</p> : null}
+                <ul aria-label={lang.startsWith('zh') ? '模型配置列表' : 'Model configurations'} className="divide-y divide-border">
+                  {existingConfigs.map(config => <li key={config.id} className="flex min-h-16 items-center gap-3 py-3">
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium" title={config.name}>{config.name}</p><p className="mt-1 truncate text-xs text-muted-foreground">{config.provider}{config.isDefault ? (lang.startsWith('zh') ? ' · 默认' : ' · Default') : ''}{config.published === false ? (lang.startsWith('zh') ? ' · 未发布' : ' · Unpublished') : ''}</p></div>
+                    <MorphPopover
+                      open={activeModelPopoverId === config.id}
+                      onOpenChange={open => {
+                        if (open) { setActiveModelPopoverId(config.id); setModelAction(null); setStatus(''); }
+                        else closeModelConfig();
+                      }}
+                    >
+                      <MorphPopoverTrigger>
+                        <button type="button" aria-label={`${config.name} ${lang.startsWith('zh') ? '操作' : 'actions'}`} disabled={isSaving} onKeyDown={event => { if (event.key === 'ArrowDown') { event.preventDefault(); setActiveModelPopoverId(config.id); setModelAction(null); } }} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-transparent text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"><MoreHorizontal className="size-5" /></button>
+                      </MorphPopoverTrigger>
+                      <MorphPopoverContent key={modelAction && selectedModelConfigId === config.id ? modelAction : 'menu'} side="bottom" align="end" ariaLabel={modelAction && selectedModelConfigId === config.id ? modelActionTitle : `${config.name} ${lang.startsWith('zh') ? '操作' : 'actions'}`} onOpenAutoFocus={content => content.focus()} className={`${modelAction && selectedModelConfigId === config.id ? 'w-[min(480px,calc(100vw-2rem))]' : 'w-44'} rounded-xl border-border bg-popover shadow-xl`}>
+                        {modelAction && selectedModelConfigId === config.id ? modelActionContent : <div role="menu" aria-label={`${config.name} ${lang.startsWith('zh') ? '操作' : 'actions'}`} className="p-1">
+                          <button type="button" role="menuitem" onClick={() => openModelConfig('rename', config)} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent"><Pencil className="size-4" />{lang.startsWith('zh') ? '编辑名称' : 'Edit name'}</button>
+                          <button type="button" role="menuitem" onClick={() => openModelConfig('details', config)} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent"><Info className="size-4" />{lang.startsWith('zh') ? '详情' : 'Details'}</button>
+                          <button type="button" role="menuitem" onClick={() => openModelConfig('delete', config)} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent"><Trash2 className="size-4" />{lang.startsWith('zh') ? '删除' : 'Delete'}</button>
+                        </div>}
+                      </MorphPopoverContent>
+                    </MorphPopover>
+                  </li>)}
+                </ul>
                 </>
               ) : null}
-              {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
+
+              {activeSection === 'platform' && activeTab === 'image' && effectiveCanManageModelConfig ? (
+                <ImageGenerationSettingsPanel ref={imageSettingsRef} language={lang} onStateChange={setImageSettingsState} onSaved={onClose} onOpenModelConnections={() => { setActiveSection('platform'); setActiveTab('model'); }} />
+              ) : null}
+              {activeSection === 'platform' && activeTab === 'model' && !modelAction && status ? (
+                <p role="status" className="mt-3 text-sm text-destructive">{status}</p>
+              ) : null}
+
+              {activeSection === 'mcp' && effectiveCanManageMcp ? (
                 <McpSettingsPanel
                   copy={mcpCopy}
                   servers={mcpServers}
@@ -1492,32 +1439,33 @@ export function SettingsMenu({
                   onDelete={skill => void handleDeleteUserSkill(skill)}
                 />
               ) : null}
-            </div>
-            {activeSection === 'platform' &&
-            activeTab !== 'mcp' &&
+            </motion.div>
+            {(activeSection === 'personal' && currentUser || activeSection === 'image-connection' || activeSection === 'connections' && modelConnectionSaveState.visible || activeSection === 'platform' &&
+            activeTab !== 'model' &&
             activeTab !== 'projects' &&
             activeTab !== 'credit' &&
-            (activeTab !== 'general' || hasGeneralSaveAction) ? (
-              <div className="flex items-center justify-end border-t border-white/10 bg-white/[0.02] px-6 py-4">
+            (activeTab !== 'general' || hasGeneralSaveAction)) ? (
+              <div className="flex items-center justify-end border-t border-border bg-muted/30 px-6 py-4">
                 <button
                   type="button"
                   aria-label={text.saveSettings}
-                  onClick={handleSaveSettings}
-                  disabled={isSaveDisabled}
-                  className="primary-pill inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={activeSection === 'personal' ? () => void bgsSettingsRef.current?.save() : activeSection === 'image-connection' ? () => void imageConnectionRef.current?.save() : activeSection === 'connections' ? () => modelConnectionsRef.current?.saveByok() : handleSaveSettings}
+                  disabled={activeSection === 'personal' ? bgsSettingsSaveState.disabled : activeSection === 'image-connection' ? imageConnectionSaveState.disabled : activeSection === 'connections' ? modelConnectionSaveState.disabled : isSaveDisabled}
+                  className="rounded-full border border-transparent bg-primary text-primary-foreground inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isSavingCurrentTab ? text.saving : text.saveSettings}
+                  {activeSection === 'personal' ? bgsSettingsSaveState.busy ? text.saving : text.saveSettings : activeSection === 'image-connection' ? imageConnectionSaveState.busy ? text.saving : text.saveSettings : activeSection === 'connections' ? modelConnectionSaveState.busy ? text.saving : text.saveSettings : isSavingCurrentTab ? text.saving : text.saveSettings}
                 </button>
               </div>
             ) : null}
+            </fieldset>
           </main>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function formatModelConfigError(error: unknown, text: Record<string, any>): string {
+function formatModelConfigError(error: unknown, text: Record<string, string>): string {
   if (!(error instanceof Error)) return text.modelSaveFailed;
   const apiError = error as Error & { code?: string; hostname?: string };
   const messages: Record<string, unknown> = {
@@ -1533,11 +1481,6 @@ function formatModelConfigError(error: unknown, text: Record<string, any>): stri
   return typeof template === 'string' ? template.replace('{host}', apiError.hostname || '') : error.message;
 }
 
-function getWebSearchKeyField(adapter: WebSearchAdapter): 'brave' | 'exa' | null {
-  if (adapter === 'brave') return 'brave';
-  if (adapter === 'exa') return 'exa';
-  return null;
-}
 
 type SettingsTranslate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -1685,16 +1628,7 @@ function parsePositiveInteger(value: string): number | null {
 }
 
 function normalizeRuntimeSettings(config: RuntimeSettingsConfig): Required<RuntimeSettingsConfig> {
-  return {
-    autoMemoryEnabled: config.autoMemoryEnabled ?? true,
-    autoDreamEnabled: config.autoDreamEnabled ?? true,
-    skillSearchEnabled: config.skillSearchEnabled ?? false,
-    treeSitterBashEnabled: config.treeSitterBashEnabled ?? false,
-    webBrowserToolEnabled: config.webBrowserToolEnabled ?? false,
-    bashClassifierEnabled: config.bashClassifierEnabled ?? false,
-    mcpSkillsEnabled: config.mcpSkillsEnabled ?? false,
-    resourceLibraryEnabled: config.resourceLibraryEnabled ?? true,
-  };
+  return { resourceLibraryEnabled: config.resourceLibraryEnabled ?? true };
 }
 
 function createEmptyMcpForm(): McpServerForm {
@@ -1772,11 +1706,7 @@ function mcpFormToInput(form: McpServerForm): McpServerInput {
   };
 }
 
-function isMcpFormSaveable(form: McpServerForm): boolean {
-  return (
-    Boolean(form.name.trim()) && (form.transport === 'stdio' ? Boolean(form.command.trim()) : Boolean(form.url.trim()))
-  );
-}
+
 
 function mcpServerToInput(server: McpServerConfig): McpServerInput {
   return {
@@ -1809,83 +1739,6 @@ function discoveredMcpServerToInput(server: DiscoveredMcpServer | ActiveDiscover
   };
 }
 
-type RuntimeCapabilityCopy = {
-  title: string;
-  items: Record<
-    keyof RuntimeSettingsConfig,
-    {
-      label: string;
-      description: string;
-      note: string;
-      scope: 'immediate' | 'newSession' | 'restart';
-    }
-  >;
-};
-
-type BillingSettingsCopy = {
-  tab: string;
-  title: string;
-  description: string;
-  packsTitle: string;
-  packsDescription: string;
-  savePack: string;
-  saving: string;
-  priceId: string;
-  credits: string;
-  displayName: string;
-  sortOrder: string;
-  enabled: string;
-  disabled: string;
-  edit: string;
-  noPacks: string;
-  noEvents: string;
-  noReference: string;
-  positiveCreditsRequired: string;
-  packSaved: string;
-  packSaveFailed: string;
-  auditUnavailable: string;
-  billingUnavailable: string;
-  metrics: {
-    consumed: string;
-    weightedTokens: string;
-  };
-};
-
-type ProjectLifecycleSettingsCopy = {
-  tab: string;
-  title: string;
-  description: string;
-  quotaUsage: string;
-  quotaRemaining: string;
-  storageCleanup: string;
-  projectsValue: (count: number) => string;
-  projectsLimitValue: (used: number, limit: number) => string;
-  unlimited: string;
-  remainingValue: (count: number) => string;
-  supabaseEnabled: string;
-  localOnly: string;
-  retentionTitle: string;
-  retentionDescription: string;
-  dryRun: string;
-  runRetention: string;
-  retentionSummary: (planned: number, deleted: number, retained: number) => string;
-  lastRetentionRun: string;
-  dryRunLabel: string;
-  deletedRunLabel: (count: number) => string;
-  activeProjects: string;
-  recentCleanup: string;
-  noActiveProjects: string;
-  noRecentCleanup: string;
-  noWorkspacePath: string;
-  snapshotSaved: string;
-  noSnapshot: string;
-  dryRunStatus: (count: number) => string;
-  runStatus: (count: number) => string;
-  dryRunFailed: string;
-  runFailed: string;
-  unavailable: string;
-};
-
 type UserSkillsSettingsCopy = {
   tab: string;
   title: string;
@@ -1905,1197 +1758,3 @@ type UserSkillsSettingsCopy = {
   unavailable: string;
   runtimeNote: string;
 };
-
-type RuntimeCapabilityItem = {
-  key: keyof RuntimeSettingsConfig;
-  label: string;
-  description: string;
-  note: string;
-  scope: 'immediate' | 'newSession' | 'restart';
-};
-
-type RuntimeSettingsCapabilityItem = RuntimeCapabilityItem & {
-  key: keyof RuntimeSettingsConfig;
-};
-
-type McpSettingsCopy = {
-  title: string;
-  intro: string;
-  configured: string;
-  newServer: string;
-  noServers: string;
-  form: {
-    name: string;
-    enabled: string;
-    transport: string;
-    scope: string;
-    command: string;
-    args: string;
-    url: string;
-    cwd: string;
-    env: string;
-    argsHint: string;
-    envHint: string;
-    stdio: string;
-    sse: string;
-    http: string;
-    beegame: string;
-    global: string;
-    project: string;
-    edit: string;
-    delete: string;
-    cancel: string;
-    save: string;
-    saving: string;
-    scanLocal: string;
-    scanActive: string;
-    scanning: string;
-    discovered: string;
-    activeDiscovered: string;
-    noDiscovered: string;
-    noActiveDiscovered: string;
-    importServer: string;
-    existing: string;
-    source: string;
-    testConnection: string;
-    testingConnection: string;
-    available: string;
-    unavailable: string;
-    untested: string;
-    advanced: string;
-    actions: string;
-  };
-  rows: Array<{
-    title: string;
-    description: string;
-    note: string;
-  }>;
-};
-
-function getMcpHealthLabel(copy: McpSettingsCopy, health: McpServerTestResult | undefined, isTesting: boolean): string {
-  if (isTesting) return copy.form.testingConnection;
-  if (!health) return copy.form.untested;
-  return health.ok ? copy.form.available : copy.form.unavailable;
-}
-
-function getMcpHealthClass(health: McpServerTestResult | undefined, isTesting: boolean): string {
-  if (isTesting) return 'text-orange-300';
-  if (!health) return 'text-zinc-500';
-  return health.ok ? 'text-emerald-400' : 'text-red-400';
-}
-
-function InvitationSettingsPanel({
-  copy,
-  required,
-  invitations,
-  newCode,
-  newLabel,
-  newMaxUses,
-  status,
-  isSaving,
-  onToggleRequired,
-  onNewCodeChange,
-  onNewLabelChange,
-  onNewMaxUsesChange,
-  onCreate,
-  onToggleInvitation,
-  onDeleteInvitation,
-}: {
-  copy: ReturnType<typeof getAdminSettingsCopy>['invitation'];
-  required: boolean;
-  invitations: InvitationRecord[];
-  newCode: string;
-  newLabel: string;
-  newMaxUses: string;
-  status: string;
-  isSaving: boolean;
-  onToggleRequired: () => void;
-  onNewCodeChange: (value: string) => void;
-  onNewLabelChange: (value: string) => void;
-  onNewMaxUsesChange: (value: string) => void;
-  onCreate: () => void;
-  onToggleInvitation: (invitation: InvitationRecord) => void;
-  onDeleteInvitation: (id: string) => void;
-}) {
-  return (
-    <div className="space-y-5 py-2">
-      <div className="divide-y divide-white/10 border-y border-white/10">
-        <div className="flex min-h-16 items-center justify-between gap-4 py-3">
-          <div className="min-w-0">
-            <div className="type-subheadline flex items-center gap-2.5 text-zinc-100">
-              <Ticket className="h-4 w-4 text-zinc-400" />
-              {copy.title}
-            </div>
-            <div className="type-footnote mt-1 text-zinc-500">{copy.description}</div>
-          </div>
-          <Switch checked={required} aria-label={copy.title} onCheckedChange={onToggleRequired} />
-        </div>
-
-        <div className="grid gap-3 py-3 sm:grid-cols-[10.5rem_1fr]">
-          <span className="type-subheadline text-zinc-100 sm:mt-2.5">{copy.newCode}</span>
-          <div className="grid gap-2">
-            <input
-              aria-label={copy.codeAria}
-              value={newCode}
-              onChange={event => onNewCodeChange(event.target.value)}
-              placeholder={copy.codePlaceholder}
-              className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-            />
-            <div className="grid gap-2 sm:grid-cols-[1fr_9rem]">
-              <input
-                aria-label={copy.labelAria}
-                value={newLabel}
-                onChange={event => onNewLabelChange(event.target.value)}
-                placeholder={copy.labelPlaceholder}
-                className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-              />
-              <input
-                aria-label={copy.maxUsesAria}
-                inputMode="numeric"
-                value={newMaxUses}
-                onChange={event => onNewMaxUsesChange(event.target.value)}
-                placeholder={copy.maxUsesPlaceholder}
-                className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-              />
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={onCreate}
-                disabled={isSaving || !newCode.trim()}
-                className="primary-pill inline-flex h-10 items-center px-5 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {copy.create}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="type-caption-1 text-zinc-500">{copy.list}</div>
-        {invitations.length ? (
-          <div className="divide-y divide-white/10 overflow-hidden rounded-3xl border border-white/10">
-            {invitations.map(invitation => {
-              const invitationCode = String(invitation.code || '').trim();
-              const primaryLabel = invitation.label || invitationCode || copy.unnamed;
-              return (
-                <div key={invitation.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${invitation.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-                      />
-                      <span className="type-footnote truncate text-zinc-100">{primaryLabel}</span>
-                    </div>
-                    {invitationCode ? (
-                      <div className="type-code mt-1 truncate pl-4 text-zinc-300">{copy.codeValue(invitationCode)}</div>
-                    ) : null}
-                    <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                      {copy.usedCount(invitation.usedCount, invitation.maxUses)}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onToggleInvitation(invitation)}
-                      disabled={isSaving}
-                      className="type-button h-9 rounded-full border border-white/15 px-3 text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {invitation.enabled ? copy.disable : copy.enable}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={copy.deleteAria}
-                      onClick={() => onDeleteInvitation(invitation.id)}
-                      disabled={isSaving || invitation.usedCount > 0}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="type-footnote rounded-3xl border border-white/10 px-4 py-4 text-zinc-500">{copy.empty}</div>
-        )}
-        {status ? <div className="type-footnote text-amber-300">{status}</div> : null}
-      </div>
-    </div>
-  );
-}
-
-function UserSkillsSettingsPanel({
-  copy,
-  skills,
-  isSaving,
-  onImport,
-  onToggle,
-  onDelete,
-}: {
-  copy: UserSkillsSettingsCopy;
-  skills: UserSkill[];
-  isSaving: boolean;
-  onImport: (file: File) => void;
-  onToggle: (skill: UserSkill) => void;
-  onDelete: (skill: UserSkill) => void;
-}) {
-  const [isDragActive, setIsDragActive] = useState(false);
-  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'copy';
-    setIsDragActive(true);
-  };
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      return;
-    }
-    setIsDragActive(false);
-  };
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragActive(false);
-    const file = event.dataTransfer.files.item?.(0) ?? event.dataTransfer.files[0];
-    if (file) onImport(file);
-  };
-  return (
-    <div className="space-y-4 py-2">
-      <section
-        data-testid="user-skills-drop-zone"
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`rounded-3xl transition-colors ${isDragActive ? 'bg-white/[0.045] ring-2 ring-white/25' : ''}`}
-      >
-        {skills.length ? (
-          <div className="max-h-[240px] overflow-y-auto rounded-3xl border border-white/10 [scrollbar-gutter:stable]">
-            <div className="divide-y divide-white/10">
-              {skills.map(skill => (
-                <div key={skill.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0 flex-1 px-2 py-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${skill.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-                      />
-                      <span className="type-footnote truncate text-zinc-100">{skill.name}</span>
-                      <span className="type-caption-1 text-zinc-500">
-                        {skill.enabled ? copy.enabled : copy.disabled}
-                      </span>
-                    </div>
-                    <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">{skill.description}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Switch
-                      checked={skill.enabled}
-                      aria-label={skill.enabled ? copy.disabled : copy.enabled}
-                      disabled={isSaving}
-                      onCheckedChange={() => onToggle(skill)}
-                    />
-                    <button
-                      type="button"
-                      aria-label={copy.delete}
-                      title={copy.delete}
-                      onClick={() => onDelete(skill)}
-                      disabled={isSaving}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-red-500/10 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="flex min-h-[190px] flex-col items-center justify-center rounded-3xl border border-dashed border-white/20 bg-white/[0.025] px-6 py-8 text-center">
-            <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/20 text-zinc-400">
-              <BookOpenText className="h-5 w-5" />
-            </div>
-            <div className="type-callout text-zinc-100">{copy.empty}</div>
-            <p className="type-footnote mt-3 max-w-md text-zinc-500">{copy.emptyDescription}</p>
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function uniqueUserSkills(skills: UserSkill[]): UserSkill[] {
-  const seen = new Set<string>();
-  const unique: UserSkill[] = [];
-  for (const skill of skills) {
-    const key = skill.slug || skill.name;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(skill);
-  }
-  return unique.sort((left, right) => left.name.localeCompare(right.name));
-}
-
-function McpSettingsPanel({
-  copy,
-  servers,
-  discovered,
-  activeDiscovered,
-  healthById,
-  testingServerId,
-  status,
-  isSaving,
-  onEdit,
-  activeEditServerId,
-  activeEditAnchorRect,
-  form,
-  onFormChange,
-  onCloseForm,
-  onSaveForm,
-  onTest,
-  onDelete,
-  onImport,
-  onImportActive,
-}: {
-  copy: McpSettingsCopy;
-  servers: McpServerConfig[];
-  discovered: DiscoveredMcpServer[];
-  activeDiscovered: ActiveDiscoveredMcpServer[];
-  healthById: Record<string, McpServerTestResult>;
-  testingServerId: string;
-  status: string;
-  isSaving: boolean;
-  onEdit: (server: McpServerConfig, rect: PopoverAnchorRect) => void;
-  activeEditServerId: string;
-  activeEditAnchorRect: PopoverAnchorRect | null;
-  form: McpServerForm;
-  onFormChange: (form: McpServerForm) => void;
-  onCloseForm: () => void;
-  onSaveForm: () => void;
-  onTest: (server: McpServerConfig) => void;
-  onDelete: (id: string) => void;
-  onImport: (server: DiscoveredMcpServer) => void;
-  onImportActive: (server: ActiveDiscoveredMcpServer) => void;
-}) {
-  const [activeServerMenuId, setActiveServerMenuId] = useState('');
-  return (
-    <div className="space-y-4 py-2">
-      <p className="type-callout max-w-2xl text-zinc-400">{copy.intro}</p>
-
-      <div className="divide-y divide-white/10 border-y border-white/10">
-        <div className="type-caption-1 py-3 text-zinc-500">{copy.configured}</div>
-        {servers.length ? (
-          servers.map(server => (
-            <div key={server.id} className="flex items-center justify-between gap-3 py-3">
-              <button
-                type="button"
-                onClick={event => onEdit(server, toPopoverAnchorRect(event.currentTarget.getBoundingClientRect()))}
-                className="min-w-0 flex-1 rounded-2xl px-2 py-1 text-left transition-colors hover:bg-white/5"
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 shrink-0 rounded-full ${server.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-                  />
-                  <span className="type-footnote truncate text-zinc-100">{server.name}</span>
-                </div>
-                <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                  {server.transport} · {server.scope}
-                </div>
-                <div className="type-footnote mt-1 flex items-center gap-2 pl-4">
-                  <span className={getMcpHealthClass(healthById[server.id], testingServerId === server.id)}>
-                    {getMcpHealthLabel(copy, healthById[server.id], testingServerId === server.id)}
-                  </span>
-                  {healthById[server.id]?.message ? (
-                    <span className="truncate text-zinc-500">{healthById[server.id].message}</span>
-                  ) : null}
-                </div>
-              </button>
-              <div className="relative flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  aria-label={copy.form.actions}
-                  aria-haspopup="menu"
-                  aria-expanded={activeServerMenuId === server.id}
-                  data-mcp-row-action={server.id}
-                  onClick={() => setActiveServerMenuId(current => (current === server.id ? '' : server.id))}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-                {activeServerMenuId === server.id ? (
-                  <>
-                    <div className="fixed inset-0 z-[250]" onMouseDown={() => setActiveServerMenuId('')} />
-                    <div
-                      role="menu"
-                      className="input-surface absolute right-0 top-10 z-[260] w-44 overflow-hidden rounded-3xl border border-white/15 p-1.5 shadow-2xl shadow-black/40"
-                      onMouseDown={event => event.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setActiveServerMenuId('');
-                          onTest(server);
-                        }}
-                        disabled={isSaving || testingServerId === server.id}
-                        className="type-button flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Network className="h-3.5 w-3.5 text-orange-300" />
-                        {testingServerId === server.id ? copy.form.testingConnection : copy.form.testConnection}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={event => {
-                          const anchor = Array.from(document.querySelectorAll('[data-mcp-row-action]')).find(
-                            element => element.getAttribute('data-mcp-row-action') === server.id,
-                          );
-                          setActiveServerMenuId('');
-                          onEdit(server, toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()));
-                        }}
-                        className="type-button flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-zinc-100 transition-colors hover:bg-white/10"
-                      >
-                        <FolderOpen className="h-3.5 w-3.5 text-zinc-400" />
-                        {copy.form.edit}
-                      </button>
-                      <div className="my-1 h-px bg-white/10" />
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setActiveServerMenuId('');
-                          onDelete(server.id);
-                        }}
-                        disabled={isSaving}
-                        className="type-button flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {copy.form.delete}
-                      </button>
-                    </div>
-                  </>
-                ) : null}
-                {activeEditServerId === server.id ? (
-                  <McpServerFormPopover
-                    mode="edit"
-                    copy={copy}
-                    form={form}
-                    status={status}
-                    isSaving={isSaving}
-                    anchorRect={activeEditAnchorRect}
-                    onChange={onFormChange}
-                    onClose={onCloseForm}
-                    onSave={onSaveForm}
-                  />
-                ) : null}
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="type-callout py-4 text-zinc-500">{copy.noServers}</div>
-        )}
-      </div>
-
-      {activeDiscovered.length ? (
-        <div className="divide-y divide-white/10 border-y border-white/10">
-          <div className="type-caption-1 py-3 text-zinc-500">{copy.form.activeDiscovered}</div>
-          {activeDiscovered.map(server => (
-            <div key={`${server.endpoint}:${server.name}`} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                  <span className="type-footnote truncate text-zinc-100">{server.name}</span>
-                  <span className="type-footnote text-emerald-400">{copy.form.available}</span>
-                </div>
-                <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                  {server.transport} · {server.endpoint}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onImportActive(server)}
-                disabled={isSaving || server.exists}
-                className="type-button h-8 shrink-0 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {server.exists ? copy.form.existing : copy.form.importServer}
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {discovered.length ? (
-        <div className="divide-y divide-white/10 border-y border-white/10">
-          <div className="type-caption-1 py-3 text-zinc-500">{copy.form.discovered}</div>
-          {discovered.map(server => (
-            <div key={`${server.sourcePath}:${server.name}`} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 shrink-0 rounded-full ${server.exists ? 'bg-zinc-600' : 'bg-emerald-400'}`}
-                  />
-                  <span className="type-footnote truncate text-zinc-100">{server.name}</span>
-                </div>
-                <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                  {server.transport} · {copy.form.source}: {server.sourcePath}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onImport(server)}
-                disabled={isSaving || server.exists}
-                className="type-button h-8 shrink-0 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {server.exists ? copy.form.existing : copy.form.importServer}
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {status ? <div className="type-footnote text-amber-300">{status}</div> : null}
-    </div>
-  );
-}
-
-function McpServerFormPopover({
-  mode,
-  copy,
-  form,
-  status,
-  isSaving,
-  anchorRect,
-  onChange,
-  onClose,
-  onSave,
-}: {
-  mode: 'create' | 'edit';
-  copy: McpSettingsCopy;
-  form: McpServerForm;
-  status: string;
-  isSaving: boolean;
-  anchorRect: PopoverAnchorRect | null;
-  onChange: (form: McpServerForm) => void;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const update = (patch: Partial<McpServerForm>) => onChange({ ...form, ...patch });
-  const saveDisabled = isSaving || !isMcpFormSaveable(form);
-  if (!anchorRect) return null;
-
-  const placement = getPopoverPlacement(anchorRect);
-  return createPortal(
-    <div className="fixed inset-0 z-[350]" onMouseDown={onClose}>
-      <div
-        className="fixed z-[360]"
-        style={{ left: placement.left, top: placement.top }}
-        onMouseDown={event => event.stopPropagation()}
-        onClick={event => event.stopPropagation()}
-      >
-        <div
-          className="absolute -top-2 h-4 w-4 rotate-45 border-l border-t border-white/15 bg-zinc-950/80"
-          style={{ left: placement.arrowLeft }}
-        />
-        <div className="input-surface relative flex max-h-[min(480px,calc(100vh-8rem))] w-[min(360px,calc(100vw-3rem))] flex-col overflow-hidden rounded-3xl border border-white/15 shadow-2xl shadow-black/50">
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2 [scrollbar-gutter:stable]">
-            <div className="relative z-10 divide-y divide-white/10">
-              <label className="grid gap-2 py-3">
-                <span className="type-caption-1 text-zinc-500">{copy.form.name}</span>
-                <input
-                  aria-label={copy.form.name}
-                  value={form.name}
-                  onChange={event => update({ name: event.target.value })}
-                  className="type-input h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                />
-              </label>
-
-              <div className="flex items-center justify-between gap-3 py-3">
-                <span className="type-footnote text-zinc-100">{copy.form.enabled}</span>
-                <Switch
-                  checked={form.enabled}
-                  aria-label={copy.form.enabled}
-                  onCheckedChange={() => update({ enabled: !form.enabled })}
-                />
-              </div>
-
-              <label className="grid gap-2 py-3">
-                <span className="type-caption-1 text-zinc-500">{copy.form.transport}</span>
-                <select
-                  aria-label={copy.form.transport}
-                  value={form.transport}
-                  onChange={event => update({ transport: event.target.value as McpServerTransport })}
-                  className="type-input h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                >
-                  <option value="stdio">{copy.form.stdio}</option>
-                  <option value="sse">{copy.form.sse}</option>
-                  <option value="http">{copy.form.http}</option>
-                </select>
-              </label>
-
-              {form.transport !== 'stdio' ? (
-                <label className="grid gap-2 py-3">
-                  <span className="type-caption-1 text-zinc-500">{copy.form.url}</span>
-                  <input
-                    aria-label={copy.form.url}
-                    value={form.url}
-                    onChange={event => update({ url: event.target.value })}
-                    placeholder="http://127.0.0.1:3000/mcp"
-                    className="type-input h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                  />
-                </label>
-              ) : null}
-
-              <div className="py-2">
-                <button
-                  type="button"
-                  aria-expanded={advancedOpen}
-                  onClick={() => setAdvancedOpen(current => !current)}
-                  className="type-button flex h-9 w-full items-center justify-between rounded-2xl px-2 text-left text-zinc-200 transition-colors hover:bg-white/5"
-                >
-                  <span>{copy.form.advanced}</span>
-                  <span className={`text-zinc-500 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}>⌄</span>
-                </button>
-                {advancedOpen ? (
-                  <div className="mt-1 divide-y divide-white/10">
-                    {form.transport === 'stdio' ? (
-                      <>
-                        <label className="grid gap-2 py-3">
-                          <span className="type-caption-1 text-zinc-500">{copy.form.command}</span>
-                          <input
-                            aria-label={copy.form.command}
-                            value={form.command}
-                            onChange={event => update({ command: event.target.value })}
-                            placeholder="npx"
-                            className="type-code h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        </label>
-                        <label className="grid gap-2 py-3">
-                          <span className="type-caption-1 text-zinc-500">{copy.form.args}</span>
-                          <div className="space-y-1">
-                            <textarea
-                              aria-label={copy.form.args}
-                              value={form.argsText}
-                              onChange={event => update({ argsText: event.target.value })}
-                              rows={3}
-                              className="type-code w-full resize-none rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-2 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                            />
-                            <div className="type-footnote text-zinc-500">{copy.form.argsHint}</div>
-                          </div>
-                        </label>
-                      </>
-                    ) : null}
-                    <label className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-zinc-500">{copy.form.scope}</span>
-                      <select
-                        aria-label={copy.form.scope}
-                        value={form.scope}
-                        onChange={event => update({ scope: event.target.value as McpServerScope })}
-                        className="type-input h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      >
-                        <option value="beegame">{copy.form.beegame}</option>
-                        <option value="project">{copy.form.project}</option>
-                        <option value="global">{copy.form.global}</option>
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-zinc-500">{copy.form.cwd}</span>
-                      <input
-                        aria-label={copy.form.cwd}
-                        value={form.cwd}
-                        onChange={event => update({ cwd: event.target.value })}
-                        className="type-code h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      />
-                    </label>
-
-                    <label className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-zinc-500">{copy.form.env}</span>
-                      <div className="space-y-1">
-                        <textarea
-                          aria-label={copy.form.env}
-                          value={form.envText}
-                          onChange={event => update({ envText: event.target.value })}
-                          rows={3}
-                          className="type-code w-full resize-none rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-2 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                        />
-                        <div className="type-footnote text-zinc-500">{copy.form.envHint}</div>
-                      </div>
-                    </label>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            {status ? <div className="type-footnote py-2 text-amber-300">{status}</div> : null}
-          </div>
-
-          {mode === 'create' ? (
-            <footer className="relative z-10 flex shrink-0 items-center justify-end gap-2 border-t border-white/10 bg-white/[0.02] px-4 py-3">
-              <button type="button" onClick={onClose} className="secondary-pill type-button h-9 px-4 text-zinc-200">
-                {copy.form.cancel}
-              </button>
-              <button
-                type="button"
-                onClick={onSave}
-                disabled={saveDisabled}
-                className="primary-pill h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSaving ? copy.form.saving : copy.form.save}
-              </button>
-            </footer>
-          ) : null}
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-function toPopoverAnchorRect(rect: DOMRect): PopoverAnchorRect {
-  return {
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-    left: rect.left,
-    width: rect.width,
-  };
-}
-
-function getPopoverPlacement(anchorRect: PopoverAnchorRect): {
-  left: number;
-  top: number;
-  arrowLeft: number;
-} {
-  const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
-  const popoverWidth = Math.min(360, Math.max(280, viewportWidth - 32));
-  const margin = 16;
-  const preferredLeft = anchorRect.right - popoverWidth;
-  const left = Math.min(Math.max(margin, preferredLeft), Math.max(margin, viewportWidth - popoverWidth - margin));
-  const anchorCenter = anchorRect.left + anchorRect.width / 2;
-  return {
-    left,
-    top: anchorRect.bottom + 12,
-    arrowLeft: Math.min(Math.max(18, anchorCenter - left - 8), popoverWidth - 34),
-  };
-}
-
-function getRuntimeCapabilityItems(copy: RuntimeCapabilityCopy): RuntimeSettingsCapabilityItem[] {
-  return [
-    'autoMemoryEnabled',
-    'autoDreamEnabled',
-    'skillSearchEnabled',
-    'treeSitterBashEnabled',
-    'webBrowserToolEnabled',
-    'bashClassifierEnabled',
-    'mcpSkillsEnabled',
-    'resourceLibraryEnabled',
-  ].map(key => ({
-    key: key as keyof RuntimeSettingsConfig,
-    ...copy.items[key as keyof RuntimeSettingsConfig],
-  }));
-}
-
-function CapabilityToggleRow({
-  item,
-  checked,
-  onToggle,
-}: {
-  item: RuntimeCapabilityItem;
-  checked: boolean;
-  onToggle: () => void;
-}) {
-  const Icon = item.scope === 'restart' ? ShieldCheck : item.key === 'autoDreamEnabled' ? Brain : Bot;
-  return (
-    <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <Icon className="h-4 w-4 text-zinc-500" />
-          <span className="type-footnote text-zinc-100">{item.label}</span>
-        </div>
-        <div className="type-footnote mt-1 space-y-0.5 text-zinc-500">
-          <div className="text-zinc-400">{item.description}</div>
-          <div>{item.note}</div>
-        </div>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-label={item.label}
-        aria-checked={checked}
-        onClick={onToggle}
-        className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${checked ? 'border-emerald-300/60 bg-emerald-400' : 'border-white/15 bg-white/[0.04]'}`}
-      >
-        <span
-          className={`absolute left-1 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-zinc-50 shadow-sm transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`}
-        />
-      </button>
-    </div>
-  );
-}
-
-function ProjectLifecyclePanel({
-  overview,
-  status,
-  retentionResult,
-  copy,
-  isRetentionRunning,
-  onPlanRetention,
-  onRunRetention,
-}: {
-  overview: BeeGameProjectLifecycleOverview | null;
-  status: string;
-  retentionResult: BeeGameProjectRetentionResult | null;
-  copy: ProjectLifecycleSettingsCopy;
-  isRetentionRunning: boolean;
-  onPlanRetention: () => void;
-  onRunRetention: () => void;
-}) {
-  const quota = overview?.quota;
-  const projectLimit = quota?.limit ?? null;
-  const quotaValue =
-    projectLimit === null
-      ? copy.projectsValue(quota?.used ?? 0)
-      : copy.projectsLimitValue(quota?.used ?? 0, projectLimit);
-  const remainingValue = projectLimit === null ? copy.unlimited : copy.remainingValue(quota?.remaining ?? 0);
-  const projects = overview?.projects ?? [];
-  const deletions = overview?.recentDeletions ?? [];
-  const retentionRuns = overview?.recentRetentionRuns ?? [];
-  return (
-    <div className="space-y-4 py-3">
-      <div>
-        <h3 className="type-subheadline text-zinc-100">{copy.title}</h3>
-        <p className="type-footnote mt-1 text-zinc-500">{copy.description}</p>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-3">
-        <CreditMetric label={copy.quotaUsage} value={quotaValue} />
-        <CreditMetric label={copy.quotaRemaining} value={remainingValue} />
-        <CreditMetric
-          label={copy.storageCleanup}
-          value={overview?.storage.supabaseStorageConfigured ? copy.supabaseEnabled : copy.localOnly}
-        />
-      </div>
-      {status ? (
-        <div className="type-footnote rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-200">
-          {status}
-        </div>
-      ) : null}
-      <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="type-caption-1 text-zinc-500">{copy.retentionTitle}</div>
-            <div className="type-footnote text-zinc-300">{copy.retentionDescription}</div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={isRetentionRunning}
-              onClick={onPlanRetention}
-              className="glass-control type-button h-9 rounded-full px-3 text-zinc-100 disabled:opacity-60"
-            >
-              {copy.dryRun}
-            </button>
-            <button
-              type="button"
-              disabled={isRetentionRunning}
-              onClick={onRunRetention}
-              className="glass-control type-button h-9 rounded-full px-3 text-zinc-100 disabled:opacity-60"
-            >
-              {copy.runRetention}
-            </button>
-          </div>
-        </div>
-        {retentionResult ? (
-          <div className="type-caption-1 text-zinc-500">
-            {copy.retentionSummary(
-              retentionResult.summary.deploymentRecordsPlannedForDeletion,
-              retentionResult.summary.deploymentRecordsDeleted,
-              retentionResult.summary.deploymentRecordsRetained,
-            )}
-          </div>
-        ) : null}
-        {retentionRuns.length ? (
-          <div className="space-y-1">
-            <div className="type-caption-1 text-zinc-500">{copy.lastRetentionRun}</div>
-            <div className="max-h-24 space-y-1 overflow-y-auto pr-1">
-              {retentionRuns.map(run => (
-                <div key={`${run.ranAt}-${run.deploymentRecordsDeleted}`} className="type-footnote text-zinc-300">
-                  {run.dryRun ? copy.dryRunLabel : copy.deletedRunLabel(run.deploymentRecordsDeleted)}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
-      <div className="space-y-2">
-        <div className="type-caption-1 text-zinc-500">{copy.activeProjects}</div>
-        <div className="overflow-hidden rounded-2xl border border-white/10">
-          {projects.length ? (
-            <div className="max-h-80 divide-y divide-white/10 overflow-y-auto">
-              {projects.map(project => (
-                <ProjectLifecycleRow key={project.id} project={project} copy={copy} />
-              ))}
-            </div>
-          ) : (
-            <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noActiveProjects}</div>
-          )}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <div className="type-caption-1 text-zinc-500">{copy.recentCleanup}</div>
-        <div className="overflow-hidden rounded-2xl border border-white/10">
-          {deletions.length ? (
-            <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
-              {deletions.map(deletion => (
-                <ProjectLifecycleDeletionRow
-                  key={`${deletion.projectId}-${deletion.deletedAt}`}
-                  deletion={deletion}
-                  copy={copy}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noRecentCleanup}</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ProjectLifecycleRow({
-  project,
-  copy,
-}: {
-  project: BeeGameProjectLifecycleProject;
-  copy: ProjectLifecycleSettingsCopy;
-}) {
-  return (
-    <div className="grid gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="type-footnote break-all text-zinc-100">{project.name}</div>
-        <div className="type-caption-1 break-all text-zinc-500">{project.rootPath || copy.noWorkspacePath}</div>
-      </div>
-      <div className="type-caption-1 max-w-full break-all text-zinc-500 sm:max-w-48 sm:text-right">
-        {project.lifecycle.phaseName || (project.lifecycle.hasRuntimeSnapshot ? copy.snapshotSaved : copy.noSnapshot)}
-      </div>
-    </div>
-  );
-}
-
-function ProjectLifecycleDeletionRow({
-  deletion,
-  copy,
-}: {
-  deletion: BeeGameProjectLifecycleDeletion;
-  copy: ProjectLifecycleSettingsCopy;
-}) {
-  return (
-    <div className="grid gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="type-footnote break-all text-zinc-100">{deletion.projectId}</div>
-        <div className="type-caption-1 break-all text-zinc-500">
-          {deletion.deletedWorkspacePath || copy.noWorkspacePath}
-        </div>
-      </div>
-      <div className="type-caption-1 max-w-full break-all text-zinc-500 sm:max-w-48 sm:text-right">
-        {deletion.cleanupOutcome}
-      </div>
-    </div>
-  );
-}
-
-function UsageBillingPanel({
-  summary,
-  status,
-  billingCreditPacks,
-  billingEvents,
-  packForm,
-  copy,
-  isSavingPack,
-  onPackFormChange,
-  onSavePack,
-}: {
-  summary: BeeGameUsageSummary | null;
-  status: string;
-  billingCreditPacks: BeeGameBillingCreditPack[];
-  billingEvents: BeeGameBillingEvent[];
-  packForm: BillingPackFormState;
-  copy: BillingSettingsCopy;
-  isSavingPack: boolean;
-  onPackFormChange: (form: BillingPackFormState) => void;
-  onSavePack: () => void;
-}) {
-  const recentBillingEvents = billingEvents.slice(0, 8);
-  return (
-    <div className="space-y-4 py-3">
-      <div>
-        <h3 className="type-subheadline text-zinc-100">{copy.title}</h3>
-        <p className="type-footnote mt-1 text-zinc-500">{copy.description}</p>
-      </div>
-      <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.025] p-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h4 className="type-footnote text-zinc-100">{copy.packsTitle}</h4>
-            <p className="type-caption-1 mt-1 text-zinc-500">{copy.packsDescription}</p>
-          </div>
-          <button
-            type="button"
-            className="type-button shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-zinc-200 hover:border-amber-300/40 hover:text-amber-100 disabled:opacity-50"
-            disabled={isSavingPack}
-            onClick={onSavePack}
-          >
-            {isSavingPack ? copy.saving : copy.savePack}
-          </button>
-        </div>
-        <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(7rem,.7fr)_minmax(0,1fr)]">
-          <input
-            className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
-            placeholder={copy.priceId}
-            value={packForm.priceId}
-            onChange={event => onPackFormChange({ ...packForm, priceId: event.target.value })}
-          />
-          <input
-            className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
-            placeholder={copy.credits}
-            inputMode="numeric"
-            value={packForm.credits}
-            onChange={event => onPackFormChange({ ...packForm, credits: event.target.value })}
-          />
-          <input
-            className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50 sm:col-span-2 xl:col-span-1"
-            placeholder={copy.displayName}
-            value={packForm.displayName}
-            onChange={event => onPackFormChange({ ...packForm, displayName: event.target.value })}
-          />
-        </div>
-        <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(7rem,10rem)_auto] sm:items-center">
-          <input
-            className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
-            placeholder={copy.sortOrder}
-            inputMode="numeric"
-            value={packForm.sortOrder}
-            onChange={event => onPackFormChange({ ...packForm, sortOrder: event.target.value })}
-          />
-          <label className="type-callout flex min-w-0 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-zinc-300">
-            <input
-              type="checkbox"
-              checked={packForm.enabled}
-              onChange={event => onPackFormChange({ ...packForm, enabled: event.target.checked })}
-            />
-            {copy.enabled}
-          </label>
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-white/10">
-          {billingCreditPacks.length ? (
-            <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
-              {billingCreditPacks.map(pack => (
-                <BillingCreditPackRow
-                  key={pack.priceId}
-                  pack={pack}
-                  copy={copy}
-                  onEdit={() =>
-                    onPackFormChange({
-                      priceId: pack.priceId,
-                      credits: String(pack.credits),
-                      displayName: pack.displayName ?? '',
-                      sortOrder: String(pack.sortOrder),
-                      enabled: pack.enabled,
-                    })
-                  }
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noPacks}</div>
-          )}
-        </div>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <CreditMetric label={copy.metrics.consumed} value={`${formatCreditAmount(summary?.consumedCredits ?? 0)} credits`} />
-        <CreditMetric label={copy.metrics.weightedTokens} value={String(summary?.weightedTokens ?? 0)} />
-      </div>
-      {status ? (
-        <div className="type-footnote rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-200">
-          {status}
-        </div>
-      ) : null}
-      <div className="overflow-hidden rounded-2xl border border-white/10">
-        {recentBillingEvents.length ? (
-          <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
-            {recentBillingEvents.map((event, index) => (
-              <BillingEventRow key={event.id ?? `${event.eventType}-${index}`} event={event} copy={copy} />
-            ))}
-          </div>
-        ) : (
-          <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noEvents}</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function BillingCreditPackRow({
-  pack,
-  copy,
-  onEdit,
-}: {
-  pack: BeeGameBillingCreditPack;
-  copy: BillingSettingsCopy;
-  onEdit: () => void;
-}) {
-  return (
-    <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="type-footnote truncate text-zinc-100">{pack.displayName || `${pack.credits} credits`}</div>
-        <div className="type-caption-1 break-all text-zinc-500">{pack.priceId}</div>
-      </div>
-      <div className="type-caption-1 text-zinc-400">{pack.enabled ? copy.enabled : copy.disabled}</div>
-      <button
-        type="button"
-        className="type-button rounded-full border border-white/10 px-3 py-1.5 text-zinc-200 hover:border-amber-300/40 hover:text-amber-100"
-        onClick={onEdit}
-      >
-        {copy.edit}
-      </button>
-    </div>
-  );
-}
-
-function BillingEventRow({ event, copy }: { event: BeeGameBillingEvent; copy: BillingSettingsCopy }) {
-  return (
-    <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
-      <div>
-        <div className="type-footnote text-zinc-100">{event.status}</div>
-        <div className="type-caption-1 text-zinc-500">{formatCreditAmount(event.credits ?? 0)} credits</div>
-      </div>
-      <div className="min-w-0">
-        <div className="type-footnote truncate text-zinc-300">{event.eventType}</div>
-        <div className="type-caption-1 break-all text-zinc-500">
-          {event.priceId || event.providerEventId || event.errorMessage || copy.noReference}
-        </div>
-      </div>
-      <div className="type-caption-1 text-zinc-500">
-        {event.createdAt ? formatBillingEventTime(event.createdAt) : ''}
-      </div>
-    </div>
-  );
-}
-
-function CreditMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-3 py-2">
-      <div className="type-caption-1 text-zinc-500">{label}</div>
-      <div className="type-subheadline mt-1 text-zinc-100">{value}</div>
-    </div>
-  );
-}
-
-function formatCreditAmount(value: number): string {
-  return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
-    maximumFractionDigits: 1,
-  });
-}
-
-function formatBillingEventTime(value: string): string {
-  const time = Date.parse(value);
-  if (!Number.isFinite(time)) return value;
-  return new Date(time).toLocaleString();
-}

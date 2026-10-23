@@ -1,0 +1,106 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui.space-prompt",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "name": "空间不足提示根（横屏但低于最小尺寸时显示）",
+        "layout": {
+          "size": [1280, 720]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [1280, 720],
+          "targetViewports": [[1280, 720], [1024, 576], [960, 540]],
+          "minimumControlSize": [88, 44],
+          "compactMaxWidth": 1024,
+          "note": "本屏在低于最小支持尺寸的横屏宿主显示；几何以 --layout-draft 临时小尺寸探查"
+        }
+      },
+      {
+        "id": "bg",
+        "parentId": "root",
+        "role": "container",
+        "name": "全屏暗底",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0]
+        },
+        "style": {
+          "background": { "color": "#060512", "opacity": 1 }
+        }
+      },
+      {
+        "id": "space-group",
+        "parentId": "bg",
+        "role": "container",
+        "name": "空间不足提示组（纵向）",
+        "layout": {
+          "anchor": "middle-center",
+          "size": [380, 140],
+          "container": {
+            "direction": "column",
+            "gap": 14,
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "space-title",
+        "parentId": "space-group",
+        "role": "text",
+        "text": "空间不足，请放大窗口",
+        "layout": {
+          "size": [380, 36]
+        },
+        "style": {
+          "fontSize": 22,
+          "fontWeight": 800,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 3
+        }
+      },
+      {
+        "id": "space-hint",
+        "parentId": "space-group",
+        "role": "text",
+        "text": "也可尝试减小浏览器页面缩放比例",
+        "layout": {
+          "size": [380, 24]
+        },
+        "style": {
+          "fontSize": 14,
+          "color": "#7B88B8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 1
+        }
+      },
+      {
+        "id": "space-min",
+        "parentId": "space-group",
+        "role": "text",
+        "text": "最小尺寸 960 × 540（横屏）",
+        "layout": {
+          "size": [300, 24]
+        },
+        "style": {
+          "fontSize": 15,
+          "fontFamily": "monospace",
+          "color": "#B9C6E8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 2
+        }
+      }
+    ]
+  }
+}

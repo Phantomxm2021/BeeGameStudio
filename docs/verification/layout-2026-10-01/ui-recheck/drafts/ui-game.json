@@ -1,0 +1,342 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-game-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "data": {
+          "referenceResolution": [
+            960,
+            540
+          ],
+          "compactMaxWidth": 600
+        },
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "game-view",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "anchorMin": [
+            0.02,
+            0.02
+          ],
+          "anchorMax": [
+            0.98,
+            0.98
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "hud-bar",
+        "role": "container",
+        "parentId": "game-view",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            0
+          ],
+          "sizeDelta": [
+            0,
+            48
+          ],
+          "container": {
+            "direction": "row",
+            "gap": 8,
+            "padding": [
+              8,
+              12,
+              8,
+              12
+            ],
+            "justify": "space-between",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "hud-score",
+        "role": "text",
+        "parentId": "hud-bar",
+        "text": "分数 0000",
+        "layout": {
+          "size": [
+            132,
+            24
+          ],
+          "minSize": [
+            96,
+            24
+          ],
+          "item": {
+            "shrink": 1
+          }
+        }
+      },
+      {
+        "id": "pause-btn",
+        "role": "button",
+        "parentId": "hud-bar",
+        "text": "暂停",
+        "layout": {
+          "size": [
+            72,
+            32
+          ],
+          "minSize": [
+            64,
+            32
+          ]
+        }
+      },
+      {
+        "id": "hud-lives",
+        "role": "text",
+        "parentId": "hud-bar",
+        "text": "生命 ♥♥♥",
+        "layout": {
+          "size": [
+            108,
+            24
+          ],
+          "minSize": [
+            96,
+            24
+          ],
+          "item": {
+            "shrink": 1
+          }
+        }
+      },
+      {
+        "id": "overlay-pause",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "pause-panel",
+        "role": "container",
+        "parentId": "overlay-pause",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            300,
+            220
+          ],
+          "minSize": [
+            260,
+            200
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 12,
+            "padding": [
+              20,
+              20,
+              20,
+              20
+            ],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "pause-title",
+        "role": "text",
+        "parentId": "pause-panel",
+        "text": "已暂停",
+        "layout": {
+          "size": [
+            240,
+            32
+          ]
+        }
+      },
+      {
+        "id": "btn-resume",
+        "role": "button",
+        "parentId": "pause-panel",
+        "text": "继续",
+        "layout": {
+          "size": [
+            200,
+            44
+          ],
+          "minSize": [
+            180,
+            44
+          ]
+        }
+      },
+      {
+        "id": "btn-quit-run",
+        "role": "button",
+        "parentId": "pause-panel",
+        "text": "退出本局",
+        "layout": {
+          "size": [
+            200,
+            44
+          ],
+          "minSize": [
+            180,
+            44
+          ]
+        }
+      },
+      {
+        "id": "overlay-result",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "result-panel",
+        "role": "container",
+        "parentId": "overlay-result",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            300,
+            260
+          ],
+          "minSize": [
+            260,
+            232
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 12,
+            "padding": [
+              20,
+              20,
+              20,
+              20
+            ],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "result-title",
+        "role": "text",
+        "parentId": "result-panel",
+        "text": "通关成功",
+        "layout": {
+          "size": [
+            240,
+            36
+          ]
+        }
+      },
+      {
+        "id": "result-score",
+        "role": "text",
+        "parentId": "result-panel",
+        "text": "最终分数 4000",
+        "layout": {
+          "size": [
+            240,
+            28
+          ]
+        }
+      },
+      {
+        "id": "btn-retry",
+        "role": "button",
+        "parentId": "result-panel",
+        "text": "再来一局",
+        "layout": {
+          "size": [
+            200,
+            44
+          ],
+          "minSize": [
+            180,
+            44
+          ]
+        }
+      },
+      {
+        "id": "btn-exit",
+        "role": "button",
+        "parentId": "result-panel",
+        "text": "退出",
+        "layout": {
+          "size": [
+            200,
+            44
+          ],
+          "minSize": [
+            180,
+            44
+          ]
+        }
+      }
+    ]
+  }
+}

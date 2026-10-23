@@ -1,0 +1,109 @@
+{
+  "date": "2026-10-05",
+  "scope": "System-only implementation of the approved simplification, author-context and review-method plan",
+  "status": "implemented-offline-verified; paid semantic/cost acceptance not run",
+  "changes": [
+    {
+      "area": "Sound ownership",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/design-handoff.ts"
+      ],
+      "implemented": "Removed outputs.soundRequired from the current strict schema and removed its redundant GDD/UI-to-Audio coverage gate. Audio events remain the owned sound definitions with real source references. Existing source-reference and required-resource checks remain active.",
+      "limitation": "Semantic completeness was never established by a boolean coverage declaration; it remains an independent Review task. Old sidecars with the retired field are explicitly diagnosed, not silently migrated."
+    },
+    {
+      "area": "Document-local writing histories",
+      "files": [
+        "packages/agent-workflow/src/native-direction-authors.ts",
+        "src/beegame/direction-authors.ts",
+        "packages/agent-workflow-server/src/beegame/project-conversation.ts"
+      ],
+      "implemented": "Reused the existing native assignment runner for specialist batches 2–4 in addition to directions. Scene completes before Balance; Asset Plan completes before final Tech; UI has one named fresh writing owner. Each reads original brief, own responsibility and applicable tools from a scoped task file; saved owner documents carry dependencies instead of author transcripts. Directions remain parallel; GDD remains its existing single-document writing turn.",
+      "limitation": "Dependency ordering sacrifices overlap for coupled drafts. It does not cap tokens within an individual author's session or prove paid savings."
+    },
+    {
+      "area": "Tool discovery and source probes",
+      "files": [
+        "src/beegame/direction-authors.ts",
+        "packages/builtin-tools/src/tools/AgentTool/runAgent.ts",
+        "packages/agent-workflow-server/src/beegame/project-conversation.ts"
+      ],
+      "implemented": "Supplied spatial help and selected format sections in the applicable scoped inputs; supplied the exact numerical calculation command. Removed duplicate inline responsibility when scoped context already carries it. Author source permission callback rejects observed native-log and bundled checker source-reading probes and replacement author dispatches; allowed operations still pass through original native permissions. Applied the author Bash description after actual native worker tool-pool rebuilding and forced the role callback to be consulted.",
+      "limitation": "The observed-probe filter is task scoping, not a shell sandbox or a guarantee against all possible obfuscated source reads. Necessary calculations and authoritative evidence collection remain available."
+    },
+    {
+      "area": "Evidence proportionality",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/project-author.ts",
+        "packages/agent-workflow-server/src/beegame/balance-calculation.ts"
+      ],
+      "implemented": "Executable evidence is requested for consequential derived claims, with scenario execution only for claims that need it. Initial parameters do not require a simulator. Generated counts and static bounds cannot be described as actual executed outcomes."
+    },
+    {
+      "area": "Checking methods",
+      "files": [
+        ".beegame/skills/builtinskills/game-design-check/SKILL.md",
+        ".beegame/skills/builtinskills/game-design-check/references/document-checks.md"
+      ],
+      "implemented": "Compare local and global rules in the same before/event/after situation; match platform evidence preconditions to the actual consumer condition; match numerical quantity, reporting time and action policy to the executed model; establish a real contract violation before accepting a structural revision recommendation. Existing audio writing Skill already defines behavior once and exceptions as explicit overrides, so it was not given another ownership definition.",
+      "limitation": "These are semantic review methods, not deterministic semantic certification. Ownership remains in the existing agent assignment, not Skill."
+    }
+  ],
+  "preserved": [
+    "Original user requirements and professional ownership",
+    "External handoff sidecars and increasing document versions",
+    "Finite Inspect → Revise → Verify and stop/escalate behavior",
+    "Native execution permissions, cancellation, saved transcripts and SDK task lifecycle",
+    "Original failed paid sample and its raw evidence; no manual product fixes"
+  ],
+  "verification": {
+    "regression": {
+      "passed": 206,
+      "failed": 0,
+      "files": 13,
+      "elapsedSeconds": 24.37,
+      "summary": " eight authors [101.85ms]\n(pass) an explicit local correction preserves unrelated follow-ups without granting their edit scope [84.96ms]\n(pass) legacy delivery requires explicit inspect; it does not acquire a baseline just by migration [24.80ms]\n(pass) malformed handoff reaches review and can be corrected once before release [14.08ms]\n(pass) audio can await future UI; its real producer must be bound before final technical consumption [60.21ms]\n\npackages/agent-workflow/src/__tests__/design-review-result.test.ts:\n(pass) receipt reports malformed fields without accepting a quality PASS [0.36ms]\n(pass) routine passed checks are not closures; source headings cannot contain commentary [0.04ms]\n(pass) revision preserves recorded findings; verifier can close a legitimately removed clause [0.06ms]\n(pass) independent verification can report remaining impact without redefining the issue or weakening the gate [0.08ms]\n\n 206 pass\n 0 fail\n 1813 expect() calls\nRan 206 tests across 13 files. [24.37s]\n",
+      "coverage": [
+        "Source reference and resource coverage remain active after removing duplicate sound declarations",
+        "Retired fields are diagnosed without mutating existing files",
+        "Document-local metadata rejects missing and unassigned owners",
+        "Dependent authors wait for actual native completion, and failure prevents downstream dispatch",
+        "Native SDK/outer runner preserves ordered task bookends and single handoff delivery for specialist batches",
+        "Source permission checks preserve original permission decisions and valid helper invocations",
+        "Existing review scope, version-increase gate, retained calculation execution and release-stop behavior"
+      ]
+    },
+    "typecheck": {
+      "agentWorkflow": "passed",
+      "agentWorkflowServer": "passed",
+      "root": "blocked by existing unrelated sceneContentAdapter, project-turn-native test authorDocuments, branded system-prompt test and SDK task-notification test errors; introduced test typing errors corrected"
+    },
+    "cliBuild": {
+      "passed": true,
+      "outputs": 611,
+      "directory": "/private/tmp/bgs-design-system-build-G3e3CY7g",
+      "paidCalls": false
+    },
+    "skillValidation": "game-design-check quick_validate passed; no independent semantic/model certification",
+    "diffCheck": "git diff --check passed",
+    "originalSample": {
+      "root": "/private/tmp/bgs-sidecar-paid-accept-20261005-WKUA67x0",
+      "comparedAgainst": "after-review-4-revise-turn13",
+      "savedProseFilesUnchanged": 7,
+      "savedHandoffFilesUnchanged": 7
+    }
+  },
+  "boundaries": {
+    "paidTestRun": false,
+    "manualProductEdits": false,
+    "injectedGameAnswers": false,
+    "addedReviewStages": false,
+    "newFramework": false
+  },
+  "risks": [
+    "Existing sidecars containing soundRequired require explicit native affected revision plus a version increase before dependent release; no automatic migration.",
+    "Coupled author batches are sequential and may take more wall time even if less history/redo is consumed.",
+    "Actual semantic miss rate and token savings remain unverified until an authorized fresh paid run."
+  ],
+  "next": "One separately authorized fresh BGS acceptance; observe contract consistency, semantic findings, per-author calls/contexts and actual provider usage. Do not seed prior findings or automatically retry."
+}

@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-13",
+  "scope": "Round208 audited system repairs; offline only, not a game acceptance or deployment",
+  "constraints": {
+    "paidExecution": false,
+    "serviceRestart": false,
+    "formalFrontendEdited": false,
+    "claudeCodeCoreEdited": false,
+    "gameProjectEdited": false,
+    "newReviewPromptOrAgentLimit": false
+  },
+  "implemented": [
+    {
+      "area": "Native task settlement",
+      "change": "Match successful structured TaskStop receipts to an active task owned by the current turn; remember terminal IDs so delayed progress cannot resurrect stopped work.",
+      "boundary": "Failed, mismatched and duplicate receipts cannot clear other active tasks. Unfinished-task delivery guard remains. No retroactive acceptance of round208."
+    },
+    {
+      "area": "Execution entry",
+      "change": "Node-compatible measurement, handoff and Preview adapters advertise Node instead of Bun. Existing Bun-only production tools are unchanged.",
+      "boundary": "Unchanged native CLI + localhost fixture confirms the Node command runs through native Bash. The exact OS/Bun cwd failure is not claimed fixed in Claude Code."
+    },
+    {
+      "area": "Evidence handoff",
+      "change": "Preview test execution retains script/source/build/dependency boundary identities and separate stdout/stderr per execution. Read-only --inspect reports subsequent drift without executing again. Explicit --report accepts only the narrow retained execution-receipt path under host metadata; no general metadata/settings access.",
+      "boundary": "Snapshots cannot establish transient intermediate changes, actual browser consumption, assertion completeness or quality. Attachments are not test acceptance; scripts outside this optional adapter have no newly inferred proof. No automatic report discovery or test replay."
+    },
+    {
+      "area": "Preview backend",
+      "change": "Existing dashboard Preview routes recognize V3 and use the latest measured artifact through the existing guarded measured-preview service, preserving the response shape and leaving page layout untouched.",
+      "boundary": "No development-script fallback, older-PASS fallback, model dispatch or build on Preview/restart. Interrupted, stale or busy runs remain rejected. Legacy explicit task selection remains available through its V3 endpoint."
+    },
+    {
+      "area": "Deployment feedback",
+      "change": "V3 readiness and deployment POST now report v3-release-unavailable rather than restoring or evaluating legacy acceptance records.",
+      "boundary": "Actual V3 public deployment remains unimplemented. Build/smoke/Preview cannot substitute for release acceptance. This is a diagnostic correction, not a completed publishing feature."
+    },
+    {
+      "area": "Preview script diagnostics",
+      "change": "Readiness failure identifies the expected URL, package entry, selected script and supplied PORT contract instead of silently choosing another port or inventing script arguments."
+    }
+  ],
+  "offlineRegression": {
+    "targetedSuite": {"passed": 104, "failed": 0, "skipped": 1, "files": 9},
+    "unchangedNativeCliLocalFixture": {"passed": 1, "paidProvider": false},
+    "finalReceiptDriftRetest": "passed; detects modification during execution and later edits, preserves original output, does not replay on inspection",
+    "expandedLegacySuite": {
+      "unresolvedFailures": 4,
+      "details": [
+        "new project bootstrap assertion expects an older Document responsibilities prompt",
+        "two fixed-milestone completion fixtures stop at author rather than traverse all expected phases",
+        "restart publishing-readiness fixture has no verified legacy acceptance"
+      ],
+      "claim": "Not changed or declared passing in this repair. No clean-baseline comparison was performed; do not present them as proven pre-existing failures."
+    },
+    "typecheck": "Full package typecheck fails with extensive cross-package module/type errors. Filtered output had no diagnostics in the modified BGS implementation files at that checkpoint; not a full typecheck pass.",
+    "diffWhitespaceCheck": "passed"
+  },
+  "selfAudit": [
+    "Retained writer-exit, ownership, permission, input freshness and capability checks; successful TaskStop is not game acceptance.",
+    "Formal route adaptation does not start old scheduling, scripts or paid work, and deployment is explicitly unavailable.",
+    "Receipt registration cannot expose arbitrary .beegame files or linked receipt paths.",
+    "History remains readable after capability expiry; current identity then becomes unverified rather than fabricating freshness.",
+    "Test boundary identity is not a replacement for gameplay coverage or resource/lighting/visual review."
+  ],
+  "remaining": [
+    "Deploy these BGS changes and validate actual formal Preview UI behavior without page/layout edits.",
+    "Implement an explicit V3 publishing contract before claiming deployment works; do not silently accept the latest smoke check as release approval.",
+    "Validate game quality and real cost only under a separately authorized paid round; no such round was started.",
+    "Quality coverage, Skills adoption and long-history cost are not claimed solved by this first-priority repair.",
+    "Resolve or independently re-baseline the four legacy regression failures and repository-wide typecheck errors."
+  ]
+}

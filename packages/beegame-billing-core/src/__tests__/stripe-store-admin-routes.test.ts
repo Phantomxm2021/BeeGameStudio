@@ -4,7 +4,7 @@ import type { BeeGameBillingRouteRepository } from '../billing-ports'
 import type { BillingRouteDeps } from '../billing-route-types'
 import { registerBeeGameStripeStoreRoutes } from '../stripe-store-admin-routes'
 
-const billingConfig = { mode: 'server' as const, usageBillingMode: 'realtime' as const }
+const billingConfig = { mode: 'server' as const }
 
 function createRepository(
   overrides: Partial<BeeGameBillingRouteRepository> = {},
@@ -60,7 +60,6 @@ describe('stripe store admin routes', () => {
     const app = createApp(createRepository(), () => true, {
       billingConfig: {
         mode: 'remote',
-        usageBillingMode: 'realtime',
         remoteApiBaseUrl: 'https://billing.beegame.test',
       },
       proxyRemoteBillingRequest: async (request, path) => {

@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-15",
+  "timezone": "Asia/Shanghai",
+  "rootCause": "Catalog browsing incorrectly required nonempty element-level semantic usage tags. Nine published packs contained 1194 technically ready files, but all were unclassified (usageTags=[], usageTagsMode=inherit), so both SQL and TypeScript catalog paths reported zero. Existing audio semantic processing does not supply these tags.",
+  "minimalFix": {
+    "catalog": "Allow missing semantic tags for browsing only; preserve technical checks and manual-only exclusion. Keep unclassified usageTags empty.",
+    "semanticMatching": "Unchanged; unclassified resources are not asserted to match a game role.",
+    "database": "Applied 20261015010000_resource_catalog_browse_unclassified.sql through the user-authorized Chrome Supabase SQL Editor. CREATE OR REPLACE VIEW only; no element or pack DML.",
+    "cliHelp": "Clarifies technically browsable counts and empty usageTags."
+  },
+  "liveResults": {
+    "publishedPacks": 25,
+    "recoveredPacks": 9,
+    "recoveredElements": 1194,
+    "counts": {
+      "kenney_casino-audio": 54,
+      "kenney_impact-sounds": 130,
+      "kenney_sci-fi-sounds": 73,
+      "kenney_modular-cave-kit_1.0": 81,
+      "kenney_modular-dungeon-kit_1.0": 81,
+      "kenney_pirate-kit": 145,
+      "kenney_platformer-kit": 307,
+      "kenney_space-station-kit": 195,
+      "kenney_ui-pack-adventure": 128
+    },
+    "downloadChain": "Authenticated live resource service -> existing resource bridge -> actual project asset CLI -> signed R2 URL -> isolated temporary local files",
+    "samples": "One PNG before the change; two newly visible OGG samples after the change. All SHA-256 values matched stored content hashes. Both OGG samples decoded with ffmpeg without errors (exit 0).",
+    "afterRequests": "13 resource API requests, all HTTP 200",
+    "audioPagination": "Second page returned a different element for both sampled audio packs.",
+    "sqlAndFilteredAudioCountsAgree": true
+  },
+  "databaseIntegrity": {
+    "resourceElementsUnchanged": true,
+    "resourcePacksUnchanged": true,
+    "viewPermissionsUnchanged": true,
+    "securityInvokerPreserved": true,
+    "pendingResourceJobsAtVerification": 0
+  },
+  "verification": {
+    "targetedTests": "86 passed across catalog, resource app, selection routes, publish readiness, schema migration, asset command and resource-library access tests.",
+    "typecheck": "Resource core and resource server passed.",
+    "syntaxAndWhitespace": "CLI node --check and git diff --check passed."
+  },
+  "operationalState": {
+    "restarted": "Resource service only, port 62177, with background processing disabled to avoid paid processing.",
+    "otherServices": "Frontend, runtime, billing and skills health endpoints returned HTTP 200; not restarted for this fix.",
+    "resourceProcessingEnabled": false
+  },
+  "scope": {
+    "existingTestProjectsModified": false,
+    "paidGenerationTriggered": false,
+    "resourceMetadataChanged": false,
+    "newFrameworkAdded": false,
+    "limits": "This verifies discovery and sampled download integrity, not every asset download, semantic suitability, visual quality, or whether a future model will choose to reuse the library. Resource sourcing policy was not changed."
+  },
+  "evidence": {
+    "before": "resource-library-catalog-2026-10-15-before.json",
+    "after": "resource-library-catalog-2026-10-15-after.json",
+    "supabaseScreenshot": "resource-library-catalog-2026-10-15-supabase.jpg"
+  }
+}

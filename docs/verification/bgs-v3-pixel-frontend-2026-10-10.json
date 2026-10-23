@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "date": "2026-10-10",
+  "scope": "V3-06 static 2D Scene/UI image -> actual Canvas observation, V3-09 task/check/usage/control view and existing Question projection",
+  "sourceRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "document": {
+    "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+    "version": "1.8",
+    "sha256": "123658aa2ccb4200e0f3ee42ac2cb9c4a7f0305f428d506091cce5453daad4c8"
+  },
+  "filesSha256": {
+    "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts": "7e72ca37264ea4cc8c39bc40ab0cb0530b6ac6696ddfbc02e57056b1a4ca9873",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts": "ca7892668dcc17ed52fa2930979a79de94fe5f49a59e65edeaa7c49f1eb75f76",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/context.ts": "415dc51fa14b15e223648149564f06d86bf84df86b8fd50aa23121ebde73e870",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts": "35894b394a87f54bf505c05a63432b035b610ab720caaf655122600be5a8a906",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.ts": "58e4d420b9de020ab9738ffcb28758709b19f5e45a39b90593e0f24b0a57be9d",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs": "a36a8249b9cafeb34c7061583b83fc607cb31dbf399924837e1adeece0b02cf5",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/pixel-consumption.ts": "62e41a261c40a3b4a5c5a770ce775d2541b921516dff1c9bd427898d61f675f0",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/pixel-consumption.test.ts": "f4f70da3777525e26eab0c55310a49b5bea2853c4e6a67e6bd42725061be90f4",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/routes-discovery.test.ts": "3fbc7ff632511b4424573a1748af0d8bead42ab679d18f5c7e6de8a9ad16ebfb",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/workflow-v3.test.ts": "2e49cdb28f76e74c76549a22535d4cf4c2e31d2a1657d2773b4c594f1c6303c0",
+    "apps/frontend/src/services/workflowV3Api.ts": "07ab9b31f4c0436bbfc94137d737f023aeb819babb3452bfc718eaa5b44bf337",
+    "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.tsx": "3ab0a373445010a3e99ae3ff950bb161c687ead291a9cb567c5d653c4600483d",
+    "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.test.tsx": "95176a230833d97f7ba56ca8d0eec6a1c1ce6989eb926697da7204da4b852eaf",
+    "apps/frontend/src/components/Demiurge/Sidebar/ChatPanel.tsx": "9df7f518727622aee7a01c299df85b328f9031c93f479f6345132a0ff53c5c8c",
+    "apps/frontend/src/components/Demiurge/RightSidebar.tsx": "40b28a670deb17266c4a163b437e8026f3f580dcd965f9720f9ee6d3be0bdfb1",
+    "apps/frontend/src/components/Demiurge/RightSidebar.test.tsx": "af80ee8e5392c2667163de5066aaa852811f0d0e2660489820be5d37b091e0c8"
+  },
+  "implemented": [
+    "Optional pixel-data-consumption uses existing schemas, Scene camera/hierarchy and UI projection, resource member/frame resolution and the existing actual static-build driver",
+    "Actual target Canvas screenshot observations for baseline, two image markers, independent source position and size changes, and exact original screenshot restoration; no author PASS callback",
+    "Source, packaged bytes, image and atlas versions retained; browser response replacements only, never fixture/game source changes",
+    "Registered image-node and authored UI viewport probe coverage; hidden, ignored images, unsupported/ambiguous selection or stale inputs cannot earn consumption PASS",
+    "Wrong/ignored position, size, camera or parent transform consumption fails; static selected atlas frame pixels observed, not dynamic atlas/binding-key consumption proof",
+    "Frontend explicit task dispatch with stable per-run/plan/task retry key; durable pause/resume, no automatic dispatch or model retry",
+    "Frontend recorded Task/check status, coverage limits and all Attempt usage including failed/interrupted history; missing usage/charge stays unknown",
+    "V3 snapshot refresh triggers existing project permission refresh because main Chat events alone do not discover task-session questions; original Question answer API and backend source/fence guards remain",
+    "Legacy discovery is read-only without V3 storage; persisted V3 missing storage/Run and changed workspace cannot silently fall back to legacy mode",
+    "Frontend old production/composer/stop path disabled for confirmed V3 mode with explicit unfinished-entry notice; existing legacy Chat and image/queue behavior retained"
+  ],
+  "tests": {
+    "uniquePassed": 388,
+    "uniqueFailed": 0,
+    "groups": [
+      {
+        "name": "core and existing consumers",
+        "passed": 180,
+        "failed": 0,
+        "assertions": 1167,
+        "files": 16,
+        "log": "/private/tmp/bgs-v3-pixel-core-tests.log",
+        "sha256": "e75df9d4c8fd1dd7467fe1a2582c915a3e6287e9722bf6ba5d3efef62fd06c18",
+        "actualSummary": "(pass) an old failure report cannot schedule repair again merely because implementation artifacts changed [52.35ms]\n\n 180 pass\n 0 fail\n 1167 expect() calls\nRan 180 tests across 16 files. [3.86s]"
+      },
+      {
+        "name": "native CLI fake provider and existing DOM browser",
+        "passed": 27,
+        "failed": 0,
+        "assertions": 216,
+        "files": 4,
+        "log": "/private/tmp/bgs-v3-pixel-browser-tests.log",
+        "sha256": "182c43013c56f6ac3fff2e677e0a5229f93d5edc82954096210acceb8532b912",
+        "actualSummary": "(pass) V3 real CLI exercises revision without legacy assignments [1721.00ms]\n\n 27 pass\n 0 fail\n 216 expect() calls\nRan 27 tests across 4 files. [49.58s]"
+      },
+      {
+        "name": "actual Canvas image browser",
+        "passed": 19,
+        "failed": 0,
+        "assertions": 83,
+        "files": 1,
+        "log": "/private/tmp/bgs-v3-pixel-tests.log",
+        "sha256": "b0e533fc93cbfd360e3d68f5ac819c6dc31ceb1ccab76b4c191981dda46326c3",
+        "actualSummary": "(pass) actual Canvas source and image consumption: 3d [16.60ms]\n\n 19 pass\n 0 fail\n 83 expect() calls\nRan 19 tests across 1 file. [62.53s]"
+      },
+      {
+        "name": "mode discovery, shared Question and session",
+        "passed": 11,
+        "failed": 0,
+        "assertions": 50,
+        "files": 4,
+        "log": "/private/tmp/bgs-v3-pixel-shared-tests.log",
+        "sha256": "333a865afa3dce7be02aed7529a0b3c81c0479af4a41876800928cb01e6f6872",
+        "actualSummary": "(pass) a configured store with a missing persisted V3 Run does not silently expose legacy Chat mode [1.98ms]\n\n 11 pass\n 0 fail\n 50 expect() calls\nRan 11 tests across 4 files. [849.00ms]"
+      },
+      {
+        "name": "frontend jsdom component/Chat/adapter",
+        "passed": 151,
+        "failed": 0,
+        "files": 5,
+        "log": "/private/tmp/bgs-v3-pixel-front-tests.log",
+        "sha256": "ca849106d51b8ada36cc25437f9ac61b3dc782fb9db594029e3337c65f2771f9",
+        "actualSummary": "Test Files  5 passed (5)\n      Tests  151 passed (151)\n   Start at  19:03:30\n   Duration  8.26s (transform 2.68s, setup 1.92s, import 3.99s, tests 5.54s, environment 3.97s)"
+      }
+    ],
+    "supplementalRoutes": {
+      "passed": 11,
+      "failed": 0,
+      "assertions": 122,
+      "log": "/private/tmp/bgs-v3-pixel-route-final-tests.log",
+      "sha256": "feafa2663034be22628ca68fb4516643609b33b15b955f6bbb19e34c78c87627",
+      "actualSummary": "(pass) HTTP vertical slice uses distinct native contexts, real files/checks, idempotency and original Chat mapping without legacy flags [96.69ms]\n\n 11 pass\n 0 fail\n 122 expect() calls\nRan 11 tests across 1 file. [635.00ms]",
+      "countedAgain": false
+    },
+    "fullServerTypes": {
+      "exitCode": 2,
+      "diagnostics": 3556,
+      "workflowV3PathDiagnostics": 0,
+      "log": "/private/tmp/bgs-v3-pixel-server-types.log",
+      "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb",
+      "conclusion": "Full server typecheck remains failed; not a green repository build"
+    },
+    "frontendTypes": {
+      "exitCode": 0,
+      "compiler": "Installed frontend TypeScript 5.9.3",
+      "log": "/private/tmp/bgs-v3-pixel-front-types.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "whitespace": "Tracked scoped diff clean. Whole-file checks clean except 3 pre-existing RightSidebar whitespace lines; left unrelated lines unchanged.",
+    "environment": "First browser run was stopped after sandbox prevented Chromium startup; rerun under test permissions passed. Legacy component mocks updated to recognize the new read-only discovery request; production errors were not hidden.",
+    "provider": "Actual native CLI using loopback deterministic fake model responses, no paid model; own Chromium observing independent synthetic target renderers",
+    "frontendEnvironment": "jsdom; not a deployed interactive browser/User/real model end-to-end acceptance"
+  },
+  "limitations": [
+    "Image-specific declared viewport/click-path coverage only; registry/probe declarations do not prove original requirement completeness",
+    "Current member/frame pixels observed; assetRef/member/frame selector keys and atlas metadata dynamic consumption are not proved",
+    "No shared identical frame isolation, Tilemap, 3D, WebGL-specific guarantee, rotation/tint/occlusion, animation, fonts/text or audio consumption guarantee",
+    "No full gameplay, aesthetics, taste, installation/export, publishing, performance/cost or production database acceptance",
+    "V3 task-native/subagent event aggregation, Preview/content editor/export, conversational initial planning/changes and actual charge view remain unfinished",
+    "Frontend task readiness is an indication from recorded state; backend independently validates permissions, current plan, dependencies and actual source freshness",
+    "Checker implementation drift, full indirect Bash dependency tracking and cross-process/unknown external operations remain earlier known boundaries",
+    "Raw logs are temporary; compact actual summaries and hashes are retained here. Prior evidence is not overwritten."
+  ],
+  "sideEffects": {
+    "claudeCodeSourceModified": false,
+    "realGeneratedProjectsModified": false,
+    "paidModels": false,
+    "productionDatabaseWrites": false,
+    "deployed": false,
+    "servicesRestarted": false,
+    "nativeCliRebuilt": false
+  },
+  "release": {
+    "deliveryEligible": false,
+    "V3_06_complete": false,
+    "V3_07_complete": false,
+    "V3_09_complete": false,
+    "newProjectDefaultChanged": false
+  }
+}

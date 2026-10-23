@@ -46,4 +46,11 @@ describe('ArtifactProcessor', () => {
             })
         ).toBe(true);
     });
+
+    it('uses a Markdown heading without guessing document type from language', () => {
+        expect(artifactProcessor.extractMetadata('# ゲーム仕様\n\n説明です')).toMatchObject({
+            title: 'ゲーム仕様', summary: '説明です',
+        });
+        expect(artifactProcessor.shouldRenderAsArtifactCard({ content: 'GDD '.repeat(100) })).toBe(false);
+    });
 });

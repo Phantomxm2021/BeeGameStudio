@@ -1,0 +1,213 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-start",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            960,
+            540
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1200,
+              540
+            ],
+            [
+              960,
+              600
+            ],
+            [
+              1280,
+              720
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "stage",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            560,
+            420
+          ]
+        },
+        "data": {
+          "container": {
+            "direction": "column",
+            "gap": 20,
+            "justify": "center",
+            "align": "center"
+          }
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "mark",
+        "role": "container",
+        "enabled": true,
+        "parentId": "stage",
+        "layout": {
+          "size": [
+            120,
+            96
+          ]
+        },
+        "data": {
+          "container": {
+            "direction": "column",
+            "gap": 8,
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "mark-ball",
+        "role": "shape",
+        "enabled": true,
+        "parentId": "mark",
+        "layout": {
+          "size": [
+            26,
+            26
+          ]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#FFFFFF"
+        }
+      },
+      {
+        "id": "mark-paddle",
+        "role": "shape",
+        "enabled": true,
+        "parentId": "mark",
+        "layout": {
+          "size": [
+            88,
+            14
+          ]
+        },
+        "style": {
+          "shape": "capsule",
+          "color": "#5CFFB0"
+        }
+      },
+      {
+        "id": "title",
+        "role": "text",
+        "enabled": true,
+        "parentId": "stage",
+        "layout": {
+          "size": [
+            480,
+            84
+          ]
+        },
+        "text": "打砖块",
+        "style": {
+          "fontSize": 64,
+          "color": "#F4F2FF",
+          "align": "center",
+          "fontWeight": "bold"
+        }
+      },
+      {
+        "id": "subtitle",
+        "role": "text",
+        "enabled": true,
+        "parentId": "stage",
+        "layout": {
+          "size": [
+            420,
+            30
+          ]
+        },
+        "text": "击碎全部砖块，别让球落地",
+        "style": {
+          "fontSize": 18,
+          "color": "#9E9AC8",
+          "align": "center"
+        }
+      },
+      {
+        "id": "start-btn",
+        "role": "button",
+        "enabled": true,
+        "parentId": "stage",
+        "layout": {
+          "size": [
+            240,
+            56
+          ]
+        },
+        "text": "开始游戏",
+        "style": {
+          "background": {
+            "color": "#29D3E0",
+            "radius": 14
+          },
+          "color": "#0A1030",
+          "fontSize": 22,
+          "fontWeight": "bold"
+        }
+      },
+      {
+        "id": "controls-hint",
+        "role": "text",
+        "enabled": true,
+        "parentId": "stage",
+        "layout": {
+          "size": [
+            480,
+            26
+          ]
+        },
+        "text": "键盘 ← → / 鼠标 / 触控拖动 移动挡板",
+        "style": {
+          "fontSize": 15,
+          "color": "#6E6AA0",
+          "align": "center"
+        }
+      }
+    ]
+  }
+}

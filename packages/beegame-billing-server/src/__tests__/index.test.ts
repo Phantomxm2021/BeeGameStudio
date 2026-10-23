@@ -58,10 +58,24 @@ describe('BeeGame billing server package', () => {
       metadata: {},
     }]
     const repository = {
-      listUsageEventsForUser: async (userId: string, projectId?: string) => {
+      listUsageEventsPageForUser: async (userId: string, projectId?: string) => {
         expect(userId).toBe('customer-a')
         expect(projectId).toBe('project-a')
-        return events
+        return { items: events, total: 1 }
+      },
+      getUsageSummaryForUser: async (userId: string, projectId?: string) => {
+        expect(userId).toBe('customer-a')
+        expect(projectId).toBe('project-a')
+        return {
+          eventsCount: 1,
+          promptTokens: 10,
+          completionTokens: 5,
+          cacheReadTokens: 3,
+          cacheCreationTokens: 2,
+          totalTokens: 20,
+          weightedTokens: 18,
+          creditsMicro: 7,
+        }
       },
       getUsageWalletForUser: async (userId: string) => {
         expect(userId).toBe('customer-a')
@@ -72,7 +86,7 @@ describe('BeeGame billing server package', () => {
           balanceCreditsMicro: 93,
         }
       },
-    } as BeeGameBillingServerRepository
+    } as unknown as BeeGameBillingServerRepository
     const app = createBeeGameBillingServerApp({
       currentUser: { id: 'customer-a', role: 'developer' },
       repository,
@@ -103,5 +117,67 @@ describe('BeeGame billing server package', () => {
       consumedCreditsMicro: 7,
       balanceCreditsMicro: 93,
     })
+  })
+
+  test('uses server-side summaries and bounded detail pages with browser-readable pagination', async () => {
+    const calls: unknown[][] = []
+    const repository = {
+      listUsageEventsPageForUser: async (...args: unknown[]) => {
+        calls.push(['page', ...args])
+        return {
+          items: [{ id: 'usage-last' }],
+          total: 3,
+        }
+      },
+      getUsageSummaryForUser: async (...args: unknown[]) => {
+        calls.push(['summary', ...args])
+        return {
+          eventsCount: 3,
+          promptTokens: 30,
+          completionTokens: 6,
+          cacheReadTokens: 2,
+          cacheCreationTokens: 1,
+          totalTokens: 38,
+          weightedTokens: 40,
+          creditsMicro: 9,
+        }
+      },
+      getUsageWalletForUser: async () => ({
+        userId: 'customer-a', includedCreditsMicro: 100,
+        consumedCreditsMicro: 9, balanceCreditsMicro: 91,
+      }),
+    } as unknown as BeeGameBillingServerRepository
+    const app = createBeeGameBillingServerApp({
+      currentUser: { id: 'customer-a', role: 'developer' },
+      repository,
+    })
+    const eventsResponse = await app.request(
+      '/api/usage/events?projectId=project-a&from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z&offset=2&limit=500',
+      { headers: { origin: 'https://dashboard.example' } },
+    )
+    expect(eventsResponse.status).toBe(200)
+    expect(await eventsResponse.json()).toEqual([{ id: 'usage-last' }])
+    expect(eventsResponse.headers.get('x-total-count')).toBe('3')
+    expect(eventsResponse.headers.get('x-next-offset')).toBeNull()
+    const exposed = eventsResponse.headers.get('access-control-expose-headers')?.toLowerCase()
+    expect(exposed).toContain('x-total-count')
+    expect(exposed).toContain('x-next-offset')
+    const summaryResponse = await app.request(
+      '/api/usage/summary?projectId=project-a&from=2026-07-01T00%3A00%3A00Z&to=2026-08-01T00%3A00%3A00Z',
+    )
+    expect(await summaryResponse.json()).toEqual({
+      eventsCount: 3,
+      promptTokens: 30,
+      completionTokens: 6,
+      cacheReadTokens: 2,
+      cacheCreationTokens: 1,
+      totalTokens: 38,
+      weightedTokens: 40,
+      creditsMicro: 9,
+    })
+    expect(calls).toEqual([
+      ['page', 'customer-a', 'project-a', new Date('2026-07-01T00:00:00.000Z'), new Date('2026-08-01T00:00:00.000Z'), 2, 200],
+      ['summary', 'customer-a', 'project-a', new Date('2026-07-01T00:00:00.000Z'), new Date('2026-08-01T00:00:00.000Z')],
+    ])
   })
 })

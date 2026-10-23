@@ -1,0 +1,1164 @@
+{
+  "ok": true,
+  "scope": "scene-layout-draft-inspection",
+  "runtimeVerified": false,
+  "viewport": {
+    "width": 960,
+    "height": 540
+  },
+  "cameraNodeId": "main-camera",
+  "view": {
+    "projection": "orthographic",
+    "framing": "letterbox",
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 960,
+      "height": 540
+    },
+    "aspect": 1.7777777777777777,
+    "halfHeight": 5.4,
+    "halfWidth": 9.6
+  },
+  "worldToScreen": [
+    0.5,
+    0,
+    0,
+    0.5,
+    0,
+    0
+  ],
+  "nodes": [
+    {
+      "id": "main-camera",
+      "enabled": true
+    },
+    {
+      "id": "wall-top",
+      "enabled": true,
+      "worldBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 1920,
+        "bottom": 8
+      },
+      "screenBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 960,
+        "bottom": 4
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "wall-left",
+      "enabled": true,
+      "worldBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 8,
+        "bottom": 1080
+      },
+      "screenBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 4,
+        "bottom": 540
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "wall-right",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1912,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080
+      },
+      "screenBounds": {
+        "left": 956,
+        "top": 0,
+        "right": 960,
+        "bottom": 540
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "miss-line",
+      "enabled": true,
+      "worldBounds": {
+        "left": 0,
+        "top": 1074,
+        "right": 1920,
+        "bottom": 1080
+      },
+      "screenBounds": {
+        "left": 0,
+        "top": 537,
+        "right": 960,
+        "bottom": 540
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-grid",
+      "enabled": true
+    },
+    {
+      "id": "brick-r0-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 120,
+        "right": 280,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 64,
+        "top": 60,
+        "right": 140,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 120,
+        "right": 448,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 148,
+        "top": 60,
+        "right": 224,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 120,
+        "right": 616,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 232,
+        "top": 60,
+        "right": 308,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 120,
+        "right": 784,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 316,
+        "top": 60,
+        "right": 392,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 120,
+        "right": 952,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 400,
+        "top": 60,
+        "right": 476,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 120,
+        "right": 1120,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 484,
+        "top": 60,
+        "right": 560,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 120,
+        "right": 1288,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 568,
+        "top": 60,
+        "right": 644,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 120,
+        "right": 1456,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 652,
+        "top": 60,
+        "right": 728,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 120,
+        "right": 1624,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 736,
+        "top": 60,
+        "right": 812,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 120,
+        "right": 1792,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 820,
+        "top": 60,
+        "right": 896,
+        "bottom": 84
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 182,
+        "right": 280,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 64,
+        "top": 91,
+        "right": 140,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 182,
+        "right": 448,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 148,
+        "top": 91,
+        "right": 224,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 182,
+        "right": 616,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 232,
+        "top": 91,
+        "right": 308,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 182,
+        "right": 784,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 316,
+        "top": 91,
+        "right": 392,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 182,
+        "right": 952,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 400,
+        "top": 91,
+        "right": 476,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 182,
+        "right": 1120,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 484,
+        "top": 91,
+        "right": 560,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 182,
+        "right": 1288,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 568,
+        "top": 91,
+        "right": 644,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 182,
+        "right": 1456,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 652,
+        "top": 91,
+        "right": 728,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 182,
+        "right": 1624,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 736,
+        "top": 91,
+        "right": 812,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 182,
+        "right": 1792,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 820,
+        "top": 91,
+        "right": 896,
+        "bottom": 115
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 244,
+        "right": 280,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 64,
+        "top": 122,
+        "right": 140,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 244,
+        "right": 448,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 148,
+        "top": 122,
+        "right": 224,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 244,
+        "right": 616,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 232,
+        "top": 122,
+        "right": 308,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 244,
+        "right": 784,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 316,
+        "top": 122,
+        "right": 392,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 244,
+        "right": 952,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 400,
+        "top": 122,
+        "right": 476,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 244,
+        "right": 1120,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 484,
+        "top": 122,
+        "right": 560,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 244,
+        "right": 1288,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 568,
+        "top": 122,
+        "right": 644,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 244,
+        "right": 1456,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 652,
+        "top": 122,
+        "right": 728,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 244,
+        "right": 1624,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 736,
+        "top": 122,
+        "right": 812,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 244,
+        "right": 1792,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 820,
+        "top": 122,
+        "right": 896,
+        "bottom": 146
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 306,
+        "right": 280,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 64,
+        "top": 153,
+        "right": 140,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 306,
+        "right": 448,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 148,
+        "top": 153,
+        "right": 224,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 306,
+        "right": 616,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 232,
+        "top": 153,
+        "right": 308,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 306,
+        "right": 784,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 316,
+        "top": 153,
+        "right": 392,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 306,
+        "right": 952,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 400,
+        "top": 153,
+        "right": 476,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 306,
+        "right": 1120,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 484,
+        "top": 153,
+        "right": 560,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 306,
+        "right": 1288,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 568,
+        "top": 153,
+        "right": 644,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 306,
+        "right": 1456,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 652,
+        "top": 153,
+        "right": 728,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 306,
+        "right": 1624,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 736,
+        "top": 153,
+        "right": 812,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 306,
+        "right": 1792,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 820,
+        "top": 153,
+        "right": 896,
+        "bottom": 177
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 368,
+        "right": 280,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 64,
+        "top": 184,
+        "right": 140,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 368,
+        "right": 448,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 148,
+        "top": 184,
+        "right": 224,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 368,
+        "right": 616,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 232,
+        "top": 184,
+        "right": 308,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 368,
+        "right": 784,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 316,
+        "top": 184,
+        "right": 392,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 368,
+        "right": 952,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 400,
+        "top": 184,
+        "right": 476,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 368,
+        "right": 1120,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 484,
+        "top": 184,
+        "right": 560,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 368,
+        "right": 1288,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 568,
+        "top": 184,
+        "right": 644,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 368,
+        "right": 1456,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 652,
+        "top": 184,
+        "right": 728,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 368,
+        "right": 1624,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 736,
+        "top": 184,
+        "right": 812,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 368,
+        "right": 1792,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 820,
+        "top": 184,
+        "right": 896,
+        "bottom": 208
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 430,
+        "right": 280,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 64,
+        "top": 215,
+        "right": 140,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 430,
+        "right": 448,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 148,
+        "top": 215,
+        "right": 224,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 430,
+        "right": 616,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 232,
+        "top": 215,
+        "right": 308,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 430,
+        "right": 784,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 316,
+        "top": 215,
+        "right": 392,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 430,
+        "right": 952,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 400,
+        "top": 215,
+        "right": 476,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 430,
+        "right": 1120,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 484,
+        "top": 215,
+        "right": 560,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 430,
+        "right": 1288,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 568,
+        "top": 215,
+        "right": 644,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 430,
+        "right": 1456,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 652,
+        "top": 215,
+        "right": 728,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 430,
+        "right": 1624,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 736,
+        "top": 215,
+        "right": 812,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 430,
+        "right": 1792,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 820,
+        "top": 215,
+        "right": 896,
+        "bottom": 239
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "paddle",
+      "enabled": true,
+      "worldBounds": {
+        "left": 850,
+        "top": 946,
+        "right": 1070,
+        "bottom": 974
+      },
+      "screenBounds": {
+        "left": 425,
+        "top": 473,
+        "right": 535,
+        "bottom": 487
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "ball",
+      "enabled": true,
+      "worldBounds": {
+        "left": 946,
+        "top": 912,
+        "right": 974,
+        "bottom": 940
+      },
+      "screenBounds": {
+        "left": 473,
+        "top": 456,
+        "right": 487,
+        "bottom": 470
+      },
+      "fullyInside": true
+    }
+  ],
+  "note": "Static XY geometry only; offscreen objects can be intentional. Unknown bounds, depth/near-far clipping, occlusion, dynamic camera behavior and gameplay need runtime checks."
+}

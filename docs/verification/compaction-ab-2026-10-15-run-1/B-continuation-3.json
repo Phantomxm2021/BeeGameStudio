@@ -1,0 +1,40 @@
+{
+  "arm": "B",
+  "phase": "continuation-3",
+  "elapsedMs": 4674,
+  "requestId": "021792040603639a4e0bfe9b623ca70f9090a72d521bae2ed95e6",
+  "message": {
+    "type": "message",
+    "id": "021792040603639a4e0bfe9b623ca70f9090a72d521bae2ed95e6",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "call_rxisyxhcbevynx8io3xwejkq",
+        "name": "ReadTranscript",
+        "input": {
+          "query": "orientation must declare",
+          "offset": 0
+        }
+      },
+      {
+        "type": "tool_use",
+        "id": "call_cgtt9xgaqgpqs29u1a0wur9b",
+        "name": "ReadTranscript",
+        "input": {
+          "query": "\"package.json\"",
+          "offset": 0
+        }
+      }
+    ],
+    "model": "auto",
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 9961,
+      "output_tokens": 84,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 33592
+    }
+  }
+}

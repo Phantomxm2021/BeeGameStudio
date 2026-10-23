@@ -5,7 +5,8 @@
  * the frontend and backend, including WebSocket messages and token usage tracking.
  */
 
-import type { ChatAttachmentPayload } from '../services/chatAttachments'
+import type { ChatAttachment } from '../services/chatAttachments'
+import type { SubagentActivitySnapshot } from '@bee-game-studio/agent-workflow/subagent-activity'
 
 /**
  * Message type enumeration
@@ -22,124 +23,22 @@ export type MessageType =
   | 'system_status'
   | 'structured_output'
 
+export type AssistantContentBlock = {
+  type: 'thinking' | 'text' | 'tool_use' | 'tool_result'
+  text?: string
+  toolUseId?: string
+  toolName?: string
+  toolInput?: unknown
+  isError?: boolean
+}
+
 export type RenderHint =
   | 'default'
+  | 'article'
   | 'document'
   | 'artifact_card'
   | 'structured_json'
   | 'csv_table'
-
-export type WorkflowCardStatus =
-  | 'draft'
-  | 'running'
-  | 'blocked'
-  | 'verifying'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'stale'
-
-export interface WorkflowCardTask {
-  id: string
-  title: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
-  operation?: 'write' | 'review' | 'produce' | 'assemble'
-  attempt?: number
-  failureReason?: string
-}
-
-export type WorkflowCardSubstage =
-  | 'INITIAL_DRAFTING'
-  | 'INITIAL_REVIEW'
-  | 'REPAIRING'
-  | 'CHECKLIST_DRAFTING'
-
-export interface WorkflowCardStageSnapshot {
-  stageId: string
-  status: WorkflowCardStatus
-  currentPhase?: string
-  /** One-based current position in the server-owned delivery phase order. */
-  phaseIndex: number
-  phaseCount?: number
-  substage?: WorkflowCardSubstage
-  convergencePass?: number
-  documentStep?: string
-  worker?: string
-  thinking?: string
-  executionStatus?: string
-  currentItemId?: string
-  tasks?: WorkflowCardTask[]
-  completedTaskCount?: number
-  totalTaskCount?: number
-  createdAt?: string
-  completedAt?: string
-  updatedAt?: string
-  stageStartedAt?: string
-  /** Accumulated active execution time before the current active interval. */
-  elapsedMs?: number
-  /** Start of the current active interval; absent while paused or terminal. */
-  activeSince?: string
-  block?: {
-    message: string
-    nextAction?: string
-  }
-}
-
-export type WorkflowCardAction = 'resume' | 'retry'
-
-export type WorkflowRecoveryUnitKind =
-  | 'document'
-  | 'resource-inventory'
-  | 'resource-content'
-  | 'resource-gate'
-  | 'atomic-plan'
-  | 'implementation-task'
-  | 'implementation-audit'
-  | 'acceptance'
-
-export interface WorkflowCardPayload {
-  runId: string
-  status: WorkflowCardStatus
-  currentPhase?: string
-  /** One-based current position in the server-owned delivery phase order. */
-  phaseIndex?: number
-  phaseCount?: number
-  substage?: WorkflowCardSubstage
-  convergencePass?: number
-  documentStep?: string
-  worker?: string
-  thinking?: string
-  executionStatus?: string
-  currentItemId?: string
-  tasks?: WorkflowCardTask[]
-  completedTaskCount?: number
-  totalTaskCount?: number
-  createdAt?: string
-  completedAt?: string
-  updatedAt?: string
-  stageStartedAt?: string
-  /** Accumulated active execution time before the current active interval. */
-  elapsedMs?: number
-  /** Start of the current active interval; absent while paused or terminal. */
-  activeSince?: string
-  stageSnapshots?: WorkflowCardStageSnapshot[]
-  nextAction?: WorkflowCardAction
-  /** True only when the server can recover from the durable workflow state. */
-  recoverable?: boolean
-  /** Last phase proven by the durable accepted-unit journal. */
-  lastProvenPhase?: string
-  /** Last accepted current-protocol unit proven by the durable journal. */
-  lastProvenUnitId?: string
-  /** Current-protocol kind parsed from the accepted-unit contract. */
-  lastProvenUnitKind?: WorkflowRecoveryUnitKind
-  /** Safe canonical item identity only for document and review units. */
-  lastProvenItemId?: string
-  block?: {
-    message: string
-    nextAction?: string
-  }
-  usage?: TokenUsage
-}
 
 export interface ModuleReadinessView {
   status: 'ready' | 'degraded' | 'blocked'
@@ -169,6 +68,8 @@ export interface Message {
 
   /** Stable identity of the user message superseded by this message version */
   supersedesMessageId?: string
+  /** Server saved the state before this turn, so it can be replaced safely. */
+  rewindAvailable?: boolean
 
   /** Semantic dedupe key used when stable identities are unavailable */
   dedupeKey?: string
@@ -180,10 +81,14 @@ export interface Message {
   content: string
 
   /** Image or document attachments submitted with the message */
-  attachments?: ChatAttachmentPayload[]
+  attachments?: ChatAttachment[]
+  todoScope?: string
 
   /** Timestamp when the message was created (Unix timestamp in milliseconds) */
   timestamp: number
+
+  /** Actual completion time of the turn, distinct from this content block's creation time. */
+  turnCompletedAt?: number
 
   /** Type of the message (optional, defaults to 'normal') */
   type?: MessageType
@@ -203,6 +108,15 @@ export interface Message {
   /** reasoning/thought content (optional) */
   thought?: string
 
+  /** Elapsed time covered by a persisted reasoning record. */
+  thinkingDurationMs?: number
+  streamStatus?: 'streaming' | 'complete'
+  completionReason?: 'stopped' | 'failed' | 'incomplete'
+  sequence?: number
+
+  /** Ordered assistant content blocks from the raw response message. */
+  contentBlocks?: AssistantContentBlock[]
+
   /** Collaborative message delivery kind for replay diagnostics (optional) */
   deliveryKind?: 'new' | 'replay'
 
@@ -211,6 +125,15 @@ export interface Message {
 
   /** Task ID associated with this message (optional, used for aggregation) */
   taskId?: string
+
+  /** Backend turn identity used to group one agent response across events. */
+  turnId?: string
+
+  /** Input order retained when timestamps from a turn are replayed out of order. */
+  sourceIndex?: number
+
+  /** Snake_case compatibility alias for persisted/event payloads. */
+  turn_id?: string
 
   /** Artifact ID associated with this message (optional, used for artifact preview) */
   artifactId?: string
@@ -235,10 +158,29 @@ export interface Message {
 
   /** Structured tool display metadata for tool cards */
   toolName?: string
+  toolUseId?: string
   toolStatus?: 'running' | 'completed' | 'failed'
+  toolExitCode?: number
+  toolDurationMs?: number
   toolDetail?: string
   toolOutput?: string
+  /** Explicit file patch supplied by a write/edit tool result. */
+  toolDiff?: string
+  toolPatch?: string
+  toolBefore?: string
+  toolAfter?: string
+  toolStructuredPatch?: unknown
+  toolInput?: unknown
   isSubagentTool?: boolean
+  subagentPrompt?: string
+  subagentOutput?: string
+  subagentTrace?: string
+  subagentActivity?: SubagentActivitySnapshot
+
+  /** Structured sources attached to an assistant response. */
+  sources?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
+  /** Alias accepted from runtimes that call response sources citations. */
+  citations?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
 }
 
 /**
@@ -255,12 +197,14 @@ export type ProjectEventMessageType =
   | 'tool_start' // Tool invocation started
   | 'tool_end' // Tool invocation completed
   | 'usage' // Token usage statistics
+  | 'billing_update' // Authoritative credit debit completed
   | 'human_gate' // Human approval gate open
   | 'error' // Runtime error event
   | 'p2p_route' // Peer-to-peer routing event
   | 'error_paused' // Error occurred, task paused
   | 'artifact_created' // Real-time artifact created event
   | 'context_update' // Context bundle visibility event
+  | 'context_compaction' // Native context compaction lifecycle marker
   | 'project_renamed' // Project renamed event (AI auto-naming)
 
 export interface RuntimeContextEvidence {
@@ -280,6 +224,9 @@ export interface RuntimeContextEvidence {
  * Represents a message received from the backend via WebSocket
  */
 export interface ProjectEventMessage {
+  todoScope?: string
+  /** Checkpoints replace block content; deltas append to it. */
+  content_mode?: 'delta' | 'snapshot'
   /** Type of the WebSocket message */
   type: ProjectEventMessageType
 
@@ -290,6 +237,9 @@ export interface ProjectEventMessage {
 
   /** Message content (optional, used for token and error_paused types) */
   content?: string
+
+  /** Ordered assistant message blocks preserved from the raw response. */
+  content_blocks?: AssistantContentBlock[]
 
   /** Task ID associated with this message */
   task_id: string
@@ -303,11 +253,21 @@ export interface ProjectEventMessage {
   /** Stable backend message identity for reconcile/deduplication */
   message_id?: string
 
+  /** Stable backend turn identity shared by one agent response. */
+  turnId?: string
+
+  /** Snake_case compatibility alias for event payloads. */
+  turn_id?: string
+
+  /** Elapsed time covered by this persisted reasoning event. */
+  thinking_duration_ms?: number
+
   /** Stable client message identity for optimistic user messages */
   client_message_id?: string
 
   /** Stable identity of the user message superseded by this message version */
   supersedes_message_id?: string
+  rewind_available?: boolean
 
   /** Tool name (optional, used for tool_start and tool_end types) */
   tool?: string
@@ -323,12 +283,31 @@ export interface ProjectEventMessage {
 
   /** Structured tool card status */
   tool_status?: 'running' | 'completed' | 'failed'
+  tool_exit_code?: number
+  tool_duration_ms?: number
 
   /** Structured tool card detail, such as command or target path */
   tool_detail?: string
 
   /** Structured tool card output summary */
   tool_output?: string
+  tool_input?: unknown
+  tool_diff?: string
+  tool_patch?: string
+  tool_before?: string
+  tool_after?: string
+  structured_patch?: unknown
+
+  /** Complete structured subagent fields; display adapters must not truncate these. */
+  subagent_prompt?: string
+  subagent_output?: string
+  subagent_trace?: string
+  subagent_activity?: SubagentActivitySnapshot
+
+  /** Structured response grounding metadata passed through from runtime events. */
+  attachments?: ChatAttachment[]
+  sources?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
+  citations?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
 
   /** Workspace-relative path from structured file tool input */
   artifact_path?: string
@@ -429,6 +408,8 @@ export interface ProjectEventMessage {
  * Tracks LLM token consumption for cost monitoring
  */
 export interface TokenUsage {
+  /** Confirmed counts are a lower bound when any provider receipt is missing. */
+  providerUsageIncomplete?: boolean
   /** Number of tokens used in the prompt */
   prompt_tokens: number
 

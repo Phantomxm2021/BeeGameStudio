@@ -1,3 +1,14 @@
+import {
+  getPayloadString,
+  getPayloadRecord,
+  getBeeGameAssistantMessageId,
+  getThinkingDisplayId,
+  getAssistantPayloadMessageId,
+  getAssistantContentBlocks,
+  type BeeGameEvent,
+} from './beeGameEvent'
+import { decodeArtifactId, toWorkspaceRelativePath, getArtifactPath, encodeArtifactId } from './beeGameArtifactPaths'
+import { projectEventMessages, projectHistoryMessages, getUsageFromEventPayload } from './beeGameChatProjection'
 import type {
   BeeGameAssetManifestPayload,
   BeeGameAssetUploadPayload,
@@ -13,8 +24,13 @@ import type {
   ChatAttachmentPayload,
 } from './api'
 import type { Project } from '../types/project'
-import type { ProjectEventMessage } from '../types/message'
+import type { BeeGameUiContentNode } from '../../../../packages/scene-editor/src/ui-preview/types'
+export type { BeeGameUiContentNode } from '../../../../packages/scene-editor/src/ui-preview/types'
+import type { AssistantContentBlock, ProjectEventMessage } from '../types/message'
 import { authenticatedFetch } from './apiClient'
+import { readSubagentActivity, mergeSubagentActivity, type SubagentActivitySnapshot } from '@bee-game-studio/agent-workflow/subagent-activity'
+import { normalizeChatAttachments } from './chatAttachments'
+import { projectQuotaErrorMessage } from './projectQuotaError'
 import {
   normalizeAttachmentBuildAnalysis,
   type AttachmentBuildAnalysis,
@@ -31,33 +47,104 @@ type BeeGameSession = {
   updatedAt: string
 }
 
-type BeeGameEvent = {
-  id: number
-  sessionId: string
-  turnId?: string
-  type:
-    | 'session.started'
-    | 'turn.started'
-    | 'user.message'
-    | 'assistant.message'
-    | 'assistant.partial'
-    | 'assistant.thinking'
-    | 'tool.started'
-    | 'tool.completed'
-    | 'tool.failed'
-    | 'tool.progress'
-    | 'permission.requested'
-    | 'permission.resolved'
-    | 'system.status'
-    | 'result'
-    | 'turn.completed'
-    | 'turn.empty'
-    | 'turn.failed'
-    | 'session.stopped'
-    | 'session.failed'
+export type BeeGameQueuedMessage = {
+  id: string
   text: string
-  payload?: { type: string; [key: string]: unknown }
   createdAt: string
+  state: 'pending' | 'dispatching'
+  attachmentCount: number
+}
+
+type V3Run = {
+  id: string
+  version: number
+  planRevision: number
+  chatSessionId: string
+  requirements: { revision: string }
+  paused?: { at: string }
+  writer?: { attemptId: string; fence: number }
+  writerLiveness?: 'none' | 'local-active' | 'unknown'
+  recoveryEvidence?: string
+  recoveryDiagnostic?: string
+  agentTurns?: Array<{
+    attemptId: string
+    turnId?: string
+    status: 'running' | 'ended' | 'failed' | 'interrupted'
+    notStarted?: boolean
+  }>
+}
+
+async function readV3Run(projectId: string): Promise<V3Run | null> {
+  const { run, writerLiveness, recoveryEvidence, recoveryDiagnostic } = await getJson<{
+    run: V3Run | null; writerLiveness?: V3Run['writerLiveness']; recoveryEvidence?: string; recoveryDiagnostic?: string
+  }>(
+    `/api/projects/${encodeURIComponent(projectId)}/workflow-v3`,
+  )
+  if (!run?.agentTurns) return null
+  return { ...run, writerLiveness, recoveryEvidence, recoveryDiagnostic }
+}
+
+async function currentV3Run(projectId: string): Promise<V3Run> {
+  const run = await readV3Run(projectId)
+  if (!run) throw new Error('此项目没有 V3 Agent 任务；旧交付不能从聊天入口继续。')
+  return run
+}
+
+function assertWriterReleased(run: V3Run): void {
+  if (!run.writer) return
+  if (run.writerLiveness === 'local-active')
+    throw new Error('原任务仍在执行或清理中，尚未确认停止；不能继续或发送新任务。')
+  if (['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? ''))
+    throw new Error('旧执行仍在结算，请稍后再试。')
+  const reason = ({
+    'exit-receipts-not-configured': '宿主未配置退出回执',
+    'exit-receipt-invalid': '退出证据无法校验',
+    'exit-evidence-read-failed': '退出证据读取失败',
+    'host-identity-unavailable': '无法核实主机启动身份',
+    'foreign-host': '执行属于另一台主机',
+    'same-boot': '同次开机中的旧执行退出状态未确认',
+    'ownership-missing': '缺少可信宿主执行记录',
+  } as Record<string, string>)[run.recoveryDiagnostic ?? ''] ?? '旧执行退出状态未确认'
+  throw new Error(`${reason}。暂停已记录不等于执行已停止；需在原主机核实并清理，不能直接解锁或重新执行。`)
+}
+
+async function sendV3Message(projectId: string, sessionId: string, input: {
+  text: string
+  intent?: 'continue'
+  requestKey: string
+  continuationOf?: string
+  allowResume?: boolean
+  attachments?: ChatAttachmentPayload[]
+}): Promise<{ turn: { attemptId: string }; runId: string }> {
+  let run = await currentV3Run(projectId)
+  if (run.chatSessionId !== sessionId)
+    throw new Error('项目会话与 V3 任务不一致，请重新打开项目。')
+  if (input.allowResume !== false && run.writer && run.writerLiveness !== 'local-active' &&
+      ['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? '')) {
+    await beeGameAdapter.recoverTask({ project_id: projectId })
+    run = await currentV3Run(projectId)
+  }
+  if (!run.paused || run.writer && run.writerLiveness !== 'local-active') assertWriterReleased(run)
+  if (run.paused) {
+    if (input.allowResume === false) throw new Error('任务已被暂停，已取消自动重试。')
+    const resumed = await postJson<{ run: V3Run }>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflow-v3/resume`,
+      { planRevision: run.planRevision },
+    )
+    run = resumed.run
+  }
+  assertWriterReleased(run)
+  return postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow-v3/agent/messages`, {
+    requestKey: input.requestKey,
+    runId: run.id,
+    chatSessionId: run.chatSessionId,
+    expectedVersion: run.version,
+    requirementsRevision: run.requirements.revision,
+    ...(input.intent ? { intent: input.intent } : {}),
+    text: input.text,
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+    ...(input.continuationOf ? { continuationOf: input.continuationOf } : {}),
+  })
 }
 
 type BeeGamePendingPermissionPayload = {
@@ -68,6 +155,7 @@ type BeeGamePendingPermissionPayload = {
   message?: string
   created_at?: string
   input?: unknown
+  design_change_allowed?: boolean
 }
 
 type ProjectRuntimeStateWithPermissions = ProjectBaselineStatusPayload & {
@@ -78,6 +166,17 @@ const projectRuntimeStateRequests = new Map<
   string,
   Promise<ProjectRuntimeStateWithPermissions>
 >()
+const projectRuntimeStateGenerations = new Map<string, number>()
+
+const invalidateProjectRuntimeState = (projectId: string): void => {
+  const normalizedProjectId = String(projectId || '').trim()
+  if (!normalizedProjectId) return
+  projectRuntimeStateGenerations.set(
+    normalizedProjectId,
+    (projectRuntimeStateGenerations.get(normalizedProjectId) ?? 0) + 1,
+  )
+  projectRuntimeStateRequests.delete(normalizedProjectId)
+}
 
 function fetchProjectRuntimeState(
   projectId: string,
@@ -85,9 +184,18 @@ function fetchProjectRuntimeState(
   const normalizedProjectId = String(projectId || '').trim()
   const existing = projectRuntimeStateRequests.get(normalizedProjectId)
   if (existing) return existing
+  const generation = projectRuntimeStateGenerations.get(normalizedProjectId) ?? 0
   const request = getJson<ProjectRuntimeStateWithPermissions>(
     `/api/projects/${encodeURIComponent(normalizedProjectId)}/runtime-state`,
-  ).finally(() => {
+  ).then(snapshot => {
+    // A preview mutation can complete while an earlier poll is still in
+    // flight. Do not let that old response overwrite the post-mutation state;
+    // join the replacement request instead.
+    if ((projectRuntimeStateGenerations.get(normalizedProjectId) ?? 0) !== generation) {
+      return fetchProjectRuntimeState(normalizedProjectId)
+    }
+    return snapshot
+  }).finally(() => {
     if (projectRuntimeStateRequests.get(normalizedProjectId) === request) {
       projectRuntimeStateRequests.delete(normalizedProjectId)
     }
@@ -118,22 +226,36 @@ type BeeGameProjectEvents = {
   recoveredFromTranscript: boolean
 }
 
+type BeeGameEventStreamCallbacks = {
+  onOpen?: () => void
+  onMessage: (message: ProjectEventMessage) => void
+  onCursor?: (eventId: number) => void
+}
+
 type BeeGameProjectTranscriptPage = BeeGameTranscriptPage & {
   sessionId: string
   workspacePath: string
+  todoEvents?: BeeGameEvent[]
 }
 
 type BeeGameProjectArtifactIndex = {
-  sessionId: string
+  sessionId?: string
   workspacePath: string
   artifacts: BeeGameDiscoveredArtifact[]
 }
 
+// A refresh should restore the active end of the conversation, not replay a
+// whole long-running project. Older history remains explicitly paged in when
+// the user scrolls to the top.
+const CHAT_INITIAL_HISTORY_PAGE_SIZE = 50
 const CHAT_HISTORY_PAGE_SIZE = 300
 type ChatHistoryCursorState = BeeGameTranscriptPage['page'] & {
   latestEventId: number
 }
 const chatHistoryCursorByProject = new Map<string, ChatHistoryCursorState>()
+const stoppedTurnsByProject = new Map<string, Set<string>>()
+type SubagentToolOwner = { event: BeeGameEvent; activity: SubagentActivitySnapshot }
+const subagentToolsByProject = new Map<string, Map<string, SubagentToolOwner>>()
 
 type BeeGameDiscoveredArtifact = {
   path: string
@@ -177,6 +299,7 @@ type BeeGameIdeaIntakeRequest = {
   idea: string
   language?: BeeGameLanguage | string
   clientRequestId?: string
+  attachments?: ChatAttachmentPayload[]
 }
 
 export type BeeGameIntakeOption = {
@@ -235,6 +358,7 @@ export type BeeGameIntakeSettings = {
   engine?: string
   visualStyle: string
   dimension: string
+  orientation?: 'Landscape' | 'Portrait' | ''
   genre: string
   inputs: string[]
   scope: string
@@ -243,6 +367,8 @@ export type BeeGameIntakeSettings = {
 }
 
 export type BeeGameBuildBrief = {
+  creationMode?: 'creative' | 'blueprint'
+  attachments?: ChatAttachmentPayload[]
   idea: string
   option: BeeGameIntakeOption
   settings: BeeGameIntakeSettings
@@ -258,13 +384,127 @@ export type BeeGameBuildBrief = {
 }
 
 const SENT_DISPLAY_KEY = 'beegame-adapter-sent-display-text'
-const ARTIFACT_ID_PREFIX = 'beegame-artifact:'
 const PROJECT_PACKAGE_ARTIFACT_PREFIX = 'beegame-project-package:'
-const DISPLAY_MESSAGE_ID_KEY = '__displayMessageId'
 
 export type BeeGameWorkspaceSettings = {
   workspacePath: string
   isDefault: boolean
+}
+
+export type BeeGameContentNode = {
+  id: string
+  parentId?: string
+  name?: string
+  semantic?: string[]
+  enabled?: boolean
+  transform?: {
+    position: [number, number, number]
+    rotation?: [number, number, number]
+    scale?: [number, number, number]
+  }
+  layer?: string
+  zIndex?: number
+  components?: Array<{
+    id: string
+    type: 'sprite-renderer' | 'mesh-filter' | 'mesh-renderer' | 'skinned-mesh-renderer' | 'grid' | 'tilemap' | 'tilemap-renderer' | 'animator' | 'box-collider-2d' | 'circle-collider-2d' | 'capsule-collider-2d' | 'polygon-collider-2d' | 'rigidbody-2d' | 'box-collider' | 'sphere-collider' | 'capsule-collider' | 'mesh-collider' | 'rigidbody' | 'audio-source' | 'audio-listener' | 'particle-system' | 'particle-system-renderer' | 'light-2d' | 'light' | 'camera' | 'canvas' | 'canvas-renderer' | 'rect-transform' | 'image' | 'text'
+    assetRef?: string
+    data?: Record<string, unknown>
+  }>
+  data?: Record<string, unknown>
+}
+
+export type BeeGameSceneContentDocument = {
+  schema: 'beegame-content.v1'
+  id: string
+  kind: 'scene-2d' | 'scene-3d'
+  assetRefs: string[]
+  data: {
+    nodes: BeeGameContentNode[]
+    cameraNodeId?: string
+    settings?: Record<string, unknown>
+  }
+}
+
+
+export type BeeGameUiContentDocument = {
+  schema: 'beegame-content.v1'
+  id: string
+  kind: 'ui-screen' | 'ui-hud' | 'ui-flow'
+  assetRefs: string[]
+  data: { rootId: string; nodes: BeeGameUiContentNode[] }
+}
+
+export type BeeGameEditableContentDocument =
+  | BeeGameSceneContentDocument
+  | BeeGameUiContentDocument
+
+export type BeeGameGameContentSnapshot = {
+  state: 'awaiting_documents' | 'awaiting_assets' | 'awaiting_content' | 'ready' | 'draft'
+  acceptedContentRevision?: string
+  contentRevision?: string
+  indexIssues?: string[]
+  index?: {
+    schema: 'beegame-content-package.v2'
+    id: string
+    dimension: '2d' | '3d'
+    documentRevision?: string
+    assetManifestRevision?: string
+    entryScene: string
+    sceneModel: 'game-object-v2'
+    files: string[]
+  }
+  documents?: Array<{
+    path: string
+    revision: string
+    document: BeeGameEditableContentDocument | Record<string, unknown>
+  }>
+}
+
+export type BeeGameContentFileListSnapshot = Omit<BeeGameGameContentSnapshot, 'documents'> & {
+  documents?: Array<{
+    path: string
+    revision?: string
+    id: string
+    kind: BeeGameEditableContentDocument['kind'] | 'scene' | 'ui'
+    error?: string
+  }>
+}
+
+function normalizeBeeGameContentFileList(
+  snapshot: BeeGameContentFileListSnapshot | BeeGameGameContentSnapshot,
+): BeeGameContentFileListSnapshot {
+  if (!snapshot.documents) {
+    // Both snapshot shapes omit documents while content is not available yet.
+    // Strip the discriminating union field before returning the lightweight
+    // file-list shape so callers never receive a full-document union here.
+    const { documents: _documents, ...metadata } = snapshot
+    return metadata
+  }
+  return {
+    ...snapshot,
+    documents: snapshot.documents.flatMap(item => {
+      if (!('document' in item)) return [item]
+      const document = item.document
+      if (!document || typeof document !== 'object' || Array.isArray(document)) return []
+      const record = document as Record<string, unknown>
+      if (typeof record.id !== 'string' || typeof record.kind !== 'string') return []
+      return [{
+        path: item.path,
+        revision: item.revision,
+        id: record.id,
+        kind: record.kind as BeeGameEditableContentDocument['kind'],
+      }]
+    }),
+  }
+}
+
+export type BeeGameContentDocumentSaveResult<
+  Document extends BeeGameEditableContentDocument = BeeGameEditableContentDocument,
+> = {
+  path: string
+  revision: string
+  contentRevision: string
+  document: Document
 }
 
 export async function getBeeGameWorkspaceSettings(): Promise<BeeGameWorkspaceSettings> {
@@ -274,6 +514,20 @@ export async function getBeeGameWorkspaceSettings(): Promise<BeeGameWorkspaceSet
 export const beeGameAdapter = {
   async getProjects(): Promise<Project[]> {
     return getJson<Project[]>('/api/projects')
+  },
+
+  async getProjectPage(offset: number, search = ''): Promise<{ items: Project[]; hasMore: boolean; total: number | null }> {
+    const query = new URLSearchParams({ offset: String(offset), limit: '20' })
+    if (search.trim()) query.set('search', search.trim())
+    return getJson<{ items: Project[]; hasMore: boolean; total: number | null }>(`/api/projects/page?${query}`)
+  },
+
+  async cloneProject(projectId: string, language: string): Promise<Project> {
+    return postJson<Project>(`/api/projects/${encodeURIComponent(projectId)}/clone`, { language })
+  },
+
+  async getProjectMetadata(projectId: string): Promise<Project> {
+    return getJson<Project>(`/api/projects/${encodeURIComponent(projectId)}/metadata`)
   },
 
   async runIdeaIntake(
@@ -345,7 +599,12 @@ export const beeGameAdapter = {
     }
   },
 
-  async openProject(_projectId: string): Promise<{ opened: boolean }> {
+  async openProject(projectId: string): Promise<{ opened: boolean }> {
+    // Opening a project must establish the server-owned session/workspace
+    // binding before the dashboard starts polling history and runtime state.
+    // Sending a message also calls this endpoint, but project navigation must
+    // recover a live session even when the user only inspects the project.
+    await ensureProjectSession(projectId)
     return { opened: true }
   },
 
@@ -362,18 +621,9 @@ export const beeGameAdapter = {
   async deleteProject(projectId: string): Promise<{ ok: boolean }> {
     await deleteProjectMetadata(projectId)
     chatHistoryCursorByProject.delete(projectId)
+    stoppedTurnsByProject.delete(projectId)
+    subagentToolsByProject.delete(projectId)
     return { ok: true }
-  },
-
-  async createReviewCopy(projectId: string): Promise<{
-    project: Project
-    runId: string
-    phase: string
-  }> {
-    return postJson(
-      `/api/projects/${encodeURIComponent(projectId)}/review-copy`,
-      {},
-    )
   },
 
   async sendMessage(data: {
@@ -385,83 +635,93 @@ export const beeGameAdapter = {
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
-    const language = getCurrentUiLanguage()
-    await sendBeeGameInput(session.id, data.content, {
-      clientMessageId: data.client_message_id,
-      supersedesMessageId: data.supersedes_message_id,
-      language,
+    if (data.supersedes_message_id)
+      throw new Error('V3 对话不能改写已发送消息；请发送一条新的更正。')
+    const result = await sendV3Message(data.project_id, session.id, {
+      text: data.content,
       attachments: data.attachments,
+      requestKey: data.client_message_id ?? crypto.randomUUID(),
     })
     return {
       command_id: session.id,
-      task_id: session.id,
+      task_id: result.turn.attemptId,
       state: 'running',
-      trace_id: data.client_message_id || session.id,
+      trace_id: data.client_message_id || result.turn.attemptId,
     }
+  },
+
+  async listQueuedMessages(projectId: string): Promise<BeeGameQueuedMessage[]> {
+    await currentV3Run(projectId)
+    return []
+  },
+
+  async deleteQueuedMessage(projectId: string, messageId: string): Promise<void> {
+    void projectId; void messageId
+    throw new Error('V3 不使用旧消息队列。')
+  },
+
+  async steerQueuedMessage(projectId: string, messageId: string): Promise<void> {
+    void projectId; void messageId
+    throw new Error('V3 不使用旧消息队列。')
   },
 
   async continueTask(data: {
     project_id: string
+    failed_turn_id?: string
+    automatic_retry?: boolean
     task_id?: string
   }): Promise<ContinueTaskResponse> {
+    if (data.automatic_retry && !data.failed_turn_id) throw new Error('自动重试必须绑定失败回合。')
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
-    const language = getCurrentUiLanguage()
-    await postJson(
-      `/api/beegame-sessions/${encodeURIComponent(session.id)}/continue`,
-      {
-        language,
-      },
-    )
+    let run = await currentV3Run(data.project_id)
+    if (data.automatic_retry && run.paused)
+      throw new Error('任务已被暂停，已取消自动重试；请明确继续任务。')
+    if (!data.automatic_retry && run.writer && run.writerLiveness !== 'local-active' &&
+        ['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? '')) {
+      await this.recoverTask({ project_id: data.project_id })
+      run = await currentV3Run(data.project_id)
+    }
+    if (!run.paused || run.writer && run.writerLiveness !== 'local-active') assertWriterReleased(run)
+    if (data.failed_turn_id && run.agentTurns?.at(-1)?.turnId !== data.failed_turn_id)
+      throw new Error('任务回合已改变，已取消旧错误的重试。')
+    if (run.paused) {
+      await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/workflow-v3/resume`, {
+        planRevision: run.planRevision,
+      })
+      run = await currentV3Run(data.project_id)
+    }
+    assertWriterReleased(run)
+    const last = run.agentTurns?.at(-1)
+    if (data.failed_turn_id && last?.turnId !== data.failed_turn_id)
+      throw new Error('任务回合已改变，已取消旧错误的重试。')
+    if (!last || !['failed', 'interrupted'].includes(last.status) || last.notStarted)
+      throw new Error('没有可续作的已中断 V3 回合；请明确发送新的执行请求。')
+    const result = await sendV3Message(data.project_id, session.id, {
+      text: '继续上一次已中断的任务。',
+      intent: 'continue',
+      requestKey: crypto.randomUUID(),
+      continuationOf: last.attemptId,
+      allowResume: !data.automatic_retry,
+    })
     return {
       command_id: session.id,
-      resume_task_id: session.id,
+      resume_task_id: result.turn.attemptId,
       resume_mode: 'resume',
       state: 'resuming',
-      trace_id: session.id,
+      trace_id: result.turn.attemptId,
     }
-  },
-
-  async resumeWorkflow(projectId: string): Promise<Record<string, unknown>> {
-    return postJson<Record<string, unknown>>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflow/resume`,
-      { language: getCurrentUiLanguage() },
-    )
-  },
-
-  async startGameIrWorkflow(projectId: string): Promise<Record<string, unknown>> {
-    return postJson<Record<string, unknown>>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflow/game-ir/start`,
-      { language: getCurrentUiLanguage() },
-    )
-  },
-
-  async retryWorkflow(projectId: string): Promise<Record<string, unknown>> {
-    return postJson<Record<string, unknown>>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflow/retry`,
-      { language: getCurrentUiLanguage() },
-    )
   },
 
   async requestProjectAction(data: {
     project_id: string
-    kind: 'build_error_repair' | 'deployment_failure_repair'
+    kind: 'deployment_failure_repair'
   }): Promise<SendMessageResponse> {
-    const handle = await ensureProjectSession(data.project_id)
-    const language = getCurrentUiLanguage()
-    await postJson(
-      `/api/beegame-sessions/${encodeURIComponent(handle.session.id)}/action`,
-      {
-        kind: data.kind,
-        language,
-      },
-    )
-    return {
-      command_id: handle.session.id,
-      task_id: handle.session.id,
-      state: 'running',
-      trace_id: handle.session.id,
-    }
+    if (data.kind !== 'deployment_failure_repair') throw new Error('不支持的 V3 项目操作。')
+    return this.sendMessage({
+      project_id: data.project_id,
+      content: '检查最近一次部署失败的实际错误，并仅在必要时修复当前工程，再重新验证。',
+    })
   },
 
   async stopTask(data: {
@@ -469,22 +729,30 @@ export const beeGameAdapter = {
     project_id?: string
   }): Promise<StopTaskResponse> {
     const projectId = String(data.project_id || '').trim()
-    const sessionId = resolveStopSessionId(data)
-    const stopped = projectId
-      ? await postJson<BeeGameSession>(
-          `/api/projects/${encodeURIComponent(projectId)}/stop`,
-          {},
-        )
-      : await postJson<BeeGameSession>(
-          `/api/beegame-sessions/${encodeURIComponent(sessionId)}/stop`,
-          {},
-        )
+    if (!projectId) throw new Error('停止 V3 任务需要项目 ID。')
+    const stopped = await postJson<{ run: V3Run; stopping: boolean }>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflow-v3/stop`, {},
+    )
     return {
-      command_id: stopped.id || sessionId,
-      task_id: stopped.id || sessionId,
-      state: 'stopped',
-      trace_id: stopped.id || sessionId,
+      command_id: stopped.run.id,
+      task_id: stopped.run.id,
+      state: stopped.stopping ? 'stop_requested' : 'stopped',
+      trace_id: stopped.run.id,
     }
+  },
+
+  async recoverTask(data: { project_id: string }): Promise<{ recovered: boolean; paused: boolean }> {
+    const run = await currentV3Run(data.project_id)
+    if (!run.writer) return { recovered: false, paused: Boolean(run.paused) }
+    if (run.writerLiveness === 'local-active' ||
+        !['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? ''))
+      assertWriterReleased(run)
+    const result = await postJson<{ run: V3Run }>(
+      `/api/projects/${encodeURIComponent(data.project_id)}/workflow-v3/recover-writer`,
+      { expectedVersion: run.version, attemptId: run.writer.attemptId, fence: run.writer.fence },
+    )
+    if (result.run.writer) throw new Error('旧执行占用尚未释放；没有恢复任务。')
+    return { recovered: true, paused: Boolean(result.run.paused) }
   },
 
   async getChatHistory(projectId: string): Promise<unknown[]> {
@@ -495,10 +763,16 @@ export const beeGameAdapter = {
       ...transcriptPage.page,
       latestEventId: getLatestBeeGameEventId(transcriptPage.events),
     })
+    const pageIds = new Set(transcriptPage.events.map(event => event.id))
+    const historyEvents = [...transcriptPage.events,
+      ...(transcriptPage.todoEvents ?? []).filter(event => !pageIds.has(event.id))]
+    const subagentTools = new Map<string, SubagentToolOwner>()
+    subagentToolsByProject.set(projectId, subagentTools)
     return eventsToHistory(
       projectId,
-      transcriptPage.events,
+      historyEvents,
       transcriptPage.workspacePath,
+      subagentTools,
     )
   },
 
@@ -580,6 +854,55 @@ export const beeGameAdapter = {
     }
   },
 
+  async streamMessages(
+    projectId: string,
+    afterEventId: number,
+    callbacks: BeeGameEventStreamCallbacks,
+    signal: AbortSignal,
+  ): Promise<number> {
+    const historyCursor = chatHistoryCursorByProject.get(projectId)
+    const effectiveAfterEventId =
+      afterEventId === 0 ? (historyCursor?.latestEventId ?? 0) : afterEventId
+    const response = await authenticatedFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/events/stream?after=${encodeURIComponent(String(effectiveAfterEventId))}`,
+      {
+        headers: {
+          accept: 'text/event-stream',
+          'last-event-id': String(effectiveAfterEventId),
+        },
+        signal,
+      },
+    )
+    if (!response.ok) {
+      // Use the same error envelope as polling: keep auth outage and retry
+      // metadata instead of reducing every SSE failure to a generic error.
+      await readResponse(response)
+    }
+    if (!response.body) throw new Error('BeeGame event stream has no response body')
+    callbacks.onOpen?.()
+
+    let lastEventId = effectiveAfterEventId
+    const isInitialHistorySync = effectiveAfterEventId === 0
+    await readProjectEventStream(response.body, frame => {
+      if (!frame.data) return
+      const payload = JSON.parse(frame.data) as Partial<BeeGameProjectEvents> & { lastEventId?: number }
+      const events = Array.isArray(payload.events)
+        ? (payload.events as BeeGameEvent[]).filter(event => event.id > lastEventId)
+        : []
+      if (events.length === 0) return
+      const eventId = typeof payload.lastEventId === 'number'
+        ? payload.lastEventId
+        : frame.id ?? events[events.length - 1]?.id ?? lastEventId
+      normalizeLiveEvents(projectId, events)
+        .flatMap(event => eventToProjectEventMessages(projectId, event, payload.workspacePath || ''))
+        .filter(message => !(isInitialHistorySync && message.type === 'error'))
+        .forEach(message => callbacks.onMessage(message))
+      lastEventId = Math.max(lastEventId, eventId)
+      callbacks.onCursor?.(lastEventId)
+    }, signal)
+    return lastEventId
+  },
+
   async getProjectStatus(
     projectId: string,
   ): Promise<ProjectBaselineStatusPayload> {
@@ -621,37 +944,47 @@ export const beeGameAdapter = {
     decision: 'allow' | 'deny'
     message?: string
     scope?: 'once' | 'session'
+    answers?: Record<string, string>
+    intent?: 'change'
   }): Promise<{ ok: boolean }> {
-    await postJson(
+    const result = await postJson<{ resolved?: boolean }>(
       `/api/projects/${encodeURIComponent(data.project_id)}/permissions/${encodeURIComponent(data.gate_id)}`,
       {
         decision: data.decision,
         remember: false,
         scope: data.scope ?? 'once',
+        ...(data.answers ? { answers: data.answers } : {}),
+        ...(data.intent ? { intent: data.intent } : {}),
         ...(data.message ? { message: data.message } : {}),
       },
+    )
+    if (result.resolved === false) throw Object.assign(
+      new Error('This request is no longer pending. Refresh the conversation.'),
+      { code: 'permission_not_pending' },
     )
     return { ok: true }
   },
 
   async getArtifacts(projectId: string): Promise<BeeGameArtifact[]> {
-    let eventResult: BeeGameProjectEvents
-    let artifactIndex: BeeGameProjectArtifactIndex
-    try {
-      eventResult = await fetchProjectEvents(projectId)
-      artifactIndex = await fetchProjectArtifactIndex(projectId).catch(() => ({
-        sessionId: eventResult.sessionId,
-        workspacePath: eventResult.workspacePath,
-        artifacts: [],
-      }))
-    } catch (error) {
-      if (isSessionNotFoundError(error)) return []
-      throw error
+    const artifactIndex = await fetchProjectArtifactIndex(projectId)
+
+    let eventResult: BeeGameProjectEvents | undefined
+    if (artifactIndex.sessionId) {
+      try {
+        eventResult = await fetchProjectEvents(projectId)
+      } catch (error) {
+        if (!isSessionNotFoundError(error)) throw error
+      }
     }
-    const binding: ProjectSessionBinding = {
+
+    const workspacePath = artifactIndex.workspacePath || eventResult?.workspacePath
+    if (!workspacePath) return []
+    const binding = {
       projectId,
-      sessionId: eventResult.sessionId,
-      workspacePath: eventResult.workspacePath,
+      workspacePath,
+      ...(artifactIndex.sessionId || eventResult?.sessionId
+        ? { sessionId: artifactIndex.sessionId || eventResult?.sessionId }
+        : {}),
     }
     return [
       ...mergeArtifactsByPath([
@@ -660,16 +993,14 @@ export const beeGameAdapter = {
           .map(artifact =>
             discoveredArtifactToPanelArtifact(binding, artifact),
           ),
-        ...extractArtifacts(
-          projectId,
-          eventResult.events,
-          eventResult.workspacePath,
-        ),
+        ...(eventResult
+          ? extractArtifacts(projectId, eventResult.events, eventResult.workspacePath)
+          : []),
       ]),
       {
         artifact_id: encodeProjectPackageArtifactId(projectId),
         id: encodeProjectPackageArtifactId(projectId),
-        name: `${binding.workspacePath.split('/').filter(Boolean).at(-1) || 'project'}.zip`,
+        name: `${workspacePath.split('/').filter(Boolean).at(-1) || 'project'}.zip`,
         artifact_type: 'Project Package',
         status: 'active',
         created_by: 'beegame',
@@ -707,32 +1038,48 @@ export const beeGameAdapter = {
   },
 
   async startProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
-    return postJson(
-      `/api/projects/${encodeURIComponent(projectId)}/preview`,
-      {},
-    )
+    try {
+      return await postJson(
+        `/api/projects/${encodeURIComponent(projectId)}/preview`,
+        {},
+      )
+    } finally {
+      invalidateProjectRuntimeState(projectId)
+    }
   },
 
   async restartProjectPreview(
     projectId: string,
   ): Promise<BeeGamePreviewPayload> {
-    return postJson(
-      `/api/projects/${encodeURIComponent(projectId)}/preview/restart`,
-      {},
-    )
+    try {
+      return await postJson(
+        `/api/projects/${encodeURIComponent(projectId)}/preview/restart`,
+        {},
+      )
+    } finally {
+      invalidateProjectRuntimeState(projectId)
+    }
   },
 
   async stopProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
-    return deleteJson<BeeGamePreviewPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/preview`,
+    try {
+      return await deleteJson<BeeGamePreviewPayload>(
+        `/api/projects/${encodeURIComponent(projectId)}/preview`,
+      )
+    } finally {
+      invalidateProjectRuntimeState(projectId)
+    }
+  },
+
+  async deployProject(projectId: string, confirmation?: import('./api').BeeGameDeploymentDiscussionConfirmation): Promise<BeeGameDeploymentPayload> {
+    return postJson(
+      `/api/projects/${encodeURIComponent(projectId)}/deployments`,
+      confirmation ?? {},
     )
   },
 
-  async deployProject(projectId: string): Promise<BeeGameDeploymentPayload> {
-    return postJson(
-      `/api/projects/${encodeURIComponent(projectId)}/deployments`,
-      {},
-    )
+  async getDeploymentReadiness(projectId: string): Promise<import('./api').BeeGameDeploymentReadiness> {
+    return getJson(`/api/projects/${encodeURIComponent(projectId)}/deployment-readiness`)
   },
 
   async listProjectDeployments(
@@ -755,19 +1102,71 @@ export const beeGameAdapter = {
 
   async getProjectAssets(
     projectId: string,
+    signal?: AbortSignal,
   ): Promise<BeeGameAssetManifestPayload> {
     return getJson<BeeGameAssetManifestPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets`,
+      { signal },
+    )
+  },
+
+  async getProjectGameContent(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<BeeGameGameContentSnapshot> {
+    return getJson<BeeGameGameContentSnapshot>(
+      `/api/projects/${encodeURIComponent(projectId)}/game-content`,
+      { signal },
+    )
+  },
+
+  async getProjectGameContentFileList(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<BeeGameContentFileListSnapshot> {
+    const snapshot = await getJson<BeeGameContentFileListSnapshot | BeeGameGameContentSnapshot>(
+      `/api/projects/${encodeURIComponent(projectId)}/game-content?metadata=1`,
+      { signal },
+    )
+    return normalizeBeeGameContentFileList(snapshot)
+  },
+
+  async loadProjectAssetFile(
+    projectId: string,
+    resourceId: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const query = new URLSearchParams({ path })
+    const response = await authenticatedFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/resources/${encodeURIComponent(resourceId)}/file?${query.toString()}`,
+      { signal },
+    )
+    if (!response.ok) await readResponse<never>(response)
+    return response.blob()
+  },
+
+  async saveProjectGameContentDocument<Document extends BeeGameEditableContentDocument>(
+    projectId: string,
+    input: {
+      path: string
+      expectedRevision: string
+      document: Document
+    },
+  ): Promise<BeeGameContentDocumentSaveResult<Document>> {
+    return putJson<BeeGameContentDocumentSaveResult<Document>>(
+      `/api/projects/${encodeURIComponent(projectId)}/game-content/document`,
+      input,
     )
   },
 
   async uploadProjectAsset(
     projectId: string,
     resourceId: string,
-    file: File,
+    file: File | readonly File[],
   ): Promise<BeeGameAssetUploadPayload> {
     const form = new FormData()
-    form.set('file', file)
+    for (const item of Array.isArray(file) ? file : [file as File]) form.append('file', item)
     return postForm<BeeGameAssetUploadPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets/resources/${encodeURIComponent(resourceId)}/upload`,
       form,
@@ -876,13 +1275,6 @@ async function ensureProjectSession(
   }
 }
 
-function resolveStopSessionId(data: {
-  task_id: string
-  project_id?: string
-}): string {
-  return String(data.task_id || '').trim()
-}
-
 function isSessionNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   const message = error.message.toLowerCase()
@@ -972,34 +1364,6 @@ async function getResponseErrorMessage(response: Response): Promise<string> {
   return `Request failed with status ${response.status}`
 }
 
-async function sendBeeGameInput(
-  sessionId: string,
-  text: string,
-  display?: {
-    clientMessageId?: string
-    supersedesMessageId?: string
-    language?: BeeGameLanguage
-    attachments?: ChatAttachmentPayload[]
-  },
-): Promise<BeeGameSession> {
-  return postJson(
-    `/api/beegame-sessions/${encodeURIComponent(sessionId)}/input`,
-    {
-      text,
-      ...(display?.clientMessageId
-        ? { clientMessageId: display.clientMessageId }
-        : {}),
-      ...(display?.supersedesMessageId
-        ? { supersedesMessageId: display.supersedesMessageId }
-        : {}),
-      ...(display?.language ? { language: display.language } : {}),
-      ...(display?.attachments?.length
-        ? { attachments: display.attachments }
-        : {}),
-    },
-  )
-}
-
 function fetchProjectEvents(
   projectId: string,
   after = 0,
@@ -1009,12 +1373,69 @@ function fetchProjectEvents(
   )
 }
 
+type ProjectEventStreamFrame = {
+  id?: number
+  data: string
+}
+
+async function readProjectEventStream(
+  body: ReadableStream<Uint8Array>,
+  onFrame: (frame: ProjectEventStreamFrame) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const cancel = () => { void reader.cancel().catch(() => {}) }
+  signal?.addEventListener('abort', cancel, { once: true })
+
+  const flush = (rawFrame: string) => {
+    let id: number | undefined
+    const data: string[] = []
+    for (const rawLine of rawFrame.split(/\r?\n/)) {
+      if (rawLine.startsWith(':')) continue
+      if (rawLine.startsWith('id:')) {
+        const parsed = Number(rawLine.slice(3).trim())
+        if (Number.isFinite(parsed) && parsed >= 0) id = parsed
+      } else if (rawLine.startsWith('data:')) {
+        data.push(rawLine.slice(5).trimStart())
+      }
+    }
+    if (data.length > 0) onFrame({ id, data: data.join('\n') })
+  }
+
+  try {
+    while (true) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const result = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => { reject(new Error('Chat stream heartbeat timed out')); cancel() }, 20_000)
+        }),
+      ]).finally(() => clearTimeout(timer))
+      if (signal?.aborted) break
+      if (result.done) break
+      buffer += decoder.decode(result.value, { stream: true })
+      const frames = buffer.split(/\r?\n\r?\n/)
+      buffer = frames.pop() || ''
+      frames.forEach(flush)
+    }
+    buffer += decoder.decode()
+    if (buffer.trim()) flush(buffer)
+  } finally {
+    signal?.removeEventListener('abort', cancel)
+    cancel()
+    reader.releaseLock()
+  }
+}
+
 async function fetchProjectTranscriptPage(
   projectId: string,
   beforeId?: number,
+  limit = CHAT_HISTORY_PAGE_SIZE,
 ): Promise<BeeGameProjectTranscriptPage> {
   const params = new URLSearchParams({
-    limit: String(CHAT_HISTORY_PAGE_SIZE),
+    limit: String(limit),
   })
   if (beforeId !== undefined) params.set('before', String(beforeId))
   return getJson(
@@ -1026,7 +1447,11 @@ async function fetchProjectTranscriptPageIfAvailable(
   projectId: string,
 ): Promise<BeeGameProjectTranscriptPage | undefined> {
   try {
-    return await fetchProjectTranscriptPage(projectId)
+    return await fetchProjectTranscriptPage(
+      projectId,
+      undefined,
+      CHAT_INITIAL_HISTORY_PAGE_SIZE,
+    )
   } catch {
     return undefined
   }
@@ -1036,41 +1461,28 @@ function eventsToHistory(
   projectId: string,
   events: BeeGameEvent[],
   workspacePath = '',
+  subagentTools?: Map<string, SubagentToolOwner>,
 ): unknown[] {
-  const normalizedEvents = normalizeDisplayEvents(events)
-  const messages = normalizedEvents
-    .flatMap(event =>
-      eventToProjectEventMessages(projectId, event, workspacePath),
-    )
-    .filter(
-      message => message.type !== 'think_start' && message.type !== 'think_end',
-    )
-  return messages.map(message => ({
-    id:
-      message.message_id || `${message.type}-${message.task_id}-${Date.now()}`,
-    message_id: message.message_id,
-    sender: message.sender || 'system',
-    content: message.content || '',
-    task_id: message.task_id,
-    timestamp: message.timestamp || Date.now(),
-    type:
-      message.type === 'agent_message'
-        ? 'text'
-        : message.type === 'tool_start' || message.type === 'tool_end'
-          ? 'tool'
-          : 'normal',
-    renderHint: message.render_hint,
-    artifactType: message.artifact_type,
-    taskKind: message.task_kind,
-    nextAction: message.next_action,
-    requiresUserAction: message.requires_user_action,
-    toolName: message.tool,
-    toolStatus: message.tool_status,
-    toolDetail: message.tool_detail,
-    toolOutput: message.tool_output,
-    artifactId: message.artifact_id,
-    isSubagentTool: message.is_subagent_tool,
-  }))
+  const normalizedEvents = normalizeDisplayEvents(events, subagentTools, projectId)
+  const turnCompletedAt = new Map<string, number>()
+  for (const event of normalizedEvents) {
+    if (event.type !== 'turn.completed' || !event.turnId) continue
+    const timestamp = Date.parse(event.createdAt)
+    if (Number.isFinite(timestamp)) turnCompletedAt.set(event.turnId, timestamp)
+  }
+  const projectedMessages = normalizedEvents.flatMap(event =>
+    eventToProjectEventMessages(projectId, event, workspacePath),
+  )
+  return projectHistoryMessages(projectedMessages, turnCompletedAt)
+}
+
+/** Adapter entry point used by dev/test transcript fixtures. */
+export function transcriptEventsToHistory(
+  projectId: string,
+  events: unknown[],
+  workspacePath = '',
+): unknown[] {
+  return eventsToHistory(projectId, events as BeeGameEvent[], workspacePath)
 }
 
 function eventToProjectEventMessages(
@@ -1078,277 +1490,17 @@ function eventToProjectEventMessages(
   event: BeeGameEvent,
   workspacePath = '',
 ): ProjectEventMessage[] {
-  const taskId = event.sessionId
-  switch (event.type) {
-    case 'user.message':
-      return [
-        baseMessage(
-          'agent_message',
-          { ...event, text: resolveUserMessageDisplayText(event) },
-          projectId,
-          'user',
-        ),
-      ]
-    case 'turn.started':
-      return [
-        {
-          type: 'status',
-          task_id: taskId,
-          project_id: projectId,
-          status: 'running',
-        } as ProjectEventMessage,
-      ]
-    case 'system.status':
-      return []
-    case 'assistant.partial':
-      return []
-    case 'assistant.thinking': {
-      const status = getPayloadString(event, 'status')
-      const thinkingMessageId = `beegame-thinking-${event.turnId || event.sessionId}`
-      if (status === 'ended') {
-        return [
-          {
-            type: 'think_end',
-            task_id: taskId,
-            project_id: projectId,
-            sender: 'beegame',
-            message_id: thinkingMessageId,
-            timestamp: Date.parse(event.createdAt) || Date.now(),
-          } as ProjectEventMessage,
-        ]
-      }
-      return [
-        {
-          type: 'think_start',
-          task_id: taskId,
-          project_id: projectId,
-          sender: 'beegame',
-          content: event.text || 'Thinking',
-          task_kind: 'assistant_thinking',
-          message_id: thinkingMessageId,
-          timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as ProjectEventMessage,
-      ]
-    }
-    case 'assistant.message': {
-      const usage = getUsageFromEventPayload(event.payload)
-      return [
-        baseMessage('agent_message', event, projectId, 'beegame'),
-        ...(usage
-          ? [
-              {
-                type: 'usage',
-                task_id: taskId,
-                project_id: projectId,
-                usage,
-                timestamp: Date.parse(event.createdAt) || Date.now(),
-              } as ProjectEventMessage,
-            ]
-          : []),
-      ]
-    }
-    case 'result': {
-      const usage = getUsageFromEventPayload(event.payload)
-      return usage
-        ? [
-            {
-              type: 'usage',
-              task_id: taskId,
-              project_id: projectId,
-              usage,
-              timestamp: Date.parse(event.createdAt) || Date.now(),
-            } as ProjectEventMessage,
-          ]
-        : []
-    }
-    case 'tool.started':
-      if (Object.keys(getPayloadRecord(event, 'input')).length === 0) return []
-      const startedInput = getPayloadRecord(event, 'input')
-      const startedTool = getPayloadString(event, 'toolName') || event.text
-      const startedInfo = getToolDisplayInfo(
-        startedTool,
-        'running',
-        startedInput,
-        workspacePath,
-      )
-      const startedArtifactPath = getArtifactPath(startedTool, startedInput)
-      return [
-        {
-          type: 'tool_start',
-          task_id: taskId,
-          project_id: projectId,
-          message_id: getToolMessageId(event),
-          tool_use_id: getPayloadString(event, 'toolUseID'),
-          tool: startedTool,
-          content: formatToolContent(startedInfo),
-          tool_status: startedInfo.status,
-          tool_detail: startedInfo.detail,
-          artifact_id: startedArtifactPath
-            ? encodeArtifactId(projectId, event.sessionId, startedArtifactPath)
-            : undefined,
-          artifact_path: startedArtifactPath
-            ? toWorkspaceRelativePath(startedArtifactPath, workspacePath)
-            : undefined,
-          is_subagent_tool: startedInfo.isSubagent,
-          timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as ProjectEventMessage,
-      ]
-    case 'tool.progress': {
-      const progressInput = getPayloadRecord(event, 'input')
-      const progressTool = getPayloadString(event, 'toolName') || event.text
-      const output =
-        typeof event.payload?.output === 'string'
-          ? event.payload.output
-          : event.text
-      const progressInfo = getToolDisplayInfo(
-        progressTool,
-        'running',
-        progressInput,
-        workspacePath,
-        output,
-      )
-      const progressArtifactPath = getArtifactPath(progressTool, progressInput)
-      return [
-        {
-          type: 'tool_start',
-          task_id: taskId,
-          project_id: projectId,
-          message_id: getToolMessageId(event),
-          tool_use_id: getPayloadString(event, 'toolUseID'),
-          tool: progressTool,
-          content: formatToolContent(progressInfo),
-          tool_status: progressInfo.status,
-          tool_detail: progressInfo.detail,
-          tool_output: progressInfo.output,
-          artifact_id: progressArtifactPath
-            ? encodeArtifactId(projectId, event.sessionId, progressArtifactPath)
-            : undefined,
-          artifact_path: progressArtifactPath
-            ? toWorkspaceRelativePath(progressArtifactPath, workspacePath)
-            : undefined,
-          is_subagent_tool: progressInfo.isSubagent,
-          timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as ProjectEventMessage,
-      ]
-    }
-    case 'tool.completed':
-    case 'tool.failed': {
-      const finishedInput = getPayloadRecord(event, 'input')
-      const finishedTool = getPayloadString(event, 'toolName') || event.text
-      const output =
-        typeof event.payload?.output === 'string'
-          ? event.payload.output
-          : event.text
-      const finishedInfo = getToolDisplayInfo(
-        finishedTool,
-        event.type === 'tool.failed' ? 'failed' : 'completed',
-        finishedInput,
-        workspacePath,
-        output,
-      )
-      const finishedArtifactPath = getArtifactPath(finishedTool, finishedInput)
-      return [
-        {
-          type: 'tool_end',
-          task_id: taskId,
-          project_id: projectId,
-          message_id: getToolMessageId(event),
-          tool_use_id: getPayloadString(event, 'toolUseID'),
-          tool: finishedTool,
-          output,
-          content: formatToolContent(finishedInfo),
-          tool_status: finishedInfo.status,
-          tool_detail: finishedInfo.detail,
-          tool_output: finishedInfo.output,
-          artifact_id: finishedArtifactPath
-            ? encodeArtifactId(projectId, event.sessionId, finishedArtifactPath)
-            : undefined,
-          artifact_path: finishedArtifactPath
-            ? toWorkspaceRelativePath(finishedArtifactPath, workspacePath)
-            : undefined,
-          is_subagent_tool: finishedInfo.isSubagent,
-          timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as ProjectEventMessage,
-      ]
-    }
-    case 'permission.requested':
-      return [
-        {
-          type: 'human_gate',
-          task_id: taskId,
-          project_id: projectId,
-          message_id: getPermissionRequestMessageId(event),
-          content: event.text,
-          sender: 'beegame',
-          task_kind: 'permission_request',
-          requires_user_action: true,
-          timestamp: Date.parse(event.createdAt) || Date.now(),
-        } as ProjectEventMessage,
-      ]
-    case 'permission.resolved': {
-      const decision = getPayloadString(event, 'decision')
-      if (decision !== 'deny') return []
-      return [
-        baseMessage(
-          'agent_message',
-          {
-            ...event,
-            text: describePermissionResolution(event),
-          },
-          projectId,
-          'system',
-        ),
-      ]
-    }
-    case 'turn.completed': {
-      return [
-        {
-          type: 'status',
-          task_id: taskId,
-          project_id: projectId,
-          status: 'idle',
-        } as ProjectEventMessage,
-      ]
-    }
-    case 'turn.empty':
-      return [
-        baseMessage('agent_message', event, projectId, 'system'),
-        {
-          type: 'status',
-          task_id: taskId,
-          project_id: projectId,
-          status: 'idle',
-        } as ProjectEventMessage,
-      ]
-    case 'session.stopped':
-      return [
-        {
-          type: 'status',
-          task_id: taskId,
-          project_id: projectId,
-          status: 'stopped',
-        } as ProjectEventMessage,
-      ]
-    case 'turn.failed':
-    case 'session.failed':
-      return [
-        {
-          type: 'error',
-          task_id: taskId,
-          project_id: projectId,
-          content: event.text,
-          error: event.text,
-        } as ProjectEventMessage,
-      ]
-    default:
-      return []
-  }
+  const userDisplayText = event.type === 'user.message' && getPayloadString(event, 'displayKind') !== 'delivery_continue'
+    ? resolveUserMessageDisplayText(event) : event.text
+  return projectEventMessages(projectId, event, workspacePath, userDisplayText)
 }
 
-function normalizeDisplayEvents(events: BeeGameEvent[]): BeeGameEvent[] {
+function normalizeDisplayEvents(events: BeeGameEvent[], subagentTools?: Map<string, SubagentToolOwner>, projectId?: string): BeeGameEvent[] {
   return normalizeBeeGameEvents(events, {
     includeUserMessages: true,
     includePartialsWhenFinalExists: false,
+    subagentTools,
+    projectId,
   })
 }
 
@@ -1357,25 +1509,90 @@ function normalizeBeeGameEvents(
   options: {
     includeUserMessages: boolean
     includePartialsWhenFinalExists: boolean
+    subagentTools?: Map<string, SubagentToolOwner>
+    projectId?: string
   },
 ): BeeGameEvent[] {
+  // A replacement turn keeps the immutable audit stream, but only the live
+  // branch belongs in Chat. Do this before grouping thoughts/tools by turn.
+  const liveEvents: BeeGameEvent[] = []
+  for (const event of events) {
+    if (event.type === 'user.message') {
+      const target = getPayloadString(event, 'supersedesMessageId') || getPayloadString(event, 'supersedes_message_id')
+      if (target) {
+        const index = liveEvents.findIndex(candidate => candidate.type === 'user.message' &&
+          (getPayloadString(candidate, 'clientMessageId') === target || `beegame-event-${candidate.id}` === target))
+        if (index >= 0) {
+          const currentTurnStart = [...liveEvents].reverse().find(candidate => candidate.type === 'turn.started' && candidate.turnId === event.turnId)
+          const targetTurnId = liveEvents[index]?.turnId
+          const start = targetTurnId
+            ? liveEvents.findIndex(candidate => candidate.type === 'turn.started' && candidate.turnId === targetTurnId)
+            : index
+          liveEvents.splice(start >= 0 ? start : index)
+          if (currentTurnStart) liveEvents.push(currentTurnStart)
+        }
+      }
+    }
+    liveEvents.push(event)
+  }
+  events = liveEvents
+  // Earlier persisted transcripts have a native TaskOutput result but no
+  // terminal task_notification. Reconcile only the SDK's structured task ID;
+  // never infer task completion from free-form terminal output.
+  const startedTasks = new Map<string, { toolUseID: string; toolName: 'Agent' | 'Task'; input: Record<string, unknown> }>()
+  events = events.map(event => {
+    if (event.type === 'system.status' && getPayloadString(event, 'subtype') === 'task_started') {
+      const taskId = getPayloadString(event, 'task_id')
+      const toolUseID = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id')
+      if (taskId && toolUseID) startedTasks.set(taskId, {
+        toolUseID, toolName: getPayloadString(event, 'task_type') === 'local_bash' ? 'Task' : 'Agent',
+        input: getPayloadRecord(event, 'input'),
+      })
+      return event
+    }
+    if (event.type === 'system.status' &&
+        ['task_progress', 'task_notification'].includes(getPayloadString(event, 'subtype'))) {
+      const task = startedTasks.get(getPayloadString(event, 'task_id'))
+      if (task && event.payload) return { ...event, payload: { ...event.payload,
+        toolUseID: task.toolUseID,
+        ...(task.toolName === 'Task' ? { task_type: 'local_bash' } : {}),
+      } }
+      return event
+    }
+    if (event.type !== 'tool.completed' || getPayloadString(event, 'toolName') !== 'TaskOutput' ||
+        event.payload?.nativeBackgroundTaskResult) return event
+    const result = getPayloadRecord(event, 'nativeTaskResult')
+    const task = startedTasks.get(typeof result.taskId === 'string' ? result.taskId : '')
+    if (!task || !event.payload || !['completed', 'failed', 'stopped', 'killed'].includes(String(result.status))) return event
+    return { ...event, payload: { ...event.payload, nativeBackgroundTaskResult: {
+      toolUseID: task.toolUseID, toolName: task.toolName, status: result.status,
+      ...(typeof result.result === 'string' ? { result: result.result } : {}),
+    }, backgroundAgentInput: task.input } }
+  })
   events = coalesceLogicalAssistantMessages(events)
   const visible: BeeGameEvent[] = []
   const terminalEventByTurn = new Map<string, number>()
+  const stoppedEventByTurn = new Map<string, number>()
   for (const event of events) {
     if (!event.turnId || !isTurnTerminalEvent(event)) continue
     const existing = terminalEventByTurn.get(event.turnId)
     if (existing === undefined || event.id < existing)
       terminalEventByTurn.set(event.turnId, event.id)
+    if (event.type === 'session.stopped' || event.type === 'session.failed')
+      stoppedEventByTurn.set(event.turnId, event.id)
   }
-  const seenUserTexts = new Set<string>()
+  const seenUserMessages = new Set<string>()
   const turnsWithFinal = new Set(
     events
       .filter(event => event.type === 'assistant.message')
-      .map(getTurnDisplayId),
+      .map(getBeeGameAssistantMessageId),
   )
   let bufferedPartial: BeeGameEvent | null = null
   let bufferedThinking: BeeGameEvent | null = null
+  // Older transcripts predate server-side thinkingStartedAt. While reading a
+  // complete history we can still recover the duration from the first event of
+  // the same visible block. Live events receive this timestamp from the server.
+  const thinkingStartedAtByBlock = new Map<string, string>()
   const flushPartial = () => {
     if (bufferedPartial) {
       visible.push(bufferedPartial)
@@ -1389,6 +1606,9 @@ function normalizeBeeGameEvents(
     }
   }
   for (const event of events) {
+    const stoppedAt = event.turnId ? stoppedEventByTurn.get(event.turnId) : undefined
+    if (stoppedAt !== undefined && event.id > stoppedAt && event.type === 'system.status' &&
+        ['task_started', 'task_progress'].includes(getPayloadString(event, 'subtype'))) continue
     if (isLateRuntimeEvent(event, terminalEventByTurn)) continue
     if (event.type !== 'assistant.partial') {
       flushPartial()
@@ -1398,41 +1618,41 @@ function normalizeBeeGameEvents(
     }
     if (event.type === 'user.message') {
       if (!options.includeUserMessages) continue
-      const displayText = resolveUserMessageDisplayText(event)
-      if (seenUserTexts.has(displayText)) continue
-      seenUserTexts.add(displayText)
+      if (getPayloadString(event, 'displayKind') === 'delivery_continue') continue
+      const identity = getPayloadString(event, 'clientMessageId') || getPayloadString(event, 'client_message_id') ||
+        `${event.sessionId}:${event.turnId || ''}:${event.id}`
+      if (seenUserMessages.has(identity)) continue
+      seenUserMessages.add(identity)
       visible.push(event)
       continue
     }
     if (
       event.type === 'system.status' &&
-      event.text.trim().toLowerCase() === 'system'
+      event.text.trim().toLowerCase() === 'system' &&
+      !['task_started', 'task_progress', 'task_notification', 'compact_boundary', 'delivery_phase'].includes(getPayloadString(event, 'subtype')) &&
+      !(getPayloadString(event, 'subtype') === 'status' && getPayloadString(event, 'status') === 'compacting')
     ) {
       continue
     }
     if (event.type === 'result' && !getUsageFromEventPayload(event.payload)) {
       continue
     }
-    if (
-      event.type === 'tool.started' &&
-      Object.keys(getPayloadRecord(event, 'input')).length === 0
-    ) {
-      continue
-    }
     if (event.type === 'assistant.partial') {
       if (
         !options.includePartialsWhenFinalExists &&
-        turnsWithFinal.has(getTurnDisplayId(event))
+        turnsWithFinal.has(getBeeGameAssistantMessageId(event))
       ) {
         continue
       }
       if (
         bufferedPartial &&
-        getTurnDisplayId(bufferedPartial) === getTurnDisplayId(event)
+        getBeeGameAssistantMessageId(bufferedPartial) === getBeeGameAssistantMessageId(event)
       ) {
         bufferedPartial = Object.assign({}, bufferedPartial, {
           id: event.id,
-          text: `${bufferedPartial.text}${event.text}`,
+          payload: { ...event.payload, sourceSequence: bufferedPartial.payload?.sourceSequence ?? bufferedPartial.id,
+            contentMode: getPayloadString(bufferedPartial, 'contentMode') === 'snapshot' || getPayloadString(event, 'contentMode') === 'snapshot' ? 'snapshot' : 'delta' },
+          text: getPayloadString(event, 'contentMode') === 'snapshot' ? event.text : `${bufferedPartial.text}${event.text}`,
           createdAt: event.createdAt,
         })
       } else {
@@ -1442,25 +1662,61 @@ function normalizeBeeGameEvents(
       continue
     }
     if (event.type === 'assistant.thinking') {
-      if (
-        !options.includePartialsWhenFinalExists &&
-        turnsWithFinal.has(getTurnDisplayId(event))
-      ) {
-        continue
-      }
-      if (getPayloadString(event, 'status') === 'ended') {
+      // Thinking is durable Chat content, unlike a transient response partial.
+      // Keep every delta: eventsToHistory groups them by turn and joins their
+      // text, while the live store performs the equivalent incremental join.
+      // Dropping these merely because a final answer exists made all persisted
+      // thinking disappear on refresh.
+      const thinkingBlock = getThinkingDisplayId(event)
+      const status = getPayloadString(event, 'status')
+      if (status === 'ended') {
+        const thinkingStartedAt =
+          getPayloadString(event, 'thinkingStartedAt') ||
+          thinkingStartedAtByBlock.get(thinkingBlock)
+        thinkingStartedAtByBlock.delete(thinkingBlock)
         flushThinking()
-        visible.push(event)
+        visible.push(thinkingStartedAt
+          ? {
+              ...event,
+              payload: {
+                ...(event.payload ?? { type: 'assistant.thinking' }),
+                thinkingStartedAt,
+              },
+            }
+          : event)
         continue
       }
+      const thinkingStartedAt =
+        getPayloadString(event, 'thinkingStartedAt') ||
+        thinkingStartedAtByBlock.get(thinkingBlock) ||
+        event.createdAt
+      thinkingStartedAtByBlock.set(thinkingBlock, thinkingStartedAt)
       if (
         bufferedThinking &&
-        getTurnDisplayId(bufferedThinking) === getTurnDisplayId(event)
+        getThinkingDisplayId(bufferedThinking) === getThinkingDisplayId(event)
       ) {
-        bufferedThinking = event
+        const previous: string = bufferedThinking.text === 'Thinking' ? '' : bufferedThinking.text
+        const next: string = event.text === 'Thinking' ? '' : event.text
+        bufferedThinking = {
+          ...event,
+          text: (getPayloadString(event, 'contentMode') === 'snapshot' ? next : previous + next) || 'Thinking',
+          payload: {
+            ...(event.payload ?? { type: 'assistant.thinking' }),
+            sourceSequence: bufferedThinking.payload?.sourceSequence ?? bufferedThinking.id,
+            thinkingStartedAt:
+              getPayloadString(bufferedThinking, 'thinkingStartedAt') ||
+              thinkingStartedAt,
+          },
+        }
       } else {
         flushThinking()
-        bufferedThinking = event
+        bufferedThinking = {
+          ...event,
+          payload: {
+            ...(event.payload ?? { type: 'assistant.thinking' }),
+            thinkingStartedAt,
+          },
+        }
       }
       continue
     }
@@ -1468,7 +1724,148 @@ function normalizeBeeGameEvents(
   }
   flushPartial()
   flushThinking()
-  return visible
+  return routeSubagentToolEvents(visible, options.subagentTools, options.projectId)
+}
+
+/** Owned child activity updates its owner's detail, never a main-chat row.
+ * Use the same projection for old transcripts, polling and separate SSE frames;
+ * some foreground workers have no output-file activity snapshot to fall back on. */
+function routeSubagentToolEvents(
+  events: BeeGameEvent[],
+  owners = new Map<string, SubagentToolOwner>(),
+  projectId?: string,
+): BeeGameEvent[] {
+  const mergeActivity = (previous: SubagentActivitySnapshot, next?: SubagentActivitySnapshot) => mergeSubagentActivity(previous, next)!
+  return events.flatMap<BeeGameEvent>(event => {
+    let parent = getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')
+    const sourceOwner = parent
+    const toolName = getPayloadString(event, 'toolName') || getPayloadString(event, 'tool_name')
+    const lifecycle = event.type === 'system.status' &&
+      ['task_started', 'task_progress', 'task_notification'].includes(getPayloadString(event, 'subtype'))
+    const toolEvent = ['tool.started', 'tool.progress', 'tool.completed', 'tool.failed'].includes(event.type)
+    if (!parent) {
+      const backgroundResult = getPayloadRecord(event, 'nativeBackgroundTaskResult')
+      const completedOwner = toolName === 'TaskOutput' && typeof backgroundResult.toolUseID === 'string'
+        ? backgroundResult.toolUseID : ''
+      if (!lifecycle && !(toolEvent && (['Agent', 'Task'].includes(toolName) || completedOwner))) return [event]
+      const id = completedOwner || getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id') || getPayloadString(event, 'task_id')
+      if (!id) return [event]
+      const key = `${event.sessionId}:${id}`
+      const previous = owners.get(key)
+      const activity = mergeActivity(previous?.activity ?? { entries: [], truncated: false }, readSubagentActivity(event.payload?.subagentActivity))
+      const updated: BeeGameEvent = { ...event, payload: { ...event.payload, type: event.payload?.type ?? event.type,
+        input: { ...getPayloadRecord(previous?.event ?? event, 'input'), ...getPayloadRecord(event, 'input') },
+        ...(activity.entries.length ? { subagentActivity: activity } : {}),
+      } }
+      owners.set(key, { event: updated, activity })
+      return [updated]
+    }
+    // Nested workers belong inside the root owner's drawer as well. Retain
+    // their real invocation relation instead of creating a main-chat owner.
+    if ((toolEvent || lifecycle) && ['Agent', 'Task'].includes(toolName)) {
+      const childId = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id')
+      if (childId) owners.set(`${event.sessionId}:${childId}`, { event, activity: { entries: [], truncated: false } })
+    }
+    const ancestors = new Set<string>()
+    while (parent && !ancestors.has(parent)) {
+      ancestors.add(parent)
+      const ancestor = owners.get(`${event.sessionId}:${parent}`)?.event
+      const next = ancestor && (getPayloadString(ancestor, 'parentToolUseID') || getPayloadString(ancestor, 'parent_tool_use_id'))
+      if (!next) break
+      parent = next
+    }
+    const key = `${event.sessionId}:${parent}`
+    const previous = owners.get(key)
+    // Provider message IDs are only unique inside their original worker.
+    // Scope both live messages and that worker's transcript snapshots equally.
+    const scopedMessageId = (id: string, worker = sourceOwner) => worker && worker !== parent ? `${worker}:${id}` : id
+    const input = getPayloadRecord(event, 'input')
+    const id = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id')
+    const priorTool = previous?.activity.entries.find(item => item.id === id && item.kind === 'tool')
+    const output = getPayloadString(event, 'output')
+    const launchReceipt = event.type === 'tool.completed' && ['Agent', 'Task'].includes(toolName) &&
+      (Boolean(event.payload?.nativeBackgroundTask) || (/^agentId:\s*\S+/m.test(output) && /^output_file:\s*\S+/m.test(output)))
+    let entry: SubagentActivitySnapshot['entries'][number] | undefined
+    if (toolEvent && id) entry = { id, kind: 'tool' as const,
+      toolName: toolName || (priorTool?.kind === 'tool' ? priorTool.toolName : 'Tool'),
+      ...(typeof input.file_path === 'string' ? { filePath: input.file_path } : {}),
+      ...(typeof input.command === 'string' ? { command: input.command } : {}),
+      ...(Object.keys(input).length ? { input: JSON.stringify(input, null, 2) } : {}),
+      ...(!launchReceipt && typeof event.payload?.output === 'string' ? { output: event.payload.output } : {}),
+      ...(getPayloadString(event, 'attachmentError') ? { attachmentError: getPayloadString(event, 'attachmentError') } : {}),
+      ...(typeof event.payload?.elapsed_time_seconds === 'number' && Number.isFinite(event.payload.elapsed_time_seconds) && event.payload.elapsed_time_seconds >= 0
+        ? { elapsedTimeSeconds: event.payload.elapsed_time_seconds } : {}),
+      ...(Array.isArray(event.payload?.attachments) ? { attachments: normalizeChatAttachments(
+        event.payload.attachments.map(item => item && typeof item === 'object' ? { ...item, projectId } : item)) } : {}),
+      status: launchReceipt ? 'running' : event.type === 'tool.failed' ? 'failed' : event.type === 'tool.completed' ? 'completed' : 'running',
+    }
+    if (lifecycle && id) {
+      const terminal = getPayloadString(event, 'subtype') === 'task_notification'
+      const status = getPayloadString(event, 'status')
+      entry = { id, kind: 'tool', toolName: toolName || 'Agent',
+        status: terminal ? status === 'completed' ? 'completed' : ['stopped', 'killed'].includes(status) ? 'cancelled' : 'failed' : 'running',
+        ...(terminal ? { output: getPayloadString(event, 'summary') || event.text } : {}),
+      }
+    }
+    if (event.type === 'assistant.message' || event.type === 'assistant.partial') {
+      const messageId = scopedMessageId(`message-${getAssistantPayloadMessageId(event) || getPayloadString(event, 'uuid') || getBeeGameAssistantMessageId(event)}`)
+      const existing = previous?.activity.entries.find(item => item.id === messageId)
+      const text = event.type === 'assistant.partial' && getPayloadString(event, 'contentMode') !== 'snapshot' && existing?.kind === 'message'
+        ? existing.text + event.text : event.text
+      entry = { id: messageId, kind: 'message', text }
+    }
+    if (event.type === 'assistant.thinking' && getPayloadString(event, 'status') !== 'ended' && event.text !== 'Thinking') {
+      const thinkingId = `thinking-${getThinkingDisplayId(event)}`
+      const existing = previous?.activity.entries.find(item => item.id === thinkingId)
+      entry = { id: thinkingId, kind: 'message', text: getPayloadString(event, 'contentMode') !== 'snapshot' && existing?.kind === 'message'
+        ? existing.text + event.text : event.text }
+    }
+    if (event.type === 'permission.requested' || event.type === 'permission.resolved') {
+      const permissionId = `permission-${id || event.id}`
+      const existing = previous?.activity.entries.find(item => item.id === permissionId)
+      const decision = getPayloadString(event, 'decision')
+      // Routine automatic allows already have a tool record; they did not ask
+      // the user and must not look like a user-approved gate.
+      if (!(event.payload?.autoApproved && !existing)) entry = { id: permissionId, kind: 'permission', toolName,
+        message: getPayloadString(event, 'message') || (existing?.kind === 'permission' ? existing.message : event.text),
+        status: event.type === 'permission.requested' ? 'pending' : decision === 'allow' ? 'allowed' : decision === 'cancelled' ? 'cancelled' : 'denied' }
+    }
+    if (event.type === 'system.status' && !lifecycle) {
+      const subtype = getPayloadString(event, 'subtype')
+      const compacting = subtype === 'status' && getPayloadString(event, 'status') === 'compacting'
+      if (compacting || subtype === 'compact_boundary') {
+        entry = { id: `compaction-${event.turnId || event.sessionId}-${sourceOwner}`, kind: 'message',
+          text: compacting ? 'Context compacting' : 'Context compacted' }
+      } else if (event.text && !['system', 'control_response'].includes(event.text)) {
+        entry = { id: `status-${event.id}`, kind: 'message', text: event.text }
+      }
+    }
+    const snapshot = readSubagentActivity(event.payload?.subagentActivity)
+    const snapshotResult = getPayloadRecord(event, 'nativeBackgroundTaskResult')
+    const snapshotOwner = (lifecycle || ['Agent', 'Task'].includes(toolName)) && id ? id
+      : typeof snapshotResult.toolUseID === 'string' ? snapshotResult.toolUseID : sourceOwner
+    const scopedSnapshot = snapshot && { ...snapshot, entries: snapshot.entries.map(item => item.kind === 'message'
+      ? { ...item, id: scopedMessageId(item.id, snapshotOwner) } : item) }
+    let activity = mergeActivity(previous?.activity ?? { entries: [], truncated: true }, scopedSnapshot)
+    if (entry) activity = mergeActivity(activity, { entries: [entry], truncated: false })
+    const taskResult = getPayloadRecord(event, 'nativeBackgroundTaskResult')
+    if (typeof taskResult.toolUseID === 'string' && ['completed', 'failed', 'stopped', 'killed'].includes(String(taskResult.status))) {
+      activity = mergeActivity(activity, { entries: [{ id: taskResult.toolUseID, kind: 'tool', toolName: 'Agent',
+        status: taskResult.status === 'completed' ? 'completed' : taskResult.status === 'failed' ? 'failed' : 'cancelled',
+        ...(typeof taskResult.result === 'string' ? { output: taskResult.result } : {}),
+      }], truncated: false })
+    }
+    // History can start mid-worker. The known parent invocation ID still owns
+    // the record; no separate execution or completion is invented here.
+    const owner = previous?.event ?? { ...event, type: 'tool.progress', text: 'Agent',
+      payload: { type: 'tool.progress', toolName: 'Agent', toolUseID: parent, input: {} } }
+    const updated: BeeGameEvent = { ...owner, id: event.id, createdAt: event.createdAt,
+      payload: { ...owner.payload, type: owner.payload?.type ?? owner.type, subagentActivity: activity } }
+    owners.set(key, { event: updated, activity })
+    // TodoWrite also feeds the task checklist. That non-visible projection
+    // keeps its original owner scope; the feed already excludes it as a row.
+    return toolName === 'TodoWrite' || event.type === 'permission.requested' ? [updated, event] : [updated]
+  })
 }
 
 function coalesceLogicalAssistantMessages(
@@ -1480,6 +1877,7 @@ function coalesceLogicalAssistantMessages(
       event: BeeGameEvent
       payloadText: string
       longestVisibleText: string
+      contentBlocks: AssistantContentBlock[]
     }
   >()
   const suppressedEventIds = new Set<number>()
@@ -1488,7 +1886,7 @@ function coalesceLogicalAssistantMessages(
     if (event.type !== 'assistant.message') continue
     const messageId = getAssistantPayloadMessageId(event)
     if (!messageId) continue
-    const identity = `${event.sessionId}:${event.turnId ?? ''}:${messageId}`
+    const identity = `${event.sessionId}:${event.turnId ?? ''}:${getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')}:${getPayloadString(event, 'assistantBlockId') || messageId}`
     const payloadText = getAssistantPayloadVisibleText(event)
     const existing = representativeByMessage.get(identity)
     if (!existing) {
@@ -1496,6 +1894,7 @@ function coalesceLogicalAssistantMessages(
         event,
         payloadText,
         longestVisibleText: event.text,
+        contentBlocks: getAssistantContentBlocks(event) ?? [],
       })
       continue
     }
@@ -1503,6 +1902,10 @@ function coalesceLogicalAssistantMessages(
     if (event.text.length > existing.longestVisibleText.length) {
       existing.longestVisibleText = event.text
     }
+    existing.contentBlocks = mergeAssistantContentBlocks(
+      existing.contentBlocks,
+      getAssistantContentBlocks(event) ?? [],
+    )
     suppressedEventIds.add(event.id)
   }
 
@@ -1511,14 +1914,21 @@ function coalesceLogicalAssistantMessages(
     event,
     payloadText,
     longestVisibleText,
+    contentBlocks,
   } of representativeByMessage.values()) {
     const text =
       payloadText.length >= longestVisibleText.length
         ? payloadText
         : longestVisibleText
+    const payload =
+      contentBlocks.length > 0
+        ? { ...(event.payload ?? { type: 'assistant.message' }), contentBlocks }
+        : event.payload
     replacementByEventId.set(
       event.id,
-      text === event.text ? event : { ...event, text },
+      text === event.text && payload === event.payload
+        ? event
+        : { ...event, text, payload },
     )
   }
 
@@ -1526,15 +1936,6 @@ function coalesceLogicalAssistantMessages(
     if (suppressedEventIds.has(event.id)) return []
     return [replacementByEventId.get(event.id) ?? event]
   })
-}
-
-function getAssistantPayloadMessageId(event: BeeGameEvent): string {
-  if (!event.payload) return ''
-  const message = event.payload.message
-  if (!message || typeof message !== 'object' || Array.isArray(message))
-    return ''
-  const id = (message as Record<string, unknown>).id
-  return typeof id === 'string' ? id.trim() : ''
 }
 
 function getAssistantPayloadVisibleText(event: BeeGameEvent): string {
@@ -1553,6 +1954,45 @@ function getAssistantPayloadVisibleText(event: BeeGameEvent): string {
         : ''
     })
     .join('')
+}
+
+function mergeAssistantContentBlocks(
+  existing: AssistantContentBlock[],
+  incoming: AssistantContentBlock[],
+): AssistantContentBlock[] {
+  const merged = [...existing]
+  for (const block of incoming) {
+    const exactIndex = merged.findIndex(candidate =>
+      assistantContentBlockKey(candidate) === assistantContentBlockKey(block),
+    )
+    if (exactIndex >= 0) continue
+
+    const sameBlockIndex = merged.findIndex(candidate =>
+      candidate.type === block.type &&
+      candidate.toolUseId === block.toolUseId &&
+      candidate.toolName === block.toolName &&
+      typeof candidate.text === 'string' &&
+      typeof block.text === 'string' &&
+      (block.text.startsWith(candidate.text) || candidate.text.startsWith(block.text)),
+    )
+    if (sameBlockIndex >= 0 && (block.text?.length ?? 0) > (merged[sameBlockIndex].text?.length ?? 0)) {
+      merged[sameBlockIndex] = block
+      continue
+    }
+    merged.push(block)
+  }
+  return merged
+}
+
+function assistantContentBlockKey(block: AssistantContentBlock): string {
+  return [
+    block.type,
+    block.toolUseId ?? '',
+    block.toolName ?? '',
+    block.text ?? '',
+    JSON.stringify(block.toolInput ?? null),
+    block.isError ? 'error' : '',
+  ].join('\u0000')
 }
 
 function isTurnTerminalEvent(event: BeeGameEvent): boolean {
@@ -1587,233 +2027,25 @@ function isLateRuntimeEvent(
 }
 
 function normalizeLiveEvents(
-  _projectId: string,
+  projectId: string,
   events: BeeGameEvent[],
 ): BeeGameEvent[] {
-  return normalizeBeeGameEvents(events, {
-    includeUserMessages: false,
-    includePartialsWhenFinalExists: true,
+  const stopped = stoppedTurnsByProject.get(projectId) ?? new Set<string>()
+  stoppedTurnsByProject.set(projectId, stopped)
+  const subagentTools = subagentToolsByProject.get(projectId) ?? new Map<string, SubagentToolOwner>()
+  subagentToolsByProject.set(projectId, subagentTools)
+  const visible = events.filter(event => {
+    if (event.turnId && (event.type === 'session.stopped' || event.type === 'session.failed'))
+      stopped.add(event.turnId)
+    return !(event.turnId && stopped.has(event.turnId) && event.type === 'system.status' &&
+      ['task_started', 'task_progress'].includes(getPayloadString(event, 'subtype')))
   })
-}
-
-function baseMessage(
-  type: 'token' | 'agent_message',
-  event: BeeGameEvent,
-  projectId: string,
-  sender: string,
-): ProjectEventMessage {
-  const clientMessageId =
-    sender === 'user'
-      ? getPayloadString(event, 'clientMessageId') ||
-        getPayloadString(event, 'client_message_id')
-      : ''
-  const supersedesMessageId =
-    sender === 'user'
-      ? getPayloadString(event, 'supersedesMessageId') ||
-        getPayloadString(event, 'supersedes_message_id')
-      : ''
-  const messageId =
-    sender === 'beegame'
-      ? getBeeGameAssistantMessageId(event)
-      : clientMessageId || `beegame-event-${event.id}`
-  return {
-    type,
-    task_id: event.sessionId,
-    project_id: projectId,
-    sender,
-    content: event.text,
-    message_id: messageId,
-    ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
-    ...(supersedesMessageId
-      ? { supersedes_message_id: supersedesMessageId }
-      : {}),
-    timestamp: Date.parse(event.createdAt) || Date.now(),
-  } as ProjectEventMessage
-}
-
-function describePermissionResolution(event: BeeGameEvent): string {
-  const toolName = getPayloadString(event, 'toolName') || 'tool'
-  const reason = getPayloadString(event, 'reason')
-  if (getPayloadBoolean(event, 'autoDenied')) {
-    return reason
-      ? `BeeGame blocked ${toolName}: ${reason}`
-      : `BeeGame blocked ${toolName}.`
-  }
-  return reason ? `${toolName} denied: ${reason}` : `${toolName} denied.`
-}
-
-function getBeeGameAssistantMessageId(event: BeeGameEvent): string {
-  const displayMessageId = getPayloadString(event, DISPLAY_MESSAGE_ID_KEY)
-  if (displayMessageId) return displayMessageId
-  if (event.type === 'assistant.message')
-    return getFinalAssistantMessageId(event)
-  if (event.type === 'assistant.partial')
-    return `beegame-partial-${getTurnDisplayId(event)}-${event.id}`
-  return `beegame-event-${event.id}`
-}
-
-function getPermissionRequestMessageId(event: BeeGameEvent): string {
-  const toolUseID = getPayloadString(event, 'toolUseID')
-  if (toolUseID) return `beegame-permission-${event.sessionId}-${toolUseID}`
-  return `beegame-permission-${event.sessionId}-${event.id}`
-}
-
-function getToolMessageId(event: BeeGameEvent): string {
-  const toolUseId = getPayloadString(event, 'toolUseID')
-  if (toolUseId) return `beegame-tool-${event.sessionId}-${toolUseId}`
-  return `beegame-event-${event.id}`
-}
-
-type ToolDisplayInfo = {
-  name: string
-  status: 'running' | 'completed' | 'failed'
-  detail: string
-  output: string
-  isSubagent: boolean
-}
-
-function getToolDisplayInfo(
-  toolName: string,
-  status: 'running' | 'completed' | 'failed',
-  input: Record<string, unknown>,
-  workspacePath: string,
-  output = '',
-): ToolDisplayInfo {
-  const normalizedTool = toolName.toLowerCase()
-  const isSubagent = normalizedTool === 'agent' || normalizedTool === 'task'
-  const description = String(input.description || '').trim()
-  const subagentType = String(
-    input.subagent_type || input.agent_type || '',
-  ).trim()
-  const prompt = String(input.prompt || '').trim()
-  const name = isSubagent ? description || toolName : toolName
-  const details: string[] = []
-  if (isSubagent && subagentType) {
-    details.push(`Type: ${subagentType}`)
-  }
-  if (isSubagent && prompt) {
-    details.push(
-      `Prompt: ${prompt.length > 220 ? `${prompt.slice(0, 220)}...` : prompt}`,
-    )
-  }
-  const command = String(input.command || '').trim()
-  const targetPath = String(
-    input.file_path || input.path || input.notebook_path || '',
-  ).trim()
-  if (!isSubagent && command) {
-    details.push(`Command: ${command}`)
-  } else if (!isSubagent && targetPath) {
-    details.push(
-      `Target: ${formatWorkspaceRelativePath(targetPath, workspacePath)}`,
-    )
-  }
-  const outputSummary =
-    output.length > 160 ? `${output.slice(0, 160)}...` : output
-  return {
-    name,
-    status,
-    detail: details.join(' · '),
-    output: outputSummary,
-    isSubagent,
-  }
-}
-
-function formatToolContent(info: ToolDisplayInfo): string {
-  const lines = info.isSubagent
-    ? [`Subagent: ${info.name}`, `Status: ${info.status}`]
-    : [`Tool: ${info.name}`, `Status: ${info.status}`]
-  if (info.detail) {
-    lines.push(info.detail)
-  }
-  if (info.output) {
-    lines.push(`Output: ${info.output}`)
-  }
-  return lines.join('\n')
-}
-
-function formatWorkspaceRelativePath(
-  path: string,
-  workspacePath: string,
-): string {
-  const normalizedPath = path.replaceAll('\\', '/')
-  const normalizedWorkspace = workspacePath
-    .replaceAll('\\', '/')
-    .replace(/\/+$/, '')
-  if (
-    normalizedWorkspace &&
-    normalizedPath.startsWith(`${normalizedWorkspace}/`)
-  ) {
-    return normalizedPath.slice(normalizedWorkspace.length + 1)
-  }
-  return normalizedPath.split('/').filter(Boolean).slice(-2).join('/') || path
-}
-
-function getUsageFromEventPayload(payload?: Record<string, unknown>): {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
-} | null {
-  const usage = getUsageRecord(payload)
-  if (!usage) return null
-  const promptTokens = normalizePositiveNumber(
-    usage.input_tokens ?? usage.prompt_tokens,
-  )
-  const completionTokens = normalizePositiveNumber(
-    usage.output_tokens ?? usage.completion_tokens,
-  )
-  const totalTokens = normalizePositiveNumber(
-    usage.total_tokens,
-    promptTokens + completionTokens,
-  )
-  if (!promptTokens && !completionTokens && !totalTokens) return null
-  return {
-    prompt_tokens: promptTokens,
-    completion_tokens: completionTokens,
-    total_tokens: totalTokens,
-  }
-}
-
-function getUsageRecord(
-  payload?: Record<string, unknown>,
-): Record<string, unknown> | null {
-  if (!payload) return null
-  const directUsage = payload.usage
-  if (
-    directUsage &&
-    typeof directUsage === 'object' &&
-    !Array.isArray(directUsage)
-  ) {
-    return directUsage as Record<string, unknown>
-  }
-  const message = payload.message
-  if (!message || typeof message !== 'object' || Array.isArray(message))
-    return null
-  const messageUsage = (message as Record<string, unknown>).usage
-  if (
-    messageUsage &&
-    typeof messageUsage === 'object' &&
-    !Array.isArray(messageUsage)
-  ) {
-    return messageUsage as Record<string, unknown>
-  }
-  return null
-}
-
-function normalizePositiveNumber(value: unknown, fallback = 0): number {
-  const number = Number(value)
-  if (Number.isFinite(number) && number > 0) return number
-  return Math.max(0, fallback)
-}
-
-function getFinalAssistantMessageId(event: BeeGameEvent): string {
-  const upstreamMessageId = getAssistantPayloadMessageId(event)
-  return upstreamMessageId
-    ? `beegame-assistant-${event.sessionId}-${upstreamMessageId}`
-    : `beegame-event-${event.id}`
-}
-
-function getTurnDisplayId(event: BeeGameEvent): string {
-  return event.turnId || `beegame-turn-${event.sessionId}-${event.id}`
+  return normalizeBeeGameEvents(visible, {
+    includeUserMessages: true,
+    includePartialsWhenFinalExists: true,
+    subagentTools,
+    projectId,
+  })
 }
 
 function normalizeIdeaIntakeResult(
@@ -1957,7 +2189,21 @@ function resolveUserMessageDisplayText(event: BeeGameEvent): string {
     typeof event.payload?.displayText === 'string'
       ? event.payload.displayText.trim()
       : ''
-  return displayText || resolveSentDisplayText(event.sessionId, event.text)
+  const text = displayText || resolveSentDisplayText(event.sessionId, event.text)
+  if (getPayloadString(event, 'displayKind') !== 'workflow_v3_goal') return text
+  try {
+    // Older initial turns saved the full internal prompt as displayText.
+    // Their structured brief remains the authoritative source of the idea.
+    const brief: unknown = JSON.parse(getPayloadString(event, 'confirmedBriefContext') || text)
+    if (brief && typeof brief === 'object' && !Array.isArray(brief) &&
+      'kind' in brief && brief.kind === 'confirmed_build_brief' &&
+      'idea' in brief && typeof brief.idea === 'string' && brief.idea.trim()) {
+      return brief.idea.trim()
+    }
+  } catch {
+    // Older goal turns may contain prose rather than a serialized brief.
+  }
+  return text
 }
 
 function stableTextHash(value: string): string {
@@ -2004,7 +2250,9 @@ function extractArtifacts(
 }
 
 function discoveredArtifactToPanelArtifact(
-  binding: ProjectSessionBinding,
+  binding: Pick<ProjectSessionBinding, 'projectId' | 'workspacePath'> & {
+    sessionId?: string
+  },
   artifact: BeeGameDiscoveredArtifact,
 ): BeeGameArtifact {
   const artifactId = encodeArtifactId(
@@ -2055,22 +2303,6 @@ function mergeArtifactsByPath(artifacts: BeeGameArtifact[]): BeeGameArtifact[] {
   )
 }
 
-function toWorkspaceRelativePath(path: string, workspacePath: string): string {
-  const normalized = path
-    .split('\\')
-    .join('/')
-    .replace(/^\.\/+/, '')
-    .replace(/\/+$/, '')
-  const normalizedWorkspace = workspacePath
-    .split('\\')
-    .join('/')
-    .replace(/\/+$/, '')
-  if (normalizedWorkspace && normalized.startsWith(`${normalizedWorkspace}/`)) {
-    return normalized.slice(normalizedWorkspace.length + 1)
-  }
-  return normalized
-}
-
 function isDeliverableDocPath(path: string): boolean {
   const normalized = path
     .split('\\')
@@ -2079,45 +2311,12 @@ function isDeliverableDocPath(path: string): boolean {
   return normalized.startsWith('docs/') && /\.md$/i.test(normalized)
 }
 
-function getArtifactPath(
-  toolName: string,
-  input: Record<string, unknown>,
-): string {
-  const normalizedTool = toolName.toLowerCase()
-  if (!['write', 'edit', 'multiedit', 'notebookedit'].includes(normalizedTool))
-    return ''
-  return String(
-    input.file_path || input.path || input.notebook_path || '',
-  ).trim()
-}
-
 function encodeProjectPackageArtifactId(projectId: string): string {
   return `${PROJECT_PACKAGE_ARTIFACT_PREFIX}${encodeURIComponent(projectId)}`
 }
 
 export function isBeeGameProjectPackageArtifactId(artifactId: string): boolean {
   return artifactId.startsWith(PROJECT_PACKAGE_ARTIFACT_PREFIX)
-}
-
-function encodeArtifactId(
-  projectId: string,
-  sessionId: string,
-  path: string,
-): string {
-  return `${ARTIFACT_ID_PREFIX}${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}:${encodeURIComponent(path)}`
-}
-
-function decodeArtifactId(
-  artifactId: string,
-): { projectId: string; sessionId: string; path: string } | null {
-  if (!artifactId.startsWith(ARTIFACT_ID_PREFIX)) return null
-  const parts = artifactId.slice(ARTIFACT_ID_PREFIX.length).split(':')
-  if (parts.length !== 3) return null
-  return {
-    projectId: decodeURIComponent(parts[0]),
-    sessionId: decodeURIComponent(parts[1]),
-    path: decodeURIComponent(parts[2]),
-  }
 }
 
 function permissionEventToReview(
@@ -2141,6 +2340,7 @@ function permissionEventToReview(
     artifact: {
       content: summary.description,
       input,
+      designChangeAllowed: (event.payload?.workflowQuestion as {designChangeAllowed?: boolean} | undefined)?.designChangeAllowed === true,
     },
     summary: {
       block_reason: summary.blockReason,
@@ -2165,6 +2365,7 @@ function pendingPermissionToReview(
       type: 'permission.requested',
       toolUseID,
       toolName,
+      workflowQuestion: {designChangeAllowed:permission.design_change_allowed === true},
       input:
         permission.input &&
         typeof permission.input === 'object' &&
@@ -2196,19 +2397,6 @@ function summarizePermissionRequest(
     input.path || input.file_path || input.notebook_path || '',
   ).trim()
   const target = command || path
-  if (
-    message.includes('was blocked') &&
-    message.includes('allowed working directories')
-  ) {
-    return {
-      title: 'Workspace boundary',
-      description: message,
-      blockReason:
-        'BeeGame attempted to access a path outside the active workspace.',
-      nextAction:
-        'Deny this request, or restart the backend with AGENT_WORKFLOW_WORKSPACE_PATH set to the directory BeeGame should operate in.',
-    }
-  }
   return {
     title: `${toolName} permission`,
     description: target ? `${toolName}: ${target}` : message,
@@ -2216,25 +2404,6 @@ function summarizePermissionRequest(
     nextAction:
       'Allow to continue this BeeGame turn, or deny to ask BeeGame to choose another approach.',
   }
-}
-
-function getPayloadString(event: BeeGameEvent, field: string): string {
-  const value = event.payload?.[field]
-  return typeof value === 'string' ? value : ''
-}
-
-function getPayloadBoolean(event: BeeGameEvent, field: string): boolean {
-  return event.payload?.[field] === true
-}
-
-function getPayloadRecord(
-  event: BeeGameEvent,
-  field: string,
-): Record<string, unknown> {
-  const value = event.payload?.[field]
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
 }
 
 type BeeGameIntakeJobCreated = {
@@ -2269,6 +2438,7 @@ function buildIdeaIntakeRequestBody(
     idea: data.idea,
     language,
     clientRequestId: data.clientRequestId ?? createClientRequestId(),
+    ...(data.attachments?.length ? { attachments: data.attachments } : {}),
   }
 }
 
@@ -2336,14 +2506,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await authenticatedFetch(path)
+async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await authenticatedFetch(path, init)
   return readResponse<T>(response)
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await authenticatedFetch(path, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return readResponse<T>(response)
+}
+
+async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await authenticatedFetch(path, {
+    method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
@@ -2402,8 +2581,15 @@ async function readResponse<T>(response: Response): Promise<T> {
 }
 
 function getJsonErrorMessage(body: unknown): string | null {
+  const quotaMessage = projectQuotaErrorMessage(body)
+  if (quotaMessage) return quotaMessage
   if (typeof body !== 'object' || body === null) return null
-  const payload = body as { message?: unknown; error?: unknown }
+  const payload = body as { message?: unknown; error?: unknown; issues?: unknown; code?: unknown }
+  if (payload.code === 'writer-unresolved') return '旧执行尚未确认停止或结算，不能直接继续。请先检查执行占用恢复状态。'
+  if (payload.code === 'conversation-unavailable') return '缺少可校验的原生会话记录，不能直接继续；需要核实原会话或另行明确授权新的执行上下文，不会自动重跑。'
+  if (Array.isArray(payload.issues) && payload.issues.some(issue => typeof issue === 'string')) {
+    return [payload.message || payload.error, ...payload.issues].filter(value => typeof value === 'string' && value.trim()).join('\n')
+  }
   if (typeof payload.message === 'string' && payload.message.trim())
     return payload.message
   if (typeof payload.error === 'string' && payload.error.trim())

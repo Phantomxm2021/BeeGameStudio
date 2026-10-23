@@ -1,0 +1,75 @@
+{
+  "date": "2026-10-05",
+  "kind": "system-repair-offline-verification",
+  "scope": "BGS system source, tests and observer audit only",
+  "originalPaidRun": "docs/verification/full-delivery-path-paid-reaccept-2026-10-05.json",
+  "changes": [
+    {
+      "problem": "Machine handoff embedded inside authoritative human documents",
+      "repair": "External .beegame/design-handoffs/<document stem>.json; prose retains decisions and readable tables. Shared parser and all author/review/acceptance consumers use sidecars. Existing format fields retained; documentVersion added."
+    },
+    {
+      "problem": "Revisions did not necessarily increase document versions",
+      "repair": "Exactly one numeric document version header; matching sidecar documentVersion. Host enforces increases for changed prose, handoff or cited calculation files, including scheduled technical completion and explicitly supplied owner revisions. Unchanged documents keep their versions."
+    },
+    {
+      "problem": "Source identities could omit external machine handoff",
+      "repair": "Design snapshots bind prose, sidecars and linked calculation evidence. Formal Content authority includes sidecars; runtime requirement records bind both documentSha256 and handoffSha256. Neither the owned prose nor its sidecar counts as result evidence."
+    },
+    {
+      "problem": "Revise changed prose but native permissions denied the retained numerical model",
+      "repair": "Trusted task metadata lists exact existing cited docs/calc files and affected sidecars. Revise permits these exact Write/Edit targets and numerical helper model/output operands, still subject to original native permissions. Inspect/Verify remain read-only. No generic shell, extra scripts, --verify, directory grants, new linked calculation files or symlinks."
+    },
+    {
+      "problem": "Verifier's accurate remaining-impact description was rejected as finding redefinition",
+      "repair": "Independent checks may update impact text only. Identity, severity, owner, scope, source pointers, deadline and closure condition remain unchanged; Revise preserves findings and cannot self-close. Remaining blockers stop release."
+    },
+    {
+      "problem": "Scope/interface friction and repeated unchanged checks enlarge model histories",
+      "repair": "Exact source/sidecar/calculation locations supplied; numerical instructions only for relevant scope. Existing host checks reused while inputs unchanged and rerun after grouped edits. No additional semantic loop or new framework."
+    }
+  ],
+  "verification": {
+    "offlineRegression": {
+      "files": 16,
+      "passed": 234,
+      "failed": 0,
+      "assertions": 2066,
+      "elapsedSeconds": 11.4,
+      "coverage": [
+        "external handoff/version/hash validation",
+        "unchanged/decreased revision versions rejected",
+        "explicit owner and scheduled technical version enforcement",
+        "linked calculation-only revision detection",
+        "exact native file and helper-command boundaries including symlinks/workspace aliases",
+        "original native permissions still adjudicate execution",
+        "stale source/sidecar acceptance and design-as-result evidence rejected",
+        "simulated native Revise recomputes retained appendix, binds saved v1.1 sources and reaches read-only Verify",
+        "full mocked native delivery/restart/publish gates",
+        "remaining-impact update does not downgrade or release a blocker"
+      ]
+    },
+    "typecheck": {
+      "agentWorkflowServer": "passed",
+      "agentWorkflow": "passed",
+      "root": "not passed: existing sceneContentAdapter module/type errors and pre-existing test type errors remain; final rerun reports no type error in the new repair paths"
+    },
+    "diffWhitespace": "passed for affected tracked paths",
+    "paidRunsAdded": 0,
+    "productionModelQuality": "not tested by synthetic fixtures",
+    "tokenOrCreditImprovement": "not measured in a new paid run"
+  },
+  "compatibility": {
+    "automaticMigration": false,
+    "existingInlineHandoff": "Rejected with exact external destination; authorized native writer must migrate and synchronize versions.",
+    "existingPaidProducts": "Not changed, restored, deleted or replaced. Prior paid receipts and run evidence preserved.",
+    "unchangedDesignPolicy": "No all-document rewrite, decision registry or additional review stage."
+  },
+  "limits": [
+    "Structural checks and source hashes do not prove semantic consistency or truthful runtime observation.",
+    "The previously observed Audio contradiction and true model-review efficacy have not been demonstrated fixed by this offline repair.",
+    "Overall high-context token accumulation remains unproven resolved; removing execution friction does not establish a measured reduction.",
+    "Numerical helper is not a project-code sandbox; execution remains subject to native tool permissions, never inside the BGS server.",
+    "New/missing numerical artifacts require an explicit owner/authorized creation step; bounded Revise grants only existing cited retained files."
+  ]
+}

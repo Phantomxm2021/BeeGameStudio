@@ -11,6 +11,7 @@ import type {
   BeeGameUsageBillingRecordInput,
   BeeGameUsageBillingRecordResult,
 } from './usage-control-client'
+import type { ImageBillingInput, ImageBillingReceipt } from './image-billing'
 
 export type BeeGameCreditGrant = {
   grantedCredits: number
@@ -60,6 +61,9 @@ export type BeeGameBillingCreditPackFilters = {
 }
 
 export type BeeGameBillingRouteRepository = {
+  getUsageWalletForUser?: (userId: string) => Promise<{ balanceCreditsMicro: number }>
+  applyImageBilling?: (userId: string, input: ImageBillingInput) => Promise<ImageBillingReceipt>
+  readImageGenerationSettings?: () => Promise<import('./image-billing').ImageConfigRead>
   recordUsageForUser: (
     userId: string,
     input: BeeGameUsageBillingRecordInput,

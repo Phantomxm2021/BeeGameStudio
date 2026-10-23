@@ -1,0 +1,24 @@
+# This frontend build needs workspace sources, never runtime data or native code.
+**
+!package.json
+!bun.lock
+!bunfig.toml
+!tsconfig.json
+!tsconfig.base.json
+!apps/
+!apps/frontend/
+!apps/frontend/**
+!apps/desktop/
+!apps/desktop/package.json
+!packages/
+!packages/**
+!docker/
+!docker/nginx.frontend.conf
+**/node_modules
+**/dist
+**/coverage
+**/output
+**/.env
+**/.env.*
+**/*.log
+**/*.tsbuildinfo

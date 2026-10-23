@@ -27,3 +27,16 @@ describe('resource semantic suggestion removal migration', () => {
     expect(viewDefinition).not.toContain('semantic_suggestion')
   })
 })
+
+test('unclassified catalog migration matches the canonical view without changing element data or access control', async () => {
+  const migration = await Bun.file(`${import.meta.dir}/../../../../supabase/migrations/20261015010000_resource_catalog_browse_unclassified.sql`).text()
+  const schema = await Bun.file(schemaPath).text()
+  const definition = (sql: string) => sql.slice(sql.indexOf('with (security_invoker = true)'), sql.indexOf('group by p.id;') + 'group by p.id;'.length).trim()
+  const schemaView = schema.slice(schema.indexOf('create view public.beegame_resource_pack_catalog'))
+  expect(definition(migration)).toBe(definition(schemaView))
+  expect(migration).toContain('create or replace view public.beegame_resource_pack_catalog')
+  expect(migration).toContain("e.usage_tags_mode <> 'manual-only'")
+  expect(migration).toContain("case when e.usage_tags_mode = 'override' then e.usage_tags else '{}'::text[] end")
+  expect(migration).not.toContain('cardinality(e.usage_tags) > 0')
+  expect(migration).not.toMatch(/\b(drop|update|delete|insert|grant|revoke)\b/i)
+})

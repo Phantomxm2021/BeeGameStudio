@@ -1,0 +1,177 @@
+{
+  "protocol": "bgs.verification.v3-editable-export.1",
+  "date": "2026-10-10",
+  "documentVersion": "1.12",
+  "workspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "scope": "Optional actual exportable-source-copy build, measured static Web editable project export, explicit frontend download. Not full game acceptance, release or fresh dependency installation certification.",
+  "implementation": [
+    "Task editableProject:true requires game.develop, build/runtime-smoke, a static runtimeArtifact and explicit full artifact-directory write authority. Existing tasks/static export remain optional and unchanged.",
+    "Host enumerates actual source bytes, excludes old runtime artifact/private dot files/installed node_modules/saved Review reports and confirmed BGS workspace transcript/diagnostic paths. Other logs/ files remain game sources. Source-copy build omits these records too, rather than packaging an incomplete source set.",
+    "Existing bun run build driver runs in owned temporary source copy. Installed project-local dependencies are separately hashed and linked for build, require a saved lockfile and are not archived. Source sets/bytes and dependencies rechecked; successful canonical output replaces only authorized artifact directory, removing stale output files.",
+    "Only actual passed v3-editable-build.1 source provenance and same-artifact passed v3-static-artifact.1 runtime-smoke on current successful Attempt qualify project export. Old measurements do not gain source proof by download.",
+    "POST export kind:project returns project/ source/package/lock/data/assets plus the same artifact at its original relative path, and measurement.json outside project/. Every archive byte and current source/dependency/artifact set is checked before returning. No build/model/state mutation on download.",
+    "Whole-source provenance verification is local to editable build/export, not added as a full-project invalidation rule to unrelated tasks. Undeclared source drift refuses editable ZIP but unchanged measured static output keeps existing export qualification.",
+    "Existing project.read/project.export permission, ownership, writer/busy and Run revision checks retained. Frontend separate editable button needs source proof, verifies response package kind; errors never auto-rebuild, downgrade to static or dispatch.",
+    "Trusted Dashboard CORS exposes only artifact identity and package-kind headers. Existing origin whitelist/credential policy and Preview sandbox remain unchanged.",
+    "Uses optional CheckResult/Run JSON fields, existing local/DB persistence and ZIP32 writer. No new DB tables, frameworks, native tool modifications or execution-turn limits."
+  ],
+  "actualExecution": {
+    "sourceProject": "Synthetic Bun static project: actual source-copy build -> Chromium initial-load measurement -> ZIP extraction -> actual rebuild with identical directory SHA-256 -> source edit/rebuild with different SHA-256; extracted original and edited build both actual runtime-smoke observed.",
+    "dependency": "Synthetic project-local library actually imported during build, with stored installed-directory hash and exported lockfile; no dependency installation or external network.",
+    "native": "Real CLI loopback fake provider variant editable: native Write -> normal end -> original host executor source-copy build -> actual Chromium smoke -> source-provenance export. Exactly two fake-provider requests, no extra mechanical handoff/model request.",
+    "compatibility": "Existing real CLI Review/Question/owner Repair/remeasure/follow-up and shared UI/Canvas consumption/Preview selection retained in full selected regression.",
+    "limits": "Protocol and byte identity evidence, not real model quality, full gameplay, touch/audio/platform compatibility or fresh-install reproducibility."
+  },
+  "failedExploration": [
+    {
+      "log": "/private/tmp/bgs-v3-editable-export-actual-chain.log",
+      "passed": 14,
+      "failed": 1,
+      "finding": "New real native editable variant found BGS workspace logs/index.json, logs/runtime-diagnostics.jsonl and transcripts/ were included in the initial source enumeration.",
+      "resolution": "Read actual SessionManager/rotation implementation, exclude its reserved record paths while retaining other logs files, assert original three source paths; no relaxed expectation or original log rewrite."
+    }
+  ],
+  "types": {
+    "frontend": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-editable-export-front-final-types.log"
+    },
+    "server": {
+      "exitCode": 2,
+      "diagnosticCount": 3556,
+      "baseline": "/private/tmp/bgs-v3-export-feedback-server-verified-types.log",
+      "addedDiagnostics": 0,
+      "removedDiagnostics": 0,
+      "log": "/private/tmp/bgs-v3-editable-export-server-final-types.log",
+      "note": "Exact diagnostic lines match baseline; whole-server typecheck still fails."
+    }
+  },
+  "limitations": [
+    "deliveryEligible:false retained; static Web engineering export only, not native/server/XR package or full game acceptance.",
+    "No Claude Code native source edits or real generated project/evidence edits, paid provider call, deployment/restart or real database migration.",
+    "Source-copy build is not an OS/network sandbox. Installed dependency hashes/runtime identity are explicit build operands; fresh installation and bit-reproducible builds are not guaranteed.",
+    "ZIP remains memory-collected ZIP32 with source/dependency scanning cost; no big-project performance claim. Executable file metadata/empty-directory portability are not certified.",
+    "Real database competition/recovery and deployed full Dashboard browser download/interaction not exercised. Existing old BeeGameLivePreviewPage avatar/jsdom Path2D failures are not claimed fixed.",
+    "Initial planning/conversational change UI, formal source editing, other target consumption/whole-game coverage remain incomplete. Optional new task/check fields do not permit older executors to ignore source-copy build qualification."
+  ],
+  "hashes": [
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/editable-project.ts",
+      "sha256": "d6ee23658a1196d3f720415af1dd2baac0fa5aaf13979263cabda44a822592e7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/editable-project.test.ts",
+      "sha256": "c5741593cd0d1b3e6584c922b9503fe0669847b0387df7291206775e93143331"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+      "sha256": "889e7754c0b37e4da2a8e8515a6bddf0febc613d326348f92df725fd408216df"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts",
+      "sha256": "460e0213f9057d599089c29f454408348535a7f6554e725ee8fc217941d302b2"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/context.ts",
+      "sha256": "9431752365dbc6e43beb977f605551277fc897d60333fab8c37de42ab6035725"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts",
+      "sha256": "f8dad9986955fcf7b5339d27181bdb63c5d7358c2a3f431637e6a457e35faa17"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+      "sha256": "1a809efd3449134e54c961ab7eb693c8dbf205a3ffaf456f373c141c6ba634d3"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/native-integration.test.ts",
+      "sha256": "e2bed0aff490079e3e66e8030edd721012cff36eb7730136fd6022835aac1ed9"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/app.ts",
+      "sha256": "46e85feb189e1e9b5c3984e60e5c972aaf957e2b69cc426e735445b589c9f462"
+    },
+    {
+      "path": "apps/frontend/src/services/workflowV3Api.ts",
+      "sha256": "f12cfc939776989179feaf0af9e2da1cbaba0128fc0631b0ef0bd603aa6c7eb1"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.tsx",
+      "sha256": "ef131db8ac385785311853bee992499ded29690f0d6e72a7a8cac71417efbd3e"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.test.tsx",
+      "sha256": "c8426c558c78e5778d79b833db0bf14be8f0203ad12f941b21b8d927f32116a4"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.tsx",
+      "sha256": "eb5a40e0847870ffb7f78587880bda486224e1faba361d7a5bcb147b0535755d"
+    },
+    {
+      "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+      "sha256": "b095665e4af543b086aa3add15aeeee0bd1ca156b3f6729d0c6a3759231816e4"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-editable-export-core-final.log",
+      "sha256": "cc2873552897b6534968a4c8db548333c8228f806047416660166f8d4c6edbe7"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-editable-export-front.log",
+      "sha256": "6cdc691e03f574bbe0fd36cde55cad8c99dceeac60c554457c58c920a6f083a1"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-editable-export-legacy-package-final.log",
+      "sha256": "ff43b0cd94b7fb32fa88d54e39289fe94a41979fc4e998a3ddb1f34cd636d17f"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-editable-export-actual-chain.log",
+      "sha256": "bb8ff220ba0551e52e84a75ba535a97f2b688cb75f9298cc5845a7c3348aef28"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-editable-export-actual-chain-verified.log",
+      "sha256": "0736142ed176f1228af418f70971e1ce7a6377fb3e06b3a3b38236af0d70cf80"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-editable-export-front-final-types.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-editable-export-server-final-types.log",
+      "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb"
+    }
+  ],
+  "regression": [
+    {
+      "kind": "Final V3 plus shared Preview",
+      "passed": 158,
+      "failed": 0,
+      "files": 23,
+      "assertions": 1151,
+      "log": "/private/tmp/bgs-v3-editable-export-core-final.log"
+    },
+    {
+      "kind": "Frontend selected task/export/Preview and existing viewer controls",
+      "passed": 151,
+      "failed": 0,
+      "files": 7,
+      "log": "/private/tmp/bgs-v3-editable-export-front.log"
+    },
+    {
+      "kind": "Existing canonical project-package compatibility",
+      "passed": 1,
+      "failed": 0,
+      "files": 1,
+      "assertions": 10,
+      "log": "/private/tmp/bgs-v3-editable-export-legacy-package-final.log"
+    },
+    {
+      "kind": "Verified focused actual native and source-copy/extracted-browser chain; same identities already counted above",
+      "passed": 16,
+      "failed": 0,
+      "files": 2,
+      "assertions": 225,
+      "log": "/private/tmp/bgs-v3-editable-export-actual-chain-verified.log"
+    }
+  ],
+  "distinctSelectedTests": 310
+}

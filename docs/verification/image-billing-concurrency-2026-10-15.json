@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-15",
+  "scope": "User-authorized live PostgreSQL multi-connection verification: two different new request IDs retry the same content of an existing committed unresolved reservation. No provider calls, game edits or committed test billing changes.",
+  "database": "https://bgs.phantominfra.com/project/default",
+  "deploymentAudit": "docs/verification/image-billing-deployment-2026-10-15.json",
+  "deployedFunctionBodyMd5": "fac151c2aaede53eb11d7a2b2d991338",
+  "marker": "bgs-billing-race-879450a6",
+  "method": {
+    "baseline": "Read one existing reserved charge. Keep user, project, digest and original request identity inside SQL; export only hashes and assertion results. Do not create or modify the original reservation.",
+    "connections": "Two independent SQL Editor requests execute BEGIN ... ROLLBACK. Each invokes the actual deployed beegame_image_billing with a distinct new request ID, the same original content digest, amount=1 micro-Credit and budget=1 micro-Credit. The unresolved-reservation branch must return before new reservation or budget accounting.",
+    "overlapProof": "After its RPC returns, connection A keeps the transaction-level wallet advisory lock. It checks pg_stat_activity with refreshed statistics until connection B is active and waiting on an advisory lock, and pg_blocking_pids(B) includes A. After observing this, A waits one second and rolls back. B then returns its receipt and rolls back. Missing overlap or changed baseline causes an exception, not a pass.",
+    "timeouts": "statement_timeout=30s, lock_timeout=12s, idle_in_transaction_session_timeout=35s; A waits at most 20s for proven overlap.",
+    "rollback": "Both complete SQL batches end in ROLLBACK. An independent read-only transaction subsequently verifies unchanged wallet/project-ledger hashes, no new request rows, no remaining test transaction and no advisory locks for either backend."
+  },
+  "baseline": {
+    "queryUrl": "https://bgs.phantominfra.com/project/default/sql/3e0e8f05-824b-4205-8d57-90c655a12f0e",
+    "targetIdentityMd5": "f4716a8aff88eab9980bf1b42275ad62",
+    "completeWalletRowMd5": "679750c4fab6711b62b1d1739ccd1401",
+    "completeProjectLedgerMd5": "58f47cf4f381838568c75c86f0ecb733",
+    "deployedSourceMatches": true
+  },
+  "connectionA": {
+    "queryUrl": "https://bgs.phantominfra.com/project/default/sql/cff49943-73f2-4f12-93fa-6b6773f9c69c",
+    "sqlSha256": "34c1983d0b3f54fb7533bfa41b82e3dfd655131da33e6615facea3e11dc45641",
+    "pastedSqlMatched": true,
+    "requestId": "bgs-billing-race-879450a6-A",
+    "backendPid": 1521758,
+    "created": false,
+    "blockedByOriginal": true,
+    "rpcStartedAt": "2026-10-14T18:27:00.025952+00:00",
+    "rpcFinishedAt": "2026-10-14T18:27:00.02719+00:00",
+    "rpcElapsedMs": 1.238,
+    "observedBlockedConnectionPid": 1521766,
+    "observedWaitEvent": "advisory",
+    "independentConnectionLockWaitObserved": true,
+    "walletUnchanged": true,
+    "ledgerUnchanged": true,
+    "transactionEnd": "ROLLBACK"
+  },
+  "connectionB": {
+    "queryUrl": "https://bgs.phantominfra.com/project/default/sql/02f13294-a854-42cd-a39c-d06f4d805fac",
+    "sqlSha256": "f19eecb20bd1dc842a679a6ce9525c76edea7c50df3a1ceb824f758e17e7ddd0",
+    "pastedSqlMatched": true,
+    "requestId": "bgs-billing-race-879450a6-B",
+    "backendPid": 1521766,
+    "created": false,
+    "blockedByOriginal": true,
+    "rpcStartedAt": "2026-10-14T18:27:00.303285+00:00",
+    "rpcFinishedAt": "2026-10-14T18:27:01.353088+00:00",
+    "rpcElapsedMs": 1049.803,
+    "walletUnchanged": true,
+    "ledgerUnchanged": true,
+    "transactionEnd": "ROLLBACK"
+  },
+  "independentPostflight": {
+    "queryUrl": "https://bgs.phantominfra.com/project/default/sql/0039cd93-e68d-4664-bfe0-186be911000e",
+    "passed": [
+      "original_reservation_unchanged",
+      "wallet_matches_before_concurrency",
+      "ledger_matches_before_concurrency",
+      "no_new_request_records",
+      "both_test_transactions_ended",
+      "test_advisory_locks_released",
+      "deployed_function_unchanged"
+    ]
+  },
+  "screenshots": [
+    "/private/tmp/bgs-image-billing-concurrency-A-2026-10-15.png",
+    "/private/tmp/bgs-image-billing-concurrency-postflight-2026-10-15.png"
+  ],
+  "boundaries": {
+    "providerCalls": 0,
+    "modelCalls": 0,
+    "gameArtifactsModified": false,
+    "applicationCodeChanged": false,
+    "databaseFunctionChanged": false,
+    "existingReservationReconciled": false,
+    "committedBillingChanges": false,
+    "newReservationRows": 0,
+    "note": "This proves concurrent renamed retries against an existing committed unresolved reservation. It is not a test of two first-ever requests with no existing reservation, an HTTP generation-route test, or a stress/load test."
+  }
+}

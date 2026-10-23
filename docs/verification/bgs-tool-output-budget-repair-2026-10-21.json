@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-21",
+  "baselineCommit": "4c92dbe3c",
+  "scope": {
+    "BGS": true,
+    "CodexChanges": false,
+    "builtinSkillChanges": false,
+    "projectArtifactChanges": false,
+    "modelCalls": 0,
+    "serviceRestarts": 0
+  },
+  "changes": [
+    "BGS startup explicitly supplies native tool_output_token_limit=10000 estimated tokens instead of unknown-model fallback 10000 bytes. Existing CLI truncation and smaller per-call budgets remain in force; no new config framework, retry or workflow stage.",
+    "Existing on-demand navigation names bun check-content.mjs --format uiLayoutContract and bun resources.mjs --contract registration. --format still lists other sections; schemas remain in existing owners."
+  ],
+  "validation": {
+    "baseline": "Before production change, the actual branded CLI with a loopback scripted Responses fixture truncated a 15KB generic reference and failed the new regression.",
+    "nativeRegression": {
+      "pass": 1,
+      "fail": 0,
+      "model": "unknown-fixture-model, no actual model",
+      "cases": [
+        "15KB ASCII reference complete",
+        "multibyte Chinese/emoji reference complete",
+        "JSON reference complete",
+        "60KB ASCII output still truncated",
+        "explicit 500-token per-call budget remains smaller",
+        "new CLI process resuming the same thread receives configured output budget"
+      ],
+      "requests": "4 scripted loopback requests across start/resume; no external model endpoint",
+      "note": "This tests existing native output-budget semantics, not exact tokenizer counts or every native tool."
+    },
+    "runnerAndNavigation": {
+      "pass": 68,
+      "fail": 0,
+      "skip": 3,
+      "note": "Three actual-browser paint/Preview cases intentionally skipped; all local runner and CLI navigation cases passed. Focused navigation case passed again after using filesystem access to check absent artifact directories."
+    },
+    "productionTypes": "tsc --noEmit -p tsconfig.json passed",
+    "diff": "git diff --check passed",
+    "sandbox": "Default sandbox blocked loopback listen; local test escalation approved, no permissions or production code relaxed."
+  },
+  "selfReview": [
+    "Only two production locations changed: configuration value plus comment, and one existing navigation string.",
+    "Full source pipeline verified through unmodified local CLI and its model-facing request; not merely a config-value assertion.",
+    "Resource and layout queries execute through existing generated adapters; no second schema, mandatory reading order or acceptance gate added.",
+    "Upper budget is native estimated tokens, not a promise of exact provider token counts. Returning previously omitted text can increase input; quality and aggregate token/time effects have not been model-tested.",
+    "No service restart or active task interruption. Existing running CLI instances keep their launch configuration; new configuration takes effect when BGS loads updated server code and starts/resumes a new CLI process.",
+    "Prior audit JSON is retained unmodified; no git commit was requested this turn."
+  ]
+}

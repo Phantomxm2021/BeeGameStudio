@@ -1,0 +1,83 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "start-compact-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "container": { "direction": "column", "gap": 0, "padding": [16, 16, 16, 16], "justify": "center", "align": "center" }
+        }
+      },
+      {
+        "id": "content",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "size": [288, 260],
+          "container": { "direction": "column", "gap": 16, "padding": [0, 0, 0, 0], "justify": "center", "align": "center" }
+        }
+      },
+      {
+        "id": "title",
+        "parentId": "content",
+        "role": "text",
+        "enabled": true,
+        "text": "打砖块",
+        "layout": { "size": [288, 48] },
+        "style": { "fontSize": 36, "align": "center", "color": "#7df9ff" }
+      },
+      {
+        "id": "instructions",
+        "parentId": "content",
+        "role": "text",
+        "enabled": true,
+        "text": "拖动挡板移动 · 点按发球",
+        "layout": { "size": [288, 24] },
+        "style": { "fontSize": 14, "lineHeight": 22, "align": "center", "color": "#b9b6d9" }
+      },
+      {
+        "id": "start-btn",
+        "parentId": "content",
+        "role": "button",
+        "enabled": true,
+        "text": "开始游戏",
+        "layout": { "size": [240, 48] },
+        "actions": { "onActivate": "START" },
+        "style": { "fontSize": 18 }
+      },
+      {
+        "id": "hero-wall",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "top-center",
+          "position": [0, 32],
+          "size": [174, 42],
+          "item": { "absolute": true }
+        },
+        "data": { "treatment": "hero-brick-pattern" },
+        "style": { "background": { "color": "#141130", "radius": 6 } }
+      },
+      {
+        "id": "mute-btn",
+        "parentId": "root",
+        "role": "button",
+        "enabled": true,
+        "text": "静音",
+        "layout": { "anchor": "bottom-right", "position": [-12, -12], "size": [64, 44], "item": { "absolute": true } },
+        "actions": { "onActivate": "TOGGLE_MUTE" }
+      }
+    ]
+  }
+}

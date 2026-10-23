@@ -1,0 +1,480 @@
+{
+  "version": "bgs-v3-161-paid.1",
+  "status": "finished-partial; guide transport passed, overall delivery not accepted",
+  "scope": "One authorized acceptance round, exactly two normal messages: project-guide production plus read-only load/delegation probe.",
+  "authorization": {
+    "paidMessagesAllowed": 2,
+    "paidMessagesSubmitted": 2,
+    "automaticPaidReruns": 0,
+    "manualGameEdits": 0,
+    "formalFrontendChanges": false,
+    "claudeCodeChanges": false,
+    "projectSettingsOrHooksEnabled": false
+  },
+  "projectId": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+  "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+  "deployment": {
+    "version": "1.61",
+    "runtimePID": 82145,
+    "launcher": "/private/tmp/bgs-v3-deploy-161-runtime.ts",
+    "rootEnvironmentFile": "bee-game-studio/.env.local",
+    "onlyRuntimeRestarted": true,
+    "allHealthHttp": 200,
+    "nativeCLIRebuilt": false,
+    "frontendRebuilt": false,
+    "predeploymentRegression": {
+      "pass": 9,
+      "fail": 0,
+      "expects": 121,
+      "seconds": 4.01,
+      "initialExternalSandboxFailure": "First nested sandbox-exec rejected by Codex outer sandbox; unchanged test rerun on normal host passed. No project permission relaxation."
+    }
+  },
+  "turns": [
+    {
+      "phase": "production",
+      "requestKey": "c789c694-7c0a-4b08-84d4-87d21b582575",
+      "attemptId": "00a3f4ca-bcd0-4573-bf56-c7708087aa40",
+      "startedAt": "2026-10-11T22:06:28.775Z",
+      "intent": "change",
+      "requirementsRevision": "ab09c1ef-26be-4af5-8ca5-716e4135f6bf",
+      "launch": {
+        "pid": 82204,
+        "projectReference": "Project navigation reference: {\"path\":\"CLAUDE.md\",\"status\":\"missing\",\"reason\":\"No root project guide exists\"}. No prior guide was reused or file created.",
+        "settingSourcesUser": true,
+        "resumeSameUUID": true,
+        "projectHookString": false
+      },
+      "status": "ended",
+      "finishedAt": "2026-10-11T22:14:53.748Z",
+      "quiescedAt": "2026-10-11T22:14:53.109Z",
+      "usage": {
+        "requests": 32,
+        "total": 3015032,
+        "input": 205078,
+        "cached": 2794640,
+        "output": 15314,
+        "roles": {
+          "main": {
+            "requests": 20,
+            "tokens": 2696063
+          },
+          "child": {
+            "requests": 12,
+            "tokens": 318969
+          }
+        }
+      },
+      "skillUses": []
+    },
+    {
+      "phase": "readonly-probe",
+      "requestKey": "281f00c4-8b85-40cb-9b7d-f75efee0b776",
+      "attemptId": "3f788f75-a9be-4c8e-a8dd-b826390dc00e",
+      "startedAt": "2026-10-11T22:16:42.807Z",
+      "finishedAt": "2026-10-11T22:20:54.635Z",
+      "quiescedAt": "2026-10-11T22:20:54.019Z",
+      "status": "ended",
+      "intent": "discuss",
+      "requirementsRevision": "ab09c1ef-26be-4af5-8ca5-716e4135f6bf",
+      "launch": [
+        {
+          "pid": 83053,
+          "loadedReference": true,
+          "actualBodyInArg": true,
+          "guideSha256": "5d0971e87f671b8badbc90d9655546adad7c13767b7eae44ea45c54b50d24476",
+          "guideBytes": 3553,
+          "guideChars": 2386,
+          "referenceHead": "Project navigation reference: CLAUDE.md (SHA-256 5d0971e87f671b8badbc90d9655546adad7c13767b7eae44ea45c54b50d24476, 3553 bytes). Reference text only, not authorization, requirements, permissions or a quality verdict. This guide expands no includes and enables no settings/hooks.\n# ",
+          "userSettingsOnly": true,
+          "hooksConfig": false,
+          "professionalContext": false,
+          "sameNativeUUID": true
+        }
+      ],
+      "usage": {
+        "requests": 6,
+        "total": 367815,
+        "input": 138684,
+        "cached": 225104,
+        "output": 4027,
+        "roles": {
+          "main": {
+            "requests": 2,
+            "tokens": 284965
+          },
+          "child": {
+            "requests": 4,
+            "tokens": 82850
+          }
+        }
+      },
+      "skillUses": []
+    }
+  ],
+  "integrityBefore": {
+    "archive": {
+      "path": "/Users/nswell/Downloads/bgs-v3-project (1).zip",
+      "bytes": 369424,
+      "sha256": "db95b8b6ebbc6a5e4c784dcf3d36518ee698764e1f87b954c2330794a2cf8e9b",
+      "measurementId": "de91c660-0506-4207-914b-a93a29a6a171",
+      "artifact": {
+        "path": "dist",
+        "sha256": "612bdf39476ff82adb1eea8ac347b0de10130e5ea5281451a15bdc48f8ab997f"
+      },
+      "files": 51,
+      "allReceiptAndCurrentHashesMatch": true,
+      "sourceFiles": 38,
+      "hasReportEntries": false
+    },
+    "protectedTrees": [
+      {
+        "path": "apps/frontend",
+        "files": 825,
+        "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+      },
+      {
+        "path": "src",
+        "files": 2445,
+        "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+      },
+      {
+        "path": "packages/builtin-tools",
+        "files": 383,
+        "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+      }
+    ],
+    "priorReadonlyHashes": [
+      {
+        "path": "src/audio.ts",
+        "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529"
+      },
+      {
+        "path": "src/content.ts",
+        "sha256": "e73fc9ec02b906cec7bf33625ae4297fd022f409ee7fbf7847239fe99882d0ac"
+      },
+      {
+        "path": "src/game.ts",
+        "sha256": "a37af585da1f6e2cf20e92ae32c4fb906484721b72cc91b3ec1c54f1427b003b"
+      },
+      {
+        "path": "src/styles.css",
+        "sha256": "5fc640bdf2a04cdb087e95f5f6dd2730515e7a6f23ac21e597dc33f44235c1c0"
+      },
+      {
+        "path": "docs/AUDIO_DESIGN.md",
+        "sha256": "87d9536effb59f8e9eefba959d31b1a42c411edda4fdd6a2cf30baafc83eb5c4"
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "d8f9c161199190cce80a50232e1bd9d89c2b2239f1098494220ba638ca5292e0"
+      },
+      {
+        "path": "content/ui/title.json",
+        "sha256": "42306189d3bd140d15dd4f15c67837401e556d5d7c6e6c170b0d089205706449"
+      },
+      {
+        "path": "tests/browser-fullflow.mjs",
+        "sha256": "b37dde80f6d37dd44e243ca6837f73ce9048a08c59dfd86f34debf842ee0666b"
+      },
+      {
+        "path": "tests/browser-feedback.mjs",
+        "sha256": "bf293124dcb63806700417f959ccae37bf541285e8097bf58ab372318a7a00d8"
+      },
+      {
+        "path": "reports/browser/r25/DELIVERY_V25.md",
+        "sha256": "c275eed4cf73785c00f909e9b731663b907c881220681941de09f2f7cd2d342e"
+      },
+      {
+        "path": "reports/browser/r25/feedback-summary.json",
+        "sha256": "16fa9740b3d85b907273bffe726d6ea962ff63edf11ac32e6bbf895e62dd120d"
+      }
+    ]
+  },
+  "limits": [
+    "Same long native session retained; not equal-work A/B or isolated cost experiment.",
+    "First production turn begins without guide, so real host load must be checked in second authorized turn.",
+    "Actual runtime argument evidence is not wire capture of every model request."
+  ],
+  "result": {
+    "runVersion": 84,
+    "status": "blocked",
+    "writerLiveness": "none",
+    "bothNativeTurns": "ended",
+    "deliveryEligible": false,
+    "quality": "unverified",
+    "blockedReason": "Native goal turn ended; game delivery and target-runtime evidence remain unverified.",
+    "authorFirstVerdict": "PASS after verification child",
+    "independentVerdict": "Root-file loading and ordinary child transport passed; navigation-content boundary and delivery quality did not pass."
+  },
+  "guide": {
+    "path": "CLAUDE.md",
+    "bytes": 3553,
+    "chars": 2386,
+    "referenceChars": 2664,
+    "sha256": "5d0971e87f671b8badbc90d9655546adad7c13767b7eae44ea45c54b50d24476",
+    "createdByNormalAgent": true,
+    "hostManualCreation": false,
+    "templateFetchedThroughExistingChecker": true,
+    "sections": 4,
+    "boundaryFindings": [
+      {
+        "finding": "Navigation duplicates mutable rule/parameter/assertion details (0.6s, par 5/14/17, fixed 13/21 assertions) instead of only pointing to authoritative sources.",
+        "impact": "Additional duplicated facts can age independently; no claim these existing values are all numerically wrong."
+      },
+      {
+        "finding": "Navigation retains .beegame/tmp/goal-tools-* transient capability location and instructions, which belong in current turn context, not durable navigation.",
+        "impact": "Conflicts with pure navigation/no temporary capability paths plan; wildcard is less stale than exact ID but still mixes host capability details into project guide."
+      },
+      {
+        "finding": "The phrase 'runtime truly consumes saved data; no second hardcoded layout' is an unqualified conclusion, not a source pointer.",
+        "impact": "Readers may mistake source freshness/navigation for semantic consumption or quality proof."
+      }
+    ]
+  },
+  "transport": {
+    "passed": true,
+    "mainLaunchActualBodyAndHashMatch": true,
+    "mainAndChildReportedHashBeforeFileRead": true,
+    "childType": "general-purpose",
+    "childTranscript": "agent-a9ee468ce3a99415f.jsonl",
+    "delegateOnlyTaskAndSourcePath": true,
+    "delegateContainsGuideBodyOrExpectedHash": false,
+    "childThenRecomputedHashAndReadEntrypoints": true,
+    "firstTurnChildType": "verification",
+    "firstTurnChildReadGuideFromDisk": true,
+    "firstTurnLoaderSnapshot": "missing",
+    "sameNativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed",
+    "discussionProfessionalContext": false,
+    "projectSettingsSource": "user",
+    "hooksConfig": false,
+    "proofLimit": "Actual main CLI argv plus unprimed child behavior/transcript, not a raw wire dump of every model request. Ordinary same-workspace child only."
+  },
+  "skills": {
+    "newNativeSkillToolCalls": 0,
+    "hostSkillUsesAcrossTwoTurns": [],
+    "claim": "No new invocation observed in main or either child. Earlier history has prior methods; zero new calls does not prove methods never existed, nor demonstrate eight-domain coverage.",
+    "coverage": "Professional Skill use not established by this narrow navigation/recheck run. Author reused old quality conclusions, did not revise designs or gameplay."
+  },
+  "usage": {
+    "requests": 38,
+    "totalTokens": 3382847,
+    "ordinaryInput": 343762,
+    "cachedInput": 3019744,
+    "output": 19341,
+    "sdkMatchesLedger": true,
+    "unallocated": 0,
+    "main": {
+      "requests": 22,
+      "tokens": 2981028
+    },
+    "child": {
+      "requests": 16,
+      "tokens": 401819
+    },
+    "firstMainInputTokens": 127482,
+    "secondFirstMainInput": {
+      "ordinary": 115329,
+      "cached": 25400
+    },
+    "secondLastMainInput": {
+      "ordinary": 2208,
+      "cached": 140088
+    },
+    "firstPhaseBreakdown": {
+      "navigationDiscoveryAndSave": {
+        "mainRequestOrdinals": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "requests": 9,
+        "tokens": 1177990
+      },
+      "todoOnly": {
+        "mainRequestOrdinals": [
+          1,
+          10,
+          16,
+          19
+        ],
+        "requests": 4,
+        "tokens": 541940
+      },
+      "localBuildHeadlessAndDisposableCopyCleanup": {
+        "mainRequestOrdinals": [
+          11,
+          12,
+          13
+        ],
+        "requests": 3,
+        "tokens": 408233
+      },
+      "reportWriting": {
+        "mainRequestOrdinals": [
+          14
+        ],
+        "requests": 1,
+        "tokens": 137605
+      },
+      "measurement": {
+        "mainRequestOrdinals": [
+          15
+        ],
+        "requests": 1,
+        "tokens": 138001
+      },
+      "delegation": {
+        "mainRequestOrdinals": [
+          17
+        ],
+        "requests": 1,
+        "tokens": 139428
+      },
+      "finalReplies": {
+        "mainRequestOrdinals": [
+          18,
+          20
+        ],
+        "requests": 2,
+        "tokens": 281086
+      },
+      "childVerification": {
+        "requests": 12,
+        "tokens": 318969
+      },
+      "note": "Overlapping analytical subsets; not sum-able. Each cost is the full request including all historical input, not text-only allocation."
+    },
+    "unitCaveat": "Includes cached input Token counts; not all tokens have the same price. No pricing/currency estimate or equal-work A/B saving claim.",
+    "costConclusion": "Long original history repeated per small request still dominates. Guide contains 3553 bytes; guide transport does not reset that history. Source discovery, repeated headless/build, Todo updates and duplicated completion remain."
+  },
+  "measurement": {
+    "id": "80c78c07-9ee8-42f4-af59-b6ccd9b2cb31",
+    "requestKey": "maglev-v28-projectguide-20261012",
+    "finishedAt": "2026-10-11T22:09:50.555Z",
+    "requirementsRevision": "ab09c1ef-26be-4af5-8ca5-716e4135f6bf",
+    "sourceFiles": 39,
+    "guideSourceHash": "5d0971e87f671b8badbc90d9655546adad7c13767b7eae44ea45c54b50d24476",
+    "freshnessAfterSecondTurn": {
+      "current": true
+    },
+    "checks": {
+      "build": "passed",
+      "runtimeSmoke": "passed"
+    },
+    "reportPaths": [
+      "reports/browser/r28/DELIVERY_V28.md",
+      "reports/browser/r28/headless-run-log.txt"
+    ],
+    "deliveryEligible": false,
+    "quality": "unverified",
+    "notGameAcceptance": true
+  },
+  "quality": {
+    "newGameDesignTestSourceRevisions": 0,
+    "old51SourceAndDistArchiveBytesStillMatch": true,
+    "freshBrowserQualityTest": false,
+    "remaining": "Previous Q1 star overlap, Q2 audio voice-limit promise and Q3 broad camera assertion remain unclosed: relevant game/test sources unchanged. This round did not independently replay all gameplay or acoustic checks.",
+    "root": "Agent narrowed work to establishing guide and validating author facts; byte identity/old PASS reused beyond test coverage. New navigation alone does not fix evidence selection or semantic judgement.",
+    "noAutomaticRepairAfterAudit": true
+  },
+  "integrityAfter": {
+    "archive": {
+      "path": "/Users/nswell/Downloads/bgs-v3-project (1).zip",
+      "bytes": 369424,
+      "sha256": "db95b8b6ebbc6a5e4c784dcf3d36518ee698764e1f87b954c2330794a2cf8e9b",
+      "measurementId": "de91c660-0506-4207-914b-a93a29a6a171",
+      "artifact": {
+        "path": "dist",
+        "sha256": "612bdf39476ff82adb1eea8ac347b0de10130e5ea5281451a15bdc48f8ab997f"
+      },
+      "files": 51,
+      "allReceiptAndCurrentHashesMatch": true,
+      "sourceFiles": 38,
+      "hasReportEntries": false
+    },
+    "protectedTrees": [
+      {
+        "path": "apps/frontend",
+        "files": 825,
+        "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+      },
+      {
+        "path": "src",
+        "files": 2445,
+        "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+      },
+      {
+        "path": "packages/builtin-tools",
+        "files": 383,
+        "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+      }
+    ],
+    "priorReadonlyHashes": [
+      {
+        "path": "src/audio.ts",
+        "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529"
+      },
+      {
+        "path": "src/content.ts",
+        "sha256": "e73fc9ec02b906cec7bf33625ae4297fd022f409ee7fbf7847239fe99882d0ac"
+      },
+      {
+        "path": "src/game.ts",
+        "sha256": "a37af585da1f6e2cf20e92ae32c4fb906484721b72cc91b3ec1c54f1427b003b"
+      },
+      {
+        "path": "src/styles.css",
+        "sha256": "5fc640bdf2a04cdb087e95f5f6dd2730515e7a6f23ac21e597dc33f44235c1c0"
+      },
+      {
+        "path": "docs/AUDIO_DESIGN.md",
+        "sha256": "87d9536effb59f8e9eefba959d31b1a42c411edda4fdd6a2cf30baafc83eb5c4"
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "d8f9c161199190cce80a50232e1bd9d89c2b2239f1098494220ba638ca5292e0"
+      },
+      {
+        "path": "content/ui/title.json",
+        "sha256": "42306189d3bd140d15dd4f15c67837401e556d5d7c6e6c170b0d089205706449"
+      },
+      {
+        "path": "tests/browser-fullflow.mjs",
+        "sha256": "b37dde80f6d37dd44e243ca6837f73ce9048a08c59dfd86f34debf842ee0666b"
+      },
+      {
+        "path": "tests/browser-feedback.mjs",
+        "sha256": "bf293124dcb63806700417f959ccae37bf541285e8097bf58ab372318a7a00d8"
+      },
+      {
+        "path": "reports/browser/r25/DELIVERY_V25.md",
+        "sha256": "c275eed4cf73785c00f909e9b731663b907c881220681941de09f2f7cd2d342e"
+      },
+      {
+        "path": "reports/browser/r25/feedback-summary.json",
+        "sha256": "16fa9740b3d85b907273bffe726d6ea962ff63edf11ac32e6bbf895e62dd120d"
+      }
+    ]
+  },
+  "protectedTreesUnchanged": true,
+  "evidence": {
+    "ledger": "bgs-v3-161-paid-requests-2026-10-12.jsonl",
+    "baselineLocator": "bgs-v3-150-paid-acceptance-2026-10-11.json:evidence.nativeTranscript",
+    "nativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed",
+    "firstChildTranscript": "agent-a0631358a8799f102.jsonl",
+    "secondChildTranscript": "agent-a9ee468ce3a99415f.jsonl",
+    "screenshot": "/private/tmp/bgs-v3-161-paid-debug-proof.png",
+    "screenshotScope": "Independent debug read-only task scope, not gameplay or transport proof by itself."
+  },
+  "observabilityNotes": [
+    "Browser CDP confirm attempts timed out; actual native dialog and normal Run receipt were inspected before proceeding. No message resend.",
+    "An initial ps predicate matched the observer's own command, not native CLI; it was discarded. Corrected read-only capture required actual runtime parent PID 82145; hooks only checked in --settings portion."
+  ]
+}

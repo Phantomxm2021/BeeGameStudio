@@ -1,0 +1,340 @@
+{
+  "version": "bgs-v3-157-paid.1",
+  "status": "finished-not-accepted",
+  "authorization": {
+    "paidMessages": 1,
+    "automaticExtraPaidRuns": 0,
+    "manualGameEdits": 0,
+    "formalFrontendChanges": false,
+    "claudeCodeChanges": false
+  },
+  "projectId": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+  "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+  "requestKey": "f41f59f4-df1b-4e9b-90f9-d8e25633580b",
+  "attemptId": "ba96fc4b-e085-4e2a-841e-5994f37d8582",
+  "startedAt": "2026-10-11T16:56:02.667Z",
+  "requirementsRevision": "e088b14e-66dd-4037-91ef-71cd12fb409a",
+  "deployment": {
+    "version": "1.57",
+    "sourceCommit": "58f5ca48",
+    "runtimePID": 70883,
+    "launcher": "/private/tmp/bgs-v3-deploy-157-runtime.ts",
+    "rootEnvironmentFile": "bee-game-studio/.env.local",
+    "onlyRuntimeRestarted": true,
+    "allHealthHttp": 200,
+    "nativeCLIRebuilt": false,
+    "frontendRebuilt": false,
+    "predeploymentRegression": {
+      "pass": 36,
+      "fail": 0,
+      "expects": 400
+    }
+  },
+  "comparison": {
+    "priorSDKTokens": 2260974,
+    "equalWorkAB": false,
+    "sameNativeHistory": true
+  },
+  "scope": "One normal independent-debug same-project message. No hard limits, manually authored game changes, prefilled case repair, fixed Review dispatch or automatic paid retry.",
+  "submissionObservation": "Browser click timed out at a native confirmation. Read-only inspection verified the exact prepared request was accepted once; no resend.",
+  "finishedAt": "2026-10-11T17:06:32.684Z",
+  "quiescedAt": "2026-10-11T17:06:31.629Z",
+  "elapsedSeconds": 630.017,
+  "model": "ark-code-latest (unchanged)",
+  "result": {
+    "runVersion": 76,
+    "status": "blocked",
+    "writerLiveness": "none",
+    "nativeTurn": "ended",
+    "deliveryEligible": false,
+    "quality": "unverified",
+    "blockedReason": "Native goal turn ended; measured inputs are current. Game-quality acceptance remains unverified.",
+    "agentVerdict": "PASS; zero revisions; no blocking gaps",
+    "independentVerdict": "Not accepted: partial handoff adoption, no demonstrated cost reduction, quality/verification gaps remain."
+  },
+  "usage": {
+    "sdkTotal": 2315274,
+    "ledgerTotal": 2315274,
+    "unallocated": 0,
+    "requests": 39,
+    "ordinaryInput": 191344,
+    "cachedInput": 2106960,
+    "output": 16970,
+    "main": {
+      "requests": 12,
+      "tokens": 1470004,
+      "firstInput": 119079,
+      "lastInput": 127293
+    },
+    "child": {
+      "requests": 27,
+      "tokens": 845270
+    },
+    "prior": {
+      "total": 2260974,
+      "requests": 33,
+      "main": 1834125,
+      "child": 426849
+    },
+    "totalChangePercent": 2.40162,
+    "compactionRequests": 0,
+    "historyReset": false,
+    "mainPhases": [
+      {
+        "requests": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "work": "Todo/handoff subset/mtime and consistency preparation",
+        "tokens": 479778
+      },
+      {
+        "requests": [
+          5,
+          6,
+          7
+        ],
+        "work": "Feedback/headless/r27 report/fresh measure",
+        "tokens": 365432
+      },
+      {
+        "requests": [
+          8,
+          9
+        ],
+        "work": "Todo and autonomous verification assignment",
+        "tokens": 246530
+      },
+      {
+        "requests": [
+          12
+        ],
+        "work": "Wait/communication",
+        "tokens": 124451
+      },
+      {
+        "requests": [
+          38,
+          39
+        ],
+        "work": "Server cleanup attempt and final reply",
+        "tokens": 253813
+      }
+    ],
+    "childPhases": [
+      {
+        "requests": [
+          10,
+          11,
+          13
+        ],
+        "work": "Project/handoff/source comparison",
+        "tokens": 55083
+      },
+      {
+        "requests": [
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23
+        ],
+        "work": "Mixed authority discovery/source searching/candidate hashes/help/content checks",
+        "tokens": 248126
+      },
+      {
+        "requests": [
+          24,
+          25,
+          26
+        ],
+        "work": "r27 report and screenshot dimensions/bytes",
+        "tokens": 94986
+      },
+      {
+        "requests": [
+          27
+        ],
+        "work": "Actual --authority and previous artifacts",
+        "tokens": 34429
+      },
+      {
+        "requests": [
+          28,
+          29,
+          30,
+          31,
+          32
+        ],
+        "work": "Previous tests/artifact identity and selected ART/AUDIO text",
+        "tokens": 189550
+      },
+      {
+        "requests": [
+          33,
+          34,
+          35,
+          36
+        ],
+        "work": "Repeat build/headless/HTTP smoke/cleanup",
+        "tokens": 176076
+      },
+      {
+        "requests": [
+          37
+        ],
+        "work": "Final PASS",
+        "tokens": 47020
+      }
+    ],
+    "overlappingTodoSubset": {
+      "requests": [
+        1,
+        4,
+        8
+      ],
+      "tokens": 362706
+    },
+    "interpretation": "Whole request cost includes history, not text-block attribution or guaranteed savings. Todo subset already in main phases. Not equal-work A/B; no game/design/test production revisions."
+  },
+  "handoff": {
+    "mainCall": "call_f90afe09sh9k3olzzjliccw6",
+    "mainParserOmitted": [
+      "measurement.freshness",
+      "changes"
+    ],
+    "mainSelected": [
+      "status/blockedReason",
+      "requirements revision",
+      "measurement identities/time",
+      "sources valid/issues",
+      "report paths"
+    ],
+    "newBlockedReasonAccurate": true,
+    "mainRecognizedRequirementsStale": true,
+    "childReadFullHandoffAndDiscussedCurrentFreshness": true,
+    "partialAdoption": true,
+    "reason": "Currentness and byte identity do not prove professional quality. Old PASS was reused beyond its assertion coverage.",
+    "newUserEntryCharacters": 3317,
+    "newUserEntryContainsProfessionalCoverage": false,
+    "professionalTextSystemCharacters": 3668,
+    "oldHistoryRetained": true,
+    "characterCountsNotTokenAllocation": true,
+    "availableButNotObserved": [
+      "checkTextSeparation",
+      "checkNumericSamples",
+      "--scene-point"
+    ],
+    "authorityUsed": true,
+    "authorityDiscoveryStillRepeated": true
+  },
+  "measurement": {
+    "id": "1ed46e7a-3351-4ef0-ae15-f3f80109bb3e",
+    "requestKey": "maglev-v27-acceptance-20261012",
+    "finishedAt": "2026-10-11T16:58:27.561Z",
+    "requirementsRevision": "e088b14e-66dd-4037-91ef-71cd12fb409a",
+    "sourceFiles": 38,
+    "artifactSHA": "612bdf39476ff82adb1eea8ac347b0de10130e5ea5281451a15bdc48f8ab997f",
+    "checks": {
+      "build": "passed",
+      "runtimeSmoke": "passed"
+    },
+    "freshnessAfterWriterExit": true,
+    "reports": [
+      "reports/browser/r27/DELIVERY_V27.md",
+      "reports/browser/r27/feedback-summary.json"
+    ],
+    "previewLoaded": true,
+    "measurementNotGameAcceptance": true,
+    "measurementIdBackfilledIntoSource": false,
+    "postmeasurementNewUnboundAttachmentsTimingNotProved": true
+  },
+  "qualityFindings": [
+    {
+      "id": "Q1",
+      "status": "still-fails",
+      "finding": "Gray third star overlaps two-star result statistics.",
+      "evidence": [
+        "reports/browser/r27/h-k-2star.png",
+        "/private/tmp/bgs-v3-157-independent-2star.jpg"
+      ],
+      "root": "Nested span inherits generic display:block; tests count stars/text, not real text separation.",
+      "independentCheck": "Normal start/three dispatches/first-level two-star result, 7 operations vs par 5. No injected state or JSON, no debug jump, no project write."
+    },
+    {
+      "id": "Q2",
+      "status": "still-fails",
+      "finding": "AUDIO_DESIGN section 3 promises max two voices per sound; src/audio.ts has no active-voice limit.",
+      "root": "Old 21/21 signal/mute assertions omit concurrency; source and promise unchanged.",
+      "limitation": "Source/coverage check, not new acoustic listening acceptance."
+    },
+    {
+      "id": "Q3",
+      "status": "verification-gap",
+      "finding": "Saved s1 x560, camera test assumes x540. With camera cx540/zoom1.2, expected screen x664 not640; broad tealAround(640,456) still passes.",
+      "root": "Test expectation not derived from saved coordinate; wide sampling masks mismatch.",
+      "limitation": "Incorrect assertion, not proof all Scene consumption is wrong."
+    }
+  ],
+  "independentCoverage": {
+    "normalGameplay": "First level/two-star actual result only, not all levels or acoustic quality.",
+    "previewMeasurementId": "1ed46e7a-3351-4ef0-ae15-f3f80109bb3e",
+    "proofImage": "/private/tmp/bgs-v3-157-independent-2star.jpg",
+    "temporaryPreviewClosed": true
+  },
+  "cleanup": {
+    "childServerPID": 71649,
+    "port": 8941,
+    "verifiedCwd": "project/dist",
+    "observedBind": "IPv6 *:8941",
+    "leftAfterNativeEnd": true,
+    "agentLocalhostCleanupClaimInaccurate": true,
+    "auditorTerminatedOnlyVerifiedServer": true,
+    "manualProjectWrites": false
+  },
+  "integrity": {
+    "scope": "Non-hidden public files excluding node_modules/transcripts, compared before/after",
+    "protectedTrees": [
+      {
+        "path": "apps/frontend",
+        "files": 825,
+        "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+      },
+      {
+        "path": "src",
+        "files": 2445,
+        "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+      },
+      {
+        "path": "packages/builtin-tools",
+        "files": 383,
+        "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+      }
+    ],
+    "priorArchive": {
+      "path": "/Users/nswell/Downloads/bgs-v3-project (1).zip",
+      "bytes": 369424,
+      "sha256": "db95b8b6ebbc6a5e4c784dcf3d36518ee698764e1f87b954c2330794a2cf8e9b",
+      "measurementId": "de91c660-0506-4207-914b-a93a29a6a171",
+      "sources": 38,
+      "buildFiles": 13,
+      "all51ReceiptAndCurrentBytesMatch": true,
+      "newArchiveDownloadedThisRound": false
+    },
+    "productionGameDesignTestRevisions": 0
+  },
+  "evidence": {
+    "ledger": "bgs-v3-157-paid-requests-2026-10-12.jsonl",
+    "nativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed",
+    "childTranscript": "subagents/agent-a5fc36b3966deb990.jsonl",
+    "transcriptLocator": "docs/verification/bgs-v3-150-paid-acceptance-2026-10-11.json:evidence.nativeTranscript"
+  },
+  "remaining": "Long native history, coverage selection, repeated authority/build/closure and non-adoption remain. No system/game code changes after failed run, no automatic extra paid run."
+}

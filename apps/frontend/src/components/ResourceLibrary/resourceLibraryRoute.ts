@@ -1,3 +1,5 @@
+import { notifyWorkspaceRouteChanged } from '../../navigation/workspaceRoute'
+
 const RESOURCE_LIBRARY_QUERY = 'resourceLibrary'
 const RESOURCE_PACK_QUERY = 'resourcePack'
 
@@ -10,6 +12,7 @@ export function openResourceLibraryRoute(): void {
   const url = new URL(window.location.href)
   url.searchParams.set(RESOURCE_LIBRARY_QUERY, '1')
   window.history.pushState({ resourceLibrary: true }, '', url)
+  notifyWorkspaceRouteChanged()
 }
 
 export function closeResourceLibraryRoute(): void {
@@ -18,6 +21,7 @@ export function closeResourceLibraryRoute(): void {
   url.searchParams.delete(RESOURCE_LIBRARY_QUERY)
   url.searchParams.delete(RESOURCE_PACK_QUERY)
   window.history.replaceState({}, '', url)
+  notifyWorkspaceRouteChanged()
 }
 
 export function getResourcePackRoute(): string | undefined {
@@ -31,6 +35,7 @@ export function openResourcePackRoute(packId: string): void {
   url.searchParams.set(RESOURCE_LIBRARY_QUERY, '1')
   url.searchParams.set(RESOURCE_PACK_QUERY, packId)
   window.history.pushState({ resourceLibrary: true, resourcePack: packId }, '', url)
+  notifyWorkspaceRouteChanged()
 }
 
 export function closeResourcePackRoute(): void {
@@ -38,4 +43,5 @@ export function closeResourcePackRoute(): void {
   const url = new URL(window.location.href)
   url.searchParams.delete(RESOURCE_PACK_QUERY)
   window.history.replaceState({ resourceLibrary: true }, '', url)
+  notifyWorkspaceRouteChanged()
 }

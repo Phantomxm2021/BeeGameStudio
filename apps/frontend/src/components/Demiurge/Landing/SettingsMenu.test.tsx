@@ -1,32 +1,43 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { goModelCatalog } from '../../../../../../tests/fixtures/opencode-go';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsMenu } from './SettingsMenu';
+import { OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
+import { useSystemStore } from '../../../store/systemStore';
+import { getImageGenerationSettings, saveImageGenerationSettings, getPersonalImageConnection, savePersonalImageConnection } from '../../../services/imageGenerationApi';
+vi.mock('../../../services/imageGenerationApi', () => ({ getImageGenerationSettings: vi.fn(), saveImageGenerationSettings: vi.fn(), getPersonalImageConnection: vi.fn(), savePersonalImageConnection: vi.fn() }));
 
 const {
     createModelConfig,
+    deleteModelConfig,
     createMcpServer,
     deleteMcpServer,
     discoverActiveMcpServers,
     discoverMcpServers,
+    importDiscoveredMcpServer,
     getBeeGameWorkspaceSettings,
-    getWebToolsConfig,
     getRuntimeSettings,
     getInvitationPublicSettings,
     listModelConfigs,
+    listOpenCodeGoModels,
+    listModelCatalog,
     listInvitations,
     listMcpServers,
     saveRuntimeSettings,
     saveInvitationSettings,
-    saveWebToolsConfig,
     testMcpServer,
     createInvitation,
     deleteInvitation,
     updateInvitation,
     updateMcpServer,
     updateModelConfig,
+    saveModelConnection,
+    startModelLogin,
+    readModelLogin,
+    cancelModelLogin,
     getCreditSummary,
     getBillingCreditPacks,
     getBillingEvents,
@@ -40,28 +51,35 @@ const {
     runProjectRetention,
     showError,
     showSuccess,
+    showWarning,
 } = vi.hoisted(() => ({
     createModelConfig: vi.fn(),
+    deleteModelConfig: vi.fn(),
     createInvitation: vi.fn(),
     createMcpServer: vi.fn(),
     deleteInvitation: vi.fn(),
     deleteMcpServer: vi.fn(),
     discoverActiveMcpServers: vi.fn(),
     discoverMcpServers: vi.fn(),
+    importDiscoveredMcpServer: vi.fn(),
     getBeeGameWorkspaceSettings: vi.fn(),
     getInvitationPublicSettings: vi.fn(),
-    getWebToolsConfig: vi.fn(),
     getRuntimeSettings: vi.fn(),
     listInvitations: vi.fn(),
     listModelConfigs: vi.fn(),
+    listOpenCodeGoModels: vi.fn(),
+    listModelCatalog: vi.fn(),
     listMcpServers: vi.fn(),
     saveInvitationSettings: vi.fn(),
     saveRuntimeSettings: vi.fn(),
-    saveWebToolsConfig: vi.fn(),
     testMcpServer: vi.fn(),
     updateInvitation: vi.fn(),
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
+    saveModelConnection: vi.fn(),
+    startModelLogin: vi.fn(),
+    readModelLogin: vi.fn(),
+    cancelModelLogin: vi.fn(),
     getCreditSummary: vi.fn(),
     getBillingCreditPacks: vi.fn(),
     getBillingEvents: vi.fn(),
@@ -75,6 +93,7 @@ const {
     runProjectRetention: vi.fn(),
     showError: vi.fn(),
     showSuccess: vi.fn(),
+    showWarning: vi.fn(),
 }));
 
 const desktopBridge = {
@@ -83,17 +102,19 @@ const desktopBridge = {
 
 vi.mock('../../../services/modelConfigApi', () => ({
     createModelConfig,
+    deleteModelConfig,
     listModelConfigs,
+    listOpenCodeGoModels,
+    listModelCatalog,
     updateModelConfig,
+    saveModelConnection,
+    startModelLogin,
+    readModelLogin,
+    cancelModelLogin,
 }));
 
 vi.mock('../../../services/beeGameAdapter', () => ({
     getBeeGameWorkspaceSettings,
-}));
-
-vi.mock('../../../services/webToolsApi', () => ({
-    getWebToolsConfig,
-    saveWebToolsConfig,
 }));
 
 vi.mock('../../../services/runtimeSettingsApi', () => ({
@@ -115,6 +136,7 @@ vi.mock('../../../services/mcpServersApi', () => ({
     deleteMcpServer,
     discoverActiveMcpServers,
     discoverMcpServers,
+    importDiscoveredMcpServer,
     listMcpServers,
     testMcpServer,
     updateMcpServer,
@@ -144,7 +166,7 @@ vi.mock('../../../contexts/ToastContext', () => ({
     useToastContext: () => ({
         showError,
         showSuccess,
-        showWarning: vi.fn(),
+        showWarning,
         showToast: vi.fn(),
         dismissToast: vi.fn(),
         dismissAll: vi.fn(),
@@ -152,21 +174,22 @@ vi.mock('../../../contexts/ToastContext', () => ({
     }),
 }));
 
-const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(
+const settingsElement = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => (
     <SettingsMenu
         isOpen
         lang="zh"
         onClose={vi.fn()}
         onSetLang={vi.fn()}
         canManageWorkspace
-        canManageSecrets
         canManageRuntimeSettings
         canManageMcp
         canManageSkills
         canManageModelConfig
         {...props}
-    />,
+    />
 );
+
+const renderSettings = (props: Partial<ComponentProps<typeof SettingsMenu>> = {}) => render(settingsElement(props));
 
 const openMcpActionsMenu = async () => {
     await userEvent.click(screen.getByRole('button', { name: /操作/ }));
@@ -181,21 +204,30 @@ const openPlatformSettingsTab = async (name: string | RegExp) => {
     await userEvent.click(screen.getByRole('tab', { name }));
 };
 
+const openMcpSettings = async () => {
+    await userEvent.click(screen.getByRole('tab', { name: 'MCP' }));
+};
+
 const openUserSkillsSettings = async () => {
     await userEvent.click(screen.getByRole('tab', { name: '技能' }));
 };
 
 describe('SettingsMenu model settings', () => {
     beforeEach(() => {
+        startModelLogin.mockReset(); readModelLogin.mockReset(); cancelModelLogin.mockReset();
+        cancelModelLogin.mockResolvedValue({});
+        vi.mocked(getPersonalImageConnection).mockReset();
+        vi.mocked(getPersonalImageConnection).mockResolvedValue({ source: 'platform', provider: 'openai', baseUrl: 'https://api.openai.com/v1/images/generations', model: 'image-model', hasApiKey: false, hasUpstreamApiKey: false });
+        vi.mocked(savePersonalImageConnection).mockReset();
         localStorage.clear();
         Object.assign(window, { BeeGameDesktop: desktopBridge });
         desktopBridge.chooseWorkspacePath.mockReset();
+        listOpenCodeGoModels.mockResolvedValue(goModelCatalog);
         listModelConfigs.mockResolvedValue([]);
         getBeeGameWorkspaceSettings.mockResolvedValue({
             workspacePath: '/tmp/beegame-projects',
             isDefault: true,
         });
-        getWebToolsConfig.mockResolvedValue({});
         getRuntimeSettings.mockResolvedValue({});
         getInvitationPublicSettings.mockReset();
         getInvitationPublicSettings.mockResolvedValue({ required: false });
@@ -209,7 +241,6 @@ describe('SettingsMenu model settings', () => {
         updateInvitation.mockReset();
         listMcpServers.mockResolvedValue([]);
         saveRuntimeSettings.mockResolvedValue({});
-        saveWebToolsConfig.mockReset();
         saveRuntimeSettings.mockReset();
         createMcpServer.mockReset();
         deleteMcpServer.mockReset();
@@ -217,6 +248,7 @@ describe('SettingsMenu model settings', () => {
         discoverActiveMcpServers.mockResolvedValue([]);
         discoverMcpServers.mockReset();
         discoverMcpServers.mockResolvedValue([]);
+        importDiscoveredMcpServer.mockReset();
         testMcpServer.mockReset();
         testMcpServer.mockResolvedValue({
             ok: false,
@@ -234,7 +266,9 @@ describe('SettingsMenu model settings', () => {
         deleteUserSkill.mockResolvedValue({ deleted: true });
         showError.mockReset();
         showSuccess.mockReset();
+        showWarning.mockReset();
         createModelConfig.mockReset();
+        deleteModelConfig.mockReset();
         updateModelConfig.mockReset();
         updateMcpServer.mockReset();
     getCreditSummary.mockReset();
@@ -335,22 +369,118 @@ describe('SettingsMenu model settings', () => {
         });
     });
 
+    it('loads only the selected settings domain, even with all management permissions', async () => {
+        const reads = [listModelConfigs, getBeeGameWorkspaceSettings, getRuntimeSettings,
+            listMcpServers, listUserSkills, getInvitationPublicSettings, listInvitations,
+            getProjectLifecycleOverview, getCreditSummary, getBillingCreditPacks, getBillingEvents];
+        reads.forEach(read => read.mockClear());
+        renderSettings({ canManageInvitations: true, canManageLifecycle: true, canManageCredits: true });
+        reads.forEach(read => expect(read).not.toHaveBeenCalled());
+
+        await openPlatformSettings();
+        await screen.findByText('/tmp/beegame-projects');
+        expect(getBeeGameWorkspaceSettings).toHaveBeenCalledTimes(1);
+        reads.filter(read => read !== getBeeGameWorkspaceSettings)
+            .forEach(read => expect(read).not.toHaveBeenCalled());
+
+        await userEvent.click(screen.getByRole('tab', { name: '能力' }));
+        expect(getRuntimeSettings).toHaveBeenCalledTimes(1);
+        expect(listModelConfigs).not.toHaveBeenCalled();
+        expect(listMcpServers).not.toHaveBeenCalled();
+    });
+
+
+
+    it('waits for the initial capability settings before allowing edits or save', async () => {
+        let resolveSettings!: (value: { resourceLibraryEnabled: boolean }) => void;
+        getRuntimeSettings.mockImplementationOnce(() => new Promise(resolve => { resolveSettings = resolve; }));
+        renderSettings();
+        await openPlatformSettingsTab('能力');
+        expect(screen.getByRole('switch', { name: '资源库' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '保存设置' })).toBeDisabled();
+        await act(async () => { resolveSettings({ resourceLibraryEnabled: true }); });
+        expect(screen.getByRole('switch', { name: '资源库' })).toBeEnabled();
+        expect(screen.getByRole('switch', { name: '资源库' })).toBeChecked();
+    });
+
+    it('keeps an open model form and its secret draft when the language changes', async () => {
+        listModelConfigs.mockClear();
+        const { rerender } = renderSettings();
+        await openPlatformSettingsTab('模型');
+        await userEvent.click(screen.getByRole('button', { name: '添加模型配置' }));
+        await userEvent.type(screen.getByLabelText('API Key'), 'unsaved-model-key');
+        await userEvent.type(screen.getByLabelText('模型'), 'draft-model');
+
+        rerender(settingsElement({ lang: 'en' }));
+        expect(screen.getByLabelText('API Key')).toHaveValue('unsaved-model-key');
+        expect(screen.getByLabelText('Model')).toHaveValue('draft-model');
+        expect(listModelConfigs).toHaveBeenCalledTimes(1);
+    });
+
+
+
+    it('preserves queued MCP autosave across language changes and cancels it on close', async () => {
+        const server = { id: 'mcp_queued', name: 'Queued MCP', enabled: true, transport: 'http',
+            scope: 'beegame', url: 'http://127.0.0.1:8081', env: [], autoStart: true };
+        listMcpServers.mockResolvedValueOnce([server]);
+        updateMcpServer.mockResolvedValue({ ...server, url: 'http://127.0.0.1:8082' });
+        const { rerender } = renderSettings();
+        await openMcpSettings();
+        await screen.findByText(server.name);
+        const actions = screen.getAllByRole('button', { name: '操作' });
+        await userEvent.click(actions[actions.length - 1]);
+        await userEvent.click(screen.getByRole('menuitem', { name: '编辑' }));
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+            fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'http://127.0.0.1:8082' } });
+            rerender(settingsElement({ lang: 'en' }));
+            expect(screen.getByLabelText('URL')).toHaveValue('http://127.0.0.1:8082');
+            expect(updateMcpServer).not.toHaveBeenCalled();
+            await act(async () => { vi.advanceTimersByTime(450); });
+            expect(updateMcpServer).toHaveBeenCalledWith(server.id, expect.objectContaining({ url: 'http://127.0.0.1:8082' }));
+
+            fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'http://127.0.0.1:8083' } });
+            rerender(settingsElement({ lang: 'en', isOpen: false }));
+            await act(async () => { vi.advanceTimersByTime(450); });
+            expect(updateMcpServer).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('only replaces the content surface when navigating settings, not when data updates', async () => {
+        const user = userEvent.setup();
+        renderSettings();
+        const shell = screen.getByTestId('settings-modal-shell');
+        const general = screen.getByTestId('settings-modal-scroll-area');
+        expect(screen.getByRole('dialog')).toHaveClass('transition-[opacity,transform,scale]');
+        expect(screen.getByRole('dialog')).toHaveClass('motion-reduce:data-[starting-style]:scale-100');
+        await user.click(screen.getByRole('tab', { name: '技能' }));
+        const skills = screen.getByTestId('settings-modal-scroll-area');
+        expect(skills).not.toBe(general);
+        expect(screen.getByTestId('settings-modal-shell')).toBe(shell);
+        await screen.findByText('还没有用户技能。');
+        expect(screen.getByTestId('settings-modal-scroll-area')).toBe(skills);
+        await user.click(screen.getByRole('tab', { name: '通用', exact: true }));
+        expect(screen.getByTestId('settings-modal-scroll-area')).not.toBe(skills);
+        expect(screen.getByLabelText('语言选择')).toBeInTheDocument();
+    });
+
     it('renders the settings panel as a centered modal overlay', async () => {
         renderSettings();
-        await waitFor(() => expect(listModelConfigs).toHaveBeenCalled());
 
         const dialog = screen.getByRole('dialog', { name: '系统设置' });
-        expect(dialog.className).toContain('items-center');
-        expect(dialog.className).toContain('justify-center');
-        expect(dialog.className).toContain('bg-zinc-950/55');
+        expect(dialog.className).toContain('max-w-none');
+        expect(dialog.className).toContain('overflow-hidden');
+        expect(dialog.className).not.toContain('bg-zinc-950/55');
         expect(dialog.className).not.toContain('right-4');
         expect(dialog.className).not.toContain('top-20');
+        expect(dialog).toHaveAttribute('aria-label', '系统设置');
         expect(screen.getByTestId('settings-modal-sidebar')).toBeInTheDocument();
-        const settingsShell = screen.getByTestId('settings-modal-shell');
         const settingsContent = screen.getByTestId('settings-modal-content');
         const settingsScrollArea = screen.getByTestId('settings-modal-scroll-area');
-        expect(settingsShell).toHaveClass('h-[min(620px,calc(100vh-2rem))]');
-        expect(settingsShell).toHaveClass('w-[min(820px,calc(100vw-2rem))]');
+        expect(dialog).toHaveClass('h-[min(680px,calc(100dvh-1rem))]');
+        expect(dialog).toHaveClass('w-[min(820px,calc(100vw-1rem))]');
         expect(settingsContent).toBeInTheDocument();
         expect(settingsScrollArea).toHaveClass('overflow-y-auto');
         expect(settingsScrollArea).toHaveClass('min-h-0');
@@ -360,23 +490,133 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '账户' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'MCP' })).toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '工作区' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('tab', { name: '网页' })).not.toBeInTheDocument();
-        expect(screen.queryByText('深色模式')).not.toBeInTheDocument();
+        expect(screen.getByText(/深色模式|浅色模式/)).toBeInTheDocument();
         expect(screen.queryByLabelText('Subagents')).not.toBeInTheDocument();
-        expect(screen.queryByRole('switch', { name: '自动记忆' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('switch', { name: '资源库' })).not.toBeInTheDocument();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
-        expect(screen.queryByText('BeeGame 会把 Brave key 注入新启动的 runtime session。已有会话不会自动重启。')).not.toBeInTheDocument();
-        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.getByLabelText('语言选择')).toBeInTheDocument();
         expect(screen.queryByText('/tmp/beegame-projects')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存工作路径' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: '保存网页配置' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '选择工作路径' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+    });
+
+    it('saves BYOK from the shared bottom-right footer, not inside the scroll area', async () => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-user', role: 'viewer', permissions: [] } });
+        listModelCatalog.mockResolvedValue([
+            { id: 'official', name: 'Bee Game Studio LLM', provider: 'openai-compatible', model: 'official', apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: { method: 'platform', hasKey: false, isPreferred: false, chatgptConnected: false } },
+            { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', model: undefined, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: { method: 'platform', hasKey: false, isPreferred: false, chatgptConnected: false } },
+        ]);
+        saveModelConnection.mockResolvedValue({ method: 'byok', hasKey: true, isPreferred: true, chatgptConnected: false });
+        try {
+            renderSettings();
+            await userEvent.click(screen.getByRole('tab', { name: '模型连接' }));
+            await userEvent.click(screen.getByRole('button', { name: '连接方式' }));
+            await userEvent.click(screen.getByRole('option', { name: 'BYOK' }));
+            await userEvent.type(screen.getByLabelText('接口 URL'), 'https://example.com/v1');
+            await userEvent.type(screen.getByLabelText('API Key'), 'fixture-secret');
+            await userEvent.type(screen.getByLabelText('模型'), 'balanced');
+            const save = screen.getByRole('button', { name: '保存设置' });
+            expect(screen.getByTestId('settings-modal-scroll-area')).not.toContainElement(save);
+            expect(save.parentElement).toHaveClass('justify-end');
+            expect(save).toHaveClass('rounded-full');
+            await userEvent.click(save);
+            await waitFor(() => expect(saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://example.com/v1', model: 'balanced' }));
+        } finally {
+            useSystemStore.setState({ currentUser: null });
+        }
+    });
+
+    it('authorizes ChatGPT from platform models once and shows the same login in Image service without changing activation or billing', async () => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: [] } });
+        let connected = false;
+        listModelCatalog.mockImplementation(async () => [{ id: 'personal-chatgpt-subscription', name: 'ChatGPT subscription',
+            provider: 'openai-compatible', model: undefined, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'],
+            connection: { method: 'platform', hasKey: false, isPreferred: false, chatgptConnected: connected } }]);
+        startModelLogin.mockResolvedValue({ id: 'admin-device', url: 'https://auth.openai.com/codex/device', userCode: 'ADMIN-CODE', method: 'chatgpt-subscription' });
+        readModelLogin.mockImplementation(async () => { connected = true; return { status: 'complete' }; });
+        vi.mocked(getImageGenerationSettings).mockImplementation(async () => ({ provider: 'chatgpt-subscription', baseUrl: 'https://chatgpt.com/backend-api/codex/responses',
+            model: 'fixture-image', responseModel: 'fixture-response', hasApiKey: false, subscriptionConnected: connected,
+            quality: 'medium', size: '1024x1024', billing: null }));
+        const open = vi.spyOn(window, 'open').mockReturnValue({ opener: null, location: { replace: vi.fn() }, close: vi.fn() } as unknown as Window);
+        saveModelConnection.mockClear(); vi.mocked(saveImageGenerationSettings).mockClear();
+        createModelConfig.mockClear(); updateModelConfig.mockClear();
+        try {
+            renderSettings();
+            await openPlatformSettingsTab('模型');
+            expect(screen.getByRole('region', { name: '管理员 ChatGPT 订阅' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: '连接方式' })).not.toBeInTheDocument();
+            const login = screen.getByRole('button', { name: '使用 ChatGPT 账号登录授权' });
+            await waitFor(() => expect(login).toBeEnabled());
+            await userEvent.click(login);
+            await screen.findByText('ADMIN-CODE');
+            expect(await screen.findByText('ChatGPT 订阅已连接', {}, { timeout: 3500 })).toBeInTheDocument();
+            await userEvent.click(screen.getByRole('tab', { name: '生图服务' }));
+            expect(await screen.findByText('当前管理员的 ChatGPT 账户已连接')).toBeInTheDocument();
+            expect(screen.getByRole('switch', { name: '配置图片计费（未配置时不允许提交生成）' })).not.toBeChecked();
+            await userEvent.click(screen.getByRole('button', { name: '前往平台模型' }));
+            expect(await screen.findByText('ChatGPT 订阅已连接')).toBeInTheDocument();
+            expect(startModelLogin).toHaveBeenCalledExactlyOnceWith('personal-chatgpt-subscription', 'chatgpt-subscription');
+            expect(open).toHaveBeenCalledTimes(1);
+            expect(saveModelConnection).not.toHaveBeenCalled();
+            expect(saveImageGenerationSettings).not.toHaveBeenCalled();
+            expect(createModelConfig).not.toHaveBeenCalled(); expect(updateModelConfig).not.toHaveBeenCalled();
+        } finally { open.mockRestore(); useSystemStore.setState({ currentUser: null }); }
+    });
+
+    it('lets an ordinary user select personal image generation without platform administration', async () => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-image-user', role: 'viewer', permissions: [] } });
+        vi.mocked(savePersonalImageConnection).mockResolvedValue({ source: 'platform', provider: 'openai', baseUrl: 'https://api.openai.com/v1/images/generations', model: 'image-model', hasApiKey: false, hasUpstreamApiKey: false });
+        try {
+            renderSettings({ canManageWorkspace: false, canManageRuntimeSettings: false, canManageMcp: false, canManageSkills: false, canManageModelConfig: false });
+            expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
+            await userEvent.click(screen.getByRole('tab', { name: 'AI 生图' }));
+            expect(await screen.findByRole('radio', { name: /平台提供/ })).toBeChecked();
+            const save = screen.getByRole('button', { name: '保存设置' });
+            expect(save.parentElement).toHaveClass('justify-end');
+            expect(save).toHaveClass('rounded-full');
+            await userEvent.click(save);
+            await waitFor(() => expect(savePersonalImageConnection).toHaveBeenCalledWith({ source: 'platform' }));
+        } finally { useSystemStore.setState({ currentUser: null }); }
+    });
+
+    it('exposes the persisted theme toggle in General settings', async () => {
+        renderSettings();
+
+        const themeSwitch = screen.getByRole('switch', { name: '主题切换' });
+        const before = themeSwitch.getAttribute('aria-checked');
+        await userEvent.click(themeSwitch);
+        expect(themeSwitch).toHaveAttribute('aria-checked', before === 'true' ? 'false' : 'true');
+        await userEvent.click(themeSwitch);
+        expect(themeSwitch).toHaveAttribute('aria-checked', before ?? 'true');
+    });
+
+    it('lets an ordinary user manage personal MCP without showing platform administration', async () => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-viewer', role: 'viewer', permissions: ['mcp.manage'] } });
+        try {
+            renderSettings({
+                canManageWorkspace: false,
+                canManageRuntimeSettings: false,
+                canManageMcp: undefined,
+                canManageModelConfig: false,
+                canManageInvitations: false,
+                canManageLifecycle: false,
+                canManageCredits: false,
+            });
+            expect(screen.getByRole('tab', { name: 'MCP' })).toBeInTheDocument();
+            expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
+            await openMcpSettings();
+            await waitFor(() => expect(listMcpServers).toHaveBeenCalled());
+            await openMcpActionsMenu();
+            expect(screen.getByRole('menuitem', { name: '新增 Server' })).toBeInTheDocument();
+        expect(screen.queryByRole('menuitem', { name: '发现本机 MCP' })).not.toBeInTheDocument();
+        } finally {
+            useSystemStore.setState({ currentUser: null });
+        }
     });
 
     it('shows platform administration inside the same settings modal for privileged users', async () => {
@@ -386,12 +626,40 @@ describe('SettingsMenu model settings', () => {
 
         expect(screen.getByRole('tab', { name: '部署' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('tab', { name: '能力' })).toBeInTheDocument();
-        expect(screen.getByRole('tab', { name: 'MCP' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: '模型' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: '生图服务' })).toBeInTheDocument();
         await expect(screen.findByText('/tmp/beegame-projects')).resolves.toBeInTheDocument();
         expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
-        expect(screen.getByLabelText('搜索后端')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+    });
+
+    it('saves image settings from the shared window footer and closes only after success', async () => {
+        const config = { provider: 'openrouter' as const, baseUrl: 'https://openrouter.ai/api/v1/images', model: 'openai/gpt-image-2.5-flare', quality: 'medium' as const, size: '1024x1024', hasApiKey: true };
+        vi.mocked(getImageGenerationSettings).mockResolvedValue(config);
+        let finish!: (value: typeof config) => void;
+        vi.mocked(saveImageGenerationSettings).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+        const onClose = vi.fn();
+        renderSettings({ onClose });
+        await userEvent.click(screen.getByRole('tab', { name: '平台' }));
+        await userEvent.click(screen.getByRole('tab', { name: '生图服务' }));
+        await screen.findByDisplayValue(config.model);
+        const save = screen.getByRole('button', { name: '保存设置' });
+        expect(save.closest('form')).toBeNull();
+        expect(screen.queryByRole('button', { name: '保存生图配置' })).not.toBeInTheDocument();
+        await userEvent.click(save);
+        expect(save).toBeDisabled();
+        expect(onClose).not.toHaveBeenCalled();
+        finish(config);
+        await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+        expect(vi.mocked(saveImageGenerationSettings).mock.calls.at(-1)![0]).not.toHaveProperty('apiKey');
+    });
+
+    it('loads private skills only when opening their settings section', async () => {
+        renderSettings();
+        await screen.findByRole('tab', { name: '技能' });
+        expect(listUserSkills).not.toHaveBeenCalled();
+        await openUserSkillsSettings();
+        await waitFor(() => expect(listUserSkills).toHaveBeenCalledTimes(1));
     });
 
     it('lets users delete private skills from the settings panel without exposing editing', async () => {
@@ -458,11 +726,13 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByText('已启用技能会在新的 BeeGame runtime turn 启动前写入 user-* 目录。')).not.toBeInTheDocument();
         expect(screen.queryByText('导入技能')).not.toBeInTheDocument();
         expect(screen.queryByText('已保存技能')).not.toBeInTheDocument();
+        expect(screen.getByTestId('user-skills-empty-state')).toHaveClass('flex-1', 'items-center', 'justify-center');
         const file = new File(['zip-bytes'], 'imported-movement-contracts.zip', { type: 'application/zip' });
         await userEvent.upload(screen.getByLabelText('导入 Skill zip 文件'), file);
 
         await waitFor(() => expect(importUserSkillPackage).toHaveBeenCalledWith(file));
         expect(await screen.findByText('imported-movement-contracts')).toBeInTheDocument();
+        expect(screen.queryByTestId('user-skills-empty-state')).not.toBeInTheDocument();
         expect(showSuccess).toHaveBeenCalledWith('已导入：imported-movement-contracts.zip');
         expect(screen.queryByText('已导入：imported-movement-contracts.zip')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('Skill markdown 内容')).not.toBeInTheDocument();
@@ -571,7 +841,6 @@ describe('SettingsMenu model settings', () => {
     it('shows private skills without exposing platform administration', async () => {
         renderSettings({
             canManageWorkspace: false,
-            canManageSecrets: false,
             canManageRuntimeSettings: false,
             canManageMcp: false,
             canManageSkills: true,
@@ -645,6 +914,8 @@ describe('SettingsMenu model settings', () => {
 
         await openPlatformSettingsTab('信用');
 
+        expect(screen.getByRole('button', { name: '保存套餐' })).toHaveClass('rounded-full');
+
         await waitFor(() => expect(screen.getAllByText('Credit 审计')).toHaveLength(2));
         expect(screen.queryByText('冻结未结算')).not.toBeInTheDocument();
         expect(screen.getByText('已用')).toBeInTheDocument();
@@ -656,7 +927,6 @@ describe('SettingsMenu model settings', () => {
         getCreditSummary.mockClear();
         renderSettings({
             canManageWorkspace: false,
-            canManageSecrets: false,
             canManageRuntimeSettings: false,
             canManageMcp: false,
             canManageSkills: false,
@@ -698,14 +968,12 @@ describe('SettingsMenu model settings', () => {
     it('hides privileged settings sections when the user lacks management permissions', () => {
         listModelConfigs.mockClear();
         getBeeGameWorkspaceSettings.mockClear();
-        getWebToolsConfig.mockClear();
         getRuntimeSettings.mockClear();
         listMcpServers.mockClear();
         listUserSkills.mockClear();
 
         renderSettings({
             canManageWorkspace: false,
-            canManageSecrets: false,
             canManageRuntimeSettings: false,
             canManageMcp: false,
             canManageSkills: false,
@@ -720,13 +988,11 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '技能' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
-        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.getByLabelText('语言选择')).toBeInTheDocument();
         expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
         expect(listModelConfigs).not.toHaveBeenCalled();
         expect(getBeeGameWorkspaceSettings).not.toHaveBeenCalled();
-        expect(getWebToolsConfig).not.toHaveBeenCalled();
         expect(getRuntimeSettings).not.toHaveBeenCalled();
         expect(listMcpServers).not.toHaveBeenCalled();
         expect(listUserSkills).not.toHaveBeenCalled();
@@ -735,13 +1001,11 @@ describe('SettingsMenu model settings', () => {
     it('keeps settings limited to personal preferences without management permissions', () => {
         listModelConfigs.mockClear();
         getBeeGameWorkspaceSettings.mockClear();
-        getWebToolsConfig.mockClear();
         getRuntimeSettings.mockClear();
         listMcpServers.mockClear();
 
         renderSettings({
             canManageWorkspace: false,
-            canManageSecrets: false,
             canManageRuntimeSettings: false,
             canManageMcp: false,
             canManageSkills: false,
@@ -753,12 +1017,10 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
-        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.getByLabelText('语言选择')).toBeInTheDocument();
         expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(listModelConfigs).not.toHaveBeenCalled();
         expect(getBeeGameWorkspaceSettings).not.toHaveBeenCalled();
-        expect(getWebToolsConfig).not.toHaveBeenCalled();
         expect(getRuntimeSettings).not.toHaveBeenCalled();
         expect(listMcpServers).not.toHaveBeenCalled();
     });
@@ -767,7 +1029,7 @@ describe('SettingsMenu model settings', () => {
         const onClose = vi.fn();
         const { container } = renderSettings({ onClose });
 
-        await openPlatformSettings();
+        await openPlatformSettingsTab('能力');
         const saveButton = screen.getByRole('button', { name: '保存设置' });
         expect(saveButton.querySelector('svg')).toBeNull();
         expect(container.querySelector('.bg-black')).toBeNull();
@@ -787,11 +1049,8 @@ describe('SettingsMenu model settings', () => {
 
     it('closes after saving settings successfully', async () => {
         const onClose = vi.fn();
-        saveWebToolsConfig.mockResolvedValue({
-            webSearchAdapter: 'tavily',
-        });
         saveRuntimeSettings.mockResolvedValue({
-            autoMemoryEnabled: true,
+            resourceLibraryEnabled: true,
             autoDreamEnabled: true,
             skillSearchEnabled: false,
             treeSitterBashEnabled: false,
@@ -809,21 +1068,11 @@ describe('SettingsMenu model settings', () => {
         await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     });
 
-    it('renders capabilities as a dedicated settings tab', async () => {
-        renderSettings();
-
-        await openPlatformSettingsTab('能力');
-
-        expect(screen.getByRole('tab', { name: '能力' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.queryByRole('switch', { name: 'Subagents' })).not.toBeInTheDocument();
-        expect(screen.getByRole('switch', { name: '自动记忆' })).toBeChecked();
-        expect(screen.getByRole('switch', { name: '自动整理' })).toBeChecked();
-        expect(screen.getByRole('switch', { name: 'Skill Search' })).not.toBeChecked();
-        expect(screen.getByText('记住偏好、项目决策和常用上下文。')).toBeInTheDocument();
-        expect(screen.queryByText('好处: 跨会话保留偏好、项目决策和常用上下文。')).not.toBeInTheDocument();
-        expect(screen.queryByText('需重启运行时')).not.toBeInTheDocument();
-        expect(screen.queryByText('新会话生效')).not.toBeInTheDocument();
-    });
+    it('renders the retained resource capability without legacy agent switches', async () => {
+ renderSettings(); await openPlatformSettingsTab('能力');
+ expect(screen.getByRole('switch',{name:'资源库'})).toBeChecked();
+ expect(screen.getAllByRole('switch')).toHaveLength(1);
+});
 
     it('configures MCP servers from the settings tab', async () => {
         createMcpServer.mockResolvedValue({
@@ -840,13 +1089,15 @@ describe('SettingsMenu model settings', () => {
 
         renderSettings();
 
-        await openPlatformSettingsTab('MCP');
+        await openMcpSettings();
 
         expect(screen.getByRole('tab', { name: 'MCP' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.getByText('通过 MCP，BeeGame 可以连接本机正在运行的编辑器、游戏引擎和工具服务。你可以在这里发现本机服务、添加 Server，并确认连接是否可用。')).toBeInTheDocument();
+        expect(screen.queryByText('在这里添加自己的 MCP Server，并检查连接是否可用。')).not.toBeInTheDocument();
         expect(screen.queryByText(/Bee Game Studio/)).not.toBeInTheDocument();
-        expect(screen.getByText('已配置')).toBeInTheDocument();
-        expect(screen.getByText('暂无 MCP server')).toBeInTheDocument();
+        expect(screen.queryByText('已配置')).not.toBeInTheDocument();
+        expect(screen.getByTestId('mcp-empty-state')).toHaveTextContent('尚未添加 MCP Server');
+        expect(screen.getByTestId('mcp-empty-state')).toHaveClass('flex-1');
+        expect(screen.getByRole('button', { name: /操作/ })).toHaveClass('rounded-full', 'bg-transparent');
         expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('自动启动')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
@@ -855,17 +1106,32 @@ describe('SettingsMenu model settings', () => {
         await userEvent.click(screen.getByRole('menuitem', { name: '新增 Server' }));
 
         expect(screen.getByLabelText('传输')).toBeInTheDocument();
+        await userEvent.click(screen.getByLabelText('传输'));
+        const transportOptions = screen.getByRole('listbox', { name: '传输' });
+        expect(transportOptions.parentElement).toBe(document.body);
+        expect(transportOptions).toHaveClass('z-[370]');
+        expect(transportOptions.style.zIndex).toBe('');
+        expect(screen.queryByRole('option', { name: /SSE/ })).not.toBeInTheDocument();
+        await userEvent.click(screen.getByRole('option', { name: 'stdio' }));
+        expect(screen.getByLabelText('名称')).toBeInTheDocument();
         expect(screen.queryByLabelText('命令')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('参数')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('作用域')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('自动启动')).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: '保存 Server' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '保存 Server' })).toHaveClass('rounded-full');
 
         await userEvent.type(screen.getByLabelText('名称'), 'Unity Bridge');
         await userEvent.click(screen.getByRole('button', { name: /高级/ }));
         await userEvent.type(screen.getByLabelText('命令'), 'npx');
         await userEvent.type(screen.getByLabelText('参数'), 'unity-mcp');
         expect(screen.getByLabelText('作用域')).toBeInTheDocument();
+        await userEvent.click(screen.getByLabelText('作用域'));
+        const scopeOptions = screen.getByRole('listbox', { name: '作用域' });
+        expect(scopeOptions.parentElement).toBe(document.body);
+        expect(scopeOptions).toHaveClass('z-[370]');
+        await userEvent.click(screen.getByRole('option', { name: 'BeeGame' }));
+        expect(screen.getByLabelText('名称')).toHaveValue('Unity Bridge');
         await userEvent.type(screen.getByLabelText('环境变量'), 'UNITY_TOKEN=unity-secret-token');
         await userEvent.click(screen.getByRole('button', { name: '保存 Server' }));
 
@@ -881,7 +1147,61 @@ describe('SettingsMenu model settings', () => {
         }));
     });
 
+    it.each([
+        ['untested', false, '未测试'],
+        ['unavailable', false, '不可用'],
+        ['available', true, '可用'],
+    ] as const)('displays the MCP test result %s without confusing untested and failure', async (status, ok, label) => {
+        listMcpServers.mockResolvedValueOnce([{
+            id: 'blender', name: 'Blender', enabled: true, transport: 'stdio', scope: 'beegame',
+            command: '/installed/mcp-for-blender', env: [], autoStart: true,
+        }]);
+        testMcpServer.mockResolvedValueOnce({ ok, status, message: 'Connection test detail', checkedAt: new Date().toISOString() });
+        renderSettings();
+        await openMcpSettings();
+        expect(await screen.findByText('Blender')).toBeInTheDocument();
+        const actions = screen.getAllByRole('button', { name: /操作/ });
+        await userEvent.click(actions[actions.length - 1]);
+        await userEvent.click(screen.getByRole('menuitem', { name: '测试连接' }));
+        await waitFor(() => expect(testMcpServer).toHaveBeenCalled());
+        expect(await screen.findByText(label, { exact: true })).toBeInTheDocument();
+        expect(screen.queryByText('Connection test detail')).not.toBeInTheDocument();
+        if (status === 'unavailable') {
+            await waitFor(() => expect(showError).toHaveBeenCalledWith('Connection test detail'));
+            expect(showError).toHaveBeenCalledTimes(1);
+        } else {
+            expect(showError).not.toHaveBeenCalled();
+        }
+        if (status === 'untested') {
+            await waitFor(() => expect(showWarning).toHaveBeenCalledWith('Connection test detail'));
+        } else {
+            expect(showWarning).not.toHaveBeenCalled();
+        }
+        if (status === 'untested') expect(screen.queryByText('不可用', { exact: true })).not.toBeInTheDocument();
+    });
+
+    it('reports a rejected MCP test through the global error notification without inline detail', async () => {
+        listMcpServers.mockResolvedValueOnce([{
+            id: 'failed', name: 'Failed MCP', enabled: true, transport: 'http', scope: 'beegame',
+            url: 'https://example.test/mcp', env: [], autoStart: true,
+        }]);
+        testMcpServer.mockRejectedValueOnce(new Error('Connection timed out'));
+        renderSettings();
+        await openMcpSettings();
+        expect(await screen.findByText('Failed MCP')).toBeInTheDocument();
+        const actions = screen.getAllByRole('button', { name: /操作/ });
+        await userEvent.click(actions[actions.length - 1]);
+        await userEvent.click(screen.getByRole('menuitem', { name: '测试连接' }));
+        await waitFor(() => expect(showError).toHaveBeenCalledWith('Connection timed out'));
+        expect(showError).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('不可用', { exact: true })).toBeInTheDocument();
+        expect(screen.queryByText('Connection timed out')).not.toBeInTheDocument();
+        expect(showWarning).not.toHaveBeenCalled();
+    });
+
     it('scans running MCP servers and imports verified entries', async () => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: ['workspace.manage', 'mcp.manage'] } });
+        try {
         discoverActiveMcpServers.mockResolvedValue([
             {
                 name: 'Runtime MCP',
@@ -913,12 +1233,14 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings();
-        await openPlatformSettingsTab('MCP');
+        await openMcpSettings();
         await openMcpActionsMenu();
-        await userEvent.click(screen.getByRole('menuitem', { name: '发现本机服务' }));
+        await userEvent.click(screen.getByRole('menuitem', { name: '发现本机 MCP' }));
 
         await waitFor(() => expect(discoverActiveMcpServers).toHaveBeenCalled());
-        expect(screen.getByText('本机服务')).toBeInTheDocument();
+        await waitFor(() => expect(showSuccess).toHaveBeenCalledWith('发现 1 个 MCP 服务或配置。'));
+        expect(screen.queryByText('发现 1 个 MCP 服务或配置。')).not.toBeInTheDocument();
+        expect(screen.getByText('本机 HTTP MCP')).toBeInTheDocument();
         expect(screen.getByText('Runtime MCP')).toBeInTheDocument();
         expect(screen.getByText('可用')).toBeInTheDocument();
 
@@ -932,9 +1254,63 @@ describe('SettingsMenu model settings', () => {
             url: 'http://127.0.0.1:8081/mcp',
             autoStart: true,
         }));
+        } finally {
+            useSystemStore.setState({ currentUser: null });
+        }
     });
 
-    it('opens the MCP edit popover from the selected server row', async () => {
+    it.each([false, true])('reports an empty or failed local MCP scan through global notifications (failed=%s)', async failed => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: ['workspace.manage', 'mcp.manage'] } });
+        try {
+            if (failed) discoverActiveMcpServers.mockRejectedValueOnce(new Error('Scan failed'));
+            else discoverActiveMcpServers.mockResolvedValueOnce([]);
+            renderSettings();
+            await openMcpSettings();
+            await openMcpActionsMenu();
+            await userEvent.click(screen.getByRole('menuitem', { name: '发现本机 MCP' }));
+            const message = failed ? 'Scan failed' : '未发现本机 MCP 服务或可导入配置。';
+            await waitFor(() => expect(failed ? showError : showWarning).toHaveBeenCalledWith(message));
+            expect(failed ? showError : showWarning).toHaveBeenCalledTimes(1);
+            expect(screen.queryByText(message)).not.toBeInTheDocument();
+            expect(showSuccess).not.toHaveBeenCalled();
+            expect(screen.queryByText('本机 HTTP MCP', { exact: true })).not.toBeInTheDocument();
+        } finally {
+            useSystemStore.setState({ currentUser: null });
+        }
+    });
+
+    it.each([false, true])('discovers stdio configurations without starting them and imports by source (HTTP scan fails=%s)', async failed => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-owner', role: 'owner', permissions: ['workspace.manage', 'mcp.manage'] } });
+        const discovered = {
+            name: 'Blender', enabled: true, transport: 'stdio', scope: 'beegame',
+            command: '/local/bin/blender-mcp', sourcePath: '/home/test/.bgs/config.toml', exists: false,
+            env: [{ key: 'TOKEN', valuePreview: '••••' }],
+        };
+        discoverMcpServers.mockResolvedValueOnce([discovered]);
+        if (failed) discoverActiveMcpServers.mockRejectedValueOnce(new Error('HTTP scan failed'));
+        importDiscoveredMcpServer.mockResolvedValueOnce({ ...discovered, id: 'imported-blender' });
+        try {
+            renderSettings();
+            await openMcpSettings();
+            await openMcpActionsMenu();
+            await userEvent.click(screen.getByRole('menuitem', { name: '发现本机 MCP' }));
+            await waitFor(() => expect(screen.getByText('Blender')).toBeInTheDocument());
+            expect(discoverMcpServers).toHaveBeenCalledOnce();
+            expect(testMcpServer).not.toHaveBeenCalled();
+            expect(createMcpServer).not.toHaveBeenCalled();
+            expect(screen.queryByText('可用', { exact: true })).not.toBeInTheDocument();
+            if (failed) expect(showError).toHaveBeenCalledWith('HTTP scan failed');
+            else expect(showSuccess).toHaveBeenCalledWith('发现 1 个 MCP 服务或配置。');
+            await userEvent.click(screen.getByRole('button', { name: '导入', exact: true }));
+            await waitFor(() => expect(importDiscoveredMcpServer).toHaveBeenCalledWith(discovered));
+            expect(testMcpServer).not.toHaveBeenCalled();
+            expect(screen.getByRole('button', { name: '已存在', exact: true })).toBeDisabled();
+        } finally {
+            useSystemStore.setState({ currentUser: null });
+        }
+    });
+
+    it('opens MCP settings only through the row actions menu, not the card body', async () => {
         listMcpServers.mockResolvedValueOnce([
             {
                 id: 'mcp_existing',
@@ -959,9 +1335,15 @@ describe('SettingsMenu model settings', () => {
         });
 
         renderSettings();
-        await openPlatformSettingsTab('MCP');
+        await openMcpSettings();
 
         expect(await screen.findByText('Existing MCP')).toBeInTheDocument();
+        expect(screen.queryByTestId('mcp-empty-state')).not.toBeInTheDocument();
+        await userEvent.click(screen.getByText('Existing MCP'));
+        expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();
+        await userEvent.click(screen.getByText('Existing MCP').closest('li')!);
+        expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
         const rowActions = screen.getAllByRole('button', { name: /操作/ });
         await userEvent.click(rowActions[rowActions.length - 1]);
         await userEvent.click(screen.getByRole('menuitem', { name: '编辑' }));
@@ -984,88 +1366,22 @@ describe('SettingsMenu model settings', () => {
         }));
     });
 
-    it('saves capability toggles from the capabilities settings footer', async () => {
-        getRuntimeSettings.mockResolvedValueOnce({
-            autoMemoryEnabled: true,
-            autoDreamEnabled: true,
-            skillSearchEnabled: false,
-            treeSitterBashEnabled: false,
-            webBrowserToolEnabled: false,
-            bashClassifierEnabled: false,
-            mcpSkillsEnabled: false,
-            resourceLibraryEnabled: true,
-        });
-        saveWebToolsConfig.mockResolvedValue({
-            webSearchAdapter: 'tavily',
-        });
-        saveRuntimeSettings.mockResolvedValue({
-            autoMemoryEnabled: true,
-            autoDreamEnabled: true,
-            skillSearchEnabled: true,
-            treeSitterBashEnabled: true,
-            webBrowserToolEnabled: false,
-            bashClassifierEnabled: false,
-            mcpSkillsEnabled: false,
-        });
+    it('saves the resource capability from the settings footer', async () => {
+ getRuntimeSettings.mockResolvedValueOnce({resourceLibraryEnabled:true});
+ saveRuntimeSettings.mockResolvedValue({resourceLibraryEnabled:false});
+ renderSettings(); await openPlatformSettingsTab('能力');
+ await userEvent.click(await screen.findByRole('switch',{name:'资源库'}));
+ await userEvent.click(screen.getByRole('button',{name:'保存设置'}));
+ await waitFor(()=>expect(saveRuntimeSettings).toHaveBeenCalledWith({resourceLibraryEnabled:false}));
+});
 
-        renderSettings();
-        await openPlatformSettingsTab('能力');
-
-        await userEvent.click(await screen.findByRole('switch', { name: 'Skill Search' }));
-        await userEvent.click(screen.getByRole('switch', { name: 'Bash AST 解析' }));
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-
-        await waitFor(() => expect(saveRuntimeSettings).toHaveBeenCalledWith({
-            autoMemoryEnabled: true,
-            autoDreamEnabled: true,
-            skillSearchEnabled: true,
-            treeSitterBashEnabled: true,
-            webBrowserToolEnabled: false,
-            bashClassifierEnabled: false,
-            mcpSkillsEnabled: false,
-            resourceLibraryEnabled: true,
-        }));
-        expect(screen.queryByRole('switch', { name: 'Subagents' })).not.toBeInTheDocument();
-    });
-
-    it('keeps deployment workspace root read-only and saves web search settings from the footer', async () => {
-        getBeeGameWorkspaceSettings.mockResolvedValueOnce({
-            workspacePath: '/tmp/beegame-projects',
-            isDefault: true,
-        });
-        getWebToolsConfig.mockResolvedValueOnce({
-            webSearchAdapter: 'tavily',
-        });
-
-        renderSettings();
-        await openPlatformSettings();
-
-        expect(await screen.findByText('/tmp/beegame-projects')).toBeInTheDocument();
-        expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: '恢复默认' })).not.toBeInTheDocument();
-        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'brave');
-        await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-
-        await waitFor(() => expect(saveWebToolsConfig).toHaveBeenCalledWith({
-            webSearchAdapter: 'brave',
-            braveApiKey: 'bsa-dashboard-secret',
-        }));
-        expect(saveRuntimeSettings).not.toHaveBeenCalled();
-        expect(screen.queryByText('工作路径已保存')).not.toBeInTheDocument();
-    });
-
-    it('shows compact tiered model fields and saves a new default model config', async () => {
+    it('shows a single model field and saves a new default model config', async () => {
         createModelConfig.mockResolvedValue({
             id: 'llm_1',
             name: 'BeeGame LLM',
             provider: 'openai-compatible',
             apiKeyPreview: 'sk-...cret',
-            models: {
-                fast: 'gpt-4.1-mini',
-                balanced: 'gpt-4.1',
-                strong: 'gpt-4.1-pro',
-            },
+            model: 'gpt-4.1',
             isDefault: true,
         });
 
@@ -1074,33 +1390,58 @@ describe('SettingsMenu model settings', () => {
         await openPlatformSettingsTab('模型');
 
         expect(screen.queryByText('BeeGame LLM')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
+        const addModel = screen.getByRole('button', { name: '添加模型配置' });
+        expect(addModel).toHaveClass('rounded-full', 'bg-transparent');
+        await userEvent.click(addModel);
+        expect(screen.getByRole('dialog', { name: '添加模型配置' })).toContainElement(screen.getByTestId('model-config-popover'));
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('模型显示名称')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('设为默认模型')).not.toBeInTheDocument();
-        expect(screen.getByLabelText('Fast 模型')).toBeInTheDocument();
-        expect(screen.getByLabelText('Balanced 模型')).toBeInTheDocument();
-        expect(screen.getByLabelText('Strong 模型')).toBeInTheDocument();
+        expect(screen.getByLabelText('模型')).toBeInTheDocument();
+        expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+        const publicationSwitch = screen.getByRole('switch', { name: '向普通用户发布' });
+        expect(publicationSwitch).toBeChecked();
+        await userEvent.click(publicationSwitch);
+        expect(publicationSwitch).not.toBeChecked();
+        await userEvent.click(publicationSwitch);
+        expect(screen.getByRole('switch', { name: '平台默认模型' })).toBeChecked();
+        expect(screen.getByRole('switch', { name: '平台凭据' })).toBeChecked();
+        expect(screen.getByRole('switch', { name: 'BYOK' })).not.toBeChecked();
 
         await userEvent.type(screen.getByLabelText('Base URL'), 'https://api.example.com/v1');
         await userEvent.type(screen.getByLabelText('API Key'), 'sk-secret');
-        await userEvent.type(screen.getByLabelText('Fast 模型'), 'gpt-4.1-mini');
-        await userEvent.type(screen.getByLabelText('Balanced 模型'), 'gpt-4.1');
-        await userEvent.type(screen.getByLabelText('Strong 模型'), 'gpt-4.1-pro');
+        await userEvent.type(screen.getByLabelText('模型'), 'gpt-4.1');
+        expect(screen.getByRole('button', { name: '保存设置' })).toHaveClass('rounded-full');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
         await waitFor(() => expect(createModelConfig).toHaveBeenCalledWith({
+            published: true,
+            authMethods: ['platform'],
             name: 'BeeGame LLM',
             provider: 'openai-compatible',
+            apiProtocol: 'responses',
             baseUrl: 'https://api.example.com/v1',
             apiKey: 'sk-secret',
-            models: {
-                fast: 'gpt-4.1-mini',
-                balanced: 'gpt-4.1',
-                strong: 'gpt-4.1-pro',
-            },
+            model: 'gpt-4.1',
             isDefault: true,
         }));
         expect(screen.queryByText('模型配置已保存')).not.toBeInTheDocument();
     });
+
+
+
+    it('loads a legacy OpenAI connection as Chat Completions and lets the user choose Responses', async () => {
+ listModelConfigs.mockResolvedValue([{id:'legacy',name:'Saved Gateway',provider:'openai-compatible',baseUrl:'https://gateway.example/v1',model: 'fixture-model',apiKeyPreview:'',isDefault:true,authMethods:['platform']}]);
+ renderSettings(); await openPlatformSettingsTab('模型');
+ fireEvent.keyDown(await screen.findByRole('button',{name:'Saved Gateway 操作'}),{key:'ArrowDown'});
+ await userEvent.click(await screen.findByRole('menuitem',{name:'详情'}));
+ expect(screen.getByLabelText('协议')).toHaveTextContent('Chat Completions');
+ await userEvent.click(screen.getByLabelText('协议'));
+ await userEvent.click(await screen.findByRole('option',{name:'Responses'}));
+ await userEvent.click(screen.getByRole('button',{name:'保存设置'}));
+ await waitFor(()=>expect(updateModelConfig).toHaveBeenCalledWith('legacy',expect.objectContaining({apiProtocol:'responses'})));
+});
 
     it('shows the specific outbound policy reason when a model provider cannot be saved', async () => {
         const error = Object.assign(new Error('Outbound URL is not permitted'), {
@@ -1111,12 +1452,14 @@ describe('SettingsMenu model settings', () => {
 
         renderSettings();
         await openPlatformSettingsTab('模型');
+        await userEvent.click(screen.getByRole('button', { name: '添加模型配置' }));
         await userEvent.type(screen.getByLabelText('Base URL'), 'https://provider.example.com/v1');
         await userEvent.type(screen.getByLabelText('API Key'), 'sk-secret');
-        await userEvent.type(screen.getByLabelText('Balanced 模型'), 'model-balanced');
+        await userEvent.type(screen.getByLabelText('模型'), 'model-balanced');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
-        expect(await screen.findByText('模型服务域名 provider.example.com 尚未获得当前部署授权。')).toBeInTheDocument();
+        await waitFor(() => expect(showError).toHaveBeenCalledWith('模型服务域名 provider.example.com 尚未获得当前部署授权。'));
+        expect(screen.queryByText('模型服务域名 provider.example.com 尚未获得当前部署授权。')).not.toBeInTheDocument();
     });
 
     it('keeps a saved API key visible as a preview and updates the existing model without retyping it', async () => {
@@ -1127,11 +1470,7 @@ describe('SettingsMenu model settings', () => {
                 provider: 'openai-compatible',
                 baseUrl: 'https://api.saved.test/v1',
                 apiKeyPreview: 'sk-...saved',
-                models: {
-                    fast: 'qwen3.5-flash',
-                    balanced: 'qwen3.7-plus',
-                    strong: 'qwen3.7-max',
-                },
+                model: 'qwen3.7-plus',
                 isDefault: true,
             },
         ]);
@@ -1141,64 +1480,104 @@ describe('SettingsMenu model settings', () => {
             provider: 'openai-compatible',
             baseUrl: 'https://api.saved.test/v1',
             apiKeyPreview: 'sk-...saved',
-            models: {
-                fast: 'qwen3.5-flash',
-                balanced: 'qwen3.7-max',
-                strong: 'qwen3.7-max',
-            },
+            model: 'qwen3.7-max',
             isDefault: true,
         });
 
         renderSettings();
         await openPlatformSettingsTab('模型');
 
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Existing LLM 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '详情' }));
+        expect(screen.getByRole('dialog', { name: '模型详情' })).toContainElement(screen.getByTestId('model-config-popover'));
         const apiKeyInput = await screen.findByLabelText('API Key');
+        expect(screen.queryByLabelText('模型显示名称')).not.toBeInTheDocument();
         expect(apiKeyInput).toHaveAttribute('placeholder', '已保存：sk-...saved');
         expect(apiKeyInput).toHaveValue('');
 
-        const modelInput = screen.getByLabelText('Balanced 模型');
+        const modelInput = screen.getByLabelText('模型');
         await userEvent.clear(modelInput);
         await userEvent.type(modelInput, 'qwen3.7-max');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
         await waitFor(() => expect(updateModelConfig).toHaveBeenCalledWith('llm_existing', {
+            published: true,
+            authMethods: ['platform'],
             name: 'Existing LLM',
             provider: 'openai-compatible',
+            apiProtocol: 'chat-completions',
             baseUrl: 'https://api.saved.test/v1',
-            models: {
-                fast: 'qwen3.5-flash',
-                balanced: 'qwen3.7-max',
-                strong: 'qwen3.7-max',
-            },
+            model: 'qwen3.7-max',
             isDefault: true,
         }));
         expect(createModelConfig).not.toHaveBeenCalled();
     });
 
-    it('shows API key only for search providers that need one and saves them from the footer', async () => {
-        getWebToolsConfig.mockResolvedValueOnce({
-            webSearchAdapter: 'tavily',
-        });
-        saveWebToolsConfig.mockResolvedValue({
-            webSearchAdapter: 'brave',
-            braveApiKeyPreview: 'bsa-…cret',
-        });
-
+    it('closes the model popover with Escape while keeping settings open', async () => {
+        listModelConfigs.mockResolvedValueOnce([{
+            id: 'llm_existing',
+            name: 'Existing LLM',
+            provider: 'openai-compatible',
+            model: 'model-balanced',
+            isDefault: true,
+        }]);
         renderSettings();
-
-        expect(screen.queryByLabelText('BRAVE_SEARCH_API_KEY')).not.toBeInTheDocument();
-        await openPlatformSettings();
-        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'brave');
-        await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
-        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-
-        await waitFor(() => expect(saveWebToolsConfig).toHaveBeenCalledWith({
-            webSearchAdapter: 'brave',
-            braveApiKey: 'bsa-dashboard-secret',
-        }));
-        expect(screen.queryByText('网页搜索配置已保存；新会话生效。')).not.toBeInTheDocument();
-
-        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'exa');
-        expect(screen.getByLabelText('EXA_API_KEY')).toBeInTheDocument();
+        await openPlatformSettingsTab('模型');
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Existing LLM 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '详情' }));
+        const details = screen.getByRole('dialog', { name: '模型详情' });
+        fireEvent.keyDown(details, { key: 'Escape' });
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: '模型详情' })).not.toBeInTheDocument());
+        expect(screen.getByTestId('settings-modal-shell')).toBeInTheDocument();
     });
+
+    it('renames only the selected platform model and deletes only after confirmation', async () => {
+        const model = { id: 'model-a', name: 'Model A', provider: 'openai-compatible', model: 'model', apiKeyPreview: 'sk-...key', isDefault: true };
+        listModelConfigs.mockResolvedValue([model, { ...model, id: 'model-b', name: 'Model B', isDefault: false }]);
+        updateModelConfig.mockResolvedValue({ ...model, name: 'Renamed' });
+        deleteModelConfig.mockResolvedValue({ deleted: true });
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        const actions = await screen.findByRole('button', { name: 'Model A 操作' });
+        expect(actions).toHaveClass('bg-transparent');
+        expect(screen.queryByLabelText('模型配置')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+        fireEvent.keyDown(actions, { key: 'ArrowDown' });
+        const renameAction = await screen.findByRole('menuitem', { name: '编辑名称' });
+        expect(document.querySelector('[data-morph-popover-portal]')).toContainElement(renameAction);
+        await userEvent.click(renameAction);
+        expect(screen.getByRole('dialog', { name: '编辑名称' })).toContainElement(screen.getByTestId('model-config-popover'));
+        await userEvent.clear(screen.getByLabelText('模型显示名称'));
+        await userEvent.type(screen.getByLabelText('模型显示名称'), 'Renamed');
+        expect(screen.getByRole('button', { name: '保存设置' })).toHaveClass('rounded-full');
+        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+        await waitFor(() => expect(updateModelConfig).toHaveBeenCalledWith('model-a', { name: 'Renamed' }));
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Renamed 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '删除' }));
+        expect(screen.getByRole('dialog', { name: '删除模型配置' })).toContainElement(screen.getByTestId('model-config-popover'));
+        expect(deleteModelConfig).not.toHaveBeenCalled();
+        await userEvent.click(screen.getByRole('button', { name: '取消' }));
+        expect(deleteModelConfig).not.toHaveBeenCalled();
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Renamed 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '删除' }));
+        await userEvent.click(screen.getByRole('button', { name: '删除', exact: true }));
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Renamed 操作' })).not.toBeInTheDocument());
+        expect(deleteModelConfig).toHaveBeenCalledWith('model-a');
+        expect(screen.getByRole('button', { name: 'Model B 操作' })).toBeInTheDocument();
+    });
+
+    it('keeps the model item and reports an error when deletion fails', async () => {
+        listModelConfigs.mockResolvedValue([{ id: 'model-a', name: 'Model A', provider: 'openai-compatible', model: 'model', apiKeyPreview: '', isDefault: true }]);
+        deleteModelConfig.mockResolvedValue({ deleted: false });
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Model A 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '删除' }));
+        await userEvent.click(screen.getByRole('button', { name: '删除', exact: true }));
+        await waitFor(() => expect(showError).toHaveBeenCalledWith(expect.stringContaining('模型未删除')));
+        await userEvent.click(screen.getByRole('button', { name: '取消' }));
+        expect(screen.getByRole('button', { name: 'Model A 操作' })).toBeInTheDocument();
+    });
+
+
 });

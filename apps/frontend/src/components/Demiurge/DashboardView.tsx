@@ -1,17 +1,17 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
-import { LoaderCircle } from 'lucide-react';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useChatStore } from '../../store/chatStore';
 import { useChat } from '../../hooks/useChat';
-import { useToast } from '../../hooks/useToast';
-import { isAuthenticationServiceUnavailable } from '../../services/apiClient';
+import { useProjectRuntimeRefresh } from '../../hooks/useProjectRuntimeRefresh';
+import { useToastContext } from '../../contexts/ToastContext';
 import type { Language } from './AgentsConfig';
 
-import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
+import { BeeGameLivePreviewPage, type DashboardStatus } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
-import type { BeeGameDeploymentPayload, ChatAttachmentPayload, PendingToolPermissionItem } from '../../services/api';
+import type { BeeGameDeploymentDiscussionConfirmation, BeeGameDeploymentPayload, ChatAttachmentPayload, PendingToolPermissionItem } from '../../services/api';
 import { api } from '../../services/api';
 import { deriveDashboardStatus, getWaitingPermissionState } from '../../utils/waitingPermission';
 import {
@@ -19,14 +19,12 @@ import {
   toProjectRuntimeDisplayModel,
   toPermissionDisplayModels,
 } from '../../viewModels/displayModels';
-import {
-  getCreditBalance,
-  getCreditSummary,
-  type BeeGameCreditBalance,
-  type BeeGameUsageSummary,
-} from '../../services/creditsApi';
+import { useCredits } from '../../hooks/useCredits';
 import { normalizeI18nLanguage } from '../../i18n/useBeeGameTranslations';
 import { countPendingToolPermissions, usePermissionTabAttention } from '../../hooks/usePermissionTabAttention';
+import { getProjectDisplayName } from '../../utils/projectDisplayName';
+import { isProjectExecutionActive } from '../../utils/chatActivity';
+import { filterPathsForDisplay } from '../../utils/chatPathDisplay';
 
 interface DashboardViewProps {
   projectId: string;
@@ -36,30 +34,12 @@ interface DashboardViewProps {
   onBack?: () => void;
 }
 
-const getWorkspaceFolderName = (rootPath?: string): string => {
-  const normalized = String(rootPath || '').replaceAll('\\', '/');
-  const parts = normalized.split('/').filter(Boolean);
-  return parts[parts.length - 1] || '';
-};
-
 const upsertDeploymentHistory = (
   current: BeeGameDeploymentPayload[],
   deployment: BeeGameDeploymentPayload,
 ): BeeGameDeploymentPayload[] => [deployment, ...current.filter(item => item.id !== deployment.id)];
 
 const PROJECT_SYNC_TIMEOUT_MS = 10_000;
-
-const getErrorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === 'string' && error.trim()) return error;
-  return fallback;
-};
-
-const logDashboardReadError = (label: string, error: unknown): void => {
-  if (!isAuthenticationServiceUnavailable(error)) {
-    console.error(label, error);
-  }
-};
 
 const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -76,53 +56,39 @@ const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string
 };
 
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack }: DashboardViewProps) {
-  const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
-  const [creditSummary, setCreditSummary] = useState<BeeGameUsageSummary | null>(null);
   const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
+  const deploymentInProgress = deploymentHistory.some(item => ['queued', 'building', 'publishing'].includes(item.status));
   const [isDeployingProject, setDeployingProject] = useState(false);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const creditRefreshPromiseRef = useRef<{ projectId: string; promise: Promise<void> } | null>(null);
-  const activeCreditProjectRef = useRef(projectId);
-  activeCreditProjectRef.current = projectId;
   const previousBeeGameStatusRef = useRef<string | null>(null);
   const { i18n } = useTranslation('beegame');
   const translateBeeGame = useMemo(() => i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame'), [i18n, lang]);
 
   // Zustand State
-  const { isSyncing, isDark, hasPermission, currentUser, authenticationStatus } = useSystemStore();
-  const { projects, pendingPermissions, projectStatus, isOpeningProject, loadProjectRuntimeState } = useProjectStore();
-  const { messages } = useChatStore();
-  const { showSuccess, showError, showWarning } = useToast();
+  const { isSyncing, isDark, hasPermission, currentUser, authenticationStatus } = useSystemStore(
+    useShallow(state => ({
+      isSyncing: state.isSyncing,
+      isDark: state.isDark,
+      hasPermission: state.hasPermission,
+      currentUser: state.currentUser,
+      authenticationStatus: state.authenticationStatus,
+    })),
+  );
+  const { projects, pendingPermissions, projectStatus, isOpeningProject, loadProjectRuntimeState } = useProjectStore(
+    useShallow(state => ({
+      projects: state.projects,
+      pendingPermissions: state.pendingPermissions,
+      projectStatus: state.projectStatus,
+      isOpeningProject: state.isOpeningProject,
+      loadProjectRuntimeState: state.loadProjectRuntimeState,
+    })),
+  );
+  const { messages } = useChatStore(useShallow(state => ({ messages: state.messages })));
+  const { showSuccess, showError, showWarning } = useToastContext();
 
-  const refreshCredits = useCallback((): Promise<void> => {
-    if (creditRefreshPromiseRef.current?.projectId === projectId) {
-      return creditRefreshPromiseRef.current.promise;
-    }
-    const request = (async () => {
-      const [summaryResult, balanceResult] = await Promise.allSettled([
-        getCreditSummary(projectId),
-        getCreditBalance(),
-      ]);
-      if (activeCreditProjectRef.current !== projectId) return;
-      if (summaryResult.status === 'fulfilled') {
-        setCreditSummary(summaryResult.value);
-      } else {
-        logDashboardReadError('Failed to load credit summary:', summaryResult.reason);
-      }
-      if (balanceResult.status === 'fulfilled') {
-        setCreditBalance(balanceResult.value);
-      } else {
-        logDashboardReadError('Failed to load credit balance:', balanceResult.reason);
-      }
-    })().finally(() => {
-      if (creditRefreshPromiseRef.current?.promise === request) {
-        creditRefreshPromiseRef.current = null;
-      }
-    });
-    creditRefreshPromiseRef.current = { projectId, promise: request };
-    return request;
-  }, [projectId]);
+  const { creditBalance, creditSummary, refreshCredits } = useCredits(
+    projectId, authenticationStatus === 'authenticated', currentUser?.id,
+  );
 
   const refreshDeploymentHistory = useCallback(async (): Promise<BeeGameDeploymentPayload[]> => {
     try {
@@ -136,46 +102,43 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   }, [projectId]);
 
   // Custom Hook for WebSocket & REST
-  const { sendMessage, stopTask, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState } = useChat({
+  useEffect(() => {
+    if (!deploymentInProgress || authenticationStatus !== 'authenticated') return;
+    let cancelled = false;
+    let warned = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const records = await api.listProjectDeployments(projectId);
+        if (!cancelled) { setDeploymentHistory(records); warned = false; }
+      } catch (error) {
+        if (!cancelled && !warned) { warned = true; showWarning(error instanceof Error ? error.message : String(error)); }
+      } finally {
+        if (!cancelled) timer = setTimeout(poll, 2500);
+      }
+    };
+    timer = setTimeout(poll, 1000);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [projectId, deploymentInProgress, authenticationStatus, showWarning]);
+
+  const { sendMessage, stopTask, continueTask, autoRetryTurnId, cancelAutoRetry, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState, sessionTokenUsage } = useChat({
     projectId,
     onError: err => console.error(err),
     showToastError: showError,
     showToastSuccess: showSuccess,
     // Trigger data refreshes on significant task events
     onTaskEvent: type => {
-      if (type === 'usage') {
-        void refreshCredits();
-      }
-      if (
-        type === 'status_finished' ||
-        type === 'status_failed' ||
-        type === 'tool_start' ||
-        type === 'tool_end' ||
-        type === 'human_gate' ||
-        type === 'error' ||
-        type === 'permission_resolved'
-      ) {
-        // Debounce refresh to prevent storms during rapid event bursts
-        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = setTimeout(() => {
-          if (authenticationStatus === 'authenticated') {
-            loadProjectRuntimeState(projectId).catch(error => {
-              logDashboardReadError('Failed to refresh project runtime state:', error);
-            });
-          }
-          refreshTimerRef.current = null;
-        }, 2000);
-      }
+      if (type === 'billing_update') void refreshCredits();
+      scheduleRuntimeRefresh(type);
     },
   });
 
   useEffect(() => {
-    setCreditBalance(null);
-    setCreditSummary(null);
+    // Deployment summaries belong to the selected project.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDeploymentHistory([]);
-    void refreshCredits();
-    void refreshDeploymentHistory();
-  }, [projectId, refreshCredits, refreshDeploymentHistory]);
+    if (authenticationStatus === 'authenticated') void refreshDeploymentHistory();
+  }, [projectId, authenticationStatus, refreshDeploymentHistory]);
 
   // Local derived state mapped from backend
   const isOffline = wsState === 'failed' || wsState === 'disconnected';
@@ -189,47 +152,44 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const displayMessages = useMemo(() => toChatDisplayMessages(messages), [messages]);
   const permissionDisplayModels = useMemo(() => toPermissionDisplayModels(pendingPermissions), [pendingPermissions]);
   const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
-  const workflowUsageRevision = useMemo(() => {
-    const usage = projectRuntimeDisplay?.workflow?.usage;
-    if (!usage) return '';
-    return [
-      usage.input_tokens ?? usage.prompt_tokens ?? 0,
-      usage.cache_read_tokens ?? 0,
-      usage.cache_creation_tokens ?? 0,
-      usage.output_tokens ?? usage.completion_tokens ?? 0,
-      usage.total_tokens ?? 0,
-    ].join(':');
-  }, [projectRuntimeDisplay?.workflow?.usage]);
-  // The durable workflow snapshot is the live, cumulative source from the
-  // beginning of this delivery run. Billing writes may trail it while a worker
-  // is streaming, so use the ledger only when no workflow snapshot exists.
-  const projectTokenUsage = useMemo(() => {
-    const workflowUsage = projectRuntimeDisplay?.workflow?.usage;
-    if (workflowUsage) return workflowUsage;
-    return creditSummary
-      ? {
-          prompt_tokens: creditSummary.inputTokens,
-          input_tokens: creditSummary.inputTokens,
-          cached_input_tokens: creditSummary.cacheReadTokens + creditSummary.cacheCreationTokens,
-          cache_read_tokens: creditSummary.cacheReadTokens,
-          cache_creation_tokens: creditSummary.cacheCreationTokens,
-          completion_tokens: creditSummary.outputTokens,
-          output_tokens: creditSummary.outputTokens,
-          total_tokens: creditSummary.totalTokens,
-        }
-      : null;
-  }, [creditSummary, projectRuntimeDisplay?.workflow?.usage]);
+  const liveSessionTokenUsage = useMemo(() => {
+    // Receipt events already update the Chat store; displaying them must not
+    // depend on another runtime/database read or on remote billing finishing.
+    if (sessionTokenUsage) return sessionTokenUsage;
+    const live = projectStatus?.project_id === projectId ? projectStatus.context?.token_budget : null;
+    if (!live) return null;
+    return {
+      ...(live.providerUsageIncomplete ? { providerUsageIncomplete: true } : {}),
+      prompt_tokens: Number(live.input_tokens) || 0,
+      input_tokens: Number(live.input_tokens) || 0,
+      cached_input_tokens: Number(live.cached_input_tokens) || 0,
+      cache_read_tokens: Number(live.cache_read_tokens) || 0,
+      cache_creation_tokens: Number(live.cache_creation_tokens) || 0,
+      completion_tokens: Number(live.output_tokens) || 0,
+      output_tokens: Number(live.output_tokens) || 0,
+      total_tokens: Number(live.total_tokens) || 0,
+    };
+  }, [sessionTokenUsage, projectStatus, projectId]);
+  const settledProjectTokenUsage = useMemo(() => creditSummary ? {
+      prompt_tokens: creditSummary.inputTokens,
+      input_tokens: creditSummary.inputTokens,
+      cached_input_tokens: creditSummary.cacheReadTokens + creditSummary.cacheCreationTokens,
+      cache_read_tokens: creditSummary.cacheReadTokens,
+      cache_creation_tokens: creditSummary.cacheCreationTokens,
+      completion_tokens: creditSummary.outputTokens,
+      output_tokens: creditSummary.outputTokens,
+      total_tokens: creditSummary.totalTokens,
+    } : null, [creditSummary]);
   const activeProject = useMemo(() => projects.find(project => project.id === projectId), [projectId, projects]);
   const isProjectStarting =
-    !projectRuntimeDisplay?.workflow &&
     // A persisted project-list snapshot is stale by definition. Do
     // not turn it into a fullscreen loading gate when the runtime
-    // request failed or the workflow already reached a terminal
+    // request failed or the Agent already reached a terminal state
     // state; the dashboard must remain available to show diagnostics.
     String(projectStatus?.phase || '').toLowerCase() === 'starting';
   const waitingPermission = useMemo(
-    () => getWaitingPermissionState(projectRuntimeDisplay, permissionDisplayModels),
-    [projectRuntimeDisplay, permissionDisplayModels],
+    () => getWaitingPermissionState(permissionDisplayModels),
+    [permissionDisplayModels],
   );
   const hasCurrentRuntimeSnapshot = projectStatus?.project_id === projectId;
   const isProjectInteractionLocked = isOpeningProject || isSyncing || !hasCurrentRuntimeSnapshot;
@@ -237,48 +197,37 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     projectStatus?.project_target?.runtime || projectStatus?.project_target?.platform || '',
   ).trim();
 
-  useEffect(() => {
-    if (!workflowUsageRevision) return undefined;
-    let cancelled = false;
-    let trailingRefresh: ReturnType<typeof setTimeout> | undefined;
-    // Workflow usage is persisted independently from the billing ledger.
-    // Refresh once more after the ledger write/retry window so the final
-    // usage snapshot cannot leave project credits one event behind.
-    void refreshCredits().finally(() => {
-      if (cancelled) return;
-      trailingRefresh = setTimeout(() => {
-        void refreshCredits();
-      }, 1_000);
-    });
-    return () => {
-      cancelled = true;
-      if (trailingRefresh) clearTimeout(trailingRefresh);
-    };
-  }, [refreshCredits, workflowUsageRevision]);
-
-  const isPipelineActive = useMemo(() => {
-    const workflowStatus = projectRuntimeDisplay?.workflow?.status;
-    return workflowStatus === 'running' || workflowStatus === 'verifying';
-  }, [projectRuntimeDisplay?.workflow?.status]);
-  const isProjectWorkspaceMutationLocked = isProjectInteractionLocked || isProjectStarting || isPipelineActive;
-  const canSendMessage = hasPermission('agent.send_message') && !isProjectWorkspaceMutationLocked;
+  const isExecutionBusy = isLoading || isStopping ||
+    (hasCurrentRuntimeSnapshot && (isProjectExecutionActive(projectRuntimeDisplay) ||
+      Boolean(projectRuntimeDisplay?.active_subagents?.length))) || hasPendingToolPermission;
+  const scheduleRuntimeRefresh = useProjectRuntimeRefresh({
+    projectId,
+    enabled: authenticationStatus === 'authenticated',
+    userId: currentUser?.id,
+    isBusy: isExecutionBusy,
+    loadRuntime: loadProjectRuntimeState,
+    showWarning,
+    timeoutMessage: translateBeeGame('livePreview.syncTimeoutMessage'),
+    failureMessage: translateBeeGame('livePreview.syncFailedMessage'),
+  });
+  const isProjectWorkspaceMutationLocked = isProjectInteractionLocked || isProjectStarting || isExecutionBusy || deploymentInProgress;
+  const canSendMessage = hasPermission('agent.send_message') && !isProjectInteractionLocked &&
+    !isProjectStarting && !isStopping && !hasPendingToolPermission && !deploymentInProgress;
   const canApproveTool = hasPermission('agent.approve_tool') && !isProjectInteractionLocked;
-  const canManagePreview = hasPermission('preview.manage') && !isProjectInteractionLocked;
+  const canManagePreview = hasPermission('preview.manage') && !isProjectWorkspaceMutationLocked;
   const canManageDeployment = hasPermission('deployment.manage') && !isProjectWorkspaceMutationLocked;
   const canUploadAssets = hasPermission('assets.upload') && !isProjectWorkspaceMutationLocked;
   const canExportProject = hasPermission('project.export');
 
   // Derived state machine based on Requirements: 4.2
   const currentStatus = useMemo(() => {
-    const workflow = projectRuntimeDisplay?.workflow;
-    const workflowStatus = String(workflow?.status || '');
     const acceptance = projectStatus?.acceptance?.status;
     if (isOffline) return 'offline';
     if (!hasCurrentRuntimeSnapshot) return 'starting';
-    if (['blocked', 'failed', 'cancelled', 'stale'].includes(workflowStatus)) return 'paused';
-    if (workflowStatus === 'completed') return 'finished';
-    if (workflowStatus === 'running' || workflowStatus === 'verifying') return 'running';
+    if (hasPendingToolPermission || projectRuntimeDisplay?.phase === 'waiting_approval') return 'waiting_approval';
+    if (isExecutionBusy) return 'running';
     if (isProjectStarting) return 'starting';
+    if (projectRuntimeDisplay?.phase === 'paused' && projectRuntimeDisplay.blocked) return 'paused';
     if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
     return deriveDashboardStatus({
       isOffline,
@@ -288,11 +237,13 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
       messages: displayMessages,
     });
   }, [
-    projectRuntimeDisplay?.workflow,
     projectStatus?.acceptance?.status,
     isOffline,
     hasCurrentRuntimeSnapshot,
     isLoading,
+    isExecutionBusy,
+    projectRuntimeDisplay?.phase,
+    projectRuntimeDisplay?.blocked,
     canContinue,
     hasPendingToolPermission,
     waitingPermission.isWaitingStatus,
@@ -306,27 +257,14 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
 
   const handleStartPreview = async () => {
     if (!canManagePreview || isProjectWorkspaceMutationLocked) return;
-    try {
-      await withProjectSyncTimeout(
-        api.startProjectPreview(projectId),
-        translateBeeGame('livePreview.syncTimeoutMessage'),
-      );
-      setPreviewRefreshNonce(value => value + 1);
-      await refreshPreviewStatus();
-    } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const handleRestartPreview = async () => {
-    if (!canManagePreview || isProjectWorkspaceMutationLocked) return;
-    try {
-      await api.restartProjectPreview(projectId);
-      setPreviewRefreshNonce(value => value + 1);
-      await refreshPreviewStatus();
-    } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
-    }
+    // Let the Preview panel retain rejection details. A transient toast alone
+    // made a rejected request look like a successful return to standby.
+    await withProjectSyncTimeout(
+      api.startProjectPreview(projectId),
+      translateBeeGame('livePreview.syncTimeoutMessage'),
+    );
+    setPreviewRefreshNonce(value => value + 1);
+    await refreshPreviewStatus();
   };
 
   const handleStopPreview = async () => {
@@ -339,21 +277,22 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     }
   };
 
-  const handleDeployProject = async () => {
+  const handleDeployProject = async (confirmation?: BeeGameDeploymentDiscussionConfirmation) => {
     if (!canManageDeployment || isDeployingProject || isProjectWorkspaceMutationLocked) return;
     setDeployingProject(true);
     try {
-      const deployment = await api.deployProject(projectId);
+      const deployment = await api.deployProject(projectId, confirmation);
       setDeploymentHistory(current => upsertDeploymentHistory(current, deployment));
       const refreshed = await refreshDeploymentHistory();
       if (!refreshed.some(item => item.id === deployment.id)) {
         setDeploymentHistory(current => upsertDeploymentHistory(current, deployment));
       }
-      if (deployment.status !== 'succeeded' || !deployment.url) {
+      if (deployment.status === 'failed') {
         throw new Error(deployment.message || 'Deployment failed');
       }
     } catch (error) {
       showError(error instanceof Error ? error.message : String(error));
+      throw error;
     } finally {
       setDeployingProject(false);
     }
@@ -376,60 +315,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     }
   };
 
-  const runProjectSync = useCallback(async () => {
-    const results = await withProjectSyncTimeout(
-      Promise.allSettled([loadProjectRuntimeState(projectId)]),
-      translateBeeGame('livePreview.syncTimeoutMessage'),
-    );
-    const failedResult = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (failedResult) throw failedResult.reason;
-  }, [loadProjectRuntimeState, projectId, translateBeeGame]);
-
-  // Poll the persisted workflow snapshot as a reconnect-safe fallback.
-  useEffect(() => {
-    if (!projectId || authenticationStatus !== 'authenticated') return;
-
-    runProjectSync().catch(error => {
-      showWarning(getErrorMessage(error, translateBeeGame('livePreview.syncFailedMessage')));
-    });
-    const poll = () => {
-      if (document.hidden) return;
-
-      if (currentStatus === 'running' || isPipelineActive) {
-        loadProjectRuntimeState(projectId).catch(error => {
-          logDashboardReadError('Failed to poll project runtime state:', error);
-        });
-      }
-    };
-
-    // Workflow state and cumulative usage are persisted server-side and
-    // refreshed once per second; the cursor endpoint remains available for
-    // reconnect/recovery without making chat text the state model.
-    const interval = setInterval(poll, 1000);
-
-    // Add visibility change listener to trigger immediate poll when returning to tab
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        poll();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [
-    projectId,
-    authenticationStatus,
-    loadProjectRuntimeState,
-    currentStatus,
-    isPipelineActive,
-    runProjectSync,
-    showWarning,
-    translateBeeGame,
-  ]);
-
   useEffect(() => {
     if (!isOpeningProject && !isSyncing) return undefined;
     const timeoutId = setTimeout(() => {
@@ -438,7 +323,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     return () => clearTimeout(timeoutId);
   }, [isOpeningProject, isSyncing, showWarning, translateBeeGame]);
 
-  // BeeGame displays the server-owned workflow phase while preserving the live turn state.
   const progressPercent = useMemo(() => {
     if (currentStatus === 'running' || currentStatus === 'waiting_approval') return 50;
     return 0;
@@ -451,8 +335,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   }, [currentStatus, translateBeeGame]);
 
   const displayProjectName = useMemo(() => {
-    return getWorkspaceFolderName(activeProject?.root_path) || projectName;
-  }, [activeProject?.root_path, projectName]);
+    return getProjectDisplayName({ root_path: activeProject?.root_path, name: projectName }, translateBeeGame('untitledProject'));
+  }, [activeProject?.root_path, projectName, translateBeeGame]);
 
   useEffect(() => {
     const previousStatus = previousBeeGameStatusRef.current;
@@ -465,42 +349,31 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   }, [currentStatus, projectStatus?.build_report?.build_url]);
 
   return (
-    <div
-      className={`${isDark ? 'dark' : ''} h-screen w-full flex overflow-hidden font-sans bg-zinc-50 dark:bg-zinc-950 transition-colors duration-700`}
-    >
+    <div className={`${isDark ? 'dark' : ''} page-enter h-full w-full overflow-hidden bg-background font-sans text-foreground`}>
       <BeeGameLivePreviewPage
+        projectId={projectId}
         lang={lang}
         projectName={displayProjectName}
-        status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
+        status={currentStatus === 'idle' ? 'idle' : (currentStatus as DashboardStatus)}
         phaseLabel={phaseLabel}
         credits={creditSummary}
         accountCreditBalance={creditBalance}
         isSyncing={isSyncing}
         isInteractionLocked={isProjectInteractionLocked}
         isWorkspaceBusy={isProjectWorkspaceMutationLocked}
+        isAgentWorking={isExecutionBusy}
         buildReport={projectStatus?.build_report || null}
         projectTarget={projectTargetLabel}
-        tokenUsage={projectTokenUsage}
+        tokenUsage={liveSessionTokenUsage ?? settledProjectTokenUsage}
+        tokenUsageScope={liveSessionTokenUsage ? 'session' : 'project'}
+        settledProjectTokens={liveSessionTokenUsage ? creditSummary?.totalTokens : undefined}
+        projectExecutionTime={hasCurrentRuntimeSnapshot ? projectStatus.execution_time : undefined}
         deployments={deploymentHistory}
         previewRefreshNonce={previewRefreshNonce}
         onStartPreview={canManagePreview ? handleStartPreview : undefined}
-        onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
         onStopPreview={canManagePreview ? handleStopPreview : undefined}
         onDeployProject={canManageDeployment ? handleDeployProject : undefined}
         onRollbackDeployment={canManageDeployment ? handleRollbackDeployment : undefined}
-        onFixBuildErrors={
-          canSendMessage
-            ? () => {
-                if (isProjectWorkspaceMutationLocked) return Promise.resolve();
-                return api
-                  .requestProjectAction({
-                    project_id: projectId,
-                    kind: 'build_error_repair',
-                  })
-                  .then(() => undefined);
-              }
-            : undefined
-        }
         onFixDeploymentFailure={
           canSendMessage
             ? () => {
@@ -514,34 +387,33 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
               }
             : undefined
         }
-        isDeploying={isDeployingProject}
+        onFixConsoleError={canSendMessage ? message => {
+          const safeMessage = filterPathsForDisplay(message);
+          const prompt = translateBeeGame('livePreview.fixConsoleEntryPrompt', { consoleLog: safeMessage });
+          return sendMessage(prompt);
+        } : undefined}
+        isDeploying={isDeployingProject || deploymentInProgress}
         onOpenExternal={url => window.open(url, '_blank', 'noopener,noreferrer')}
         onBack={onBack}
         onSetLang={onSetLang}
-      />
+        collaboration={
+          <RightSidebar
 
-      <RightSidebar
         projectId={projectId}
         lang={lang}
         messages={displayMessages}
         progress={progressPercent}
-        onSendMessage={(message, attachments?: ChatAttachmentPayload[], supersedesMessageId?: string) => {
-          if (isProjectWorkspaceMutationLocked) return Promise.resolve();
+        onSendMessage={async (message, attachments?: ChatAttachmentPayload[], supersedesMessageId?: string) => {
+          if (!canSendMessage) return false;
           return sendMessage(message, undefined, attachments, supersedesMessageId);
         }}
         isLoading={isLoading}
         onStopTask={stopTask}
-        onWorkflowAction={
-          canSendMessage
-            ? async action => {
-                if (action === 'resume') await api.resumeWorkflow(projectId);
-                else await api.retryWorkflow(projectId);
-                await loadProjectRuntimeState(projectId);
-              }
-            : undefined
-        }
+        onContinueTask={canSendMessage ? continueTask : undefined}
+        autoRetryTurnId={autoRetryTurnId}
+        onCancelRetry={cancelAutoRetry}
         isStopping={isStopping}
-        isRuntimeBusy={currentStatus === 'running'}
+        isRuntimeBusy={isExecutionBusy}
         onResolveToolPermission={hasPendingToolPermission && canApproveTool && !isProjectInteractionLocked ? resolveToolPermission : undefined}
         permissionState={permissionState}
         pendingPermissions={permissionDisplayModels}
@@ -554,26 +426,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         currentUserDisplayName={currentUser?.displayName}
         currentUserEmail={currentUser?.email}
         currentUserAvatarUrl={currentUser?.avatarUrl}
+          />
+        }
       />
-      {isProjectStarting ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center overflow-hidden bg-black/95 px-6 backdrop-blur-2xl"
-          role="status"
-          aria-live="polite"
-          aria-label={translateBeeGame('dashboard.starting.title')}
-        >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(52,211,153,0.11),transparent_34%)]" />
-          <div className="relative flex max-w-md flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[0_20px_70px_rgba(16,185,129,0.12)]">
-              <LoaderCircle className="h-6 w-6 animate-spin text-emerald-300" aria-hidden="true" />
-            </div>
-            <h2 className="type-title-2 mt-7 text-white">{translateBeeGame('dashboard.starting.title')}</h2>
-            <p className="type-body mt-3 max-w-sm text-zinc-400">
-              {translateBeeGame('dashboard.starting.description')}
-            </p>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

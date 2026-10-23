@@ -5,10 +5,15 @@ import type {
 } from '@bee-game-studio/beegame-storage-core'
 import { createR2DeploymentPublisher } from '../beegame/r2-deployment-publisher'
 
-function metadataFetch(events: Array<Record<string, unknown>>): typeof fetch {
+function metadataFetch(events: Array<Record<string, unknown>>, publicHtml = '<main>game</main>'): typeof fetch {
   const rows = new Map<string, Record<string, unknown>>()
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    if (url.startsWith('https://games.test/deployments/')) {
+      expect(init?.headers).toBeUndefined()
+      expect(init?.redirect).toBe('error')
+      return new Response(publicHtml, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+    }
     if (url.endsWith('/beegame_storage_objects') && init?.method === 'POST') {
       const row = JSON.parse(String(init.body)) as Record<string, unknown>
       rows.set(String(row.id), row)
@@ -31,15 +36,59 @@ function metadataFetch(events: Array<Record<string, unknown>>): typeof fetch {
 }
 
 describe('R2 deployment publisher', () => {
+  test('rejects a public page whose referenced asset is missing', async () => {
+    const publisher = createR2DeploymentPublisher({
+      baseUrl: 'https://supabase.test', anonKey: 'anon-key', bucket: 'delivery-data',
+      publicBaseUrl: 'https://games.test', driver: { provider: 'r2' } as ProjectStorageDriver,
+      fetchImpl: (async input => String(input).endsWith('/assets/game.js')
+        ? new Response('Not found', { status: 404 })
+        : new Response('<script type="module" src="./assets/game.js"></script>',
+          { headers: { 'content-type': 'text/html; charset=utf-8' } })) as typeof fetch,
+    })
+    await expect(publisher.verifyPublished!('https://games.test/deployments/test/files/index.html', [
+      { path: 'index.html', bytes: async () => new TextEncoder().encode('<script type="module" src="./assets/game.js"></script>'), text: async () => '' },
+      { path: 'assets/game.js', bytes: async () => new TextEncoder().encode('start()'), text: async () => '' },
+    ])).rejects.toThrow('assets/game.js')
+  })
+
+  test('rejects a public domain returning another website with HTTP 200', async () => {
+    const deleted: string[] = []
+    const sizes = new Map<string, number>()
+    const publisher = createR2DeploymentPublisher({
+      baseUrl: 'https://supabase.test', anonKey: 'anon-key', bucket: 'delivery-data',
+      publicBaseUrl: 'https://games.test', fetchImpl: metadataFetch([], '<h1>Page not found</h1>'),
+      driver: {
+        provider: 'r2',
+        putObject: async (locator, bytes) => { sizes.set(locator.objectKey, bytes.byteLength) },
+        headObject: async locator => ({ byteSize: sizes.get(locator.objectKey)!, metadata: {} }),
+        deleteObject: async locator => { deleted.push(locator.objectKey) },
+        getObject: async () => undefined, createUploadUrl: async () => 'unused',
+        createDownloadUrl: async () => 'unused', copyObject: async () => undefined,
+        createMultipartUpload: async () => 'unused', createMultipartPartUploadUrl: async () => 'unused',
+        completeMultipartUpload: async () => undefined, abortMultipartUpload: async () => undefined,
+      },
+    })
+    const files = [{ path: 'index.html', bytes: async () => new TextEncoder().encode('<main>game</main>'), text: async () => '<main>game</main>' }]
+    const published = await publisher.publishStaticDirectory({
+      deploymentId: 'wrong-domain', sessionId: 'test', userId: 'test', projectId: 'test',
+      workspacePath: '/workspace', outputDir: '/workspace/dist', artifactHash: 'hash', authToken: 'private-token',
+      files,
+    })
+    await expect(publisher.verifyPublished!(published.url, files)).rejects.toThrow('delivery domain returned different content')
+    // Public verification follows registration; manager revokes that record on
+    // failure. Upload cleanup remains responsible only for incomplete uploads.
+    expect(deleted).toEqual([])
+  })
+
   test('publishes immutable files and makes the deployment manifest the final object', async () => {
     const metadataEvents: Array<Record<string, unknown>> = []
-    const uploads: Array<{ locator: StorageObjectLocator; bytes: Uint8Array }> =
+    const uploads: Array<{ locator: StorageObjectLocator; bytes: Uint8Array; cacheControl?: string }> =
       []
     const sizes = new Map<string, number>()
     const driver: ProjectStorageDriver = {
       provider: 'r2',
-      putObject: async (locator, bytes) => {
-        uploads.push({ locator, bytes })
+      putObject: async (locator, bytes, _contentType, _metadata, httpMetadata) => {
+        uploads.push({ locator, bytes, ...(httpMetadata?.cacheControl ? { cacheControl: httpMetadata.cacheControl } : {}) })
         sizes.set(locator.objectKey, bytes.byteLength)
       },
       getObject: async () => undefined,
@@ -93,6 +142,11 @@ describe('R2 deployment publisher', () => {
       'deployments/deploy-1/files/assets/game.js',
       'deployments/deploy-1/manifest.json',
     ])
+    expect(uploads.slice(0, 2).map(file => file.cacheControl)).toEqual([
+      'public, max-age=31536000, immutable',
+      'public, max-age=31536000, immutable',
+    ])
+    expect(uploads[2]?.cacheControl).toBeUndefined()
     expect(result).toEqual(
       expect.objectContaining({
         url: 'https://games.test/deployments/deploy-1/files/index.html',
@@ -111,6 +165,12 @@ describe('R2 deployment publisher', () => {
     expect(metadataEvents.at(-1)).toEqual(
       expect.objectContaining({ operation: 'patch', status: 'ready' }),
     )
+    expect(metadataEvents.filter(event => event.operation === 'create').every(event =>
+      event.scope_id === 'project-1' && event.project_id === 'project-1' &&
+      (event.metadata as Record<string, unknown>).deployment_id === 'deploy-1')).toBe(true)
+    await publisher.verifyPublished!(result.url, [{ path: 'index.html',
+      bytes: async () => new TextEncoder().encode('<main>game</main>'),
+      text: async () => '<main>game</main>' }])
   })
 
   test('removes already uploaded objects when a later deployment file fails', async () => {

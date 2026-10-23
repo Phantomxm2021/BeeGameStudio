@@ -1,0 +1,40 @@
+{
+  "scope": "UI document regeneration only; no Review/resources/content/implementation turn",
+  "elapsedSeconds": 233.651,
+  "model": "ark-code-latest",
+  "sameMainNativeSession": true,
+  "changedUpstream": [],
+  "usage": {
+    "input": 144615,
+    "cachedInput": 1025472,
+    "output": 9994
+  },
+  "providerFailures": [
+    {
+      "status": 401,
+      "usageKnown": false
+    }
+  ],
+  "geometricReferenceCases": "All three retained full-host drafts fit; game-view camera inputs match Scene reference framing.",
+  "acceptance": "Not fully accepted: remaining document boundary and cross-document findings. No extra paid retry, resources or implementation.",
+  "findings": [
+    {
+      "severity": "boundary",
+      "source": "UI_UX_SPEC.md §2.2",
+      "issue": "Minimum dpad height remains 190, but 3×48 + 2×8 + 16 + 24 requires 200. Its published formula gives 44.67px keys at 190.",
+      "basis": "Direct arithmetic from the new document; the tested 232px allocation does not exhibit this error."
+    },
+    {
+      "severity": "boundary",
+      "source": "UI_UX_SPEC.md §4.3",
+      "issue": "Portrait pause panel is 380px wide at x=5; 375px is a declared supported viewport, but no smaller-panel rule is defined.",
+      "basis": "Declared bounds right=385 exceed width=375; no pause draft was generated in this targeted run."
+    },
+    {
+      "severity": "existing-cross-document",
+      "source": "TECHNICAL_DESIGN.md §2/§12/§16",
+      "issue": "Retained technical examples and acceptance expectations still use 390×784 and y=197; Scene and the new UI use 390×390 and host y=60.",
+      "basis": "Pre-existing upstream inconsistency; other seven documents intentionally remain unchanged."
+    }
+  ]
+}

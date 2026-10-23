@@ -6,7 +6,7 @@ import type {
 } from './types'
 import { normalizeResourceTechnicalFacts } from './technical-facts'
 
-/** Resolve one element explicitly selected by Claude Code without ranking it. */
+/** Resolve one element explicitly selected by Bgs without ranking it. */
 export function resolveExactResourceElement(
   pack: ResourcePack,
   elements: readonly ResourceElement[],

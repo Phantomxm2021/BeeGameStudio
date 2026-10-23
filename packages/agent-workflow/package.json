@@ -7,7 +7,18 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./package.json": "./package.json"
+    "./opencode-go": "./src/opencode-go.ts",
+    "./native-response-trace": "./src/native-response-trace.ts",
+    "./subagent-activity": "./src/subagent-activity.ts",
+    "./design-review-result": "./src/design-review-result.ts",
+    "./preview-environment": "./src/preview-environment.ts",
+    "./package.json": "./package.json",
+    "./runtime-environment": "./src/runtime-environment.ts",
+    "./runtime-path": "./src/runtime-path.ts",
+    "./model-protocol": "./src/model-protocol.ts"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   },
   "scripts": {
     "test": "bun test src/__tests__",

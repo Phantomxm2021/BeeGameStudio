@@ -1,0 +1,9 @@
+{
+  "orthographic": true,
+  "orthographicSize": 270,
+  "coordinateSpace": "logical-pixels",
+  "viewport": { "width": 960, "height": 540 },
+  "framing": "letterbox",
+  "nearClip": 0.1,
+  "farClip": 100
+}

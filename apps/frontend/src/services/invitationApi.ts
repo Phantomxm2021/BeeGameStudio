@@ -20,11 +20,6 @@ export async function getInvitationPublicSettings(): Promise<InvitationPublicSet
   return await apiClient.get('/api/invitations/settings');
 }
 
-export async function validateInvitationCode(code: string): Promise<boolean> {
-  const result = await apiClient.post('/api/invitations/validate', { code }) as { valid: boolean };
-  return result.valid === true;
-}
-
 export async function listInvitations(): Promise<InvitationRecord[]> {
   return await apiClient.get('/api/admin/invitations');
 }

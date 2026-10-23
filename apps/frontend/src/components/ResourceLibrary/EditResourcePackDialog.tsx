@@ -9,11 +9,16 @@ type Props = {
   onClose: () => void
   onUploadCover: (file: File) => Promise<ResourcePackSummary>
   onSave: (input: UpdateResourcePackInput) => Promise<ResourcePackSummary>
+  finalFocus?: () => HTMLElement | null
 }
 
-export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onSave }: Props) {
+export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onSave, finalFocus }: Props) {
   const { t } = useTranslation('resourceLibrary')
-  const copy = { title: t('editPack'), update: t('update'), updating: t('updating') }
+  const copy = useMemo(() => ({
+    title: t('editPack'),
+    update: t('update'),
+    updating: t('updating'),
+  }), [t])
   const initialValues = useMemo<ResourcePackFormValues>(() => ({
     name: pack.name,
     styles: [...pack.styles],
@@ -38,6 +43,7 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
     submittingLabel={copy.updating}
     initialValues={initialValues}
     onClose={onClose}
+    finalFocus={finalFocus}
     allowCover
     formTestId="edit-pack-dialog"
     onSubmit={async (values, cover) => {
@@ -61,7 +67,6 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
   />
   );
 }
-
 
 function splitList(value: string): string[] {
   return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))]

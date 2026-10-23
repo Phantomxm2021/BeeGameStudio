@@ -1,0 +1,10 @@
+{
+  "orthographic": true,
+  "pixelsPerUnit": 100,
+  "orthographicSize": 3.36,
+  "viewport": {
+    "width": 480,
+    "height": 672
+  },
+  "framing": "letterbox"
+}

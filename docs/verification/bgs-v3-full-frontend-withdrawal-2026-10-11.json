@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-11",
+  "scope": "Withdraw all V3 production frontend integration; no new feature development.",
+  "restoredTrackedFiles": [
+    "apps/frontend/src/components/Demiurge/DashboardView.tsx",
+    "apps/frontend/src/components/Demiurge/Sidebar/ChatPanel.tsx",
+    "apps/frontend/src/components/Demiurge/RightSidebar.tsx",
+    "apps/frontend/src/components/Demiurge/RightSidebar.test.tsx",
+    "apps/frontend/src/components/Demiurge/Sidebar/ArtifactsPanel.tsx",
+    "apps/frontend/src/components/Demiurge/Sidebar/ArtifactsPanel.test.tsx",
+    "apps/frontend/src/components/Workspace/SceneEditorOverlay.tsx",
+    "apps/frontend/src/components/Workspace/SceneEditorOverlay.test.tsx",
+    "apps/frontend/src/components/Workspace/SceneEditor.interactions.test.tsx",
+    "apps/frontend/src/types/scene-editor-runtime.ts",
+    "packages/scene-editor/src/editor.tsx"
+  ],
+  "selectivelyRestoredFiles": [
+    "apps/frontend/src/components/Workspace/UiEditorOverlay.tsx",
+    "apps/frontend/src/components/Workspace/UiEditorOverlay.test.tsx",
+    "apps/frontend/src/services/beeGameAdapter.ts"
+  ],
+  "removedV3Files": [
+    "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.tsx",
+    "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.test.tsx",
+    "apps/frontend/src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.tsx",
+    "apps/frontend/src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.test.tsx",
+    "apps/frontend/src/services/workflowV3Api.ts"
+  ],
+  "recoveryArchive": "/private/tmp/bgs-v3-frontend-withdrawal-sTKDnQ/frontend-before-withdrawal.tar",
+  "preserved": [
+    "Previously requested non-V3 frontend fixes and production review",
+    "BGS backend and Supabase migrations",
+    "Saved game artifacts and historical acceptance evidence",
+    "Backend V3/legacy safety separation"
+  ],
+  "verification": {
+    "targetedFrontendTests": {
+      "files": 7,
+      "passed": 215,
+      "failed": 0
+    },
+    "frontendTypecheck": {
+      "command": "bunx tsc -b",
+      "exitCode": 0
+    },
+    "sourceScan": {
+      "patterns": [
+        "WorkflowPanel",
+        "WorkflowMeasuredPreview",
+        "workflowV3Api",
+        "bgs.workflow.v3",
+        "BeeGameContentEditVersion",
+        "editingRef",
+        "setReadOnly",
+        "V3："
+      ],
+      "root": "apps/frontend/src",
+      "matches": 0
+    },
+    "browser": {
+      "browser": "Chrome",
+      "tabId": "590369291",
+      "project": "v3-deployed-fixture-e58a5f9d-5e2f-49cc-9424-626d27f369d2",
+      "observed": "Existing page after HMR has no V3 header notice or V3 Chat task panel; original Chat composer and preview controls are present. No business operation submitted."
+    }
+  },
+  "limitations": [
+    "No claim of full-repository tests or live V3 product acceptance",
+    "Production frontend currently has no V3-specific operation loop; backend guards remain active"
+  ],
+  "serviceRestart": false,
+  "paidModelCall": false
+}

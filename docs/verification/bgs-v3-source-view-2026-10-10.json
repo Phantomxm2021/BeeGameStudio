@@ -1,0 +1,165 @@
+{
+  "date": "2026-10-10",
+  "rfcVersion": "1.9",
+  "workspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "scope": "V3 formal saved Scene/UI JSON read-only view through the existing public API, artifact chooser and renderers.",
+  "implemented": [
+    "Owned V3 Run/canonical workspace/store mode selection without legacy delivery or eight-document authority.",
+    "Existing strict v2 registry/schema parsing, actual source hashes and post-read file/Run freshness.",
+    "Traversal/alias/symlink rejection, explicit missing index vs malformed or incomplete sources.",
+    "Writer/unknown lease refusal; reading does not dispatch native work, mutate Run or game files, or grant release acceptance.",
+    "Existing Scene/UI renderers and file chooser consume the saved snapshot; V3 read-only mode protects central data/save paths and explains candidate status.",
+    "Legacy editing defaults retained; server rejects V3 writes through legacy save/publish paths."
+  ],
+  "tests": [
+    {
+      "suite": "Core/public routes/content/shared isolation",
+      "runner": "bun test",
+      "files": 14,
+      "passed": 127,
+      "failed": 0,
+      "assertions": 741,
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-source-view-core-tests.log"
+    },
+    {
+      "suite": "Frontend jsdom editor/view/Artifacts/Chat/Question/adapter",
+      "runner": "apps/frontend bun run test --run",
+      "files": 8,
+      "passed": 195,
+      "failed": 0,
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-source-view-front-tests.log"
+    },
+    {
+      "suite": "Existing actual native CLI + loopback fake model (no paid provider)",
+      "runner": "bun test",
+      "files": 2,
+      "passed": 9,
+      "failed": 0,
+      "assertions": 141,
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-source-view-native-tests.log"
+    }
+  ],
+  "totalDistinctPassed": 331,
+  "typechecks": {
+    "frontend": {
+      "command": "bun apps/frontend/node_modules/typescript/bin/tsc --noEmit --pretty false -p apps/frontend/tsconfig.app.json",
+      "exitCode": 0
+    },
+    "server": {
+      "command": "bunx tsc --noEmit --pretty false -p packages/agent-workflow-server/tsconfig.json",
+      "exitCode": 2,
+      "diagnostics": 3556,
+      "workflowV3Diagnostics": 0,
+      "note": "Pre-existing full-repository failure; not a clean server build."
+    }
+  },
+  "limitations": [
+    "No current-turn real-browser screenshot or deployed UI validation. Scene interaction tests mock the GPU viewport, not proof of target game rendering.",
+    "Source view is a candidate at current bytes, not semantic review, runtime consumption, package acceptance or game release.",
+    "V3 measured-build Preview not connected: existing preview scripts do not select/pin runtimeArtifact or guarantee byte identity.",
+    "Authorized source editing/export, ordinary Chat creation/requirements changes and task-event aggregation remain incomplete.",
+    "Real DB concurrency/migration, unknown external effects, full game/audio/Tilemap/3D and paid acceptance remain unverified.",
+    "Temporary test logs are referenced by path/hash; repository evidence retains summaries and source hashes, not the complete logs."
+  ],
+  "notPerformed": [
+    "Claude Code/native source changes",
+    "real generated-game edits",
+    "paid model calls",
+    "deployment/service restart",
+    "production DB writes/migrations",
+    "historical evidence overwrite"
+  ],
+  "hashes": [
+    {
+      "sha256": "4aaca47480501e209acb063631c7e8ebaae1101868ce928ca7b3da6f8887a5db",
+      "path": "packages/agent-workflow-server/src/app.ts"
+    },
+    {
+      "sha256": "d7fe2e686c36b25c861ff403d1e9037d981437c9216c8674d42d5f7528ac794e",
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/content-view.ts"
+    },
+    {
+      "sha256": "e8d3a1af682dfe9f2cab6c403b2d55d30d869eb6e3dac859f214585080a29cba",
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/content-view.test.ts"
+    },
+    {
+      "sha256": "5f1ef13a1ddfefc35fe621ab259021fbf4013de3380fa3d0341f9de32087aa49",
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts"
+    },
+    {
+      "sha256": "0c1cf2817b88864aca367cc1b05a7b63afb4399fa49ba485429037879502ce55",
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/workflow-v3.test.ts"
+    },
+    {
+      "sha256": "e2accc54635514fa1f85da0d2035f0de5d3e827b89e08979188ab6fce140da4d",
+      "path": "packages/scene-editor/src/editor.tsx"
+    },
+    {
+      "sha256": "f5579866a7d657a1297177a410e850d149406f99816be0c7e7262742222dfc22",
+      "path": "apps/frontend/src/services/beeGameAdapter.ts"
+    },
+    {
+      "sha256": "71b17429a4e5869b0c13181102c11733efe1d7a52f29a6c60b2b0f7bc9850436",
+      "path": "apps/frontend/src/types/scene-editor-runtime.ts"
+    },
+    {
+      "sha256": "36ba05e194262d1b95ee92a00fc77d9bd736b96fc73fc28b709eb54309478eea",
+      "path": "apps/frontend/src/components/Workspace/SceneEditorOverlay.tsx"
+    },
+    {
+      "sha256": "1317b3e19753951e3a7702f9d255e26d511266943ab84bf9886dee4cd2714a30",
+      "path": "apps/frontend/src/components/Workspace/SceneEditorOverlay.test.tsx"
+    },
+    {
+      "sha256": "bca9d8563508d2cc61b3ee80b01e3d4de0e5104771c9d375a85c864dce51828e",
+      "path": "apps/frontend/src/components/Workspace/SceneEditor.interactions.test.tsx"
+    },
+    {
+      "sha256": "c5161f19c724a37eaf2a2a55eeb661090a3c53c96ce319c4571ade878e784dfe",
+      "path": "apps/frontend/src/components/Workspace/UiEditorOverlay.tsx"
+    },
+    {
+      "sha256": "5915e2e4504702e7c6c0bbd608d36af31ac5856b1af790cb74ea4d96186861f0",
+      "path": "apps/frontend/src/components/Workspace/UiEditorOverlay.test.tsx"
+    },
+    {
+      "sha256": "761a2b7028c9e29da0ceec74863d734de12557faf9bcac695e3d280cfec2b946",
+      "path": "apps/frontend/src/components/Demiurge/RightSidebar.tsx"
+    },
+    {
+      "sha256": "ce1a759271e4a7d18a9d2b8fefc6064c987fca6c4e387f652bbe48f986ae9baa",
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/ArtifactsPanel.tsx"
+    },
+    {
+      "sha256": "8da1bdc62103c6ebdc2a5f5610a7ef3428fdca3b0b2f6a222536dfa4569c2da0",
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/ArtifactsPanel.test.tsx"
+    },
+    {
+      "sha256": "ec614ea965b35876211bda30d6cebab8344ef1868e8103987dfb61cd3112af3b",
+      "path": "/private/tmp/bgs-v3-source-view-core-tests.log"
+    },
+    {
+      "sha256": "47733d53b23e9cd4831fbe9bfeef67fe798c5801118265a44c2fa45e9de2c44f",
+      "path": "/private/tmp/bgs-v3-source-view-front-tests.log"
+    },
+    {
+      "sha256": "6a60d415b576222e3f39e1b59c67786710a3588eb45de7501568dd927b11db70",
+      "path": "/private/tmp/bgs-v3-source-view-native-tests.log"
+    },
+    {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "path": "/private/tmp/bgs-v3-source-view-front-types.log"
+    },
+    {
+      "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb",
+      "path": "/private/tmp/bgs-v3-source-view-server-types.log"
+    },
+    {
+      "sha256": "c63e88f0ee2182207d8077187bf4a0d7e8953be699d092f1183fa4fb13d08a38",
+      "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md"
+    }
+  ]
+}

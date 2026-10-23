@@ -1,0 +1,166 @@
+{
+  "record": "1.91",
+  "productionRuntime": "1.89",
+  "deployed": false,
+  "rootCause": {
+    "nativeErrorFormatter": "src/utils/toolErrors.ts:formatError keeps first and last 5000 characters when over 10000",
+    "failedFixture": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-native-measurement-FKtuiE",
+    "hostProbesRetained": 5,
+    "modelLostHiddenReason": true
+  },
+  "fix": "Front-loaded complete selected UI diagnostics; compact default UI observation, exact saved details retained; no native formatter/prompt/limit changes",
+  "debug": {
+    "normalHttp": true,
+    "actualCli": true,
+    "syntheticOwner": true,
+    "localStore": true,
+    "nativeStarts": 1,
+    "modelRequests": 9,
+    "paidCalls": 0,
+    "current": {
+      "current": true
+    },
+    "historical": {
+      "current": false,
+      "reason": "A newer measurement exists for this artifact; inspect its actual result, including failure or interruption",
+      "code": "measurement-superseded"
+    },
+    "oldBatch": [
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "play",
+        "status": "passed"
+      },
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "hidden",
+        "status": "unverified",
+        "reason": "Target UI ancestor is hidden; geometry alone cannot establish visible consumption"
+      },
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "clipped",
+        "status": "unverified",
+        "reason": "Complete visible text fit could not be established"
+      },
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "play",
+        "status": "unverified",
+        "reason": "Target selector is invalid; select one actual UI element: ["
+      },
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "play",
+        "status": "passed"
+      }
+    ],
+    "actualModelInputs": [
+      {
+        "request": 2,
+        "chars": 10489,
+        "hidden": true,
+        "clipped": true,
+        "selector": true
+      },
+      {
+        "request": 3,
+        "chars": 10039,
+        "hidden": true,
+        "clipped": true,
+        "selector": true
+      },
+      {
+        "request": 4,
+        "chars": 25829,
+        "hidden": true,
+        "clipped": true,
+        "selector": true
+      },
+      {
+        "request": 5,
+        "chars": 765,
+        "hidden": false,
+        "clipped": false,
+        "selector": false
+      },
+      {
+        "request": 6,
+        "chars": 180,
+        "hidden": false,
+        "clipped": false,
+        "selector": false
+      },
+      {
+        "request": 7,
+        "chars": 8159,
+        "hidden": false,
+        "clipped": true,
+        "selector": false
+      },
+      {
+        "request": 8,
+        "chars": 10039,
+        "hidden": true,
+        "clipped": true,
+        "selector": true
+      },
+      {
+        "request": 9,
+        "chars": 22156,
+        "hidden": false,
+        "clipped": true,
+        "selector": false
+      }
+    ],
+    "exportBytes": 16164,
+    "unrelatedSourcesUnchanged": true,
+    "writerExited": true,
+    "turnStatus": "ended",
+    "quality": "unverified",
+    "passed": true
+  },
+  "offlineRegression": {
+    "pass": 52,
+    "skip": 1,
+    "fail": 0,
+    "assertions": 621,
+    "rootTypecheck": true,
+    "diffCheck": true
+  },
+  "guard": {
+    "protectedFiles": 3207,
+    "protectedChanges": [],
+    "gameFiles": 201,
+    "gameChanges": [],
+    "checkedAt": "2026-10-12T18:49:26.458Z"
+  },
+  "dbPreflight": {
+    "projectsChecked": 40,
+    "unresolvedWriters": [
+      {
+        "projectId": "v3-edit-fault-8741b8db-84ea-437f-80cd-15c1c6f1f522",
+        "revision": 3
+      },
+      {
+        "projectId": "v3-edit-fault-bf1512d1-196f-48cc-a723-49685333fc2e",
+        "revision": 3
+      },
+      {
+        "projectId": "v3-host-restart-c4b3872f-5099-4535-a954-6134b8d8210b",
+        "revision": 2
+      }
+    ],
+    "writes": 0
+  },
+  "paidRequests": 0,
+  "allScriptedProviderRequests": 45,
+  "debugServicesClosed": true,
+  "screenshot": "/private/tmp/bgs-v3-191-native-debug-proof.jpg",
+  "evidence": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-native-measurement-KCDiUF/native-measurement-evidence.json",
+  "limits": [
+    "Local store and synthetic owner",
+    "Scripted loopback provider, not model reasoning",
+    "Not game quality or production remote database acceptance"
+  ]
+}

@@ -1,0 +1,162 @@
+[
+  {
+    "timestamp": "2026-10-01T08:52:49.880Z",
+    "id": "call_db8wr1jzaetpai11acujao95",
+    "command": "bun .beegame/delivery/check-content.mjs --camera-draft .beegame/tmp/breakout-camera.json 960 540 2>&1 | head -40",
+    "resultTimestamp": "2026-10-01T08:18:50.102Z",
+    "isError": false,
+    "content": "{\n  \"ok\": true,\n  \"scope\": \"camera-framing-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 960,\n    \"height\": 540\n  },\n  \"note\": \"Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.\",\n  \"view\": {\n    \"projection\": \"orthographic\",\n    \"framing\": \"letterbox\",\n    \"rect\": {\n      \"x\": 0,\n      \"y\": 0,\n      \"width\": 960,\n      \"height\": 540\n    },\n    \"aspect\": 1.7777777777777777,\n    \"halfHeight\": 2.7,\n    \"halfWidth\": 4.8\n  }\n}"
+  },
+  {
+    "timestamp": "2026-10-01T08:52:49.880Z",
+    "id": "call_hpf1q5tyfczvxq5qi5dc1sln",
+    "command": "ls -la content/ui/ docs/ && bun .beegame/delivery/check-content.mjs --design-layouts 2>&1 | tail -30",
+    "resultTimestamp": "2026-10-01T08:40:49.517Z",
+    "isError": false,
+    "content": "content/ui/:\ntotal 96\ndrwxr-xr-x@ 8 nswell  wheel    256 Oct  1 08:37 .\ndrwxr-xr-x@ 3 nswell  wheel     96 Oct  1 08:27 ..\n-rw-r--r--@ 1 nswell  wheel   5258 Oct  1 08:35 game-over.json\n-rw-r--r--@ 1 nswell  wheel  10128 Oct  1 08:33 game-screen.json\n-rw-r--r--@ 1 nswell  wheel   6637 Oct  1 08:35 level-complete.json\n-rw-r--r--@ 1 nswell  wheel   5203 Oct  1 08:37 pause-menu.json\n-rw-r--r--@ 1 nswell  wheel   3579 Oct  1 08:37 rotate-prompt.json\n-rw-r--r--@ 1 nswell  wheel   5235 Oct  1 08:31 title-screen.json\n\ndocs/:\ntotal 336\ndrwxr-xr-x@ 9 nswell  wheel    288 Oct  1 08:40 .\ndrwxr-xr-x@ 8 nswell  wheel    256 Oct  1 08:27 ..\n-rw-r--r--@ 1 nswell  wheel  28555 Oct  1 05:26 ART_DIRECTION.md\n-rw-r--r--@ 1 nswell  wheel  24657 Oct  1 05:26 AUDIO_DESIGN.md\n-rw-r--r--@ 1 nswell  wheel  16403 Oct  1 08:25 BALANCE_DESIGN.md\n-rw-r--r--@ 1 nswell  wheel  12043 Oct  1 08:26 GDD.md\n-rw-r--r--@ 1 nswell  wheel  19326 Oct  1 08:19 LEVEL_SCENE_DESIGN.md\n-rw-r--r--@ 1 nswell  wheel  28793 Oct  1 05:28 TECHNICAL_DESIGN.md\n-rw-r--r--@ 1 nswell  wheel  25866 Oct  1 08:40 UI_UX_SPEC.md\n{\n  \"scope\": \"design-layout-geometry\",\n  \"runtimeVerified\": false,\n  \"note\": \"Recomputes final inputs; does not prove screen/state coverage, agreement with prose, visual quality or gameplay.\",\n  \"valid\": true,\n  \"issues\": [],\n  \"files\": [\n    \"content/ui/game-over.json\",\n    \"content/ui/game-screen.json\",\n    \"content/ui/level-complete.json\",\n    \"content/ui/pause-menu.json\",\n    \"content/ui/rotate-prompt.json\",\n    \"content/ui/title-screen.json\"\n  ]\n}"
+  },
+  {
+    "timestamp": "2026-10-01T08:52:49.880Z",
+    "id": "call_0f7p4h4xpyjforzjjrbq0y8m",
+    "command": "bun .beegame/delivery/check-content.mjs --design-layouts 2>&1 | head -12",
+    "resultTimestamp": "2026-10-01T08:51:48.694Z",
+    "isError": false,
+    "content": "{\n  \"scope\": \"design-layout-geometry\",\n  \"runtimeVerified\": false,\n  \"note\": \"Recomputes final inputs; does not prove screen/state coverage, agreement with prose, visual quality or gameplay.\",\n  \"valid\": true,\n  \"issues\": [],\n  \"files\": [\n    \"content/ui/game-over.json\",\n    \"content/ui/game-screen.json\",\n    \"content/ui/level-complete.json\",\n    \"content/ui/pause-menu.json\",\n    \"content/ui/rotate-prompt.json\","
+  },
+  {
+    "timestamp": "2026-10-01T08:59:09.873Z",
+    "id": "call_b1uo19mzxmmxiz7e1vm32ta2",
+    "command": "bun .beegame/delivery/check-content.mjs --design-layouts 2>&1 | tail -40",
+    "resultTimestamp": "2026-10-01T08:59:10.016Z",
+    "isError": false,
+    "content": "{\n  \"scope\": \"design-layout-geometry\",\n  \"runtimeVerified\": false,\n  \"note\": \"Recomputes final inputs; does not prove screen/state coverage, agreement with prose, visual quality or gameplay.\",\n  \"valid\": true,\n  \"issues\": [],\n  \"files\": [\n    \"content/ui/game-over.json\",\n    \"content/ui/game-screen.json\",\n    \"content/ui/level-complete.json\",\n    \"content/ui/pause-menu.json\",\n    \"content/ui/rotate-prompt.json\",\n    \"content/ui/title-screen.json\"\n  ]\n}"
+  },
+  {
+    "timestamp": "2026-10-01T08:59:16.783Z",
+    "id": "call_ff5tkuk6hy2os322172r1gcx",
+    "command": "bun .beegame/delivery/check-content.mjs --layout-draft content/ui/game-over.json 960 540 2>&1 | head -60; echo ===; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/level-complete.json 960 540 2>&1 | head -20",
+    "resultTimestamp": "2026-10-01T08:59:16.886Z",
+    "isError": true,
+    "content": "Exit code 1\n{\n  \"ok\": true,\n  \"scope\": \"layout-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 960,\n    \"height\": 540\n  },\n  \"note\": \"Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.\",\n  \"diagnostics\": {\n    \"outsideViewport\": [],\n    \"outsideParent\": [],\n    \"outsideContentArea\": [],\n    \"belowMinimumControlSize\": [],\n    \"overlapCandidates\": []\n  },\n  \"boundaryChecks\": [],\n  \"nodes\": [\n    {\n      \"id\": \"gameover-root\",\n      \"active\": true,\n      \"layout\": {\n        \"anchorMin\": [\n          0,\n          0\n        ],\n        \"anchorMax\": [\n          1,\n          1\n        ],\n        \"sizeDelta\": [\n          0,\n          0\n        ],\n        \"position\": [\n          0,\n          0\n        ],\n        \"size\": [\n          960,\n          540\n        ]\n      },\n      \"pivot\": {\n        \"x\": 0,\n        \"y\": 0\n      },\n      \"corners\": [\n        [\n          0,\n          0\n        ],\n        [\n          960,\n          0\n        ],\n        [\n          960,\n          540\n        ],\n(eval):1: == not found"
+  },
+  {
+    "timestamp": "2026-10-01T08:59:22.431Z",
+    "id": "call_o187zf0j4bpnzjq0j3ha80br",
+    "command": "bun .beegame/delivery/check-content.mjs --layout-draft content/ui/level-complete.json 800 450 2>&1 | sed -n '/\"diagnostics\"/,/]/p' | head -30",
+    "resultTimestamp": "2026-10-01T08:59:22.526Z",
+    "isError": false,
+    "content": "  \"diagnostics\": {\n    \"outsideViewport\": [],"
+  },
+  {
+    "timestamp": "2026-10-01T08:59:31.874Z",
+    "id": "call_1f5difu6yfue9evhkmg5tqza",
+    "command": "bun .beegame/delivery/check-content.mjs --layout-draft content/ui/level-complete.json 800 450 2>&1 | python3 -c \"import json,sys; d=json.load(sys.stdin); print(json.dumps(d['diagnostics'],ensure_ascii=False)); print(d.get('boundaryChecks'))\"",
+    "resultTimestamp": "2026-10-01T08:59:32.010Z",
+    "isError": false,
+    "content": "{\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}\n[]"
+  },
+  {
+    "timestamp": "2026-10-01T08:31:21.810Z",
+    "id": "call_0wa50uoix3sb2f26w7rqw6sy",
+    "command": "bun .beegame/delivery/check-content.mjs --layout-draft content/ui/title-screen.json 960 540 2>&1 | head -100",
+    "resultTimestamp": "2026-10-01T08:31:21.903Z",
+    "isError": false,
+    "content": "{\"valid\":false,\"issues\":[\"[\\n  {\\n    \\\"code\\\": \\\"unrecognized_keys\\\",\\n    \\\"keys\\\": [\\n      \\\"orientation\\\",\\n      \\\"referenceResolution\\\",\\n      \\\"targetViewports\\\",\\n      \\\"minimumControlSize\\\"\\n    ],\\n    \\\"path\\\": [\\n      \\\"data\\\"\\n    ],\\n    \\\"message\\\": \\\"Unrecognized keys: \\\\\\\"orientation\\\\\\\", \\\\\\\"referenceResolution\\\\\\\", \\\\\\\"targetViewports\\\\\\\", \\\\\\\"minimumControlSize\\\\\\\"\\\"\\n  }\\n]\"]}"
+  },
+  {
+    "timestamp": "2026-10-01T08:31:59.777Z",
+    "id": "call_t97huhmt0zbe76zohi55nm28",
+    "command": "bun .beegame/delivery/check-content.mjs --layout-draft content/ui/title-screen.json 960 540 2>&1 | head -60; echo \"=== 800x450 ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/title-screen.json 800 450 2>&1 | head -60",
+    "resultTimestamp": "2026-10-01T08:31:59.926Z",
+    "isError": false,
+    "content": "{\n  \"ok\": true,\n  \"scope\": \"layout-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 960,\n    \"height\": 540\n  },\n  \"note\": \"Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.\",\n  \"diagnostics\": {\n    \"outsideViewport\": [],\n    \"outsideParent\": [],\n    \"outsideContentArea\": [],\n    \"belowMinimumControlSize\": [],\n    \"overlapCandidates\": []\n  },\n  \"boundaryChecks\": [],\n  \"nodes\": [\n    {\n      \"id\": \"title-root\",\n      \"active\": true,\n      \"layout\": {\n        \"anchorMin\": [\n          0,\n          0\n        ],\n        \"anchorMax\": [\n          1,\n          1\n        ],\n        \"sizeDelta\": [\n          0,\n          0\n        ],\n        \"position\": [\n          0,\n          0\n        ],\n        \"size\": [\n          960,\n          540\n        ]\n      },\n      \"pivot\": {\n        \"x\": 0,\n        \"y\": 0\n      },\n      \"corners\": [\n        [\n          0,\n          0\n        ],\n        [\n          960,\n          0\n        ],\n        [\n          960,\n          540\n        ],\n=== 800x450 ===\n{\n  \"ok\": true,\n  \"scope\": \"layout-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 800,\n    \"height\": 450\n  },\n  \"note\": \"Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.\",\n  \"diagnostics\": {\n    \"outsideViewport\": [],\n    \"outsideParent\": [],\n    \"outsideContentArea\": [],\n    \"belowMinimumControlSize\": [],\n    \"overlapCandidates\": []\n  },\n  \"boundaryChecks\": [],\n  \"nodes\": [\n    {\n      \"id\": \"title-root\",\n      \"active\": true,\n      \"layout\": {\n        \"anchorMin\": [\n          0,\n          0\n        ],\n        \"anchorMax\": [\n          1,\n          1\n        ],\n        \"sizeDelta\": [\n          0,\n          0\n        ],\n        \"position\": [\n          0,\n          0\n        ],\n        \"size\": [\n          800,\n          450\n        ]\n      },\n      \"pivot\": {\n        \"x\": 0,\n        \"y\": 0\n      },\n      \"corners\": [\n        [\n          0,\n          0\n        ],\n        [\n          800,\n          0\n        ],\n        [\n          800,\n          450\n        ],"
+  },
+  {
+    "timestamp": "2026-10-01T08:33:36.811Z",
+    "id": "call_zgqgw8ulqv0ub32252zv4u4q",
+    "command": "bun .beegame/delivery/check-content.mjs --layout-draft content/ui/game-screen.json 960 540 --game-view game-view --camera .beegame/tmp/breakout-camera.json 2>&1 | python3 -c \"import json,sys; d=json.load(sys.stdin); print(json.dumps({'ok':d['ok'],'viewport':d.get('viewport'),'diagnostics':d.get('diagnostics'),'boundaryChecks':d.get('boundaryChecks')},ensure_ascii=False,indent=1))\"; echo \"=== 800x450 ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/game-screen.json 800 450 --game-view game-view --camera .beegame/tmp/breakout-camera.json 2>&1 | python3 -c \"import json,sys; d=json.load(sys.stdin); print(json.dumps({'ok':d['ok'],'viewport':d.get('viewport'),'diagnostics':d.get('diagnostics'),'boundaryChecks':d.get('boundaryChecks')},ensure_ascii=False,indent=1))\"",
+    "resultTimestamp": "2026-10-01T08:33:37.049Z",
+    "isError": false,
+    "content": "{\n \"ok\": true,\n \"viewport\": {\n  \"width\": 960,\n  \"height\": 540\n },\n \"diagnostics\": {\n  \"outsideViewport\": [],\n  \"outsideParent\": [],\n  \"outsideContentArea\": [],\n  \"belowMinimumControlSize\": [],\n  \"overlapCandidates\": [],\n  \"outsideCameraView\": []\n },\n \"boundaryChecks\": []\n}\n=== 800x450 ===\n{\n \"ok\": true,\n \"viewport\": {\n  \"width\": 800,\n  \"height\": 450\n },\n \"diagnostics\": {\n  \"outsideViewport\": [],\n  \"outsideParent\": [],\n  \"outsideContentArea\": [],\n  \"belowMinimumControlSize\": [],\n  \"overlapCandidates\": [],\n  \"outsideCameraView\": []\n },\n \"boundaryChecks\": []\n}"
+  },
+  {
+    "timestamp": "2026-10-01T08:36:22.023Z",
+    "id": "call_k4z681aumboyqy2und17iijt",
+    "command": "for f in pause-menu level-complete game-over rotate-prompt; do for s in \"960 540\" \"800 450\"; do echo \"=== $f @ $s ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/$f.json $s 2>&1 | python3 -c \"import json,sys; d=json.load(sys.stdin); print(json.dumps({'ok':d['ok'],'diag':d['diagnostics']},ensure_ascii=False))\"; done; done",
+    "resultTimestamp": "2026-10-01T08:36:22.630Z",
+    "isError": true,
+    "content": "Exit code 1\n=== pause-menu @ 960 540 ===\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nKeyError: 'ok'\n=== pause-menu @ 800 450 ===\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nKeyError: 'ok'\n=== level-complete @ 960 540 ===\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nKeyError: 'ok'\n=== level-complete @ 800 450 ===\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nKeyError: 'ok'\n=== game-over @ 960 540 ===\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nKeyError: 'ok'\n=== game-over @ 800 450 ===\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nKeyError: 'ok'\n=== rotate-prompt @ 960 540 ===\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nKeyError: 'ok'\n=== rotate-prompt @ 800 450 ===\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nKeyError: 'ok'"
+  },
+  {
+    "timestamp": "2026-10-01T08:36:28.838Z",
+    "id": "call_lca708uozisxkq5wagzunndy",
+    "command": "bun .beegame/delivery/check-content.mjs --layout-draft content/ui/pause-menu.json 960 540 2>&1 | head -30",
+    "resultTimestamp": "2026-10-01T08:36:28.929Z",
+    "isError": false,
+    "content": "{\n  \"ok\": true,\n  \"scope\": \"layout-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 960,\n    \"height\": 540\n  },\n  \"note\": \"Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.\",\n  \"diagnostics\": {\n    \"outsideViewport\": [],\n    \"outsideParent\": [],\n    \"outsideContentArea\": [],\n    \"belowMinimumControlSize\": [],\n    \"overlapCandidates\": [\n      [\n        \"pause-title\",\n        \"pause-mute-toggle\"\n      ]\n    ]\n  },\n  \"boundaryChecks\": [],\n  \"nodes\": [\n    {\n      \"id\": \"pause-root\",\n      \"active\": true,\n      \"layout\": {\n        \"anchorMin\": [\n          0,\n          0"
+  },
+  {
+    "timestamp": "2026-10-01T08:36:45.979Z",
+    "id": "call_bawtaymyfob0f7npn7tzadv2",
+    "command": "for f in pause-menu level-complete game-over rotate-prompt; do for w in 960 800; do if [ $w = 960 ]; then h=540; else h=450; fi; echo \"=== $f @ ${w}x${h} ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/$f.json $w $h 2>&1 | python3 -c \"\nimport json,sys\nraw=sys.stdin.read()\ntry:\n    d=json.loads(raw)\n    if 'ok' in d: print(json.dumps({'ok':d['ok'],'diag':d['diagnostics']},ensure_ascii=False))\n    else: print(raw[:400])\nexcept Exception: print(raw[:400])\n\"; done; done",
+    "resultTimestamp": "2026-10-01T08:36:46.607Z",
+    "isError": false,
+    "content": "=== pause-menu @ 960x540 ===\n{\"ok\": true, \"diag\": {\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": [[\"pause-title\", \"pause-mute-toggle\"]]}}\n=== pause-menu @ 800x450 ===\n{\"ok\": true, \"diag\": {\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": [[\"pause-title\", \"pause-mute-toggle\"]]}}\n=== level-complete @ 960x540 ===\n{\"ok\": true, \"diag\": {\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}}\n=== level-complete @ 800x450 ===\n{\"ok\": true, \"diag\": {\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}}\n=== game-over @ 960x540 ===\n{\"ok\": true, \"diag\": {\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}}\n=== game-over @ 800x450 ===\n{\"ok\": true, \"diag\": {\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}}\n=== rotate-prompt @ 960x540 ===\n{\"ok\": true, \"diag\": {\"outsideViewport\": [], \"outsideParent\": [\"rotate-arrow\"], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}}\n=== rotate-prompt @ 800x450 ===\n{\"ok\": true, \"diag\": {\"outsideViewport\": [], \"outsideParent\": [\"rotate-arrow\"], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}}"
+  },
+  {
+    "timestamp": "2026-10-01T08:37:10.560Z",
+    "id": "call_rwxhkioh62cfk639945iuncj",
+    "command": "for pair in \"pause-menu 960 540\" \"pause-menu 800 450\" \"rotate-prompt 960 540\" \"rotate-prompt 800 450\"; do set -- $pair; echo \"=== $1 @ $2x$3 ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/$1.json $2 $3 2>&1 | python3 -c \"\nimport json,sys\nd=json.loads(sys.stdin.read())\nprint(json.dumps(d['diagnostics'],ensure_ascii=False))\n\"; done",
+    "resultTimestamp": "2026-10-01T08:37:10.888Z",
+    "isError": true,
+    "content": "Exit code 1\n=== pause-menu 960 540 @ x ===\nTraceback (most recent call last):\n  File \"<string>\", line 4, in <module>\nKeyError: 'diagnostics'\n=== pause-menu 800 450 @ x ===\nTraceback (most recent call last):\n  File \"<string>\", line 4, in <module>\nKeyError: 'diagnostics'\n=== rotate-prompt 960 540 @ x ===\nTraceback (most recent call last):\n  File \"<string>\", line 4, in <module>\nKeyError: 'diagnostics'\n=== rotate-prompt 800 450 @ x ===\nTraceback (most recent call last):\n  File \"<string>\", line 4, in <module>\nKeyError: 'diagnostics'"
+  },
+  {
+    "timestamp": "2026-10-01T08:37:21.269Z",
+    "id": "call_d9vs99c0itslatsdxf0yot58",
+    "command": "echo \"=== pause 960 ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/pause-menu.json 960 540 2>&1 | python3 -c \"import json,sys; print(json.dumps(json.loads(sys.stdin.read())['diagnostics'],ensure_ascii=False))\"; echo \"=== pause 800 ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/pause-menu.json 800 450 2>&1 | python3 -c \"import json,sys; print(json.dumps(json.loads(sys.stdin.read())['diagnostics'],ensure_ascii=False))\"; echo \"=== rotate 960 ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/rotate-prompt.json 960 540 2>&1 | python3 -c \"import json,sys; print(json.dumps(json.loads(sys.stdin.read())['diagnostics'],ensure_ascii=False))\"; echo \"=== rotate 800 ===\"; bun .beegame/delivery/check-content.mjs --layout-draft content/ui/rotate-prompt.json 800 450 2>&1 | python3 -c \"import json,sys; print(json.dumps(json.loads(sys.stdin.read())['diagnostics'],ensure_ascii=False))\"",
+    "resultTimestamp": "2026-10-01T08:37:21.613Z",
+    "isError": false,
+    "content": "=== pause 960 ===\n{\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}\n=== pause 800 ===\n{\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}\n=== rotate 960 ===\n{\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}\n=== rotate 800 ===\n{\"outsideViewport\": [], \"outsideParent\": [], \"outsideContentArea\": [], \"belowMinimumControlSize\": [], \"overlapCandidates\": []}"
+  },
+  {
+    "timestamp": "2026-10-01T08:40:30.695Z",
+    "id": "call_6uwcacql7dg57x5ytb9xee2p",
+    "command": "bun .beegame/delivery/check-content.mjs --design-layouts 2>&1 | tail -30",
+    "resultTimestamp": "2026-10-01T08:40:30.823Z",
+    "isError": false,
+    "content": "{\n  \"scope\": \"design-layout-geometry\",\n  \"runtimeVerified\": false,\n  \"note\": \"Recomputes final inputs; does not prove screen/state coverage, agreement with prose, visual quality or gameplay.\",\n  \"valid\": true,\n  \"issues\": [],\n  \"files\": [\n    \"content/ui/game-over.json\",\n    \"content/ui/game-screen.json\",\n    \"content/ui/level-complete.json\",\n    \"content/ui/pause-menu.json\",\n    \"content/ui/rotate-prompt.json\",\n    \"content/ui/title-screen.json\"\n  ]\n}"
+  },
+  {
+    "timestamp": "2026-10-01T05:32:40.480Z",
+    "id": "call_zprgyyth2xkbplsvmp4u2zr9",
+    "command": "bun .beegame/delivery/check-content.mjs --camera-draft .beegame/tmp/breakout-camera.json 960 540",
+    "resultTimestamp": "2026-10-01T05:32:40.638Z",
+    "isError": false,
+    "content": "{\n  \"ok\": true,\n  \"scope\": \"camera-framing-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 960,\n    \"height\": 540\n  },\n  \"note\": \"Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.\",\n  \"view\": {\n    \"projection\": \"orthographic\",\n    \"framing\": \"letterbox\",\n    \"rect\": {\n      \"x\": 0,\n      \"y\": 0,\n      \"width\": 960,\n      \"height\": 540\n    },\n    \"aspect\": 1.7777777777777777,\n    \"halfHeight\": 2.7,\n    \"halfWidth\": 4.8\n  }\n}"
+  },
+  {
+    "timestamp": "2026-10-01T05:32:41.650Z",
+    "id": "call_p3fqsus657bfc8abfhbthu6n",
+    "command": "bun .beegame/delivery/check-content.mjs --camera-draft .beegame/tmp/breakout-camera.json 800 450",
+    "resultTimestamp": "2026-10-01T05:32:41.740Z",
+    "isError": false,
+    "content": "{\n  \"ok\": true,\n  \"scope\": \"camera-framing-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 800,\n    \"height\": 450\n  },\n  \"note\": \"Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.\",\n  \"view\": {\n    \"projection\": \"orthographic\",\n    \"framing\": \"letterbox\",\n    \"rect\": {\n      \"x\": 0,\n      \"y\": 0,\n      \"width\": 800,\n      \"height\": 450\n    },\n    \"aspect\": 1.7777777777777777,\n    \"halfHeight\": 2.7,\n    \"halfWidth\": 4.8\n  }\n}"
+  },
+  {
+    "timestamp": "2026-10-01T05:32:46.809Z",
+    "id": "call_305r9c3rnau8bambt3vzfds6",
+    "command": "bun .beegame/delivery/check-content.mjs --camera-draft .beegame/tmp/breakout-camera.json 1024 768",
+    "resultTimestamp": "2026-10-01T05:32:46.900Z",
+    "isError": false,
+    "content": "{\n  \"ok\": true,\n  \"scope\": \"camera-framing-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 1024,\n    \"height\": 768\n  },\n  \"note\": \"Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.\",\n  \"view\": {\n    \"projection\": \"orthographic\",\n    \"framing\": \"letterbox\",\n    \"rect\": {\n      \"x\": 0,\n      \"y\": 96,\n      \"width\": 1024,\n      \"height\": 576\n    },\n    \"aspect\": 1.7777777777777777,\n    \"halfHeight\": 2.7,\n    \"halfWidth\": 4.8\n  }\n}"
+  },
+  {
+    "timestamp": "2026-10-01T05:32:47.852Z",
+    "id": "call_rc2ttmcfk1shngjkwozmxlin",
+    "command": "bun .beegame/delivery/check-content.mjs --camera-draft .beegame/tmp/breakout-camera.json 1280 540",
+    "resultTimestamp": "2026-10-01T05:32:47.944Z",
+    "isError": false,
+    "content": "{\n  \"ok\": true,\n  \"scope\": \"camera-framing-draft-inspection\",\n  \"runtimeVerified\": false,\n  \"viewport\": {\n    \"width\": 1280,\n    \"height\": 540\n  },\n  \"note\": \"Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.\",\n  \"view\": {\n    \"projection\": \"orthographic\",\n    \"framing\": \"letterbox\",\n    \"rect\": {\n      \"x\": 160,\n      \"y\": 0,\n      \"width\": 960,\n      \"height\": 540\n    },\n    \"aspect\": 1.7777777777777777,\n    \"halfHeight\": 2.7,\n    \"halfWidth\": 4.8\n  }\n}"
+  }
+]

@@ -143,7 +143,7 @@ export function createR2DeploymentPublisher(options: {
           body: JSON.stringify({
             id,
             scope_type: 'project',
-            scope_id: input.deploymentId,
+            scope_id: input.projectId,
             owner_user_id: input.ownerId,
             project_id: input.projectId,
             provider: 'r2',
@@ -177,7 +177,9 @@ export function createR2DeploymentPublisher(options: {
       await options.driver.putObject(locator, input.bytes, input.contentType, {
         'beegame-object-id': id,
         'beegame-sha256': input.checksum,
-      })
+      }, input.objectKind === 'deployment_file'
+        ? { cacheControl: 'public, max-age=31536000, immutable' }
+        : undefined)
       const head = await options.driver.headObject(locator)
       if (!head || head.byteSize !== input.bytes.byteLength) {
         throw new Error('R2 deployment object verification failed')
@@ -206,6 +208,26 @@ export function createR2DeploymentPublisher(options: {
   }
 
   return {
+    async verifyPublished(url, files) {
+      const entrypoint = files.find(file => file.path === 'index.html')
+      if (!entrypoint) throw new Error('Deployment is missing index.html')
+      for (const file of files) {
+        const fileUrl = file.path === 'index.html' ? url : new URL(file.path, url).href
+        const publicResponse = await fetchImpl(fileUrl, {
+          redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15_000),
+        }).catch(() => {
+          throw new Error(`Public deployment verification failed: cannot reach ${file.path} on the delivery domain.`)
+        })
+        if (!publicResponse.ok || file.path === 'index.html' &&
+            !publicResponse.headers.get('content-type')?.toLowerCase().startsWith('text/html')) {
+          await publicResponse.body?.cancel()
+          throw new Error(`Public deployment verification failed for ${file.path} (HTTP ${publicResponse.status}): check the Worker domain and public deployment record.`)
+        }
+        if (sha256(new Uint8Array(await publicResponse.arrayBuffer())) !== sha256(await file.bytes())) {
+          throw new Error(`Public deployment verification failed for ${file.path}: the delivery domain returned different content.`)
+        }
+      }
+    },
     async publishStaticDirectory(input) {
       if (!input.userId || !input.projectId) {
         throw new Error(
@@ -273,8 +295,9 @@ export function createR2DeploymentPublisher(options: {
           authToken: input.authToken,
         })
         uploaded.push(manifest)
+        const url = `${publicBaseUrl}/deployments/${input.deploymentId}/files/index.html`
         return {
-          url: `${publicBaseUrl}/deployments/${input.deploymentId}/files/index.html`,
+          url,
           artifactPath: `r2://${bucket}/deployments/${input.deploymentId}`,
           manifestStorageObjectId: manifest.id,
           message: 'Static deployment published as an immutable R2 version',

@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react'
-import { useTranslation } from 'react-i18next'
 import { ChevronRight, File, Folder, FolderOpen, FolderPlus, FolderUp, Pencil, ScanSearch, Trash2, Upload } from 'lucide-react'
 import { Tree, type NodeRendererProps, type RowRendererProps } from 'react-arborist'
 import type { ExplorerNode } from './resourcePackExplorerTree'
@@ -48,19 +47,8 @@ export function ResourcePackExplorer({
   onDeleteElement,
   onMoveElements,
   onCreateFolder,
-  labels,
+  labels = { upload: 'Upload', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', delete: 'Delete', newFolder: 'New folder' },
 }: ResourcePackExplorerProps) {
-  const { t } = useTranslation('resourceLibrary')
-  const defaultLabels = {
-    upload: t('explorer.upload'),
-    uploadFolder: t('explorer.uploadFolder'),
-    rename: t('explorer.rename'),
-    inspect: t('explorer.inspect'),
-    inspectAll: t('explorer.inspectAll'),
-    delete: t('explorer.delete'),
-    newFolder: t('explorer.newFolder'),
-  }
-  const resolvedLabels = labels ?? defaultLabels
   const nodesById = useMemo(() => {
     const nodes = new Map<string, ExplorerNode>()
     const visit = (node: ExplorerNode) => { nodes.set(node.id, node); node.children?.forEach(visit) }
@@ -111,8 +99,8 @@ export function ResourcePackExplorer({
       <ContextMenuTrigger asChild>
     <div className="h-full w-full" onContextMenu={(event) => setContextNode(nodesById.get((event.target as Element).closest('[data-resource-node]')?.getAttribute('data-resource-node') || 'root'))}>
       <Tree<ExplorerNode>
-      aria-label={t('explorer.packFiles')}
-      className="overflow-hidden bg-transparent text-[#c6c6cc]"
+      aria-label="Pack files"
+      className="overflow-hidden bg-transparent text-foreground"
       data={[tree]}
       disableDrag
       disableDrop
@@ -131,7 +119,7 @@ export function ResourcePackExplorer({
       </Tree>
     </div>
       </ContextMenuTrigger>
-      <ExplorerContextMenu node={contextNode} tree={tree} labels={resolvedLabels} onCreateFolder={onCreateFolder} onUploadToFolder={onUploadToFolder} onUploadFolderToFolder={onUploadFolderToFolder} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onRenameElement={onRenameElement} onInspectElement={onInspectElement} onInspectAll={onInspectAll} onDeleteElement={onDeleteElement} />
+      <ExplorerContextMenu node={contextNode} tree={tree} labels={labels} onCreateFolder={onCreateFolder} onUploadToFolder={onUploadToFolder} onUploadFolderToFolder={onUploadFolderToFolder} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} onRenameElement={onRenameElement} onInspectElement={onInspectElement} onInspectAll={onInspectAll} onDeleteElement={onDeleteElement} />
     </ContextMenu>
   )
 }
@@ -156,8 +144,7 @@ function ExplorerRow({ attrs, children, innerRef, node, onFileClick }: RowRender
 
   const rowAttributes = node.data.kind === 'file'
     ? (() => {
-        const { 'aria-expanded': ariaExpanded, ...fileAttributes } = attrs
-        void ariaExpanded
+        const { 'aria-expanded': _ariaExpanded, ...fileAttributes } = attrs
         return fileAttributes
       })()
     : attrs
@@ -183,10 +170,10 @@ function ExplorerNodeRow({ node, selectedElementId, selectedElementIds, selected
   const guideLeft = Math.max(6, node.level * INDENT - 9)
 
   return <div
-      className={`relative flex h-[30px] min-w-0 items-center gap-1 rounded-[5px] pr-2 text-[12px] leading-none transition-colors ${
+      className={`relative flex h-[30px] min-w-0 items-center gap-1 rounded-[5px] pr-2 text-xs leading-4 transition-colors ${
         isSelected
-          ? 'bg-[#5b3d17] text-[#f5d19b]'
-          : 'text-[#b9bac1] hover:bg-white/[0.055] hover:text-[#f0f0f2]'
+          ? 'bg-accent text-accent-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
       }`}
       style={style}
       draggable={!isFolder}
@@ -204,32 +191,31 @@ function ExplorerNodeRow({ node, selectedElementId, selectedElementIds, selected
       {node.level > 0 ? (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute top-0 bottom-0 w-px bg-white/[0.07]"
+          className="pointer-events-none absolute top-0 bottom-0 w-px bg-border-subtle"
           style={{ left: guideLeft }}
         />
       ) : null}
       {isFolder ? (
         <ChevronRight
           aria-hidden="true"
-          className={`h-3 w-3 shrink-0 text-[#888a93] transition-transform ${node.isOpen ? 'rotate-90' : ''}`}
+          className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${node.isOpen ? 'rotate-90' : ''}`}
         />
       ) : (
         <span aria-hidden="true" className="w-3 shrink-0" />
       )}
       {isFolder ? (
-        node.isOpen ? <FolderOpen aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#c6a367]" /> : <Folder aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#aaaeb7]" />
+        node.isOpen ? <FolderOpen aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-primary" /> : <Folder aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       ) : (
-        <File aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#838691]" />
+        <File aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       )}
       <span className="min-w-0 truncate">{node.data.name}</span>
     </div>
 }
 
 function ExplorerContextMenu({ node, tree, labels, onCreateFolder, onUploadToFolder, onUploadFolderToFolder, onRenameFolder, onDeleteFolder, onRenameElement, onInspectElement, onInspectAll, onDeleteElement }: Pick<ResourcePackExplorerProps, 'labels' | 'onCreateFolder' | 'onUploadToFolder' | 'onUploadFolderToFolder' | 'onRenameFolder' | 'onDeleteFolder' | 'onRenameElement' | 'onInspectElement' | 'onInspectAll' | 'onDeleteElement'> & { node?: ExplorerNode; tree: ExplorerNode }) {
-  const { t } = useTranslation('resourceLibrary')
   const current = node ?? tree
-  const menuLabels = labels ?? { upload: t('explorer.upload'), uploadFolder: t('explorer.uploadFolder'), rename: t('explorer.rename'), inspect: t('explorer.inspect'), inspectAll: t('explorer.inspectAll'), delete: t('explorer.delete'), newFolder: t('explorer.newFolder') }
-  const uploadFolderLabel = menuLabels.uploadFolder ?? t('explorer.uploadFolder')
+  const menuLabels = labels ?? { upload: 'Upload', rename: 'Rename', inspect: 'Reinspect', inspectAll: 'Inspect unprocessed files', delete: 'Delete', newFolder: 'New folder' }
+  const uploadFolderLabel = menuLabels.uploadFolder ?? 'Upload folder'
   if (current.kind === 'file' && current.element) return <ContextMenuContent><ContextMenuItem onSelect={() => onInspectElement?.(current.element!)}><ScanSearch />{menuLabels.inspect}</ContextMenuItem><ContextMenuItem onSelect={() => onRenameElement?.(current.element!)}><Pencil />{menuLabels.rename}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem variant="destructive" onSelect={() => onDeleteElement?.(current.element!)}><Trash2 />{menuLabels.delete}</ContextMenuItem></ContextMenuContent>
   if (current.id !== 'root') return <ContextMenuContent><ContextMenuItem onSelect={() => onUploadToFolder?.(current)}><Upload />{menuLabels.upload}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadFolderToFolder?.(current)}><FolderUp />{uploadFolderLabel}</ContextMenuItem>{current.folder ? <><ContextMenuItem onSelect={() => onRenameFolder?.(current)}><Pencil />{menuLabels.rename}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem variant="destructive" onSelect={() => onDeleteFolder?.(current)}><Trash2 />{menuLabels.delete}</ContextMenuItem></> : null}</ContextMenuContent>
   return <ContextMenuContent><ContextMenuItem onSelect={onCreateFolder}><FolderPlus />{menuLabels.newFolder}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadToFolder?.(tree)}><Upload />{menuLabels.upload}</ContextMenuItem><ContextMenuItem onSelect={() => onUploadFolderToFolder?.(tree)}><FolderUp />{uploadFolderLabel}</ContextMenuItem><ContextMenuSeparator /><ContextMenuItem onSelect={onInspectAll}><ScanSearch />{menuLabels.inspectAll}</ContextMenuItem></ContextMenuContent>

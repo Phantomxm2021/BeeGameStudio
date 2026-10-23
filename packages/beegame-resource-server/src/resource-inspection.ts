@@ -6,18 +6,24 @@ type JsonRecord = Record<string, unknown>
 
 /** Extracts deterministic technical facts from formats we can safely inspect in-process. */
 export async function inspectUploadedResource(file: File, options: { modelProcessor?: ResourceModelProcessor } = {}): Promise<Record<string, string | number | boolean>> {
-  const extension = extensionOf(file.name)
   const bytes = new Uint8Array(await file.arrayBuffer())
+  let facts = inspectResourceBytes(file.name, bytes)
+  if (facts.inspectionStatus === 'binary_fbx_requires_processor' && options.modelProcessor) {
+    facts = { ...facts, ...await options.modelProcessor(file) }
+  }
+  return { ...facts, contentHash: await sha256(bytes) }
+}
+
+/** Same in-process inspection for saved project bytes; no processor or network. */
+export function inspectResourceBytes(name: string, bytes: Uint8Array): Record<string, string | number | boolean> {
+  const extension = extensionOf(name)
   let facts: Record<string, string | number | boolean> = {}
   if (extension === 'png') facts = inspectPng(bytes)
   else if (extension === 'glb') facts = inspectGlb(bytes)
   else if (extension === 'gltf') facts = inspectGltfText(new TextDecoder().decode(bytes))
   else if (extension === 'obj') facts = inspectObjText(new TextDecoder().decode(bytes))
   else if (extension === 'fbx') facts = inspectFbx(bytes)
-  if (facts.inspectionStatus === 'binary_fbx_requires_processor' && options.modelProcessor) {
-    facts = { ...facts, ...await options.modelProcessor(file) }
-  }
-  return { ...facts, contentHash: await sha256(bytes) }
+  return facts
 }
 
 export function contentProfileFromInspection(

@@ -1,0 +1,223 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "breakout-loading-error",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "loading-error-root",
+    "nodes": [
+      {
+        "id": "loading-error-root",
+        "role": "screen-root",
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            1920,
+            1080
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1920,
+              1080
+            ],
+            [
+              2560,
+              1080
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "loading-error-bg",
+        "parentId": "loading-error-root",
+        "role": "shape",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ],
+          "position": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "gradient": [
+            "#1E1E42",
+            "#13132B"
+          ]
+        }
+      },
+      {
+        "id": "error-column",
+        "parentId": "loading-error-root",
+        "role": "container",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            440,
+            300
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 18,
+            "padding": [
+              28,
+              32,
+              28,
+              32
+            ],
+            "align": "center",
+            "justify": "center"
+          }
+        }
+      },
+      {
+        "id": "error-icon",
+        "parentId": "error-column",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            48,
+            48
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FF5C7A",
+            "radius": 24
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 24
+          }
+        }
+      },
+      {
+        "id": "error-title",
+        "parentId": "error-column",
+        "role": "text",
+        "text": "加载失败",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            60,
+            6
+          ],
+          "size": [
+            320,
+            36
+          ]
+        },
+        "style": {
+          "fontSize": 30,
+          "color": "#F3F4FF",
+          "align": "center",
+          "lineHeight": 36
+        }
+      },
+      {
+        "id": "error-message",
+        "parentId": "error-column",
+        "role": "text",
+        "text": "资源加载未完成，请检查网络后重试。",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            40,
+            0
+          ],
+          "size": [
+            360,
+            48
+          ]
+        },
+        "style": {
+          "fontSize": 18,
+          "color": "#9FA3C7",
+          "align": "center",
+          "lineHeight": 24
+        }
+      },
+      {
+        "id": "retry-load-button",
+        "parentId": "error-column",
+        "role": "button",
+        "actions": {
+          "activate": "retry-loading"
+        },
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            110,
+            0
+          ],
+          "size": [
+            220,
+            56
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFD166",
+            "radius": 12
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 12
+          }
+        }
+      },
+      {
+        "id": "retry-load-button-label",
+        "parentId": "retry-load-button",
+        "role": "text",
+        "text": "重试",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            220,
+            28
+          ]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#0F0F22",
+          "align": "center",
+          "lineHeight": 28
+        }
+      }
+    ]
+  }
+}

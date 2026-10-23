@@ -32,7 +32,7 @@ export type DiscoveredMcpServer = McpServerInput & {
   exists: boolean;
 };
 
-export type McpServerHealthStatus = 'available' | 'unavailable';
+export type McpServerHealthStatus = 'available' | 'unavailable' | 'untested';
 
 export type McpServerTestResult = {
   ok: boolean;
@@ -54,19 +54,24 @@ export type ActiveDiscoveredMcpServer = McpServerInput & {
 };
 
 export const listMcpServers = (): Promise<McpServerConfig[]> => (
-  apiClient.get('/api/mcp-servers')
+  apiClient.get('/api/mcp-servers', { headers: { 'Hide-Error-Toast': 'true' } })
 );
 
 export const discoverMcpServers = (): Promise<DiscoveredMcpServer[]> => (
-  apiClient.get('/api/mcp-servers/discover')
+  apiClient.get('/api/mcp-servers/discover', { headers: { 'Hide-Error-Toast': 'true' } })
+);
+
+export const importDiscoveredMcpServer = (server: DiscoveredMcpServer): Promise<McpServerConfig> => (
+  apiClient.post('/api/mcp-servers', { name: server.name, sourcePath: server.sourcePath }, { headers: { 'Hide-Error-Toast': 'true' } })
 );
 
 export const discoverActiveMcpServers = (): Promise<ActiveDiscoveredMcpServer[]> => (
-  apiClient.get('/api/mcp-servers/discover-active')
+  apiClient.get('/api/mcp-servers/discover-active', { headers: { 'Hide-Error-Toast': 'true' } })
 );
 
 export const testMcpServer = (input: McpServerInput): Promise<McpServerTestResult> => (
-  apiClient.post('/api/mcp-servers/test', input)
+  // The caller reports both protocol failures and request errors in one toast.
+  apiClient.post('/api/mcp-servers/test', input, { headers: { 'Hide-Error-Toast': 'true' } })
 );
 
 export const createMcpServer = (input: McpServerInput): Promise<McpServerConfig> => (

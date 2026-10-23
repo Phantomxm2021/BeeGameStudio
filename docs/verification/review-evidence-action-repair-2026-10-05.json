@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-05",
+  "kind": "review-evidence-action-boundary-system-repair",
+  "basis": "newidea-memory-paid-accept-2026-10-05.json；原生作者留存Usage错误，Reviewer正确复算但action=evidence使流程停止。",
+  "scope": {
+    "systemOnly": true,
+    "manualProductEdits": false,
+    "paidRuns": 0,
+    "resumedPaidProject": false,
+    "modelChanged": false,
+    "skillsChanged": false,
+    "gateChanged": false,
+    "reviewLoopChanged": false
+  },
+  "changes": [
+    {
+      "file": "packages/agent-workflow-server/src/beegame/project-author.ts",
+      "areas": [
+        "authorBatchReviewInstruction",
+        "authorBatchInstruction"
+      ],
+      "details": [
+        "动作按关闭条件分类，而不是按问题是否涉及证据分类。",
+        "correct：在已有负责人决策和可用来源/工具下纠错，包括重生成失败、过期或错误保存的证据。",
+        "decide：需要负责人提供缺失或存在争议的专业决策；改变已确认需求/范围仍需用户。",
+        "evidence：必要事实依据不能通过现有提供来源或授权检查取得。",
+        "必需检查执行失败仍报告并停止；不把不可完成的检查改标correct来强行继续。",
+        "只读复算不能关闭坏留存记录；仍由一次授权Revision修订，Inspect不编辑。",
+        "作者宣称计算成功之前确认每项必需命令结果和实际保存结果；末尾shell命令成功不代表此前步骤成功。",
+        "Review/Verify核对实际保存证据，不接受作者成功声明作为证明。"
+      ]
+    },
+    {
+      "file": "packages/agent-workflow-server/src/beegame/project-author.test.ts",
+      "details": [
+        "三个Review步骤均携带相同动作含义与权限边界；所有作者批次都有留存结果核对要求且不恢复语义自审计。"
+      ]
+    },
+    {
+      "file": "packages/agent-workflow-server/src/beegame/design-release.test.ts",
+      "details": [
+        "通用合成坏证据可进入一次scoped Revise→Verify，证据修订提升文档版本并保留输入和验证边界。",
+        "decide/evidence均停止且不允许自动重试，不改正文、不释放基线。"
+      ]
+    },
+    {
+      "file": "packages/agent-workflow-server/src/beegame/content-handoff.test.ts",
+      "details": [
+        "现有模拟native Revise/Verify集成测试确认新增边界和已保存结果要求进入实际临时任务上下文。"
+      ]
+    }
+  ],
+  "minimality": "沿用三个动作、已有一次修订、授权文件范围与版本检查。未新增Schema字段、分类器、Skill边界、自动重分类、外部审计层或额外阶段；未强制切换shell；未写入记忆翻牌答案。",
+  "validation": {
+    "command": "bun test packages/agent-workflow-server/src/beegame/project-author.test.ts packages/agent-workflow-server/src/beegame/design-release.test.ts packages/agent-workflow-server/src/beegame/content-handoff.test.ts packages/agent-workflow/src/__tests__/design-review-result.test.ts",
+    "testFiles": 4,
+    "pass": 52,
+    "fail": 0,
+    "seconds": 2.64,
+    "expectations": 512,
+    "workflowServerTypecheck": "bun run typecheck: exit 0",
+    "scopedTrackedWhitespaceCheck": "git diff --check: exit 0",
+    "initialTypecheckIssue": "新增测试可选documentVersions访问TS18048，修正为可选链后复跑通过。"
+  },
+  "limits": [
+    "测试证明提示词传递、已给分类下的Gate路由、修订范围与版本行为；不是模型自主分类的真实验收。",
+    "没有自动识别/修复任意shell子步骤失败；明确核对责任不能保证LLM始终遵从。",
+    "没有证明通用语义漏检已解决，也没有修改之前GDD/美术中的矛盾。",
+    "未重建或启动付费CLI，本轮落地在系统源码及离线测试；下次真实运行需用新源码构建并另获付费授权。"
+  ],
+  "skillUse": {
+    "name": "openai-docs",
+    "influence": "参考官方agent eval指导：从真实trace定位工具/交接/路由问题，并区分工作流离线检查与端到端模型行为；不因此引入新的eval平台或框架。",
+    "source": "https://developers.openai.com/api/docs/guides/agent-evals",
+    "modelNote": "非模型迁移；保留既有BGS模型配置，没有套用其他模型的特定提示词。"
+  }
+}

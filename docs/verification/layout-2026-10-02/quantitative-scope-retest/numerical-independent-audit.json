@@ -1,0 +1,104 @@
+{
+  "scope": "Recorded contacts, requested clamp and loss boundary only; no global playability proof",
+  "sources": {
+    "docs/draft/balance-model.mjs": "e1b97b6e3cb6965e4225bb3c777a0442332fb1e33552a2876ccb0b42cc7dbec7",
+    "docs/draft/balance-verify.mjs": "23eb7247c6cfcec0b3277fee21eca5b489f13b3edb9b5b84b6a009f695067a4e",
+    "docs/draft/arena.scene.json": "59b71032e78609f5250e67ac54ed50c342812b6588e2ef7b6f50c6fc8b894a39",
+    "docs/GDD.md": "9fcd2a207337f6024600015b004ef5e8efb19d2c9f6d0ae3ad112d7e20cf280c"
+  },
+  "baselineVerification": [
+    {
+      "name": "V1 独立提取场景几何与模型观察逐项一致",
+      "passed": true
+    },
+    {
+      "name": "V2 GDD 源规则可定位（短语匹配，非形式化解析）",
+      "passed": true
+    },
+    {
+      "name": "V3 发球纵向可达性独立重建（0° 与最大角 20°）",
+      "passed": true
+    },
+    {
+      "name": "V4 S2a 键盘救球时间不等式独立成立（接触后反应策略）",
+      "passed": true
+    },
+    {
+      "name": "V5 S2a 之外的对侧钳制位独立判定为来不及且被如实记录",
+      "passed": true
+    },
+    {
+      "name": "V6 S2c 高位极端角落点独立可救",
+      "passed": true
+    },
+    {
+      "name": "V7 击球点映射与最小向上角约束独立重算",
+      "passed": true
+    },
+    {
+      "name": "V8 失球扣命序列与可恢复次数独立计数",
+      "passed": true
+    },
+    {
+      "name": "V9 清空 60 砖理论总分独立重算",
+      "passed": true
+    },
+    {
+      "name": "V10 固定步长单步位移边界独立计算",
+      "passed": true
+    },
+    {
+      "name": "V11 expand 取景在最小参考宿主 960×540 的缩放独立计算",
+      "passed": true
+    },
+    {
+      "name": "V12 触控定位请求经边界钳制后仍覆盖落点",
+      "passed": true
+    },
+    {
+      "name": "V13 侧走廊球心活动带独立计算",
+      "passed": true
+    }
+  ],
+  "contacts": [
+    {
+      "angle": 0,
+      "reportedContact": {
+        "x": 640,
+        "y": 385
+      },
+      "claimedCount": 2,
+      "actualCircleBoxContacts": [],
+      "consistent": false
+    },
+    {
+      "angle": 20,
+      "reportedContact": {
+        "x": 727.72,
+        "y": 385
+      },
+      "claimedCount": 1,
+      "actualCircleBoxContacts": [
+        "brick-5-5"
+      ],
+      "consistent": true
+    }
+  ],
+  "requestedExecution": {
+    "request": 1245,
+    "actualClamp": 1176,
+    "reported": 1165,
+    "consistent": false
+  },
+  "lossBoundary": {
+    "reportedCenterY": 709,
+    "radius": 11,
+    "bottom": 720,
+    "wholeBallPastBottom": false
+  },
+  "offFieldContactProbe": {
+    "mutatedY": 742,
+    "rejected": false
+  },
+  "productWrites": false
+}

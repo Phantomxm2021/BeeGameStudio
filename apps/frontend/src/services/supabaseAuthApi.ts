@@ -1,3 +1,11 @@
+import {
+  getOAuthRedirectUri,
+  isDesktopShell,
+  onDesktopOAuthCallback,
+  openExternal,
+} from '../lib/platform';
+import { authRetryDelay } from './authRetry';
+
 export type BeeGameSupabaseUser = {
   id: string;
   email?: string;
@@ -57,6 +65,8 @@ let pendingRedirectConsumption: {
 } | null = null;
 let pendingSessionInitialization: Promise<BeeGameSupabaseSession | null> | null = null;
 let pendingSessionRefresh: Promise<BeeGameSupabaseSession | null> | null = null;
+let refreshFailure: { error: unknown; attempts: number; retryAt: number } | null = null;
+let desktopOAuthListenerSetup = false;
 let httpOnlySessionUser: BeeGameSupabaseUser | null = null;
 let httpOnlySessionExpiresAt = 0;
 
@@ -163,6 +173,33 @@ export async function signUpWithSupabasePassword(
   return session;
 }
 
+export async function verifySupabaseSignupCode(email: string, code: string): Promise<BeeGameSupabaseSession> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase Auth is not configured.');
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/verify`, {
+    method: 'POST',
+    headers: { apikey: anonKey, 'content-type': 'application/json' },
+    body: JSON.stringify({ email: email.trim(), token: code.trim(), type: 'signup' }),
+  });
+  if (!response.ok) throw await readSupabaseAuthError(response);
+  const session = toSupabaseSession(await response.json());
+  await persistSupabaseSession(session);
+  return session;
+}
+
+export async function resendSupabaseSignupCode(email: string): Promise<void> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase Auth is not configured.');
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/resend`, {
+    method: 'POST',
+    headers: { apikey: anonKey, 'content-type': 'application/json' },
+    body: JSON.stringify({ email: email.trim(), type: 'signup' }),
+  });
+  if (!response.ok) throw await readSupabaseAuthError(response);
+}
+
 export async function sendSupabasePasswordReset(email: string): Promise<void> {
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
@@ -262,10 +299,15 @@ export async function signInWithSupabaseOAuth(
   }
   const codeVerifier = createPkceCodeVerifier();
   const codeChallenge = await createPkceCodeChallenge(codeVerifier);
+  const state = createOAuthState();
+  const redirectTarget = new URL(getOAuthRedirectUri());
+  redirectTarget.searchParams.set('oauth_state', state);
+  const redirectTo = redirectTarget.toString();
   const invitationCode = options.invitationCode?.trim() || '';
   const pkceContext: Record<string, unknown> = {
     provider,
     codeVerifier,
+    state,
     createdAt: Date.now(),
   };
   let redirectUrl: string;
@@ -280,9 +322,10 @@ export async function signInWithSupabaseOAuth(
       body: JSON.stringify({
         provider,
         invitationCode,
-        redirectTo: window.location.origin,
+        redirectTo,
         codeChallenge,
         codeChallengeMethod: 'S256',
+        state,
         ...(provider === 'discord' ? { scopes: 'identify email' } : {}),
       }),
     });
@@ -300,17 +343,22 @@ export async function signInWithSupabaseOAuth(
   } else {
     const url = new URL(`${trimTrailingSlash(supabaseUrl)}/auth/v1/authorize`);
     url.searchParams.set('provider', provider);
-    url.searchParams.set('redirect_to', window.location.origin);
+    url.searchParams.set('redirect_to', redirectTo);
     url.searchParams.set('flow_type', 'pkce');
     url.searchParams.set('code_challenge', codeChallenge);
     url.searchParams.set('code_challenge_method', 'S256');
+    url.searchParams.set('state', state);
     if (provider === 'discord') {
       url.searchParams.set('scopes', 'identify email');
     }
     redirectUrl = url.toString();
   }
   sessionStorage.setItem(OAUTH_PKCE_STORAGE_KEY, JSON.stringify(pkceContext));
-  window.location.assign(redirectUrl);
+  if (isDesktopShell()) {
+    await openExternal(redirectUrl);
+  } else {
+    window.location.assign(redirectUrl);
+  }
 }
 
 export async function consumeSupabaseRedirectSession(): Promise<boolean> {
@@ -329,16 +377,44 @@ export async function consumeSupabaseRedirectSession(): Promise<boolean> {
   return promise;
 }
 
-async function consumeSupabaseRedirectSessionOnce(): Promise<boolean> {
-  const hash = window.location.hash.startsWith('#')
-    ? window.location.hash.slice(1)
-    : window.location.hash;
+export async function consumeSupabaseOAuthCallback(callbackUrl: string): Promise<boolean> {
+  let parsed: URL;
+  try {
+    parsed = new URL(callbackUrl);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'beegame:' || parsed.hostname !== 'oauth' || parsed.pathname !== '/callback') return false;
+  const callbackKey = parsed.toString();
+  if (pendingRedirectConsumption?.key === callbackKey) return pendingRedirectConsumption.promise;
+  const promise = consumeSupabaseRedirectSessionOnce(parsed, false).finally(() => {
+    if (pendingRedirectConsumption?.promise === promise) pendingRedirectConsumption = null;
+  });
+  pendingRedirectConsumption = { key: callbackKey, promise };
+  return promise;
+}
+
+async function consumeSupabaseRedirectSessionOnce(source?: URL, clearCallback = true): Promise<boolean> {
+  const hash = source?.hash.startsWith('#')
+    ? source.hash.slice(1)
+    : source?.hash ?? (window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash);
   const hashParams = new URLSearchParams(hash);
-  const searchParams = new URLSearchParams(window.location.search);
+  const searchParams = source?.searchParams ?? new URLSearchParams(window.location.search);
   const pkce = readStoredPkceContext();
+  // Supabase owns the top-level `state` value. The client nonce travels in
+  // redirect_to and is returned as `oauth_state`, so prefer it whenever both
+  // values are present.
+  const callbackState = searchParams.get('oauth_state')?.trim()
+    || searchParams.get('state')?.trim()
+    || hashParams.get('oauth_state')?.trim()
+    || hashParams.get('state')?.trim()
+    || '';
+  if (source && (!pkce?.state || !callbackState || callbackState !== pkce.state)) {
+    throw new Error('OAuth callback state did not match the sign-in request.');
+  }
   const error = readOAuthError(hashParams) ?? readOAuthError(searchParams);
   if (error) {
-    clearOAuthCallbackUrl();
+    if (clearCallback) clearOAuthCallbackUrl();
     sessionStorage.removeItem(OAUTH_PKCE_STORAGE_KEY);
     throw new Error(toUserFacingOAuthError(error, pkce?.provider));
   }
@@ -352,14 +428,14 @@ async function consumeSupabaseRedirectSessionOnce(): Promise<boolean> {
       user: { id: 'oauth' },
     });
     await redeemOAuthInvitationNonce(pkce?.invitationNonce, accessToken);
-    clearOAuthCallbackUrl();
+    if (clearCallback) clearOAuthCallbackUrl();
     return true;
   }
   const authCode = searchParams.get('code')?.trim() || '';
   if (!authCode) return false;
   const session = await exchangeSupabaseOAuthCode(authCode);
   await redeemOAuthInvitationNonce(pkce?.invitationNonce, session.accessToken);
-  clearOAuthCallbackUrl();
+  if (clearCallback) clearOAuthCallbackUrl();
   return true;
 }
 
@@ -399,6 +475,9 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
           status: response.status,
         });
       }
+      if (response.status !== 401) throw new SupabaseAuthApiError('Session lookup temporarily unavailable', {
+        status: 503, code: 'authentication_unavailable',
+      });
       return null;
     }
     const cookieSession = toCookieSession(await response.json());
@@ -443,6 +522,20 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
 export function initializeSupabaseSession(): Promise<BeeGameSupabaseSession | null> {
   if (pendingSessionInitialization) return pendingSessionInitialization;
   const initialization = (async () => {
+    if (!desktopOAuthListenerSetup) {
+      desktopOAuthListenerSetup = true;
+      onDesktopOAuthCallback((callbackUrl) => {
+        void consumeSupabaseOAuthCallback(callbackUrl)
+          .then((consumed) => {
+            if (consumed) window.location.reload();
+          })
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : 'OAuth sign-in failed.';
+            window.dispatchEvent(new CustomEvent('beegame-oauth-error', { detail: { message } }));
+            console.error('OAuth callback could not be consumed:', error);
+          });
+      });
+    }
     await consumeSupabaseRedirectSession();
     return hydrateSupabaseSessionUser();
   })().finally(() => {
@@ -456,7 +549,18 @@ export function initializeSupabaseSession(): Promise<BeeGameSupabaseSession | nu
 
 export async function refreshSupabaseSession(): Promise<BeeGameSupabaseSession | null> {
   if (pendingSessionRefresh) return pendingSessionRefresh;
-  const refresh = refreshSupabaseSessionOnce().finally(() => {
+  if (refreshFailure && refreshFailure.retryAt > Date.now()) throw refreshFailure.error;
+  const refresh = refreshSupabaseSessionOnce().then(session => {
+    refreshFailure = null;
+    return session;
+  }).catch(cause => {
+    const error = cause instanceof SupabaseAuthApiError ? cause : new SupabaseAuthApiError('Session refresh temporarily unavailable', {
+      status: 503, code: 'authentication_unavailable',
+    });
+    const attempts = (refreshFailure?.attempts ?? 0) + 1;
+    refreshFailure = { error, attempts, retryAt: Date.now() + authRetryDelay(attempts, error) };
+    throw error;
+  }).finally(() => {
     if (pendingSessionRefresh === refresh) pendingSessionRefresh = null;
   });
   pendingSessionRefresh = refresh;
@@ -481,7 +585,9 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
         httpOnlySessionExpiresAt = 0;
         return null;
       }
-      throw new Error(`Secure session refresh is temporarily unavailable (${response.status})`);
+      throw new SupabaseAuthApiError(`Secure session refresh is temporarily unavailable (${response.status})`, {
+        status: 503, code: 'authentication_unavailable',
+      });
     }
     const value = await response.json() as unknown;
     const session = toCookieSession(value);
@@ -511,7 +617,9 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
       clearSupabaseSession();
       return null;
     }
-    throw new Error(`Supabase session refresh is temporarily unavailable (${response.status})`);
+    throw new SupabaseAuthApiError(`Supabase session refresh is temporarily unavailable (${response.status})`, {
+      status: 503, code: 'authentication_unavailable',
+    });
   }
   const refreshed = toSupabaseSession(await response.json());
   saveSupabaseSession({
@@ -529,19 +637,19 @@ async function fetchAuthRefreshWithRetry(
   init: RequestInit,
 ): Promise<Response> {
   const retryDelays = [250, 750];
-  let lastError: unknown;
   for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
     try {
-      return await fetch(input, init);
+      return await fetch(input, { ...init, signal: AbortSignal.timeout(12_000) });
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') throw error;
-      lastError = error;
+      if (error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)) break;
       const delay = retryDelays[attempt];
       if (delay === undefined) break;
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
-  throw lastError;
+  throw new SupabaseAuthApiError('Authentication service is temporarily unavailable', {
+    status: 503, code: 'authentication_unavailable',
+  });
 }
 
 function isDefinitiveAuthenticationFailure(status: number): boolean {
@@ -549,6 +657,7 @@ function isDefinitiveAuthenticationFailure(status: number): boolean {
 }
 
 export function clearSupabaseSession(): void {
+  refreshFailure = null;
   localStorage.removeItem(SESSION_STORAGE_KEY);
   httpOnlySessionUser = null;
   httpOnlySessionExpiresAt = 0;
@@ -565,6 +674,7 @@ function saveSupabaseSession(session: BeeGameSupabaseSession): void {
 }
 
 async function persistSupabaseSession(session: BeeGameSupabaseSession): Promise<void> {
+  refreshFailure = null;
   if (!isHttpOnlySessionsEnabled()) {
     saveSupabaseSession(session);
     return;
@@ -647,6 +757,7 @@ function readStoredPkceContext(): {
   provider?: SupabaseOAuthProvider
   codeVerifier?: string
   invitationNonce?: string
+  state?: string
 } | undefined {
   const raw = sessionStorage.getItem(OAUTH_PKCE_STORAGE_KEY);
   if (!raw) return undefined;
@@ -664,10 +775,12 @@ function readStoredPkceContext(): {
     const invitationNonce = typeof value.invitationNonce === 'string'
       ? value.invitationNonce.trim()
       : '';
+    const state = typeof value.state === 'string' ? value.state.trim() : '';
     return {
       provider,
       codeVerifier,
       ...(invitationNonce ? { invitationNonce } : {}),
+      ...(state ? { state } : {}),
     };
   } catch {
     return undefined;
@@ -926,11 +1039,17 @@ function getOAuthCallbackKey(): string {
 }
 
 function clearOAuthCallbackUrl(): void {
-  window.history.replaceState({}, document.title, window.location.pathname);
+  history.replaceState({}, document.title, window.location.pathname);
 }
 
 function createPkceCodeVerifier(): string {
   const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+function createOAuthState(): string {
+  const bytes = new Uint8Array(24);
   window.crypto.getRandomValues(bytes);
   return base64UrlEncode(bytes);
 }

@@ -7,7 +7,6 @@ import {
   listInvitations,
   saveInvitationSettings,
   updateInvitation,
-  validateInvitationCode,
 } from './invitationApi';
 
 vi.mock('./apiClient', () => ({
@@ -25,15 +24,10 @@ describe('invitation API', () => {
 
   it('uses same-origin public invitation routes', async () => {
     vi.mocked(apiClient.get).mockResolvedValue({ required: true });
-    vi.mocked(apiClient.post).mockResolvedValue({ valid: true });
 
     await expect(getInvitationPublicSettings()).resolves.toEqual({ required: true });
-    await expect(validateInvitationCode('BEE-ALPHA')).resolves.toBe(true);
 
     expect(apiClient.get).toHaveBeenCalledWith('/api/invitations/settings');
-    expect(apiClient.post).toHaveBeenCalledWith('/api/invitations/validate', {
-      code: 'BEE-ALPHA',
-    });
   });
 
   it('routes every admin operation through the authenticated application API', async () => {

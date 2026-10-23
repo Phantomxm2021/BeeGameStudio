@@ -1,0 +1,25 @@
+{
+  "name": "bee-game-studio-desktop",
+  "private": true,
+  "version": "0.0.0",
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "lint": "biome check src forge.config.ts vite.*.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.8.3",
+    "@electron-forge/maker-zip": "^7.8.3",
+    "@electron-forge/plugin-vite": "^7.8.3",
+    "@electron-forge/shared-types": "^7.11.2",
+    "electron": "44.3.0",
+    "@types/node": "^24.10.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
+  }
+}

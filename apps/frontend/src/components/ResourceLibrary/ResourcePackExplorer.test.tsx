@@ -1,9 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 import type { ExplorerNode } from './resourcePackExplorerTree'
 import { ResourcePackExplorer } from './ResourcePackExplorer'
-import i18n from '../../i18n'
 
 const knight = {
   id: 'element-knight',
@@ -33,17 +32,6 @@ const tree: ExplorerNode = {
 }
 
 describe('ResourcePackExplorer', () => {
-  test('uses the active language for the accessible tree label', async () => {
-    const previousLanguage = i18n.language
-    await act(async () => { await i18n.changeLanguage('ja') })
-    try {
-      render(<ResourcePackExplorer tree={tree} onElement={vi.fn()} />)
-
-      expect(screen.getByRole('tree', { name: 'パックファイル' })).toBeInTheDocument()
-    } finally {
-      await act(async () => { await i18n.changeLanguage(previousLanguage) })
-    }
-  })
   test('toggles folders without selecting an element', async () => {
     const user = userEvent.setup()
     const onElement = vi.fn()
@@ -60,7 +48,7 @@ describe('ResourcePackExplorer', () => {
     const onElement = vi.fn()
     render(<ResourcePackExplorer tree={tree} onElement={onElement} />)
 
-    expect(screen.getByRole('tree', { name: i18n.t('resourceLibrary:explorer.packFiles') })).toBeInTheDocument()
+    expect(screen.getByRole('tree', { name: 'Pack files' })).toBeInTheDocument()
     expect(screen.getByRole('treeitem', { name: 'Materials' })).toBeInTheDocument()
     await user.click(screen.getByRole('treeitem', { name: 'Models' }))
     await user.click(screen.getByRole('treeitem', { name: 'knight.glb' }))
@@ -113,7 +101,7 @@ describe('ResourcePackExplorer', () => {
     await user.click(screen.getByRole('treeitem', { name: 'Models' }))
 
     fireEvent.contextMenu(screen.getByRole('treeitem', { name: 'knight.glb' }))
-    await user.click(screen.getByText(i18n.t('resourceLibrary:explorer.inspect')))
+    await user.click(screen.getByText('Reinspect'))
 
     expect(onInspectElement).toHaveBeenCalledWith(knight)
   })

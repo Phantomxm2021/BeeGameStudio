@@ -1,0 +1,79 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "start-base-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": { "anchorMin": [0, 0], "anchorMax": [1, 1], "sizeDelta": [0, 0] }
+      },
+      {
+        "id": "bg",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "item": { "absolute": true }
+        },
+        "style": { "background": { "color": "#0b0a1a" } }
+      },
+      {
+        "id": "content",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "center",
+          "position": [0, 0],
+          "size": [420, 300],
+          "container": { "direction": "column", "gap": 18, "padding": [0, 0, 0, 0], "justify": "center", "align": "center" }
+        }
+      },
+      {
+        "id": "title",
+        "parentId": "content",
+        "role": "text",
+        "enabled": true,
+        "text": "打砖块",
+        "layout": { "size": [420, 64] },
+        "style": { "fontSize": 48, "align": "center", "color": "#7df9ff" }
+      },
+      {
+        "id": "instructions",
+        "parentId": "content",
+        "role": "text",
+        "enabled": true,
+        "text": "方向键或 A/D 移动挡板 · 空格发球\n触屏拖动移动 · 点按发球",
+        "layout": { "size": [420, 56] },
+        "style": { "fontSize": 15, "lineHeight": 24, "align": "center", "color": "#b9b6d9" }
+      },
+      {
+        "id": "start-btn",
+        "parentId": "content",
+        "role": "button",
+        "enabled": true,
+        "text": "开始游戏",
+        "layout": { "size": [220, 46] },
+        "actions": { "onActivate": "START" },
+        "style": { "fontSize": 18 }
+      },
+      {
+        "id": "mute-btn",
+        "parentId": "root",
+        "role": "button",
+        "enabled": true,
+        "text": "🔊",
+        "layout": { "anchor": "bottom-right", "position": [-12, -12], "size": [44, 44] },
+        "actions": { "onActivate": "TOGGLE_MUTE" }
+      }
+    ]
+  }
+}

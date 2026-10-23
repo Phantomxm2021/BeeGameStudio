@@ -39,7 +39,7 @@ verification.
 
 Fill Supabase URL, anon key, and service-role values in
 `docker/.env.resource`. Keeping these in a separate file prevents resource
-Storage/database credentials from entering the browser image or Claude runtime
+Storage/database credentials from entering the browser image or BGS runtime
 container.
 
 `BEEGAME_CREDIT_CONTROL_TOKEN` must match in both files. The runtime host uses
@@ -51,9 +51,25 @@ is injected into `beegame-runtime` and `beegame-skills`; the runtime host uses i
 only for internal enabled-skill materialization requests to `beegame-skills`.
 
 Do not put Supabase service-role keys or Stripe secrets in
-`docker/.env.production`. The runtime host runs in `BEEGAME_BILLING_MODE=remote`
+`docker/.env.production`, which is shared by multiple services. The trusted V3
+persistence host requires `BEEGAME_SUPABASE_SERVICE_ROLE_KEY`; supply it only
+to `beegame-runtime` through a runtime-specific environment override. Never
+forward it to frontend builds or native model processes. Apply
+`supabase/migrations/20261022010000_single_runtime_model.sql` before deploying
+the single-model runtime. The runtime host runs in `BEEGAME_BILLING_MODE=remote`
 and calls the billing backend through the internal Compose URL
 `http://beegame-billing:62175`.
+
+Upgrade the billing service before the runtime host: new model work requires
+the internal `/api/internal/usage/authorize` endpoint. The runtime fails closed
+if authorization or settlement of pending usage cannot be confirmed. This
+endpoint adds no database migration; apply the existing usage migrations
+described in the root README before deployment.
+
+Usage summary reads additionally require
+`supabase/migrations/20261023030000_usage_read_aggregation.sql`. Apply it before
+deploying the updated billing service; it adds the read RPC and index without
+rewriting existing usage events or wallet balances.
 
 `http://127.0.0.1:62175/health` is public. Billing API routes under
 `/api/payments/*` require the same signed-in user Authorization header that the
@@ -62,7 +78,9 @@ return `401 Unauthorized`.
 
 `http://127.0.0.1:62176/health` is public. User skill routes under
 `/api/user-skills/*` require the signed-in user Authorization header. Internal
-enabled-skill reads can require `BEEGAME_SKILLS_SERVICE_TOKEN` when configured.
+enabled-skill reads require `BEEGAME_SKILLS_SERVICE_TOKEN`.
+Production Skills authentication requires both Supabase URL and anon key;
+missing configuration rejects user requests instead of selecting a local owner.
 
 `http://127.0.0.1:62177/health` is public. Resource management routes require a
 signed-in resource administrator; runtime catalog exploration uses the
@@ -77,8 +95,8 @@ the repository root:
 npm run beegame:dev
 ```
 
-It starts frontend, runtime host, billing backend, and skills backend together,
-auto-selects free ports, and injects the local service URLs into each process.
+It starts all five services on their fixed ports and injects the local service
+URLs into each process. Startup fails if a required port is already in use.
 
 When debugging billing only, create `docker/.env.billing` and run:
 
@@ -121,8 +139,22 @@ The four Bun backend services share one dependency-install stage in
 `docker/Dockerfile.backend`. Only `beegame-runtime` keeps the full workspace and
 dependency tree. Billing, Skills, and Resource Library are emitted as compact
 runtime bundles, so Compose does not export four duplicate `node_modules`
-layers. Bun and npm download caches use BuildKit cache mounts and are not copied
-into the final images.
+layers. The frontend also installs the workspace from the root `bun.lock`, then
+builds `apps/frontend` with the shared `packages` sources present. Bun download
+caches use BuildKit cache mounts and are not copied into the final images.
+The obsolete frontend `package-lock.json` is no longer maintained.
+
+Build just the frontend from the repository root (without starting services):
+
+```bash
+docker build -f docker/Dockerfile.frontend -t beegame-frontend .
+```
+
+The old `apps/frontend/Dockerfile` path aliases this same recipe and also requires
+the repository root as its build context. The Dockerfile-specific ignore file
+excludes local `node_modules`, build output, env files, runtime data, and native
+sources. Dependencies come from the root lockfile; frontend configuration
+comes from the explicit `VITE_*` build arguments.
 
 On a small host, keep `BEEGAME_BUN_INSTALL_NETWORK_CONCURRENCY=2` (the default)
 and build without Compose-level parallelism:
@@ -131,7 +163,7 @@ and build without Compose-level parallelism:
 COMPOSE_PARALLEL_LIMIT=1 ./scripts/beegame-docker.sh up
 ```
 
-The launcher uses the same configurable package registry for frontend npm and
+The launcher uses the same configurable package registry for frontend and
 backend Bun installs. The default is `https://registry.npmmirror.com/`. Override
 it for one build without editing a Dockerfile or env file:
 
@@ -140,8 +172,8 @@ sudo ./scripts/beegame-docker.sh up --registry https://registry.npmjs.org/
 ```
 
 For a persistent override, set `BEEGAME_PACKAGE_REGISTRY` in
-`docker/.env.production`. npm replaces registry hosts recorded in the lockfile,
-and retries transient downloads with bounded backoff.
+`docker/.env.production`. Both builds use `bun install --frozen-lockfile` and
+retain the versions recorded in the root lockfile.
 
 If the host previously attempted builds with the legacy per-service
 Dockerfiles, old BuildKit layers can still occupy `/var/lib/docker` or
@@ -310,9 +342,10 @@ Generated projects are stored in the `beegame-projects` Docker volume at
 Runtime config is stored in the `beegame-config` Docker volume at
 `/home/bun/.beegame`.
 
-BeeGame does not inject a built-in skill catalog into Claude Code. Uploaded
-user skills are explicit user configuration managed by the skills service under
-`.beegame/skills/<user_id>`.
+The runtime image includes the read-only built-in Skill catalog at
+`/app/.beegame/skills/bgs-game-skills`. The native Agent discovers it separately
+from uploaded user Skills, which remain explicit per-user configuration managed
+by the skills service under `.beegame/skills/<user_id>`.
 
 ## Current Scope
 

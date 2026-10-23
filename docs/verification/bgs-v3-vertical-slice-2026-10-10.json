@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "date": "2026-10-10",
+  "sourceRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "scope": [
+    "V3-01",
+    "V3-02",
+    "V3-03"
+  ],
+  "implementation": {
+    "V3_01": "implemented; API routing and original requirement snapshots covered by regression",
+    "V3_02": "implementation and migration prepared; PostgreSQL execution, cross-process concurrency and DB permission tests pending",
+    "V3_03": "implemented; synthetic runner plus real native CLI with local deterministic provider verified"
+  },
+  "prohibitedActionsPerformed": [],
+  "unchangedScopes": [
+    "Claude Code native source",
+    "real generated project artifacts",
+    "existing raw paid-run evidence",
+    "production service processes",
+    "production database",
+    "default new-project legacy route"
+  ],
+  "filesSha256": {
+    "packages/agent-workflow-server/src/app.ts": "77fc00c0e12e1f1bc2845170e01fe1b07bb09c2198ec765114d9dae8075080e8",
+    "packages/agent-workflow-server/src/beegame/session-manager.ts": "0ca0534bbc3df740367316539a11aa08a316b0e23e491c2384110d728f0e36fc",
+    "packages/agent-workflow-server/src/project-metadata-store.ts": "c6a168c64d86d1f15b6b9c3e4aebb600a78aac337ba68cf20c2b0780dab8260f",
+    "packages/agent-workflow-server/src/supabase-dashboard-store.ts": "06e049366c363e889f58fb891e85a46684239853349f8bf104bb71af1ab3a011",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts": "b2bc4632d146fd3317745d84dcefe50454833b2e753b7ca14b7ccaf7870e7684",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/store.ts": "d9fd009ef20e6182814df26723c5fa074c079f5c31378a4f47399260ee30f0a4",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts": "58acb088388265c5115190ce32e038b86fef05ca09afa0890e910405761ca624",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts": "06210a4dd008ab61c1d29d978fd8f8ab2b337a0ce92ca936b7aaa417f3b01e49",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts": "74a89c5f84f1a700528a44a821ebe4b10e7250822d6d9ada7c3e3c5dc9417967",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/workflow-v3.test.ts": "39179b9568b7ad014ba53eac4d01c4ff7bf1d4127b805a3843e779369b43dad7",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/native-integration.test.ts": "e2d5b63946e4674ea073ca29976203d8cf25747c6f4354ceeee7d7aeb1c59bf8",
+    "supabase/migrations/20261010010000_workflow_v3_vertical_slice.sql": "c425c3e5041c97a6740408df97a23fe2a4fe4f4a690f972078e44759f9050cdb"
+  },
+  "tests": {
+    "core": {
+      "passed": 119,
+      "failed": 0,
+      "assertions": 845,
+      "files": 8,
+      "log": "/private/tmp/bgs-v3-core-final.log",
+      "covers": [
+        "structural plan validation",
+        "immutable original requirements",
+        "CAS conflicts in explicit single-process development backend",
+        "workspace alias writer exclusion",
+        "no expired-lease takeover",
+        "stale input/dependency rejection",
+        "missing/bad JSON and absent runtime checks",
+        "actual nonzero rule-command result",
+        "idempotency and distinct task contexts",
+        "native Question addressed to request-owning session",
+        "partial outputs on cancellation",
+        "disabled backend does not silently revert stored V3 mode",
+        "no legacy state side effects"
+      ]
+    },
+    "realV3Native": {
+      "passed": 1,
+      "failed": 0,
+      "assertions": 11,
+      "log": "/private/tmp/bgs-v3-real-native-fixture.log",
+      "provider": "local Bun fake Anthropic SSE server only",
+      "paidModelCalls": 0,
+      "firstFailure": "Test used ANTHROPIC_API_KEY, which the existing SessionManager does not forward; test switched to its existing ANTHROPIC_AUTH_TOKEN contract. No native auth code change."
+    },
+    "existingNativeRegression": {
+      "passed": 54,
+      "failed": 2,
+      "log": "/private/tmp/bgs-v3-native-unsandboxed-regression.log",
+      "failedCases": [
+        "real CLI discovers Skills before a native child chooses its first tool",
+        "reports the selected model and sanitized launch contract to passive observability"
+      ],
+      "notes": "First sandbox run could not open loopback listeners or inspect processes; rerun outside sandbox used only local fake providers. Existing native implementation and these test sources were not edited."
+    },
+    "legacyFullDelivery": {
+      "passed": 7,
+      "failed": 4,
+      "prechangeBaselineLog": "/private/tmp/bgs-v3-prechange-legacy-tests.log",
+      "loader": "/private/tmp/bgs-v3-prechange-baseline.ts",
+      "failedCases": [
+        "new project bootstrap starts one native project conversation",
+        "one native project session completes delivery, implementation evidence false",
+        "one native project session completes delivery, implementation evidence true",
+        "publish readiness preserves verified milestone state after runtime restart"
+      ],
+      "notes": "Diagnostic Bun onLoad transformed app/session-manager in memory to exclude this turn's V3 changes; working tree was not reverted. The same four tests failed. This establishes no new failure here, not that the legacy workflow is correct."
+    }
+  },
+  "typecheck": {
+    "focused": "passed for state/store/checks with --ignoreConfig; no new dependency installation",
+    "focusedLog": "/private/tmp/bgs-v3-core-typecheck.log",
+    "full": "failed; no whole-repository build claim",
+    "fullLog": "/private/tmp/bgs-v3-typecheck-completed.log",
+    "notes": "Full server typecheck imports existing native packages with unresolved src/* aliases and other diagnostics; it was not greenwashed or used to justify modifying native source."
+  },
+  "database": {
+    "migration": "supabase/migrations/20261010010000_workflow_v3_vertical_slice.sql",
+    "applied": false,
+    "sqlExecutionVerified": false,
+    "concurrencyVerifiedOnPostgres": false,
+    "tables": 2,
+    "projectIdType": "text",
+    "mutationRoles": [
+      "service_role"
+    ],
+    "billingAuthority": "existing usage/outbox, not a new billing ledger"
+  },
+  "runtimeLimits": {
+    "nativeTurnCapAdded": false,
+    "automaticRetryAdded": false,
+    "paidTestStarted": false,
+    "defaultRouteSwitched": false,
+    "unknownWriterRecovery": "blocked until actual native writer exit is established; no expiry-based replacement"
+  },
+  "knownBoundaries": [
+    "API-only slice; frontend V3 controls not integrated",
+    "no existing legacy-project auto migration",
+    "no rewrite/retry of executed plans in this slice",
+    "Skills use evidence remains V3-04",
+    "full observed write-scope/dependency analysis remains V3-08",
+    "runtime and delivery-package drivers deliberately unverified, V3-06 pending",
+    "tasks passing checks cannot produce an accepted/completed game delivery; deliveryEligible=false"
+  ],
+  "next": "Validate migration, permissions and competing workers on an isolated PostgreSQL test database; then decide deployment. No production apply or additional paid test authorized by this record."
+}

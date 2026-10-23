@@ -1,0 +1,228 @@
+{
+  "version": "1.62",
+  "date": "2026-10-12",
+  "status": "offline implemented; not deployed",
+  "runtimeVersion": "1.61",
+  "paidModelCalls": 0,
+  "constraints": {
+    "noReviewPromptAdded": true,
+    "noAgentLimitsOrForcedDelegation": true,
+    "noNativeHistoryResetOrCompaction": true,
+    "formalFrontendChanges": false,
+    "claudeCodeSourceChanges": false,
+    "builtinToolChanges": false,
+    "projectSettingsOrHooksEnabled": false,
+    "realProjectWrites": 0,
+    "serviceRestart": false
+  },
+  "originalEvidence": {
+    "audit": "bgs-v3-161-paid-acceptance-2026-10-12.json",
+    "ledger": "bgs-v3-161-paid-requests-2026-10-12.jsonl",
+    "total": 3382847,
+    "requests": 38,
+    "ordinaryInput": 343762,
+    "cachedInput": 3019744,
+    "output": 19341,
+    "mainRequests": 22,
+    "mainTokens": 2981028,
+    "childRequests": 16,
+    "childTokens": 401819
+  },
+  "causes": [
+    {
+      "area": "Tokens",
+      "classification": "long native history plus unnecessary task/author workflow; not a proven compression stall",
+      "evidence": "Main request input was 127482 initially and 142296 in last probe; native history had no compaction events/requests. Four Todo-only requests cost 541940, initial navigation discovery/save 1177990 (overlapping subset), first child repeated build/headless; author repeated completion replies.",
+      "implementation": "AgentGoal intentionally resumes the same native UUID; native window-protection compaction is not a cost budget. BGS previously required author-maintained navigation, offered empty placeholders and fragmented discovery; current handoff supplied hashes/freshness but not saved commands/source pointers in one batch.",
+      "fix": "Removed 262-character mandatory navigation maintenance/delegation-copy instruction; batch source facts into existing host context/handoff and on-demand scaffold; shorten duplicate tool prose and template output. No forced child dispatch, reset, threshold override or retry.",
+      "remaining": "Original long history, model batching/delegation and repetition remain. These fixes do not prove the 3382847 total is solved or predict a real Token reduction."
+    },
+    {
+      "area": "Skills",
+      "classification": "per-turn evidence gap and previous audit overinterpretation, not a demonstrated installation/load failure",
+      "evidence": "Read-only normalized native history contains 3 successful parent loads: game-content-pipeline-engineer once, game-design-check twice. Both acceptance turns had zero new calls. Actual plugin load is already tested with settings disabled.",
+      "implementation": "Final agentTurn.skillUses only derives that turn's tool lifecycle; no historical reuse evidence was given in context/handoff although responsibilities allowed reuse. Fresh children do not inherit parent tool-loaded method bodies just by a parent load.",
+      "fix": "Added priorMainSkillLoads from persisted turns in the same native UUID; deduplicate by latest successful main load, exclude child/failed/different-native/future loads. Include in existing context/handoff, keep current-turn accounting unchanged. Labels contextPresence/application as unverified.",
+      "remaining": "Historical loading does not prove a method survived compaction, was applied or covers all eight domains. No forced loading, copied whole Skills or new skill prompt."
+    },
+    {
+      "area": "Navigation",
+      "classification": "empty free-prose scaffold plus unnecessary default authoring work; model authored unqualified facts",
+      "evidence": "Original CLAUDE.md was 3553 bytes and included rule/par values, fixed assertions, transient tool directory and unconditional consumption conclusion.",
+      "implementation": "Static template requested 'actual route', 'runtime values', entry roles and command scope with no host facts, making model perform repeated discovery and semantic summary. Raw root loader correctly delivered it but is not a semantic auditor.",
+      "fix": "On-demand projectGuide now deterministically fills public source pointers and declared package scripts from current files. It does not copy documents/test bodies, rule values, assertions, receipts or temporary capabilities, infer engine/entry/authority or execute scripts. Existing root-file loading stays unchanged; no keyword blocklist/semantic Gate/schema framework.",
+      "remaining": "User/Agent can still add free prose to root CLAUDE.md; this run does not mechanically guarantee all such prose stays in scope. Original game guide remains unchanged."
+    },
+    {
+      "area": "Requirement revision",
+      "classification": "acceptance operator error, not a new BGS routing bug",
+      "evidence": "Paid production message was explicitly submitted as change by Codex despite existing work option; this changed requirements. BGS already preserves revisions for work, with offline and real-native regression.",
+      "fix": "Correct the audit/plan attribution and retain existing work regression; do not add a heuristic to reinterpret authorized change messages or modify the original Run.",
+      "remaining": "Source changes, including real CLAUDE.md edits, still invalidate measured sources independently; no hash exclusion added."
+    }
+  ],
+  "changes": {
+    "projectGuide": "Optional source-pointer template, read-only one-level public root/docs/src/tests file names, package.json scripts and content/index.json registered paths. UTF-8 JSON, no links/private traversal, visible malformed/oversized metadata diagnostics, no command execution or project writes.",
+    "context": "Same facts before task and via existing handoff, not a new task/plan/model turn. Current task selection and real source/receipt checks preserved.",
+    "skills": "Historical data only. No new persisted state fields; no method-body copying or fixed domain selection.",
+    "inputDescription": "Responsibility prompt only reduced; tool help shortened. Existing detailed help remains on demand. Actual bridge operations/auth/fencing/recovery unchanged."
+  },
+  "regression": {
+    "full": {
+      "pass": 128,
+      "fail": 0,
+      "skip": 0,
+      "expects": 1586,
+      "files": 12,
+      "seconds": 51.99,
+      "log": "/private/tmp/bgs-v3-162-final3-regression.log",
+      "environment": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1; normal host loopback and sandbox-exec; existing CLI with controlled local model"
+    },
+    "finalLabelRecheck": {
+      "pass": 5,
+      "fail": 0,
+      "expects": 52,
+      "seconds": 0.23,
+      "log": "/private/tmp/bgs-v3-162-final-guide.log",
+      "overlapsFull": true,
+      "change": "Template label clarifies Markdown pointers do not infer authority."
+    },
+    "typecheck": {
+      "command": "bun run typecheck",
+      "log": "/private/tmp/bgs-v3-162-final2-typecheck.log",
+      "result": "passed (exit 0)"
+    },
+    "diffCheck": "passed",
+    "controlledNativeRequests": 35,
+    "paidModelCalls": 0,
+    "coverage": [
+      "standard plugin Skills with project settings/hooks disabled",
+      "same native UUID/resume and child reference delivery",
+      "native Skill lifecycle and historical same-lineage evidence",
+      "exclude child/failed/future/unrelated lineage",
+      "no automatic model/Task retry",
+      "work leaves requirements revision unchanged",
+      "read-only source scaffold refresh",
+      "no prose/value/assertion/temp capability copying",
+      "script not executed",
+      "outside aliases/private traversal malformed metadata diagnosed",
+      "current measured source/report and export rules unchanged"
+    ],
+    "developmentFailures": "Outer sandbox initially denied loopback server creation; unchanged tests passed on normal host. New assertions first guessed src/index.html then root index.html, corrected to actual fixture rules.mjs/build.mjs. Existing <2600-character assertion then caught 2621; duplicate description was removed (2588), not the assertion raised. No business safety check weakened."
+  },
+  "sizing": {
+    "units": "characters/bytes, not actual provider Token savings",
+    "oldProfessionalChars": 4208,
+    "newProfessionalChars": 3946,
+    "oldSyntheticToolsAndFactsChars": 2556,
+    "newSyntheticToolsAndFactsChars": 2588,
+    "combinedInputCharDelta": -230,
+    "oldNativeParentSystemChars": 34339,
+    "newNativeParentSystemChars": 34077,
+    "oldNativeChildSystemChars": 9334,
+    "newNativeChildSystemChars": 9072,
+    "currentProjectReadOnlySample": {
+      "generatedBytes": 1325,
+      "generatedChars": 1325,
+      "factChars": 1174,
+      "staticTemplateChars": 477,
+      "professionalChars": 3946,
+      "issues": [],
+      "capabilitiesInScaffold": false,
+      "duplicatedAssertions": false,
+      "duplicatedProseNumbers": false
+    },
+    "originalProjectGuideBytes": 3553,
+    "originalProjectGuideChars": 2386,
+    "caveat": "Generated scaffold is not written to the project. Fake request count/usage cannot certify lower real cost or improved autonomous adoption."
+  },
+  "integrity": {
+    "archive": {
+      "path": "/Users/nswell/Downloads/bgs-v3-project (1).zip",
+      "bytes": 369424,
+      "sha256": "db95b8b6ebbc6a5e4c784dcf3d36518ee698764e1f87b954c2330794a2cf8e9b",
+      "measurementId": "de91c660-0506-4207-914b-a93a29a6a171",
+      "artifact": {
+        "path": "dist",
+        "sha256": "612bdf39476ff82adb1eea8ac347b0de10130e5ea5281451a15bdc48f8ab997f"
+      },
+      "files": 51,
+      "allReceiptAndCurrentHashesMatch": true,
+      "sourceFiles": 38,
+      "hasReportEntries": false
+    },
+    "protectedTrees": [
+      {
+        "path": "apps/frontend",
+        "files": 825,
+        "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+      },
+      {
+        "path": "src",
+        "files": 2445,
+        "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+      },
+      {
+        "path": "packages/builtin-tools",
+        "files": 383,
+        "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+      }
+    ],
+    "priorReadonlyHashes": [
+      {
+        "path": "src/audio.ts",
+        "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529"
+      },
+      {
+        "path": "src/content.ts",
+        "sha256": "e73fc9ec02b906cec7bf33625ae4297fd022f409ee7fbf7847239fe99882d0ac"
+      },
+      {
+        "path": "src/game.ts",
+        "sha256": "a37af585da1f6e2cf20e92ae32c4fb906484721b72cc91b3ec1c54f1427b003b"
+      },
+      {
+        "path": "src/styles.css",
+        "sha256": "5fc640bdf2a04cdb087e95f5f6dd2730515e7a6f23ac21e597dc33f44235c1c0"
+      },
+      {
+        "path": "docs/AUDIO_DESIGN.md",
+        "sha256": "87d9536effb59f8e9eefba959d31b1a42c411edda4fdd6a2cf30baafc83eb5c4"
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "d8f9c161199190cce80a50232e1bd9d89c2b2239f1098494220ba638ca5292e0"
+      },
+      {
+        "path": "content/ui/title.json",
+        "sha256": "42306189d3bd140d15dd4f15c67837401e556d5d7c6e6c170b0d089205706449"
+      },
+      {
+        "path": "tests/browser-fullflow.mjs",
+        "sha256": "b37dde80f6d37dd44e243ca6837f73ce9048a08c59dfd86f34debf842ee0666b"
+      },
+      {
+        "path": "tests/browser-feedback.mjs",
+        "sha256": "bf293124dcb63806700417f959ccae37bf541285e8097bf58ab372318a7a00d8"
+      },
+      {
+        "path": "reports/browser/r25/DELIVERY_V25.md",
+        "sha256": "c275eed4cf73785c00f909e9b731663b907c881220681941de09f2f7cd2d342e"
+      },
+      {
+        "path": "reports/browser/r25/feedback-summary.json",
+        "sha256": "16fa9740b3d85b907273bffe726d6ea962ff63edf11ac32e6bbf895e62dd120d"
+      }
+    ]
+  },
+  "realGuideUnchanged": {
+    "bytes": 3553,
+    "sha256": "5d0971e87f671b8badbc90d9655546adad7c13767b7eae44ea45c54b50d24476"
+  },
+  "limits": [
+    "Not deployed, restarted or paid retested.",
+    "Original quality findings, full professional coverage and actual method application remain unverified.",
+    "No attempt to replace native history/compaction with a BGS memory framework.",
+    "No guarantee that agent uses batch facts, avoids repeated work or writes compliant additional prose."
+  ]
+}

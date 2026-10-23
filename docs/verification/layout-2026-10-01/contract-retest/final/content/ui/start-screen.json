@@ -1,0 +1,553 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "breakout-start",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "start-root",
+    "nodes": [
+      {
+        "id": "start-root",
+        "role": "screen-root",
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            1920,
+            1080
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1920,
+              1080
+            ],
+            [
+              2560,
+              1080
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "start-bg",
+        "parentId": "start-root",
+        "role": "shape",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ],
+          "position": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "gradient": [
+            "#1E1E42",
+            "#13132B"
+          ]
+        }
+      },
+      {
+        "id": "start-volume-button",
+        "parentId": "start-root",
+        "role": "button",
+        "actions": {
+          "activate": "open-volume"
+        },
+        "layout": {
+          "anchor": "top-right",
+          "position": [
+            -24,
+            24
+          ],
+          "size": [
+            128,
+            48
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#1B1D3D",
+            "opacity": 0.85,
+            "radius": 12
+          },
+          "border": {
+            "width": 3,
+            "color": "#F3F4FF",
+            "radius": 12
+          }
+        },
+        "data": {
+          "anchor": {
+            "x": 1,
+            "y": 0
+          }
+        }
+      },
+      {
+        "id": "start-volume-icon",
+        "parentId": "start-volume-button",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            16,
+            15
+          ],
+          "size": [
+            20,
+            18
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#F3F4FF",
+            "radius": 3
+          }
+        }
+      },
+      {
+        "id": "start-volume-text",
+        "parentId": "start-volume-button",
+        "role": "text",
+        "text": "音量",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            44,
+            12
+          ],
+          "size": [
+            64,
+            24
+          ]
+        },
+        "style": {
+          "fontSize": 18,
+          "color": "#F3F4FF",
+          "lineHeight": 24
+        }
+      },
+      {
+        "id": "start-column",
+        "parentId": "start-root",
+        "role": "container",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            600,
+            480
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 18,
+            "padding": [
+              28,
+              24,
+              28,
+              24
+            ],
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "game-title",
+        "parentId": "start-column",
+        "role": "text",
+        "text": "打砖块",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            24,
+            0
+          ],
+          "size": [
+            552,
+            96
+          ]
+        },
+        "style": {
+          "fontSize": 80,
+          "color": "#F3F4FF",
+          "align": "center",
+          "lineHeight": 96
+        }
+      },
+      {
+        "id": "title-motif",
+        "parentId": "start-column",
+        "role": "container",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            24,
+            0
+          ],
+          "size": [
+            552,
+            120
+          ]
+        }
+      },
+      {
+        "id": "motif-ball",
+        "parentId": "title-motif",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            140,
+            44
+          ],
+          "size": [
+            64,
+            64
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFF6BF",
+            "radius": 32
+          },
+          "border": {
+            "width": 5,
+            "color": "#0F0F22",
+            "radius": 32
+          }
+        }
+      },
+      {
+        "id": "motif-arc",
+        "parentId": "title-motif",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            180,
+            62
+          ],
+          "size": [
+            220,
+            8
+          ],
+          "rotation": -0.28
+        },
+        "style": {
+          "background": {
+            "color": "#0F0F22",
+            "radius": 4
+          }
+        }
+      },
+      {
+        "id": "motif-brick-1",
+        "parentId": "title-motif",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            360,
+            18
+          ],
+          "size": [
+            40,
+            26
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FF6B6B",
+            "radius": 4
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 4
+          }
+        }
+      },
+      {
+        "id": "motif-brick-2",
+        "parentId": "title-motif",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            406,
+            18
+          ],
+          "size": [
+            40,
+            26
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#5AA9FF",
+            "radius": 4
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 4
+          }
+        }
+      },
+      {
+        "id": "motif-brick-3",
+        "parentId": "title-motif",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            337,
+            52
+          ],
+          "size": [
+            40,
+            26
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FF914D",
+            "radius": 4
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 4
+          }
+        }
+      },
+      {
+        "id": "motif-brick-4",
+        "parentId": "title-motif",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            383,
+            52
+          ],
+          "size": [
+            40,
+            26
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#6FCF8F",
+            "radius": 4
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 4
+          }
+        }
+      },
+      {
+        "id": "motif-brick-5",
+        "parentId": "title-motif",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            429,
+            52
+          ],
+          "size": [
+            40,
+            26
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#9B7EDE",
+            "radius": 4
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 4
+          }
+        }
+      },
+      {
+        "id": "highscore-box",
+        "parentId": "start-column",
+        "role": "container",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            140,
+            0
+          ],
+          "size": [
+            320,
+            48
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#1B1D3D",
+            "opacity": 0.85,
+            "radius": 10
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 10
+          }
+        }
+      },
+      {
+        "id": "highscore-label",
+        "parentId": "highscore-box",
+        "role": "text",
+        "text": "最高分",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            20,
+            12
+          ],
+          "size": [
+            72,
+            24
+          ]
+        },
+        "style": {
+          "fontSize": 16,
+          "color": "#9FA3C7",
+          "lineHeight": 24
+        }
+      },
+      {
+        "id": "highscore-value",
+        "parentId": "highscore-box",
+        "role": "text",
+        "text": "0000",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            104,
+            10
+          ],
+          "size": [
+            196,
+            28
+          ]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#9FA3C7",
+          "lineHeight": 28,
+          "fontVariant": "tabular-nums"
+        },
+        "bindings": {
+          "text": "game.highScore"
+        }
+      },
+      {
+        "id": "start-game-button",
+        "parentId": "start-column",
+        "role": "button",
+        "actions": {
+          "activate": "start-game"
+        },
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            160,
+            0
+          ],
+          "size": [
+            280,
+            64
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFD166",
+            "radius": 12
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 12
+          }
+        }
+      },
+      {
+        "id": "start-game-button-label",
+        "parentId": "start-game-button",
+        "role": "text",
+        "text": "开始游戏",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            280,
+            32
+          ]
+        },
+        "style": {
+          "fontSize": 24,
+          "color": "#0F0F22",
+          "align": "center",
+          "lineHeight": 32
+        }
+      },
+      {
+        "id": "start-hints",
+        "parentId": "start-column",
+        "role": "text",
+        "text": "空格 发球 · Esc 暂停 · 支持鼠标与触控",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            40,
+            0
+          ],
+          "size": [
+            520,
+            24
+          ]
+        },
+        "style": {
+          "fontSize": 16,
+          "color": "#9FA3C7",
+          "align": "center",
+          "lineHeight": 24
+        }
+      }
+    ]
+  }
+}

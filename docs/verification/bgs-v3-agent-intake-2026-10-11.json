@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-11",
+  "baseSpec": "1.30",
+  "updatedSpec": "1.31",
+  "scope": "minimum autonomous goal intake; BGS integration and independent debug only",
+  "endpoint": "POST /api/projects/:id/workflow-v3/agent/goal",
+  "proven": [
+    "canonical confirmed goal preserved",
+    "normal native Chat, not host Task",
+    "real native TodoWrite/Skill/Question/Write/Bash/Read/Edit",
+    "failed rule check repaired and retested",
+    "same intake not dispatched twice",
+    "native Question answer and history",
+    "durable pause, CAS race, evidence-only recovery",
+    "deliveryEligible remains false"
+  ],
+  "controlledNative": {
+    "requests": 9,
+    "goalPromptChars": 870,
+    "reportedSyntheticUsage": {
+      "prompt_tokens": 90,
+      "completion_tokens": 45,
+      "total_tokens": 135
+    },
+    "paidModelCalls": 0,
+    "realModelReasoningValidated": false,
+    "gameQualityValidated": false
+  },
+  "regression": {
+    "targeted": {
+      "pass": 11,
+      "fail": 0,
+      "files": 3
+    },
+    "typeScript": {
+      "command": "bunx tsc --noEmit --pretty false",
+      "exitCode": 0
+    },
+    "firstFullRun": {
+      "pass": 237,
+      "fail": 3,
+      "tests": 240,
+      "files": 30,
+      "accepted": false,
+      "note": "Implementation changed during this run; do not combine different loaded/on-disk versions into a PASS claim. Frozen-source targeted reruns passed; full frozen rerun required."
+    },
+    "frozenFullRun": {
+      "status": "passed",
+      "pass": 240,
+      "fail": 0,
+      "tests": 240,
+      "files": 30,
+      "exitCode": 0,
+      "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3"
+    }
+  },
+  "protectedFiles": {
+    "src": {
+      "count": 2445,
+      "sha256": "c9ebce9fd4a0a161bd6d686866eca1ca645f39f45e0c4f4bad87e119393534d6"
+    },
+    "packages/builtin-tools": {
+      "count": 383,
+      "sha256": "6ea20f3920b4217d60e6eb11f6adf31bc89dd47859708c83259c68f936f85461"
+    },
+    "apps/frontend": {
+      "count": 508,
+      "sha256": "2ba3b642e4fa584b4b488e912f79853fdba122d8b38c2dcf33fa29928e52e091"
+    },
+    "beforeAfterEqual": true
+  },
+  "untouched": [
+    "production frontend",
+    "Claude Code core/builtin-tools",
+    "production project artifacts",
+    "database schema",
+    "production deployment/services"
+  ],
+  "pending": [
+    "professional BGS asset/Content command decoupling",
+    "same project follow-up changes and interrupted continuation",
+    "new intake remote database concurrency acceptance",
+    "Unity/Godot real CLI/MCP conditions and runtime acceptance",
+    "real model game delivery, independent quality and cost acceptance"
+  ]
+}
