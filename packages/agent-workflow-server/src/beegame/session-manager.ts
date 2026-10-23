@@ -1,7 +1,6 @@
 import {inferRuntimeModelType} from '@bee-game-studio/agent-workflow/runtime-environment'
 import type { DesignFileChanges } from './workflow-v3/state'
 import { createHash, randomUUID } from 'node:crypto'
-import { PROJECT_DESIGN_PATHS } from './design-handoff'
 import { projectRuntimeDisplayReason } from './project-runtime-display'
 import { normalizeRuntimeEnvironment } from '@bee-game-studio/agent-workflow/runtime-environment'
 import { isEnvTruthy } from '@bee-game-studio/agent-workflow/runtime-environment'
@@ -400,7 +399,6 @@ export type DashboardPermissionDecision = {
 
 type PendingPermission = DashboardPermissionRequest & {
   requestedAt: Date
-  designChangeAllowed?: boolean
   resolve(decision: DashboardPermissionDecision): void
 }
 
@@ -408,11 +406,9 @@ export type BeeGamePendingPermission = DashboardPermissionRequest & {
   sessionId: string
   projectId?: string
   requestedAt: Date
-  designChangeAllowed?: boolean
 }
 
 type SessionRecord = {
-  designLocked?: boolean
   executionIdentity?: BeeGameRuntimeSnapshot['executionIdentity']
   /** Redact runtime credentials from persisted and streamed Chat events only. */
   redactVisible?: ReturnType<typeof createResponseRedactor>
@@ -1057,12 +1053,6 @@ export class BeeGameSessionManager {
 
   async send(sessionId: string, text: string): Promise<BeeGameSession> {
     return this.sendWithDisplay(sessionId, text)
-  }
-
-  setProjectDesignLocked(sessionId: string, locked: boolean) {
-    const record = this.sessions.get(sessionId)
-    if (!record?.projectId) throw new Error('Project session not found')
-    record.designLocked = locked
   }
 
   async sendWithDisplay(
@@ -1780,9 +1770,8 @@ export class BeeGameSessionManager {
     const pending = record.pendingPermissions.get(toolUseID)
     if (!pending) throw new Error('Permission request not found')
 
-    if (decision.intent !== undefined && (decision.intent !== 'change' || decision.behavior !== 'allow' ||
-        pending.toolName !== 'AskUserQuestion' || !pending.designChangeAllowed || !record.workflowQuestionGuard))
-      throw new UserQuestionValidationError('Design changes require an explicit answer to a current locked-design question')
+    if (decision.intent !== undefined)
+      throw new UserQuestionValidationError('Question answers do not rewrite the authorized task; use the existing task change request')
     // Validate before consuming the pending request so a failed submission can retry.
     if (decision.behavior === 'allow' &&
         (['AskUserQuestion', 'McpElicitation'].includes(pending.toolName) || decision.answers !== undefined)) {
@@ -1910,7 +1899,6 @@ export class BeeGameSessionManager {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,
         requestedAt: new Date(),
-        ...(workflowQuestion?.designChangeAllowed === true ? {designChangeAllowed:true} : {}),
         resolve,
       })
       this.append(record, 'permission.requested', request.message, {
@@ -3682,7 +3670,6 @@ type ProjectWorkspaceFileAccessAuthority = {
     | 'project_workspace_file_access'
     | 'project_workspace_boundary'
     | 'project_workspace_target_invalid'
-    | 'project_design_locked'
     | 'project_managed_web_boot'
   message?: string
 }
@@ -3732,8 +3719,6 @@ function projectWorkspaceFileAccessAuthority(
   // Keep instruction changes under the existing explicit permission authority,
   // even when native omits a safety reason. Ordinary project outputs retain
   // their current automatic workspace approval.
-  if (writing && record.designLocked && PROJECT_DESIGN_PATHS.includes(rel))
-    return { behavior: 'deny', reason: 'project_design_locked', message: 'Planning records are locked by the implementation baseline. An explicit user design change is required; finalize cannot replace the baseline.' }
   if (writing && rel === 'AGENTS.md') return undefined
   // Native serializes safety/other reasons, but not the ordinary ask rule
   // installed by BGS. Preserve those native prompts without allowing a human

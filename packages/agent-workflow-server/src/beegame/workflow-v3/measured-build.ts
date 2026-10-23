@@ -7,7 +7,7 @@ import { digest, WorkflowError, type Run, type CheckResult, type FileVersion, ty
 import { projectFiles, projectDependencies, sameFiles, changedProjectPaths } from './editable-project'
 import { EDITABLE_BUILD_CHECK_VERSION, CHECK_VERSIONS } from './check-versions'
 import { artifactDigest } from '../runtime-acceptance'
-import { designBaselineIssue } from './design-baseline'
+import { designInputRevision } from '../design-handoff'
 
 export function blockingRegisteredContentChecks(measurement: AgentMeasurement) {
   return measurement.checks.filter(check =>
@@ -123,7 +123,10 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     for(const report of measurement.reports)
       if(!await versionsMatch(run.workspacePath,[report]))changedReports.push(report.path)
     const changedSources=changedProjectPaths(proof.files,await projectFiles(run.workspacePath,artifact.path,proof.excludedReports))
-    const baselineIssue=designBaselineIssue(run,purpose!=='preview' && run.creation?.initialDelivery==='design-led-first-version')
+    const designInputsChanged=measurement.designInputRevision !== undefined &&
+      measurement.designInputRevision !== designInputRevision(run.workspacePath)
+    const designInputsMissing=measurement.designInputRevision === undefined &&
+      purpose !== 'preview' && run.creation?.initialDelivery === 'design-led-first-version'
     const dependenciesChanged=proof.dependencySha256!==await projectDependencies(run.workspacePath)
     // Export identity and observed runtime evidence are different facts. A
     // source-only edit must not be described as changed runtime bytes. These
@@ -141,7 +144,7 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     const artifactMatches=await artifactDigest(run.workspacePath,artifact.path,true).then(hash=>hash===artifact.sha256,()=>false)
     const buildOrArtifactChanged=!artifactMatches || checkInputs.some(check=>!check.inputsMatch)
     const changes={requirements:requirementsChanged,authorizedSourceSave:sourceSaveChanged,
-      sources:changedSources,reports:changedReports,dependencies:dependenciesChanged,buildOrArtifact:buildOrArtifactChanged,
+      sources:changedSources,reports:changedReports,dependencies:dependenciesChanged,designInputs:designInputsChanged,buildOrArtifact:buildOrArtifactChanged,
       artifact:!artifactMatches,checkInputs:checkInputs.filter(check=>!check.inputsMatch).map(check=>check.id)}
     // A new requirement must not hide concurrent source/report changes. Return
     // the whole deterministic comparison once, rather than forcing mtime guesses
@@ -151,10 +154,11 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     // closed while distinguishing that decision from an actual input change.
     const pendingDiscussion=requirementsChanged && discussionMessagesSinceMeasurement(run,measurement)?.length &&
       !sourceSaveChanged && !changedReports.length && !changedSources.length && !dependenciesChanged &&
-      !buildOrArtifactChanged
+      !buildOrArtifactChanged && !designInputsChanged
     const previewDiscussion=purpose==='preview' && pendingDiscussion
     const reasons=[
-      ...(baselineIssue?[baselineIssue]:[]),
+      ...(designInputsChanged?['Design inputs changed since this measurement; inspect and revalidate affected evidence for the current version.']:[]),
+      ...(designInputsMissing?['This historical measurement did not record design input identity; design freshness is unverified. Current inputs cannot be backfilled into old evidence.']:[]),
       ...(changedReports.length?['Reports changed or are missing: '+changedReports.join(', ')+'. Finalize evidence before measuring; the receipt is already saved in BGS, not in these files.']:[]),
       ...(pendingDiscussion && !previewDiscussion?['Source/build/report inputs are unchanged after a settled chat message. Confirm that it did not change the game before publication; a question alone does not require a rebuild. If it changed requirements, remeasure affected results.']:[]),
       ...(!pendingDiscussion && (requirementsChanged || sourceSaveChanged)?['Requirements or an authorized source save changed; remeasure affected results']:[]),
@@ -164,17 +168,14 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
       ...(changes.checkInputs.length?['Saved check inputs or checker versions differ: '+changes.checkInputs.join(', ')]:[]),
       ...(consumptionBlocked?['Requested consumption checks have not passed: '+incomplete.join(', ')+'. Build/smoke observations remain separate from consumption evidence. Inspect actual failures and coverage; an unsupported probe does not mandate a renderer change or automatic retry.']:[]),
     ]
-    const inputChanges=sourceSaveChanged || changedReports.length || changedSources.length || dependenciesChanged || buildOrArtifactChanged
+    const inputChanges=sourceSaveChanged || changedReports.length || changedSources.length || dependenciesChanged || buildOrArtifactChanged || designInputsChanged
     const code=!reasons.length ? 'current'
-      // Baseline eligibility is separate from saved input identity. Keep all
-      // reasons, but actual input drift must still be diagnosed as stale.
-      : baselineIssue && !inputChanges && (!requirementsChanged || pendingDiscussion)
-        ? (run.designBaseline ? 'design-baseline-changed' : 'design-baseline-missing')
+      : designInputsMissing && !inputChanges && (!requirementsChanged || pendingDiscussion) ? 'design-inputs-unverified'
       : consumptionBlocked && !inputChanges && (!requirementsChanged || pendingDiscussion) ? 'preview-unverified'
       : pendingDiscussion && !previewDiscussion ? 'discussion-confirmation-required' : 'measurement-stale'
     return {current:!reasons.length,code,changes,
       unverifiedChecks,
-      evidence:{artifactMatches,exportableSourcesMatch:!changedSources.length&&!dependenciesChanged,checks:checkInputs,
+      evidence:{artifactMatches,designInputsMatch:measurement.designInputRevision === undefined ? null : !designInputsChanged,exportableSourcesMatch:!changedSources.length&&!dependenciesChanged,checks:checkInputs,
         scope:'Saved input identity only; matching checks describe the recorded artifact and conditions, not current source-to-build correspondence, new requirements, a new execution or game quality. Changed sources still require a verified build before export.'},
       reason:reasons.length?reasons.join('; '):previewDiscussion
         ? 'Unchanged measured build is available for diagnostic Preview only; later chat requirements remain unconfirmed. No new requirement or delivery acceptance.'

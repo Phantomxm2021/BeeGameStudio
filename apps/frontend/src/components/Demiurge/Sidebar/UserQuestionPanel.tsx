@@ -21,19 +21,17 @@ function parseQuestions(input: unknown): NativeQuestion[] {
         ? input.questions : [];
 }
 
-export function UserQuestionPanel({ input, lang, busy, error, onSubmit, onDismiss, allowDesignChange = false }: {
+export function UserQuestionPanel({ input, lang, busy, error, onSubmit, onDismiss }: {
     input: unknown;
     lang: Language;
     busy: boolean;
     error?: string;
-    allowDesignChange?: boolean;
-    onSubmit?: (answers: Record<string, string>, intent?: 'change') => Promise<void>;
+    onSubmit?: (answers: Record<string, string>) => Promise<void>;
     onDismiss?: () => Promise<void>;
 }) {
     const text = useBeeGameText(lang).userQuestion;
     const questions = parseQuestions(input);
     const [answers, setAnswers] = useState<ApprovalCardAnswers>({});
-    const [authorizeChange, setAuthorizeChange] = useState(false);
     return <div className="mb-3" data-testid="beegame-question-panel">
         {questions.length ? <ApprovalCard
             questions={questions.map((question, index) => ({
@@ -63,8 +61,7 @@ export function UserQuestionPanel({ input, lang, busy, error, onSubmit, onDismis
                     const answer = values[String(index)];
                     return [question.question, [...(answer?.selected ?? []), ...(answer?.custom?.trim() ? [answer.custom.trim()] : [])].join(', ')];
                 }));
-                if (allowDesignChange && authorizeChange) void onSubmit?.(valuesByQuestion, 'change');
-                else void onSubmit?.(valuesByQuestion);
+                void onSubmit?.(valuesByQuestion);
             }}
             onDismiss={onDismiss ? () => void onDismiss() : undefined}
             className="text-[var(--text-primary)]"
@@ -72,10 +69,6 @@ export function UserQuestionPanel({ input, lang, busy, error, onSubmit, onDismis
             {text.invalid}
             {onDismiss && <button type="button" disabled={busy} onClick={() => void onDismiss()} className="ml-2 underline">{text.dismiss}</button>}
         </div>}
-        {allowDesignChange && questions.length > 0 && <label className="mt-2 flex items-start gap-2 type-caption-1 text-[var(--text-secondary)]">
-            <input type="checkbox" checked={authorizeChange} disabled={busy || !onSubmit} onChange={event => setAuthorizeChange(event.target.checked)} />
-            {text.authorizeDesignChange}
-        </label>}
         {questions.some(question => question.options.some(option => option.preview)) && <details className="mt-2 type-caption-1">
             <summary>{text.previews}</summary>
             {questions.flatMap((question, index) => question.options.filter(option => option.preview).map(option =>

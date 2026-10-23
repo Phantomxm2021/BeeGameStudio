@@ -827,7 +827,6 @@
     "permissionRiskGeneric": "May create files, install dependencies, or access the network",
     "permissionPendingPlaceholder": "Waiting for permission confirmation",
     "userQuestion": {
-      "authorizeDesignChange": "Authorize the design changes in these answers and unlock the implementation baseline for revision.",
       "custom": "Or enter your own answer…",
       "submit": "Submit answers",
       "previous": "Previous question",

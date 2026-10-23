@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, realpathSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
@@ -90,7 +90,7 @@ export function assertCommit(projectId: string, actorId: string, version: number
     throw new WorkflowError('immutable-web-boot', 'Installed Web startup/storage wiring cannot be replaced by a follow-up')
   if (!prior?.webBoot && next.webBoot && (!prior?.writer ||
       next.creation?.webBoot !== MANAGED_WEB_BOOT_VERSION || next.webBoot.version !== MANAGED_WEB_BOOT_VERSION ||
-      !next.designBaseline || next.writer?.attemptId !== prior.writer.attemptId ||
+      next.writer?.attemptId !== prior.writer.attemptId ||
       !sameJson(next.webBoot.files.map(file => file.path), MANAGED_WEB_BOOT_PATHS) ||
       next.webBoot.files.some(file => !/^[a-f0-9]{64}$/.test(file.sha256))))
     throw new WorkflowError('invalid-web-boot', 'Managed Web entry requires the current implementation writer and host-installed file identities')
@@ -98,35 +98,8 @@ export function assertCommit(projectId: string, actorId: string, version: number
     throw new WorkflowError('task-mode-retired', 'This older Task Run is read-only; it cannot be migrated implicitly')
   if (!Array.isArray(next.agentTurns) || 'plans' in next || 'tasks' in next || 'attempts' in next)
     throw new WorkflowError('invalid-commit','Only Agent Runs without host Task execution are writable')
-  if (prior?.designBaseline && !sameJson(prior.designBaseline,next.designBaseline)) {
-    const added = next.agentTurns.length === (prior.agentTurns?.length ?? 0) + 1 ? next.agentTurns.at(-1) : undefined
-    const explicitChange = !prior.writer && !next.designBaseline && added?.message?.intent === 'change'
-    const baseline = next.designBaseline, old = prior.designBaseline
-    const edit = next.sourceEdits?.find(edit => edit.attemptId === baseline?.sourceEditId)
-    const oldEdit = prior.sourceEdits?.find(item => item.attemptId === edit?.attemptId)
-    const path = edit ? relative(next.workspacePath,resolve(next.workspacePath,edit.sourceEdit.path)).split('\\').join('/') : ''
-    const changed = baseline ? [...new Set([...Object.keys(old.supportingFiles),...Object.keys(baseline.supportingFiles)])]
-      .filter(file=>old.supportingFiles[file]!==baseline.supportingFiles[file]) : []
-    const exactSourceSave = baseline && edit?.sourceEdit.status === 'saved' && oldEdit?.status === 'running' &&
-      prior.writer?.attemptId === edit.attemptId && !next.writer && changed.length === 1 && changed[0] === path &&
-      baseline.attemptId === old.attemptId && baseline.capturedAt === old.capturedAt &&
-      baseline.requirementsRevision === old.requirementsRevision && baseline.digestVersion === old.digestVersion &&
-      baseline.registryRevision === old.registryRevision &&
-      sameJson(baseline.protectedFiles,old.protectedFiles)
-    // A literal user answer may authorize a design correction inside the
-    // existing native turn. The host question guard commits only invalidation;
-    // native tools still have to finalize and capture the corrected inputs.
-    const questionChange = event?.startsWith('agent.design-change-authorized:') &&
-      event.length > 'agent.design-change-authorized:'.length && prior.writer && !prior.paused && !baseline &&
-      sameJson(next,{...prior,version:prior.version+1,designBaseline:undefined,deliveryEligible:false})
-    if (!explicitChange && !exactSourceSave && !questionChange)
-      throw new WorkflowError('design-baseline-locked','Implementation baseline cannot be replaced by native work or a plain message')
-  } else if (!prior?.designBaseline && next.designBaseline) {
-    const baseline = next.designBaseline
-    if (!prior?.writer || next.writer?.attemptId !== prior.writer.attemptId || baseline.attemptId !== prior.writer.attemptId ||
-        baseline.requirementsRevision !== prior.requirements.revision || !/^[a-f0-9]{64}$/.test(baseline.revision))
-      throw new WorkflowError('invalid-design-baseline','Design baseline requires the current implementation writer')
-  }
+  if (prior && !sameJson(prior.designBaseline, next.designBaseline))
+    throw new WorkflowError('immutable-source', 'Historical design snapshots cannot be created, removed or rewritten')
   if(next.agentTurns?.some(t=>t.notStarted!==undefined && t.notStarted!==true))
     throw new WorkflowError('invalid-exit-evidence','No-start proof must be the literal host fact, not a user string or false flag')
   const oldEdits = prior?.sourceEdits ?? [], edits = next.sourceEdits ?? []

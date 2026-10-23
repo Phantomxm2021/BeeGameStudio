@@ -16,8 +16,7 @@ import { reviewSourceSnapshot } from '../design-source-reading'
 import { projectNavigationSnapshot } from './project-guide'
 import { priorMainSkillLoads } from './context'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
-import { snapshotDesignRevisionFiles, designRevisionFileDigest, DESIGN_ACCEPTANCE_PATH, readDesignImplementationChecklist, readDesignAcceptanceRequirements } from '../design-handoff'
-import { captureDesignBaseline, designBaselineIssue } from './design-baseline'
+import { snapshotDesignRevisionFiles, designRevisionFileDigest, designInputRevision, DESIGN_ACCEPTANCE_PATH, readDesignImplementationChecklist, readDesignAcceptanceRequirements } from '../design-handoff'
 import { requiresBgsEditableContent } from './web-project-start'
 
 export const AGENT_CONSUMPTION_CHECKS = ['ui-data-consumption','scene-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'] as const
@@ -127,7 +126,7 @@ export function agentSkillFacts(run:Run,turn:AgentTurn,liveUses?:SkillUse[]) {
  * No Task, plan, model round or game-quality decision is created. A durable
  * request is recorded BEFORE executing scripts; unknown outcomes never replay. */
 export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store: WorkflowStore; executionContext?: ()=>Record<string, unknown>|undefined;
-  skillUses?: ()=>SkillUse[]; onDesignLocked?: () => void }) {
+  skillUses?: ()=>SkillUse[] }) {
   // Capture once for this user turn, not at compact, context read or finalize.
   let before: Record<string, string | null> | undefined, snapshotError: string | undefined
   try { before = snapshotDesignRevisionFiles(input.run.workspacePath) }
@@ -147,7 +146,6 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
   }
   const controller = new AbortController()
   let work: Promise<AgentMeasurement> | undefined
-  const pendingBaselines = new Set<Promise<unknown>>()
   const sameWriter = (run: Run) => run.id === input.run.id && run.workspacePath === input.run.workspacePath &&
     run.writer?.attemptId === input.turn.attemptId && run.writer.fence === input.turn.fence && run.writer.workerId === input.turn.workerId
   async function current() {
@@ -192,8 +190,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     await save(record,true)
     const root=run.workspacePath
     try {
-      const baselineIssue = designBaselineIssue(run)
-      if (baselineIssue) throw new WorkflowError('design-baseline-changed', baselineIssue)
+      record.designInputRevision = designInputRevision(root)
       // Refresh before hashing/building: guide maintenance must not stale the
       // just-created receipt when the turn settles without further source edits.
       // Only explicitly selected execution receipts may enter from host
@@ -236,6 +233,8 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
           build.projectBuild.dependencySha256!==await projectDependencies(root) || !await versionsMatch(root,record.reports))
           throw new WorkflowError('measurement-stale','Source, dependency or report changed during measurement; rebuild/recheck the affected version')
       }
+      if (record.designInputRevision !== designInputRevision(root))
+        throw new WorkflowError('measurement-stale', 'Design inputs changed during measurement; inspect the affected evidence before measuring the current version')
       if(controller.signal.aborted)throw Error('Measurement cancelled; no automatic retry')
     } catch(error) {record.error=error instanceof Error?error.message:'Measurement failed'}
     record.finishedAt=new Date().toISOString()
@@ -244,54 +243,11 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
   }
   return {
     designFileChanges,
-    async authorizeDesignChange(toolUseID: string) {
-      if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
-      if (work || pendingBaselines.size) throw new WorkflowError('workspace-busy', 'Wait for the current measurement or baseline operation')
-      const run = await current()
-      if (run.paused) throw new WorkflowError('run-paused', 'Turn writes are paused')
-      if (!toolUseID || !run.designBaseline) throw new WorkflowError('design-baseline-missing', 'No locked design is available to revise')
-      const next = structuredClone(run)
-      delete next.designBaseline
-      next.version++; next.deliveryEligible = false
-      if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
-      await input.store.commit(run.projectId,run.ownerId,run.version,next,'agent.design-change-authorized:'+toolUseID)
-    },
-    lockDesignBaseline() {
-      const operation = (async()=>{
-      if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
-      for (let retry = 0; retry < 2; retry++) {
-        const run = await current()
-        if (run.paused) throw new WorkflowError('run-paused', 'Turn writes are paused')
-        const checklist = readDesignImplementationChecklist(run.workspacePath)
-        const issue = designBaselineIssue(run)
-        if (issue) throw new WorkflowError('design-baseline-changed', issue)
-        if (!run.designBaseline) {
-          const next = structuredClone(run)
-          next.designBaseline ??= await captureDesignBaseline(run)
-          if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
-          next.version++
-          try { await input.store.commit(run.projectId, run.ownerId, run.version, next, 'agent.design-baseline-locked') }
-          catch (error) { if (!retry && error instanceof WorkflowError && error.code === 'revision-conflict') continue; throw error }
-        }
-        if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
-        input.onDesignLocked?.()
-        const saved = await current(), changed = designBaselineIssue(saved)
-        if (changed) throw new WorkflowError('design-baseline-changed', changed)
-        return { valid: true, ...checklist, requirements: readDesignAcceptanceRequirements(run.workspacePath),
-          designBaseline: { revision: saved.designBaseline!.revision, capturedAt: saved.designBaseline!.capturedAt,
-            scope: 'Implementation constraint, not user approval or game acceptance' } }
-      }
-      throw new WorkflowError('revision-conflict', 'Design baseline could not be recorded')
-      })().finally(()=>pendingBaselines.delete(operation))
-      pendingBaselines.add(operation)
-      return operation
-    },
     async assertActive(write = false) {
       if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
       const run = await current()
       if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
       if (write && run.paused) throw new WorkflowError('run-paused', 'Turn writes are paused')
-      if (write && run.designBaseline) throw new WorkflowError('design-baseline-locked', 'Planning records are locked; finalize cannot replace the implementation baseline')
       return {runId:run.id,requirementsRevision:run.requirements.revision}
     },
     async executionInputs() {
@@ -321,7 +277,6 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       const {text:_userText,...task}=activeUserTask(run,turn)
       return {...(input.executionContext?.()?{executionContext:input.executionContext!()}:{}),task,
         requirementsRevision:run.requirements.revision,
-        designBaseline:run.designBaseline?{revision:run.designBaseline.revision,capturedAt:run.designBaseline.capturedAt,locked:true}:null,
         project:projectNavigationSnapshot(run.workspacePath),skills:skillFacts(run),
         measurement:latest?{id:latest.id,requestKey:latest.requestKey,runtimeArtifact:latest.runtimeArtifact,requirementsRevision:latest.requirementsRevision,
           freshness,
@@ -399,7 +354,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       work=execute(request).finally(()=>{work=undefined})
       return work
     },
-    async close() {controller.abort();await Promise.allSettled([...pendingBaselines]);await work},
+    async close() {controller.abort();await work},
   }
 }
 

@@ -659,7 +659,6 @@
       "retrying": "重試中…"
     },
     "userQuestion": {
-      "authorizeDesignChange": "授權本次回答中的設計變更，解除實作基線鎖以便修訂。",
       "custom": "或輸入你自己的回答…",
       "submit": "提交回答",
       "previous": "上一題",

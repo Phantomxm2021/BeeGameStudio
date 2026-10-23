@@ -87,8 +87,8 @@ export type Run = {
   // Retained as an optimistic revision for authorized requirement changes and
   // source edits; it no longer implies a host-authored Task plan.
   planRevision: number;
-  // Captured by the existing implementation handoff, not model approval or a
-  // new workflow phase. A normal follow-up cannot replace this authority.
+  // Historical implementation snapshot only. Retained when reading old Runs;
+  // it grants no authority and does not freeze sources or gate verification.
   designBaseline?: { revision: string; digestVersion: 1 | 2; capturedAt: string; attemptId: string;
     requirementsRevision: string; protectedFiles: FileVersion[]; supportingFiles: Record<string, string>; registryRevision?: string; sourceEditId?: string };
   writer?: { attemptId: string; fence: number; workerId: string }; fence: number;
@@ -132,6 +132,9 @@ export type AgentMeasurement = {
   requirementsRevision: string; startedAt: string; finishedAt?: string;
   sourceEditId?: string;
   reports: FileVersion[]; checks: CheckResult[]; error?: string;
+  // Host-observed design bytes (including private indexes) for this measurement.
+  // Absent on historical receipts; never backfilled from current inputs.
+  designInputRevision?: string;
   // Explicit optional reuse of existing static-Web drivers, not a Task plan.
   consumption?: Pick<TaskSpec, 'uiProbes'|'sceneProbes'|'pixelProbes'|'audioProbes'> & {
     checks: Array<'ui-data-consumption'|'scene-data-consumption'|'pixel-data-consumption'|'font-data-consumption'|'audio-data-consumption'>;

@@ -340,8 +340,7 @@ export const ChatPanel = memo(({
                         lang={lang}
                         busy={permissionState.gateId === permission.gate_id && permissionState.phase === 'submitting'}
                         error={permissionState.gateId === permission.gate_id && permissionState.phase === 'failed' ? permissionState.message : undefined}
-                        allowDesignChange={permission.artifact?.designChangeAllowed === true}
-                        onSubmit={onResolveToolPermission ? (answers, intent) => onResolveToolPermission({...toPermissionPayload(permission), ...(intent ? {intent} : {})}, 'allow', 'once', answers) : undefined}
+                        onSubmit={onResolveToolPermission ? answers => onResolveToolPermission(toPermissionPayload(permission), 'allow', 'once', answers) : undefined}
                         onDismiss={onResolveToolPermission ? () => onResolveToolPermission(toPermissionPayload(permission), 'deny') : undefined}
                     /> : permission.permission_tool_name === 'McpElicitation' ? <McpElicitationPanel
                         key={permission.gate_id} input={permission.artifact?.input} language={lang}

@@ -13,19 +13,12 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-baseline-cli-')))
   const sessionId = 'baseline-fixture'
   const inspected: boolean[] = []
-  let implementationCalls = 0
   const sourceRequests: { paths: string[]; details: boolean }[] = []
   const unexpected = async () => { throw Error('Baseline must not execute other measurement operations') }
   const measurement: NonNullable<Parameters<typeof openAgentTools>[0]['measurement']> = {
     async assertActive(write = false) { inspected.push(write); return { runId: 'fixture', requirementsRevision: 'fixture' } },
     async close() {},
-    authorizeDesignChange: unexpected,
     designFileChanges: () => ({scope: 'design-revision-files',attemptId: 'fixture',requestKey: 'fixture',status: 'unverified',files: []}),
-    async lockDesignBaseline() {
-      implementationCalls++
-      return { valid: true, ...readDesignImplementationChecklist(root), requirements: readDesignAcceptanceRequirements(root),
-        designBaseline: { revision: 'fixture', capturedAt: '2026-01-01T00:00:00Z', scope: 'Fixture only' } }
-    },
     async handoff(paths = [], details = false) {
       sourceRequests.push({ paths, details })
       throw Error('Synthetic source inspection failure')
@@ -66,12 +59,10 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     expect(compact.stdout.length).toBeLessThan(detailed.stdout.length)
     expect(await readFile(join(root, 'docs/GDD.md'), 'utf8')).toBe(original)
 
-    expect(implementationCalls).toBe(0)
     const implementationHelp = await command('--design', 'implementation', '--help')
     expect(implementationHelp.code, implementationHelp.stderr).toBe(0)
-    expect(JSON.parse(implementationHelp.stdout).instruction).toContain('Use --design implementation only when entering authorized implementation')
-    expect(JSON.parse(implementationHelp.stdout).help).toContain('locks planning records')
-    expect(implementationCalls).toBe(0)
+    expect(JSON.parse(implementationHelp.stdout).instruction).toContain('Use --design implementation to read the current design inputs for authorized work')
+    expect(JSON.parse(implementationHelp.stdout).help).toContain('without freezing them')
     expect(inspected.every(write => write === false)).toBe(true)
     expect(await readFile(join(root, 'docs/GDD.md'), 'utf8')).toBe(original)
     const implementation = await command('--design', 'implementation')
@@ -93,7 +84,6 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     expect(entry.resultPath).toBe(complete.resultPath)
     expect(entry.limitation).toBe(complete.limitation)
     expect(implementation.stdout.length).toBeLessThan(implementationDetails.stdout.length / 2)
-    expect(implementationCalls).toBe(2)
     const task = readImplementationTask(root, { id: entry.items[0].id })
     expect(task.valid, task.issues.join(' ')).toBe(true)
     expect('sources' in task && task.sources.length).toBeGreaterThan(0)
@@ -118,19 +108,18 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     expect(help.help).toContain('--design finalize')
     expect(help).not.toHaveProperty('acceptanceExample')
     expect(help).not.toHaveProperty('acceptanceInstruction')
-    expect(help.instruction).not.toContain('Use --design implementation only when entering authorized implementation')
+    expect(help.instruction).not.toContain('Use --design implementation to read the current design inputs for authorized work')
     expect(help.relatedHelp).toContain('--design acceptance --help')
     expect(help.relatedHelp).toContain('--design implementation --help')
     const acceptanceHelp = await command('--design', 'acceptance', '--help')
     expect(acceptanceHelp.code, acceptanceHelp.stderr).toBe(0)
     const runtimeHelp = JSON.parse(acceptanceHelp.stdout)
-    expect(implementationCalls).toBe(2)
     expect(inspected.every(write=>write===false)).toBe(true)
     expect(JSON.parse((await command('--design','baseline')).stdout)).toEqual(JSON.parse(compact.stdout))
     expect(runtimeHelp.acceptanceInstruction).toContain('verification.designRevision (64 lowercase hexadecimal characters)')
     expect(runtimeHelp.acceptanceInstruction).toContain('not a top-level designRevision')
     expect(runtimeHelp.acceptanceInstruction).toContain('--design baseline (read-only)')
-    expect(runtimeHelp.acceptanceInstruction).toContain('do not invoke it merely to read a revision')
+    expect(runtimeHelp.acceptanceInstruction).toContain('Record the version actually verified')
     expect(runtimeHelp.acceptanceInstruction).toContain('blocked/failed report may omit verification.designRevision')
     expect(runtimeHelp.acceptanceExample.verification).not.toHaveProperty('designRevision')
     expect(runtimeHelp.acceptanceInstruction).toContain('An existing measurement is immutable')
@@ -230,10 +219,8 @@ test('baseline and implementation CLI summarize inputs, expose existing executio
     }
 
     // Help remains readable even when the actual implementation handoff is blocked.
-    const blockedCalls = implementationCalls
     expect((await command('--design', 'implementation', '--help')).code).toBe(0)
     expect((await command('--design', 'acceptance', '--help')).code).toBe(0)
-    expect(implementationCalls).toBe(blockedCalls)
 
     const source = await command('docs/GDD.md', '--details')
     expect(source.code).toBe(1)

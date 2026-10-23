@@ -150,7 +150,7 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     expect(guide).toContain('Complete technical design in this stage before actual visual design or resource production')
     expect(guide).toContain('The Agent chooses methods and work order')
     for (const document of DESIGN_WRITING_ORDER) expect(guide).toContain(document)
-    expect(guide).toContain('normal file registration and implementation progress do not require rewriting the plan')
+    expect(guide).toContain('Verification applies to its recorded input version')
     expect(guide).not.toContain('Technical/resource plans start as drafts')
     expect(guide).not.toContain('Finalize TECHNICAL_DESIGN.md tasks from these inputs')
     expect(guide).not.toContain('Planning geometry supports layout checks')

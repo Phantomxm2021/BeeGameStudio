@@ -6,6 +6,7 @@ import { createRun, digest, type AgentTurn } from './state'
 import { createLocalWorkflowStore, assertCommit } from './store'
 import { observeProjectCreation } from './web-project-start'
 import { createAgentMeasurement } from './agent-measurement'
+import { openDesignActions } from './agent-tools'
 import { MANAGED_WEB_BOOT_PATHS } from './managed-web-boot'
 import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
 
@@ -31,9 +32,9 @@ test.each([false,true])('implementation handoff never chooses or installs startu
     await mkdir(join(f.workspace,'src'))
     const source='export const application = "Agent-owned startup";\n'
     await writeFile(join(f.workspace,'src/application.ts'),source)
-    const result=await f.measurement.lockDesignBaseline()
+    const result=await openDesignActions(f.workspace)('implementation')
     expect(result.valid).toBe(true)
-    expect(result.designBaseline.revision).toBeString()
+    expect(result).toMatchObject({designRevision:expect.any(String)})
     expect(result).not.toHaveProperty('webBoot')
     expect(await f.measurement.context()).not.toHaveProperty('webBoot')
     const saved=(await f.store.read('project','owner'))!
@@ -41,7 +42,7 @@ test.each([false,true])('implementation handoff never chooses or installs startu
     for(const path of ['index.html','package.json','src/game.jsx',...MANAGED_WEB_BOOT_PATHS])
       expect(await Bun.file(join(f.workspace,path)).exists()).toBe(false)
     expect(await readFile(join(f.workspace,'src/application.ts'),'utf8')).toBe(source)
-    await f.measurement.lockDesignBaseline()
+    await openDesignActions(f.workspace)('implementation')
     expect((await f.store.read('project','owner'))!.version).toBe(saved.version)
   }finally{await f.close()}
 })
@@ -50,7 +51,7 @@ test('historical installation receipts are retained without constraining current
   const f=await fixture(true)
   try {
     await writeDesignDocumentsFixture(f.workspace)
-    await f.measurement.lockDesignBaseline()
+    await openDesignActions(f.workspace)('implementation')
     const saved=(await f.store.read('project','owner'))!
     const next=structuredClone(saved); next.version++
     await mkdir(join(f.workspace,'src'))
@@ -63,14 +64,14 @@ test('historical installation receipts are retained without constraining current
     }
     await f.store.commit('project','owner',saved.version,next,'fixture-historical-install')
     expect(await f.measurement.context()).not.toHaveProperty('webBoot')
-    const result=await f.measurement.lockDesignBaseline()
+    const result=await openDesignActions(f.workspace)('implementation')
     expect(result).not.toHaveProperty('webBoot')
     expect((await f.store.read('project','owner'))!.webBoot).toEqual(next.webBoot)
     const changed=structuredClone(next);changed.version++;delete changed.webBoot
     expect(()=>assertCommit('project','owner',next.version,changed,next)).toThrow('cannot be replaced')
     await writeFile(join(f.workspace,'index.html'),'<title>Project-owned metadata</title>')
     await writeFile(join(f.workspace,'src/bgs-entry.mjs'),'External modification')
-    expect((await f.measurement.lockDesignBaseline()).valid).toBe(true)
+    expect((await openDesignActions(f.workspace)('implementation')).valid).toBe(true)
     expect((await f.store.read('project','owner'))!.webBoot).toEqual(next.webBoot)
     expect(await readFile(join(f.workspace,'src/bgs-entry.mjs'),'utf8')).toBe('External modification')
   }finally{await f.close()}

@@ -5444,7 +5444,6 @@ function pendingBeeGamePermissionRequestToJson(
     message: permission.message,
     created_at: normalizeBeeGameCreatedAt(permission.requestedAt),
     input: permission.input,
-    ...(permission.designChangeAllowed ? {design_change_allowed:true} : {}),
   }
 }
 

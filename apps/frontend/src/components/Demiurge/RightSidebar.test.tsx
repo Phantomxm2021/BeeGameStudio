@@ -278,7 +278,7 @@ describe('RightSidebar tabs', () => {
         await act(async () => request.resolve(true));
         expect(getChatInput()).toHaveValue('Second project draft');
     });
-    it.each([false, true])('submits a live question with explicit design authorization only when selected: %s', async authorizeChange => {
+    it.each([false, true])('submits question answers without reviving legacy design unlock controls: %s', async authorizeChange => {
         const onResolveToolPermission = vi.fn().mockResolvedValue(undefined);
         const projectStatus = { project_id: 'p', workflow: { status: 'completed' as const } };
         render(<RightSidebar projectId="p" lang="en" progress={100} isLoading={false}
@@ -290,10 +290,10 @@ describe('RightSidebar tabs', () => {
             waitingPermission={getWaitingPermissionState()} />);
         expect(screen.getByTestId('beegame-question-panel')).toBeInTheDocument();
         expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
-        if (authorizeChange) fireEvent.click(screen.getByRole('checkbox', { name: /Authorize the design changes/ }));
+        expect(screen.queryByRole('checkbox', { name: /Authorize the design changes/ })).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('radio', { name: 'Pixel' }));
         fireEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
-        expect(onResolveToolPermission).toHaveBeenCalledWith({ gate_id: 'question', ...(authorizeChange ? { intent: 'change' } : {}) }, 'allow', 'once', { 'Style?': 'Pixel' });
+        expect(onResolveToolPermission).toHaveBeenCalledWith({ gate_id: 'question' }, 'allow', 'once', { 'Style?': 'Pixel' });
     });
     it.each(['Bash', 'AskUserQuestion'])('shows only the actionable %s card while waiting for permission', (toolName) => {
         const projectStatus = { project_id: 'p', blocked: true, blocked_reason: 'Bash requires permission.' };

@@ -239,17 +239,17 @@ test.each(['write', 'edit', 'denied', 'revoked', 'cancelled', 'instructions'] as
   const manager = new BeeGameSessionManager({ async start(input) {
     return runner.start({ ...input, requestPermission: async request => {
       requests.push(request)
-      const pending = input.requestPermission!(request)
+      const deny = mode === 'denied' || mode === 'revoked' && request.phase === 'recheck'
+      const pending = input.requestPermission!(deny ? { ...request, decisionReason: 'Fixture explicit authorization' } : request)
+      if (deny) manager.resolvePermission(sessionId, request.toolUseID, { behavior: 'deny', source: 'user', message: 'Fixture write denied' })
       if (mode === 'instructions') manager.resolvePermission(sessionId, request.toolUseID, { behavior: 'allow', source: 'user' })
       const decision = await pending
-      if (mode === 'revoked' && !request.phase) manager.setProjectDesignLocked(sessionId, true)
       if (mode === 'cancelled' && request.phase === 'recheck') manager.stop(sessionId)
       return decision
     } })
   } }, root, () => ({ BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only' }))
   try {
     sessionId = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' }).id
-    if (mode === 'denied') manager.setProjectDesignLocked(sessionId, true)
     const allowed = ['write', 'edit', 'instructions'].includes(mode)
     // Reusing the fixture call ID in a later turn must not suppress its initial receipt.
     const turns = mode === 'write' || mode === 'edit' ? 2 : 1
@@ -268,12 +268,11 @@ test.each(['write', 'edit', 'denied', 'revoked', 'cancelled', 'instructions'] as
     expect(resolved.map(event => event.payload?.decision)).toEqual(mode === 'revoked' ? ['allow', 'deny'] :
       Array(turns).fill(mode === 'denied' ? 'deny' : 'allow'))
     expect(resolved.every(event => event.payload?.toolUseID === 'write-design')).toBe(true)
-    expect(events.filter(event => event.type === 'permission.requested')).toHaveLength(mode === 'instructions' ? 1 : 0)
+    expect(events.filter(event => event.type === 'permission.requested')).toHaveLength(['instructions', 'denied', 'revoked'].includes(mode) ? 1 : 0)
     if (mode === 'revoked' || mode === 'denied') {
-      expect(resolved.at(-1)?.payload).toMatchObject({ reason: 'project_design_locked',
-        ...(mode === 'revoked' ? { phase: 'recheck' } : {}) })
+      expect(resolved.at(-1)?.payload).toMatchObject({ decision: 'deny' })
       const failure = events.find(event => event.type === 'assistant.message' && event.text.includes('Write rejected'))
-      expect(failure?.text).toContain(String(resolved.at(-1)?.payload?.message))
+      expect(failure?.text).toContain('Fixture write denied')
     }
     if (mode === 'cancelled') expect(events.some(event => event.type === 'session.stopped')).toBe(true)
   } finally {

@@ -100,7 +100,7 @@ test('Agent-authored Web project chooses public helpers and consumes its registe
     expect(await Bun.file(join(workspace,'index.html')).exists()).toBe(false)
     await writeFile(join(workspace,'index.html'), '<!doctype html><div id="root"></div><script type="module" src="./src/start.mjs"></script>')
     await writeFile(join(workspace,'src/start.mjs'), "import { createGame } from './game.jsx'; await createGame({root:document.getElementById('root')});")
-    expect(implementation.designBaseline.revision).toBeString()
+    expect(implementation.designRevision).toBeString()
     await writeFile(join(workspace,'src/game.jsx'),`import {parseBeeGameContentIndex,fetchStartupContentDocuments,readSceneData,readUiData,loadProductionResources,createProductionUiSurface,renderProductionScene2d} from './consumer.mjs';
 export async function createGame({root}) {
 root.innerHTML='<canvas id="scene"></canvas><div id="ui"></div>';
@@ -200,8 +200,8 @@ await copyRegisteredRuntimeFiles(process.cwd(),'dist');`)
       const path=join(workspace,'docs',name)
       await writeFile(path,(await readFile(path,'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm,''))
     }
-    expect((await command('handoff.mjs','--design','finalize')).error).toContain('Planning records are locked')
-    expect((await command('handoff.mjs','--design','implementation')).error).toContain('locked implementation baseline')
+    expect((await command('handoff.mjs','--design','finalize')).valid).toBe(true)
+    expect((await command('handoff.mjs','--design','implementation')).valid).toBe(true)
     expect((await inspectDesignAcceptance(workspace,true,false)).valid).toBe(false)
     expect((await command('handoff.mjs','--design','acceptance')).valid).toBe(false)
     expect((await measurement.handoff()).acceptance.valid).toBe(false)

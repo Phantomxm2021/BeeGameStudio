@@ -15,10 +15,10 @@ import { createAgentMeasurement } from './agent-measurement'
 import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
 import { readContentView } from './content-view'
 import { createV3Executor } from './execution'
-import { designBaselineIssue } from './design-baseline'
+import { openDesignActions } from './agent-tools'
 import { projectPreviewCapabilityPath } from '../project-preview-capability'
 
-test('only explicit change releases the implementation baseline; exact visual saves retain scoped authority across work/messages',async()=>{
+test('implementation reads and exact visual saves preserve authorized requirements without freezing later work',async()=>{
   const f=await fixture('wait'),editor=createV3Executor({store:f.store,sessions:f.sessions})
   let measurement:ReturnType<typeof createAgentMeasurement>|undefined
   try {
@@ -27,10 +27,10 @@ test('only explicit change releases the implementation baseline; exact visual sa
     await writeDesignDocumentsFixture(f.root)
     await writeFile(join(f.root,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',dimension:'2d',entryScene:'level',
       files:['ui/menu.json','scenes/level.json'],documents:[{id:'menu',path:'ui/menu.json',kind:'ui-screen',loadPhase:'startup'},{id:'level',path:'scenes/level.json',kind:'scene-2d',loadPhase:'startup'}]}))
-    measurement=createAgentMeasurement({run,turn:run.agentTurns![0]!,store:f.store,onDesignLocked:()=>f.sessions.setProjectDesignLocked(run.chatSessionId,true)})
-    await measurement.lockDesignBaseline()
+    measurement=createAgentMeasurement({run,turn:run.agentTurns![0]!,store:f.store})
+    expect((await openDesignActions(f.root)('implementation')).valid).toBe(true)
     run=(await f.store.read(run.projectId,run.ownerId))!
-    const original=run.designBaseline!
+    const originalRequirements=structuredClone(run.requirements)
     f.setMode('normal')
     await f.call('/stop','POST')
     run=await f.wait(r=>!r.writer)
@@ -45,20 +45,16 @@ test('only explicit change releases the implementation baseline; exact visual sa
     await editor.edit(run,{path:'ui/menu.json',expectedRevision:entry.revision,document,requestKey:'exact-save',
       workflow:{version:run.version,planRevision:run.planRevision,requirementsRevision:run.requirements.revision}})
     run=(await f.store.read(run.projectId,run.ownerId))!
-    expect(run.designBaseline?.sourceEditId).toBe(run.sourceEdits!.at(-1)!.attemptId)
-    expect(run.designBaseline?.revision).not.toBe(original.revision)
-    expect(run.designBaseline?.protectedFiles).toEqual(original.protectedFiles)
-    expect(designBaselineIssue(run)).toBeUndefined()
-    const saved=structuredClone(run.designBaseline)
+    expect(run.designBaseline).toBeUndefined()
+    expect(run.requirements).toEqual(originalRequirements)
     for(const intent of ['work','message','change'] as const) {
       const response=await f.call('/agent/messages','POST',{requestKey:intent,runId:run.id,chatSessionId:run.chatSessionId,
         expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent,text:intent==='change'?'Explicitly revise the requested design':'Inspect or implement the existing design'})
       expect(response.status,await response.clone().text()).toBe(202)
       run=await f.wait(r=>Boolean(r.agentTurns!.at(-1)?.finishedAt)&&r.agentTurns!.at(-1)?.requestKey===intent)
-      expect(run.designBaseline).toEqual(intent==='change'?undefined:saved)
+      expect(run.designBaseline).toBeUndefined()
     }
     expect(run.requirementChanges?.at(-1)?.after.text).toContain('Explicitly revise the requested design')
-    expect(original.attemptId).toBe(run.agentTurns![0]!.attemptId)
   }finally{await measurement?.close();await editor.dispose();await f.close()}
 },30000)
 
@@ -1408,62 +1404,24 @@ test('turn-end host evidence lists actual design changes even when the native an
 })
 
 
-test('native question design approval unlocks only the active baseline before returning to tools, without another model turn',async()=>{
+test('ordinary questions retain answers and task identity without an unlock or extra turn',async()=>{
   const f=await fixture('wait')
-  let measurement:ReturnType<typeof createAgentMeasurement>|undefined
   try {
     await f.call('/agent/goal','POST',f.body)
-    let run=await f.wait(()=>f.submissions.length===1)
-    await writeDesignDocumentsFixture(f.root)
-    measurement=createAgentMeasurement({run,turn:run.agentTurns![0]!,store:f.store,
-      onDesignLocked:()=>f.sessions.setProjectDesignLocked(run.chatSessionId,true)})
-    await measurement.lockDesignBaseline()
-    run=(await f.store.read(run.projectId,run.ownerId))!
-    const original=structuredClone(run.designBaseline),requirements=structuredClone(run.requirements)
-    const question='Approve the UI correction?'
-    const ask=async(id:string,intent?:'change',deny=false)=>{
-      const result=f.submissions[0]!.requestPermission({toolUseID:id,toolName:'AskUserQuestion',message:'Design correction',
-        input:{questions:[{question,options:[{label:'Approve'},{label:'Reject'}]}]}})
-      for(let i=0;i<200&&!f.sessions.pendingPermissionsForProject('owner',run.projectId,f.root).length;i++)await Bun.sleep(5)
-      expect(f.sessions.pendingPermissionsForProject('owner',run.projectId,f.root)[0]?.designChangeAllowed).toBe(true)
-      f.sessions.resolvePermission(run.chatSessionId,id,deny?{behavior:'deny'}:
-        {behavior:'allow',answers:{[question]:'Approve'},...(intent?{intent}:{})})
-      return result
-    }
-    expect((await ask('ordinary-answer')).behavior).toBe('allow')
-    expect((await f.store.read(run.projectId,run.ownerId))?.designBaseline).toEqual(original)
-    expect((await ask('rejected-change',undefined,true)).behavior).toBe('deny')
-    expect((await f.store.read(run.projectId,run.ownerId))?.designBaseline).toEqual(original)
-    const commit=f.store.commit
-    f.store.commit=async(...args)=>{
-      if(args[4].startsWith('agent.design-change-authorized:'))throw Error('Synthetic authorization storage failure')
-      return commit(...args)
-    }
-    const failed=await ask('storage-failed-change','change')
-    expect(failed.behavior).toBe('deny')
-    expect(failed.source).toBe('policy')
-    expect((await f.store.read(run.projectId,run.ownerId))?.designBaseline).toEqual(original)
-    await expect(measurement.assertActive(true)).rejects.toThrow('Planning records are locked')
-    f.store.commit=commit
-    expect((await ask('authorized-change','change')).behavior).toBe('allow')
-    run=(await f.store.read(run.projectId,run.ownerId))!
-    expect(run.designBaseline).toBeUndefined()
-    expect(run.requirements).toEqual(requirements)
-    expect(run.agentTurns).toHaveLength(1)
+    const run=await f.wait(()=>f.submissions.length===1)
+    const before=structuredClone(run),question='Which resource treatment is intended?'
+    const answer=f.submissions[0]!.requestPermission({toolUseID:'resource-question',toolName:'AskUserQuestion',message:question,
+      input:{questions:[{question,options:[{label:'Static'},{label:'Animated'}]}]}})
+    for(let i=0;i<200&&!f.sessions.pendingPermissionsForProject('owner',run.projectId,f.root).length;i++)await Bun.sleep(5)
+    const pending=f.sessions.pendingPermissionsForProject('owner',run.projectId,f.root)[0]!
+    expect(pending).not.toHaveProperty('designChangeAllowed')
+    expect(()=>f.sessions.resolvePermission(run.chatSessionId,pending.toolUseID,
+      {behavior:'allow',answers:{[question]:'Animated'},intent:'change'})).toThrow('Question answers do not rewrite')
+    f.sessions.resolvePermission(run.chatSessionId,pending.toolUseID,{behavior:'allow',answers:{[question]:'Animated'}})
+    expect((await answer).behavior).toBe('allow')
+    expect(await f.store.read(run.projectId,run.ownerId)).toEqual(before)
     expect(f.submissions).toHaveLength(1)
-    expect(f.events).toContain('agent.design-change-authorized:authorized-change')
-    await measurement.assertActive(true)
-    // Corrected source remains a fixture, never a project artifact or author PASS.
-    const uiPath=join(f.root,'content/ui/menu.json'),ui=JSON.parse(await readFile(uiPath,'utf8'))
-    ui.data.nodes[1].layout.size[0]+=8
-    await writeFile(uiPath,JSON.stringify(ui))
-    await measurement.lockDesignBaseline()
-    run=(await f.store.read(run.projectId,run.ownerId))!
-    expect(run.designBaseline?.revision).not.toBe(original!.revision)
-    expect(designBaselineIssue(run)).toBeUndefined()
-    await expect(measurement.assertActive(true)).rejects.toThrow('Planning records are locked')
-    expect(f.sessions.transcript(run.chatSessionId).find(e=>e.type==='permission.resolved'&&e.payload?.toolUseID==='authorized-change')?.payload?.intent).toBe('change')
-  } finally {await measurement?.close();await f.close()}
+  } finally {await f.close()}
 },30000)
 
 test('new and resumed goals retain requested scope while Agent selects Skills; follow-ups preserve literal intent', () => {

@@ -827,7 +827,6 @@
     "permissionRiskGeneric": "可能创建文件、安装依赖或访问网络",
     "permissionPendingPlaceholder": "等待权限确认",
     "userQuestion": {
-      "authorizeDesignChange": "授权本次回答中的设计变更，解除实现基线锁以便修订。",
       "custom": "或输入你自己的回答…",
       "submit": "提交回答",
       "previous": "上一题",

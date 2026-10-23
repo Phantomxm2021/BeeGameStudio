@@ -246,8 +246,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     let image: AgentImageAccess | undefined
     let executionContext: Record<string, unknown> | undefined
     const measurement = createAgentMeasurement({run,turn,store:input.store,executionContext:()=>executionContext,
-      skillUses:()=>turnId ? skillEvidence(input.sessions.transcript(turn.sessionId).filter(e=>e.turnId===turnId)) : [],
-      onDesignLocked:()=>input.sessions.setProjectDesignLocked(run.chatSessionId,true)})
+      skillUses:()=>turnId ? skillEvidence(input.sessions.transcript(turn.sessionId).filter(e=>e.turnId===turnId)) : []})
     try {
       if (disposing || (await read(run)).paused) throw new Error('Worker stopped or user paused before dispatch')
       const previous=run.agentTurns!.filter(t=>t.attemptId!==turn.attemptId).at(-1)
@@ -264,18 +263,13 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         userDataRoot:options.userDataRoot,
         ...(focused ? {freshNativeContext:true} : turn.message && previous?.nativeRuntime === 'bgs' && previous.nativeSessionId ? {resumeNativeSessionId:previous.nativeSessionId}:{}),
         authToken:options.authToken, getValidAuthToken:options.getValidAuthToken,
-        workflowQuestionGuard: async (request, decision) => {
+        workflowQuestionGuard: async () => {
           const current = await read(run)
           if (!sameWriter(current,turn) || current.paused)
             throw new WorkflowError('stale-attempt','This question no longer belongs to the active project turn')
-          if (decision?.intent === 'change') {
-            await measurement.authorizeDesignChange(request.toolUseID)
-            input.sessions.setProjectDesignLocked(run.chatSessionId,false)
-          }
-          return {runId:run.id,attemptId:turn.attemptId,designChangeAllowed:Boolean(current.designBaseline)}
+          return {runId:run.id,attemptId:turn.attemptId}
         } })
       if (session.id!==run.chatSessionId) throw new Error('Native goal must use the bound project conversation')
-      input.sessions.setProjectDesignLocked(session.id,Boolean(run.designBaseline))
       const prompt = turn.message ? agentMessagePrompt(turn.message,
         run.sourceEdits?.filter(e=>e.fence>(run.agentTurns?.at(-2)?.fence??0))) : agentGoalPrompt(run)
       await input.sessions.sendWithDisplay(session.id, prompt, {
@@ -431,9 +425,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         throw new WorkflowError('invalid-continuation','Continuation must address the latest interrupted or failed native turn',400)
     }
     const next=structuredClone(run);next.version++;next.fence++;next.status='running'
-    // Only the explicit change route grants replanning. A question, ordinary
-    // work or interrupted continuation does not release the design authority.
-    if (message?.intent === 'change') delete next.designBaseline
     if(message && ['change','message'].includes(message.intent)) {
       const original=run.requirementChanges?.[0]?.before ?? run.requirements
       const allMessages=[...run.agentTurns.flatMap(t=>t.message ? [t.message]:[]),message]

@@ -23,7 +23,7 @@ export type AgentPreviewAccess = ReturnType<typeof openPreviewTestAccess>
 export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
 
 /** Same design indexes and writer lifetime; no new workflow state or copied plan. */
-export function openDesignActions(root: string, requireEditableContent = false, implementation?: () => Promise<unknown>) {
+export function openDesignActions(root: string, requireEditableContent = false) {
   let before = snapshotDesignDocuments(root, PROJECT_DOCUMENTS)
   return async (action: string, documents: string[] = [], executionIdentity?: {runId:string;requirementsRevision:string}, details = false) => {
     const selected = documents.map(name => name.startsWith('docs/') ? name.slice(5) : name)
@@ -43,7 +43,7 @@ export function openDesignActions(root: string, requireEditableContent = false, 
       relatedHelp: '--design implementation --help describes the implementation handoff; --design acceptance --help describes runtime reports. Help only reads contracts; it does not lock planning, build or invoke a model.',
     }
     if (action === 'implementation-help') return { valid: true, instruction: DESIGN_IMPLEMENTATION_INSTRUCTION,
-      help: '--design implementation reads saved design sources, records the implementation baseline and locks planning records; it is not user approval. Use --details for full task/source references and requirement hashes. Native file tools author planning records before that lock; Shell cannot write them. Ordinary work/finalize cannot release it. This help performs none of those actions.',
+      help: '--design implementation reads and checks current saved design sources without freezing them or granting authorization. Use --details for full task/source references and requirement hashes. Update affected records through the supplied file tools within the current user assignment; Shell cannot write these protected paths.',
     }
     if (action === 'acceptance-help') return { valid: true,
       acceptanceExample: {
@@ -54,7 +54,7 @@ export function openDesignActions(root: string, requireEditableContent = false, 
           unverified: ['Replace this example with actual coverage and missing observations.'],
           requirementChecks: [], contentChecks: [] },
       },
-      acceptanceInstruction: DESIGN_RUNTIME_REPORT_INSTRUCTION + ' Save .beegame/delivery/acceptance.json using the field types in acceptanceExample; it is an incomplete shape example, not evidence or a passed report. Allowed status values are "passed"|"failed"|"blocked". A design-bound delivery PASS requires verification.designRevision (64 lowercase hexadecimal characters), not a top-level designRevision. Use the designRevision from an existing implementation handoff, or read the current revision with --design baseline (read-only). Record the version actually verified; a changed revision requires revalidating affected evidence, not just replacing the hash. --design implementation can lock the design baseline; do not invoke it merely to read a revision. The blocked/failed report may omit verification.designRevision, as this example does. Filling it does not resolve knownIssues or unverified items. Source hashes are needed only for existing indexed checks. Do not invent hashes or create indexes. Record real differences from selected designs and missing observations honestly. --design acceptance reads this same validator; it never executes or retries tests. Include finalized reports with --report .beegame/delivery/acceptance.json in the original measurement request. An existing measurement is immutable; --report does not attach to it. Inspect retained evidence without rebuilding. ' + CONTENT_RUNTIME_REPORT_INSTRUCTION,
+      acceptanceInstruction: DESIGN_RUNTIME_REPORT_INSTRUCTION + ' Save .beegame/delivery/acceptance.json using the field types in acceptanceExample; it is an incomplete shape example, not evidence or a passed report. Allowed status values are "passed"|"failed"|"blocked". A design-bound delivery PASS requires verification.designRevision (64 lowercase hexadecimal characters), not a top-level designRevision. Use the designRevision from an existing implementation handoff, or read the current revision with --design baseline (read-only). Record the version actually verified; a changed revision requires revalidating affected evidence, not just replacing the hash. The blocked/failed report may omit verification.designRevision, as this example does. Filling it does not resolve knownIssues or unverified items. Source hashes are needed only for existing indexed checks. Do not invent hashes or create indexes. Record real differences from selected designs and missing observations honestly. --design acceptance reads this same validator; it never executes or retries tests. Include finalized reports with --report .beegame/delivery/acceptance.json in the original measurement request. An existing measurement is immutable; --report does not attach to it. Inspect retained evidence without rebuilding. ' + CONTENT_RUNTIME_REPORT_INSTRUCTION,
     }
     if (action === 'finalize') {
       const names = PROJECT_DOCUMENTS.filter(name => selected.length ? selected.includes(name) :
@@ -78,9 +78,8 @@ export function openDesignActions(root: string, requireEditableContent = false, 
     if (action === 'baseline') {
       const { availableRequirements = [], ...check } = checkDesignHandoff(root, PROJECT_DOCUMENTS, { technicalBaseline: true, planningInputs: true })
       return { ...check, requirements: availableRequirements,
-        requirementScope: 'Available source pointers, including incomplete drafts; valid:false still blocks release/implementation. Repair named inputs only.' }
+        requirementScope: 'Available source pointers, including incomplete drafts; valid:false means this source/index integrity check failed. Inspect the reported issues and repair affected inputs.' }
     }
-    if (action === 'implementation' && implementation) return implementation()
     if (action === 'implementation') return { valid: true, ...readDesignImplementationChecklist(root),
       requirements:readDesignAcceptanceRequirements(root) }
     if (action === 'acceptance') return inspectDesignAcceptance(root,true,requireEditableContent,executionIdentity)
@@ -102,7 +101,7 @@ export async function openAgentTools(input: {
   openImage?: () => AgentImageAccess | Promise<AgentImageAccess>
 }) {
   const root = await realpath(input.workspacePath)
-  const design = openDesignActions(root, input.requireEditableContent, input.measurement?.lockDesignBaseline)
+  const design = openDesignActions(root, input.requireEditableContent)
   // Check each parent before creating a child; a project symlink must not
   // redirect host-written adapters outside the authorized workspace.
   let parent = root
@@ -229,7 +228,7 @@ export async function openAgentTools(input: {
         'const response=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(designAction?{designAction,documents,details}:{handoffPaths:paths,details}),redirect:"error"});',
         'const result=await response.json();let output=result;',
         'if(designAction==="baseline" && !details && typeof result.valid==="boolean")output={scope:"design-source-integrity",valid:result.valid,issues:result.issues,revision:result.revision,documentVersions:result.documentVersions,...(result.indexedDocuments?.length?{requirementCount:result.requirements.length,requirementScope:"Existing indexed requirements only; not prose coverage"}:{}),layoutVerified:false,runtimeVerified:false,note:result.note,details:"Use --design baseline --details for full requirements/source hashes. Geometry is not checked here; use check-content.mjs --design-layouts --draft."};',
-        'if(designAction==="implementation" && response.ok && !result.error && result.valid===true){const execution={sources:"ReadDesignHandoff locates saved documents/sections. ReadImplementationTask exposes existing indexed tasks or the technical source; choose Skills and work organization as needed."};output=details?{...result,execution}:{scope:"implementation-handoff",valid:true,source:result.source,designRevision:result.designRevision,resultPath:result.resultPath,...(result.documents?{documents:result.documents}:{}),items:result.items.map(item=>({id:item.id,dependsOn:item.dependsOn,section:item.taskSource.section})),execution,webBoot:result.webBoot,designBaseline:result.designBaseline,limitation:result.limitation,details:result.items.length?"Use --design implementation --details for full task/source references and requirement hashes.":"Use ReadDesignHandoff with a listed technical section to read original implementation guidance; no task index is required."}};',
+        'if(designAction==="implementation" && response.ok && !result.error && result.valid===true){const execution={sources:"ReadDesignHandoff locates saved documents/sections. ReadImplementationTask exposes existing indexed tasks or the technical source; choose Skills and work organization as needed."};output=details?{...result,execution}:{scope:"implementation-handoff",valid:true,source:result.source,designRevision:result.designRevision,resultPath:result.resultPath,...(result.documents?{documents:result.documents}:{}),items:result.items.map(item=>({id:item.id,dependsOn:item.dependsOn,section:item.taskSource.section})),execution,webBoot:result.webBoot,limitation:result.limitation,details:result.items.length?"Use --design implementation --details for full task/source references and requirement hashes.":"Use ReadDesignHandoff with a listed technical section to read original implementation guidance; no task index is required."}};',
         'console.log(JSON.stringify(output,null,2));if(!response.ok || result.error || !(designAction?result.valid:result.sources?.valid))process.exitCode=1;',
       ].join('\n'),{flag:'wx',mode:0o600})
     }

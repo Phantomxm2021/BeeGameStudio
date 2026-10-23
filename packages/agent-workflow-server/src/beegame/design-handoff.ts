@@ -109,9 +109,9 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
 export const DESIGN_INDEX_INSTRUCTION = `Author decisions in docs/<NAME>.md. The eight-document deliverable is the prose itself, including the technical approach and necessary implementation guidance in TECHNICAL_DESIGN.md. Select Skills and organize work to suit the current task; self-check original requirements, contradictions and unresolved decisions. BGS does not require output indexes, task graphs or coverage mappings. Stop at the user's requested scope. Existing indexes remain readable; do not create them merely to satisfy a tool.`
 
 export const DESIGN_HANDOFF_INSTRUCTION = DESIGN_INDEX_INSTRUCTION + `
-Use ReadDesignHandoff to locate saved documents and read selected sections. Explicit --design baseline checks saved source/index integrity, not design quality. Plain documents need no finalize command or version header. Existing versioned indexes can use --design finalize after an authorized revision; this updates metadata, not approval. Read selected reference pictures and reconcile the interfaces and inputs needed for the current part before locking. Keep later inputs planned and subsequent production facts in the existing Manifest/content registry and progress; links, task ticks and hashes are not proof of delivery.`
+Use ReadDesignHandoff to locate saved documents and read selected sections. Explicit --design baseline checks saved source/index integrity, not design quality. Plain documents need no finalize command or version header. Existing versioned indexes can use --design finalize after an authorized revision; this updates metadata, not approval. Read selected reference pictures and reconcile the interfaces and inputs needed for the current part before consuming them. Keep later inputs planned and subsequent production facts in the existing Manifest/content registry and progress; links, task ticks and hashes are not proof of delivery.`
 
-export const DESIGN_IMPLEMENTATION_INSTRUCTION = `Read the saved technical plan and relevant original documents; choose Skills and task organization for the work. ReadDesignHandoff locates documents/sections. ReadImplementationTask exposes existing indexed tasks when available, otherwise the technical source; no index is required. Use --design implementation only when entering authorized implementation: it records the current design baseline, not user approval or game acceptance. Consume actual selected designs, resources and Editor data. Resume from saved work and evidence, not task ticks. Compare actual results with the confirmed scope and original designs; report unresolved and unverified outcomes. Do not create another plan, index or task database to satisfy BGS.`
+export const DESIGN_IMPLEMENTATION_INSTRUCTION = `Read the saved technical plan and relevant original documents; choose Skills and task organization for the work. ReadDesignHandoff locates documents/sections. ReadImplementationTask exposes existing indexed tasks when available, otherwise the technical source; no index is required. Use --design implementation to read the current design inputs for authorized work. It does not freeze them or grant approval. Update affected records as implementation details develop; verification evidence applies to its recorded version. Consume actual selected designs, resources and Editor data. Resume from saved work and evidence, not task ticks. Compare actual results with the confirmed scope and original designs; report unresolved and unverified outcomes. Do not create another plan, index or task database to satisfy BGS.`
 
 function hash(body: string | Buffer) { return createHash('sha256').update(body).digest('hex') }
 function readRetained(workspace: string, path: string) {
@@ -662,6 +662,10 @@ export function snapshotDesignRevisionFiles(workspace: string): Record<string, s
   }
   const files = { ...evidenceFiles, ...Object.fromEntries([...paths].map(path => [path, designRevisionFileDigest(workspace, path)])) }
   return Object.fromEntries(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)))
+}
+/** Bind a measurement to the design bytes it observed, without locking them. */
+export function designInputRevision(workspace: string): string {
+  return hash(JSON.stringify(snapshotDesignRevisionFiles(workspace)))
 }
 /** Capture before a controlled author/revise write; malformed drafts can be repaired. */
 export function snapshotDesignDocuments(workspace: string, documents: readonly DesignDocument[]): DesignDocumentSnapshot {

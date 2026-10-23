@@ -5,11 +5,11 @@ import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review
 import { checkDesignHandoff, checkDesignHandoffDraft, finalizeDesignDocuments, snapshotDesignDocuments, readDesignImplementationChecklist, DESIGN_ACCEPTANCE_PATH } from './design-handoff'
 import { readDesignHandoff, readImplementationTask } from './workflow-read-tools'
 import { inspectDesignAcceptance } from './runtime-acceptance'
-import { captureDesignBaseline, designBaselineIssue } from './workflow-v3/design-baseline'
+import { designInputRevision } from './design-handoff'
 import { agentTurnHandoffReason } from './workflow-v3/agent-goal'
 import type { Run, AgentTurn } from './workflow-v3/state'
 
-test('plain eight-document work flows through reads, handoff and locking without indexes or invented acceptance', async () => {
+test('plain eight-document work flows through reads, handoff and continued refinement without indexes or invented acceptance', async () => {
   const root = await mkdtemp('/private/tmp/bgs-plain-design-')
   try {
     await mkdir(join(root, 'docs'))
@@ -24,14 +24,14 @@ test('plain eight-document work flows through reads, handoff and locking without
     for (const name of PROJECT_DOCUMENTS) expect(await readFile(join(root, 'docs', name), 'utf8')).toBe(original)
     const run = { workspacePath: root, writer: { attemptId: 'fixture' }, requirements: { revision: 'fixture' },
       creation: { initialDelivery: 'design-led-first-version' }, agentTurns: [] } as unknown as Run
-    run.designBaseline = await captureDesignBaseline(run)
-    expect(designBaselineIssue(run)).toBeUndefined()
+    const before=designInputRevision(root)
     expect(await inspectDesignAcceptance(root, true)).toMatchObject({ valid: false, status: 'unverified', quality: 'unverified' })
     const ended = await agentTurnHandoffReason(run, {} as AgentTurn)
     expect(ended).toContain('execution completion is not acceptance')
     expect(ended).not.toContain('Itemized acceptance')
     await writeFile(join(root, 'docs/GDD.md'), original + 'Changed decision.\n')
-    expect(designBaselineIssue(run)).toContain('Design differs')
+    expect(designInputRevision(root)).not.toBe(before)
+    expect(readDesignImplementationChecklist(root).source).toBe("docs/TECHNICAL_DESIGN.md")
     await writeFile(join(root, 'docs/GDD.md'), '')
     expect(checkDesignHandoff(root, PROJECT_DOCUMENTS).valid).toBe(false)
     await rm(join(root, 'docs/GDD.md'))

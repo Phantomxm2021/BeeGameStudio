@@ -197,7 +197,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       profile[join(home, 'skills')] = 'read'
       const instructions = [BEEGAME_USER_RESPONSE_SCOPE, input.language && responseLanguageInstruction(input.language),
         'Use WriteProjectFile or EditProjectFile for these host-protected paths relative to the project root: ' + JSON.stringify(access.protectedPaths.map(path => relative(access.root, path))) +
-        '. Shell cannot modify these protected paths. For ordinary project files, use exec_command with project-local file operations. Only use apply_patch if it is listed as an available tool; do not assume a shell executable exists. A design lock is enforced by BGS; never bypass a rejection.', mcp.context,
+        '. Shell cannot modify these protected paths. For ordinary project files, use exec_command with project-local file operations. Only use apply_patch if it is listed as an available tool; do not assume a shell executable exists. Preserve the current user requirements and authorization when updating design records.', mcp.context,
         access.unavailable.length ? 'BGS host components unavailable: ' + access.unavailable.join('; ') +
           '. Unrelated work can continue; dependent inspections remain unavailable and unverified.' : '',
       ].filter(Boolean).join('\n\n')

@@ -1,4 +1,4 @@
-import {test,expect} from 'bun:test'
+import {test,expect,spyOn} from 'bun:test'
 import {mkdtemp,mkdir,writeFile,readFile,rm,realpath,symlink,chmod} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
@@ -10,6 +10,7 @@ import {createAgentMeasurement,measurementSummary,measurementRequest} from './ag
 import {openAgentTools} from './agent-tools'
 import {selectAgentMeasuredBuild,exportAgentMeasuredBuild,inspectAgentMeasurementInputs,discussionMessagesSinceMeasurement} from './measured-build'
 import {buildEditableProject} from './editable-project'
+import * as editableProject from './editable-project'
 import {createMeasuredPreview} from './measured-preview'
 import {createPreviewCapabilityManager} from '../../auth/preview-capability'
 import {registerV3Routes} from './routes'
@@ -23,7 +24,7 @@ import {openPreviewTestAccess} from '../preview-test-access'
 import {sharedContentChecker} from '../content-checker-runtime'
 import {createAgentWorkflowApp} from '../../app'
 import {writeBeeGameAssetManifest} from '../asset-contracts'
-import {DESIGN_ACCEPTANCE_PATH,checkDesignHandoff} from '../design-handoff'
+import {DESIGN_ACCEPTANCE_PATH,checkDesignHandoff,designInputRevision} from '../design-handoff'
 import {PROJECT_DOCUMENTS} from '../project-content-authority'
 import {artifactDigest,inspectDesignAcceptance} from '../runtime-acceptance'
 import {projectRuntimeDisplayReason} from '../project-runtime-display'
@@ -162,7 +163,7 @@ test.each(['misplaced','missing','changed'] as const)('turn report diagnostic su
   } finally {await f.close()}
 })
 
-test('combined baseline, stale report and revision diagnostics preserve bounded coverage without relaxing publication',async()=>{
+test('combined stale report and revision diagnostics preserve bounded coverage without relaxing publication',async()=>{
   const f=await fixture(builder,[],false,'design-led-first-version')
   try {
     await writeDesignDocumentsFixture(f.workspace)
@@ -191,7 +192,6 @@ test('combined baseline, stale report and revision diagnostics preserve bounded 
       expect(displayed).toContain(DESIGN_ACCEPTANCE_PATH+'#verification')
       expect(displayed).toContain('game quality remains unverified')
       expect(displayed).not.toContain(report.summary)
-      expect(reason).toContain('Implementation design baseline is missing')
       expect(reason).toContain('Reports changed or are missing: '+DESIGN_ACCEPTANCE_PATH)
       for(const purpose of ['delivery','publication'] as const)
         await expect(selectAgentMeasuredBuild(run,measured.id,false,purpose)).rejects.toMatchObject({code:'measurement-stale'})
@@ -716,63 +716,88 @@ test('Node test receipts retain before/after identities and inspect later drift 
   } finally {await tools.close();await f.close()}
 })
 
-test.each(['unchanged','source-and-report'] as const)('baseline eligibility stays separate from measurement identity: %s',async kind=>{
+test.each(['unchanged','source-and-report'] as const)('measurement identity needs no global design freeze: %s',async kind=>{
   const f=await fixture(builder,[],false,'design-led-first-version')
   try {
     await writeDesignDocumentsFixture(f.workspace)
     const record=await f.measurement.measure(request),saved=JSON.stringify(record),live=await f.current()
     expect(record.error).toBeUndefined()
+    expect(record.designInputRevision).toBe(designInputRevision(f.workspace))
     expect(live.designBaseline).toBeUndefined()
-    // Isolate baseline selection from the independent active-writer gate.
-    const settled=structuredClone(live)
-    delete settled.writer
-    settled.agentTurns![0]!.status='ended'
-    settled.agentTurns![0]!.quiescedAt=new Date().toISOString()
-    for(const purpose of ['delivery','publication'] as const) {
-      const inputs=await inspectAgentMeasurementInputs(settled,record,undefined,purpose)
-      expect(inputs).toMatchObject({current:false,code:'design-baseline-missing',
-        changes:{requirements:false,authorizedSourceSave:false,sources:[],reports:[],dependencies:false,
-          buildOrArtifact:false,artifact:false,checkInputs:[]},evidence:{artifactMatches:true,exportableSourcesMatch:true}})
-      expect(inputs.reason).toContain('then inspect the same saved measurement')
-      expect(inputs.reason).toContain('--design baseline only reads it')
-      await expect(selectAgentMeasuredBuild(settled,record.id,false,purpose)).rejects.toMatchObject({code:'design-baseline-missing'})
-    }
-    expect((await selectAgentMeasuredBuild(settled,record.id,false,'preview')).measurement.id).toBe(record.id)
     await expect(selectAgentMeasuredBuild(live,record.id,false,'publication')).rejects.toMatchObject({code:'workspace-busy'})
-    const ordinary=structuredClone(settled)
-    ordinary.creation={initialDelivery:'playable-slice',editableContent:false}
-    expect((await selectAgentMeasuredBuild(ordinary,record.id,false,'publication')).measurement.id).toBe(record.id)
-    expect((await f.current()).version).toBe(live.version) // Inspection does not create a baseline.
-
     if(kind==='source-and-report') {
       await writeFile(join(f.workspace,'src/index.html'),'<html>Changed source after measurement</html>')
       await writeFile(join(f.workspace,'README.md'),'Changed report after measurement')
-      const stale=await inspectAgentMeasurementInputs(live,record)
-      expect(stale).toMatchObject({current:false,code:'measurement-stale',
-        changes:{sources:['README.md','src/index.html'],reports:['README.md']},evidence:{artifactMatches:true}})
-      expect(stale.reason).toContain('Implementation design baseline is missing')
-      expect(stale.reason).toContain('Reports changed or are missing: README.md')
     }
-    await f.measurement.lockDesignBaseline()
-    const ready=await f.settle()
-    expect(JSON.stringify(ready.agentTurns![0]!.measurements![0])).toBe(saved)
-    for(const purpose of ['delivery','publication'] as const) {
-      const inputs=await inspectAgentMeasurementInputs(ready,record,undefined,purpose)
-      expect(inputs).toMatchObject({current:kind==='unchanged',code:kind==='unchanged'?'current':'measurement-stale'})
+    const ready=await f.settle(),version=ready.version
+    for(const purpose of ['delivery','publication','preview'] as const) {
+      expect(await inspectAgentMeasurementInputs(ready,record,undefined,purpose))
+        .toMatchObject({current:kind==='unchanged',code:kind==='unchanged'?'current':'measurement-stale'})
       if(kind==='unchanged')expect((await selectAgentMeasuredBuild(ready,record.id,false,purpose)).measurement.id).toBe(record.id)
       else await expect(selectAgentMeasuredBuild(ready,record.id,false,purpose)).rejects.toMatchObject({code:'measurement-stale'})
     }
+    expect((await f.current()).version).toBe(version)
+    expect(JSON.stringify((await f.current()).agentTurns![0]!.measurements![0])).toBe(saved)
     if(kind==='unchanged') {
-      // A conflicting saved baseline is also a policy blocker when the measured
-      // files match. Preview must not bypass an existing design lock.
-      const conflicting={...ready,designBaseline:{...ready.designBaseline!,revision:'0'.repeat(64)}}
-      for(const purpose of ['delivery','publication','preview'] as const) {
-        expect(await inspectAgentMeasurementInputs(conflicting,record,undefined,purpose))
-          .toMatchObject({current:false,code:'design-baseline-changed',evidence:{artifactMatches:true,exportableSourcesMatch:true}})
-        await expect(selectAgentMeasuredBuild(conflicting,record.id,false,purpose)).rejects.toMatchObject({code:'design-baseline-changed'})
+      // Legacy evidence cannot acquire current design identity by inspection.
+      const legacy=structuredClone(ready),old=legacy.agentTurns![0]!.measurements![0]!
+      delete old.designInputRevision
+      for(const purpose of ['delivery','publication'] as const) {
+        expect(await inspectAgentMeasurementInputs(legacy,old,undefined,purpose))
+          .toMatchObject({current:false,code:'design-inputs-unverified',evidence:{designInputsMatch:null}})
+        await expect(selectAgentMeasuredBuild(legacy,old.id,false,purpose)).rejects.toMatchObject({code:'design-inputs-unverified'})
       }
+      expect((await selectAgentMeasuredBuild(legacy,old.id,false,'preview')).measurement.id).toBe(old.id)
+      expect(old.designInputRevision).toBeUndefined()
     }
   } finally {await f.close()}
+},30000)
+
+test.each(['docs/GDD.md','.beegame/design-handoffs/GDD.json'])('design refinement invalidates saved evidence without preventing explicit work: %s',async path=>{
+  const f=await fixture(builder,[],false,'design-led-first-version')
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    const record=await f.measurement.measure(request),saved=JSON.stringify(record)
+    expect(record.error).toBeUndefined()
+    const file=join(f.workspace,path)
+    await writeFile(file,(await readFile(file,'utf8'))+'\n ')
+    const stale=await inspectAgentMeasurementInputs(await f.current(),record)
+    expect(stale).toMatchObject({current:false,code:'measurement-stale',changes:{designInputs:true},evidence:{artifactMatches:true,designInputsMatch:false}})
+    // Private indexes are absent from the public source proof, so the design
+    // identity must detect them independently. Reading never starts a build.
+    if(path.startsWith('.beegame/'))expect(stale).toMatchObject({changes:{sources:[]}})
+    expect((await f.current()).agentTurns![0]!.measurements).toHaveLength(1)
+    await f.measurement.assertActive(true)
+    expect(JSON.stringify(await f.measurement.measure(request))).toBe(saved)
+    const next=await f.measurement.measure({...request,requestKey:'explicit-current-version'})
+    expect(next.error).toBeUndefined()
+    expect(next.designInputRevision).not.toBe(record.designInputRevision)
+    const ready=await f.settle()
+    expect((await selectAgentMeasuredBuild(ready,next.id,false,'publication')).measurement.id).toBe(next.id)
+    expect(JSON.stringify(ready.agentTurns![0]!.measurements![0])).toBe(saved)
+    expect(ready.requirements).toEqual(f.run.requirements)
+  } finally {await f.close()}
+},30000)
+
+test('a private design input changed during measurement leaves failed evidence and never retries automatically',async()=>{
+  const f=await fixture()
+  const build=editableProject.buildEditableProject
+  const measuredBuild=spyOn(editableProject,'buildEditableProject').mockImplementation(async(...args)=>{
+    const result=await build(...args)
+    const path=join(f.workspace,'.beegame/design-handoffs/GDD.json')
+    await writeFile(path,(await readFile(path,'utf8'))+'\n ')
+    return result
+  })
+  try {
+    await writeDesignDocumentsFixture(f.workspace)
+    const record=await f.measurement.measure(request)
+    expect(record.checks.find(check=>check.id==='build')?.status).toBe('passed')
+    expect(record.error).toContain('Design inputs changed during measurement')
+    expect(measuredBuild).toHaveBeenCalledTimes(1)
+    expect((await f.current()).agentTurns![0]!.measurements).toHaveLength(1)
+    const ready=await f.settle()
+    await expect(selectAgentMeasuredBuild(ready,record.id,false,'publication')).rejects.toMatchObject({code:'measurement-failed'})
+  } finally {measuredBuild.mockRestore();await f.close()}
 },30000)
 
 test('source, report and artifact identity changes stay distinct without accepting a changed export or rerunning checks',async()=>{
@@ -1804,12 +1829,9 @@ test.each(['file','directory','root','broken-parent','not-directory'] as const)(
 test('publication exposes the saved measurement failure instead of blaming writer settlement or author PASS',async()=>{
   const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
   try {
-    await writeDesignDocumentsFixture(f.workspace)
-    await f.measurement.lockDesignBaseline()
-    await writeFile(join(f.workspace,'docs/GDD.md'),(await readFile(join(f.workspace,'docs/GDD.md'),'utf8'))+'\nDesign correction.\n')
-    const failed=await f.measurement.measure(request)
+    const failed=await f.measurement.measure({...request,reportPaths:['missing-evidence.json']})
     expect(failed.checks).toHaveLength(0)
-    expect(failed.error).toContain('locked implementation baseline')
+    expect(failed.error).toContain('missing-evidence.json')
     const run=await f.settle()
     await expect(selectAgentMeasuredBuild(run,failed.id,false,'publication')).rejects.toMatchObject({code:'measurement-failed',message:expect.stringContaining(failed.error!)})
     await expect(selectAgentMeasuredBuild(run,failed.id,true,'publication')).rejects.toMatchObject({code:'workspace-busy'})

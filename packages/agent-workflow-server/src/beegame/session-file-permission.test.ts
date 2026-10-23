@@ -37,7 +37,7 @@ test('startup files use ordinary workspace permissions; design and instruction p
   }finally{await manager.dispose();await rm(root,{recursive:true,force:true})}
 })
 
-test('implementation baseline locks native planning writes without blocking code or requiring another approval flow', async () => {
+test('native planning and code writes use existing project authority without a design freeze', async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(),'bgs-plan-permission-'))), workspace=join(base,'project')
   await mkdir(workspace)
   await mkdir(join(workspace,'docs'))
@@ -48,9 +48,7 @@ test('implementation baseline locks native planning writes without blocking code
   const manager=new BeeGameSessionManager({start:async()=>({stop(){},async submit(turn){
     const write=async(path:string)=>decisions.push(await turn.requestPermission({toolName:'Write',toolUseID:crypto.randomUUID(),input:{file_path:join(workspace,path)},message:'Fixture path decision'}))
     await write('docs/GDD.md')
-    manager.setProjectDesignLocked(sessionId,true)
     for(const path of ['docs/GDD.md','plan-alias.md','.beegame/design-handoffs/GDD.json','src/game.js'])await write(path)
-    manager.setProjectDesignLocked(sessionId,false)
     await write('docs/GDD.md')
     await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture complete' })
   }})},base)
@@ -58,7 +56,7 @@ test('implementation baseline locks native planning writes without blocking code
     sessionId=manager.start({workspacePath:workspace,userId:'owner',projectId:'project'}).id
     await manager.sendWithDisplay(sessionId,'Offline permissions only')
     await manager.waitForSessionIdle(sessionId)
-    expect(decisions.map(d=>d.behavior)).toEqual(['allow','deny','deny','deny','allow','allow'])
+    expect(decisions.map(d=>d.behavior)).toEqual(['allow','allow','allow','allow','allow','allow'])
     expect(manager.pendingPermissionsForProject('owner','project',workspace)).toHaveLength(0)
   }finally{await manager.dispose();await rm(base,{recursive:true,force:true})}
 })
