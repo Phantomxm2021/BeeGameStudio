@@ -46,6 +46,9 @@ jobs:
         run: bun run typecheck
       - name: Run frontend tests
         run: bun run test:run --maxWorkers=2
+      - name: Run Scene Editor tests
+        working-directory: packages/scene-editor
+        run: bun run test
       - name: Build production frontend
         run: bun run build
       - name: Build shared content runtime

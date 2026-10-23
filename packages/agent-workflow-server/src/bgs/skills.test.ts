@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, lstat, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import type { BgsClient } from './client'
 import { configureBgsSkills } from './skills'
 
 test('registers roots before retiring managed links; preserves user files and failed registrations', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-shared-skills-'), home = join(root, 'home'), builtins = join(root, 'catalog'), user = join(root, 'user')
+  const root = await mkdtemp(join(tmpdir(), 'bgs-shared-skills-')), home = join(root, 'home'), builtins = join(root, 'catalog'), user = join(root, 'user')
   const directory = join(home, 'skills'), source = join(builtins, 'fixture')
   await mkdir(directory, { recursive: true }); await mkdir(source, { recursive: true })
   await writeFile(join(source, 'SKILL.md'), 'Shared source')
