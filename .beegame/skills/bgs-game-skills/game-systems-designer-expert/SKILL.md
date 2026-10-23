@@ -9,6 +9,8 @@ description: Use for gameplay rules, core loops, progression, economy structure,
 
 Make the repeatable player action clear, coherent and worth doing. Start with the goal, legal actions, constraints, information and resulting feedback, not scalability or a catalogue of progression systems. Explain what changes on repetition: a new situation, a choice, skill expression, discovery or creative expression. A reward counter alone does not establish that value.
 
+Before settling an unfamiliar mechanic or a consequential design assumption, identify what the brief and existing research leave unresolved. Use available web search and read relevant public sources to answer that question; distinguish observed examples from your proposed adaptation. Keep useful conclusions, source links and the decisions they inform in the existing GDD sections. Reuse current, relevant research across documents; search again for a new gap or outdated information, stopping when there is enough evidence for the decision. This adds no search quota, research document or approval stage. Public examples do not override confirmed requirements or establish that the proposed game is enjoyable.
+
 ---
 
 ## 1. Core Loop Architecture

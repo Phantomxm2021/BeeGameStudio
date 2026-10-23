@@ -13,7 +13,7 @@ Use the relevant parts for a resource-format or renderer feasibility question, o
 
 ## Production from selected designs
 
-After actual compositions are selected, revise the affected production choices in that same plan to match them. Distinguish artwork/skins, live text/values and runtime-driven objects. Procedural controls must retain the selected appearance, not replace distinctive artwork with generic shapes. For AI derivatives use the existing referenceImagePath input; distinctive UI skins can use uiAssets on the supplied assets entry (see its --help). Group compatible small artwork into sheets before generation; split for an actual resolution or composition need. Inspect and register delivered files, then author scene/UI data and bindings in the chosen engine’s format from the same designs and assets. Image requests are not layouts; do not create runtime scene/UI content before those inputs. Repair existing content in place.
+After actual compositions are selected, revise the affected production choices in that same plan to match them. Distinguish artwork/skins, live text/values and runtime-driven objects. Procedural controls must retain the selected appearance, not replace distinctive artwork with generic shapes. For AI derivatives use the existing referenceImagePath input; distinctive UI skins can use uiAssets on the supplied assets entry (see its --help). Group compatible small artwork into sheets before generation; split for an actual resolution or composition need. Inspect and register delivered files before binding them in scene/UI data authored in the chosen engine’s format from the same designs. Image requests are not layouts. Repair existing content in place.
 
 ## Saved resources and runtime observations
 
