@@ -26,6 +26,20 @@ export function inspectResourceBytes(name: string, bytes: Uint8Array): Record<st
   return facts
 }
 
+/** Raw relative/remote GLTF URI values for callers that must validate closure.
+ * Unlike the summarized inspection facts, this preserves URI spelling. */
+export function gltfExternalResourceUris(name: string, bytes: Uint8Array): string[] {
+  const extension = extensionOf(name)
+  const document = extension === 'glb'
+    ? parseGlbDocument(bytes)
+    : extension === 'gltf'
+      ? parseGltfJson(new TextDecoder().decode(bytes))
+      : undefined
+  if (!document) return []
+  const fields = gltfExternalUriFields(document)
+  return [...fields.textures, ...fields.buffers]
+}
+
 export function contentProfileFromInspection(
   facts: Record<string, string | number | boolean>,
 ): ResourceContentProfile {
@@ -74,18 +88,16 @@ function inspectPng(bytes: Uint8Array): Record<string, number> {
 }
 
 function inspectGlb(bytes: Uint8Array): Record<string, string | number | boolean> {
-  if (bytes.length < 20) return {}
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  if (view.getUint32(0, true) !== 0x46546c67 || view.getUint32(16, true) !== 0x4e4f534a) return {}
-  const length = view.getUint32(8, true)
-  const jsonLength = view.getUint32(12, true)
-  if (length > bytes.length || jsonLength > bytes.length - 20) return {}
-  return inspectGltfText(new TextDecoder().decode(bytes.slice(20, 20 + jsonLength)))
+  const document = parseGlbDocument(bytes)
+  return document ? inspectGltfDocument(document) : {}
 }
 
 function inspectGltfText(text: string): Record<string, string | number | boolean> {
-  let document: JsonRecord
-  try { document = JSON.parse(text) as JsonRecord } catch { return {} }
+  const document = parseGltfJson(text)
+  return document ? inspectGltfDocument(document) : {}
+}
+
+function inspectGltfDocument(document: JsonRecord): Record<string, string | number | boolean> {
   const accessors = asRecords(document.accessors)
   const meshes = asRecords(document.meshes)
   const materials = asRecords(document.materials)
@@ -123,11 +135,39 @@ function inspectGltfText(text: string): Record<string, string | number | boolean
     hasTextureCoordinates,
   }
   appendBoundsFacts(result, bounds)
-  const externalTextures = images.map((image) => typeof image.uri === 'string' && isExternalResourceUri(image.uri) ? image.uri : '').filter(Boolean)
-  const externalBuffers = asRecords(document.buffers).map((buffer) => typeof buffer.uri === 'string' && isExternalResourceUri(buffer.uri) ? buffer.uri : '').filter(Boolean)
+  const { textures: externalTextures, buffers: externalBuffers } = gltfExternalUriFields(document)
   if (externalTextures.length) result.textureReferences = externalTextures.join(' · ')
   addExternalReferences(result, [...externalTextures, ...externalBuffers])
   return result
+}
+
+function parseGlbDocument(bytes: Uint8Array): JsonRecord | undefined {
+  if (bytes.length < 20) return undefined
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (view.getUint32(0, true) !== 0x46546c67 || view.getUint32(16, true) !== 0x4e4f534a) return undefined
+  const length = view.getUint32(8, true)
+  const jsonLength = view.getUint32(12, true)
+  if (length > bytes.length || jsonLength > bytes.length - 20) return undefined
+  return parseGltfJson(new TextDecoder().decode(bytes.slice(20, 20 + jsonLength)))
+}
+
+function parseGltfJson(text: string): JsonRecord | undefined {
+  try {
+    const value = JSON.parse(text) as unknown
+    return asRecord(value)
+  } catch {
+    return undefined
+  }
+}
+
+function gltfExternalUriFields(document: JsonRecord): { textures: string[]; buffers: string[] } {
+  const externalTextures = asRecords(document.images)
+    .map(image => typeof image.uri === 'string' && isExternalResourceUri(image.uri) ? image.uri : '')
+    .filter(Boolean)
+  const externalBuffers = asRecords(document.buffers)
+    .map(buffer => typeof buffer.uri === 'string' && isExternalResourceUri(buffer.uri) ? buffer.uri : '')
+    .filter(Boolean)
+  return { textures: externalTextures, buffers: externalBuffers }
 }
 
 function isExternalResourceUri(value: string): boolean {
