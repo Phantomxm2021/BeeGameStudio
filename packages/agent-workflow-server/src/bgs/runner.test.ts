@@ -67,6 +67,7 @@ test('streams text once, preserves tool lifecycle, and counts cached tokens once
     expect(f.events.filter(e => e.eventType.startsWith('assistant.')).map(e => e.text).join('')).toBe('Hello Bgs')
     expect(f.events.filter(e => e.eventType.startsWith('tool.')).map(e => e.eventType)).toEqual(['tool.started', 'tool.completed'])
     expect(f.events.find(e => e.eventType === 'tool.completed')).toMatchObject({ exitCode: 0, durationMs: 1200 })
+    expect(f.events.filter(e => e.eventType.startsWith('tool.')).every(e => !('cwd' in e.input))).toBe(true)
     expect(getLatestRuntimeUsage(f.usage)).toEqual({ prompt_tokens: 80, completion_tokens: 30, cache_read_tokens: 20, cache_creation_tokens: 0, total_tokens: 130 })
     expect(f.sessionId).toBe('019a0000-0000-7000-8000-000000000001')
   } finally { await f.close() }
@@ -108,13 +109,28 @@ test('native file change receipts retain the actual diff in a structured field',
   } finally { await f.close() }
 }, 30_000)
 
-test('native command progress carries cumulative output and its original input', async () => {
+test('native command lifecycle retains cwd through progress and a completion that omits it', async () => {
   const f = await fixture()
   try {
     await f.submit('command-progress')
     const progress = f.events.filter(e => e.eventType === 'tool.progress')
     expect(progress.map(e => e.output)).toEqual(['Bu', 'Built'])
-    expect(progress.every(e => e.input?.command === 'bun run build')).toBe(true)
+    const tools = f.events.filter(e => e.eventType.startsWith('tool.'))
+    expect(tools.map(e => e.eventType)).toEqual(['tool.started', 'tool.progress', 'tool.progress', 'tool.completed'])
+    expect(tools.map(e => e.input)).toEqual(Array(4).fill({ command: 'bun run build', cwd: join(f.workspace, 'command-workdir') }))
+  } finally { await f.close() }
+}, 30_000)
+
+test('failed command receipts retain the native nonexistent cwd and error', async () => {
+  const f = await fixture()
+  try {
+    await f.submit('command-missing-cwd')
+    expect(f.events.find(e => e.eventType === 'tool.failed')).toMatchObject({
+      toolUseID: 'missing-cwd', toolName: 'Shell', is_error: true,
+      input: { command: 'bun run build', cwd: join(f.workspace, 'missing-workdir') },
+      output: 'No such file or directory (os error 2)',
+    })
+    expect(f.events.some(e => e.eventType === 'tool.completed')).toBe(false)
   } finally { await f.close() }
 }, 30_000)
 

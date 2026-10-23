@@ -84,6 +84,10 @@ createInterface({ input: process.stdin }).on('line', async line => {
       const changes = [{ path: 'src/Example.ts', diff: '@@ -11 +11 @@\n-old\n+new\n' }]
       event('item/started', { item: { id: 'edit-1', type: 'fileChange', status: 'inProgress', changes } })
       event('item/completed', { item: { id: 'edit-1', type: 'fileChange', status: 'completed', changes } })
+    } else if (prompt === 'command-missing-cwd') {
+      event('item/started', { item: { id: 'missing-cwd', type: 'commandExecution', command: 'bun run build', status: 'inProgress' } })
+      event('item/completed', { item: { id: 'missing-cwd', type: 'commandExecution', command: 'bun run build',
+        cwd: join(process.cwd(), 'missing-workdir'), status: 'failed', error: { message: 'No such file or directory (os error 2)' } } })
     } else if (prompt === 'question') {
       const result = await new Promise<any>(resolve => {
         awaiting = resolve
@@ -95,7 +99,8 @@ createInterface({ input: process.stdin }).on('line', async line => {
     } else if (prompt === 'unfinished-child') {
       event('item/completed', { item: { id: 'spawn', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'], agentsStates: { child: { status: 'running' } }, status: 'completed' } })
     } else {
-      event('item/started', { item: { id: 'shell-1', type: 'commandExecution', command: 'bun run build', status: 'inProgress' } })
+      event('item/started', { item: { id: 'shell-1', type: 'commandExecution', command: 'bun run build', status: 'inProgress',
+        ...(prompt === 'command-progress' ? { cwd: join(process.cwd(), 'command-workdir') } : {}) } })
       if (prompt === 'command-progress') {
         event('item/commandExecution/outputDelta', { itemId: 'shell-1', delta: 'Bu' })
         event('item/commandExecution/outputDelta', { itemId: 'shell-1', delta: 'ilt' })

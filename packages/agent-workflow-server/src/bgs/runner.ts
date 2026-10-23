@@ -106,6 +106,11 @@ function toolFailureOutput(output: unknown, reason: string | undefined): unknown
   return { result: output, error: reason }
 }
 
+function commandInput(item: RpcObject, prior?: RpcObject) {
+  const cwd = item.cwd ?? prior?.cwd
+  return { command: item.command ?? prior?.command, ...(typeof cwd === 'string' ? { cwd } : {}) }
+}
+
 export function createBgsRunner(options: ProviderNetworkOptions & { command?: readonly string[] } = {}): BeeGameSessionRunner {
   return { start: input => BgsRuntime.start(input, options) }
 }
@@ -370,7 +375,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
         const tools = item.type === 'webSearch' ? [webSearchTool(item, complete)] : item.type === 'fileChange' ? item.changes.map((change: RpcObject, i: number) => ({
           toolUseID: item.id + ':' + i, toolName: 'Edit', input: { file_path: change.path }, diff: change.diff, output: toolFailureOutput(change.diff, reason) })) : [{
           toolUseID: item.id, toolName: item.type === 'commandExecution' ? 'Shell' : item.tool || item.type,
-          input: item.arguments || { command: item.command, path: item.path },
+          input: item.type === 'commandExecution' ? commandInput(item, prior) : item.arguments || { command: item.command, path: item.path },
           output: toolFailureOutput(item.aggregatedOutput ?? item.result ?? item.contentItems ?? prior?.aggregatedOutput, reason),
           ...(item.type === 'commandExecution' ? {
             ...(Number.isInteger(item.exitCode) ? { exitCode: item.exitCode } : {}),
@@ -388,7 +393,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
         ? (item.aggregatedOutput || '') + p.delta : p.delta
       if (item?.type === 'commandExecution') this.items.set(p.itemId, { ...item, aggregatedOutput: output })
       await this.emit('tool.progress', p.delta, { toolUseID: p.itemId, toolName: 'Shell', output,
-        ...(item?.type === 'commandExecution' ? { input: { command: item.command } } : {}),
+        ...(item?.type === 'commandExecution' ? { input: commandInput(item) } : {}),
         ...(owner ? { parentToolUseID: owner } : {}) })
     } else if (method === 'error') {
       // Retryable upstream events are observations; only turn/completed is terminal.
