@@ -121,9 +121,12 @@ jobs:
           bun-version: '1.4.3'
       - name: Install locked workspace dependencies
         run: bun install --frozen-lockfile --ignore-scripts
-      - name: Identify the pinned native source
+      - name: Fetch native release tags and identify the pinned source
         id: bgs-source
-        run: echo "commit=$(git -C vendor/bgs rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        # Submodule checkout does not fetch tag refs, even with full history.
+        run: |
+          git -C vendor/bgs fetch --tags origin
+          echo "commit=$(git -C vendor/bgs rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Cache the source-built native runtime
         id: bgs-runtime
         uses: actions/cache@v4
