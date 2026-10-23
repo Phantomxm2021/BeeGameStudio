@@ -673,13 +673,12 @@ export async function runGameContentCli(args = process.argv.slice(2), options: {
       process.exitCode = result.valid ? 0 : 1
       return
     }
-    // Selected contracts are machine-readable source, not display paragraphs.
-    // Pretty JSON pushed a normal multi-section selection over native output
-    // persistence limits, requiring another model Read (and sometimes probes).
+    // Default JSON is machine-readable: indentation only enlarges the model's
+    // retained tool output. Explicit --details keeps the expanded display.
     // Detailed layout output can exceed the OS pipe buffer. Await delivery
     // before the CLI completes; console.log can leave a truncated JSON stream.
     await writeCliOutput('help' in result && typeof result.help === 'string' ? result.help : JSON.stringify(formatGameContentResult(result, args.at(-1) === '--details'), null,
-      args[0] === '--format' ? undefined : 2))
+      args[0] === '--format' || args.at(-1) !== '--details' ? undefined : 2))
     process.exitCode = ('valid' in result ? result.valid : result.ok) ? 0 : 1
   } catch (error) {
     let inputLocation: ReturnType<typeof contentInputLocation> | undefined

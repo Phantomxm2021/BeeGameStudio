@@ -1,0 +1,133 @@
+{
+  "date": "2026-10-23",
+  "baselineCommit": "c6e7a3484",
+  "objective": "Reduce confirmed BGS-owned search contamination and default check-output overhead in initial implementation without restricting source reads or dropping verification evidence.",
+  "scope": {
+    "projectArtifacts": "read-only",
+    "realModelCalls": 0,
+    "realProjectReruns": 0,
+    "serviceRestarts": 0,
+    "promptOrSkillChanges": false,
+    "newWorkflowStages": false
+  },
+  "evidence": {
+    "nativeSnapshotSha256": "b40e14f52f9cc49d48e0446ac123751ab101f3ded2e9aedb5ea807dbd6e86cf3",
+    "hostSnapshotSha256": "039612e0fbc0ead02821c0013ed0687715dbd6aeff0689501132e6d75fc29e92",
+    "initialImplementation": {
+      "fromUTC": "2026-10-23T06:43:28.003Z",
+      "toUTC": "2026-10-23T07:18:13.455Z",
+      "responses": 57,
+      "reportedTokens": 8796659,
+      "cachedInputTokens": 7818880
+    },
+    "measurementBoundary": "Counts use actual native function_call_output JSON, excluding wrapper/trailing newline for byte comparisons. Host progress/storage copies are not counted as repeated model input. Byte reductions are not token or end-to-end savings measurements."
+  },
+  "planAndSelfReview": [
+    "Trace large saved outputs to their actual callers and source contracts before changing defaults. Separate explicit cat/JSON.stringify/--appendix/--details from BGS-generated defaults.",
+    "Reject the proposed nested-inspections explanation: the saved default layout response has no inspections or measurements array. Its 11 diagnostics carry relevant failed geometry, not all nodes.",
+    "Keep complete diagnostics, issues, coverage, failure/unverified/freshness states and explicit detailed reads. Do not create a new projection schema, summary model call or review phase.",
+    "Apply the existing host-metadata distinction to ordinary source search with a standard directory-local ignore file, without rewriting shell commands, moving transcripts or changing their UI/export paths.",
+    "Initialize this marker only at existing session start/resume events; preserve existing ignore files and transcript persistence. No per-event filesystem maintenance or process-wide state cache.",
+    "Remove serialization whitespace at existing CLI output boundaries only. Parsed JSON, checks, exits, retained receipts, text reports and library/MCP results remain unchanged.",
+    "Verify with temporary fixtures and existing offline integration checks. Do not repair or rerun the evidence project."
+  ],
+  "findings": [
+    {
+      "id": "host-transcript-search-boundary",
+      "observed": {
+        "nativeCallOrdinal": 947,
+        "nativeOutputOrdinal": 953,
+        "hostEvents": [
+          1756,
+          1757
+        ],
+        "returnedChars": 31320,
+        "command": "rg -n \"withPreviewPage|withPlayCapture|checkTextSeparation\" . --glob '!node_modules/**' --glob '!.beegame/tmp/goal-tools-XEPFvY/content-consumer.mjs*' | head -80"
+      },
+      "cause": "BGS writes durable JSONL transcripts into a visible project directory. Dedicated source navigation, measurement and clone paths exclude it as host metadata, but ordinary recursive rg in a project without ignore rules includes source/code copies retained in those records.",
+      "change": "On session.started/session.resumed, appendChatTranscript creates transcripts/.ignore with /*.jsonl using exclusive creation. An existing marker is untouched; a symbolic-link directory is skipped. A marker failure cannot prevent an already-appended transcript event.",
+      "preserved": "Explicit transcript paths and --no-ignore remain readable; JSONL sources elsewhere remain searchable. Artifact discovery and migration enumerate JSONL directly, so the new dotfile does not change their public artifacts.",
+      "sources": [
+        "packages/agent-workflow-server/src/beegame/project-records.ts",
+        "packages/agent-workflow-server/src/beegame/session-manager.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts",
+        "packages/agent-workflow-server/src/beegame/design-source-reading.ts",
+        "packages/agent-workflow-server/src/app.ts",
+        "packages/agent-workflow-server/src/local-data-migration.ts"
+      ]
+    },
+    {
+      "id": "default-json-formatting-overhead",
+      "cause": "Default content-check and measurement CLI responses were pretty-printed even after semantic summarization. Formatting whitespace became part of the retained model tool output.",
+      "change": "Use compact JSON for default content-check and measurement CLI output. Existing --details remains expanded; --format retains its existing compact behavior. No evidence fields are removed or renamed.",
+      "savedOutputComparisons": [
+        {
+          "nativeOutputOrdinal": 777,
+          "kind": "default layout failure",
+          "originalBytes": 30115,
+          "compactBytes": 14995,
+          "removedWhitespaceBytes": 15120,
+          "reductionPercent": 50.20753777187448,
+          "parsedValuePreserved": true
+        },
+        {
+          "nativeOutputOrdinal": 877,
+          "kind": "initial measurement",
+          "originalBytes": 25204,
+          "compactBytes": 18628,
+          "removedWhitespaceBytes": 6576,
+          "reductionPercent": 26.091096651325184,
+          "parsedValuePreserved": true
+        },
+        {
+          "nativeOutputOrdinal": 2820,
+          "kind": "final measurement",
+          "originalBytes": 25777,
+          "compactBytes": 19179,
+          "removedWhitespaceBytes": 6598,
+          "reductionPercent": 25.596461962214377,
+          "parsedValuePreserved": true
+        }
+      ],
+      "sources": [
+        "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts"
+      ]
+    }
+  ],
+  "excludedConclusions": [
+    "Full-code and UI JSON reads were explicit Agent commands. No automatic BGS full-source reread mechanism was established, and arbitrary source access was not restricted.",
+    "The layout default contains 11 substantive diagnostics. Geometry/corners/required visibility were retained rather than replaced with lossy summaries.",
+    "Measurement already removes repeated binding/asset inventories from nested checks. No second field-duplication bug was established.",
+    "Repeated preview command text or unchanged-at-boundaries receipts do not establish identical inputs across runs. This task does not change preview retries or project test drivers.",
+    "The earlier context-accounting fix remains separate; its benefit is not counted again here."
+  ],
+  "validation": {
+    "baseline": "Before the marker fix, a temporary no-Git fixture's ordinary rg matched both source JSONL and transcript JSONL.",
+    "regression": {
+      "pass": 137,
+      "fail": 0,
+      "files": 6,
+      "assertions": 1400,
+      "durationSeconds": 76.35,
+      "paths": [
+        "packages/agent-workflow-server/src/beegame/project-records.test.ts",
+        "packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/measurement-summary.test.ts",
+        "packages/agent-workflow-server/src/__tests__/project-clone.test.ts",
+        "packages/agent-workflow-server/src/__tests__/local-data-migration.test.ts"
+      ]
+    },
+    "coverage": "Actual rg default/explicit/--no-ignore behavior, source JSONL visibility, resumed and existing markers, symlinks, marker failure without event loss; existing CLI parse/detail/appendix/slow-pipe failure output and measurement/clone/migration contracts.",
+    "environment": "Initial outer-sandbox execution could not bind localhost or launch nested sandbox-exec. The same offline fixtures passed with those local operations permitted; no real provider or project was invoked.",
+    "typecheck": "./node_modules/.bin/tsc --noEmit -p tsconfig.json: exit 0",
+    "diffCheck": "git diff --check passed"
+  },
+  "limitations": [
+    "No measured end-to-end token savings. These narrow fixes do not remove the entire 8.8M-token implementation phase or all deliberate large reads.",
+    "Existing custom ignore files remain authoritative. Idle legacy transcript directories receive the default marker only at the next normal session start/resume; explicit no-ignore searches remain possible.",
+    "JSON whitespace is a display change; external consumers should parse complete JSON rather than depend on indentation/line numbers.",
+    "No service restart. Unrelated concurrent README/runtime-upgrade/security-test/vendor changes were left untouched and excluded from this commit."
+  ]
+}

@@ -210,7 +210,7 @@ export async function openAgentTools(input: {
         'if(capability.version!==1 || capability.workspace!==await realpath(process.cwd()) || capability.sessionId!=='+JSON.stringify(input.sessionId)+' || !capability.executionId)throw Error("Expired or mismatched measurement capability");',
         'const api=new URL(capability.apiUrl);if(api.protocol!=="http:" || api.hostname!=="127.0.0.1" || api.username || api.password || api.search || api.hash)throw Error("Invalid measurement endpoint");',
         'const response=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),redirect:"error"});',
-        'const result=await response.json();console.log(JSON.stringify(result,null,2));',
+        'const result=await response.json();console.log(JSON.stringify(result,null,body.details?2:undefined));',
         'if(!response.ok || result.error || !result.finishedAt || !result.freshness?.current || !["build","runtime-smoke"].every(id=>result.checks?.some(c=>c.id===id && c.status==="passed")))process.exitCode=1;',
       ].join('\n'),{flag:'wx',mode:0o600})
       // Reuse the same workspace/session capability; reading evidence does not
