@@ -40,7 +40,6 @@ jobs:
     timeout-minutes: 15
     env:
       BGS_SANDBOX_TESTS: '0'
-      BGS_PGLITE_MODULE: ${{ runner.temp }}/bgs-sql-tests/node_modules/@electric-sql/pglite/dist/index.js
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -61,6 +60,8 @@ jobs:
       # regressions run in the separate job below; native-runtime suites remain
       # outside this workflow and are not executed automatically.
       - name: Run backend and deployment regressions
+        env:
+          BGS_PGLITE_MODULE: ${{ runner.temp }}/bgs-sql-tests/node_modules/@electric-sql/pglite/dist/index.js
         run: >-
           bun test
           packages/agent-workflow/src
@@ -108,7 +109,6 @@ jobs:
     timeout-minutes: 20
     env:
       BGS_LAYOUT_BROWSER: '1'
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -120,9 +120,13 @@ jobs:
       - name: Install locked workspace dependencies
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Install Chromium and Linux dependencies
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
         working-directory: packages/agent-workflow-server
         run: ./node_modules/.bin/playwright-core install chromium --with-deps --no-progress
       - name: Run Scene Editor browser regressions
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
         run: >-
           bun test
           packages/agent-workflow-server/src/beegame/scene-layout-browser.test.ts
