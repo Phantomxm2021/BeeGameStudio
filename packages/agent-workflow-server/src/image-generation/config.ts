@@ -7,6 +7,12 @@ export const imageSourceSchema = z.enum(['platform', 'byok', 'chatgpt-subscripti
 export type ImageSource = z.infer<typeof imageSourceSchema>
 export const imageProviderSchema = z.enum(['openai', 'openrouter', 'vercel', 'cloudflare', 'chatgpt-subscription'])
 export type ImageProviderKind = z.infer<typeof imageProviderSchema>
+// OpenRouter's aggregate usage/cost does not provide the categories used by our token tariff.
+export function platformImageBillingUnavailableReason(provider: ImageProviderKind): string | undefined {
+  return provider === 'openrouter'
+    ? 'OpenRouter image usage lacks the token-category breakdown required for platform Credits billing.'
+    : undefined
+}
 export const imageConfigSchema = z.object({
   provider: imageProviderSchema.default('openai'),
   baseUrl: z.string().url().default('https://api.openai.com/v1/images/generations').superRefine((value, ctx) => {

@@ -29,6 +29,21 @@
 
 未配置售价的质量／尺寸不能生成；目前 `auto`、`high`、`xhigh`、`max` 均未开放。使用参考图编辑沿用对应质量／尺寸售价。固定售价是 BGS 向用户收取的价格，不代表 Cloudflare 单次实际成本。
 
+## 供应商与计费兼容性（2026-10-24）
+
+| 来源与供应商 | 当前结算规则 |
+| --- | --- |
+| 平台 Cloudflare、管理员共享 ChatGPT 订阅 | 必须配置质量 × 尺寸固定售价；按请求预留时冻结的价格结算。 |
+| 平台 OpenAI、Vercel Images 协议 | 仅完整、相互一致的输入与输出 token 类别明细可按配置费率结算。供应商或模型名称本身不保证响应具备这些字段。 |
+| 平台 OpenRouter | 当前汇总用量缺少本系统费率所需的类别明细，新请求不开放；能力查询返回不可用及原因，提交在钱包预留和供应商调用前返回 `422 / billing-unsupported`。 |
+| 用户自带 API Key（含 OpenRouter）、个人 ChatGPT 订阅 | 分别由外部供应商、个人订阅计费，不换算为平台 Credits；沿用各自配置与调用限制。 |
+
+[OpenRouter 图片接口](https://openrouter.ai/docs/api/api-reference/images/generate-an-image)的汇总 token 数和 `usage.cost` 不能替代当前按类别单价计算的规则；不从总价反推 token，也不套用其他供应商的固定售价。[OpenAI Images 接口](https://developers.openai.com/api/reference/resources/images/methods/generate)将 `output_tokens_details` 列为可选，未提供明细时不能据此断言输出全部属于图片；当前解析继续拒绝缺失或含糊的计费数据。Vercel 的具体模型用量兼容性尚未通过真实付费响应验证。
+
+新请求限制复用已有请求校验入口，不改变请求身份。资产命令仅在报价返回明确的 `billing-unsupported` 时继续交给宿主判断：已有收据可恢复，新请求仍在预留前拒绝；其他不可用报价仍直接停止。已有本地图片收据仍按原 requestId 恢复；原始图片、usage 和冻结费率保留，不能结算的旧请求继续待核对，不补造费用、不重复生图。若本地收据已丢失，前置拒绝也不会新增预留或重新生成，已有钱包预留仍需人工核对。
+
+本地模拟验证覆盖不可用查询、直接服务与 HTTP 提交均在预留前拒绝、BYOK 继续由外部计费，以及旧图片重复恢复不新增供应商调用、不猜测扣费。未修改供应商配置、既有项目或账本，未运行真实付费请求。
+
 ## 验收
 
 1. 商店四档的美元售价和发放量与表格一致，均为 100 Credits/USD；新旧订单分别按购买时的套餐发放。

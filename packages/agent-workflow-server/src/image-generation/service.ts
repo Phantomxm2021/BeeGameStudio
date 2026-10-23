@@ -3,7 +3,7 @@ import type { ImageBillingClient, ImageBillingInput } from '@bee-game-studio/bee
 import { ImageAttemptError, ImageAttemptStore, type ImageAttemptInput } from './attempt'
 import { imagePricingSchema, imageChargeCreditsMicro, fixedImageChargeCreditsMicro, creditsToMicro } from './pricing'
 import { ImageReferenceError } from './reference-image'
-import { CHATGPT_IMAGE_ENDPOINT, type ImageSource } from './config'
+import { CHATGPT_IMAGE_ENDPOINT, platformImageBillingUnavailableReason, type ImageSource } from './config'
 
 export class ImageServiceError extends Error {
   constructor(readonly stage: string) { super('Image service failed at ' + stage) }
@@ -40,7 +40,11 @@ export class ImageGenerationService {
       throw new ImageReferenceError('provider-unsupported')
     // Read-only preflight before any new wallet reservation or provider call.
     // Missing/corrupt paid output still cannot resubmit: recoverOnly below stays unchanged.
-    this.attempts.validateNewRequest(input)
+    this.attempts.validateNewRequest({ ...input, validateNewRequest: () => {
+      if (source === 'platform' && platformImageBillingUnavailableReason(input.config.provider))
+        throw new ImageServiceError('billing-unsupported')
+      input.validateNewRequest?.()
+    } })
     if (source === 'chatgpt-subscription') {
       if (input.config.provider !== 'openai' || input.config.baseUrl !== CHATGPT_IMAGE_ENDPOINT ||
           !input.config.responseModel || input.config.apiKey || input.config.upstreamApiKey)
