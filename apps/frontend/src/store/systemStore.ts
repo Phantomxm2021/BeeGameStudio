@@ -14,6 +14,7 @@ import { create } from 'zustand';
 import type { TaskCandidateAgent } from '../types/agent';
 import type { TokenUsage } from '../types/message';
 import { api } from '../services/api';
+import { applyThemeToDocument, readThemePreference, writeThemePreference, subscribeThemePreference } from '../lib/themePreference';
 import { isAuthenticationServiceUnavailable } from '../services/apiClient';
 import {
   getSupabaseSessionUser,
@@ -23,13 +24,7 @@ import type {
   BeeGamePermission,
 } from '../services/currentUserApi';
 
-/** Keep the document theme class and native color-scheme in lockstep. */
-export function applyThemeToDocument(isDark: boolean): void {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  root.classList.toggle('dark', isDark);
-  root.style.colorScheme = isDark ? 'dark' : 'light';
-}
+export { applyThemeToDocument };
 
 export interface ProjectTask {
   id: string;
@@ -270,6 +265,24 @@ export const useSystemStore = create<SystemState>()(
     }
   )
 );
+
+if (typeof window !== 'undefined') {
+  const syncTheme = () => {
+    const isDark = readThemePreference();
+    if (useSystemStore.getState().isDark !== isDark) useSystemStore.setState({ isDark });
+    applyThemeToDocument(isDark);
+  };
+  syncTheme();
+  writeThemePreference(useSystemStore.getState().isDark);
+  const unsubscribe = useSystemStore.subscribe((state, previous) => {
+    if (state.isDark !== previous.isDark) {
+      writeThemePreference(state.isDark);
+      applyThemeToDocument(state.isDark);
+    }
+  });
+  const stopSync = subscribeThemePreference(syncTheme);
+  if (import.meta.hot) import.meta.hot.dispose(() => { unsubscribe(); stopSync(); });
+}
 
 function getErrorStatus(error: unknown): number | undefined {
   if (!error || typeof error !== 'object') return undefined;
