@@ -132,3 +132,131 @@ test.skipIf(process.env.BGS_PLAY_CAPTURE_BROWSER !== '1')('actual Preview path r
     expect(JSON.stringify(failedReport.runtimeErrorDetails)).not.toContain('synthetic-secret')
   } finally { await access.close(); server.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 45_000)
+
+/** A tiny source-driven player path: the same state assertion must pass for
+ * the healthy fixture and fail when the fixture intentionally omits victory.
+ * This observes tool sensitivity and retained evidence, not Skill or game
+ * quality. */
+test.skipIf(process.env.BGS_PLAY_CAPTURE_BROWSER !== '1')('source-driven 2D path checks pause, retry and retained assertion evidence', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-play-path-browser-')))
+  let fault = false
+  const fixture = `<!doctype html><meta charset="utf-8"><style>
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;color:#fff;font:16px sans-serif}
+    #hud{padding:12px;display:flex;gap:16px}#game{display:block;width:320px;height:180px;image-rendering:pixelated}
+  </style><body><div id="hud"><span id="status">Ready</span><span id="score">0</span><span id="hint">Enter to start</span></div>
+  <canvas id="game" width="160" height="90"></canvas><script>
+    // Rules: Enter starts; each unpaused ArrowRight is one core action;
+    // score 2 becomes Won; ArrowLeft becomes Lost; P pauses and blocks actions;
+    // R retries from Won or Lost.
+    const fault = new URL(location.href).searchParams.get('fault') === '1';
+    const status = document.querySelector('#status'), scoreText = document.querySelector('#score'), hint = document.querySelector('#hint');
+    const canvas = document.querySelector('#game'), ctx = canvas.getContext('2d');
+    let phase = 'ready', score = 0, paused = false;
+    const paint = () => {
+      const color = paused ? '#a06000' : phase === 'ready' ? '#444444' : phase === 'playing' ? '#2040a0' : phase === 'won' ? '#208040' : '#a02020';
+      ctx.fillStyle = color; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      status.textContent = paused ? 'Paused' : phase === 'ready' ? 'Ready' : phase === 'playing' ? 'Playing' : phase === 'won' ? 'Won' : 'Lost';
+      scoreText.textContent = String(score);
+      hint.textContent = phase === 'ready' ? 'Enter to start' : phase === 'playing' ? 'ArrowRight action / P pause' : 'R retry';
+    };
+    addEventListener('keydown', event => {
+      if (['Enter', 'ArrowRight', 'ArrowLeft', 'p', 'P', 'r', 'R'].includes(event.key)) event.preventDefault();
+      if (event.key === 'Enter' && phase === 'ready') { phase = 'playing'; paint(); return; }
+      if ((event.key === 'p' || event.key === 'P') && phase === 'playing') { paused = !paused; paint(); return; }
+      if ((event.key === 'r' || event.key === 'R') && (phase === 'won' || phase === 'lost')) { phase = 'playing'; score = 0; paused = false; paint(); return; }
+      if (event.key === 'ArrowLeft' && phase === 'playing' && !paused) { phase = 'lost'; paint(); return; }
+      if (event.key === 'ArrowRight' && phase === 'playing' && !paused) {
+        score += 1;
+        if (score >= 2) {
+          if (fault) console.error('controlled fixture: victory state not set');
+          else phase = 'won';
+        }
+        paint();
+      }
+    });
+    paint();
+  </script></body>`
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(fixture, { headers: { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' } }) })
+  const snapshot = () => ({ status: 'running', mode: 'production', url: server.url.href + (fault ? '?fault=1' : '') })
+  const access = openPreviewTestAccess({ start: async () => snapshot(), status: snapshot, stop() {} })
+  try {
+    await mkdir(join(root, 'evidence'))
+    await writeFile(join(root, 'capability.json'), JSON.stringify({ version: 1, workspace: root,
+      sessionId: 'offline-play-path', executionId: 'offline-play-path', apiUrl: access.baseUrl }))
+    await writeFile(join(root, 'driver.mjs'), `
+      import assert from 'node:assert/strict';
+      const { withPlayCapture } = await import(process.env.BEEGAME_PREVIEW_TEST_MODULE);
+      const report = await withPlayCapture({ mode: 'production', viewport: { width: 320, height: 240 }, outputParent: 'evidence' }, async ({ page, gameFrame, mark, captureFrame }) => {
+        await gameFrame.waitForSelector('#status');
+        const readState = () => gameFrame.evaluate(() => ({ status: document.querySelector('#status').textContent,
+          score: Number(document.querySelector('#score').textContent),
+          pixel: [...document.querySelector('#game').getContext('2d').getImageData(8, 8, 1, 1).data] }));
+        const assertState = async expected => assert.deepStrictEqual(await readState(), expected);
+        await assertState({ status: 'Ready', score: 0, pixel: [68, 68, 68, 255] });
+        await captureFrame('ready');
+        await page.keyboard.press('Enter'); mark('start');
+        await assertState({ status: 'Playing', score: 0, pixel: [32, 64, 160, 255] });
+        await captureFrame('started');
+        await page.keyboard.press('ArrowRight'); mark('core-action-1');
+        await assertState({ status: 'Playing', score: 1, pixel: [32, 64, 160, 255] });
+        await page.keyboard.press('p'); mark('pause');
+        await assertState({ status: 'Paused', score: 1, pixel: [160, 96, 0, 255] });
+        await captureFrame('paused');
+        await page.keyboard.press('ArrowRight'); mark('paused-action');
+        await assertState({ status: 'Paused', score: 1, pixel: [160, 96, 0, 255] });
+        await page.keyboard.press('p'); mark('resume');
+        await page.keyboard.press('ArrowRight'); mark('core-action-2');
+        await captureFrame('terminal');
+        // The same source-derived assertion is used in healthy and faulty runs.
+        await assertState({ status: 'Won', score: 2, pixel: [32, 128, 64, 255] });
+        await page.keyboard.press('r'); mark('retry');
+        await assertState({ status: 'Playing', score: 0, pixel: [32, 64, 160, 255] });
+        await page.keyboard.press('ArrowRight'); mark('retry-action');
+        await assertState({ status: 'Playing', score: 1, pixel: [32, 64, 160, 255] });
+        await page.keyboard.press('ArrowLeft'); mark('failure');
+        await assertState({ status: 'Lost', score: 1, pixel: [160, 32, 32, 255] });
+        await captureFrame('lost');
+        await page.keyboard.press('r'); mark('retry-after-loss');
+        await assertState({ status: 'Playing', score: 0, pixel: [32, 64, 160, 255] });
+        await page.keyboard.press('ArrowRight'); mark('retry-after-loss-action');
+        await assertState({ status: 'Playing', score: 1, pixel: [32, 64, 160, 255] });
+        await captureFrame('retry-after-loss-continued');
+        return await readState();
+      });
+      console.log(JSON.stringify({ report }));
+    `)
+    const runtime = await sharedContentChecker()
+    const run = async (mode: 'normal' | 'fault') => {
+      fault = mode === 'fault'
+      const child = Bun.spawn(['node', join(root, 'driver.mjs')], { cwd: root, stdout: 'pipe', stderr: 'pipe',
+        env: { ...process.env, BEEGAME_PREVIEW_CAPABILITY_FILE: join(root, 'capability.json'),
+          BEEGAME_PREVIEW_TEST_MODULE: new URL('./preview-test-client.mjs', runtime.moduleUrl).href,
+          BEEGAME_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl } })
+      const [code, out, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+      return { code, out, error }
+    }
+    const normal = await run('normal')
+    expect(normal.code, normal.error).toBe(0)
+    const normalReport = JSON.parse(normal.out).report
+    expect(normalReport.quality).toBe('unverified')
+    expect(normalReport.runtimeErrors).toEqual({ pageErrors: 0, consoleErrors: 0, failedRequests: 0, httpErrors: 0 })
+    expect(normalReport.frames).toHaveLength(6)
+    expect((await readFile(join(root, normalReport.video))).length).toBeGreaterThan(1000)
+    for (const frame of normalReport.frames) expect((await readFile(join(root, frame.path))).length).toBeGreaterThan(100)
+    const faultRun = await run('fault')
+    expect(faultRun.code).not.toBe(0)
+    expect(faultRun.error).toContain('retained evidence/play-capture-')
+    const reports = await Promise.all((await readdir(join(root, 'evidence')))
+      .map(async name => JSON.parse(await readFile(join(root, 'evidence', name, 'observation.json'), 'utf8'))))
+    expect(reports).toHaveLength(2)
+    const failedReport = reports.find(item => item.driverError)
+    expect(failedReport?.driverError).toContain('Expected values to be strictly deep-equal')
+    expect(failedReport?.runtimeErrors).toMatchObject({ consoleErrors: 1 })
+    expect(failedReport?.runtimeErrorDetails.consoleErrors[0].message).toContain('controlled fixture: victory state not set')
+    expect(failedReport?.video).toBeTruthy()
+    expect(failedReport?.frames).toHaveLength(4)
+    expect((await readFile(join(root, failedReport.video))).length).toBeGreaterThan(1000)
+    for (const frame of failedReport.frames) expect((await readFile(join(root, frame.path))).length).toBeGreaterThan(100)
+  } finally { await access.close(); server.stop(true); await rm(root, { recursive: true, force: true }) }
+}, 45_000)
