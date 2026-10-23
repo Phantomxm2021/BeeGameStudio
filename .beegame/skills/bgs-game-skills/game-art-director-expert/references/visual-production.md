@@ -2,7 +2,7 @@
 
 Use when producing or revising actual visual designs or modular assets.
 
-Use the relevant requirements across the eight design documents to create one coherent set of complete game screens: Scene, subjects, HUD and planned UI states together. Choose individual screens or readable groups; a single overview board is optional. Reuse pictures across UI/Scene responsibilities. A reference-image assignment covers those complete screens and key states, not additional component explanation boards or runtime asset production. Identify supplied images as inspiration, selected designs or runtime captures.
+Use the relevant requirements across the eight design documents to create one overview board covering all game screens and key states in the current assignment. Keep each complete Scene, subjects and HUD together in its panel. Share the board across UI/Scene responsibilities. A reference-image assignment covers that board, not additional component explanation boards or runtime asset production. Identify supplied images as inspiration, selected designs or runtime captures.
 
 For a consequential correction, revise the affected complete screen using the existing image as a reference and describe the intended change while preserving established composition and identity. With BGS assets.mjs, use referenceImagePath with prompt or uiReference; seeing an image in chat does not pass it to the image provider. Check the available quote and authorized budget; a revision need not become a new set of alternatives.
 

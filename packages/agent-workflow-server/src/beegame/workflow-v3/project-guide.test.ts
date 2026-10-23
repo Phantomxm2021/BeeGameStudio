@@ -139,7 +139,7 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     expect(guide).not.toContain('game-ui-ux-designer')
     expect(guide).not.toContain('game-art-director-expert')
     expect(guide).toContain('Prose, palettes and JSON geometry do not replace visual design')
-    expect(guide).toContain('complete game screens/key states shared by UI and Scene records')
+    expect(guide).toContain('one overview board covering all game screens and key states in the current assignment')
     expect(guide).toContain('pixel-size deviations alone do not require regeneration or block reference delivery')
     expect(guide).toContain('Resolve consequential conflicts before affected production')
     expect(guide).toContain('use ASSET_PLAN.md and the selected visual/audio designs for the current part')

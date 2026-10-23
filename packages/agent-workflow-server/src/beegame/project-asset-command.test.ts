@@ -94,7 +94,9 @@ test('UI board CLI plans offline, quotes the computed canvas and submits structu
     await writeFile(file, JSON.stringify(example))
     const examplePlan = await run(root, script, 'ui-board-plan', file)
     expect(examplePlan.code).toBe(0)
-    expect(JSON.parse(examplePlan.stdout).request).toMatchObject({ quality: 'low', background: 'opaque' })
+    const compiledExample = JSON.parse(examplePlan.stdout)
+    expect(compiledExample.request).toMatchObject({ quality: 'low', background: 'opaque' })
+    expect(compiledExample.layout.panels.map((panel: { id: string }) => panel.id)).toEqual(['title', 'play', 'pause', 'result'])
     await writeFile(file, JSON.stringify(input))
     for (const command of ['cost', 'ui-board-plan', 'ui-assets-plan']) {
       const result = await run(root, script, command, '--help')
