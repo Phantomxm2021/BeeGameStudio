@@ -116,6 +116,7 @@ import { CHATGPT_IMAGE_ENDPOINT, imageConfigPatchSchema, imageProviderSchema, pu
 import { ImageAttemptStore } from './image-generation/attempt'
 import { ImageGenerationService } from './image-generation/service'
 import { createHostedImageGenerationProvider } from './image-generation'
+import { createImageResultRequest } from './image-generation/image-result-network'
 import { hasChatGPTAccount } from './model-connections'
 import { openImageGenerationAccess } from './image-generation/access'
 import { loadRuntimeImageConfig } from './image-generation/runtime-config'
@@ -508,6 +509,10 @@ export function createAgentWorkflowApp(
     options.dashboardDataRoot ?? options.defaultWorkspacePath,
   )
   const serviceFetch = createTLSAwareFetch()
+  const imageResultRequest = createImageResultRequest({
+    resolveOutboundTarget,
+    outboundTargetPolicyOptions,
+  })
   const supabaseStore = createSupabaseDashboardStoreFromEnv(
     process.env,
     serviceFetch,
@@ -556,7 +561,11 @@ export function createAgentWorkflowApp(
   const billingConfig = resolveBeeGameBillingConfig()
   const imageGeneration = new ImageGenerationService(
     new ImageAttemptStore(resolve(dashboardDataRoot, 'image-attempts'),
-      createHostedImageGenerationProvider(dashboardDataRoot, ((url, init) => serviceFetch(url, init)) as typeof fetch)),
+      createHostedImageGenerationProvider(
+        dashboardDataRoot,
+        ((url, init) => serviceFetch(url, init)) as typeof fetch,
+        imageResultRequest,
+      )),
     createImageBillingClient(billingConfig, (url, init) => serviceFetch(url, init)),
   )
   const proxyBillingRequest = (request: Request, path: string) =>

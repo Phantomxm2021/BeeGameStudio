@@ -30,13 +30,15 @@ test('Cloudflare uses the exact /ai/run endpoint, native envelope, and downloads
   const calls: string[] = []
   const adapter = createImageGenerationProvider('cloudflare', async (url, init) => {
     calls.push(url)
-    if (url === config.baseUrl) {
-      expect(new Headers(init.headers).get('authorization')).toBe('Bearer cloudflare-token')
-      const body = JSON.parse(String(init.body))
-      expect(body).toEqual({ model: 'openai/gpt-image-2.5-flare', input: { prompt: 'icon', quality: config.quality, size: config.size, output_format: 'png', background: 'auto' } })
-      return Response.json({ result: { state: 'Completed', result: { image: 'https://cdn.example/result.png' }, gatewayMetadata: { keySource: 'Unified' } } })
-    }
+    expect(url).toBe(config.baseUrl)
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer cloudflare-token')
+    const body = JSON.parse(String(init.body))
+    expect(body).toEqual({ model: 'openai/gpt-image-2.5-flare', input: { prompt: 'icon', quality: config.quality, size: config.size, output_format: 'png', background: 'auto' } })
+    return Response.json({ result: { state: 'Completed', result: { image: 'https://cdn.example/result.png' }, gatewayMetadata: { keySource: 'Unified' } } })
+  }, async (url, init) => {
+    calls.push(url)
     expect(url).toBe('https://cdn.example/result.png')
+    expect(init.redirect).toBe('error')
     return new Response(png, { headers: { 'content-type': 'image/png' } })
   })
   const result = await adapter.generate(config, { prompt: 'icon' })
@@ -49,12 +51,14 @@ test('Cloudflare sends a reference image through the native images field', async
   const config = { ...defaultImageConfig('cloudflare'), apiKey: 'cloudflare-token' }
   const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
   const adapter = createImageGenerationProvider('cloudflare', async (url, init) => {
-    if (url === config.baseUrl) {
-      const body = JSON.parse(String(init.body))
-      expect(body.input.images).toEqual([`data:image/png;base64,${png.toString('base64')}`])
-      expect(body.input.size).toBe('1536x1024')
-      return Response.json({ result: { state: 'Completed', result: { image: 'https://cdn.example/edited.png' } } })
-    }
+    expect(url).toBe(config.baseUrl)
+    const body = JSON.parse(String(init.body))
+    expect(body.input.images).toEqual([`data:image/png;base64,${png.toString('base64')}`])
+    expect(body.input.size).toBe('1536x1024')
+    return Response.json({ result: { state: 'Completed', result: { image: 'https://cdn.example/edited.png' } } })
+  }, async (url, init) => {
+    expect(url).toBe('https://cdn.example/edited.png')
+    expect(init.redirect).toBe('error')
     return new Response(png, { headers: { 'content-type': 'image/png' } })
   })
   const result = await adapter.generate(config, { prompt: 'matching UI elements',

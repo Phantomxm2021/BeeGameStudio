@@ -2,13 +2,31 @@ import type { ImageGenerationConfig } from './config'
 import { ImageProviderError, type ImageGenerationProvider, type ImageRequest, type ImageResult } from './provider'
 
 const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+export type ImageRequestFetch = (url: string, init: RequestInit) => Promise<Response>
 
 /** Cloudflare REST /ai/run: exact endpoint, nested input, URL image result. */
 export class CloudflareImageProvider implements ImageGenerationProvider {
-  constructor(private readonly request: (url: string, init: RequestInit) => Promise<Response> = fetch) {}
+  private readonly resultRequest?: ImageRequestFetch
+
+  constructor(
+    private readonly request: ImageRequestFetch = fetch,
+    resultRequest?: ImageRequestFetch,
+  ) {
+    // The configured Cloudflare endpoint is operator-owned. The image URL in
+    // its response is provider data and must use a separately secured path.
+    this.resultRequest = resultRequest
+  }
 
   async generate(rawConfig: ImageGenerationConfig, input: ImageRequest): Promise<ImageResult> {
     const config = rawConfig
+    const resultRequest = this.resultRequest
+    if (!resultRequest)
+      throw new ImageProviderError(
+        'Cloudflare image result downloader is not configured',
+        'rejected',
+        undefined,
+        'image-result-downloader-unconfigured',
+      )
     if (!config.apiKey) throw new ImageProviderError('Cloudflare API token is not configured', 'rejected')
     if (!input.prompt.trim() || input.prompt.length > 32000)
       throw new ImageProviderError('Image prompt must contain 1–32000 characters', 'rejected')
@@ -62,8 +80,11 @@ export class CloudflareImageProvider implements ImageGenerationProvider {
       throw new ImageProviderError('Cloudflare returned an invalid image URL', 'unknown', response.status, 'image-url-invalid')
     }
     let imageResponse: Response
-    try { imageResponse = await this.request(parsedUrl.toString(), { redirect: 'error', signal: input.signal }) }
-    catch { throw new ImageProviderError('Cloudflare image result could not be downloaded', 'unknown', response.status, 'image-download-network') }
+    try { imageResponse = await resultRequest(parsedUrl.toString(), { redirect: 'error', signal: input.signal }) }
+    catch (error) {
+      if (error instanceof ImageProviderError) throw error
+      throw new ImageProviderError('Cloudflare image result could not be downloaded', 'unknown', response.status, 'image-download-network')
+    }
     if (!imageResponse.ok)
       throw new ImageProviderError('Cloudflare image result returned HTTP ' + imageResponse.status, 'unknown', imageResponse.status, 'image-download-http')
     const bytes = Buffer.from(await imageResponse.arrayBuffer())
