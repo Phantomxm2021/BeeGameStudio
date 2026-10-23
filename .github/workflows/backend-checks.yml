@@ -56,9 +56,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/bgs-sql-tests"
           bun add --cwd "$RUNNER_TEMP/bgs-sql-tests" --ignore-scripts --exact @electric-sql/pglite@0.5.10
-      # These suites use temporary files and local fake services. The browser
-      # regressions run in the separate job below; native-runtime suites remain
-      # outside this workflow and are not executed automatically.
+      # These suites use temporary files and local fake services. Browser and
+      # real native-process regressions run in separate jobs below.
       - name: Run backend and deployment regressions
         env:
           BGS_PGLITE_MODULE: ${{ runner.temp }}/bgs-sql-tests/node_modules/@electric-sql/pglite/dist/index.js
@@ -88,9 +87,8 @@ jobs:
           packages/agent-workflow-server/src/beegame/workflow-v3/project-guide.test.ts
           packages/beegame-resource-server/src/__tests__/resource-dependency-bindings.test.ts
           packages/beegame-resource-server/src/__tests__/resource-inspection.test.ts
-          packages/agent-workflow-server/src/image-generation/reference-image.test.ts
-          packages/agent-workflow-server/src/image-generation/image-result-network.test.ts
-          packages/agent-workflow-server/src/image-generation/provider-profiles.test.ts
+          packages/agent-workflow-server/src/image-generation
+          packages/agent-workflow-server/src/beegame/project-asset-command.test.ts
           packages/agent-workflow-server/src/beegame/model-runtime-security.test.ts
           packages/agent-workflow-server/src/beegame/session-usage-billing.test.ts
           packages/agent-workflow-server/src/__tests__/preview-manager.test.ts
@@ -103,6 +101,65 @@ jobs:
           scripts/__tests__/docker-runtime-permissions.test.ts
           scripts/__tests__/beegame-owner-bootstrap.test.ts
           scripts/__tests__/beegame-migration-cli.test.ts
+
+  native:
+    # Existing native fixtures exercise macOS Seatbelt and use /private/tmp.
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          # build-bgs records the nearest upstream tag from the pinned submodule.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25.2.1'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - name: Install locked workspace dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Identify the pinned native source
+        id: bgs-source
+        run: echo "commit=$(git -C vendor/bgs rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cache the source-built native runtime
+        id: bgs-runtime
+        uses: actions/cache@v4
+        with:
+          path: dist/bgs-runtime
+          key: bgs-native-${{ runner.os }}-${{ runner.arch }}-${{ steps.bgs-source.outputs.commit }}-${{ hashFiles('scripts/build-bgs.ts') }}
+      - name: Fetch locked Rust dependencies
+        if: steps.bgs-runtime.outputs.cache-hit != 'true'
+        working-directory: vendor/bgs/bgs-rs
+        env:
+          # Use system git for the pinned dependencies' nested submodules.
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+        # Cargo/rustup reads this checkout's rust-toolchain.toml.
+        run: cargo fetch --locked
+      - name: Build the pinned native runtime
+        if: steps.bgs-runtime.outputs.cache-hit != 'true'
+        env:
+          # Keep the cold debug build within a standard runner's disk and memory.
+          CARGO_PROFILE_DEV_DEBUG: '0'
+          CARGO_INCREMENTAL: '0'
+          CARGO_BUILD_JOBS: '2'
+        run: bun run bgs:build
+      - name: Verify native packaging and local plugin operations
+        run: bun run bgs:verify
+      - name: Run native protocol and sandbox fixtures
+        env:
+          BGS_SANDBOX_TESTS: '1'
+        run: >-
+          bun test
+          packages/agent-workflow-server/src/bgs/integration.test.ts
+          packages/agent-workflow-server/src/model-providers/integration.test.ts
+          packages/agent-workflow-server/src/bgs/goals.native.test.ts
+          packages/agent-workflow-server/src/bgs/preferences.native.test.ts
+          packages/agent-workflow-server/src/bgs/skills.native.test.ts
+          packages/agent-workflow-server/src/bgs/project-file-tools.native.test.ts
+          packages/agent-workflow-server/src/bgs/short-context.native.test.ts
 
   browser:
     runs-on: ubuntu-latest
