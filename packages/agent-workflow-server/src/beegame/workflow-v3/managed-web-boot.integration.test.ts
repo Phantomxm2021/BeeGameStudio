@@ -38,7 +38,7 @@ test.each([
           expect(start.systemContext?.includes('Register Scene/UI documents in content/index.json')).toBe(!native)
           if(submitted.length===1) {
             const guide=await readFile(join(workspace,'AGENTS.md'),'utf8')
-            expect(guide).toContain('complete the eight design documents')
+            expect(guide).toContain('create and maintain the eight design documents')
             expect(guide).not.toContain('4. UI/Scene JSON:')
             await mkdir(join(workspace,'docs'))
             for(const document of PROJECT_DOCUMENTS)

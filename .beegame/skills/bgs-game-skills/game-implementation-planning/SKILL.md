@@ -9,7 +9,7 @@ Plan multi-step implementation from relevant requirements/designs. A local fix c
 
 ## Sources and scope
 
-Complete TECHNICAL_DESIGN.md in the eight-document stage, before visual/resource/UI/Scene production: approach, modules, interfaces, data consumption and verification. Mark unproduced inputs as planned contracts, not delivered paths/IDs/evidence. Reconcile the interfaces and inputs needed for the first coherent implementation part before affected implementation; unrelated planned resources/content need not be produced yet. No early layout JSON or second plan.
+Establish TECHNICAL_DESIGN.md among the eight design records with confirmed constraints, module responsibilities and unresolved dependencies. Resolve resource-dependent implementation choices from selected designs and actual resources, updating interfaces, data consumption and verification in the same document before affected implementation. Unrelated inputs may remain planned, without invented paths/IDs/evidence. No early layout JSON or second plan.
 
 Derive outcomes from confirmed requirements and owning professional records, selected pictures and actual content/code/tests when available. Indexes alone can omit work. Preserve the chosen engine/framework and content authority; do not duplicate layouts or invent another data layer. Do not add template filler or silently defer/drop/simplify confirmed outcomes.
 

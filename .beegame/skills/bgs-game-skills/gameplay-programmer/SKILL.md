@@ -15,7 +15,7 @@ Identify input, simulation and presentation ownership, consequential clocks/unit
 
 Consume authored configuration and Scene/UI through actual contracts, without duplicating static layout in gameplay code. Describe consequential interfaces/execution choices separately from product rules; share confirmed simulation results with animation, audio and UI.
 
-For BGS new games, complete TECHNICAL_DESIGN.md in the eight-document stage: approach, module responsibilities, interfaces, data consumption, lifecycle/failure behavior and verification. Mark unproduced inputs as planned; revise the same design from later visual/resource/Scene/UI outputs. Select implementation-planning guidance when useful; no task index is required. Document-only assignments do not authorize implementation.
+For BGS new games, establish TECHNICAL_DESIGN.md among the eight design records with confirmed constraints, module responsibilities and unresolved dependencies. Resolve resource-dependent interfaces and implementation choices from selected designs and actual resources before affected implementation, updating the same document. Select implementation-planning guidance when useful; no task index is required. Document-only assignments do not authorize implementation.
 
 Support consequential platform claims with the supplied contract or authoritative source and actual preconditions. Gather additional evidence only for a downstream constraint and within authorization; preserve provenance under the project contract. Missing evidence is not a remembered quotation or a reason to collect broad tutorials.
 
