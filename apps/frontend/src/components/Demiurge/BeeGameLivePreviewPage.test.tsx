@@ -233,7 +233,7 @@ describe('dashboard header', () => {
       fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
       fireEvent.click(within(screen.getByTestId('beegame-project-hint')).getByRole('button', { name: '复制项目名称' }));
       await waitFor(() => expect(writeText).toHaveBeenCalledWith('游戏项目'));
-      expect(screen.getByRole('button', { name: '已复制项目名称' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: '已复制项目名称' })).toBeInTheDocument();
     } finally {
       if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
       else Reflect.deleteProperty(navigator, 'clipboard');
