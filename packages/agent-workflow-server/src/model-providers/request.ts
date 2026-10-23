@@ -56,7 +56,7 @@ export async function requestProvider(
       )
         result = event.response
     if (!result) throw Error('Provider response was incomplete')
-    return Response.json(result)
+    return Response.json(result, { headers: { 'x-reasoning-included': 'true' } })
   }
   const encoder = new TextEncoder()
   let sequence = 0
@@ -110,6 +110,9 @@ export async function requestProvider(
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-store',
+      // Converted providers count replayed assistant history in prompt usage.
+      // Its opaque native carrier is not additional hidden context to estimate.
+      'x-reasoning-included': 'true',
     },
   })
 }

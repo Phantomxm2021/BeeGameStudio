@@ -74,6 +74,7 @@ for (const stream of [false, true]) test.each([
   const reported: unknown[] = []
   const response = await requestProvider({ ...base, protocol }, { model: 'fixture', input: 'Synthetic question', stream },
     mockFetch(async () => sse([receipt])), signal(), usage => reported.push(usage))
+  expect(response.headers.get('x-reasoning-included')).toBe('true')
   let result: any
   if (stream) {
     for await (const event of parseSse(response)) {
@@ -255,6 +256,8 @@ for (const stream of [false, true]) test.each([
   const receipts: unknown[] = []
   const response = await requestProvider({ ...base, protocol }, { input: 'Synthetic', stream },
     mockFetch(async () => sse([...chunks])), signal(), usage => receipts.push(usage))
+  // The header describes usage semantics; it must not fabricate a missing receipt.
+  expect(response.headers.get('x-reasoning-included')).toBe('true')
   let result: any
   if (stream) {
     const events = []

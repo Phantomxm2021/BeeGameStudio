@@ -177,10 +177,11 @@ test('bad referenced headings retain readable task and requirement text with exp
 
 test('binding check catches nested unknown resources and missing manifest, keeps actual operands and all-file scope', async () => {
   const root = fixture(), ui = uiLayoutFixture()
-  ;(ui.data.nodes[1] as any).data = { image: { assetRef: 'missing-atlas', member: 'no.png', frame: 'idle' } }
+  ;(ui.data.nodes[1] as any).data = { image: { assetRef: 'missing-atlas', member: 'no.png', atlasMember: 'atlas.json', frame: 'idle' } }
   ui.assetRefs = ['missing-atlas'] as never[]
   save(root, 'content/ui/menu.json', ui)
-  const other = uiLayoutFixture(); other.id = 'other'
+  const other = uiLayoutFixture(); other.id = 'other'; other.assetRefs = ['missing-other'] as never[]
+  ;(other.data.nodes[1] as any).data = { image: { assetRef: 'missing-other', member: 'other.png', atlasMember: 'other.json', frame: 'idle' } }
   save(root, 'content/ui/other.json', other)
   mkdirSync(join(root, 'content/scenes'), { recursive: true })
   const beforeMissing = snapshot(root)
@@ -188,14 +189,30 @@ test('binding check catches nested unknown resources and missing manifest, keeps
   expect(missing.valid).toBe(false)
   expect(missing.issues.join(' ')).toContain('manifest.json is missing')
   expect(missing.files).toHaveLength(2)
-  expect(JSON.stringify(missing.files)).toContain('missing-atlas')
+  const selected = missing.files.find(file => file.file === 'content/ui/menu.json') as any
+  const unselected = missing.files.find(file => file.file === 'content/ui/other.json') as any
+  expect(selected.nodes.find((node: any) => node.id === 'play').data.image).toEqual({
+    assetRef: 'missing-atlas', member: 'no.png', atlasMember: 'atlas.json', frame: 'idle',
+  })
+  expect(unselected).toMatchObject({ nodeCount: 2, bindingNodeCount: 1 })
+  expect(unselected).not.toHaveProperty('nodes')
+  expect(unselected).not.toHaveProperty('bindings')
   expect(snapshot(root)).toEqual(beforeMissing)
   const manifest = assetManifestAuthoringExamples().canonical
   manifest.resources = []; manifest.requirements = []
   await writeBeeGameAssetManifest(root, manifest)
   const before = snapshot(root), result = await checkResourcesAndBindings(root, {})
   expect(result.issues.join(' ')).toContain('Unknown resource missing-atlas')
+  expect(result.issues.join(' ')).toContain('Unknown resource missing-other')
   expect(result.issues.join(' ')).toContain('content/ui/menu.json')
+  expect(result.issues.join(' ')).toContain('content/ui/other.json')
+  const expanded = await checkResourcesAndBindings(root, { detailsFor: 'content/ui/menu.json' })
+  expect(expanded.valid).toBe(result.valid)
+  expect(expanded.issues).toEqual(result.issues)
+  const summary = result.files.find(file => file.file === 'content/ui/menu.json') as any
+  expect(summary).toMatchObject({ nodeCount: 2, bindingNodeCount: 1 })
+  expect(summary).not.toHaveProperty('nodes')
+  expect(summary).not.toHaveProperty('bindings')
   expect(snapshot(root)).toEqual(before)
   await expect(checkResourcesAndBindings(root, { detailsFor: 'content/ui/../../secret.json' })).rejects.toThrow()
   symlinkSync(join(root, 'content/ui/menu.json'), join(root, 'content/ui/alias.json'))

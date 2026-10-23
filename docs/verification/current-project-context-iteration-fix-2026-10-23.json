@@ -1,0 +1,167 @@
+{
+  "date": "2026-10-23",
+  "baselineCommit": "434d57a28",
+  "purpose": "Trace ineffective iteration and context growth to confirmed BGS responsibilities before changing code.",
+  "scope": {
+    "projectArtifacts": "read-only",
+    "frontendChanges": false,
+    "nativeCliChanges": false,
+    "promptOrSkillChanges": false,
+    "realModelCalls": 0,
+    "realProjectReruns": 0,
+    "serviceRestarts": 0
+  },
+  "evidence": {
+    "sessionId": "beegame_45fd24acc2aa4bb399f9c1ba51194af7",
+    "projectSnapshot": {
+      "rows": 4642,
+      "firstEventAt": "2026-10-23T06:30:47.449Z",
+      "lastEventAt": "2026-10-23T08:32:49.323Z",
+      "sha256": "039612e0fbc0ead02821c0013ed0687715dbd6aeff0689501132e6d75fc29e92"
+    },
+    "nativeSnapshot": {
+      "rows": 2851,
+      "bytes": 77494578,
+      "sha256": "b40e14f52f9cc49d48e0446ac123751ab101f3ded2e9aedb5ea807dbd6e86cf3",
+      "nativeSessionId": "01a16774-8e25-7500-9647-420c29f53e49"
+    },
+    "outcome": "Turn ended and session stopped; the host's final measurement explicitly leaves overall game quality unverified.",
+    "actualModel": "deepseek-v4.1-flash",
+    "actualUpstreamProtocol": "chat-completions",
+    "protocolProof": "All 318 opaque carrier envelopes declare chat-completions; host usage epochs are provider:<UUID>. The CLI-facing Responses environment is a local bridge interface, not evidence that the upstream uses Responses.",
+    "nativeBuild": {
+      "sourceCommit": "f3b87d82de569c44651dddd480e29c228e8884eb",
+      "dirty": true,
+      "version": "bgs 0.163.0",
+      "sourceComparison": "Relevant history accounting and context limit functions also match the recorded build source commit."
+    },
+    "recordedUsage": {
+      "inputIncludingCache": 46520600,
+      "cacheRead": 43771392,
+      "inputExcludingCache": 2749208,
+      "output": 507735,
+      "reasoningSubsetOfOutput": 253056,
+      "total": 47028335,
+      "incompleteReceiptPresent": true
+    },
+    "usageBoundary": "Recorded usage agrees between native input-minus-cache and host prompt accounting. Reasoning is already inside output. One incomplete receipt remains unknown; these totals are recorded usage, not proof of a complete provider bill.",
+    "originalEvidenceHandling": "Snapshots outside the project were read only for analysis. No original project files or receipts were changed; no private reasoning text is reproduced here."
+  },
+  "planAndSelfReview": [
+    "Separate actual upstream requests, native history, host progress receipts and project tool results; do not equate transcript volume with model tokens.",
+    "Reconstruct the compaction boundary from complete usage, the native estimator, turn boundaries and the actual provider bridge.",
+    "Change only the missing accounting contract and the default tool projection. Keep provider history, signatures, billing, validation scope and explicit details.",
+    "Verify with a native process resumed against a local scripted provider, threshold cases, existing protocol/error tests and production TypeScript.",
+    "Reject new prompts, model reviewers, retry budgets, full-stream buffering, guessed usage and case-specific test rules. The main remaining project iteration cost does not establish a BGS automatic retry defect."
+  ],
+  "findings": [
+    {
+      "id": "converted-history-double-estimation",
+      "classification": "confirmed BGS bridge defect; fixed",
+      "sources": [
+        "packages/agent-workflow-server/src/model-providers/request.ts",
+        "packages/agent-workflow-server/src/model-providers/messages.ts:124",
+        "packages/agent-workflow-server/src/model-providers/requests.ts:39",
+        "vendor/bgs/bgs-rs/bgs-api/src/sse/responses.rs:32",
+        "vendor/bgs/bgs-rs/core/src/context_manager/history.rs:905",
+        "vendor/bgs/bgs-rs/core/src/context_manager/history.rs:935"
+      ],
+      "cause": "Converted providers preserve the raw assistant, including tool calls and private protocol data, inside opaque native reasoning carriers. Provider prompt usage already accounts for replayed input. The converted response omitted x-reasoning-included, so native history added an estimate of old carriers before the latest user boundary to the reported context again.",
+      "observedBoundary": {
+        "startEvent": 895,
+        "endEvent": 898,
+        "elapsedSeconds": 143.155,
+        "oldCarrierCount": 55,
+        "oldCarrierEncodedChars": 603580,
+        "additionalEstimatedTokens": 104590,
+        "reportedContextTokens": 212601,
+        "inflatedContextTokens": 317191,
+        "rawModelContextWindow": 272000,
+        "usableModelContextWindow": 258400,
+        "autoCompactLimit": 244800
+      },
+      "estimator": "Sum per carrier: ceil(max(0, floor(encodedLength * 3 / 4) - 650) / 4). The auto-compact limit is 90% of raw 272000; the separate 95% usable-context headroom is not applied again.",
+      "change": "Converted streaming and non-streaming responses declare x-reasoning-included: true. Native Responses forwarding is unchanged. Provider history, signatures and billing receipts are unchanged.",
+      "reproduction": "Before the fix, the local native resume fixture compacted at 220000 reported prompt tokens. After the fix it does not compact at 220000 and still compacts at 250000. The full earlier synthetic private carrier is present in the resumed provider request; tool results and exact reported usage remain intact.",
+      "supersedes": "The prior fixed-snapshot audit current-project-token-time-audit-2026-10-23.json had not established a compaction misfire. Native history and the actual converted protocol now establish one.",
+      "costBoundary": "This proves one premature compaction trigger, not that all four compactions were unnecessary or that 143.155 seconds will disappear from a full run. Later necessary compaction can still occur. The header changes context estimation, not billing."
+    },
+    {
+      "id": "resource-check-default-node-expansion",
+      "classification": "confirmed BGS tool projection defect; fixed",
+      "sources": [
+        "packages/agent-workflow-server/src/beegame/workflow-read-tools.ts:147",
+        "packages/agent-workflow-server/src/beegame/ui-layout-tool.ts:37"
+      ],
+      "evidenceEvents": {
+        "request": 4379,
+        "result": 4382,
+        "input": {}
+      },
+      "cause": "The tool promises concise default results but returned whole resource-bearing nodes: 14 Scene nodes and 22 UI nodes in this receipt, including fields unrelated to a default resource summary.",
+      "change": "Default file summaries now expose bindingNodeCount instead of the whole bindings array. Existing detailsFor still returns exact full nodes; every saved file is validated and all issues remain visible.",
+      "savedReceiptProjection": {
+        "originalTextChars": 15422,
+        "reprojectedTextChars": 5345,
+        "reductionPercent": 65.34
+      },
+      "measurementBoundary": "Pure projection of the saved tool receipt, not a project rerun or a token benchmark. Native tool history contains one text block, so host content plus structuredContent must not be counted twice.",
+      "compatibility": "No repository consumer uses files[].bindings outside the tool tests. File identity, hashes, assetRefs, nodeCount, resource/requirement summaries, full validation and selected full-node expansion remain available."
+    },
+    {
+      "id": "context-growth-and-project-iteration",
+      "classification": "measured behavior; no additional BGS mechanism justified",
+      "facts": {
+        "toolCalls": 469,
+        "toolResults": 469,
+        "providerResponses": 318,
+        "compactions": 4,
+        "userTurns": 2,
+        "toolResultTextChars": 1728518,
+        "toolArgumentChars": 565288,
+        "inlineImages": 38,
+        "uniqueInlineImages": 35
+      },
+      "growth": "Each compaction replaces history with five items, including a fresh summary; old raw histories do not recursively accumulate. Large reads, generated code/tool arguments, images and protocol-required assistant history explain substantial growth. Character counts are once-returned content, not provider tokens or repeated billable context.",
+      "ineffectiveTests": {
+        "failedProjectPlaytests": 9,
+        "passedProjectPlaytests": 2,
+        "additionalProductionSmoke": 1,
+        "observedTestExecutionSecondsApprox": 440.5,
+        "observedRuntimeErrors": 0
+      },
+      "attribution": "Failures are separate agent-issued commands against project gameplay/UI assertions, with the correct cwd. They do not establish host automatic retries, browser failure, repeated per-call context reinjection or a cache-prefix defect.",
+      "decision": "Do not hardcode project routes, assertion answers or new iteration gates. Do not silently remove necessary reasoning/signatures, clamp context or impose shorter transport timeouts on the basis of one project."
+    }
+  ],
+  "knownLimits": [
+    "Missing usage is still unknown. The header describes usage semantics, not receipt availability; existing missing-usage tests continue to omit usage and record incomplete receipts.",
+    "Native record_token_usage_info(None) leaves the previous context baseline unchanged. This pre-existing missing-usage limitation can undercount new content. With consecutive missing receipts and an intervening steer, true also omits a newly generated carrier that false would partially estimate after the new user boundary. False still misses other unreported content and double-counts older fully reported carriers, so it is not a correct fallback. This patch does not claim accurate context accounting without provider usage; no usage is fabricated and streams are not buffered just to decide a header.",
+    "The local fixture uses synthetic reported token numbers to isolate native threshold behavior; it does not model real-provider tokenization or measure end-to-end cost savings.",
+    "No service restart or real-project execution was performed. Runtime savings and overall game quality remain unmeasured."
+  ],
+  "validation": {
+    "localTests": {
+      "pass": 86,
+      "fail": 0,
+      "files": [
+        "packages/agent-workflow-server/src/model-providers/context-accounting.native.test.ts",
+        "packages/agent-workflow-server/src/model-providers/integration.test.ts",
+        "packages/agent-workflow-server/src/model-providers/protocols.test.ts",
+        "packages/agent-workflow-server/src/model-providers/response-stream.test.ts",
+        "packages/agent-workflow-server/src/model-providers/bridge.test.ts",
+        "packages/agent-workflow-server/src/model-providers/security-regressions.test.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-read-tools.test.ts"
+      ],
+      "nativeTestsEnabledBy": "BGS_SANDBOX_TESTS=1",
+      "networkScope": "Only local scripted provider fixtures; no real model endpoint."
+    },
+    "typecheck": {
+      "command": "./node_modules/.bin/tsc --noEmit -p tsconfig.json",
+      "exitCode": 0,
+      "scope": "Repository production TypeScript; tsconfig excludes test files."
+    },
+    "selfReviewCorrection": "An initial upper-threshold fixture used 240000 based on incorrectly applying 95% context headroom twice. Reading auto_compact_token_limit corrected the threshold to 244800; the independent above-limit fixture now uses 250000.",
+    "diffCheck": "git diff --check passed"
+  }
+}

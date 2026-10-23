@@ -146,7 +146,8 @@ export async function checkResourcesAndBindings(workspace: string, input: unknow
     requirementBindings: audit.bindings,
     files: bindings.files.map(file => file.file === detailsFor ? file : {
       file: file.file, sha256: file.sha256, documentId: file.documentId, kind: file.kind, assetRefs: file.assetRefs,
-      nodeCount: file.nodes.length, bindings: file.nodes.filter(node => JSON.stringify(node).includes('"assetRef":')),
+      nodeCount: file.nodes.length,
+      bindingNodeCount: file.nodes.filter(node => JSON.stringify(node).includes('"assetRef":')).length,
     }),
     note: 'All saved UI/Scene files and registered resources checked; detailsFor changes presentation only. Missing inputs are unverified. Actions/state bindings are source operands only: runtime wiring, design coverage and quality remain unverified. No files changed.' }
 }
