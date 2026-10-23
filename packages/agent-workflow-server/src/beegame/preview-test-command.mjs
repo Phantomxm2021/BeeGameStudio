@@ -1,8 +1,68 @@
 import { open, mkdir, mkdtemp, realpath, writeFile, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
 import { createHash } from 'node:crypto';
 import { relative, resolve, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { resolvePreviewApi, withPreviewPage } from './preview-test-client.mjs';
+
+// Read at most 2 KiB per stream. Only the head/tail are sampled; the omitted
+// middle may contain the key error or a credential's opening label. Redaction
+// covers recognizable sampled forms, not unknown context. Full output stays on disk.
+async function failureOutputExcerpt(path) {
+  let file;
+  try {
+    if (await realpath(path) !== path) throw Error('Aliased output');
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const stat = await file.stat();
+    if (!stat.isFile()) throw Error('Not a regular output file');
+    const limit = 2048, truncated = stat.size > limit;
+    const read = async (length, position) => {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await file.read(buffer, 0, length, position);
+      return buffer.subarray(0, bytesRead);
+    };
+    const decode = buffer => {
+      let start = 0;
+      while (start < buffer.length && (buffer[start] & 0xc0) === 0x80) start++;
+      return new StringDecoder('utf8').write(buffer.subarray(start));
+    };
+    // Recognize both forms on the original sample. Overlapping spans must not
+    // rewrite each other's quote/escape context or the original line boundary.
+    const redact = (value, start = 0) => {
+      const ranges = [
+        /\bBearer\s+[^\s,;"']+/gi,
+        /\b(?:authorization|api[-_ ]?key|access[-_ ]?token|token|secret|password|cookie)["']?\s*[:=]\s*(?:"(?:\\(?:[\s\S]|$)|[^"\\])*(?:"|$)|'(?:\\(?:[\s\S]|$)|[^'\\])*(?:'|$)|[^\s,;]+)/gi,
+      ].flatMap(pattern => [...value.matchAll(pattern)].map(match => [Math.max(start, match.index), match.index + match[0].length]))
+        .sort((a, b) => a[0] - b[0]);
+      let output = '', cursor = start;
+      for (const [begin, end] of ranges) {
+        if (end <= cursor) continue;
+        if (begin >= cursor) output += value.slice(cursor, begin) + '[credential redacted]';
+        cursor = end;
+      }
+      return output + value.slice(cursor);
+    };
+    const gap = '\n[...truncated...]\n', part = Math.floor((limit - gap.length) / 2);
+    let text;
+    if (truncated) {
+      const head = redact(decode(await read(part, 0)));
+      // Include one preceding byte within the 2 KiB budget to distinguish a
+      // complete first tail line from a fragment. Never join across the gap before redaction.
+      const tailBytes = await read(part + 1, stat.size - part - 1);
+      const tail = decode(tailBytes.subarray(1));
+      const tailStart = tailBytes[0] === 10 || tailBytes[0] === 13 ? 0
+        : /^[^\r\n]*(?:\r\n?|\n|$)/.exec(tail)[0].length;
+      text = head + gap + redact(tail, tailStart);
+    } else text = redact(decode(await read(stat.size, 0)));
+    return { text: text.slice(0, limit), truncated: truncated || text.length > limit };
+  } catch {
+    return { unavailable: true };
+  } finally {
+    // Optional diagnostics must not replace the process result or prevent its receipt.
+    try { await file?.close(); } catch {}
+  }
+}
 
 /** One first-load observation without a project-authored test driver. It is a
  * diagnostic image, never a gameplay, design or source-version verdict. */
@@ -214,6 +274,10 @@ export async function runPreviewTest(script, args = [], { timeoutMs = 300_000 } 
     try {
       await termination;
       Object.assign(report, interruption, {finishedAt:new Date().toISOString()});
+      if (report.status !== 'exited' || report.exitCode !== 0) report.failureOutput = {
+        stdout: await failureOutputExcerpt(join(directory, 'stdout.txt')),
+        stderr: await failureOutputExcerpt(join(directory, 'stderr.txt')),
+      };
       await writeFile(join(root, reportPath), JSON.stringify(report, null, 2));
     } finally {
       clearTimeout(timer);

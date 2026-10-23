@@ -790,7 +790,9 @@ test('Preview test entry uses Node, retains complete output, and cannot reuse a 
     expect(JSON.parse(stdout.split('\n')[0]!)).toEqual({node:true,arg:'literal;not-a-shell-command',checks:[false]})
     expect(stdout.length).toBeGreaterThan(80000)
     expect(await readFile(join(root,first.result.stderrPath),'utf8')).toContain('actual failure details')
-    expect(JSON.stringify(first.result).length).toBeLessThan(1500)
+    expect(first.result.failureOutput.stderr).toEqual({text:'actual failure details\n',truncated:false})
+    expect(first.result.failureOutput.stdout.truncated).toBe(true)
+    expect(JSON.stringify(first.result).length).toBeLessThan(6000)
     expect(first.result).not.toHaveProperty('passed')
     for(let i=0;i<3;i++) {
       const saved=JSON.parse(await readFile(join(root,first.result.reportPath),'utf8'))
@@ -801,6 +803,7 @@ test('Preview test entry uses Node, retains complete output, and cannot reuse a 
     expect(await readFile(join(root,'calls.txt'),'utf8')).toBe('once\n')
     const second=await run('--run','test.mjs','same-test','0')
     expect(second.code).toBe(0);expect(second.result.quality).toBe('unverified')
+    expect(second.result).not.toHaveProperty('failureOutput')
     expect(second.result.reportPath).not.toBe(first.result.reportPath)
     expect(await readFile(join(root,first.result.stdoutPath),'utf8')).toBe(stdout)
     expect((await run('--snapshot','development','0','540')).result.error).toContain('Expected --snapshot')
@@ -900,6 +903,14 @@ test('optional Preview is published to the bound native session, lazy help works
       'Click start, observe countdown','key down/hold/up','asserts frame coverage, pause and resume'])
       expect(help).not.toContain(script)
     expect(help).toContain('Exit code is not test quality')
+    expect(help).toContain('at most 2 KiB read per stream')
+    expect(help).toContain('the key error may be absent')
+    expect(help).toContain('recognizable sampled credential forms only')
+    expect(help).toContain('Redaction and omission use the original sampled text')
+    expect(help).toContain('multiline credentials beginning in the unread middle may remain')
+    expect(help).toContain('--client')
+    expect(help).not.toContain('withPreviewPage(')
+    expect(help).not.toContain('withPlayCapture(')
 
     const diagnostic=await command(root,tools.directory,'preview.mjs','--client')
     expect(diagnostic.code).toBe(0)
@@ -908,18 +919,34 @@ test('optional Preview is published to the bound native session, lazy help works
       environment:{helper:'BEEGAME_PREVIEW_TEST_MODULE',playwright:'BEEGAME_PLAYWRIGHT_MODULE',capability:'BEEGAME_PREVIEW_CAPABILITY_FILE'}})
     expect(client.helperModule).toBe(new URL('./preview-test-client.mjs',(await sharedContentChecker()).moduleUrl).href)
     expect(client.playCapture).toContain('withPlayCapture')
+    expect(client.withPreviewPage).toContain('beforeNavigate?')
+    expect(client.withPreviewPage).toContain('runtimeErrorPolicy?')
+    expect(client.options).toContain('defaults to observe')
+    for(const term of ['OUTER preview wrapper','frame is a FrameLocator','gameFrame is the actual game Frame',
+      'Reload can detach gameFrame','FrameLocator has no evaluate/waitForFunction'])expect(client.frames).toContain(term)
+    for(const term of ['context.addInitScript','separate window','never page.evaluate','missing probe is unverified',
+      'do not prove audible output'])expect(client.probes).toContain(term)
+    expect(client.observations).toContain('first 5 redacted samples')
+    expect(client.checkNumericSamples).toContain('empty samples are unverified')
+    expect(client.checkNumericSamples).toContain('violations return failed, without throwing')
+    expect(client.checkNumericSamples).toContain('Invalid samples/bounds throw')
+    expect(client.checkTextSeparation).toContain('missing/hidden text is unverified')
+    expect(client.checkTextSeparation).toContain('overlap returns failed, without throwing')
+    expect(client.lifecycle).toContain('returns the callback result')
+    expect(client.capture).toContain('reject with error.report')
+    expect(client.capture).toContain('setup/write failures may reject without a report')
     expect(diagnostic.stdout).not.toContain(preview.baseUrl)
     expect(diagnostic.stdout).not.toContain(path)
-    expect(Buffer.byteLength(diagnostic.stdout)).toBeLessThan(1500)
+    expect(Buffer.byteLength(diagnostic.stdout)).toBeLessThan(6000)
     // A child script can resolve exports directly; no source read/copy, env
     // dump, package installation, browser start or review verdict is required.
     const node=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',
-      'const {withPreviewPage,withPlayCapture,checkTextSeparation}=await import('+JSON.stringify(client.helperModule)+');'+
+      'const {withPreviewPage,withPlayCapture,checkTextSeparation,checkNumericSamples}=await import('+JSON.stringify(client.helperModule)+');'+
       'const {chromium}=await import('+JSON.stringify(client.playwrightModule)+');'+
-      'console.log([typeof withPreviewPage,typeof withPlayCapture,typeof checkTextSeparation,typeof chromium.connectOverCDP].join(","))'],
+      'console.log([typeof withPreviewPage,typeof withPlayCapture,typeof checkTextSeparation,typeof checkNumericSamples,typeof chromium.connectOverCDP].join(","))'],
       {cwd:root,env:{PATH:process.env.PATH},stdout:'pipe',stderr:'pipe'})
     const [stdout,stderr,exit]=await Promise.all([new Response(node.stdout).text(),new Response(node.stderr).text(),node.exited])
-    expect(exit,stderr).toBe(0);expect(stdout.trim()).toBe('function,function,function,function')
+    expect(exit,stderr).toBe(0);expect(stdout.trim()).toBe('function,function,function,function,function')
     expect((await command(root,tools.directory,'preview.mjs','--client','--help')).code).toBe(1)
     expect((await fetch(preview.baseUrl+'/status')).status).toBe(200)
     const first=tools.close();expect(tools.close()).toBe(first)

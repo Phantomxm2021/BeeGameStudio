@@ -36,17 +36,8 @@ test('preview capability exposes only its owned preview and revokes browser acce
     expect(refreshed.environment.sandbox).toBe(PREVIEW_IFRAME_SANDBOX)
     expect(access.instruction).toContain('Read returned URLs from JSON')
     expect(access.instruction).toContain('avoids shell sandbox escape approvals')
-    const helper = access.instruction.split('\n').find(line=>line.startsWith('Optional Node helper:'))!
-    expect(helper).not.toContain(access.baseUrl)
-    expect(helper).not.toContain('apiUrl:')
-    expect(helper).toContain('gameFrame')
-    expect(helper).toContain('node <test-script.mjs> (not bun)')
-    expect(helper).toContain('beforeNavigate')
-    const audioScope = access.instruction.split('\n').find(line => line.startsWith('Audio/custom probe scope:'))!
-    for (const term of ['OUTER preview wrapper', 'context.addInitScript', 'separate window',
-      'gameFrame.evaluate(() => window.__audioEvents ?? null)', 'never page.evaluate',
-      'missing probe is unverified', 'do not prove audible output'])
-      expect(audioScope).toContain(term)
+    expect(access.instruction).toContain('preview.mjs --client')
+    expect(access.instruction).not.toContain('withPreviewPage(')
     const html = await (await fetch(result.hostUrl)).text()
     expect(html).toContain(`sandbox="${PREVIEW_IFRAME_SANDBOX}"`)
     expect(html).not.toContain('allow-same-origin')

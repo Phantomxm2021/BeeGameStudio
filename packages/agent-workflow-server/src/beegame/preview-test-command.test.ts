@@ -110,8 +110,190 @@ test('ordinary exit codes and complete output remain facts, not quality verdicts
     expect(result).not.toHaveProperty('passed')
     expect((await readFile(join(root, result.stdoutPath), 'utf8')).length).toBeGreaterThan(80000)
     expect(await readFile(join(root, result.stderrPath), 'utf8')).toContain('failure details')
+    if (exitCode) {
+      expect(result.failureOutput.stderr).toEqual({text:'failure details\n',truncated:false})
+      expect(result.failureOutput.stdout.truncated).toBe(true)
+      expect(result.failureOutput.stdout.text.length).toBeLessThanOrEqual(2048)
+      const inspected = await complete(launch(`inspectPreviewTest(${JSON.stringify(result.reportPath)})`))
+      expect(inspected.result.failureOutput).toEqual(result.failureOutput)
+    } else expect(result).not.toHaveProperty('failureOutput')
   }
   expect(await readFile(join(root, 'calls.txt'), 'utf8')).toBe('xx')
+})
+
+test('failure excerpts retain bounded UTF-8 log ends and redact credentials without rewriting full logs', async () => {
+  await writeFile(join(root, 'test.mjs'), `
+    console.log('AssertionError: expected 2, received 3\\n'+'场景🎮'.repeat(10000)+'\\nstdout end');
+    console.error('Error: original failure\\napi_key=fixture-secret\\nBearer fixture-bearer\\n'+'堆栈🎮'.repeat(10000)+'\\nstderr end');
+    process.exitCode=7;`)
+  const {result} = await complete(launch("runPreviewTest('test.mjs')"))
+  expect(result).toMatchObject({status:'exited',exitCode:7,quality:'unverified'})
+  for (const [stream, beginning] of [['stdout','AssertionError: expected 2, received 3'],['stderr','Error: original failure']]) {
+    const excerpt=result.failureOutput[stream!]
+    expect(excerpt.truncated).toBe(true)
+    expect(excerpt.text).toStartWith(beginning!)
+    expect(excerpt.text).toContain(stream+' end')
+    expect(excerpt.text).not.toContain('\uFFFD')
+    expect(excerpt.text.length).toBeLessThanOrEqual(2048)
+  }
+  expect(JSON.stringify(result.failureOutput)).not.toContain('fixture-secret')
+  expect(JSON.stringify(result.failureOutput)).not.toContain('fixture-bearer')
+  expect(await readFile(join(root,result.stderrPath),'utf8')).toContain('api_key=fixture-secret')
+})
+
+test('unavailable or replaced output cannot hide the failure or inline an unrelated file', async () => {
+  await writeFile(join(root,'decoy.txt'),'UNRELATED_FILE_MUST_NOT_BE_INLINED')
+  await writeFile(join(root,'test.mjs'), `import {readdirSync,unlinkSync,symlinkSync} from 'node:fs';
+    const dir='.beegame/tmp/'+readdirSync('.beegame/tmp').find(name=>name.startsWith('preview-test-'));
+    unlinkSync(dir+'/stdout.txt');unlinkSync(dir+'/stderr.txt');
+    symlinkSync(process.cwd()+'/decoy.txt',dir+'/stderr.txt');process.exitCode=9;`)
+  const {result}=await complete(launch("runPreviewTest('test.mjs')"))
+  expect(result).toMatchObject({status:'exited',exitCode:9,
+    failureOutput:{stdout:{unavailable:true},stderr:{unavailable:true}}})
+  expect(JSON.stringify(result)).not.toContain('UNRELATED_FILE_MUST_NOT_BE_INLINED')
+})
+
+test('sampled credential prefixes are redacted before partial tail lines are omitted', async () => {
+  await writeFile(join(root, 'test.mjs'), `
+    console.log('Bearer HEAD_SECRET_'+'s'.repeat(4000)+'_TAIL_SECRET');
+    console.error('Error: original failure\\r\\nAuthorization: Bearer HEAD_SECRET_'+
+      's'.repeat(4000)+'_TAIL_SECRET\\r\\nError: final details');
+    process.exitCode=7;`)
+  const {result} = await complete(launch("runPreviewTest('test.mjs')"))
+  expect(result).toMatchObject({status:'exited',exitCode:7,quality:'unverified'})
+  for (const stream of ['stdout', 'stderr']) {
+    const excerpt = result.failureOutput[stream]
+    expect(excerpt.truncated).toBe(true)
+    expect(excerpt.text).toContain('[...truncated...]')
+    expect(excerpt.text).not.toContain('HEAD_SECRET')
+    expect(excerpt.text).not.toContain('TAIL_SECRET')
+    const full = await readFile(join(root, result[stream+'Path']), 'utf8')
+    expect(full).toContain('HEAD_SECRET')
+    expect(full).toContain('TAIL_SECRET')
+  }
+  expect(result.failureOutput.stdout.text).toStartWith('[credential redacted]')
+  expect(result.failureOutput.stderr.text).toStartWith('Error: original failure\r\n')
+  expect(result.failureOutput.stderr.text).toEndWith('Error: final details\n')
+})
+
+test('tail cuts at LF/CRLF line starts retain complete errors and multiline credential labels for redaction', async () => {
+  const part = Math.floor((2048 - '\n[...truncated...]\n'.length) / 2)
+  for (const newline of ['\n', '\r\n']) {
+    const prefix = 'Error: first'+newline+'x'.repeat(3000)+newline
+    const error = 'Error: COMPLETE_TAIL_ERROR'+newline
+    const label = 'password="'+newline+'SYNTHETIC_SECRET_LINE'+newline
+    const ending = newline+'"'+newline+'Error: final'+newline
+    const stdout = prefix+error+'z'.repeat(part-Buffer.byteLength(error))
+    const stderr = prefix+label+'s'.repeat(part-Buffer.byteLength(label+ending))+ending
+    await writeFile(join(root,'test.mjs'), `process.stdout.write(${JSON.stringify(stdout)});
+      process.stderr.write(${JSON.stringify(stderr)});process.exitCode=7;`)
+    const {result} = await complete(launch("runPreviewTest('test.mjs')"))
+    expect(result).toMatchObject({status:'exited',exitCode:7})
+    expect(result.failureOutput.stdout.text).toContain('Error: COMPLETE_TAIL_ERROR')
+    expect(result.failureOutput.stderr.text).toContain('[credential redacted]')
+    expect(result.failureOutput.stderr.text).not.toContain('SYNTHETIC_SECRET_LINE')
+    expect(result.failureOutput.stderr.text).toEndWith('Error: final'+newline)
+    expect(await readFile(join(root,result.stderrPath),'utf8')).toBe(stderr)
+  }
+})
+
+test('long ordinary error prefixes survive while quoted credentials cut mid-value or after an escape are redacted', async () => {
+  const part = Math.floor((2048 - '\n[...truncated...]\n'.length) / 2)
+  const start = 'Error: original\npassword="first\\"line\nSYNTHETIC_SECRET_HEAD\n'
+  for (const cut of ['s', '\\']) {
+    const stdout = 'Error: LONG_ERROR '+ 'x'.repeat(4000)
+    const stderr = start+'s'.repeat(part-Buffer.byteLength(start)-1)+cut+
+      's'.repeat(4000)+'"\nError: final\n'
+    await writeFile(join(root,'test.mjs'), `process.stdout.write(${JSON.stringify(stdout)});
+      process.stderr.write(${JSON.stringify(stderr)});process.exitCode=7;`)
+    const {result} = await complete(launch("runPreviewTest('test.mjs')"))
+    expect(result.failureOutput.stdout.text).toStartWith('Error: LONG_ERROR ')
+    expect(result.failureOutput.stdout.truncated).toBe(true)
+    expect(result.failureOutput.stderr.text).toStartWith('Error: original\n[credential redacted]')
+    expect(result.failureOutput.stderr.text).not.toContain('SYNTHETIC_SECRET_HEAD')
+    expect(result.failureOutput.stderr.text).toEndWith('Error: final\n')
+    expect(await readFile(join(root,result.stderrPath),'utf8')).toBe(stderr)
+  }
+})
+
+test('excerpt read/close failures preserve the original exit and finalized receipt without retries', async () => {
+  await writeFile(join(root, 'test.mjs'), `import {appendFileSync} from 'node:fs';
+    appendFileSync('calls.txt','x');
+    console.log('original stdout\\n'+'x'.repeat(4000)+'\\nstdout end');
+    console.error('original failure\\n'+'x'.repeat(4000)+'\\nstderr end');
+    process.exitCode=7;`)
+  for (const failRead of [false, true]) {
+    // Fault only the optional read handles, after closing the real descriptor.
+    // This exercises the actual adapter finalization and persisted receipt.
+    const {code, result} = await complete(launch(`(async()=>{
+      const fs=(await import('node:fs/promises')).default, originalOpen=fs.open;
+      let bytesRequested=0, closed=0;
+      fs.open=async(...args)=>{
+        const file=await originalOpen(...args);
+        if(typeof args[1]==='number'){
+          const read=file.read.bind(file), close=file.close.bind(file);
+          file.read=async(...args)=>{
+            bytesRequested+=args[2];
+            if(${failRead})throw Error('synthetic read failure');
+            return read(...args);
+          };
+          file.close=async()=>{await close();closed++;throw Error('synthetic close failure');};
+        }
+        return file;
+      };
+      (await import('node:module')).syncBuiltinESMExports();
+      return {...await runPreviewTest('test.mjs'),bytesRequested,closed};
+    })()`))
+    expect(code).toBe(1)
+    expect(result).toMatchObject({status:'exited',exitCode:7,quality:'unverified',closed:2})
+    expect(result.bytesRequested).toBeGreaterThan(0)
+    expect(result.bytesRequested).toBeLessThanOrEqual(4096)
+    if (failRead) expect(result.failureOutput).toEqual({stdout:{unavailable:true},stderr:{unavailable:true}})
+    else {
+      expect(result.failureOutput.stdout.text).toContain('original stdout')
+      expect(result.failureOutput.stderr.text).toContain('original failure')
+    }
+    const saved = JSON.parse(await readFile(join(root, result.reportPath), 'utf8'))
+    expect(saved).toMatchObject({status:'exited',exitCode:7,failureOutput:result.failureOutput})
+    expect(saved.finishedAt).toBeString()
+  }
+  expect(await readFile(join(root, 'calls.txt'), 'utf8')).toBe('xx')
+})
+
+test('credential matches use original text when Bearer and escaped quoted values overlap', async () => {
+  const stdout = 'Error: first\npassword="Bearer abc\\"SYNTHETIC_DOUBLE_SECRET"\nError: last\n'
+  const stderr = "Error: first\npassword='Bearer abc\\'SYNTHETIC_SINGLE_SECRET'\n"+
+    'Authorization: Bearer SYNTHETIC_HEADER_SECRET\nError: last\n'
+  await writeFile(join(root,'test.mjs'), `process.stdout.write(${JSON.stringify(stdout)});
+    process.stderr.write(${JSON.stringify(stderr)});process.exitCode=7;`)
+  const {result} = await complete(launch("runPreviewTest('test.mjs')"))
+  expect(result).toMatchObject({status:'exited',exitCode:7})
+  for (const stream of ['stdout','stderr']) {
+    const excerpt = result.failureOutput[stream]
+    expect(excerpt.truncated).toBe(false)
+    expect(excerpt.text).not.toContain('SYNTHETIC_')
+    expect(excerpt.text).toStartWith('Error: first\n')
+    expect(excerpt.text).toEndWith('Error: last\n')
+  }
+  expect(await readFile(join(root,result.stdoutPath),'utf8')).toBe(stdout)
+  expect(await readFile(join(root,result.stderrPath),'utf8')).toBe(stderr)
+})
+
+test('partial tail omission uses original lines even when a credential replacement removes newlines', async () => {
+  const part = Math.floor((2048 - '\n[...truncated...]\n'.length) / 2)
+  for (const newline of ['\n','\r\n']) {
+    const tail = 'fragment password="SYNTHETIC_FIRST_SECRET'+newline+
+      'SYNTHETIC_SECOND_SECRET"; Error: COMPLETE_LATER_LINE'+newline
+    const stderr = 'Error: first\n'+'x'.repeat(3000)+tail+'z'.repeat(part-Buffer.byteLength(tail))
+    await writeFile(join(root,'test.mjs'), `process.stderr.write(${JSON.stringify(stderr)});process.exitCode=7;`)
+    const {result} = await complete(launch("runPreviewTest('test.mjs')"))
+    expect(result).toMatchObject({status:'exited',exitCode:7})
+    expect(result.failureOutput.stderr.truncated).toBe(true)
+    expect(result.failureOutput.stderr.text).toContain('; Error: COMPLETE_LATER_LINE'+newline)
+    expect(result.failureOutput.stderr.text).not.toContain('SYNTHETIC_')
+    expect(result.failureOutput.stderr.text).not.toContain('fragment')
+    expect(await readFile(join(root,result.stderrPath),'utf8')).toBe(stderr)
+  }
 })
 
 test('launch failure and an unfinished legacy receipt cannot become success', async () => {
