@@ -28,8 +28,9 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
   const f=await fixture(false)
   try {
     expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true})
-    for(const path of ['.beegame','transcripts','logs'])await mkdir(join(f.root,path))
+    for(const path of ['.beegame','.beegame-attachments','transcripts','logs'])await mkdir(join(f.root,path))
     await writeFile(join(f.root,'logs/index.json'),'{}')
+    await writeFile(join(f.root,'.beegame-attachments/brief.txt'),'Reference input, not imported project source')
     expect(await observeProjectCreation(f.root,brief)).toEqual(f.run.creation)
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:'blueprint'})).toEqual(f.run.creation)
     expect(await observeProjectCreation(f.root,{...brief,build_source:{kind:'import'}})).toBeUndefined()
@@ -43,6 +44,10 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:'blueprint'})).toBeUndefined()
     expect(await readFile(join(f.root,'README.md'),'utf8')).toBe('Existing user source')
     await expect(readFile(join(f.root,'package.json'))).rejects.toThrow()
+    await rm(join(f.root,'README.md'))
+    await rm(join(f.root,'.beegame-attachments'),{recursive:true})
+    await symlink(join(f.root,'.beegame'),join(f.root,'.beegame-attachments'))
+    expect(await observeProjectCreation(f.root,brief)).toBeUndefined()
   }finally{await f.close()}
 })
 

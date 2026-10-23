@@ -147,7 +147,7 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     expect(guide).toContain('do not create runtime scene/UI content here')
     expect(guide).toContain('once the selected designs and resources for that content exist')
     expect(guide).toContain('create and maintain the eight design documents')
-    expect(guide).toContain('Determine resource production methods from selected visual/audio designs and consuming interfaces from actual resources')
+    expect(guide).toContain('Resolve resource production methods and consuming interfaces from selected designs and actual resources')
     expect(guide).toContain('The Agent chooses methods and work order')
     for (const document of DESIGN_WRITING_ORDER) expect(guide).toContain(document)
     expect(guide).toContain('Verification applies to its recorded input version')

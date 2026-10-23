@@ -9,7 +9,9 @@ async function sourcePaths(root: string): Promise<string[]> {
   async function visit(dir: string) {
     for (const entry of await readdir(dir, {withFileTypes:true})) {
       const path = relative(root, join(dir, entry.name))
+      // Bootstrap materializes reference uploads before observing creation.
       if (path === '.beegame' || path === 'transcripts' ||
+          (path === '.beegame-attachments' && entry.isDirectory()) ||
           /^logs\/(index\.json|runtime-diagnostics\.jsonl(?:\.\d+)?)$/.test(path)) continue
       if (entry.isDirectory()) await visit(join(root,path))
       else paths.push(path)

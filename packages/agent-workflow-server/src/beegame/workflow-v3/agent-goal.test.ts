@@ -857,7 +857,7 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).toContain('without a second hardcoded layout')
     expect(prompt).toContain('Prose, palettes and JSON geometry do not replace visual design')
     expect(prompt).toContain('do not create runtime scene/UI content here')
-    expect(prompt).toContain('Determine resource production methods from selected visual/audio designs and consuming interfaces from actual resources')
+    expect(prompt).toContain('Resolve resource production methods and consuming interfaces from selected designs and actual resources')
     expect(prompt).not.toContain('Technical/resource plans start as drafts')
     expect(prompt).not.toContain('without waiting for production assets')
     expect(prompt).not.toContain('file_paths')

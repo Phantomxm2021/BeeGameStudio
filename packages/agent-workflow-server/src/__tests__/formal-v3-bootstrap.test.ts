@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,7 +9,7 @@ import { createLocalWorkflowStore } from '../beegame/workflow-v3/store'
 import { discussionMessagesSinceMeasurement } from '../beegame/workflow-v3/measured-build'
 import type { AgentMeasurement } from '../beegame/workflow-v3/state'
 
-test('formal project bootstrap starts the same V3 native goal as the explicit route', async () => {
+test.each([false, true])('formal project bootstrap starts the same V3 native goal with an initial reference: %s', async withReference => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-formal-v3-bootstrap-'))
   const store = createLocalWorkflowStore(join(root, 'workflow-store'))
   const cleanups: Array<() => void | Promise<void>> = []
@@ -37,6 +37,8 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
         project: { id: 'formal-game', name: 'New game', created_at: Date.now() },
         brief: { idea: 'Make a small game', option: { title: 'Selected game' },
           settings: { orientation: 'Landscape', resourceLibraryUsage: 'optional' },
+          ...(withReference ? { attachments: [{ type: 'file', filename: 'brief.txt', mediaType: 'text/plain',
+            data: Buffer.from('Synthetic reference only').toString('base64') }] } : {}),
           documentLanguage: 'en', gameUserVisibleLanguage: 'en', agentResponseLanguage: 'en' },
       }) })
     expect(response.status, await response.clone().text()).toBe(202)
@@ -48,6 +50,11 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
     expect(prompts[0]).not.toContain('$game-creative-director-expert')
     const workspace = await realpath(body.project.root_path)
     expect(workspaces).toEqual([workspace])
+    if (withReference) {
+      const attachments = await readdir(join(workspace, '.beegame-attachments'))
+      expect(attachments).toHaveLength(1)
+      expect(await readFile(join(workspace, '.beegame-attachments', attachments[0]!), 'utf8')).toBe('Synthetic reference only')
+    }
     const guide = await readFile(join(workspace, 'AGENTS.md'))
     // Native BGS loads the saved guide from cwd. Host context carries its
     // identity and the current tool contract, not a duplicate guide body.
