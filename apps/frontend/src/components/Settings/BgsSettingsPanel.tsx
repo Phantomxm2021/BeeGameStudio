@@ -1,12 +1,20 @@
-import { useEffect, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { getBgsSettings, saveBgsSettings, type BgsSettings } from '../../services/bgsSettingsApi';
 
-export function BgsSettingsPanel({ language }: { language: string }) {
+export type BgsSettingsHandle = { save: () => Promise<void> };
+export type BgsSettingsSaveState = { busy: boolean; disabled: boolean };
+
+export const BgsSettingsPanel = forwardRef<BgsSettingsHandle, {
+  language: string;
+  onSaveStateChange?: (state: BgsSettingsSaveState) => void;
+}>(function BgsSettingsPanel({ language, onSaveStateChange }, ref) {
   const zh = language.startsWith('zh');
   const [settings, setSettings] = useState<BgsSettings>();
   const [effort, setEffort] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const disabled = busy || !settings || effort === (settings.effort || '');
+  useEffect(() => { onSaveStateChange?.({ busy, disabled }); }, [busy, disabled, onSaveStateChange]);
   useEffect(() => {
     let alive = true;
     getBgsSettings().then(value => { if (alive) { setSettings(value); setEffort(value.effort || ''); } })
@@ -23,6 +31,7 @@ export function BgsSettingsPanel({ language }: { language: string }) {
     } catch { setStatus(zh ? '保存失败；若模型连接已变更，请重新打开设置。' : 'Save failed. Reopen settings if your model connection changed.'); }
     finally { setBusy(false); }
   };
+  useImperativeHandle(ref, () => ({ save }));
   return <section className="space-y-2 py-4" aria-label={zh ? 'BGS 设置' : 'BGS settings'}>
     <div className="grid gap-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
       <label className="text-sm font-medium" htmlFor="bgs-reasoning-effort">{zh ? '推理强度' : 'Reasoning effort'}</label>
@@ -36,10 +45,6 @@ export function BgsSettingsPanel({ language }: { language: string }) {
     <p className="text-xs text-muted-foreground">{settings?.efforts.length
       ? (zh ? `应用于当前模型：${settings.model}。设置按当前账号独立保存。` : `Applies to ${settings.model}. Saved separately for your current account.`)
       : (zh ? '当前连接未提供可确认的推理档位，保持默认。' : 'No verified reasoning options are available for this connection. Using defaults.')}</p>
-    <button type="button" disabled={busy || !settings || effort === (settings.effort || '')}
-      className="rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50" onClick={() => void save()}>
-      {busy ? (zh ? '保存中…' : 'Saving…') : (zh ? '保存推理设置' : 'Save reasoning settings')}
-    </button>
     {status && <p role="status" className="text-xs">{status}</p>}
   </section>;
-}
+});

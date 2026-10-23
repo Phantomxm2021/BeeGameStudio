@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { motion } from 'motion/react';
 import { EASE_OUT } from '../../beui/registry/lib/ease';
 import { ModelConnectionsPanel, type ModelConnectionsHandle, type ModelConnectionsSaveState } from '../../Settings/ModelConnectionsPanel';
-import { BgsSettingsPanel } from '../../Settings/BgsSettingsPanel';
+import { BgsSettingsPanel, type BgsSettingsHandle, type BgsSettingsSaveState } from '../../Settings/BgsSettingsPanel';
 import { PersonalImageConnectionPanel, type PersonalImageConnectionHandle, type PersonalImageConnectionSaveState } from '../../Settings/PersonalImageConnectionPanel';
 import {
   BookOpenText,
@@ -210,6 +210,8 @@ export function SettingsMenu({
   const [isSaving, setIsSaving] = useState(false);
   const imageSettingsRef = useRef<ImageSettingsHandle>(null);
   const [imageSettingsState, setImageSettingsState] = useState<ImageSettingsState>({ busy: false, canSave: false });
+  const bgsSettingsRef = useRef<BgsSettingsHandle>(null);
+  const [bgsSettingsSaveState, setBgsSettingsSaveState] = useState<BgsSettingsSaveState>({ disabled: true, busy: false });
   const modelConnectionsRef = useRef<ModelConnectionsHandle>(null);
   const [modelConnectionSaveState, setModelConnectionSaveState] = useState<ModelConnectionsSaveState>({ visible: false, disabled: true, busy: false });
   const imageConnectionRef = useRef<PersonalImageConnectionHandle>(null);
@@ -1268,7 +1270,7 @@ export function SettingsMenu({
                 </div>
               ) : null}
 
-              {activeSection === 'personal' && currentUser ? <BgsSettingsPanel key={currentUser.id} language={lang} /> : null}
+              {activeSection === 'personal' && currentUser ? <BgsSettingsPanel key={currentUser.id} ref={bgsSettingsRef} language={lang} onSaveStateChange={setBgsSettingsSaveState} /> : null}
               {activeSection === 'connections' && currentUser ? <ModelConnectionsPanel key={currentUser.id} ref={modelConnectionsRef} language={lang} onSaveStateChange={setModelConnectionSaveState} /> : null}
               {activeSection === 'image-connection' && currentUser ? <PersonalImageConnectionPanel key={currentUser.id} ref={imageConnectionRef} language={lang} onSaveStateChange={setImageConnectionSaveState} /> : null}
 
@@ -1438,7 +1440,7 @@ export function SettingsMenu({
                 />
               ) : null}
             </motion.div>
-            {(activeSection === 'image-connection' || activeSection === 'connections' && modelConnectionSaveState.visible || activeSection === 'platform' &&
+            {(activeSection === 'personal' && currentUser || activeSection === 'image-connection' || activeSection === 'connections' && modelConnectionSaveState.visible || activeSection === 'platform' &&
             activeTab !== 'model' &&
             activeTab !== 'projects' &&
             activeTab !== 'credit' &&
@@ -1447,11 +1449,11 @@ export function SettingsMenu({
                 <button
                   type="button"
                   aria-label={text.saveSettings}
-                  onClick={activeSection === 'image-connection' ? () => void imageConnectionRef.current?.save() : activeSection === 'connections' ? () => modelConnectionsRef.current?.saveByok() : handleSaveSettings}
-                  disabled={activeSection === 'image-connection' ? imageConnectionSaveState.disabled : activeSection === 'connections' ? modelConnectionSaveState.disabled : isSaveDisabled}
+                  onClick={activeSection === 'personal' ? () => void bgsSettingsRef.current?.save() : activeSection === 'image-connection' ? () => void imageConnectionRef.current?.save() : activeSection === 'connections' ? () => modelConnectionsRef.current?.saveByok() : handleSaveSettings}
+                  disabled={activeSection === 'personal' ? bgsSettingsSaveState.disabled : activeSection === 'image-connection' ? imageConnectionSaveState.disabled : activeSection === 'connections' ? modelConnectionSaveState.disabled : isSaveDisabled}
                   className="rounded-full border border-transparent bg-primary text-primary-foreground inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {activeSection === 'image-connection' ? imageConnectionSaveState.busy ? text.saving : text.saveSettings : activeSection === 'connections' ? modelConnectionSaveState.busy ? text.saving : text.saveSettings : isSavingCurrentTab ? text.saving : text.saveSettings}
+                  {activeSection === 'personal' ? bgsSettingsSaveState.busy ? text.saving : text.saveSettings : activeSection === 'image-connection' ? imageConnectionSaveState.busy ? text.saving : text.saveSettings : activeSection === 'connections' ? modelConnectionSaveState.busy ? text.saving : text.saveSettings : isSavingCurrentTab ? text.saving : text.saveSettings}
                 </button>
               </div>
             ) : null}
