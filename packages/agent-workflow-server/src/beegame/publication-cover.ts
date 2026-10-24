@@ -7,15 +7,17 @@ export const PUBLICATION_COVER_PATH = '__bgs_publication/cover.webp'
 export async function preparePublicationCover(value: { mediaType: string; filename: string; data: string }): Promise<Buffer> {
   const [attachment] = validateBeeGameAttachments([{ ...value, type: 'image' }])
   try {
-    // Decode and orient the actual bytes. Re-encoding strips metadata and ensures
-    // that the public file is a still WebP, regardless of the uploaded extension.
-    const { data, info } = await sharp(Buffer.from(attachment!.data, 'base64'), {
+    const image = sharp(Buffer.from(attachment!.data, 'base64'), {
       limitInputPixels: 16_777_216, failOn: 'warning',
-    }).rotate().webp({ quality: 85 }).toBuffer({ resolveWithObject: true })
-    if (!info.width || info.width * 9 !== info.height * 16) {
-      throw new BeeGameUploadPolicyError(`Cover must be 16:9; received ${info.width} × ${info.height}.`)
+    })
+    // Validate the oriented source before resize rounding can mask a wrong ratio.
+    const { autoOrient: { width, height } } = await image.metadata()
+    if (!width || width * 9 !== height * 16) {
+      throw new BeeGameUploadPolicyError(`Cover must be 16:9; received ${width} × ${height}.`)
     }
-    return data
+    // Uploads and preview captures share the same bounded, metadata-free WebP.
+    return await image.rotate().resize({ width: 1280, height: 720, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80 }).toBuffer()
   } catch (error) {
     if (error instanceof BeeGameUploadPolicyError) throw error
     throw new BeeGameUploadPolicyError('Cover could not be decoded. Use a PNG, JPEG or WebP image of up to 16 megapixels.')

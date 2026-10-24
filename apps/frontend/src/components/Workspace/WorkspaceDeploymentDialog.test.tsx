@@ -12,7 +12,7 @@ const props = { projectId: 'project', projectName: '磁轨调度', isOpen: true,
   onClose: vi.fn(), onDeploy: vi.fn(), isDeploying: false, canDeploy: true };
 
 describe('publishing confirmation', () => {
-  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.getDeploymentReadiness).mockResolvedValue({ allowed: true, issues: [], destination: 'remote' }); });
   it('shows the reviewed public title instead of the internal project name', async () => {
     const live = { id: 'version-1', sessionId: 'session', workspacePath: '/test', status: 'succeeded' as const,
@@ -274,7 +274,16 @@ describe('publishing confirmation', () => {
     expect(api.generatePublicationDescription).not.toHaveBeenCalled();
   });
 
-  it.each([[160, 90, true], [160, 100, false]])('checks cover dimensions %s × %s and retains the published cover on rejection', async (width, height, valid) => {
+  it.each([
+    { width: 3840, height: 2160, valid: true, format: 'webp' },
+    { width: 160, height: 90, valid: true, format: 'webp' },
+    { width: 3840, height: 2160, valid: true, format: 'png' },
+    { width: 2561, height: 1440, valid: false, format: 'webp' },
+  ])('compresses $width × $height as $format and retains the cover on rejection', async ({ width, height, valid, format }) => {
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+    const encoded = btoa('compressed-fixture');
+    const encode = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(`data:image/${format};base64,${encoded}`);
     vi.stubGlobal('Image', class {
       naturalWidth = width; naturalHeight = height; onload?: () => void;
       set src(_value: string) { queueMicrotask(() => this.onload?.()); }
@@ -286,17 +295,21 @@ describe('publishing confirmation', () => {
     const file = new File(['image-fixture'], 'cover.png', { type: 'image/png' });
     fireEvent.change(screen.getByLabelText(labels.deploymentCoverUpload, { selector: 'input' }), { target: { files: [file] } });
     if (valid) {
-      await waitFor(() => expect(screen.getByAltText(labels.deploymentCover)).toHaveAttribute('src', expect.stringContaining('data:image/png;base64,')));
+      await waitFor(() => expect(screen.getByAltText(labels.deploymentCover)).toHaveAttribute('src', `data:image/${format};base64,${encoded}`));
     } else {
-      expect(await screen.findByRole('alert')).toHaveTextContent('160 × 100');
+      expect(await screen.findByRole('alert')).toHaveTextContent(`${width} × ${height}`);
       expect(screen.getByAltText(labels.deploymentCover)).toHaveAttribute('src', existing.publicCoverUrl);
     }
     const publish = screen.getByRole('button', { name: labels.deploymentPublishUpdate });
     await waitFor(() => expect(publish).toBeEnabled());
     fireEvent.click(publish);
     await waitFor(() => expect(onDeploy).toHaveBeenCalledWith(valid ? {
-      publicationCover: { mediaType: 'image/png', filename: 'cover.png', data: btoa('image-fixture') },
+      publicationCover: { mediaType: `image/${format}`, filename: `cover.${format}`, data: encoded },
     } : undefined));
+    if (valid) {
+      expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, Math.min(width, 1280), Math.min(height, 720));
+      expect(encode).toHaveBeenCalledWith('image/webp', 0.8);
+    } else expect(encode).not.toHaveBeenCalled();
   });
 
   it('fills both fields from the current project without publishing and allows later editing', async () => {
@@ -350,16 +363,21 @@ describe('publishing confirmation', () => {
     const record = { id: 'new', sessionId: 'session', workspacePath: '/test', createdAt: '', updatedAt: '', url: '' };
     const { rerender } = render(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record, status: 'queued' }]} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', labels.deploymentQueued);
+    const waitingBeam = screen.getByRole('progressbar').firstElementChild;
     rerender(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record, status: 'publishing' }]} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', labels.deploymentUploadVerify);
     expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
     rerender(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record, status: 'publishing',
       uploadProgress: { uploadedBytes: 37, totalBytes: 100, phase: 'uploading' } }]} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
+    const uploadFill = screen.getByRole('progressbar').firstElementChild;
+    // A waiting beam's translateX must not survive into the percentage fill.
+    expect(uploadFill).not.toBe(waitingBeam);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', '正在上传 · 37%');
     rerender(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record, status: 'publishing',
       uploadProgress: { uploadedBytes: 100, totalBytes: 100, phase: 'verifying' } }]} />);
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+    expect(screen.getByRole('progressbar').firstElementChild).not.toBe(uploadFill);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', labels.deploymentVerifying);
     expect(screen.queryByRole('heading', { name: labels.deploymentCompleteTitle })).toBeNull();
     expect(screen.queryByRole('textbox', { name: labels.deploymentDescription })).toBeNull();

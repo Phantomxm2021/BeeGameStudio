@@ -19,3 +19,34 @@ test('rejects wrong ratios and corrupt bytes even when the MIME and filename cla
   await expect(preparePublicationCover({ mediaType: 'image/png', filename: 'cover.png', data: corrupt.toString('base64') }))
     .rejects.toThrow('decoded')
 })
+
+
+test('compresses a 4K cover to 1280 × 720 without changing its ratio', async () => {
+  const width = 3840, height = 2160
+  const pixels = Buffer.alloc(width * height * 3)
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const offset = (y * width + x) * 3
+    pixels[offset] = x % 256
+    pixels[offset + 1] = y % 256
+    pixels[offset + 2] = (x + y) % 256
+  }
+  const input = await sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer()
+  const output = await preparePublicationCover({ mediaType: 'image/png', filename: 'large.png', data: input.toString('base64') })
+  expect(await sharp(output).metadata()).toMatchObject({ format: 'webp', width: 1280, height: 720 })
+  expect(output.length).toBeLessThan(input.length)
+})
+
+test('validates the source ratio before resize can round it to 16:9', async () => {
+  const input = await sharp({ create: { width: 2561, height: 1440, channels: 3, background: '#345678' } }).png().toBuffer()
+  await expect(preparePublicationCover({ mediaType: 'image/png', filename: 'almost.png', data: input.toString('base64') }))
+    .rejects.toThrow('2561 × 1440')
+})
+
+test('validates and compresses using EXIF-oriented dimensions', async () => {
+  const input = await sharp({ create: { width: 900, height: 1600, channels: 3, background: '#345678' } })
+    .withMetadata({ orientation: 6 }).jpeg().toBuffer()
+  const output = await preparePublicationCover({ mediaType: 'image/jpeg', filename: 'rotated.jpg', data: input.toString('base64') })
+  const metadata = await sharp(output).metadata()
+  expect(metadata).toMatchObject({ format: 'webp', width: 1280, height: 720 })
+  expect(metadata.exif).toBeUndefined()
+})

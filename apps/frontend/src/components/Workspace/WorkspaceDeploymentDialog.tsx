@@ -123,8 +123,22 @@ function WorkspaceDeploymentDialogContent({
       if (!image.naturalWidth || image.naturalWidth * 9 !== image.naturalHeight * 16) {
         throw new Error(labels.deploymentCoverRatio.replace('{width}', String(image.naturalWidth)).replace('{height}', String(image.naturalHeight)));
       }
-      if (request === coverRequest.current) setCover({ mediaType: file.type as 'image/png' | 'image/jpeg' | 'image/webp',
-        filename: file.name, data: dataUrl.slice(dataUrl.indexOf(',') + 1) });
+      if (request !== coverRequest.current) return;
+      // Match the server's cover size before sending the request body.
+      const scale = Math.min(1, 1280 / image.naturalWidth);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(image.naturalWidth * scale);
+      canvas.height = Math.round(image.naturalHeight * scale);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error(labels.deploymentCoverReadError);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const compressed = canvas.toDataURL('image/webp', 0.8);
+      // Browsers without a WebP encoder return PNG; keep the actual MIME.
+      const encoded = /^data:(image\/(?:webp|png));base64,(.+)$/.exec(compressed);
+      if (!encoded) throw new Error(labels.deploymentCoverReadError);
+      const mediaType = encoded[1] as 'image/webp' | 'image/png';
+      setCover({ mediaType, filename: file.name.replace(/\.[^.]+$/, '') + (mediaType === 'image/webp' ? '.webp' : '.png'),
+        data: encoded[2] });
     } catch (reason) {
       if (request === coverRequest.current) setCoverError(reason instanceof Error ? reason.message : String(reason));
     } finally {

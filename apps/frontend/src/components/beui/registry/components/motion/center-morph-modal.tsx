@@ -53,7 +53,8 @@ const FOCUSABLE_SELECTOR = [
 ].join(',');
 
 const CENTER_FOLDED_CLIP = 'inset(48% 48% 48% 48% round 30px)';
-const CENTER_OPEN_CLIP = 'inset(0% 0% 0% 0% round 30px)';
+// Once open, let the panel's CSS radius shape its border without clipping it.
+const CENTER_OPEN_CLIP = 'inset(0% 0% 0% 0% round 0px)';
 const CENTER_UNFOLD_TRANSITION = { duration: 0.43, ease: [0.2, 0, 0.2, 1] as const };
 
 function getFocusableElements(root: HTMLElement | null) {

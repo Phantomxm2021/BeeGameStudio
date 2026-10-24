@@ -15,7 +15,7 @@ export function DeploymentProgress({ status, projectName, version, uploadProgres
   const reduced = useReducedMotion();
   const complete = status === 'succeeded';
   const progress = status === 'publishing' ? uploadProgress : undefined;
-  const percent = progress && progress.totalBytes > 0
+  const percent = progress?.phase === 'uploading' && progress.totalBytes > 0
     ? Math.max(0, Math.min(100, Math.floor(progress.uploadedBytes / progress.totalBytes * 100))) : undefined;
   const stage = status === 'building' ? labels.deploymentBuilding
     : status === 'publishing' ? progress?.phase === 'verifying' ? labels.deploymentVerifying
@@ -52,8 +52,8 @@ export function DeploymentProgress({ status, projectName, version, uploadProgres
             <motion.div variants={element} className="mt-7 w-full max-w-[246px]">
               <div role="progressbar" aria-label={labels.deploymentProgress} aria-valuetext={stage} aria-valuemin={percent === undefined ? undefined : 0} aria-valuemax={percent === undefined ? undefined : 100} aria-valuenow={percent}
                 className="relative h-1 overflow-hidden rounded-full bg-foreground/10">
-                {percent !== undefined ? <motion.div className="absolute inset-y-0 left-0 rounded-full bg-foreground/60"
-                  initial={false} animate={{ width: `${percent}%` }} transition={{ duration: reduced ? 0 : 0.3, ease }} /> : <motion.div className="absolute inset-y-0 w-[38%] rounded-full bg-foreground/60"
+                {percent !== undefined ? <motion.div key="upload-progress" className="absolute inset-y-0 left-0 rounded-full bg-foreground/60"
+                  initial={false} animate={{ width: `${percent}%` }} transition={{ duration: reduced ? 0 : 0.3, ease }} /> : <motion.div key="stage-activity" className="absolute inset-y-0 left-0 w-[38%] rounded-full bg-foreground/60"
                   animate={reduced ? { x: '80%' } : { x: ['-110%', '365%'] }}
                   transition={{ duration: reduced ? 0 : 2.5, repeat: reduced ? 0 : Infinity, ease: [0.45, 0, 0.55, 1] }} />}
               </div>
