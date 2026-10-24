@@ -66,7 +66,7 @@ export type CheckResult = { id: string; version: string; status: 'passed' | 'fai
     uiSurfaceCompatibility?: ({ document: string } & Pick<ReturnType<typeof import('../../../../scene-editor/src/production-surface').inspectProductionUiSupport>, 'supported' | 'issues' | 'projectSemantics'>)[];
     sceneNodeBindings?: SceneNodeBindingCoverage[];
     assetContract?: import('../asset-contract-audit').AssetContractAudit }; projectBuild?: {
-    version: 'v3-editable-build.1'; files: FileVersion[]; excludedReports: string[];
+    version: 'v3-editable-build.2'; files: FileVersion[]; excludedReports: string[];
     artifact: FileVersion; dependencySha256?: string; runtime: string; packageComposition?: PackageComposition;
   } }
 export type SkillUse = { name: string; toolUseID?: string; messageId?: string; source?: 'command'; eventId: number; parentToolUseID?: string; status: 'loaded' | 'failed' | 'unverified' }

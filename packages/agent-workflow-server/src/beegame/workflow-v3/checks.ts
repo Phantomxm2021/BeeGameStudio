@@ -71,11 +71,11 @@ export async function checkIsCurrent(root: string, check: CheckResult, task?: Pi
   }
   return true
 }
-export async function commandCheck(root: string, script: string, signal?: AbortSignal): Promise<{ code: number | null; log: string }> {
+export async function commandCheck(root: string, script: string, signal?: AbortSignal, allowViteTemp = false): Promise<{ code: number | null; log: string }> {
   // Code/build execution is within the user's project authorization. No host keys are inherited.
   return new Promise((resolvePromise, reject) => {
     if (signal?.aborted) { reject(new Error('Check cancelled')); return }
-    const child = spawn(process.execPath, [fileURLToPath(new URL('./sandbox-build.mjs',import.meta.url)),script], { cwd: root, env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, BEEGAME_BGS_PATH: process.env.BEEGAME_BGS_PATH },
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./sandbox-build.mjs',import.meta.url)),script,...(allowViteTemp?['--isolated-vite-cache']:[])], { cwd: root, env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, BEEGAME_BGS_PATH: process.env.BEEGAME_BGS_PATH },
       detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
     const abort = () => {
       try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL') }

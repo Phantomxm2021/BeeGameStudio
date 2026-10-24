@@ -19,7 +19,7 @@ export const CHECK_VERSIONS = {
   'font-data-consumption': 'v3-dom-font-consumption.5',
   'audio-data-consumption': 'v3-html-audio-consumption.7',
 } as const satisfies Record<(typeof CHECK_IDS)[number], string>
-export const EDITABLE_BUILD_CHECK_VERSION = 'v3-editable-build.1' as const
+export const EDITABLE_BUILD_CHECK_VERSION = 'v3-editable-build.2' as const
 
 export function currentCheckVersion(id: keyof typeof CHECK_VERSIONS, task?: Pick<TaskSpec, 'editableProject'>): string {
   return id === 'build' && task?.editableProject ? EDITABLE_BUILD_CHECK_VERSION : CHECK_VERSIONS[id]

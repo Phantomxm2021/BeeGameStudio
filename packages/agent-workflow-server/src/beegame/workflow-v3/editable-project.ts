@@ -117,8 +117,16 @@ export async function buildEditableProject(root:string, task:Pick<TaskSpec,'edit
       if(await artifactDigest(temporary,'node_modules',true)!==dependencySha256 || await projectDependencies(base)!==dependencySha256)
         throw new WorkflowError('dependency-copy-changed','Installed dependencies changed while materializing the isolated build; no code was executed')
     }
+    // Vite's ESM config loader writes here even for a production build. Only
+    // prepare this exception after validating the disposable dependency copy.
+    if(dependencySha256) {
+      const cache=join(await realpath(temporary),'node_modules','.vite-temp')
+      await mkdir(cache).catch(error=>{if(error.code!=='EEXIST')throw error})
+      if(!(await lstat(cache)).isDirectory() || await realpath(cache)!==cache)
+        throw new WorkflowError('dependency-alias','Vite build cache must be a canonical directory in the isolated copy')
+    }
     const {commandCheck}=await import('./checks')
-    const observed=await commandCheck(temporary,'build',signal)
+    const observed=await commandCheck(temporary,'build',signal,!!dependencySha256)
     result.observation='Host executed the project build script in the exportable source copy; exit '+observed.code+'\n'+observed.log
     if(observed.code!==0) {result.status='failed';return result}
     if(!sameFiles(files,await projectFiles(base,artifact,excludedReports)) || !sameFiles(files,await projectFiles(temporary,artifact,excludedReports)) || dependencySha256!==await projectDependencies(base))
@@ -146,7 +154,7 @@ export async function buildEditableProject(root:string, task:Pick<TaskSpec,'edit
     result.projectBuild={version:EDITABLE_BUILD_CHECK_VERSION,files,excludedReports,artifact:{path:artifact,sha256},packageComposition:composition,...(dependencySha256?{dependencySha256}:{}),runtime:'Bun '+Bun.version+' (Node '+process.version+') '+process.platform+'/'+process.arch}
     result.coverage={files:files.map(f=>f.path),limitations:[
       'Actual source-copy build and installed artifact identity only. Not a fresh dependency installation, bit-reproducible rebuild or full game acceptance.',
-      'Build script ran in the supported host OS sandbox with no network and writes confined to the source copy; installed dependencies were read-only.',
+      'Build script ran in the supported host OS sandbox with no network and writes confined to the source copy; copied dependencies were read-only except node_modules/.vite-temp. Original source and dependencies were not writable.',
     ]}
     return result
   } finally {
