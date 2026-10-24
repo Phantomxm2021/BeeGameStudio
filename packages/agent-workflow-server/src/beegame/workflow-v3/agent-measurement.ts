@@ -392,6 +392,15 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
     .flatMap(c=>c.coverage?.files??[]))
   const bindingCheck=record.checks.find(c=>c.id==='content-resources')
   const bindingInventory=bindingCheck?.coverage?.uiNodeBindings
+  const assetContract=bindingCheck?.coverage?.assetContract
+  // Keep failures and provisional resources fully inspectable in the compact
+  // receipt; routine file evidence remains in the saved record and --details.
+  const resourceStructureCoverage=assetContract && !details ? {...assetContract,
+    resources:assetContract.resources.map(resource=>{
+      if(resource.status!=='verified' || resource.provisional || resource.issues.length)return resource
+      const {rootPath,filePaths,fileEvidence,...summary}=resource
+      return summary
+    })} : assetContract
   // Preserve individual host observations and their scope; a layout PASS is
   // never promoted to image use, nor a sampled node to a whole-screen PASS.
   const uiObservations=record.checks.flatMap(check=>{
@@ -420,7 +429,7 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
     runtimeArtifact:record.runtimeArtifact,reports:record.reports,
     reportEvidence:'Explicit attachment identities only. Execution receipts describe their recorded boundaries; attachment at build time does not rerun tests or certify coverage/quality.',
     checkScope:measurementCheckScope(record),
-    resourceStructureCoverage:bindingCheck?.coverage?.assetContract ?? null,
+    resourceStructureCoverage:resourceStructureCoverage ?? null,
     sceneBindingCoverage:{sourceCheckStatus:bindingCheck?.status ?? 'unverified',
       nodeCount:sceneNodes?.length ?? null,unobservedNodeCount:sceneNodes?.filter(node=>!node.observations.length).length ?? null,
       nodesScope:details?'all':'issues-only',
@@ -447,7 +456,7 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
     packageComposition:record.checks.find(c=>c.id==='build')?.projectBuild?.packageComposition ?? null,
     measuredSourceFiles:record.checks.find(c=>c.id==='build')?.projectBuild?.files.length,
     ...(record.consumption?{consumption:details?record.consumption:{checks:record.consumption.checks}}:{}),
-    ...(!details?{detailsHint:'Read this measurement ID with details:true (CLI: --inspect ID --details) for all node bindings and saved observations; no verification is rerun.'}:{}),
+    ...(!details?{detailsHint:'Read this measurement ID with details:true (CLI: --inspect ID --details) for full resource file evidence, all node bindings and saved observations; no verification is rerun.'}:{}),
     deliveryEligible:false,quality:'unverified',note:record.consumption?
       'Receipt records source-copy build, static smoke and explicitly selected consumption probes only. Do not add its ID to measured source/report files. Probe results do not prove report semantics, complete gameplay or game quality.':
       'Receipt is saved in BGS; do not add its ID to measured source/report files. Only source-copy build and static browser smoke are measured, not report semantics or game quality.'}

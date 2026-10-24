@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { measurementSummary } from './agent-measurement'
 import type { AgentMeasurement, UiNodeBindingCoverage, SceneNodeBindingCoverage } from './state'
+import type { AssetContractAudit, AssetResourceAudit } from '../asset-contract-audit'
 
 test('summary omits routine inventories, retains all problems, and details returns each inventory once', () => {
   const ui: UiNodeBindingCoverage[] = Array.from({ length: 300 }, (_, i) => ({
@@ -68,4 +69,45 @@ test('absent inventory, empty inventory and unobserved nodes remain distinct fro
   expect(compact).toMatchObject({ quality: 'unverified', deliveryEligible: false })
   record.checks[0]!.coverage!.uiNodeBindings![0]!.resolution = 'unverified'
   expect(measurementSummary(record, false).uiBindingCoverage.nodes).toMatchObject([{ nodeId: 'root', resolution: 'unverified' }])
+})
+
+test('compact resource evidence preserves problems and provisional resources; details retains the saved evidence', () => {
+  const resource = (id: string, extra: Partial<AssetResourceAudit> = {}): AssetResourceAudit => ({
+    id, status: 'verified', sourceType: 'resource-library', provisional: false, issues: [],
+    rootPath: `assets/${id}.png`, filePaths: [`assets/${id}.png`],
+    fileEvidence: [{ path: `assets/${id}.png`, sha256: 'a'.repeat(64), facts: { width: 64, height: 64 } }],
+    ...extra,
+  })
+  const routine = resource('intact')
+  const problems = [resource('failed', { status: 'failed', issues: ['File does not exist: assets/failed.png'] }),
+    resource('pending', { status: 'available' }), resource('unverified', { status: 'unverified' }),
+    resource('hash-mismatch', { issues: ['Local file hash does not match'] }),
+    resource('provisional', { provisional: true })]
+  const assetContract: AssetContractAudit = { present: true, valid: false, manifestPath: 'assets/asset-manifest.json',
+    resources: [routine, ...problems], issues: ['Required resource failed'],
+    requirements: [
+      { id: 'broken-model', required: true, issues: ['No intact model'],
+        structure: { status: 'failed', observations: ['Required animation is missing'] } },
+      { id: 'unobserved-atlas', required: true, issues: [],
+        structure: { status: 'unverified', observations: ['Named frame coverage remains unverified'] } },
+    ], bindings: [{ requirementId: 'unobserved-atlas', resourceIds: ['intact', 'provisional'] }] }
+  const record: AgentMeasurement = { id: 'resource-evidence', requestKey: 'resource-request', startedAt: '2026-10-24',
+    runtimeArtifact: 'dist', reports: [], reportPaths: [], requirementsRevision: 'revision', checks: [
+      { id: 'content-resources', version: 'test', createdAt: '2026-10-24', status: 'failed', inputs: [],
+        observation: 'Required resource failed; named frame coverage remains unverified',
+        coverage: { files: [assetContract.manifestPath], limitations: ['Static resource evidence only'], assetContract } },
+    ] }
+  const before = JSON.stringify(record)
+  const compact = measurementSummary(record, false), detailed = measurementSummary(record, true)
+  expect(compact.resourceStructureCoverage).toEqual({ ...assetContract, resources: [
+    { id: 'intact', status: 'verified', sourceType: 'resource-library', provisional: false, issues: [] }, ...problems,
+  ] })
+  expect(compact.checks[0]).toMatchObject({ status: 'failed', observation: record.checks[0]!.observation,
+    coverage: { files: [assetContract.manifestPath], limitations: ['Static resource evidence only'] } })
+  expect(compact).toMatchObject({ quality: 'unverified', deliveryEligible: false })
+  expect(compact.detailsHint).toContain('--inspect ID --details')
+  expect(compact.detailsHint).toContain('resource file evidence')
+  expect(detailed.resourceStructureCoverage).toEqual(assetContract)
+  expect(measurementSummary(record)).toEqual(detailed)
+  expect(JSON.stringify(record)).toBe(before)
 })
