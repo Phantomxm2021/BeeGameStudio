@@ -105,9 +105,17 @@ test('opaque Preview preserves saves across new browsers, Chat sessions and serv
     const {chromium}=await import(sharedPlaywright().moduleUrl)
     browser=await chromium.launch({headless:true,executablePath:process.env.BGS_LAYOUT_BROWSER_EXECUTABLE??chromium.executablePath()})
     let context=await browser.newContext(),page=await context.newPage()
+    const headRequests:string[]=[]
+    page.on('requestfinished',(request:any)=>{
+      if(request.method()==='HEAD'&&request.url()===viewUrl)headRequests.push('finished')
+    })
+    page.on('requestfailed',(request:any)=>{
+      if(request.method()==='HEAD'&&request.url()===viewUrl)headRequests.push(request.failure()?.errorText??'failed')
+    })
     await page.goto(origin+'/host')
     let frame=page.frameLocator('#beegame-preview')
     await expectText(frame,'EMPTY');await frame.locator('#save').click();await expectText(frame,'42')
+    expect(headRequests).toEqual(['finished'])
     expect(await frame.locator('body').evaluate(()=>({origin:globalThis.origin,native:(()=>{try{localStorage.setItem('secret','x');return true}catch{return false}})(),
       parent:(()=>{try{return Boolean(parent.document.body)}catch{return false}})()}))).toEqual({origin:'null',native:false,parent:false})
     const bytes=await readFile(join(workspace,'dist/index.html'),'utf8')

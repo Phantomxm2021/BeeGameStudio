@@ -77,6 +77,8 @@ export async function createGameStorage(documentUrl = globalThis.location.href, 
   const url = new URL(documentUrl)
   const head = await fetcher(url, { method: 'HEAD', credentials: 'omit', cache: 'no-store', redirect: 'error' })
   if (!head.ok) throw Error('Storage environment unavailable: HTTP ' + head.status)
+  // Finish the HEAD stream so Chromium does not report a successful probe as ERR_ABORTED.
+  await head.arrayBuffer()
   if (head.headers.get(PREVIEW_STORAGE_HEADER) === PREVIEW_STORAGE_VERSION) {
     const endpoint = new URL(PREVIEW_STORAGE_PATH, url)
     const request = async (key, value, write) => {
