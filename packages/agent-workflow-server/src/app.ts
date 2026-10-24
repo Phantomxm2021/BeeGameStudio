@@ -1,3 +1,4 @@
+import { publicationDescriptionSources, PUBLIC_DESCRIPTION_PROMPT, validatePublicDescriptionDraft } from './beegame/publication-description'
 import { UsageOutboxPersistenceError } from './beegame/session-usage-outbox'
 import {createBgsRunner} from './bgs/runner'
 import { registerBgsSettingsRoutes } from './bgs/settings-routes'
@@ -361,6 +362,7 @@ export type AgentWorkflowAppOptions = {
   /** Explicit backend injection for local development and deterministic tests. */
   workflowV3Store?: WorkflowStore | false
   workflowV3PreviewOrigin?: string
+  publicationCoverCapture?: (previewUrl: string) => Promise<Buffer>
   sessionRunner?: BeeGameSessionRunner
   modelRuntimeHost?: BeeGameModelRuntimeHost
   previewRunner?: BeeGamePreviewRunner
@@ -666,6 +668,7 @@ export function createAgentWorkflowApp(
   options.registerCleanup?.(async () => { measuredPreview?.dispose(); previewStorage.close() })
   registerV3DebugPage(app, process.env.BEEGAME_WORKFLOW_V3_DEBUG === '1')
   const v3Routes = registerV3Routes(app, {
+    capturePublicationCover: options.publicationCoverCapture,
     deployment:()=>beeGameDeployments,
     persistDeployment:(request,user,record)=>dashboardRepository.upsertDeploymentRecord(request,user,record),
     listDeployments:(request,user,sessionId)=>dashboardRepository.listDeploymentRecords(request,user,sessionId),
@@ -715,9 +718,10 @@ export function createAgentWorkflowApp(
     const tail = c.req.path.split('/').slice(4).join('/')
     // The wildcard also matches the project root. Account-scoped deletion is
     // lifecycle cleanup, not legacy scheduling; its handler verifies ownership.
+    // Publication copy drafting reads owned documents and does not schedule project work.
     const isProjectDeletion = c.req.method === 'DELETE' && tail === ''
     if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !tail.startsWith('workflow-v3') &&
-        !isProjectDeletion && !(c.req.method === 'POST' && tail === 'clone') && tail !== 'session/ensure' && !(c.req.method === 'PUT' && tail === 'game-content/document') && !tail.startsWith('permissions/')) {
+        !isProjectDeletion && !(c.req.method === 'POST' && ['clone', 'publication-description'].includes(tail)) && tail !== 'session/ensure' && !(c.req.method === 'PUT' && tail === 'game-content/document') && !tail.startsWith('permissions/')) {
       try { await v3Routes.assertLegacy(c.req.param('id')!, getCurrentUser(c.req.raw).id, c.req.raw) }
       catch (error) {
         if (error instanceof WorkflowError) return c.json({ error: error.message, code: error.code }, error.status)
@@ -2730,6 +2734,35 @@ export function createAgentWorkflowApp(
       if (err instanceof UserQuestionValidationError) return c.json({ error: err.message }, 400)
       return tracedRouteError(c, 'project.permissions.resolve', err, 404)
     }
+  })
+
+  app.post('/api/projects/:id/publication-description', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'deployment.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    c.header('Cache-Control', 'private, no-store')
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project?.root_path) return c.json({ error: 'Project workspace not found' }, 404)
+      const sources = await publicationDescriptionSources(project.root_path)
+      const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
+      const modelConfigId = await resolveDefaultModelConfigId(c.req.raw, user, undefined,
+        (request, owner, id) => dashboardRepository.modelConfigExists(request, owner, id),
+        (request, owner) => dashboardRepository.listModelConfigs(request, owner))
+      const runtimeEnv = await dashboardRepository.getRuntimeEnv(getCurrentUserDataRoot(c.req.raw), user.id,
+        getRequestAuthToken(c.req.raw), modelConfigId)
+      const recordUsage = createUsageRecorder({ sessionId: `publication-description:${randomUUID()}`, projectId: project.id,
+        submit: usage => beeGameSessions.recordExternalUsage(user.id, usage) })
+      const language = typeof body.language === 'string' && body.language.length <= 32 ? body.language : undefined
+      const content = await generateBeeGameModelWithUsage(modelRuntimeHost, {
+        cwd: getCurrentUserDataRoot(c.req.raw), runtimeEnv,
+        systemPrompt: [BEEGAME_USER_RESPONSE_SCOPE, PUBLIC_DESCRIPTION_PROMPT,
+          language ? `Write in the selected UI language: ${language}.` : 'Use the language of the source documents.'].join('\n'),
+        messages: [{ role: 'user', content: JSON.stringify(sources) }],
+        maxTokens: 2048, querySource: 'beegame_publication_description',
+      }, recordUsage, true, () => beeGameSessions.assertModelRequestAllowed(user.id))
+      return c.json({ description: validatePublicDescriptionDraft(content) })
+    } catch (error) { return tracedRouteError(c, 'project.publication-description', error) }
   })
 
   app.get('/api/projects/:id/preview', async c => {

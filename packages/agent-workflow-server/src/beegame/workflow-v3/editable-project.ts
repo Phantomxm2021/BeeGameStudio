@@ -86,7 +86,7 @@ async function packageComposition(root:string, artifact:FileVersion, files:strin
 }
 /** Source-copy build with OS/network isolation. This does not prove fresh
  * dependency installation, bit-reproducibility or full game quality. */
-export async function buildEditableProject(root:string, task:Pick<TaskSpec,'editableProject'|'runtimeArtifact'|'writablePaths'>, inputs:FileVersion[], excludedReports:string[], signal?:AbortSignal):Promise<CheckResult> {
+export async function buildEditableProject(root:string, task:Pick<TaskSpec,'editableProject'|'runtimeArtifact'|'writablePaths'>, inputs:FileVersion[], excludedReports:string[], signal?:AbortSignal, installRoot?:string):Promise<CheckResult> {
   const result:CheckResult={id:'build',version:EDITABLE_BUILD_CHECK_VERSION,status:'unverified',inputs,createdAt:new Date().toISOString(),observation:'Editable build has not completed'}
   if(!task.editableProject || !task.runtimeArtifact || !task.writablePaths.includes(task.runtimeArtifact+'/**')) return result
   const base=await realpath(root), artifact=task.runtimeArtifact, temporary=await mkdtemp(join(tmpdir(),'bgs-editable-build-'))
@@ -135,17 +135,20 @@ export async function buildEditableProject(root:string, task:Pick<TaskSpec,'edit
     if(!built.includes(artifact+'/index.html')) {result.observation+='\nBuilt static artifact has no index.html';return result}
     const sha256=await artifactDigest(temporary,artifact,true)
     const composition=await packageComposition(temporary,{path:artifact,sha256},built)
-    const target=join(base,artifact), parent=dirname(target)
-    await canonicalParents(base,parent)
+    // Publishing installs into its own release workspace, leaving Preview and
+    // saved project evidence untouched. Agent measurement still installs in-place.
+    const destination=installRoot ? await realpath(installRoot) : base
+    const target=join(destination,artifact), parent=dirname(target)
+    await canonicalParents(destination,parent)
     try{if(await realpath(target)!==target || !(await lstat(target)).isDirectory())throw new WorkflowError('project-alias','Existing build output is not a canonical directory')}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
     // Same-volume staging replaces only the fully authorized artifact directory;
     // old stale files cannot sneak into the measured build through a merge.
-    const host=join(base,'.beegame');await mkdir(host,{recursive:true})
+    const host=join(destination,'.beegame');await mkdir(host,{recursive:true})
     if(await realpath(host)!==host)throw new WorkflowError('project-alias','Host build staging must not be an alias')
     stage=await mkdtemp(join(host,'editable-build-'))
     await cp(join(temporary,artifact),join(stage,'candidate'),{recursive:true})
-    if(await artifactDigest(base,relative(base,join(stage,'candidate')),true)!==sha256)throw Error('Build copy changed before installation')
+    if(await artifactDigest(destination,relative(destination,join(stage,'candidate')),true)!==sha256)throw Error('Build copy changed before installation')
     if(!sameFiles(files,await projectFiles(base,artifact,excludedReports)))throw new WorkflowError('project-source-changed','Source changed before build installation')
     if(signal?.aborted)throw Error('Build cancelled')
     try{await rename(target,join(stage,'previous'));backup=true}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}

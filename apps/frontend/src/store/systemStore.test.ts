@@ -44,6 +44,16 @@ describe('systemStore token usage', () => {
     expect(getComputedStyle(document.documentElement).colorScheme).toBe('light');
   });
 
+  it('publishes local theme changes and follows changes from the Portal', () => {
+    useSystemStore.getState().setTheme(true);
+    useSystemStore.getState().setTheme(false);
+    expect(document.cookie).toContain('beegame-theme=light');
+    document.cookie = 'beegame-theme=dark; Path=/';
+    window.dispatchEvent(new Event('focus'));
+    expect(useSystemStore.getState().isDark).toBe(true);
+    expect(document.documentElement).toHaveClass('dark');
+  });
+
   it('keeps project and task token usage monotonic for cumulative snapshots', () => {
     const store = useSystemStore.getState();
 

@@ -1,0 +1,21 @@
+name = "beegame-game-portal"
+main = "src/worker.ts"
+compatibility_date = "2026-09-18"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "404-page"
+html_handling = "none"
+
+[[routes]]
+pattern = "portal.beegame.studio"
+custom_domain = true
+
+[vars]
+BEEGAME_SUPABASE_URL = "https://bgs.phantominfra.com"
+BEEGAME_DELIVERY_ORIGIN = "https://game.beegame.studio"
+
+[observability]
+enabled = true

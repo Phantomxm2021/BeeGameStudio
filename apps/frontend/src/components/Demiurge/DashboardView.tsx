@@ -11,7 +11,7 @@ import type { Language } from './AgentsConfig';
 
 import { BeeGameLivePreviewPage, type DashboardStatus } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
-import type { BeeGameDeploymentDiscussionConfirmation, BeeGameDeploymentPayload, ChatAttachmentPayload, PendingToolPermissionItem } from '../../services/api';
+import type { BeeGameDeploymentRequest, BeeGameDeploymentPayload, ChatAttachmentPayload, PendingToolPermissionItem } from '../../services/api';
 import { api } from '../../services/api';
 import { deriveDashboardStatus, getWaitingPermissionState } from '../../utils/waitingPermission';
 import {
@@ -57,7 +57,8 @@ const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string
 
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack }: DashboardViewProps) {
   const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
-  const deploymentInProgress = deploymentHistory.some(item => ['queued', 'building', 'publishing'].includes(item.status));
+  const activeDeployment = deploymentHistory.find(item => ['queued', 'building', 'publishing'].includes(item.status));
+  const deploymentInProgress = Boolean(activeDeployment);
   const [isDeployingProject, setDeployingProject] = useState(false);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const previousBeeGameStatusRef = useRef<string | null>(null);
@@ -110,7 +111,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const poll = async () => {
       try {
         const records = await api.listProjectDeployments(projectId);
-        if (!cancelled) { setDeploymentHistory(records); warned = false; }
+        if (!cancelled) {
+          setDeploymentHistory(records); warned = false;
+          const finished = records.find(record => record.id === activeDeployment?.id);
+          if (finished?.status === 'failed') showError(finished.message || translateBeeGame('livePreview.deploymentFailed'));
+        }
       } catch (error) {
         if (!cancelled && !warned) { warned = true; showWarning(error instanceof Error ? error.message : String(error)); }
       } finally {
@@ -119,7 +124,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     };
     timer = setTimeout(poll, 1000);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [projectId, deploymentInProgress, authenticationStatus, showWarning]);
+  }, [projectId, deploymentInProgress, activeDeployment?.id, authenticationStatus, showWarning, showError, translateBeeGame]);
 
   const { sendMessage, stopTask, continueTask, autoRetryTurnId, cancelAutoRetry, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState, sessionTokenUsage } = useChat({
     projectId,
@@ -277,7 +282,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     }
   };
 
-  const handleDeployProject = async (confirmation?: BeeGameDeploymentDiscussionConfirmation) => {
+  const handleDeployProject = async (confirmation?: BeeGameDeploymentRequest) => {
     if (!canManageDeployment || isDeployingProject || isProjectWorkspaceMutationLocked) return;
     setDeployingProject(true);
     try {

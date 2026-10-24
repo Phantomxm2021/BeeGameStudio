@@ -150,6 +150,9 @@ export interface BeeGameDeploymentPayload {
   createdAt: string
   updatedAt: string
   deployedAt?: string
+  portalPublishedAt?: string
+  publicDescription?: string
+  publicCoverUrl?: string
 }
 
 export interface BeeGameDeploymentReadiness {
@@ -167,6 +170,11 @@ export type BeeGameDeploymentDiscussionConfirmation = {
   measurementId: string
   requirementsRevision: string
   discussionConfirmation: { messageRequestKeys: string[] }
+}
+
+export type BeeGameDeploymentRequest = Partial<BeeGameDeploymentDiscussionConfirmation> & {
+  publicationDescription?: { text: string; confirmed: true }
+  publicationCover?: { mediaType: 'image/png' | 'image/jpeg' | 'image/webp'; filename: string; data: string }
 }
 
 export interface BeeGameAssetRequirementPayload {
@@ -621,7 +629,9 @@ export const api = {
   stopProjectPreview: (projectId: string) =>
     beeGameAdapter.stopProjectPreview(projectId),
 
-  deployProject: (projectId: string, confirmation?: BeeGameDeploymentDiscussionConfirmation) => beeGameAdapter.deployProject(projectId, confirmation),
+  capturePublicationCover: (projectId: string) => beeGameAdapter.capturePublicationCover(projectId),
+  generatePublicationDescription: (projectId: string) => beeGameAdapter.generatePublicationDescription(projectId),
+  deployProject: (projectId: string, confirmation?: BeeGameDeploymentRequest) => beeGameAdapter.deployProject(projectId, confirmation),
   getDeploymentReadiness: (projectId: string) => beeGameAdapter.getDeploymentReadiness(projectId),
 
   listProjectDeployments: (projectId: string) =>

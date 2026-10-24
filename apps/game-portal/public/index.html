@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#090a0c" />
+    <title>游戏 · Bee Play</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/account.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-controls.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至内容</a>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Bee Play 首页"><span class="brand-mark" aria-hidden="true">✦</span><span>Bee Play</span></a>
+      <div class="portal-account-toolbar"><span data-theme-toggle></span><div id="account-avatar"></div></div>
+    </header>
+    <div class="site-content">
+    <main class="page" id="main">
+      <section id="catalogue" hidden>
+        <div class="catalogue-heading"><h1 id="catalogue-title">Made With BGS</h1></div>
+        <section id="featured" class="featured" aria-label="新近发布的游戏" aria-roledescription="轮播" hidden>
+          <div id="feature-track" class="feature-track" tabindex="0" aria-label="新近发布，左右滑动浏览"></div>
+          <div class="carousel-controls"><button id="feature-previous" class="carousel-arrow" type="button" aria-label="上一款游戏"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><div id="feature-dots" class="feature-dots" aria-label="选择游戏"></div><button id="feature-next" class="carousel-arrow" type="button" aria-label="下一款游戏"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button></div>
+        </section>
+        <div class="section-heading" id="all-releases"><h2>所有游戏</h2></div>
+        <p id="catalogue-status" class="empty-state" role="status">正在载入游戏…</p>
+        <div id="game-grid" class="game-grid"></div>
+        <div id="catalogue-end" style="height: 1px" aria-hidden="true" hidden></div>
+        <button id="load-more" class="share-button load-more" type="button" hidden>重试</button>
+      </section>
+      <section id="game-page" hidden>
+        <section class="player" id="player" aria-label="游戏画面">
+          <div class="player-surface">
+            <iframe id="game-frame" title="游戏" allow="autoplay; fullscreen; gamepad" allowfullscreen referrerpolicy="origin" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms"></iframe>
+            <div id="load-state" class="load-state" role="status" aria-live="polite">正在连接游戏…</div>
+            <details id="player-menu" class="player-controls">
+              <summary id="player-menu-button" class="control-button" aria-label="游戏菜单"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></summary>
+              <div class="player-actions" aria-label="游戏画面控制">
+              <button id="retry-button" class="control-button" type="button" aria-label="重新加载" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19.5 12a7.5 7.5 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
+              <button id="audio-button" class="control-button" type="button" aria-label="静音" aria-pressed="false" hidden>
+                <svg class="audio-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5ZM15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg class="audio-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5ZM16 9l5 6m0-6-5 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button id="share-button" class="control-button" type="button" aria-label="分享游戏" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M7 10H5a1 1 0 0 0-1 1v9h16v-9a1 1 0 0 0-1-1h-2"/></svg></button>
+              <button id="fullscreen-button" class="control-button" type="button" aria-label="全屏" aria-pressed="false">
+                <svg class="expand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg>
+                <svg class="shrink-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h4V4m12 4h-4V4M4 16h4v4m12-4h-4v4"/></svg>
+              </button>
+              </div>
+            </details>
+          </div>
+          <div class="share-feedback"><button id="close-share" class="dialog-close" type="button" aria-label="关闭分享提示"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button><p id="share-status" role="status" aria-live="polite"></p><input id="share-url" class="share-url" aria-label="游戏分享链接" readonly hidden></div>
+        </section>
+        <div class="game-heading"><div id="game-icon" class="app-icon game-icon" aria-hidden="true">✦</div><div class="game-heading-copy"><h1 id="game-title">游戏</h1><a id="game-author" class="author-link"></a></div><span data-theme-toggle></span></div>
+        <section id="game-description" class="game-description" aria-labelledby="game-description-title" hidden><h2 id="game-description-title">游戏介绍</h2><div id="game-description-text" tabindex="0" role="region" aria-labelledby="game-description-title"></div></section>
+      </section>
+    </main>
+    </div>
+    <dialog id="login-dialog" aria-labelledby="login-title"><form id="login-form"><button id="close-login" class="dialog-close" type="button" aria-label="关闭登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button><span class="brand-mark" aria-hidden="true">✦</span><h2 id="login-title">登录 Bee Play</h2><label for="email">邮箱</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required><button id="submit-login" class="primary-button" type="submit">登录</button><p id="login-error" class="form-error" role="alert"></p><div class="oauth-buttons"><button class="share-button" type="button" data-oauth="github">使用 GitHub</button><button class="share-button" type="button" data-oauth="discord">使用 Discord</button></div></form></dialog>
+    <template id="game-card"><article class="game-card"><a class="card-play" target="_blank" rel="noopener"><div class="card-art"><img class="card-image" alt="" width="1200" height="900" loading="lazy" decoding="async"></div><h3></h3></a></article></template>
+    <template id="feature-card"><article class="feature-slide" aria-roledescription="幻灯片"><a class="feature-link" target="_blank" rel="noopener"><div class="feature-copy"><h2></h2><span class="feature-cta">立即游玩 <span aria-hidden="true">↗</span></span></div><div class="feature-art" aria-hidden="true"><span class="feature-ring"></span><span class="feature-monogram"></span><span class="feature-spark">✦</span></div></a></article></template>
+  </body>
+</html>

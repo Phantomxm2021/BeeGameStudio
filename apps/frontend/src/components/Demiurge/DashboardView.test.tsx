@@ -2,10 +2,12 @@ import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DashboardView } from './DashboardView';
 
-const { loadRuntime, refreshCredits, taskEvent, system, project, i18n, chat, preview } = vi.hoisted(() => {
+const { loadRuntime, refreshCredits, taskEvent, system, project, i18n, chat, preview, deploymentApi, showError } = vi.hoisted(() => {
   const loadRuntime = vi.fn<(projectId: string) => Promise<void>>().mockResolvedValue(undefined);
   return {
     loadRuntime,
+    showError: vi.fn(),
+    deploymentApi: { listProjectDeployments: vi.fn().mockResolvedValue([]), deployProject: vi.fn() },
     chat: { sessionTokenUsage: undefined as undefined | { prompt_tokens: number; completion_tokens: number; cache_read_tokens?: number; total_tokens: number } },
     preview: vi.fn((_props: Record<string, unknown>) => null),
     refreshCredits: vi.fn().mockResolvedValue(undefined),
@@ -22,18 +24,20 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ i18n }) }));
 vi.mock('../../store/systemStore', () => ({ useSystemStore: (select: (state: typeof system) => unknown) => select(system) }));
 vi.mock('../../store/projectStore', () => ({ useProjectStore: (select: (state: typeof project) => unknown) => select(project) }));
 vi.mock('../../store/chatStore', () => ({ useChatStore: () => ({ messages: [] }) }));
-vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showWarning: vi.fn(), showError: vi.fn(), showSuccess: vi.fn() }) }));
+vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showWarning: vi.fn(), showError, showSuccess: vi.fn() }) }));
 vi.mock('../../hooks/useCredits', () => ({ useCredits: () => ({ creditBalance: null, creditSummary: null, refreshCredits }) }));
 vi.mock('../../hooks/useChat', () => ({ useChat: (options: { onTaskEvent: (type: string) => void }) => {
   taskEvent.current = options.onTaskEvent;
   return { isLoading: false, isStopping: false, wsState: 'connected', ...chat };
 } }));
-vi.mock('../../services/api', () => ({ api: { listProjectDeployments: vi.fn().mockResolvedValue([]) } }));
+vi.mock('../../services/api', () => ({ api: deploymentApi }));
 vi.mock('./BeeGameLivePreviewPage', () => ({ BeeGameLivePreviewPage: preview }));
 vi.mock('./RightSidebar', () => ({ RightSidebar: () => null }));
 
 beforeEach(() => {
-  loadRuntime.mockClear(); refreshCredits.mockClear(); preview.mockClear();
+  loadRuntime.mockClear(); refreshCredits.mockClear(); preview.mockClear(); showError.mockClear();
+  deploymentApi.listProjectDeployments.mockReset().mockResolvedValue([]);
+  deploymentApi.deployProject.mockReset();
   project.projectStatus = { project_id: 'A', phase: 'idle', context: undefined };
   chat.sessionTokenUsage = undefined;
 });
@@ -80,5 +84,21 @@ it('restores the incomplete usage notice from runtime history without a new live
   const { unmount } = render(<DashboardView projectId="A" projectName="test" lang="zh" onSetLang={vi.fn()} />);
   await act(async () => {});
   expect(preview.mock.lastCall?.[0].tokenUsage).toMatchObject({ total_tokens: 0, providerUsageIncomplete: true });
+  unmount();
+});
+
+it('reports a background publication failure through the global notification', async () => {
+  vi.useFakeTimers();
+  const queued = { id: 'publication', status: 'queued', createdAt: '', updatedAt: '' };
+  deploymentApi.deployProject.mockResolvedValue(queued);
+  const { unmount } = render(<DashboardView projectId="A" projectName="test" lang="en" onSetLang={vi.fn()} />);
+  await act(async () => {});
+  deploymentApi.listProjectDeployments.mockResolvedValue([queued]);
+  await act(async () => { await (preview.mock.lastCall?.[0].onDeployProject as () => Promise<void>)(); });
+  expect(preview.mock.lastCall?.[0].isDeploying).toBe(true);
+  deploymentApi.listProjectDeployments.mockResolvedValue([{ ...queued, status: 'failed', message: 'Publication build failed: fixture' }]);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(showError).toHaveBeenCalledExactlyOnceWith('Publication build failed: fixture');
+  expect(preview.mock.lastCall?.[0].isDeploying).toBe(false);
   unmount();
 });

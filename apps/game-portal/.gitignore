@@ -1,0 +1,7 @@
+.dev.vars
+.wrangler/
+
+public/auth.js
+public/theme.js
+public/theme-controls.js
+public/account.css

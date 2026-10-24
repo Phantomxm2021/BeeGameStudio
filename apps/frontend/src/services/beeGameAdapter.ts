@@ -1071,7 +1071,15 @@ export const beeGameAdapter = {
     }
   },
 
-  async deployProject(projectId: string, confirmation?: import('./api').BeeGameDeploymentDiscussionConfirmation): Promise<BeeGameDeploymentPayload> {
+  async capturePublicationCover(projectId: string): Promise<NonNullable<import('./api').BeeGameDeploymentRequest['publicationCover']>> {
+    return postJson(`/api/projects/${encodeURIComponent(projectId)}/publication-cover`, {})
+  },
+
+  async generatePublicationDescription(projectId: string): Promise<{ description: string }> {
+    return postJson(`/api/projects/${encodeURIComponent(projectId)}/publication-description`, { language: getCurrentUiLanguage() })
+  },
+
+  async deployProject(projectId: string, confirmation?: import('./api').BeeGameDeploymentRequest): Promise<BeeGameDeploymentPayload> {
     return postJson(
       `/api/projects/${encodeURIComponent(projectId)}/deployments`,
       confirmation ?? {},

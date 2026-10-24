@@ -14,6 +14,7 @@ import {
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { computeWorkspaceRevision } from './workspace-revision'
 import { artifactDigest } from './runtime-acceptance'
+import { PUBLICATION_COVER_PATH, publicationCoverUrl } from './publication-cover'
 
 export type BeeGameDeploymentStatus =
   | 'queued'
@@ -40,6 +41,11 @@ export type BeeGameDeploymentRecord = {
   createdAt: string
   updatedAt: string
   deployedAt?: string
+  /** Set only after publication checks; database projects this release into the public Portal. */
+  portalPublishedAt?: string
+  /** Creator-reviewed public copy; never populated directly from source documents. */
+  publicDescription?: string
+  publicCoverUrl?: string
 }
 
 export type BeeGameDeploymentRetentionItem = {
@@ -108,12 +114,25 @@ export type BeeGameDeploymentManagerOptions = {
   publisher?: BeeGameDeploymentPublisher
 }
 
+export type PreparedPublication = {
+  artifact: { path: string; sha256: string }
+  buildLog: string
+  validate(): Promise<void>
+}
+
 type DeploymentInput = {
+  publicDescription?: string
+  /** Validated cover bytes, added only to the immutable release copy. */
+  publicationCover?: Uint8Array
+  /** Existing cover selected from this project's successful release by the server. */
+  publicCoverUrl?: string
   sessionId: string
   userId?: string
   projectId?: string
   workspacePath: string
   authToken?: string
+  /** Builds and checks current sources inside a release-owned directory. */
+  build?: (directory: string) => Promise<PreparedPublication>
   /** Server-owned acceptance snapshot; never taken from the request body. */
   acceptance?: { revision: string; artifacts: Array<{ path: string; sha256: string }> }
   /** Server-selected V3 bytes, not author acceptance or request-supplied hashes.
@@ -194,7 +213,7 @@ export class BeeGameDeploymentManager {
     const key = `${input.userId ?? ''}:${resolve(input.workspacePath)}`
     const existing = this.active.get(key)
     if (existing) {
-      if (input.measured) throw new Error('Publication already in progress; inspect the existing deployment, do not start another.')
+      if (input.measured || input.build) throw new Error('Publication already in progress; inspect the existing deployment, do not start another.')
       return existing
     }
     let queued!: (record: BeeGameDeploymentRecord) => void
@@ -259,9 +278,12 @@ export class BeeGameDeploymentManager {
       const referencedArtifacts = records.filter(record => retainedIds.has(record.id) && record.artifactPath)
         .map(record => resolve(record.artifactPath!))
       const referencedOwners = new Set<string>()
+      const referencedCovers = new Set(records.filter(record => retainedIds.has(record.id))
+        .map(record => record.publicCoverUrl).filter(Boolean))
       for (const record of records.filter(record => deleteIds.has(record.id))) {
         const directory = resolve(this.deploymentsRoot, record.id)
-        if (referencedArtifacts.some(path => isInsideOrEqual(path, directory))) {
+        if (referencedArtifacts.some(path => isInsideOrEqual(path, directory)) ||
+            record.url && referencedCovers.has(publicationCoverUrl(record.url))) {
           deleteIds.delete(record.id)
           retainedIds.add(record.id)
           referencedOwners.add(record.id)
@@ -314,23 +336,36 @@ export class BeeGameDeploymentManager {
       workspacePath,
       status: 'queued',
       url: '',
+      ...(input.publicDescription !== undefined ? { publicDescription: input.publicDescription } : {}),
+      ...(input.publicCoverUrl ? { publicCoverUrl: input.publicCoverUrl } : {}),
       createdAt: now,
       updatedAt: now,
     }
     await this.saveRecord(record)
     onQueued?.(record)
 
+    let buildRoot = workspacePath
+    let prepared: PreparedPublication | undefined
+    let selection: Pick<PreparedPublication, 'artifact' | 'validate'> | undefined = input.measured
     try {
       if (this.publisher?.verifyPublished && !persistRecord) {
         throw new Error('Worker publishing requires deployment record persistence before public verification')
       }
-      if (input.measured && input.acceptance) throw new Error('Select exactly one deployment evidence contract')
-      await input.measured?.validate()
-      const acceptedWorkspaceRevision = input.measured ? undefined : await computeWorkspaceRevision(workspacePath)
+      if ([input.measured, input.acceptance, input.build].filter(Boolean).length > 1) throw new Error('Select exactly one deployment build contract')
+      if (input.build) {
+        record = { ...record, status: 'building', artifactPath: join(this.deploymentsRoot, id, 'site'), updatedAt: new Date().toISOString() }
+        await this.saveRecord(record)
+        buildRoot = join(this.deploymentsRoot, id, 'build')
+        await mkdir(buildRoot, { recursive: true })
+        prepared = await input.build(buildRoot)
+        selection = prepared
+      }
+      if (!prepared) await selection?.validate()
+      const acceptedWorkspaceRevision = selection ? undefined : await computeWorkspaceRevision(workspacePath)
       if (input.acceptance && input.acceptance.revision !== acceptedWorkspaceRevision)
         throw new Error('Project source changed after acceptance; verify before publishing.')
-      const plan: DeploymentPlan = input.measured ? { supported:true, cwd:workspacePath,
-        entrypoint:input.measured.artifact.path + '/index.html', command:[] } : createDeploymentPlan(workspacePath)
+      const plan: DeploymentPlan = selection ? { supported:true, cwd:buildRoot,
+        entrypoint:selection.artifact.path + '/index.html', command:[] } : createDeploymentPlan(workspacePath)
       if (!plan.supported) {
         record = this.fail(record, plan.message)
         await this.saveRecord(record)
@@ -340,14 +375,14 @@ export class BeeGameDeploymentManager {
 
       record = {
         ...record,
-        status: input.measured ? 'publishing' : 'building',
-        ...(!input.acceptance && !input.measured ? { buildCommand: plan.command.join(' ') } : {}),
+        status: selection ? 'publishing' : 'building',
+        ...(!input.acceptance && !selection ? { buildCommand: plan.command.join(' ') } : {}),
         entrypoint: plan.entrypoint,
         updatedAt: new Date().toISOString(),
       }
       await this.saveRecord(record)
 
-      const result = input.measured ? {exitCode:0,stderr:'',stdout:JSON.stringify({protocol:'bgs.workflow.v3',
+      const result = prepared ? {exitCode:0,stderr:'',stdout:prepared.buildLog} : input.measured ? {exitCode:0,stderr:'',stdout:JSON.stringify({protocol:'bgs.workflow.v3',
         runId:input.measured.runId,measurementId:input.measured.measurementId,artifact:input.measured.artifact,
         ...(input.measured.discussionConfirmation?{discussionConfirmation:input.measured.discussionConfirmation}:{}),
         quality:'unverified',operation:'User-requested publication of measured bytes; no rebuild or quality certification.'})} :
@@ -366,7 +401,7 @@ export class BeeGameDeploymentManager {
         return record
       }
       if (
-        !input.measured && (await computeWorkspaceRevision(workspacePath)) !==
+        !selection && (await computeWorkspaceRevision(workspacePath)) !==
         acceptedWorkspaceRevision
       ) {
         record = this.fail(
@@ -378,11 +413,11 @@ export class BeeGameDeploymentManager {
         return record
       }
 
-      const outputDir = input.measured ? resolve(workspacePath,input.measured.artifact.path) : await this.findOutputDir(plan.cwd, workspacePath)
-      if (input.measured) {
-        if (!isInsideOrEqual(outputDir,workspacePath) || outputDir === workspacePath || await realpath(outputDir) !== outputDir)
+      const outputDir = selection ? resolve(buildRoot,selection.artifact.path) : await this.findOutputDir(plan.cwd, workspacePath)
+      if (selection) {
+        if (!isInsideOrEqual(outputDir,buildRoot) || outputDir === buildRoot || await realpath(outputDir) !== outputDir)
           throw new Error('Measured output must be a canonical project subdirectory')
-        if (await artifactDigest(workspacePath,input.measured.artifact.path,true) !== input.measured.artifact.sha256)
+        if (await artifactDigest(buildRoot,selection.artifact.path,true) !== selection.artifact.sha256)
           throw new Error('Measured deployment artifact changed')
       }
       const artifactPath = join(this.deploymentsRoot, id, 'site')
@@ -400,10 +435,10 @@ export class BeeGameDeploymentManager {
       await mkdir(artifactPath, { recursive: true })
       await cp(outputDir, artifactPath, { recursive: true })
       await validateDeploymentArtifact(artifactPath)
-      if (input.measured) {
-        if (await artifactDigest(dirname(artifactPath),basename(artifactPath),true) !== input.measured.artifact.sha256)
+      if (selection) {
+        if (await artifactDigest(dirname(artifactPath),basename(artifactPath),true) !== selection.artifact.sha256)
           throw new Error('Copied deployment differs from the measured artifact')
-        await input.measured.validate()
+        await selection.validate()
       }
       if (input.acceptance) {
         const covered: string[] = []
@@ -423,6 +458,14 @@ export class BeeGameDeploymentManager {
         if (await computeWorkspaceRevision(workspacePath) !== input.acceptance.revision)
           throw new Error('Project source changed while preparing the accepted deployment.')
       }
+      // Publication artwork is creator input, not measured game code. Add it
+      // after checking the copied game bytes; never modify the project itself.
+      if (input.publicationCover) {
+        const coverPath = join(artifactPath, PUBLICATION_COVER_PATH)
+        if (existsSync(dirname(coverPath))) throw new Error('Build uses the reserved __bgs_publication directory')
+        await mkdir(dirname(coverPath))
+        await writeFile(coverPath, input.publicationCover)
+      }
       const artifactHash = await hashDirectory(artifactPath)
       const files = await createDeploymentFiles(artifactPath)
       const published = this.publisher
@@ -439,24 +482,25 @@ export class BeeGameDeploymentManager {
           })
         : undefined
       const deployedAt = new Date().toISOString()
-      if (input.measured) {
+      if (selection) {
         const {observeStaticPublication} = await import('./workflow-v3/runtime-checks')
         await observeStaticPublication(dirname(artifactPath),basename(artifactPath),
           new URL(published?.url ?? this.publicUrl(id),'http://bgs-runtime.invalid').href)
         // Observation can take time; a newly active writer must not inherit the
         // earlier eligibility check. No model/build is dispatched here.
-        await input.measured.validate()
+        await selection.validate()
       }
       record = {
         ...record,
         status: 'succeeded',
         artifactHash,
         url: published?.url ?? this.publicUrl(id),
+        ...(input.publicationCover ? { publicCoverUrl: publicationCoverUrl(published?.url ?? this.publicUrl(id)) } : {}),
         artifactPath: published?.artifactPath ?? artifactPath,
         ...(published?.manifestStorageObjectId
           ? { manifestStorageObjectId: published.manifestStorageObjectId }
           : {}),
-        message: input.measured
+        message: prepared ? 'Current sources rebuilt, checked and published; game quality remains unverified.' : input.measured
           ? 'User-requested measured build published without rebuilding; game quality remains unverified.'
           : published?.message ?? 'Static deployment published',
         updatedAt: deployedAt,
@@ -472,11 +516,12 @@ export class BeeGameDeploymentManager {
         // Public verification awaits network I/O. The selected run may have
         // changed since registration; revoke it through the existing failure
         // path rather than completing with an obsolete eligibility decision.
-        await input.measured?.validate()
+        await selection?.validate()
         record = { ...record, updatedAt: new Date().toISOString() }
       }
+      if (this.publisher && input.projectId) record = { ...record, portalPublishedAt: new Date().toISOString() }
       await this.saveRecord(record)
-      if (!this.publisher?.verifyPublished) await persistRecord?.(record)
+      await persistRecord?.(record)
       return record
     } catch (error) {
       record = this.fail(record, error instanceof Error ? error.message : String(error))
@@ -485,6 +530,8 @@ export class BeeGameDeploymentManager {
       }
       await this.saveRecord(record)
       return record
+    } finally {
+      if (input.build && buildRoot !== workspacePath) await rm(buildRoot, { recursive: true, force: true })
     }
   }
 
@@ -518,6 +565,7 @@ export class BeeGameDeploymentManager {
         createdAt: now,
         updatedAt: now,
         deployedAt: now,
+        ...((source.portalPublishedAt || (this.publisher && source.projectId)) ? { portalPublishedAt: now } : {}),
       }
       await this.saveRecords(mergeDeploymentRecords(await this.loadRecords(), [record]))
       return record

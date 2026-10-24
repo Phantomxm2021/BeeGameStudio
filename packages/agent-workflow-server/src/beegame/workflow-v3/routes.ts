@@ -12,8 +12,7 @@ import { sameJson, type WorkflowStore } from './store'
 import { readContentView } from './content-view'
 import { versionsMatch } from './checks'
 import type { MeasuredPreviewManager } from './measured-preview'
-import { exportAgentMeasuredBuild, selectAgentMeasuredBuild, inspectAgentMeasurementInputs, measuredFiles,
-  discussionMessagesSinceMeasurement } from './measured-build'
+import { exportAgentMeasuredBuild, selectAgentMeasuredBuild, inspectAgentMeasurementInputs } from './measured-build'
 import { mergeDeploymentRecords, type BeeGameDeploymentManager, type BeeGameDeploymentRecord } from '../deployment-manager'
 import { measurementSummary, activeUserTask, agentSkillFacts } from './agent-measurement'
 import { agentGoalSchema, agentMessageSchema, createAgentGoalExecutor } from './agent-goal'
@@ -22,6 +21,10 @@ import { auditEventPage } from './event-page'
 import type { HostExitReceipts } from './host-exit-receipt'
 import { observeProjectCreation } from './web-project-start'
 import { initializeProjectGuide } from './project-guide'
+import { preparePublicationCover } from '../publication-cover'
+import { capturePublicationCover } from '../publication-cover-capture'
+import { artifactDigest } from '../runtime-acceptance'
+import { publicationBuildPlan, rebuildPublication } from './publication-build'
 
 function imageScreenOrientation(run: Run): 'Landscape' | 'Portrait' | undefined {
   const value = run.requirements.constraints.orientation
@@ -31,6 +34,7 @@ function imageScreenOrientation(run: Run): 'Landscape' | 'Portrait' | undefined 
 export function registerV3Routes(app: Hono, input: {
   store?: WorkflowStore; sessions: BeeGameSessionManager; preview?: MeasuredPreviewManager; exitReceipts?: HostExitReceipts;
   deployment?: () => BeeGameDeploymentManager;
+  capturePublicationCover?: (previewUrl: string) => Promise<Buffer>;
   persistDeployment?(request:Request, user:BeeGameUserContext, record:BeeGameDeploymentRecord):Promise<unknown>;
   listDeployments?(request:Request, user:BeeGameUserContext, sessionId:string):Promise<BeeGameDeploymentRecord[] | undefined>;
   getUser(request: Request): BeeGameUserContext;
@@ -85,6 +89,27 @@ export function registerV3Routes(app: Hono, input: {
         code: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing-transcript' : 'unreadable-transcript' } }
     }
   }
+  app.post('/api/projects/:id/publication-cover', async c => {
+    c.header('Cache-Control', 'private, no-store')
+    try {
+      const ctx = await current(c.req.raw, c.req.param('id'), false)
+      if (!hasBeeGamePermission(ctx.user, 'deployment.manage') || !hasBeeGamePermission(ctx.user, 'preview.manage'))
+        throw new WorkflowError('permission-denied', 'Publication and Preview permission required', 403)
+      z.object({}).strict().parse(await input.readBody(c.req.raw))
+      if (!input.preview) throw new WorkflowError('preview-unavailable', 'Project Preview is not configured', 503)
+      // Reuse the ordinary isolated Preview of the saved build; never rebuild or run an Agent.
+      const preview = await input.preview.openCandidate(ctx.run)
+      let image: Buffer
+      try { image = await (input.capturePublicationCover ?? capturePublicationCover)(preview.url) }
+      catch { throw new WorkflowError('publication-cover-unavailable', 'Could not capture the current build. Open Preview to check it, then try again.', 400) }
+      const currentPreview = await input.preview.candidateStatus(ctx.project.id, ctx.user.id)
+      if (currentPreview.preview?.id !== preview.id ||
+          await artifactDigest(ctx.workspace, preview.artifact.path, true) !== preview.artifact.sha256)
+        throw new WorkflowError('preview-stale', 'Project Preview changed during capture; try again', 409)
+      return c.json({ mediaType: 'image/webp' as const, filename: 'game-preview.webp', data: image.toString('base64') })
+    } catch (error) { const result = routeError(error); return c.json({ error: result.error, code: result.code }, result.status) }
+  })
+
   const agentSelection = z.object({measurementId:z.string().uuid(),requirementsRevision:z.string().min(1)}).strict()
   // Ordinary Preview is a candidate runtime, not measured delivery. Keep it
   // out of both measurement selection and legacy session/model restoration.
@@ -110,51 +135,41 @@ export function registerV3Routes(app: Hono, input: {
             if (deployment.isPublishing(user.id,ctx.run.workspacePath))
               throw new WorkflowError('deployment-busy','Publication is already running; inspect its record')
             const requested = c.req.method === 'POST'
-              ? z.object({measurementId:z.string().uuid().optional(),requirementsRevision:z.string().optional(),
-                discussionConfirmation:z.object({messageRequestKeys:z.array(z.string().min(1)).min(1)}).strict().optional(),
+              ? z.object({requirementsRevision:z.string().optional(),
+                publicationDescription:z.object({text:z.string().max(4000),confirmed:z.literal(true)}).strict().optional(),
+                publicationCover:z.object({mediaType:z.enum(['image/png','image/jpeg','image/webp']),
+                  filename:z.string().max(255),data:z.string().max(14 * 1024 * 1024)}).strict().optional(),
               }).strict().parse(await input.readBody(c.req.raw))
               : undefined
-            const latest = ctx.run.agentTurns?.flatMap(t=>t.measurements ?? []).at(-1)
-            if (!latest) throw new WorkflowError('deployment-unverified','No measured build is available')
-            if (requested?.measurementId && requested.measurementId !== latest.id ||
-                requested?.requirementsRevision && requested.requirementsRevision !== ctx.run.requirements.revision)
-              throw new WorkflowError('revision-conflict','Deployment selection changed; read current readiness')
-            const discussion=discussionMessagesSinceMeasurement(ctx.run,latest)
-            const expectedKeys=discussion?.map(item=>item.requestKey)
-            const confirmedKeys=requested?.discussionConfirmation?.messageRequestKeys
-            if (confirmedKeys && (!discussion?.length || !requested?.measurementId || !requested.requirementsRevision ||
-                !sameJson(confirmedKeys,expectedKeys)))
-              throw new WorkflowError('confirmation-conflict','The messages or measured version changed; read current readiness and confirm again')
             const busy = (run:Run) => input.sessions.hasActiveProjectTurn(run.ownerId,run.projectId,run.workspacePath)
-            const selectionKeys=c.req.method === 'GET' ? expectedKeys : confirmedKeys
-            const selected = await selectAgentMeasuredBuild(ctx.run,latest.id,busy(ctx.run),'publication',selectionKeys)
-            await measuredFiles(ctx.run,selected)
-            if (c.req.method === 'GET') return c.json(discussion?.length ? {allowed:false,
-              issues:['Messages after this measurement need your confirmation that they did not change the game requirements.'],
-              destination:deployment.destination,quality:'unverified',
-              confirmationRequired:{measurementId:latest.id,requirementsRevision:ctx.run.requirements.revision,messages:discussion}}
-              : {allowed:true,issues:[],destination:deployment.destination,
-                measurementId:latest.id,requirementsRevision:ctx.run.requirements.revision,artifact:selected.artifact,
-                quality:'unverified',scope:'Eligible for explicit publication of measured bytes, not game-quality certification.'})
-            const validate = async () => {
+            const validateRun = async () => {
               const current = await ctx.store.read(project.id,user.id)
               if (!current || current.id !== ctx.run.id || current.version !== ctx.run.version ||
                   current.workspacePath !== ctx.run.workspacePath)
-                throw new WorkflowError('revision-conflict','Workflow changed while preparing publication')
-              const checked = await selectAgentMeasuredBuild(current,latest.id,busy(current),'publication',confirmedKeys)
-              if (checked.artifact.path !== selected.artifact.path || checked.artifact.sha256 !== selected.artifact.sha256)
-                throw new WorkflowError('measurement-stale','Selected deployment bytes changed')
-              await measuredFiles(current,checked)
+                throw new WorkflowError('revision-conflict','Project changed while preparing publication; publish the updated version again')
+              if (current.writer || busy(current))
+                throw new WorkflowError('workspace-busy','Wait for the project writer and owned tools to stop before publishing')
             }
-            // Selection above awaits file/database reads. Recheck synchronously
+            await validateRun()
+            const plan = await publicationBuildPlan(ctx.run)
+            if (requested?.requirementsRevision && requested.requirementsRevision !== ctx.run.requirements.revision)
+              throw new WorkflowError('revision-conflict','Project requirements changed; reopen the publication window')
+            if (c.req.method === 'GET') return c.json({allowed:true,issues:[],destination:deployment.destination,
+              requirementsRevision:ctx.run.requirements.revision,quality:'unverified',
+              scope:'Publication rebuilds current sources and checks the static page before uploading; this is not game-quality certification.'})
+            const previous = mergeDeploymentRecords(await deployment.list(ctx.run.chatSessionId),
+              await input.listDeployments?.(c.req.raw,user,ctx.run.chatSessionId) ?? [])
+              .find(record => record.status === 'succeeded' && record.url)
+            const publicationCover = requested?.publicationCover ? await preparePublicationCover(requested.publicationCover) : undefined
+            // Preparation above awaits file/database reads. Recheck synchronously
             // with start so a concurrent request gets 409, not a generic 500.
             if (deployment.isPublishing(user.id,ctx.run.workspacePath))
               throw new WorkflowError('deployment-busy','Publication is already running; inspect its record')
             return c.json(await deployment.start({sessionId:ctx.run.chatSessionId,userId:user.id,projectId:project.id,
               workspacePath:ctx.run.workspacePath,authToken:input.getAuthToken(c.req.raw),
-              measured:{runId:ctx.run.id,measurementId:latest.id,artifact:selected.artifact,validate,
-                ...(confirmedKeys?{discussionConfirmation:{requirementsRevision:ctx.run.requirements.revision,
-                  messageRequestKeys:confirmedKeys}}:{})}},
+              publicDescription:requested?.publicationDescription?.text.trim() ?? previous?.publicDescription ?? '',
+              ...(publicationCover ? {publicationCover} : previous?.publicCoverUrl ? {publicCoverUrl:previous.publicCoverUrl} : {}),
+              build: directory => rebuildPublication(ctx.run,plan,directory,validateRun)},
               input.persistDeployment ? record=>input.persistDeployment!(c.req.raw,user,record) : undefined),202)
           } catch(error) {
             if (suffix !== 'deployment-readiness') throw error

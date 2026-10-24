@@ -1,0 +1,4 @@
+# Use the same Supabase project as desktop and web BGS.
+BEEGAME_SUPABASE_ANON_KEY=replace-with-public-anon-key
+# Server only; used to resolve verified historical version links.
+BEEGAME_SUPABASE_SERVICE_ROLE_KEY=replace-with-private-service-role-key

@@ -1,0 +1,26 @@
+@layer theme, base, components, utilities;
+
+@import "../../frontend/node_modules/tailwindcss/theme.css" layer(theme);
+@import "../../frontend/node_modules/tailwindcss/utilities.css" layer(utilities);
+@import "../../frontend/src/styles/tokens.css";
+@import "../../frontend/src/styles/publication-markdown.css";
+@config "../../frontend/tailwind.config.js";
+@source "../../frontend/src/components/Demiurge/ProfileAvatarButton.tsx";
+@source "../../frontend/src/components/Demiurge/Landing/UserAccountMenu.tsx";
+@source "../../frontend/src/components/beui/registry/components/motion/popover-morph.tsx";
+
+@layer base {
+  .portal-account-toolbar button,
+  [data-morph-popover-portal] button {
+    padding: 0;
+    border-width: 0;
+    border-style: solid;
+    background-color: transparent;
+    color: inherit;
+  }
+}
+
+.portal-account-toolbar,
+[data-morph-popover-portal] {
+  --accent: var(--surface-hover);
+}

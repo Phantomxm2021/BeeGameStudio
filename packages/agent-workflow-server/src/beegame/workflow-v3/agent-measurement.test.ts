@@ -1,4 +1,5 @@
 import {test,expect,spyOn} from 'bun:test'
+import sharp from 'sharp'
 import {mkdtemp,mkdir,writeFile,readFile,rm,realpath,symlink,chmod} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
@@ -534,34 +535,43 @@ test('a saved but invalid content registry cannot disappear behind a passing bui
   }finally{await f.close()}
 },30000)
 
-test.each([false,true])('V3 ordinary deployment publishes exact measured bytes without rebuilding; publisher failure=%s',async failPublication=>{
+test.each([false,true])('V3 ordinary deployment rebuilds current sources without relying on old measurement bytes; publisher failure=%s',async failPublication=>{
   const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
   let calls=0,builds=0,native=0
   let role:'owner'|'viewer'='owner'
   try {
     const record=await f.measurement.measure(request)
     expect(record.error).toBeUndefined()
-    await f.settle()
+    const settled=await f.settle()
+    const savedEvidence=structuredClone(settled.agentTurns)
+    const oldArtifact=await readFile(join(f.workspace,'dist/index.html'),'utf8')
+    const updatedSource='<html><body><h1>Rebuilt current source</h1></body></html>'
+    await writeFile(join(f.workspace,'src/index.html'),updatedSource)
     const app=createAgentWorkflowApp({currentUserResolver:async()=>({id:'owner',role}),workflowV3Store:f.store,
       dashboardDataRoot:join(f.root,'dashboard'),defaultWorkspacePath:f.root,modelConfigStore:false,skillsConfig:false,
       sessionRunner:{async start(){native++;throw Error('No native execution')}},
       deploymentRunner:async()=>{builds++;throw Error('Do not rebuild')},
       deploymentPublisher:{async publishStaticDirectory(input){
         calls++
-        expect(await input.files.find(x=>x.path==='index.html')!.text()).toBe(await readFile(join(f.workspace,'dist/index.html'),'utf8'))
+        expect(await input.files.find(x=>x.path==='index.html')!.text()).toBe(updatedSource)
         return {url:'https://offline.invalid/deployment/'}
       },async verifyPublished(){if(failPublication)throw Error('Synthetic delivery host failed')}},
       registerCleanup:fn=>cleanups.push(fn)})
     const post=(path:string,body:unknown={})=>app.request(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
     expect((await post('/api/projects',{id:'measure',name:'Synthetic measured publication',root_path:f.workspace,created_at:Date.now()})).status).toBe(200)
     const readiness=await(await app.request('/api/projects/measure/deployment-readiness')).json()
-    expect(readiness).toMatchObject({allowed:true,measurementId:record.id,quality:'unverified',destination:'remote'})
+    expect(readiness).toMatchObject({allowed:true,quality:'unverified',destination:'remote'})
     role='viewer'
     expect((await post('/api/projects/measure/deployments')).status).toBe(403)
     role='owner'
     expect((await post('/api/projects/measure/deployments',{artifact:{path:'../private',sha256:'fake'}})).status).toBe(400)
-    expect((await post('/api/projects/measure/deployments',{measurementId:crypto.randomUUID()})).status).toBe(409)
-    const start=await post('/api/projects/measure/deployments',{measurementId:record.id,requirementsRevision:f.run.requirements.revision})
+    expect((await post('/api/projects/measure/deployments',{measurementId:crypto.randomUUID()})).status).toBe(400)
+    const cover = await sharp({create:{width:160,height:90,channels:3,background:'#345678'}}).png().toBuffer()
+    expect((await post('/api/projects/measure/deployments',{publicationDescription:{text:'Unconfirmed',confirmed:false}})).status).toBe(400)
+    expect((await post('/api/projects/measure/deployments',{publicationCover:{mediaType:'image/png',filename:'cover.png',data:'invalid'}})).status).toBe(400)
+    const start=await post('/api/projects/measure/deployments',{requirementsRevision:f.run.requirements.revision,
+      publicationDescription:{text:'Creator-edited controls',confirmed:true},
+      publicationCover:{mediaType:'image/png',filename:'cover.png',data:cover.toString('base64')}})
     expect(start.status).toBe(202)
     const queued=await start.json()
     expect((await post('/api/projects/measure/deployments')).status).toBe(409)
@@ -573,18 +583,22 @@ test.each([false,true])('V3 ordinary deployment publishes exact measured bytes w
       await Bun.sleep(10)
     }
     expect(result?.status).toBe(failPublication?'failed':'succeeded')
-    expect(JSON.parse(result.buildLog)).toMatchObject({protocol:'bgs.workflow.v3',measurementId:record.id,quality:'unverified'})
+    expect(result.publicDescription).toBe('Creator-edited controls')
+    expect(result.publicCoverUrl).toBe('https://offline.invalid/deployment/__bgs_publication/cover.webp')
+    expect(JSON.parse(result.buildLog)).toMatchObject({protocol:'bgs.workflow.v3',quality:'unverified',
+      checks:expect.arrayContaining([expect.objectContaining({id:'build',status:'passed'}),expect.objectContaining({id:'runtime-smoke',status:'passed'})])})
+    expect(await readFile(join(f.workspace,'dist/index.html'),'utf8')).toBe(oldArtifact)
+    expect((await f.current()).agentTurns).toEqual(savedEvidence)
     expect(calls).toBe(1);expect(builds).toBe(0);expect(native).toBe(0)
     if(failPublication)expect((await app.request('/deployments/'+queued.id+'/')).status).toBe(404)
     await writeFile(join(f.workspace,'src/index.html'),'Source edit after publication')
-    expect((await(await app.request('/api/projects/measure/deployment-readiness')).json()).allowed).toBe(false)
-    expect((await post('/api/projects/measure/deployments')).status).toBe(409)
+    expect((await(await app.request('/api/projects/measure/deployment-readiness')).json()).allowed).toBe(true)
     expect(calls).toBe(1)
     expect((await f.current()).deliveryEligible).toBe(false)
   }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.close()}
 },30000)
 
-test('publication may confirm only settled plain chat after measurement, never changed source or explicit requirements',async()=>{
+test('fresh publication rebuilds current sources independently of old discussion confirmations',async()=>{
   const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
   const preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),
     readRun:f.current,isBusy:()=>false})
@@ -643,42 +657,65 @@ test('publication may confirm only settled plain chat after measurement, never c
     unfinished.agentTurns!.at(-1)!.status='failed'
     expect(discussionMessagesSinceMeasurement(unfinished,record)).toBeNull()
     const readiness=await(await app.request('/api/projects/measure/deployment-readiness')).json()
-    expect(readiness).toMatchObject({allowed:false,confirmationRequired:{measurementId:record.id,
-      requirementsRevision:discussed.requirements.revision,messages:[{requestKey:'question-1',text:'What was tested?'}]}})
-    expect((await post({measurementId:record.id,requirementsRevision:discussed.requirements.revision})).status).toBe(409)
-    expect((await post({measurementId:record.id,requirementsRevision:discussed.requirements.revision,
-      discussionConfirmation:{messageRequestKeys:['wrong-message']}})).status).toBe(409)
+    expect(readiness).toMatchObject({allowed:true})
+    expect(readiness.confirmationRequired).toBeUndefined()
     expect(published).toBe(0)
-    const confirmation={measurementId:record.id,requirementsRevision:discussed.requirements.revision,
-      discussionConfirmation:{messageRequestKeys:['question-1']}}
-    const started=await post(confirmation)
+    const started=await post({})
     expect(started.status).toBe(202)
     const deploymentId=(await started.json()).id
     let saved:any
-    for(let i=0;i<100;i++) {
+    for(let i=0;i<1000;i++) {
       saved=(await(await app.request('/api/projects/measure/deployments')).json()).find((item:any)=>item.id===deploymentId)
       if(saved?.status==='succeeded')break
       await Bun.sleep(10)
     }
     expect(saved?.status).toBe('succeeded')
-    expect(JSON.parse(saved.buildLog)).toMatchObject({discussionConfirmation:{
-      requirementsRevision:discussed.requirements.revision,messageRequestKeys:['question-1']}})
+    expect(JSON.parse(saved.buildLog).checks).toEqual(expect.arrayContaining([expect.objectContaining({id:'build',status:'passed'})]))
     expect(published).toBe(1)
     await writeFile(join(f.workspace,'src/index.html'),'Changed after confirmation')
     const drift=await(await app.request('/api/projects/measure/deployment-readiness')).json()
-    expect(drift.allowed).toBe(false)
+    expect(drift.allowed).toBe(true)
     expect(drift.confirmationRequired).toBeUndefined()
     expect((await inspectAgentMeasurementInputs(discussed,record)).code).toBe('measurement-stale')
-    expect((await post(confirmation)).status).toBe(409)
     await writeFile(join(f.workspace,'src/index.html'),'<html><body><h1>Actual fixture</h1><button>Play</button></body></html>')
     const changed=await appendMessage('change','change-1','Change the goal')
     expect((await inspectAgentMeasurementInputs(changed,record)).code).toBe('measurement-stale')
     const blocked=await(await app.request('/api/projects/measure/deployment-readiness')).json()
-    expect(blocked.allowed).toBe(false)
+    expect(blocked.allowed).toBe(true)
     expect(blocked.confirmationRequired).toBeUndefined()
-    expect((await post({...confirmation,requirementsRevision:changed.requirements.revision})).status).toBe(409)
     expect(published).toBe(1)
   }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.close()}
+},30000)
+
+test.each(['build','smoke'])('fresh publication records %s failure without uploading or needing an agent measurement',async failure=>{
+  const f=await fixture(failure==='build'?"throw Error('Synthetic build failure')":builder),cleanups:Array<()=>void|Promise<void>>=[]
+  let published=0
+  try {
+    await f.settle()
+    if(failure==='smoke')await writeFile(join(f.workspace,'src/index.html'),"<html><body><script>throw Error('Synthetic smoke failure')</script></body></html>")
+    const app=createAgentWorkflowApp({currentUserResolver:async()=>({id:'owner',role:'owner'}),workflowV3Store:f.store,
+      dashboardDataRoot:join(f.root,'dashboard'),defaultWorkspacePath:f.root,modelConfigStore:false,skillsConfig:false,
+      sessionRunner:{async start(){throw Error('No model or native task should run')}},
+      deploymentPublisher:{async publishStaticDirectory(){published++;return {url:'https://offline.invalid/deployment/'}},async verifyPublished(){}},
+      registerCleanup:fn=>cleanups.push(fn)})
+    const post=(path:string,body:unknown={})=>app.request(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+    await post('/api/projects',{id:'measure',name:'Synthetic fresh publication',root_path:f.workspace,created_at:Date.now()})
+    expect((await(await app.request('/api/projects/measure/deployment-readiness')).json()).allowed).toBe(true)
+    const response=await post('/api/projects/measure/deployments')
+    expect(response.status).toBe(202)
+    const queued=await response.json()
+    let result:any
+    for(let n=0;n<1000;n++) {
+      result=(await(await app.request('/api/projects/measure/deployments')).json()).find((r:any)=>r.id===queued.id)
+      if(['failed','succeeded'].includes(result?.status))break
+      await Bun.sleep(10)
+    }
+    expect(result?.status).toBe('failed')
+    expect(result.message).toContain(failure==='build'?'Publication build failed':'Publication page check failed')
+    expect(published).toBe(0)
+    expect((await f.current()).agentTurns![0]!.measurements).toBeUndefined()
+    expect((await f.current()).deliveryEligible).toBe(false)
+  } finally {for(const cleanup of cleanups.reverse())await cleanup();await f.close()}
 },30000)
 
 test('execution identity observes saved sources and builds without running or claiming acceptance',async()=>{
@@ -1843,7 +1880,7 @@ test.each(['file','directory','root','broken-parent','not-directory'] as const)(
 })
 
 
-test('publication exposes the saved measurement failure instead of blaming writer settlement or author PASS',async()=>{
+test('fresh publication readiness stays independent while measured consumers retain saved failures',async()=>{
   const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
   try {
     const failed=await f.measurement.measure({...request,reportPaths:['missing-evidence.json']})
@@ -1859,7 +1896,7 @@ test('publication exposes the saved measurement failure instead of blaming write
       body:JSON.stringify({id:'measure',name:'Failed measurement fixture',root_path:f.workspace,created_at:Date.now()})})
     const readiness=await app.request('/api/projects/measure/deployment-readiness')
     expect(readiness.status).toBe(200)
-    expect(await readiness.json()).toMatchObject({allowed:false,code:'measurement-failed',issues:[expect.stringContaining(failed.error!)]})
+    expect(await readiness.json()).toMatchObject({allowed:true,quality:'unverified',issues:[]})
 
     const checkFailed=structuredClone(run),record=checkFailed.agentTurns![0]!.measurements![0]!
     delete record.error
@@ -1924,3 +1961,44 @@ test('parallel measured resource requests share only in-flight verification and 
     expect((await preview.handle(new Request(opened.url)))?.status).toBe(404)
   }finally{release();preview?.dispose();await f.close()}
 },30000)
+
+
+test('publication cover capture uses only the owned current build without generation, rebuilding or publication',async()=>{
+  const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
+  let role:'owner'|'viewer'='owner',captures=0,changeDuringCapture=false
+  try {
+    const image=await sharp({create:{width:160,height:90,channels:3,background:'#456789'}}).webp().toBuffer()
+    const app=createAgentWorkflowApp({currentUserResolver:async()=>({id:'owner',role}),workflowV3Store:f.store,
+      workflowV3PreviewOrigin:'http://localhost:12345',dashboardDataRoot:join(f.root,'dashboard'),defaultWorkspacePath:f.root,
+      modelConfigStore:false,skillsConfig:false,
+      sessionRunner:{async start(){throw Error('No native execution')}},
+      deploymentRunner:async()=>{throw Error('No rebuilding')},
+      deploymentPublisher:{async publishStaticDirectory(){throw Error('No publication')}},
+      publicationCoverCapture:async url=>{
+        captures++;expect(new URL(url).hostname).toMatch(/^[a-f0-9]+\.localhost$/)
+        if(changeDuringCapture)await writeFile(join(f.workspace,'dist/index.html'),'Changed build')
+        return image
+      },registerCleanup:fn=>cleanups.push(fn)})
+    const post=(path:string,body:unknown={})=>app.request(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+    expect((await post('/api/projects',{id:'measure',name:'Capture fixture',root_path:f.workspace,created_at:Date.now()})).status).toBe(200)
+    const path='/api/projects/measure/publication-cover'
+    role='viewer';expect((await post(path)).status).toBe(403);role='owner'
+    expect((await post('/api/projects/missing/publication-cover')).status).toBe(404)
+    expect((await post(path,{url:'http://untrusted.invalid/'})).status).toBe(400)
+    expect((await post(path)).status).toBe(409) // Active writer.
+    await f.settle()
+    expect((await post(path)).status).toBe(409) // No existing build; do not create one.
+    expect(captures).toBe(0)
+    await mkdir(join(f.workspace,'dist'));await writeFile(join(f.workspace,'dist/index.html'),'<canvas></canvas>')
+    const before=await artifactDigest(f.workspace,'dist',true)
+    const response=await post(path)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(await response.json()).toEqual({mediaType:'image/webp',filename:'game-preview.webp',data:image.toString('base64')})
+    expect(captures).toBe(1)
+    expect(await artifactDigest(f.workspace,'dist',true)).toBe(before)
+    expect((await f.current()).agentTurns![0]!.measurements).toBeUndefined()
+    changeDuringCapture=true
+    expect((await post(path)).status).toBe(409)
+  }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.close()}
+})

@@ -268,6 +268,9 @@ type SupabaseDeploymentRow = {
   created_at: string
   updated_at: string
   deployed_at: string | null
+  portal_published_at?: string | null
+  public_description?: string | null
+  public_cover_url?: string | null
 }
 
 export function createSupabaseDashboardStoreFromEnv(
@@ -1088,6 +1091,9 @@ export class SupabaseDashboardStore {
         created_at: record.createdAt,
         updated_at: record.updatedAt,
         deployed_at: record.deployedAt ?? null,
+        ...(record.publicDescription !== undefined ? { public_description: record.publicDescription } : {}),
+        ...(record.publicCoverUrl !== undefined ? { public_cover_url: record.publicCoverUrl } : {}),
+        ...(record.portalPublishedAt ? { portal_published_at: record.portalPublishedAt } : {}),
       },
       'id',
     )
@@ -1746,6 +1752,9 @@ function rowToDeploymentRecord(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.deployed_at ? { deployedAt: row.deployed_at } : {}),
+    ...(row.public_description !== undefined && row.public_description !== null ? { publicDescription: row.public_description } : {}),
+    ...(row.public_cover_url ? { publicCoverUrl: row.public_cover_url } : {}),
+    ...(row.portal_published_at ? { portalPublishedAt: row.portal_published_at } : {}),
   }
 }
 

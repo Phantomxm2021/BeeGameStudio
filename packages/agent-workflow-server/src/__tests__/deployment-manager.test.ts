@@ -6,6 +6,7 @@ import { artifactDigest } from '../beegame/runtime-acceptance'
 import { computeWorkspaceRevision } from '../beegame/workspace-revision'
 import { createPreviewTestBrowser } from '../beegame/preview-test-browser'
 import { sharedPlaywright } from '../beegame/shared-playwright'
+import { PUBLICATION_COVER_PATH } from '../beegame/publication-cover'
 import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisher,
@@ -26,6 +27,44 @@ describe('BeeGameDeploymentManager', () => {
   afterEach(async () => {
     await rm(root, { recursive: true, force: true })
   })
+
+  test('creator-reviewed description survives publication persistence and rollback', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'dist/index.html'), '<main>Fixture</main>')
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+    const result = await manager.deploy({ sessionId: 'copy-fixture', workspacePath: workspace,
+      publicDescription: 'Controls\nMove with arrow keys.' })
+    expect(result.status, result.message).toBe('succeeded')
+    expect((await manager.list('copy-fixture'))[0].publicDescription).toBe('Controls\nMove with arrow keys.')
+    const rollback = await manager.rollbackTo(result)
+    expect(rollback.publicDescription).toBe(result.publicDescription)
+    expect((await manager.list('copy-fixture')).find(record => record.id === rollback.id)?.publicDescription).toBe(result.publicDescription)
+  })
+
+  test('cover metadata follows versions and retention without changing the measured project', async () => {
+    workspace = await realpath(workspace)
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'dist/index.html'), '<main>Measured fixture</main>')
+    const artifact = { path: 'dist', sha256: await artifactDigest(workspace, 'dist', true) }
+    const measured = { runId: 'fixture', measurementId: 'fixture', artifact, validate: async () => {} }
+    const manager = new BeeGameDeploymentManager({ dataRoot: root, runner: async () => { throw Error('No rebuild') } })
+    const coverBytes = new Uint8Array([1, 2, 3]) // Manager receives already validated bytes.
+    const first = await manager.deploy({ sessionId: 'cover-fixture', workspacePath: workspace, measured, publicationCover: coverBytes })
+    expect(first.status, first.message).toBe('succeeded')
+    expect(first.publicCoverUrl).toEndWith(PUBLICATION_COVER_PATH)
+    expect(new Uint8Array(await (await manager.readPublicFile(first.publicCoverUrl!))!.body.arrayBuffer())).toEqual(coverBytes)
+    expect(await artifactDigest(workspace, 'dist', true)).toBe(artifact.sha256)
+    expect(await Bun.file(join(workspace, 'dist', PUBLICATION_COVER_PATH)).exists()).toBe(false)
+    await Bun.sleep(2)
+    const next = await manager.deploy({ sessionId: 'cover-fixture', workspacePath: workspace, measured, publicCoverUrl: first.publicCoverUrl })
+    expect(next.status, next.message).toBe('succeeded')
+    expect(next.publicCoverUrl).toBe(first.publicCoverUrl)
+    const retention = await manager.applyRetention({ dryRun: true, keepSuccessfulPerProject: 1 })
+    expect(retention.retained.some(record => record.id === first.id)).toBe(true)
+    expect((await manager.rollbackTo(first)).publicCoverUrl).toBe(first.publicCoverUrl)
+  }, 30000)
 
   test('published local bytes load HTML, module and JSON through their actual deployment URL in Chromium',async()=>{
     workspace=await realpath(workspace)
@@ -195,6 +234,18 @@ describe('BeeGameDeploymentManager', () => {
       if (mode === 'extra') expect(result.message).toContain('not covered by acceptance')
     })
 
+  test('explicit rollback of a pre-Portal remote release publishes its original bytes to Portal', async () => {
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      publisher: { publishStaticDirectory: async () => { throw Error('Rollback must not upload') } } })
+    const source = { id: 'legacy', sessionId: 'session', projectId: 'project', workspacePath: workspace,
+      status: 'succeeded' as const, url: 'https://games.test/deployments/legacy/files/index.html',
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }
+    const restored = await manager.rollbackTo(source)
+    expect(restored.url).toBe(source.url)
+    expect(restored.portalPublishedAt).toBe(restored.deployedAt)
+    expect(restored.id).not.toBe(source.id)
+  })
+
   test.each([false, true])('registers before Worker verification and revokes failure: %s', async (rejectVerification) => {
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
     const statuses: string[] = []
@@ -209,14 +260,19 @@ describe('BeeGameDeploymentManager', () => {
         verifyPublished: async () => {
           expect(statuses).toEqual(['succeeded'])
           expect((await manager.list())[0]?.status).toBe('publishing')
+          expect((await manager.list())[0]?.portalPublishedAt).toBeUndefined()
           if (rejectVerification) throw new Error('Public page mismatch')
         },
       },
     })
-    const result = await manager.deploy({sessionId: 'test', workspacePath: workspace}, undefined,
-      async record => { statuses.push(record.status) })
+    const result = await manager.deploy({sessionId: 'test', projectId: 'project', workspacePath: workspace}, undefined,
+      async record => {
+        if (statuses.length === 0) expect(record.portalPublishedAt).toBeUndefined()
+        statuses.push(record.status)
+      })
+    expect(Boolean(result.portalPublishedAt)).toBe(!rejectVerification)
     expect(result.status).toBe(rejectVerification ? 'failed' : 'succeeded')
-    expect(statuses).toEqual(rejectVerification ? ['succeeded', 'failed'] : ['succeeded'])
+    expect(statuses).toEqual(rejectVerification ? ['succeeded', 'failed'] : ['succeeded', 'succeeded'])
     if (rejectVerification) expect(result.url).toBe('')
   })
 
@@ -240,7 +296,7 @@ describe('BeeGameDeploymentManager', () => {
     }, undefined, async record => { statuses.push(record.status) })
     expect(verified).toBe(true)
     expect(result.status).toBe(changed ? 'failed' : 'succeeded')
-    expect(statuses).toEqual(changed ? ['succeeded', 'failed'] : ['succeeded'])
+    expect(statuses).toEqual(changed ? ['succeeded', 'failed'] : ['succeeded', 'succeeded'])
     expect((await manager.list())[0]?.status).toBe(result.status)
     if (changed) {
       expect(result.message).toContain('Workflow changed during public verification')

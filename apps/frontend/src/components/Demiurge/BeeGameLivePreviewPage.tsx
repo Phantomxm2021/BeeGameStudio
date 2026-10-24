@@ -13,7 +13,7 @@ import {
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
-import type { BeeGameDeploymentDiscussionConfirmation, BeeGameDeploymentPayload, BuildReportPayload, ProjectBaselineStatusPayload } from '../../services/api';
+import type { BeeGameDeploymentRequest, BeeGameDeploymentPayload, BuildReportPayload, ProjectBaselineStatusPayload } from '../../services/api';
 import type { TokenUsage } from '../../types/message';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
@@ -64,7 +64,7 @@ interface BeeGameLivePreviewPageProps {
   previewRefreshNonce?: number;
   onStartPreview?: () => void | Promise<void>;
   onStopPreview?: () => void | Promise<void>;
-  onDeployProject?: (confirmation?: BeeGameDeploymentDiscussionConfirmation) => void | Promise<void>;
+  onDeployProject?: (confirmation?: BeeGameDeploymentRequest) => void | Promise<void>;
   onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
   onFixDeploymentFailure?: () => void | Promise<void>;
   onFixConsoleError?: (message: string) => Promise<boolean | void>;
@@ -247,7 +247,7 @@ export function BeeGameLivePreviewPage({
       setStartingPreview(false);
     }
   };
-  const handleDeploy = async (confirmation?: BeeGameDeploymentDiscussionConfirmation) => {
+  const handleDeploy = async (confirmation?: BeeGameDeploymentRequest) => {
     if (isInteractionLocked || isWorkspaceBusy) return;
     await onDeployProject?.(confirmation);
   };

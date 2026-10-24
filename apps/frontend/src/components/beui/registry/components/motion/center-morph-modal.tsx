@@ -70,6 +70,7 @@ export function CenterMorphModalContent({
   closeButtonLabel = 'Close modal',
   className,
   backdropClassName,
+  layout,
 }: {
   children: ReactNode;
   ariaLabel: string;
@@ -79,6 +80,7 @@ export function CenterMorphModalContent({
   closeButtonLabel?: string;
   className?: string;
   backdropClassName?: string;
+  layout?: 'size';
 }) {
   const context = useCenterMorphModalContext();
   const reduce = useReducedMotion() ?? false;
@@ -147,6 +149,7 @@ export function CenterMorphModalContent({
           <div className="flex w-full flex-col items-center py-8">
             <motion.div
               ref={panelRef}
+              layout={reduce ? undefined : layout}
               id={context.contentId}
               role="dialog"
               aria-modal="true"
@@ -157,7 +160,7 @@ export function CenterMorphModalContent({
               animate={{ opacity: 1, clipPath: CENTER_OPEN_CLIP }}
               exit={reduce ? { opacity: 0, clipPath: CENTER_OPEN_CLIP } : { opacity: 1, clipPath: CENTER_FOLDED_CLIP }}
               {...gate}
-              transition={reduce ? { duration: 0.14, ease: EASE_OUT } : CENTER_UNFOLD_TRANSITION}
+              transition={reduce ? { duration: 0.14, ease: EASE_OUT } : { ...CENTER_UNFOLD_TRANSITION, layout: { duration: 0.32, ease: EASE_OUT } }}
               className={cn('pointer-events-auto relative w-full max-w-[26rem] origin-center overflow-hidden rounded-[30px] border border-border bg-background will-change-[clip-path]', className)}
             >
               {children}
