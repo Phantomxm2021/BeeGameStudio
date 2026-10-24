@@ -5,12 +5,15 @@ import {
   inspectOutboundTarget,
   type OutboundTargetPolicyOptions,
 } from '@bee-game-studio/security-core'
+import { createPublicOutboundDns, type PublicIpv4Resolver } from '../public-outbound-policy'
 import { ImageProviderError } from './provider'
 
 export type ImageResultRequest = (url: string, init: RequestInit) => Promise<Response>
 
 export type ImageResultRequestOptions = {
   dns?: Pick<OutboundTargetPolicyOptions, 'resolve4' | 'resolve6'>
+  /** Test-owned public DNS injection; production uses the pinned DoH resolver. */
+  resolvePublic4?: PublicIpv4Resolver
   /** Test-only transport injection; production uses the pinned Undici path. */
   baseFetch?: typeof fetch
 }
@@ -22,8 +25,7 @@ export function createImageResultRequest(options: ImageResultRequestOptions): Im
   // endpoints. Validate each destination without inheriting their allowlist or
   // development proxy exception. Only DNS resolvers are shared.
   const resultPolicy: OutboundTargetPolicyOptions = {
-    resolve4: options.dns?.resolve4,
-    resolve6: options.dns?.resolve6,
+    ...createPublicOutboundDns(options.dns, options.resolvePublic4),
     allowHttp: false,
     allowTrustedDevelopmentProxy: false,
   }

@@ -319,9 +319,14 @@
         }
       ],
       "configured": "Configured",
-      "newServer": "New server",
+      "newServer": "Add MCP (manual)",
+      "newServerCommand": "Add MCP (command)",
       "noServers": "No MCP servers yet",
       "form": {
+        "pasteCommand": "Paste add command",
+        "pasteCommandHint": "Supports bgs mcp add name --url address and the codex equivalent. Review the parsed details and save.",
+        "commandFormatError": "Use bgs mcp add name --url address (codex is also accepted). Other options and shell expressions are not supported yet.",
+        "commandUrlError": "Enter a complete HTTP or HTTPS URL without a username or password.",
         "name": "Name",
         "enabled": "Enabled",
         "transport": "Transport",

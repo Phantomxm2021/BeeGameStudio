@@ -124,3 +124,30 @@ test('host-authorized stdio imports preserve credentials on the backend and reje
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('create, update and connection-test routes use public MCP policy instead of provider exceptions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-mcp-policy-'))
+  const cleanups: Array<() => void> = []
+  const app = createAgentWorkflowApp({
+    dashboardDataRoot: root, modelConfigStore: false, skillsConfig: false,
+    currentUser: { id: 'viewer', role: 'viewer' },
+    outboundTargetPolicyOptions: { allowedHosts: ['model.example'], allowHttp: true, allowTrustedDevelopmentProxy: true,
+      resolve4: () => ['93.184.216.34'], resolve6: () => [] },
+    registerCleanup: cleanup => cleanups.push(cleanup),
+  })
+  const body = { name: 'Public MCP', enabled: true, transport: 'http', scope: 'beegame', url: 'https://new-mcp.example/mcp' }
+  const send = (route: string, method: string, url: string) => app.request(route, {
+    method, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, url }),
+  })
+  try {
+    const created = await send('/api/mcp-servers', 'POST', body.url)
+    expect(created.status).toBe(200)
+    const saved = await created.json()
+    expect((await send(`/api/mcp-servers/${saved.id}`, 'PUT', 'https://another-mcp.example/mcp')).status).toBe(200)
+    for (const url of ['http://new-mcp.example', 'https://127.0.0.1', 'https://169.254.169.254', 'https://u:p@new-mcp.example']) {
+      expect((await send('/api/mcp-servers', 'POST', url)).status).toBe(400)
+      expect((await send(`/api/mcp-servers/${saved.id}`, 'PUT', url)).status).toBe(400)
+      expect((await send('/api/mcp-servers/test', 'POST', url)).status).toBe(400)
+    }
+  } finally { cleanups.forEach(cleanup => cleanup()); await rm(root, { recursive: true, force: true }) }
+})

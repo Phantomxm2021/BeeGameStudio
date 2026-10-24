@@ -996,6 +996,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
               setIsHistoryOpen(false);
               setIsCreditStoreOpen(false);
             }}
+            canManageBeePlay={currentUser?.role === 'owner'}
             canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
             onOpenResourceLibrary={() => {
               openResourceLibraryRoute();

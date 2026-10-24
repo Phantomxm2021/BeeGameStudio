@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { SceneAsset, SceneDocument } from '@beegame/scene-editor';
 import { atlasFrameName, parseSpriteSheet, parseTileSet, type SpriteSheet } from '@beegame/scene-editor';
@@ -410,6 +411,7 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
         )}>
           <div className="h-full min-h-0">
             <SceneEditor
+              renderNumber={value => <AnimatedNumber>{value}</AnimatedNumber>}
               key={selectedScenePath}
               initialDocument={initialDocument}
               initialProjection={initialDocument.dimension === '2d' ? 'orthographic' : 'perspective'}

@@ -46,6 +46,7 @@ describe('public Portal projection', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       projectId: row.project_id,
+      playCount: 0,
       authorId: row.owner_id,
       authorName: row.author_name,
       title: row.title,
@@ -198,6 +199,7 @@ describe('public Portal projection', () => {
     expect(await response.json()).toEqual({
       supabaseUrl: env.BEEGAME_SUPABASE_URL,
       supabaseAnonKey: 'public-key',
+      bgsSsoEnabled: false,
     })
     const head = await worker.fetch(
       new Request('https://play.test/', { method: 'HEAD' }),
@@ -353,6 +355,39 @@ describe('reviewed publication names', () => {
         return mockFetch({ public_description: '# Current Harbor\n\nIntro' })(input, init)
       })
       expect((await response.json()).title).toBe(title)
+    }
+  })
+})
+
+describe('BeePlay recommendations', () => {
+  test('uses the saved recommendation order and includes lifetime plays', async () => {
+    const response = await handleGamePortalRequest(new Request('https://portal.test/api/featured'), env, async input => {
+      const url = new URL(String(input))
+      expect(url.searchParams.get('featured_position')).toBe('not.is.null')
+      expect(url.searchParams.get('order')).toBe('featured_position.asc')
+      expect(url.searchParams.get('limit')).toBe('5')
+      return Response.json([{ ...row, play_count: 42 }])
+    })
+    const body = await response.json() as { games: { playCount: number }[] }
+    expect(body.games[0].playCount).toBe(42)
+  })
+})
+
+
+describe('independent BeePlay administration', () => {
+  test('serves the separate admin document without indexing, caching or framing', async () => {
+    for (const path of ['/admin', '/admin/', '/admin.html']) {
+      const response = await handleGamePortalRequest(new Request('https://play.test' + path), {
+        ...env, ASSETS: { fetch: async request => {
+          expect(new URL(request.url).pathname).toBe('/admin.html')
+          return new Response('<main id="beeplay-admin-root"></main>')
+        } },
+      })
+      expect(response.status).toBe(200)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(response.headers.get('x-robots-tag')).toContain('noindex')
+      expect(response.headers.get('content-security-policy')).toBe("frame-ancestors 'none'")
+      expect(await response.text()).toContain('beeplay-admin-root')
     }
   })
 })

@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { ResourceUploadButton } from '../../../../../packages/scene-editor/src/resource-upload';
 import { uiNodeKind, supportsTextNode, supportsImageNode, isVisualNode, isTransformNode, isNineSliceRole, uiNodeText, nodeSize, uiFontSize, nodeAnchor, nodePosition, uiPaintChildren, renderUiNode, uiNodeImageSource, resolveNodeImage, type UiNodeKind } from '../../../../../packages/scene-editor/src/ui-preview/UiContentRenderer';
 import '../../../../../packages/scene-editor/src/ui-preview/UiContentRenderer.css';
@@ -1133,7 +1134,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
     <div className="ui-editor-overlay" role="dialog" aria-modal="true" aria-label="UI Editor" onContextMenu={event => event.preventDefault()}>
       <main className="ui-editor-main">
         <aside className={`ui-editor-panel ui-editor-tree${collapsedPanels.hierarchy ? ' is-collapsed' : ''}`} aria-label="UI hierarchy" inert={collapsedPanels.hierarchy}>
-          <div className="ui-editor-panel-title"><strong>HIERARCHY</strong><span>{current?.document.data.nodes.length ?? 0} objects</span></div>
+          <div className="ui-editor-panel-title"><strong>HIERARCHY</strong><span><AnimatedNumber>{current?.document.data.nodes.length ?? 0}</AnimatedNumber> objects</span></div>
           <div className="ui-editor-panel-content ui-editor-tree-content" role="tree" aria-label="UI hierarchy tree">
             {current ? [current.document.data.rootId, ...current.document.data.nodes.filter(node => !node.parentId && node.id !== current.document.data.rootId).map(node => node.id)].map(renderHierarchyNode) : null}
           </div>

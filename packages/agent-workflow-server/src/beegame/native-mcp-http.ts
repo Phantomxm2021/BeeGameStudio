@@ -1,3 +1,4 @@
+import { resolveMcpOutboundTarget } from '../mcp-outbound-policy'
 import { modelRuntimeFetch } from './model-runtime-transport'
 import { getTLSFetchOptions, resolveApprovedOutboundTarget, type OutboundTargetPolicyOptions,
   type ApprovedOutboundTarget } from '@bee-game-studio/security-core'
@@ -13,8 +14,7 @@ export type McpHttpNetworkOptions = {
 export async function startNativeMcpHttp(servers: Record<string, string>, options: McpHttpNetworkOptions = {}) {
   const targets: Record<string, ApprovedOutboundTarget> = {}
   for (const [name, url] of Object.entries(servers)) {
-    const target = await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(url,
-      options.outboundTargetPolicyOptions ?? { allowedHosts: (process.env.BEEGAME_OUTBOUND_ALLOWED_HOSTS ?? '').split(',').map(value => value.trim()).filter(Boolean) })
+    const target = await resolveMcpOutboundTarget(url, options.outboundTargetPolicyOptions, options.resolveOutboundTarget)
     if (!target) throw Error('MCP endpoint is not permitted: ' + name)
     targets[name] = target
   }

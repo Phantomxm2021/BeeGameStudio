@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 // beui.dev/components/agents/todo-list
 
 import { ChevronDown, ListTodo } from "lucide-react";
@@ -12,7 +14,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { ActionSwapRollText } from "@/components/beui/registry/components/motion/action-swap-roll";
 import { AgentDisclosure } from "@/components/beui/registry/components/agents/agent-disclosure";
 import {
   EASE_OUT,
@@ -288,11 +289,7 @@ export function TodoList({
             {completed} of {items.length} tasks completed
           </span>
           <span aria-hidden="true" className="inline-flex">
-            <ActionSwapRollText value={String(completed)}>
-              {completed}
-            </ActionSwapRollText>
-            <span>/</span>
-            <span>{items.length}</span>
+            <AnimatedNumber>{`${completed}/${items.length}`}</AnimatedNumber>
           </span>
         </span>
         <motion.span

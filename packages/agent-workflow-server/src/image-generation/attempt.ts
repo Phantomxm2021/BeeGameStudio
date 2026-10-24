@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { imageConfigSchema, type ImageGenerationConfig, type ImageSource } from './config'
-import { ImageProviderError, type ImageGenerationProvider, type ImageRequest, type ImageResult } from './provider'
+import { ImageProviderError, type ImageGenerationProvider, type ImageRequest, type ImageResult, type ImageResultReference } from './provider'
 
 /** Host-owned storage only. Never place this directory inside an Agent workspace. */
 export type ImageAttemptInput = {
@@ -26,6 +26,7 @@ type Record = {
   diagnosticId?: string
   code?: string
   result?: StoredResult
+  reference?: ImageResultReference
 }
 
 export class ImageAttemptError extends Error {
@@ -61,7 +62,7 @@ export class ImageAttemptStore {
     input.request.signal?.throwIfAborted()
     const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
     const identity = hash([input.ownerId, input.projectId, input.requestId])
-    // Never persist secrets, prompt text, or user identifiers in this receipt.
+    // Never persist API credentials, prompt text, or user identifiers in this receipt.
     const digest = hash([config.provider, config.baseUrl, config.model, input.request.quality ?? config.quality, input.request.size ?? config.size,
       input.request.prompt, input.request.background ?? 'auto', input.request.referenceImage?.sha256 ?? null,
       ...(input.source === 'chatgpt-subscription' ? [input.source, config.responseModel] : []),
@@ -79,6 +80,7 @@ export class ImageAttemptStore {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       existing = true
     }
+    let reference: ImageResultReference | undefined
     if (existing) {
       let record: Record
       try { record = JSON.parse(readFileSync(target, 'utf8')) }
@@ -87,29 +89,45 @@ export class ImageAttemptStore {
       const running = this.active.get(identity)
       if (running) return running
       if (record.state === 'received' && record.result) return this.restore(record.result)
-      throw new ImageAttemptError(record.state === 'rejected' ? 'rejected' : 'unknown', record.status,
-        record.diagnosticId, record.code, true)
+      if (record.state !== 'rejected' && record.reference && this.provider.recover) reference = record.reference
+      else throw new ImageAttemptError(record.state === 'rejected' ? 'rejected' : 'unknown', record.status,
+          record.diagnosticId, record.code, true)
     }
     const save = (record: Record) => {
       const temporary = join(directory, `${randomUUID()}.tmp`)
       writeFileSync(temporary, JSON.stringify(record), { mode: 0o600, flush: true })
       renameSync(temporary, target)
     }
-    save({ digest, state: 'pending' })
+    if (!existing) save({ digest, state: 'pending' })
     // Defer invocation until the promise is registered for concurrent callers.
     const running = Promise.resolve().then(async () => {
       let result: ImageResult
-      try { result = await this.provider.generate(config, input.request, { ownerId: input.ownerId, source: input.source }) }
+      try {
+        result = reference
+          ? await this.provider.recover!(config, reference, input.request.signal)
+          : await this.provider.generate(config, input.request, {
+            ownerId: input.ownerId, source: input.source,
+            onResultReference: value => {
+              // A signed URL is private host data, protected by the same 0700/0600
+              // storage as image bytes. Replace it with bytes after a successful GET.
+              reference = value
+              save({ digest, state: 'pending', reference })
+            },
+          })
+      }
       catch (error) {
-        const rejected = error instanceof ImageProviderError && error.outcome === 'rejected'
+        // A completed generation remains billable even if its download is rejected.
+        const rejected = !reference && error instanceof ImageProviderError && error.outcome === 'rejected'
         const status = error instanceof ImageProviderError ? error.status : undefined
         const diagnosticId = randomUUID()
         const code = error instanceof ImageProviderError ? error.code : 'provider-execution-failed'
         console.warn('[image-generation]', { event: 'attempt-failed', diagnosticId,
           projectId: input.projectId, requestId: input.requestId, provider: config.provider,
           code, upstreamStatus: status, outcome: rejected ? 'rejected' : 'unknown' })
-        save({ digest, state: rejected ? 'rejected' : 'unknown', status, diagnosticId, code })
-        throw new ImageAttemptError(rejected ? 'rejected' : 'unknown', status, diagnosticId, code)
+        // Completed references are already durable. A late failed GET must not
+        // overwrite bytes saved by another process recovering the same request.
+        if (!reference) save({ digest, state: rejected ? 'rejected' : 'unknown', status, diagnosticId, code })
+        throw new ImageAttemptError(rejected ? 'rejected' : 'unknown', status, diagnosticId, code, existing)
       }
       // Persist the upstream result BEFORE decoding, publishing, or billing settlement.
       // A post-processing failure must not discard paid output or induce regeneration.

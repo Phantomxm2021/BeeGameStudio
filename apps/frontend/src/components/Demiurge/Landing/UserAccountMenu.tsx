@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { type ReactNode, useState } from 'react';
 import { LogOut } from 'lucide-react';
 import { ProfileAvatarButton } from '../ProfileAvatarButton';
@@ -78,7 +79,7 @@ export function UserAccountMenu({
                             <div className="mt-1 truncate text-sm text-muted-foreground">{currentUserEmail}</div>
                         ) : null}
                         {typeof creditBalance === 'number' ? (
-                            <div className="mt-1 text-sm text-primary">{creditBalance} credits</div>
+                            <div className="mt-1 text-sm text-primary"><AnimatedNumber>{creditBalance}</AnimatedNumber> credits</div>
                         ) : null}
                     </div>
                     {items.length > 0 ? <div className="my-1 h-px bg-border" /> : null}

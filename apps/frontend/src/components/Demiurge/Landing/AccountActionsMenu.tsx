@@ -1,4 +1,4 @@
-import { FolderOpen, History, Settings, ShoppingCart, UserCircle } from 'lucide-react';
+import { ExternalLink, FolderOpen, History, Settings, ShoppingCart, UserCircle } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { UserAccountMenu, type UserAccountMenuItem } from './UserAccountMenu';
@@ -18,6 +18,7 @@ interface AccountActionsMenuProps {
     currentUserAvatarUrl?: string;
     creditBalance?: number;
     canManageResources?: boolean;
+    canManageBeePlay?: boolean;
     onToggleSettings: () => void;
     onOpenResourceLibrary?: () => void;
     onToggleHistory: () => void;
@@ -49,6 +50,7 @@ export function AccountActionsMenu({
     onOpenLogin,
     onSignOut,
     canManageResources = false,
+    canManageBeePlay = false,
 }: AccountActionsMenuProps) {
     const t = useCommonText(lang);
     const items: UserAccountMenuItem[] = [
@@ -70,6 +72,12 @@ export function AccountActionsMenu({
             icon: <Settings className="h-4 w-4" />,
             onClick: onToggleSettings,
         },
+        ...(canManageBeePlay ? [{
+            key: 'beeplay',
+            label: lang.startsWith('zh') ? 'BeePlay 管理后台' : 'BeePlay administration',
+            icon: <ExternalLink className="h-4 w-4" />,
+            onClick: () => window.open(new URL('/auth/bgs/start', String(import.meta.env.VITE_BEEGAME_GAME_PORTAL_BASE_URL || 'https://portal.beegame.studio')).href, '_blank', 'noopener,noreferrer'),
+        }] : []),
         ...(canManageResources ? [{
             key: 'resources',
             label: t.resourceLibrary,

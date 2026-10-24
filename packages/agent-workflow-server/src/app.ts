@@ -1,10 +1,12 @@
+import { registerPortalSsoRoutes } from './auth/portal-sso-routes'
+import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
 import { publicationDescriptionSources, PUBLIC_DESCRIPTION_PROMPT, validatePublicDescriptionDraft } from './beegame/publication-description'
 import { UsageOutboxPersistenceError } from './beegame/session-usage-outbox'
 import {createBgsRunner} from './bgs/runner'
 import { registerBgsSettingsRoutes } from './bgs/settings-routes'
 import { Hono, type Context } from 'hono'
 import { registerModelConnectionRoutes, validateBgsModelConfig } from './model-connection-routes'
-import { validateModelAccess } from '@bee-game-studio/agent-workflow'
+import { defaultModelApiProtocol, validateModelAccess } from '@bee-game-studio/agent-workflow'
 import { registerV3Routes } from './beegame/workflow-v3/routes'
 import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
 import { createMeasuredPreview, type MeasuredPreviewManager, type CandidatePreview } from './beegame/workflow-v3/measured-preview'
@@ -496,6 +498,8 @@ export function createAgentWorkflowApp(
     }
     return inspectOutboundTarget(value, outboundTargetPolicyOptions)
   }
+  const hasPermittedMcpUrl = async (value: unknown): Promise<boolean> =>
+    typeof value === 'string' && Boolean(await resolveMcpOutboundTarget(value, outboundTargetPolicyOptions, resolveOutboundTarget))
   const hasPermittedOutboundUrl = async (value: unknown): Promise<boolean> =>
     (await inspectPermittedOutboundUrl(value))?.approved !== false
   const assertPermittedOutboundUrl = async (value: string): Promise<void> => {
@@ -545,6 +549,10 @@ export function createAgentWorkflowApp(
   const getRequestAuthToken = authContext.getAccessToken
   const previewCapabilities = createPreviewCapabilityManager()
   const getCurrentUser = authContext.getCurrentUser
+  registerPortalSsoRoutes(app, {
+    resolveUser: request => authContext.resolveRequestUser(request),
+    getAccessToken: request => resolveValidRequestAccessToken(request, sessionAuth),
+  })
   // Resolve async identity before V3 routes and legacy-mode guards use the
   // synchronous request projection. Session refresh routes were registered
   // above; capability-only preview hosts were isolated before every API route.
@@ -1392,7 +1400,7 @@ export function createAgentWorkflowApp(
     }
     let apiProtocol
     try {
-      apiProtocol = await validateBgsModelConfig({ provider: String(body.provider),apiProtocol:body.apiProtocol, baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : undefined,
+      apiProtocol = await validateBgsModelConfig({ provider: String(body.provider),apiProtocol:body.apiProtocol ?? defaultModelApiProtocol(body.provider as ModelProviderKind), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : undefined,
         model: body.model, authMethods }, assertPermittedOutboundUrl)
     } catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
 
@@ -1445,7 +1453,7 @@ export function createAgentWorkflowApp(
       }
       let apiProtocol
       try {
-        apiProtocol = await validateBgsModelConfig({ provider: String(body.provider ?? existing.provider),apiProtocol:body.apiProtocol ?? (body.provider && body.provider!==existing.provider?undefined:existing.apiProtocol), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : existing.baseUrl,
+        apiProtocol = await validateBgsModelConfig({ provider: String(body.provider ?? existing.provider),apiProtocol:body.apiProtocol ?? (body.provider && body.provider!==existing.provider?defaultModelApiProtocol(body.provider as ModelProviderKind):existing.apiProtocol), baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : existing.baseUrl,
           model: body.model === undefined ? existing.model : body.model, authMethods }, assertPermittedOutboundUrl)
       } catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
       const updated = await dashboardRepository.updateModelConfig(
@@ -1655,7 +1663,7 @@ export function createAgentWorkflowApp(
       const hostForbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
       if (hostForbidden) return c.json(hostForbidden, 403)
     }
-    const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
+    const error = await validateMcpServerBody(body, hasPermittedMcpUrl)
     if (error) return c.json({ error }, 400)
     return c.json(
       await testMcpServerConnection(toMcpServerInput(body), {
@@ -1686,7 +1694,7 @@ export function createAgentWorkflowApp(
       const hostForbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
       if (hostForbidden) return c.json(hostForbidden, 403)
     }
-    const error = await validateMcpServerBody(input, hasPermittedOutboundUrl)
+    const error = await validateMcpServerBody(input, hasPermittedMcpUrl)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
     const saved = await dashboardRepository.upsertMcpServer(
@@ -1716,7 +1724,7 @@ export function createAgentWorkflowApp(
       const hostForbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
       if (hostForbidden) return c.json(hostForbidden, 403)
     }
-    const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
+    const error = await validateMcpServerBody(body, hasPermittedMcpUrl)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
     const ownedServers = await dashboardRepository.listMcpServers(c.req.raw, user)

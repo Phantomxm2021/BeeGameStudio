@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { memo, useState } from 'react';
 import { ArrowLeft, Box, ChevronRight, Download, ExternalLink, Eye, FileJson, FileText, FolderOpen, LayoutPanelTop, RefreshCw } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
@@ -51,7 +52,7 @@ export const ArtifactsPanel = memo(({
             {page ? <Button variant="ghost" size="icon" aria-label={zh ? '返回产物' : 'Back to artifacts'} onClick={() => setPage(null)}><ArrowLeft size={16} /></Button> : null}
             <div className="min-w-0 flex-1">
                 <h2 className="type-footnote truncate font-medium text-[var(--text-primary)]">{page ? labels[page] : text.artifacts || 'Artifacts'}</h2>
-                <p className="type-caption-2 mt-1 text-[var(--text-muted)]">{page === 'documents' ? `${view.documents.length} ${zh ? '个文件' : 'files'}` : page ? (zh ? '选择 JSON 文件，在新标签页中编辑' : 'Select a JSON file to edit in a new tab') : text.deliverables || 'Project outputs'}</p>
+                <p className="type-caption-2 mt-1 text-[var(--text-muted)]"><AnimatedNumber>{page === 'documents' ? `${view.documents.length} ${zh ? '个文件' : 'files'}` : page ? (zh ? '选择 JSON 文件，在新标签页中编辑' : 'Select a JSON file to edit in a new tab') : text.deliverables || 'Project outputs'}</AnimatedNumber></p>
             </div>
             {!page && canExportProject ? <Button variant="ghost" size="sm" disabled={!packageId} onClick={() => onDownload(packageId, packageArtifact?.name || 'project.zip')}><Download size={16} /><span>{zh ? '导出' : 'Export'}</span></Button> : null}
             {page && page !== 'documents' && onLoadEditorFiles ? <Button variant="ghost" size="icon" disabled={isEditorFilesLoading} aria-label={zh ? '刷新文件列表' : 'Refresh files'} onClick={onLoadEditorFiles}><RefreshCw size={15} /></Button> : null}

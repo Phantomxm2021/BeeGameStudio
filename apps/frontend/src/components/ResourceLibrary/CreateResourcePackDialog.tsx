@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { useState, type FormEvent } from 'react'
 import { Check, ChevronDown, ChevronLeft, Plus, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -67,7 +68,7 @@ function MultiSelectField({ label, customLabel, addLabel, options, value, onChan
     <MorphPopover className="block min-w-0 w-full">
       <MorphPopoverTrigger>
         <button type="button" aria-label={value.length ? `${label}：${value.join('，')}` : label} className="flex h-11 min-w-0 w-full items-center gap-2 rounded-xl border border-transparent bg-muted px-3.5 text-left text-sm text-foreground transition hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          {tags && value.length ? <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden"><span className="min-w-0 max-w-full truncate rounded-md bg-background px-2 py-1 text-xs">{value[0]}</span>{value.length > 1 ? <span className="shrink-0 text-xs text-muted-foreground">+{value.length - 1}</span> : null}</span> : <span className={`min-w-0 flex-1 truncate ${value.length ? '' : 'text-muted-foreground'}`}>{value.length ? value.join(', ') : label}</span>}
+          {tags && value.length ? <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden"><span className="min-w-0 max-w-full truncate rounded-md bg-background px-2 py-1 text-xs">{value[0]}</span>{value.length > 1 ? <span className="shrink-0 text-xs text-muted-foreground">+<AnimatedNumber>{value.length - 1}</AnimatedNumber></span> : null}</span> : <span className={`min-w-0 flex-1 truncate ${value.length ? '' : 'text-muted-foreground'}`}>{value.length ? value.join(', ') : label}</span>}
           <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         </button>
       </MorphPopoverTrigger>

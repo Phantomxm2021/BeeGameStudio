@@ -87,12 +87,8 @@ function eventToProjectEventMessagesBase(
       if (getPayloadString(event, 'type') === 'billing.realtime_debited')
         return [{ type: 'billing_update', task_id: taskId, project_id: projectId,
           timestamp: Date.parse(event.createdAt) || now() }]
-      if (subtype === 'host_evidence') {
-        return [{ type: 'context_update', task_id: taskId, project_id: projectId,
-          sender: 'system', message_id: `beegame-host-evidence-${event.sessionId}-${event.id}`,
-          content: event.text, task_kind: 'host_evidence', timestamp: Date.parse(event.createdAt) || now(),
-        }]
-      }
+      // Retain host receipts in the transcript, outside the Chat presentation.
+      if (subtype === 'host_evidence') return []
       if (subtype === 'delivery_error') {
         return [{ type: 'context_update', task_id: taskId, project_id: projectId,
           sender: 'system', message_id: `beegame-delivery-error-${event.sessionId}-${event.id}`,

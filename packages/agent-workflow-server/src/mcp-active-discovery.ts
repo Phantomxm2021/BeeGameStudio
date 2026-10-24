@@ -1,3 +1,5 @@
+import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
+import { modelRuntimeFetch } from './beegame/model-runtime-transport'
 import type { McpServerConfig, McpServerInput } from './mcp-servers-store'
 import { tmpdir } from 'node:os'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -167,9 +169,10 @@ async function testMcpEndpoint(
 ): Promise<McpServerTestResult> {
   const approved = localOnly
     ? resolveLoopbackDiscoveryTarget(rawEndpoint)
-    : await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+    : await resolveMcpOutboundTarget(
       rawEndpoint,
-      resolveOutboundTargetPolicyOptions(options.outboundTargetPolicyOptions),
+      options.outboundTargetPolicyOptions,
+      options.resolveOutboundTarget,
     )
   if (!approved) {
     return unavailable('Outbound URL is not permitted')
@@ -181,7 +184,7 @@ async function testMcpEndpoint(
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   const dispatcher = createPinnedUndiciDispatcher(approved)
   try {
-    const response = await fetch(endpoint, {
+    const response = await (localOnly ? fetch : modelRuntimeFetch)(endpoint, {
       method: 'POST',
       headers: {
         accept: 'application/json, text/event-stream',
@@ -248,8 +251,9 @@ async function testMcpEndpoint(
       : 'MCP initialize request failed.'
     return unavailable(message, endpoint)
   } finally {
-    if (typeof dispatcher.close === 'function') await dispatcher.close()
+    controller.abort()
     clearTimeout(timeout)
+    await dispatcher.close()
   }
 }
 
@@ -261,9 +265,10 @@ async function testSseEndpoint(
 ): Promise<McpServerTestResult> {
   const approved = localOnly
     ? resolveLoopbackDiscoveryTarget(rawEndpoint)
-    : await (options.resolveOutboundTarget ?? resolveApprovedOutboundTarget)(
+    : await resolveMcpOutboundTarget(
       rawEndpoint,
-      resolveOutboundTargetPolicyOptions(options.outboundTargetPolicyOptions),
+      options.outboundTargetPolicyOptions,
+      options.resolveOutboundTarget,
     )
   if (!approved) {
     return unavailable('Outbound URL is not permitted')
@@ -275,7 +280,7 @@ async function testSseEndpoint(
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   const dispatcher = createPinnedUndiciDispatcher(approved)
   try {
-    const response = await fetch(endpoint, {
+    const response = await (localOnly ? fetch : modelRuntimeFetch)(endpoint, {
       method: 'GET',
       headers: {
         accept: 'text/event-stream',
@@ -304,9 +309,9 @@ async function testSseEndpoint(
       : 'SSE endpoint request failed.'
     return unavailable(message, endpoint)
   } finally {
-    if (typeof dispatcher.close === 'function') await dispatcher.close()
-    clearTimeout(timeout)
     controller.abort()
+    clearTimeout(timeout)
+    await dispatcher.close()
   }
 }
 
@@ -355,18 +360,6 @@ function resolveLoopbackDiscoveryTarget(rawEndpoint: string) {
       callback(null, '127.0.0.1', 4)
     },
   }
-}
-
-function resolveOutboundTargetPolicyOptions(options: OutboundTargetPolicyOptions | undefined): OutboundTargetPolicyOptions {
-  return {
-    ...options,
-    allowedHosts: options?.allowedHosts ?? readAllowedOutboundHosts(),
-  }
-}
-
-function readAllowedOutboundHosts(): string[] {
-  const value = process.env.BEEGAME_OUTBOUND_ALLOWED_HOSTS
-  return value ? value.split(',').map(host => host.trim()).filter(Boolean) : []
 }
 
 function unavailable(message: string, endpoint?: string): McpServerTestResult {

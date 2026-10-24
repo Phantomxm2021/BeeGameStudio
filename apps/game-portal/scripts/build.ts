@@ -4,6 +4,7 @@ for (const [source, output, format] of [
   ['../src/auth.ts', 'auth.js', 'esm'],
   ['../src/theme-bootstrap.ts', 'theme.js', 'iife'],
   ['../../frontend/src/entrypoints/portalTheme.tsx', 'theme-controls.js', 'iife'],
+  ['../../frontend/src/entrypoints/beeplayAdmin.tsx', 'admin.js', 'iife'],
 ] as const) {
   const result = await Bun.build({
     entrypoints: [new URL(source, import.meta.url).pathname],

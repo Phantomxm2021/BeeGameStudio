@@ -83,3 +83,27 @@ await server.connect(new StdioServerTransport());`
     expect(discovered).toEqual([])
   })
 })
+
+test('remote connection tests use pinned lookup under Bun and reject redirects', async () => {
+  let connections = 0, lookups = 0, redirected = 0
+  const trap = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { redirected++; return new Response('unexpected') } })
+  const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    connections++
+    if (new URL(request.url).pathname === '/redirect') return new Response(null, { status: 307, headers: { location: trap.url.toString() } })
+    return Response.json({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'pinned' } } })
+  } })
+  const input = { name: 'Pinned', enabled: true, transport: 'http' as const, scope: 'beegame' as const,
+    url: `http://unresolvable-mcp.invalid:${upstream.port}/mcp` }
+  const options = { outboundTargetPolicyOptions: { allowedHosts: ['model.example'], allowHttp: true },
+    resolveOutboundTarget: async (value: string, policy: any) => {
+      expect(policy).toMatchObject({ allowedHosts: [], allowHttp: false, allowTrustedDevelopmentProxy: false })
+      return { url: new URL(value), addresses: ['127.0.0.1'], lookup: (_host: string, _options: unknown, callback: any) => {
+        lookups++; callback(null, '127.0.0.1', 4)
+      } }
+    } }
+  try {
+    expect(await testMcpServerConnection(input, options)).toMatchObject({ ok: true, serverInfo: { name: 'pinned' } })
+    expect(await testMcpServerConnection({ ...input, url: input.url.replace('/mcp', '/redirect') }, options)).toMatchObject({ ok: false })
+    expect(connections).toBe(2); expect(lookups).toBe(2); expect(redirected).toBe(0)
+  } finally { upstream.stop(true); trap.stop(true) }
+})

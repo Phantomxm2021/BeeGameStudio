@@ -13,14 +13,20 @@ import {
   type McpServerTransport,
 } from '../../services/mcpServersApi';
 import { isMcpFormSaveable, toPopoverAnchorRect, type McpServerForm, type PopoverAnchorRect } from './McpSettingsPanel.types';
+import { parseMcpAddCommand } from './mcpAddCommand';
 
 export type McpSettingsCopy = {
   title: string;
   intro: string;
   configured: string;
   newServer: string;
+  newServerCommand: string;
   noServers: string;
   form: {
+    pasteCommand: string;
+    pasteCommandHint: string;
+    commandFormatError: string;
+    commandUrlError: string;
     name: string;
     enabled: string;
     transport: string;
@@ -300,7 +306,7 @@ export function McpServerFormPopover({
   onClose,
   onSave,
 }: {
-  mode: 'create' | 'edit';
+  mode: 'create' | 'command' | 'edit';
   copy: McpSettingsCopy;
   form: McpServerForm;
   status: string;
@@ -308,11 +314,26 @@ export function McpServerFormPopover({
   anchorRect: PopoverAnchorRect | null;
   onChange: (form: McpServerForm) => void;
   onClose: () => void;
-  onSave: () => void;
+  onSave: (form: McpServerForm) => void;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [addCommand, setAddCommand] = useState('');
+  const [commandError, setCommandError] = useState<'format' | 'url' | null>(null);
   const update = (patch: Partial<McpServerForm>) => onChange({ ...form, ...patch });
-  const saveDisabled = isSaving || !isMcpFormSaveable(form);
+  const parsedCommand = parseMcpAddCommand(addCommand);
+  const save = () => {
+    if (mode !== 'command') {
+      onSave(form);
+      return;
+    }
+    if ('error' in parsedCommand) {
+      setCommandError(parsedCommand.error);
+      return;
+    }
+    setCommandError(null);
+    onSave({ ...form, name: parsedCommand.name, transport: 'http', url: parsedCommand.url, command: '', argsText: '', envText: '' });
+  };
+  const saveDisabled = isSaving || (mode === 'command' ? !addCommand.trim() : !isMcpFormSaveable(form));
   if (!anchorRect) return null;
 
   const placement = getPopoverPlacement(anchorRect);
@@ -331,119 +352,149 @@ export function McpServerFormPopover({
         <div className="bg-background relative flex max-h-[min(480px,calc(100vh-8rem))] w-[min(360px,calc(100vw-3rem))] flex-col overflow-hidden rounded-lg border border-border shadow-lg ">
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2 [scrollbar-gutter:stable]">
             <div className="relative z-10 divide-y divide-border">
-              <label className="grid gap-2 py-3">
-                <span className="type-caption-1 text-muted-foreground">{copy.form.name}</span>
-                <input
-                  aria-label={copy.form.name}
-                  value={form.name}
-                  onChange={event => update({ name: event.target.value })}
-                  className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
-                />
-              </label>
+              {mode === 'command' ? (
+                <div className="grid gap-3 py-3">
+                  <label className="grid gap-2">
+                    <span className="type-caption-1 text-muted-foreground">{copy.form.pasteCommand}</span>
+                    <textarea
+                      aria-label={copy.form.pasteCommand}
+                      value={addCommand}
+                      onChange={event => { setAddCommand(event.target.value); setCommandError(null); }}
+                      placeholder="bgs mcp add my-server --url https://example.com/mcp"
+                      rows={4}
+                      spellCheck={false}
+                      disabled={isSaving}
+                      className="type-code w-full resize-none rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                    />
+                  </label>
+                  <p className="type-footnote text-muted-foreground">{copy.form.pasteCommandHint}</p>
+                  {commandError ? <p role="alert" className="type-footnote text-destructive">{commandError === 'url' ? copy.form.commandUrlError : copy.form.commandFormatError}</p> : null}
+                  {!('error' in parsedCommand) ? (
+                    <dl className="grid gap-1 border-t border-border pt-3 text-sm">
+                      <dt className="text-muted-foreground">{copy.form.name}</dt>
+                      <dd className="break-all text-foreground">{parsedCommand.name}</dd>
+                      <dt className="mt-2 text-muted-foreground">{copy.form.url}</dt>
+                      <dd className="break-all text-foreground">{parsedCommand.url}</dd>
+                    </dl>
+                  ) : null}
+                </div>
+              ) : (
+                <>
+                  <label className="grid gap-2 py-3">
+                    <span className="type-caption-1 text-muted-foreground">{copy.form.name}</span>
+                    <input
+                      aria-label={copy.form.name}
+                      value={form.name}
+                      onChange={event => update({ name: event.target.value })}
+                      className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                    />
+                  </label>
 
-              <div className="flex items-center justify-between gap-3 py-3">
-                <span className="type-footnote text-foreground">{copy.form.enabled}</span>
-                <Switch
-                  checked={form.enabled}
-                  aria-label={copy.form.enabled}
-                  onCheckedChange={() => update({ enabled: !form.enabled })}
-                />
-              </div>
+                  <div className="flex items-center justify-between gap-3 py-3">
+                    <span className="type-footnote text-foreground">{copy.form.enabled}</span>
+                    <Switch
+                      checked={form.enabled}
+                      aria-label={copy.form.enabled}
+                      onCheckedChange={() => update({ enabled: !form.enabled })}
+                    />
+                  </div>
 
-              <div className="grid gap-2 py-3">
-                <span className="type-caption-1 text-muted-foreground">{copy.form.transport}</span>
-                <ProjectSelect portal ariaLabel={copy.form.transport} value={form.transport} onValueChange={value => update({ transport: value as McpServerTransport })} options={[{ value: 'stdio', label: copy.form.stdio }, { value: 'http', label: copy.form.http }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" contentClassName="z-[370]" />
-                {form.transport === 'sse' ? <p role="alert" className="text-sm text-muted-foreground">{copy.form.sse}</p> : null}
-              </div>
+                  <div className="grid gap-2 py-3">
+                    <span className="type-caption-1 text-muted-foreground">{copy.form.transport}</span>
+                    <ProjectSelect portal ariaLabel={copy.form.transport} value={form.transport} onValueChange={value => update({ transport: value as McpServerTransport })} options={[{ value: 'stdio', label: copy.form.stdio }, { value: 'http', label: copy.form.http }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" contentClassName="z-[370]" />
+                    {form.transport === 'sse' ? <p role="alert" className="text-sm text-muted-foreground">{copy.form.sse}</p> : null}
+                  </div>
 
-              {form.transport !== 'stdio' ? (
-                <label className="grid gap-2 py-3">
-                  <span className="type-caption-1 text-muted-foreground">{copy.form.url}</span>
-                  <input
-                    aria-label={copy.form.url}
-                    value={form.url}
-                    onChange={event => update({ url: event.target.value })}
-                    placeholder="http://127.0.0.1:3000/mcp"
-                    className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
-                  />
-                </label>
-              ) : null}
+                  {form.transport !== 'stdio' ? (
+                    <label className="grid gap-2 py-3">
+                      <span className="type-caption-1 text-muted-foreground">{copy.form.url}</span>
+                      <input
+                        aria-label={copy.form.url}
+                        value={form.url}
+                        onChange={event => update({ url: event.target.value })}
+                        placeholder="http://127.0.0.1:3000/mcp"
+                        className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                      />
+                    </label>
+                  ) : null}
 
-              <div className="py-2">
-                <button
-                  type="button"
-                  aria-expanded={advancedOpen}
-                  onClick={() => setAdvancedOpen(current => !current)}
-                  className="type-button flex h-9 w-full items-center justify-between rounded-lg px-2 text-left text-foreground transition-colors hover:bg-accent"
-                >
-                  <span>{copy.form.advanced}</span>
-                  <span className={`text-muted-foreground transition-transform ${advancedOpen ? 'rotate-180' : ''}`}>⌄</span>
-                </button>
-                {advancedOpen ? (
-                  <div className="mt-1 divide-y divide-border">
-                    {form.transport === 'stdio' ? (
-                      <>
+                  <div className="py-2">
+                    <button
+                      type="button"
+                      aria-expanded={advancedOpen}
+                      onClick={() => setAdvancedOpen(current => !current)}
+                      className="type-button flex h-9 w-full items-center justify-between rounded-lg px-2 text-left text-foreground transition-colors hover:bg-accent"
+                    >
+                      <span>{copy.form.advanced}</span>
+                      <span className={`text-muted-foreground transition-transform ${advancedOpen ? 'rotate-180' : ''}`}>⌄</span>
+                    </button>
+                    {advancedOpen ? (
+                      <div className="mt-1 divide-y divide-border">
+                        {form.transport === 'stdio' ? (
+                          <>
+                            <label className="grid gap-2 py-3">
+                              <span className="type-caption-1 text-muted-foreground">{copy.form.command}</span>
+                              <input
+                                aria-label={copy.form.command}
+                                value={form.command}
+                                onChange={event => update({ command: event.target.value })}
+                                placeholder="npx"
+                                className="type-code h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                              />
+                            </label>
+                            <label className="grid gap-2 py-3">
+                              <span className="type-caption-1 text-muted-foreground">{copy.form.args}</span>
+                              <div className="space-y-1">
+                                <textarea
+                                  aria-label={copy.form.args}
+                                  value={form.argsText}
+                                  onChange={event => update({ argsText: event.target.value })}
+                                  rows={3}
+                                  className="type-code w-full resize-none rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                                />
+                                <div className="type-footnote text-muted-foreground">{copy.form.argsHint}</div>
+                              </div>
+                            </label>
+                          </>
+                        ) : null}
+                        <div className="grid gap-2 py-3">
+                          <span className="type-caption-1 text-muted-foreground">{copy.form.scope}</span>
+                          <ProjectSelect portal ariaLabel={copy.form.scope} value={form.scope} onValueChange={value => update({ scope: value as McpServerScope })} options={[{ value: 'beegame', label: copy.form.beegame }, { value: 'project', label: copy.form.project }, { value: 'global', label: copy.form.global }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" contentClassName="z-[370]" />
+                        </div>
+
                         <label className="grid gap-2 py-3">
-                          <span className="type-caption-1 text-muted-foreground">{copy.form.command}</span>
+                          <span className="type-caption-1 text-muted-foreground">{copy.form.cwd}</span>
                           <input
-                            aria-label={copy.form.command}
-                            value={form.command}
-                            onChange={event => update({ command: event.target.value })}
-                            placeholder="npx"
+                            aria-label={copy.form.cwd}
+                            value={form.cwd}
+                            onChange={event => update({ cwd: event.target.value })}
                             className="type-code h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
                           />
                         </label>
+
                         <label className="grid gap-2 py-3">
-                          <span className="type-caption-1 text-muted-foreground">{copy.form.args}</span>
+                          <span className="type-caption-1 text-muted-foreground">{copy.form.env}</span>
                           <div className="space-y-1">
                             <textarea
-                              aria-label={copy.form.args}
-                              value={form.argsText}
-                              onChange={event => update({ argsText: event.target.value })}
+                              aria-label={copy.form.env}
+                              value={form.envText}
+                              onChange={event => update({ envText: event.target.value })}
                               rows={3}
                               className="type-code w-full resize-none rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
                             />
-                            <div className="type-footnote text-muted-foreground">{copy.form.argsHint}</div>
+                            <div className="type-footnote text-muted-foreground">{copy.form.envHint}</div>
                           </div>
                         </label>
-                      </>
-                    ) : null}
-                    <div className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-muted-foreground">{copy.form.scope}</span>
-                      <ProjectSelect portal ariaLabel={copy.form.scope} value={form.scope} onValueChange={value => update({ scope: value as McpServerScope })} options={[{ value: 'beegame', label: copy.form.beegame }, { value: 'project', label: copy.form.project }, { value: 'global', label: copy.form.global }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" contentClassName="z-[370]" />
-                    </div>
-
-                    <label className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-muted-foreground">{copy.form.cwd}</span>
-                      <input
-                        aria-label={copy.form.cwd}
-                        value={form.cwd}
-                        onChange={event => update({ cwd: event.target.value })}
-                        className="type-code h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
-                      />
-                    </label>
-
-                    <label className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-muted-foreground">{copy.form.env}</span>
-                      <div className="space-y-1">
-                        <textarea
-                          aria-label={copy.form.env}
-                          value={form.envText}
-                          onChange={event => update({ envText: event.target.value })}
-                          rows={3}
-                          className="type-code w-full resize-none rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
-                        />
-                        <div className="type-footnote text-muted-foreground">{copy.form.envHint}</div>
                       </div>
-                    </label>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
+                </>
+              )}
             </div>
             {status ? <div className="type-footnote py-2 text-foreground">{status}</div> : null}
           </div>
 
-          {mode === 'create' ? (
+          {mode !== 'edit' ? (
             <footer className="relative z-10 flex shrink-0 items-center justify-end gap-2 border-t border-border bg-muted/30 px-4 py-3">
               <Button type="button" variant="secondary" onClick={onClose}>
                 {copy.form.cancel}
@@ -451,7 +502,7 @@ export function McpServerFormPopover({
               <Button
                 type="button"
                 className="rounded-full"
-                onClick={onSave}
+                onClick={save}
                 disabled={saveDisabled}
               >
                 {isSaving ? copy.form.saving : copy.form.save}

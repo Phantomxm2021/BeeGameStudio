@@ -1,4 +1,4 @@
-import { resolveModelApiProtocol } from '@bee-game-studio/agent-workflow'
+import { defaultModelApiProtocol, resolveModelApiProtocol } from '@bee-game-studio/agent-workflow'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   existsSync,
@@ -67,10 +67,14 @@ export function personalModelConfig(
   const method = id === PERSONAL_CHATGPT_ID ? 'chatgpt-subscription' : 'byok'
   const provider =
     providerOverride ?? connection?.provider ?? 'openai-compatible'
+  const apiProtocol = connection?.provider === provider
+    ? resolveModelApiProtocol(provider, connection.apiProtocol)
+    : defaultModelApiProtocol(provider)
   const go =
     id === OPENCODE_GO_ID
       ? OPENCODE_GO_PROFILES[
-          isOpenCodeGoProvider(provider) ? provider : 'openai-compatible'
+          provider === 'openai-compatible' && apiProtocol === 'responses' ? 'responses'
+            : isOpenCodeGoProvider(provider) ? provider : 'responses'
         ]
       : undefined
   const now = new Date(0)
@@ -84,8 +88,7 @@ export function personalModelConfig(
         : 'ChatGPT subscription',
     provider,
     published: true,
-    apiProtocol:
-      connection?.provider === provider ? connection.apiProtocol : undefined,
+    apiProtocol,
     authMethods: [method],
     ...(go
       ? { baseUrl: go.baseUrl }
@@ -239,16 +242,14 @@ export function saveConnection(
     validateOpenCodeGoConfig({
       provider: config.provider,
       baseUrl: profile.baseUrl,
+      apiProtocol: byok?.apiProtocol ?? config.apiProtocol,
       model,
       authMethods: ['byok'],
     })
     byok = {
       baseUrl: profile.baseUrl,
       model,
-      apiProtocol:
-        config.provider === 'anthropic-compatible'
-          ? 'anthropic-messages'
-          : 'chat-completions',
+      apiProtocol: byok?.apiProtocol ?? config.apiProtocol ?? profile.apiProtocol,
     }
   }
   const allowed = validateModelAccess(config.provider, config.authMethods)

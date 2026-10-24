@@ -38,8 +38,12 @@ test('HTTP MCP pins DNS, preserves native protocol sessions, blocks redirects an
       : { content: [{ type: 'text', text: 'offline success' }] } })
   } })
   const relay = await startNativeMcpHttp({ fixture: `http://synthetic-mcp.invalid:${upstream.port}/mcp` }, {
-    resolveOutboundTarget: async value => ({ url: new URL(value), addresses: ['127.0.0.1'],
-      lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }),
+    outboundTargetPolicyOptions: { allowedHosts: ['model.example'], allowHttp: true, allowTrustedDevelopmentProxy: true },
+    resolveOutboundTarget: async (value, policy) => {
+      expect(policy).toMatchObject({ allowedHosts: [], allowHttp: false, allowTrustedDevelopmentProxy: false })
+      return { url: new URL(value), addresses: ['127.0.0.1'],
+        lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }
+    },
   })
   const config = relay.config.fixture!, client = new Client({ name: 'offline-client', version: '1' })
   const send = (body: unknown, extraHeaders: Record<string, string> = {}) => fetch(config.url, {

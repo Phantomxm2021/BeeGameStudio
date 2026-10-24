@@ -40,6 +40,8 @@ beforeEach(() => {
   deploymentApi.deployProject.mockReset();
   project.projectStatus = { project_id: 'A', phase: 'idle', context: undefined };
   chat.sessionTokenUsage = undefined;
+  system.isSyncing = false;
+  project.isOpeningProject = false;
 });
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -84,6 +86,30 @@ it('restores the incomplete usage notice from runtime history without a new live
   const { unmount } = render(<DashboardView projectId="A" projectName="test" lang="zh" onSetLang={vi.fn()} />);
   await act(async () => {});
   expect(preview.mock.lastCall?.[0].tokenUsage).toMatchObject({ total_tokens: 0, providerUsageIncomplete: true });
+  unmount();
+});
+
+// Visibility changes reconnect the event transport and synchronize the session.
+// A loaded project's publication must remain available during that read.
+it('keeps publishing available during background sync but retains project and execution locks', async () => {
+  const { rerender, unmount } = render(<DashboardView projectId="A" projectName="test" lang="en" onSetLang={vi.fn()} />);
+  await act(async () => {});
+  expect(preview.mock.lastCall?.[0].onDeployProject).toBeTypeOf('function');
+  system.isSyncing = true;
+  const refresh = () => rerender(<DashboardView projectId="A" projectName="test" lang="en" onSetLang={vi.fn()} />);
+  refresh();
+  expect(preview.mock.lastCall?.[0]).toMatchObject({ isSyncing: true, isInteractionLocked: false, isWorkspaceBusy: false });
+  expect(preview.mock.lastCall?.[0].onDeployProject).toBeTypeOf('function');
+  project.isOpeningProject = true;
+  refresh();
+  expect(preview.mock.lastCall?.[0].onDeployProject).toBeUndefined();
+  project.isOpeningProject = false;
+  project.projectStatus = { project_id: 'other', phase: 'idle', context: undefined };
+  refresh();
+  expect(preview.mock.lastCall?.[0].onDeployProject).toBeUndefined();
+  project.projectStatus = { project_id: 'A', phase: 'running', context: undefined };
+  refresh();
+  expect(preview.mock.lastCall?.[0].onDeployProject).toBeUndefined();
   unmount();
 });
 

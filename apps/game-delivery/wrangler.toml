@@ -1,0 +1,19 @@
+name = "beegame-delivery"
+main = "src/index.js"
+compatibility_date = "2026-07-23"
+workers_dev = false
+
+[[routes]]
+pattern = "game.beegame.studio"
+custom_domain = true
+
+[vars]
+PORTAL_ORIGIN = "https://portal.beegame.studio"
+
+[[r2_buckets]]
+binding = "DELIVERY_BUCKET"
+bucket_name = "beegame-delivery"
+# Secrets: SUPABASE_URL, SUPABASE_ANON_KEY (same values as the existing delivery Worker).
+
+[observability]
+enabled = true

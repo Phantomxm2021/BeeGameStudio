@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { memo } from 'react';
 import type { ReactNode } from 'react';
 import { motion } from 'motion/react';
@@ -53,7 +54,7 @@ export const AssetsPanel = memo(({
                         {manifest?.project_target?.runtime || manifest?.project_target?.platform || 'Project'}
                     </div>
                     {hasResources ? <div className="type-caption-2 mt-1.5 text-[var(--text-muted)]">
-                        {resources.length} {text.libraryBinding} · {requirements.length} {text.required}
+                        <AnimatedNumber>{resources.length}</AnimatedNumber> {text.libraryBinding} · <AnimatedNumber>{requirements.length}</AnimatedNumber> {text.required}
                     </div> : null}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">

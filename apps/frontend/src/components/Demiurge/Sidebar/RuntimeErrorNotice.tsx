@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -68,9 +69,9 @@ export function RuntimeErrorNotice({ content, retry, lang }: {
                 className={`relative isolate flex h-8 ${['en', 'zh', 'zh-TW', 'ja', 'ko'].includes(lang) ? 'w-32' : 'w-52'} items-center justify-center gap-1.5 overflow-hidden rounded-full border border-[var(--border)] px-3 text-sm leading-5 whitespace-nowrap tabular-nums disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]`}>
                 {armed && <span data-testid="retry-progress" aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 -z-10 bg-blue-500/15 transition-[width] duration-100 ease-linear motion-reduce:transition-none"
                     style={{ width: `${remaining / 10_000 * 100}%` }} />}
-                {armed
+                <AnimatedNumber>{armed
                     ? t('modelRequestError.retryIn', { seconds: Math.ceil(remaining / 1000) })
-                    : t('modelRequestError.retry')}
+                    : t('modelRequestError.retry')}</AnimatedNumber>
             </button>
         </div>}
     </div>;

@@ -13,12 +13,12 @@ function latestContext(items: any[], key: string) {
   const values = new Map<string, { value: string; part?: number; total?: number }>()
   let family: number | undefined
   for (const item of items) for (const block of item.content ?? []) {
-    const match = new RegExp('^<(' + key + '(?:_part_([0-9]+)_of_([0-9]+))?)>([\\s\\S]*)</\\1>$').exec(block.text ?? '')
-    if (!match) continue
-    expect(item.role).toBe('developer')
-    expect(Buffer.byteLength(match[4]!)).toBeLessThanOrEqual(4000)
-    family = match[3] ? Number(match[3]) : undefined
-    values.set(match[1]!, { value: match[4]!, part: match[2] ? Number(match[2]) : undefined, total: family })
+    for (const match of (block.text ?? '').matchAll(new RegExp('<(' + key + '(?:_part_([0-9]+)_of_([0-9]+))?)>([\\s\\S]*?)</\\1>', 'g'))) {
+      expect(item.role).toBe('developer')
+      expect(Buffer.byteLength(match[4]!)).toBeLessThanOrEqual(4000)
+      family = match[3] ? Number(match[3]) : undefined
+      values.set(match[1]!, { value: match[4]!, part: match[2] ? Number(match[2]) : undefined, total: family })
+    }
   }
   if (family === undefined) return values.get(key)?.value ?? ''
   const parts = [...values.values()].filter(part => part.total === family).sort((a, b) => a.part! - b.part!)
@@ -95,6 +95,7 @@ localTest('native resume receives current BGS context as well as project instruc
         sessionId: 'context-fixture', cwd: game,
         ...([1, 2].includes(index) ? { resumeSessionId: nativeSessionId } : {}),
         systemContext,
+        confirmedBriefContext: run.requirements.text,
         env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
           OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-model' },
         onNativeSessionId: id => { nativeSessionId = id },

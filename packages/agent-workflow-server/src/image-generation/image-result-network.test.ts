@@ -164,14 +164,41 @@ test('provider result hosts do not need the model allowlist, and model policy is
   expect(insecure.calls).toEqual([config.baseUrl])
 })
 
-test('image results reject fake proxy and mixed private DNS even when model policy allows the host', async () => {
-  for (const addresses of [['198.18.0.7'], ['93.184.216.34', '10.0.0.7']]) {
-    const modelPolicy = { allowedHosts: ['cdn.example.test'], allowTrustedDevelopmentProxy: true,
-      resolve4: async () => addresses, resolve6: async () => [] }
-    const output = await generateWithResultUrl('https://cdn.example.test/result.png', { dns: modelPolicy })
-    expect(output.error).toMatchObject({ outcome: 'unknown', code: 'image-url-not-permitted' })
-    expect(output.calls).toEqual([config.baseUrl])
-  }
+test('image results replace transparent proxy DNS with injected public DNS', async () => {
+  const publicDnsCalls: string[] = []
+  const output = await generateWithResultUrl('https://cdn.example.test/result.png', {
+    dns: { resolve4: async () => ['198.18.0.7'], resolve6: async () => [] },
+    resolvePublic4: async hostname => {
+      publicDnsCalls.push(hostname)
+      return ['93.184.216.34']
+    },
+  })
+  expect(output.result?.bytes).toEqual(PNG)
+  expect(output.calls).toEqual([config.baseUrl, 'https://cdn.example.test/result.png'])
+  expect(publicDnsCalls).toEqual(['cdn.example.test'])
+})
+
+test('image results still reject private, mixed, and failed public DNS answers', async () => {
+  const privateOutput = await generateWithResultUrl('https://cdn.example.test/result.png', {
+    dns: { resolve4: async () => ['198.18.0.7'], resolve6: async () => [] },
+    resolvePublic4: async () => ['10.0.0.7'],
+  })
+  expect(privateOutput.error).toMatchObject({ outcome: 'unknown', code: 'image-url-not-permitted' })
+  expect(privateOutput.calls).toEqual([config.baseUrl])
+
+  const mixedOutput = await generateWithResultUrl('https://cdn.example.test/result.png', {
+    dns: { resolve4: async () => ['93.184.216.34', '10.0.0.7'], resolve6: async () => [] },
+    resolvePublic4: async () => { throw Error('must not replace mixed answers') },
+  })
+  expect(mixedOutput.error).toMatchObject({ outcome: 'unknown', code: 'image-url-not-permitted' })
+  expect(mixedOutput.calls).toEqual([config.baseUrl])
+
+  const failedOutput = await generateWithResultUrl('https://cdn.example.test/result.png', {
+    dns: { resolve4: async () => ['198.18.0.7'], resolve6: async () => [] },
+    resolvePublic4: async () => { throw Error('public DNS unavailable') },
+  })
+  expect(failedOutput.error).toMatchObject({ outcome: 'unknown', code: 'image-url-not-permitted' })
+  expect(failedOutput.calls).toEqual([config.baseUrl])
 })
 
 test('result downloads send only an anonymous GET, never caller headers or body', async () => {

@@ -652,7 +652,7 @@ export const useChat = ({
           break
 
         case 'context_update': {
-          if (['delivery_error', 'host_evidence', 'delivery_phase', 'session_lifecycle'].includes(message.task_kind ?? '') &&
+          if (['delivery_error', 'delivery_phase', 'session_lifecycle'].includes(message.task_kind ?? '') &&
               message.content && (!message.project_id || message.project_id === refs.projectId)) {
             addMessage({
               id: message.message_id || `${message.task_kind}-${message.task_id}-${message.timestamp}`,

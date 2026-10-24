@@ -211,6 +211,13 @@ class BgsRuntime implements BeeGameSessionRuntime {
         '. Shell cannot modify these protected paths. For ordinary project files, use exec_command with project-local file operations. Only use apply_patch if it is listed as an available tool; do not assume a shell executable exists. Preserve the current user requirements and authorization when updating design records.', mcp.context,
         access.unavailable.length ? 'BGS host components unavailable: ' + access.unavailable.join('; ') +
           '. Unrelated work can continue; dependent inspections remain unavailable and unverified.' : '',
+        // Local compaction reconstructs thread instructions but drops the
+        // per-turn additionalContext messages. Retain the same current host
+        // facts here; no summary, extra rules or model request is needed.
+        ...Object.entries({
+          ...bgsApplicationContext('bgsRuntime', input.systemContext),
+          ...bgsApplicationContext('bgsConfirmedBrief', input.confirmedBriefContext),
+        }).map(([key, { value }]) => `<${key}>${value}</${key}>`),
       ].filter(Boolean).join('\n\n')
       if(env.OPENAI_AUTH_MODE!=='chatgpt') {
         let incomplete = false
@@ -264,6 +271,8 @@ class BgsRuntime implements BeeGameSessionRuntime {
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
     if (this.stopped) throw Error('BGS session is stopped')
     if (this.active) throw Error('BGS session already has an active turn')
+    if (input.confirmedBriefContext !== this.input.confirmedBriefContext)
+      throw Error('Confirmed requirements changed after BGS runtime preparation; prepare a current runtime before submitting')
     input.signal.throwIfAborted()
     let abort = () => {}
     try {
@@ -288,13 +297,13 @@ class BgsRuntime implements BeeGameSessionRuntime {
           if (!skill) { reject(Error('Required BGS skill is unavailable: ' + name)); return }
           prompt.unshift({type:'skill',name,path:skill.path})
         }
-        // thread/resume does not replace instructions already in model history.
-        // Workflow context contains current bridge paths, authorization and host
-        // evidence, so deliver it in the existing per-turn application slot.
-        const additionalContext = {
+        // Resume does not replace old model history. Refresh it once through
+        // the existing slot; the current thread instructions above survive
+        // later compaction. New threads already contain these facts once.
+        const additionalContext = this.input.resumeSessionId ? {
           ...bgsApplicationContext('bgsRuntime', this.input.systemContext),
           ...bgsApplicationContext('bgsConfirmedBrief', input.confirmedBriefContext),
-        }
+        } : {}
         void this.client.request('turn/start', { threadId: this.threadId, input: prompt,
           ...(Object.keys(additionalContext).length ? { additionalContext } : {}) })
           .then(result => {

@@ -27,11 +27,12 @@ test.each([
   expect(() => validateConfirmedBriefContext(context)).toThrow(message)
 })
 
-test('new and resumed turns retain confirmed chat context without writing or replacing independent evidence', async () => {
+test.each(['confirmed_brief', 'workflow_v3_goal', 'workflow_v3_change'])('new and resumed turns retain %s context without replacing independent evidence', async displayKind => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-confirmed-context-'))
   const contexts: Array<string | undefined> = []
-  const runner: BeeGameSessionRunner = { async start() { return {
-    stop() {}, async submit(input) { contexts.push(input.confirmedBriefContext) },
+  const startContexts: Array<string | undefined> = []
+  const runner: BeeGameSessionRunner = { async start(input) { startContexts.push(input.confirmedBriefContext); return {
+    reusable: false, stop() {}, async submit(input) { contexts.push(input.confirmedBriefContext) },
   } } }
   const first = new BeeGameSessionManager(runner, root, () => ({}))
   const resumed = new BeeGameSessionManager(runner, root, () => ({}))
@@ -40,12 +41,12 @@ test('new and resumed turns retain confirmed chat context without writing or rep
     const context = JSON.stringify(brief)
     const session = first.start({ workspacePath, userId: 'owner', projectId: 'game' })
     await first.sendWithDisplay(session.id, 'Confirmed goal', {
-      displayKind: 'confirmed_brief', confirmedBriefContext: context,
+      displayKind, confirmedBriefContext: context,
     })
     await first.waitForSessionIdle(session.id)
     expect(contexts).toEqual([context])
     expect(first.transcriptFacts(session.id).find(event => event.type === 'user.message')?.payload)
-      .toMatchObject({ displayKind: 'confirmed_brief', confirmedBriefContext: context })
+      .toMatchObject({ displayKind, confirmedBriefContext: context })
     const evidenceDir = join(root, 'confirmed-brief-evidence')
     expect(existsSync(evidenceDir)).toBe(false)
     await first.dispose()
@@ -68,10 +69,11 @@ test('new and resumed turns retain confirmed chat context without writing or rep
 
     const updated = JSON.stringify({ ...brief, resource_library_usage: 'required' })
     await resumed.sendWithDisplay(session.id, 'Updated goal', {
-      displayKind: 'confirmed_brief', confirmedBriefContext: updated,
+      displayKind, confirmedBriefContext: updated,
     })
     await resumed.waitForSessionIdle(session.id)
     expect(contexts).toEqual([context, context, updated])
+    expect(startContexts).toEqual(contexts)
     expect(await readFile(evidencePath, 'utf8')).toBe(historical)
   } finally {
     await first.dispose()

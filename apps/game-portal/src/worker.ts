@@ -1,3 +1,5 @@
+import { handleBgsSessionRequest, studioOrigin } from './bgs-session'
+import { recordPortalEvent } from './analytics'
 import { BGS_ORGANIZATION, PORTAL_SITE_NAME, portalTitle, portalDescription } from './seo'
 import { publicationTitle } from '../../frontend/src/utils/publicationPresentation'
 
@@ -8,6 +10,8 @@ type FetchImplementation = (
 ) => Promise<Response>
 export type GamePortalEnv = {
   ASSETS: AssetBinding
+  BEEGAME_PORTAL_SSO_SECRET?: string
+  BEEGAME_STUDIO_ORIGIN?: string
   BEEGAME_SUPABASE_URL: string
   BEEGAME_SUPABASE_ANON_KEY?: string
   BEEGAME_SUPABASE_SERVICE_ROLE_KEY?: string
@@ -22,6 +26,7 @@ type GameRow = {
   game_url: string
   published_at: string
   updated_at: string
+  play_count?: number
   public_description?: string
   public_cover_url?: string | null
 }
@@ -30,7 +35,7 @@ const GAME_PATH = /^\/g\/([A-Za-z0-9_-]{1,128})\/?$/
 const DEPLOYMENT_PATH =
   /^\/deployments\/([A-Za-z0-9_-]{1,128})\/files\/index\.html$/
 const SELECT =
-  'project_id,owner_id,deployment_id,title,author_name,game_url,published_at,updated_at,public_cover_url,public_description'
+  'project_id,owner_id,deployment_id,title,author_name,game_url,published_at,updated_at,public_cover_url,public_description,play_count'
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -98,6 +103,7 @@ function publicCover(value: string | null | undefined, gameUrl: string): string 
 }
 const metadata = (row: GameRow) => ({
   projectId: row.project_id,
+  playCount: Number(row.play_count) || 0,
   authorId: row.owner_id,
   authorName: row.author_name,
   title: publicationTitle(row.public_description, row.title),
@@ -288,18 +294,36 @@ export async function handleGamePortalRequest(
 ): Promise<Response> {
   const url = new URL(request.url),
     path = url.pathname
+  const authResponse = await handleBgsSessionRequest(request, env, fetchImpl)
+  if (authResponse) return authResponse
+  if (path === '/api/events' && request.method === 'POST') return recordPortalEvent(request, env, fetchImpl)
   if (!['GET', 'HEAD'].includes(request.method))
     return json({ error: 'method_not_allowed' }, 405)
+  if (path === '/admin' || path === '/admin/' || path === '/admin.html') {
+    const asset = await env.ASSETS.fetch(new Request(new URL('/admin.html', request.url)));
+    return new Response(asset.body, { status: asset.status, headers: {
+      'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow',
+      'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin',
+      'content-security-policy': "frame-ancestors 'none'",
+    } });
+  }
   if (path === '/sitemap.xml') return sitemap(request, env, fetchImpl)
   if (path === '/robots.txt') return new Response(
-    `User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${new URL('/sitemap.xml', request.url).href}\n`,
+    `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin\nSitemap: ${new URL('/sitemap.xml', request.url).href}\n`,
     { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=300' } },
   )
   if (path === '/api/config')
     return json({
       supabaseUrl: env.BEEGAME_SUPABASE_URL,
       supabaseAnonKey: env.BEEGAME_SUPABASE_ANON_KEY || '',
+      bgsSsoEnabled: Boolean(env.BEEGAME_PORTAL_SSO_SECRET && studioOrigin(env)),
     })
+  if (path === '/api/featured') {
+    try {
+      return json({ games: (await rows(env, new URLSearchParams({ select: SELECT,
+        featured_position: 'not.is.null', order: 'featured_position.asc', limit: '5' }), fetchImpl)).map(metadata) })
+    } catch { return json({ error: 'unavailable' }, 503) }
+  }
   if (path === '/api/games') {
     const author = url.searchParams.get('author'),
       rawPage = url.searchParams.get('page') || '0'

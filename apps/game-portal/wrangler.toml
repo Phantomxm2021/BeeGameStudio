@@ -14,6 +14,9 @@ pattern = "portal.beegame.studio"
 custom_domain = true
 
 [vars]
+# This deployment uses the existing local BGS web session. Set an exact HTTPS
+# Studio origin when deploying BGS as a remote web service.
+BEEGAME_STUDIO_ORIGIN = "http://127.0.0.1:62173"
 BEEGAME_SUPABASE_URL = "https://bgs.phantominfra.com"
 BEEGAME_DELIVERY_ORIGIN = "https://game.beegame.studio"
 

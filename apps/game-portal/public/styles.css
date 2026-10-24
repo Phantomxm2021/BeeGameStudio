@@ -1052,3 +1052,5 @@ input {
   background: transparent;
   color: #d2d2d7;
 }
+
+.play-count { margin: 6px 0 0; color: var(--secondary); font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; }

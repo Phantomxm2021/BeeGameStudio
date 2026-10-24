@@ -343,19 +343,20 @@ it('keeps the native working status live and exposes the completed log through d
   }
 });
 
-it('renders host evidence independently of an all-passed author answer in saved history', () => {
+it('keeps host evidence out of saved history and previously cached Chat messages', () => {
   const common={sessionId:'evidence-session',turnId:'evidence-turn',createdAt:new Date(1000).toISOString()};
   const hostText='BGS 宿主检查｜本轮执行已结束，不等于游戏验收通过\naudio-data-consumption: 未验证\n游戏质量仍未验证。';
   const events=[{...common,id:1,type:'assistant.message',text:'全部通过，已交付。',payload:{type:'assistant.message'}},
     {...common,id:2,type:'turn.completed',text:'Turn ended'},
     {...common,id:3,type:'system.status',text:hostText,payload:{type:'system.status',subtype:'host_evidence',quality:'unverified',deliveryEligible:false}}];
   const messages=toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('evidence',events)));
-  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
+  expect(messages.some(message => message.taskKind === 'host_evidence')).toBe(false);
+  const cached: ChatDisplayMessage = { id: 'cached-host', sender: 'system', type: 'system_status',
+    taskKind: 'host_evidence', content: hostText, timestamp: 1000 };
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[...messages, cached]} lang="zh" />);
   expect(screen.getByText('全部通过，已交付。')).toBeVisible();
-  const host=screen.getByTestId('beegame-host-evidence');
-  expect(host).toBeVisible();
-  expect(host).toHaveTextContent('audio-data-consumption: 未验证');
-  expect(host).toHaveTextContent('游戏质量仍未验证');
+  expect(screen.queryByTestId('beegame-host-evidence')).not.toBeInTheDocument();
+  expect(screen.queryByText(/audio-data-consumption/)).not.toBeInTheDocument();
 });
 
 it('shows child tools only inside the subagent detail while keeping main tools in chat', () => {

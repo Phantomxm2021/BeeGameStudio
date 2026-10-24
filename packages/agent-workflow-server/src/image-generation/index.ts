@@ -38,7 +38,11 @@ export function createHostedImageGenerationProvider(
       return new ChatGPTSubscriptionImageProvider(join(getUserDashboardDataRoot(dataRoot, ownerId), '.runtime/app'), request)
         .generate(config, input)
     }
-    return createImageGenerationProvider(config.provider, request, resultRequest).generate(config, input)
+    return createImageGenerationProvider(config.provider, request, resultRequest).generate(config, input, context)
+  }, recover(config, reference, signal) {
+    if (config.provider !== 'cloudflare')
+      throw new ImageProviderError('Image provider has no result download recovery', 'unknown', undefined, 'image-recovery-unsupported')
+    return new CloudflareImageProvider(request, resultRequest).recover(config, reference, signal)
   } }
 }
 export * from './config'

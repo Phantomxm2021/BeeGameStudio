@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { canAutomaticallyRetryModelFailure } from '../../utils/modelRequestFailure';
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import type { Language } from './AgentsConfig';
@@ -725,7 +726,7 @@ export function RightSidebar({
                                     {tabLabel(tab)}
                                     {tab === 'artifacts' ? (
                                         <span className="type-caption-2 ml-2 rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-[var(--text-muted)]">
-                                            {artifactView.displayCount}
+                                            <AnimatedNumber>{artifactView.displayCount}</AnimatedNumber>
                                         </span>
                                     ) : null}
                                 </TabsTrigger>

@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { RuntimeErrorNotice, type ModelRequestRetryControl } from './RuntimeErrorNotice';
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowLeft, Bot, Check, ChevronDown, CircleCheck, Copy, FileText, LoaderCircle, Minus, Pencil, Send, X } from 'lucide-react';
@@ -125,7 +126,6 @@ const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
         message.taskKind === 'context_compaction' || raw.task_kind === 'context_compaction' ||
         message.taskKind === 'delivery_phase' || raw.task_kind === 'delivery_phase' ||
         message.taskKind === 'delivery_error' || raw.task_kind === 'delivery_error' ||
-        message.taskKind === 'host_evidence' || raw.task_kind === 'host_evidence' ||
         message.taskKind === 'session_lifecycle' || raw.task_kind === 'session_lifecycle';
 };
 
@@ -411,6 +411,8 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     };
 
     for (const message of messages) {
+        // Older local Chat snapshots can still contain projected host receipts.
+        if (message.taskKind === 'host_evidence' || (message as ChatDisplayMessage & { task_kind?: string }).task_kind === 'host_evidence') continue;
         if (message.type === 'error') {
             entries.push({ kind: 'context', message });
             activeTurn = null;
@@ -741,7 +743,7 @@ function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang,
         ? (lang === 'zh' ? '少于 1 秒' : 'less than 1s')
         : seconds < 60 ? (lang === 'zh' ? `${seconds} 秒` : `${seconds}s`)
         : lang === 'zh' ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    const heading = `${text.details}${duration ? ` · ${duration}` : ''}`;
+    const heading = <>{text.details}{duration && <> · <AnimatedNumber>{duration}</AnimatedNumber></>}</>;
     const latestProgress = [...parts].reverse().find((part): part is Extract<ResponsePart, { kind: 'agent' }> =>
         part.kind === 'agent' && !part.message.requiresUserAction && messagePresentation(part.message) !== 'artifact');
     // Show the latest progress until a final reply arrives; keep artifacts and
@@ -1060,7 +1062,7 @@ function LongMarkdownMessage({
             onClick={() => setOpen((current) => !current)}
             className="mx-auto mt-2 flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
         >
-            <span>{open ? (lang === 'zh' ? '收起全文' : 'Show less') : moreLabel}</span>
+            <span><AnimatedNumber>{open ? (lang === 'zh' ? '收起全文' : 'Show less') : moreLabel}</AnimatedNumber></span>
             <ChevronDown
                 aria-hidden="true"
                 className={`h-3.5 w-3.5 transition-transform motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
@@ -1092,11 +1094,6 @@ const deliveryPhaseLabels: Record<string, Record<string, string>> = {
 };
 
 function ContextUpdateSeparator({ message, text, lang }: { message: ChatDisplayMessage; text: BeeGameText; lang: Language }) {
-    if (message.taskKind === 'host_evidence') return (
-        <aside data-testid="beegame-host-evidence" aria-label="BGS host evidence" className="my-2 rounded border border-[var(--border-subtle)] p-3 text-sm whitespace-pre-wrap">
-            {displayText(message.content)}
-        </aside>
-    );
     const labels = deliveryPhaseLabels[lang] || deliveryPhaseLabels.en;
     const label = message.taskKind === 'delivery_error' ? displayText(message.content)
         : message.taskKind === 'delivery_phase' ? labels[message.content] || message.content

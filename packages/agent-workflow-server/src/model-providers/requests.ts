@@ -10,17 +10,19 @@ import {
   type ConversationItem,
 } from './messages'
 
+export function openCodeGoHeaders(config: ProviderConfig): Record<string, string> {
+  if (!getOpenCodeGoProvider(config.baseUrl)) return {}
+  if (!config.sessionId) throw Error('OpenCode Go requires a stable model session id')
+  return { 'User-Agent': 'bee-game-studio/2.8.4', 'X-Opencode-Session': config.sessionId }
+}
+
 export function nativeRequest(config: ProviderConfig, body: Json) {
   const tools = mapTools(body.tools),
     { system, messages } = conversation(body, config.protocol)
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'User-Agent': 'bee-game-studio/2.8.4',
-  }
-  if (getOpenCodeGoProvider(config.baseUrl)) {
-    if (!config.sessionId)
-      throw Error('OpenCode Go requires a stable model session id')
-    headers['X-Opencode-Session'] = config.sessionId
+    ...openCodeGoHeaders(config),
   }
   const model = body.model || config.model
   if (typeof model !== 'string' || !model)

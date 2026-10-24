@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto'
 
 import {
+  defaultModelApiProtocol,
   resolveModelApiProtocol,
   type ModelApiProtocol,
   type ModelProviderKind,
 } from './model-protocol'
 export {
+  defaultModelApiProtocol,
   resolveModelApiProtocol,
   type ModelApiProtocol,
   type ModelProviderKind,
@@ -184,7 +186,7 @@ export function createModelConfig(
     ownerId,
     name: input.name,
     provider: input.provider,
-    apiProtocol: resolveModelApiProtocol(input.provider, input.apiProtocol),
+    apiProtocol: resolveModelApiProtocol(input.provider, input.apiProtocol ?? defaultModelApiProtocol(input.provider)),
     ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
     apiKey: input.apiKey,
     model: input.model?.trim(),
@@ -228,7 +230,7 @@ export function updateModelConfig(
   const protocol = resolveModelApiProtocol(
     provider,
     patch.apiProtocol ??
-      (provider === record.provider ? record.apiProtocol : undefined),
+      (provider === record.provider ? record.apiProtocol : defaultModelApiProtocol(provider)),
   )
   record.apiProtocol = protocol
   record.authMethods = methods

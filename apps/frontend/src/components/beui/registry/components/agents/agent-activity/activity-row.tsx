@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import {
   Check,
   ChevronRight,
@@ -159,7 +160,7 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
             transition={transition}
             className="px-1.5 py-1 pl-8 text-muted-foreground/55"
           >
-            +{item.moreCount} more
+            +<AnimatedNumber>{item.moreCount}</AnimatedNumber> more
           </motion.div>
         ) : null}
       </AnimatePresence>

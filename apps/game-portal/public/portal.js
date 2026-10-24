@@ -1,3 +1,4 @@
+import { trackPortalEvent, observeBanner } from './analytics'
 import { portalTitle, portalDescription } from '../src/seo'
 import { renderPublicationDescription } from '../../frontend/src/entrypoints/portalDescription'
 const $ = id => document.getElementById(id)
@@ -184,7 +185,10 @@ function paintFeatures(games) {
   for (const [index, item] of games.slice(0, 5).entries()) {
     const fragment = $('feature-card').content.cloneNode(true)
     fragment.querySelector('.feature-slide').setAttribute('aria-label', `${index + 1} / ${Math.min(games.length, 5)}：${item.title}`)
+    const slide = fragment.querySelector('.feature-slide')
+    observeBanner(slide, item.projectId)
     const link = fragment.querySelector('.feature-link')
+    link.addEventListener('click', () => { void trackPortalEvent('banner_click', item.projectId) })
     link.href = `/g/${encodeURIComponent(item.projectId)}`
     link.setAttribute('aria-label', `游玩 ${item.title}（在新标签页打开）`)
     fragment.querySelector('.feature-cover').src = coverFor(item)
@@ -255,7 +259,7 @@ async function initializeAuth() {
     const returnTo = sessionStorage.getItem('beegame_portal_return')
     if (user && returnTo) {
       sessionStorage.removeItem('beegame_portal_return')
-      if (/^\/(?:g\/[A-Za-z0-9_-]+\/?|\?author=[A-Za-z0-9_-]+)$/.test(returnTo))
+      if (/^\/(?:admin\/?|g\/[A-Za-z0-9_-]+\/?|\?author=[A-Za-z0-9_-]+)$/.test(returnTo))
         location.replace(returnTo)
     }
   } catch {
@@ -276,10 +280,12 @@ export async function openPortalLogin() {
   $('submit-login').disabled = !auth
   $('login-dialog').showModal()
 }
-export function signOutPortalAccount() {
-  auth?.clearSupabaseSession()
-  user = null
-  paintAccount()
+export async function signOutPortalAccount() {
+  try {
+    await auth?.clearSupabaseSession()
+    user = null
+    paintAccount()
+  } catch { window.alert('退出登录失败，请重试。') }
 }
 $('close-login').addEventListener('click', () => $('login-dialog').close())
 $('login-form').addEventListener('submit', async event => {
@@ -336,12 +342,16 @@ async function loadCatalogue() {
   if (author) params.set('author', author)
   try {
     const { games } = await readJson(`/api/games?${params}`)
-    if (page === 0) paintFeatures(games)
+    if (page === 0 && !author) {
+      // Recommendations are optional; their failure must not hide the catalogue.
+      void readJson('/api/featured').then(featured => paintFeatures(featured.games)).catch(() => { $('featured').hidden = true })
+    }
     for (const [index, item] of games.entries()) {
       const card = $('game-card').content.cloneNode(true)
       card.querySelector('.card-play').href =
         `/g/${encodeURIComponent(item.projectId)}`
       card.querySelector('h3').textContent = item.title
+      card.querySelector('.play-count').textContent = `${Number(item.playCount || 0).toLocaleString()} 次游玩`
       card.querySelector('.card-image').src = coverFor(item)
       if (item.coverUrl) card.querySelector('.card-art').classList.add('has-cover')
       card
@@ -419,6 +429,8 @@ async function loadGame() {
     )
       throw Error('游戏地址无效。')
     $('game-title').textContent = game.title
+    $('game-play-count').textContent = `${Number(game.playCount || 0).toLocaleString()} 次游玩`
+    void trackPortalEvent('visit', game.projectId)
     $('game-frame').title = game.title
     document.title = portalTitle(game.title)
     $('game-author').textContent = `由 ${game.authorName} 创作`
@@ -517,6 +529,16 @@ document.addEventListener('keydown', event => {
     $('player').classList.remove('is-expanded')
     updateFullscreen()
   }
+})
+window.addEventListener('message', event => {
+  if (!game || event.source !== $('game-frame').contentWindow || event.origin !== gameOrigin ||
+      event.data?.type !== 'beegame:play' || event.data.version !== 1) return
+  const expected = /^\/deployments\/([^/]+)\/files\/index\.html$/.exec(new URL(game.gameUrl).pathname)?.[1]
+  if (!expected || event.data.deploymentId !== expected) return
+  void trackPortalEvent('play', game.projectId).then(result => {
+    if (result && Number.isSafeInteger(result.playCount) && result.playCount >= 0)
+      $('game-play-count').textContent = `${result.playCount.toLocaleString()} 次游玩`
+  })
 })
 window.addEventListener('message', event => {
   if (

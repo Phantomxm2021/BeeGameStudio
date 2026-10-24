@@ -1,3 +1,4 @@
+import { openCodeGoHeaders } from './requests'
 import { modelRuntimeFetch, MODEL_RESPONSE_TIMEOUTS } from '../beegame/model-runtime-transport'
 import {
   getTLSFetchOptions,
@@ -86,6 +87,8 @@ export async function startProviderBridge(
         for (const name of ['host', 'authorization', 'content-length', 'connection', 'cookie',
           'transfer-encoding', 'keep-alive', 'proxy-authorization', 'te', 'trailer', 'upgrade']) headers.delete(name)
         headers.set('authorization', 'Bearer ' + config.apiKey)
+        if (config.protocol === 'responses')
+          for (const [name, value] of Object.entries(openCodeGoHeaders(config))) headers.set(name, value)
         // Identify the real network boundary; conversion errors are local,
         // even when their exception has no recognizable code or HTTP status.
         const requestUpstream = ((input: RequestInfo | URL, init?: RequestInit) => {

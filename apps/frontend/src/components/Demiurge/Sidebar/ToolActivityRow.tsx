@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { AlertTriangle, CircleCheck, FileText, ImageIcon, LoaderCircle, Minus, Pencil, Search, SquareTerminal, Wrench, X } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { activityToolKind, toolActivitySummary } from '../../../utils/toolActivitySummary';
@@ -28,6 +29,6 @@ export function ToolActivityRow({ id, name, input, detail = '', state, duration,
             <StateIcon aria-hidden="true" className={`size-3 ${state === 'running' ? 'motion-safe:animate-spin' : ''}`} />
             {labels[state]}
         </span>
-        {duration && <span className="shrink-0 text-xs tabular-nums">{duration}</span>}
+        {duration && <span className="shrink-0 text-xs tabular-nums"><AnimatedNumber>{duration}</AnimatedNumber></span>}
     </div>;
 }

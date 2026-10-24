@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import type { BeeGameBillingCreditPack, BeeGameBillingEvent, BeeGameUsageSummary } from '../../services/creditsApi';
 import { Checkbox } from '../beui/registry/components/motion/checkbox';
 import { Button } from '../beui/project-button';
@@ -42,7 +43,7 @@ export function CreditMetric({ label, value }: CreditMetricProps) {
   return (
     <div className="rounded-lg border border-border bg-muted/40 px-3 py-2">
       <div className="type-caption-1 text-muted-foreground">{label}</div>
-      <div className="type-subheadline mt-1 text-foreground">{value}</div>
+      <div className="type-subheadline mt-1 text-foreground"><AnimatedNumber>{value}</AnimatedNumber></div>
     </div>
   );
 }

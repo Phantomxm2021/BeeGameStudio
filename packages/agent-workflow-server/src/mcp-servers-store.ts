@@ -1,3 +1,4 @@
+import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
 import {
   existsSync,
   mkdirSync,
@@ -125,9 +126,10 @@ export async function discoverMcpServers(
       const normalized = normalizeMcpServerInput(server, undefined)
       const publicInput = toPublicMcpServerInput(normalized)
       if ((publicInput.transport === 'http' || publicInput.transport === 'sse') &&
-        (!publicInput.url || !await (options.outboundTargetResolver ?? resolveApprovedOutboundTarget)(
+        (!publicInput.url || !await resolveMcpOutboundTarget(
           publicInput.url,
           options.outboundTargetPolicyOptions,
+          options.outboundTargetResolver,
         ))) continue
       const key = getMcpServerFingerprint(publicInput)
       if (discovered.has(key)) continue

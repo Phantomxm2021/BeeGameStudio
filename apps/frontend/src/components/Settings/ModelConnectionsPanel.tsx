@@ -1,4 +1,4 @@
-import {resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
+import {defaultModelApiProtocol,resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
 import {OpenCodeGoPanel} from './OpenCodeGoPanel';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { ProjectSelect } from '../beui/project-select';
@@ -59,7 +59,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
       else setMode('official');
       setOfficialId(active && !personalIds.includes(active.id) && active.authMethods?.includes('platform') ? active.id : result.find(item => !personalIds.includes(item.id) && item.authMethods?.includes('platform'))?.id ?? '');
       const personal = result.find(item => item.id === BYOK_ID);
-      if (personal) { setProvider(personal.provider);setApiProtocol(personal.connection.apiProtocol ?? personal.apiProtocol ?? resolveModelApiProtocol(personal.provider)); setBaseUrl(personal.connection.baseUrl ?? ''); setModel(personal.connection.model ?? ''); }
+      if (personal) { setProvider(personal.provider);setApiProtocol(personal.connection.apiProtocol ?? personal.apiProtocol ?? (personal.connection.baseUrl ? resolveModelApiProtocol(personal.provider) : defaultModelApiProtocol(personal.provider))); setBaseUrl(personal.connection.baseUrl ?? ''); setModel(personal.connection.model ?? ''); }
     }).catch(() => { if (mounted.current) setStatus(chatgptAuthorizationOnly ? copy('无法读取登录状态，请重新打开此页面。', 'Could not read login status. Reopen this page.') : copy('无法读取可用模型', 'Could not load available models')); });
     return () => { mounted.current = false; if (loginRef.current) void cancelModelLogin(loginRef.current.id).catch(() => {}); };
   }, [chatgptAuthorizationOnly]);
@@ -114,7 +114,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     if (next === 'byok' && byok?.connection.hasKey && byokComplete) void run(() => activate(BYOK_ID, 'byok', { provider,apiProtocol, baseUrl: baseUrl.trim(), model: model.trim() }), () => setMode(previous));
     if (next === 'opencode-go') {
       const go = models.find(item => item.id === OPENCODE_GO_ID);
-      if (go?.connection.hasKey && go.baseUrl) void run(() => activate(OPENCODE_GO_ID, 'byok', {provider:go.provider,baseUrl:go.baseUrl!,model:go.connection.model ?? go.model}),()=>setMode(previous));
+      if (go?.connection.hasKey && go.baseUrl) void run(() => activate(OPENCODE_GO_ID, 'byok', {provider:go.provider,apiProtocol:go.connection.apiProtocol ?? go.apiProtocol,baseUrl:go.baseUrl!,model:go.connection.model ?? go.model}),()=>setMode(previous));
     }
     if (next === 'chatgpt-subscription') {
       const id = CHATGPT_ID;

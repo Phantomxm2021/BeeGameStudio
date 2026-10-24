@@ -214,7 +214,7 @@ describe('useChat clarification gate handling', () => {
     }));
     expect(chatStoreState.settleActivity).not.toHaveBeenCalled();
   });
-  it('keeps projected host evidence live and in history after session stop, with the same identity', async () => {
+  it('excludes host evidence from live Chat and restored history after session stop', async () => {
     const { result } = renderHook(() => useChat({ projectId: 'evidence-project' }));
     const common = { sessionId: 'main', turnId: 'turn', createdAt: '2026-10-20T00:00:00Z' };
     const stopped = projectEventMessages('evidence-project', {
@@ -227,15 +227,14 @@ describe('useChat clarification gate handling', () => {
       payload: { type: 'system.status', subtype: 'host_evidence', quality: 'unverified', deliveryEligible: false },
     });
     act(() => evidence.forEach(message => latestWebSocketOptions.onMessage?.(message)));
-    const [restored] = projectHistoryMessages(evidence, new Map());
-    expect(chatStoreState.addMessage).toHaveBeenCalledTimes(1);
-    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
-      id: restored.id, sender: 'system', type: 'system_status', taskKind: 'host_evidence',
-      content: restored.content, timestamp: restored.timestamp,
+    expect(evidence).toEqual([]);
+    expect(projectHistoryMessages(evidence, new Map())).toEqual([]);
+    act(() => latestWebSocketOptions.onMessage?.({
+      type: 'context_update', project_id: 'evidence-project', task_id: 'main',
+      task_kind: 'host_evidence', content: 'Host evidence', timestamp: 200,
     }));
+    expect(chatStoreState.addMessage).not.toHaveBeenCalled();
     expect(result.current.isLoading).toBe(false);
-    act(() => evidence.forEach(message => latestWebSocketOptions.onMessage?.({ ...message, project_id: 'other' })));
-    expect(chatStoreState.addMessage).toHaveBeenCalledTimes(1);
     expect(api.continueTask).not.toHaveBeenCalled();
   });
 

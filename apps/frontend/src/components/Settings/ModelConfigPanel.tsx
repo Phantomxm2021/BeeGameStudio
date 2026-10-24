@@ -1,9 +1,9 @@
-import {resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
+import {defaultModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
 import { useEffect } from 'react';
 import { useOpenCodeGoModels, OpenCodeGoCatalogStatus } from './useOpenCodeGoModels';
 import type { ModelProviderKind } from '../../services/modelConfigApi';
 import { ProjectSelect } from '../beui/project-select';
-import { getOpenCodeGoProvider, OPENCODE_GO_PROFILES, type OpenCodeGoProvider } from '@bee-game-studio/agent-workflow/opencode-go';
+import { getOpenCodeGoProfileId, OPENCODE_GO_PROFILES, type OpenCodeGoProfileId } from '@bee-game-studio/agent-workflow/opencode-go';
 
 export type ModelConfigPanelLabels = {
   provider: string;
@@ -50,14 +50,14 @@ export function ModelConfigPanel({
   onGoModelsReady?: (ready: boolean) => void;
   language?: string;
 }) {
-  const goProvider = enableOpenCodeGo ? getOpenCodeGoProvider(baseUrl) : undefined;
-  const goProfile = goProvider ? OPENCODE_GO_PROFILES[goProvider] : undefined;
-  const catalog = useOpenCodeGoModels(goProvider);
+  const goProfileId = enableOpenCodeGo ? getOpenCodeGoProfileId(baseUrl, apiProtocol) : undefined;
+  const goProfile = goProfileId ? OPENCODE_GO_PROFILES[goProfileId] : undefined;
+  const catalog = useOpenCodeGoModels(goProfileId);
   const ready = !catalog.loading && !catalog.error && !!catalog.models?.includes(model);
   useEffect(() => { onGoModelsReady?.(!goProfile || ready); }, [onGoModelsReady, goProfile, ready]);
-  const selectGoProtocol = (next: OpenCodeGoProvider) => {
+  const selectGoProtocol = (next: OpenCodeGoProfileId) => {
     const profile = OPENCODE_GO_PROFILES[next];
-    onProviderChange(next); onApiProtocolChange?.(resolveModelApiProtocol(next)); onBaseUrlChange(profile.baseUrl);
+    onProviderChange(profile.provider); onApiProtocolChange?.(profile.apiProtocol); onBaseUrlChange(profile.baseUrl);
     onModelChange(profile.model);
   };
   const inputClass = 'h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring/30';
@@ -66,19 +66,19 @@ export function ModelConfigPanel({
       <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
         <span className="text-sm font-medium text-foreground">{labels.provider}</span>
         <ProjectSelect ariaLabel={labels.provider} value={goProfile ? 'opencode-go' : provider} onValueChange={value => {
-          if (value === 'opencode-go') { selectGoProtocol('anthropic-compatible'); return; }
+          if (value === 'opencode-go') { selectGoProtocol('responses'); return; }
           onProviderChange(value as ModelProviderKind);
-          onApiProtocolChange?.(resolveModelApiProtocol(value as ModelProviderKind));
+          onApiProtocolChange?.(defaultModelApiProtocol(value as ModelProviderKind));
           if (goProfile) onBaseUrlChange('');
         }} options={[{ value: 'openai-compatible', label: 'OpenAI Compatible' }, { value: 'anthropic-compatible', label: 'Anthropic API Compatible' }, { value: 'gemini', label: 'Gemini' }, { value: 'grok', label: 'Grok' }, ...(enableOpenCodeGo ? [{ value: 'opencode-go', label: 'OpenCode Go' }] : [])]} className="w-full" triggerClassName={inputClass} />
       </label>
       {!goProfile && (provider==='openai-compatible'||provider==='grok') && onApiProtocolChange && <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
         <span className="text-sm font-medium text-foreground">{labels.protocol ?? 'API Protocol'}</span>
-        <ProjectSelect ariaLabel={labels.protocol ?? 'API Protocol'} value={apiProtocol ?? resolveModelApiProtocol(provider)} onValueChange={value=>onApiProtocolChange(value as ModelApiProtocol)} options={[{value:'responses',label:'Responses'},{value:'chat-completions',label:'Chat Completions'}]} className="w-full" triggerClassName={inputClass}/>
+        <ProjectSelect ariaLabel={labels.protocol ?? 'API Protocol'} value={apiProtocol ?? defaultModelApiProtocol(provider)} onValueChange={value=>onApiProtocolChange(value as ModelApiProtocol)} options={[{value:'responses',label:'Responses'},{value:'chat-completions',label:'Chat Completions'}]} className="w-full" triggerClassName={inputClass}/>
       </label>}
       {goProfile && <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
         <span className="text-sm font-medium text-foreground">{labels.protocol ?? 'Protocol'}</span>
-        <ProjectSelect ariaLabel={labels.protocol ?? 'Protocol'} value={goProvider!} onValueChange={value => selectGoProtocol(value as OpenCodeGoProvider)} options={Object.entries(OPENCODE_GO_PROFILES).map(([value, profile]) => ({ value, label: profile.label }))} className="w-full" triggerClassName={inputClass} />
+        <ProjectSelect ariaLabel={labels.protocol ?? 'Protocol'} value={goProfileId!} onValueChange={value => selectGoProtocol(value as OpenCodeGoProfileId)} options={Object.entries(OPENCODE_GO_PROFILES).map(([value, profile]) => ({ value, label: profile.label }))} className="w-full" triggerClassName={inputClass} />
       </label>}
       <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center"><span className="text-sm font-medium text-foreground">{labels.baseUrl}</span><input aria-label={labels.baseUrl} value={baseUrl} readOnly={!!goProfile} onChange={event => onBaseUrlChange(event.target.value)} placeholder="https://api.example.com/v1" className={inputClass} /></label>
       <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center"><span className="text-sm font-medium text-foreground">{labels.apiKey}</span><input aria-label={labels.apiKey} type="password" autoComplete="new-password" value={apiKey} onChange={event => onApiKeyChange(event.target.value)} placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'} className={inputClass} /></label>

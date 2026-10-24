@@ -2,7 +2,7 @@ import { expect, test, mock } from 'bun:test'
 import { fetchOpenCodeGoModels, OPENCODE_GO_PROFILES, validateOpenCodeGoConfig } from '../opencode-go'
 import { goCatalogResponse, goModelCatalog } from '../../../../tests/fixtures/opencode-go'
 
-test('discovers new IDs by protocol without including Responses, Google, removed or unknown models', async () => {
+test('discovers new IDs by protocol including Responses while excluding Google, removed or unknown models', async () => {
   const get = mock(async (url: string | URL | Request, init?: RequestInit) => {
     expect(init?.redirect).toBe('error')
     expect(init?.signal).toBeInstanceOf(AbortSignal)
@@ -10,13 +10,16 @@ test('discovers new IDs by protocol without including Responses, Google, removed
     return goCatalogResponse(String(url))
   })
   const catalog = await fetchOpenCodeGoModels(Object.assign(get, { preconnect: () => {} }))
-  for (const provider of ['anthropic-compatible', 'openai-compatible'] as const)
+  for (const provider of ['anthropic-compatible', 'openai-compatible', 'responses'] as const)
     expect(catalog[provider]).toEqual([...goModelCatalog[provider]].sort())
   expect(get).toHaveBeenCalledTimes(2)
   const config = { provider: 'openai-compatible', baseUrl: OPENCODE_GO_PROFILES['openai-compatible'].baseUrl,
     model: 'new-chat-model', authMethods: ['byok'] }
   expect(() => validateOpenCodeGoConfig(config, catalog)).not.toThrow()
   expect(() => validateOpenCodeGoConfig({ ...config, model: 'new-anthropic-model' }, catalog)).toThrow()
+  expect(() => validateOpenCodeGoConfig({ ...config, model: 'new-responses-model' }, catalog)).toThrow()
+  expect(() => validateOpenCodeGoConfig({ ...config, apiProtocol: 'responses', model: 'new-responses-model' }, catalog)).not.toThrow()
+  expect(() => validateOpenCodeGoConfig({ ...config, apiProtocol: 'responses' }, catalog)).toThrow()
 })
 
 test('catalog failures and malformed responses fail without retry or static fallback', async () => {

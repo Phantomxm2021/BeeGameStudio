@@ -1,5 +1,5 @@
 import type { ProviderConfig } from './config'
-import { nativeRequest } from './requests'
+import { nativeRequest, openCodeGoHeaders } from './requests'
 import { responseEvents, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
 import { UnknownProviderToolError, type Json } from './messages'
 import { safeErrorFacts } from '../security/safe-error-facts'
@@ -21,6 +21,7 @@ export async function requestProvider(
       headers: {
         Authorization: 'Bearer ' + config.apiKey,
         'Content-Type': 'application/json',
+        ...openCodeGoHeaders(config),
       },
       body: JSON.stringify(body),
     })

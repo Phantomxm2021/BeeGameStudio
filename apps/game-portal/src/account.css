@@ -24,3 +24,16 @@
 [data-morph-popover-portal] {
   --accent: var(--surface-hover);
 }
+
+@source "../../frontend/src/components/BeePlay/BeePlayAdminPanel.tsx";
+@source "../../frontend/src/entrypoints/beeplayAdmin.tsx";
+@source "../../frontend/src/components/beui/project-button.tsx";
+@source "../../frontend/src/components/beui/registry/components/motion/button.tsx";
+
+@layer base {
+  #beeplay-admin-root *, #beeplay-admin-root *::before, #beeplay-admin-root *::after { box-sizing: border-box; border: 0 solid; }
+  #beeplay-admin-root button, #beeplay-admin-root input { font: inherit; color: inherit; }
+  #beeplay-admin-root button { background-color: transparent; padding: 0; }
+  #beeplay-admin-root p, #beeplay-admin-root ol { margin: 0; padding: 0; }
+  #beeplay-admin-root ol { list-style: none; }
+}

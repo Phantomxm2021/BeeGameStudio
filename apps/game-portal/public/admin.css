@@ -1,0 +1,15 @@
+.beeplay-admin { width: min(1120px, 100%); margin: 0 auto; padding: 48px 32px 80px; }
+.admin-header-actions { display: flex; align-items: center; gap: 18px; font-size: 14px; }
+.admin-page-heading { margin-bottom: 32px; }
+.admin-page-heading h1 { margin: 10px 0 12px; font-size: 32px; line-height: 1.2; letter-spacing: -.025em; }
+.admin-page-heading p, .admin-login > p { color: var(--secondary); font-size: 14px; }
+.admin-login { max-width: 440px; padding: 28px; background: var(--surface-1); border: 1px solid var(--line); border-radius: 18px; }
+.admin-login h2 { margin-top: 0; font-size: 20px; }
+.admin-login form, .admin-login label { display: grid; gap: 8px; }
+.admin-login form { margin: 24px 0 16px; gap: 18px; }
+.admin-login input { width: 100%; color: var(--foreground); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.admin-oauth { display: flex; gap: 12px; flex-wrap: wrap; }
+.admin-message { color: var(--destructive); margin-bottom: 20px; }
+.beeplay-admin button, .admin-header-actions button { border-style: solid; }
+.beeplay-admin table { border-collapse: collapse; }
+@media(max-width: 640px) { .beeplay-admin { padding: 28px 16px 56px; } .admin-header-actions { gap: 12px; font-size: 12px; } .admin-login { padding: 22px; } }

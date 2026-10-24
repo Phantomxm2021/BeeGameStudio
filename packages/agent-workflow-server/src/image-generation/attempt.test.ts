@@ -1,11 +1,11 @@
 import { test, expect } from 'bun:test'
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { ImageAttemptStore } from './attempt'
 import { imageConfigSchema } from './config'
-import { ImageProviderError, type ImageResult } from './provider'
+import { ImageProviderError, type ImageGenerationProvider, type ImageResult } from './provider'
 
 const input = {
   ownerId: 'user', projectId: 'project', requestId: 'icon-1',
@@ -92,4 +92,95 @@ test('another process sees pending receipt as unknown, not permission to submit 
     await running
     expect(calls).toBe(1)
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('an interrupted completed-result download is recovered once for concurrent callers', async () => {
+  const root = temporary()
+  const image = await result()
+  const { bytes: _, ...metadata } = image
+  const reference = { ...metadata, url: 'https://cdn.example.test/result.png?signed=private' }
+  let submissions = 0, downloads = 0
+  const provider: ImageGenerationProvider = {
+    async generate(_config, _request, context) {
+      submissions++
+      context!.onResultReference!(reference)
+      throw new ImageProviderError('download failed', 'unknown')
+    },
+    async recover(_config, saved) {
+      downloads++
+      expect(saved).toEqual(reference)
+      return image
+    },
+  }
+  try {
+    await expect(new ImageAttemptStore(root, provider).generate(input)).rejects.toMatchObject({ reason: 'unknown' })
+    const path = join(root, readdirSync(root)[0]!, 'receipt.json')
+    const record = JSON.parse(readFileSync(path, 'utf8'))
+    // Simulate termination after the completed reference was saved, before
+    // the downloader could report success or failure.
+    writeFileSync(path, JSON.stringify({ digest: record.digest, state: 'pending', reference }))
+    const restarted = new ImageAttemptStore(root, provider)
+    const results = await Promise.all([restarted.generate(input), restarted.generate(input)])
+    expect(results).toEqual([image, image])
+    expect(submissions).toBe(1)
+    expect(downloads).toBe(1)
+    expect(readFileSync(path, 'utf8')).not.toContain(reference.url)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a rejected download cannot turn a completed generation into a refundable rejection', async () => {
+  const root = temporary()
+  const { bytes: _, ...metadata } = await result()
+  const reference = { ...metadata, url: 'https://cdn.example.test/result.png' }
+  let submissions = 0
+  const provider: ImageGenerationProvider = {
+    async generate(_config, _request, context) {
+      submissions++
+      context!.onResultReference!(reference)
+      throw new ImageProviderError('download rejected', 'rejected', 403)
+    },
+    async recover() { throw new ImageProviderError('download rejected', 'rejected', 403) },
+  }
+  try {
+    for (let replay = 0; replay < 2; replay++) {
+      await expect(new ImageAttemptStore(root, provider).generate(input))
+        .rejects.toMatchObject({ reason: 'unknown', status: 403, replayed: replay > 0 })
+    }
+    const record = JSON.parse(readFileSync(join(root, readdirSync(root)[0]!, 'receipt.json'), 'utf8'))
+    expect(record.state).toBe('pending')
+    expect(record.reference).toEqual(reference)
+    expect(submissions).toBe(1)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a late failed download cannot overwrite a result recovered by another store', async () => {
+  const root = temporary()
+  const image = await result()
+  const { bytes: _, ...metadata } = image
+  let submissions = 0, downloads = 0
+  let failLate!: () => void
+  const waitForFailure = new Promise<void>(resolve => { failLate = resolve })
+  const provider: ImageGenerationProvider = {
+    async generate(_config, _request, context) {
+      submissions++
+      context!.onResultReference!({ ...metadata, url: 'https://cdn.example.test/result.png' })
+      throw new ImageProviderError('download failed', 'unknown')
+    },
+    async recover() {
+      if (++downloads === 1) return image
+      await waitForFailure
+      throw new ImageProviderError('late network failure', 'unknown')
+    },
+  }
+  try {
+    await expect(new ImageAttemptStore(root, provider).generate(input)).rejects.toMatchObject({ reason: 'unknown' })
+    const successful = new ImageAttemptStore(root, provider).generate(input)
+    const failed = new ImageAttemptStore(root, provider).generate(input)
+    expect(await successful).toEqual(image)
+    failLate()
+    await expect(failed).rejects.toMatchObject({ reason: 'unknown' })
+    expect(await new ImageAttemptStore(root, provider).generate(input)).toEqual(image)
+    expect(submissions).toBe(1)
+    expect(downloads).toBe(2)
+  } finally { failLate(); rmSync(root, { recursive: true, force: true }) }
 })

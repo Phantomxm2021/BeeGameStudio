@@ -104,6 +104,12 @@
         "vitest": "^4.0.18",
       },
     },
+    "apps/game-delivery": {
+      "name": "@bee-game-studio/game-delivery",
+      "devDependencies": {
+        "wrangler": "^4.0.0",
+      },
+    },
     "apps/game-portal": {
       "name": "@bee-game-studio/game-portal",
       "devDependencies": {
@@ -348,6 +354,8 @@
     "@bee-game-studio/beegame-skills-server": ["@bee-game-studio/beegame-skills-server@workspace:packages/beegame-skills-server"],
 
     "@bee-game-studio/beegame-storage-core": ["@bee-game-studio/beegame-storage-core@workspace:packages/beegame-storage-core"],
+
+    "@bee-game-studio/game-delivery": ["@bee-game-studio/game-delivery@workspace:apps/game-delivery"],
 
     "@bee-game-studio/game-portal": ["@bee-game-studio/game-portal@workspace:apps/game-portal"],
 

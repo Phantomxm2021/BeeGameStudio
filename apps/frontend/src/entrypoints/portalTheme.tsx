@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ThemeToggleButton } from '../components/beui/motion/theme-toggle-button';
 import { UserAccountMenu } from '../components/Demiurge/Landing/UserAccountMenu';
-import { FolderOpen } from 'lucide-react';
+import { canManageBeePlay } from '../../../game-portal/src/admin-api';
+import { FolderOpen, Settings } from 'lucide-react';
 import { getPortalAccountUser, subscribePortalAccount, openPortalLogin, signOutPortalAccount } from '../../../game-portal/public/portal.js';
 import { applyThemeToDocument, readThemePreference, writeThemePreference, subscribeThemePreference } from '../lib/themePreference';
 
@@ -28,6 +29,13 @@ for (const container of document.querySelectorAll('[data-theme-toggle]')) {
 
 function PortalAccountMenu() {
   const [user, setUser] = useState(getPortalAccountUser);
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    setIsAdmin(false);
+    if (user) void canManageBeePlay().then(allowed => { if (!disposed) setIsAdmin(allowed); }).catch(() => {});
+    return () => { disposed = true; };
+  }, [user]);
   useEffect(() => subscribePortalAccount(setUser), []);
   return <UserAccountMenu
     ariaLabel={user ? '用户菜单' : '登录'}
@@ -40,7 +48,7 @@ function PortalAccountMenu() {
     items={user ? [{
       key: 'releases', label: '我的发布', icon: <FolderOpen className="h-4 w-4" />,
       onClick: () => location.assign(`/?author=${encodeURIComponent(user.id)}`),
-    }] : []}
+    }, ...(isAdmin ? [{ key: 'admin', label: '管理后台', icon: <Settings className="h-4 w-4" />, onClick: () => location.assign('/admin') }] : [])] : []}
     onOpenLogin={() => void openPortalLogin()}
     onSignOut={signOutPortalAccount}
   />;

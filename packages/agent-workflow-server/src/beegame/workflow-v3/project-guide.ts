@@ -27,7 +27,7 @@ ${PRODUCTION_DEPENDENCIES}
 - Actual visual designs: use existing image tools or supplied designs for one overview board covering all game screens and key states in the current assignment, with each Scene and HUD together. Save and inspect the pictures; share the board across UI/Scene records. Prose, palettes and JSON geometry do not replace visual design; missing supplied pictures do not waive it. ${VISUAL_REFERENCE_EXPECTATIONS}
 - Resources: use ASSET_PLAN.md and the selected visual/audio designs for the current part; acquire, inspect and register actual assets. Keep delivered paths, frames and metrics in the Manifest, preserving the selected style.
 - Editable scene/UI content: author layout, objects, cameras and resource/action/state bindings from the selected designs in the format appropriate to the confirmed engine and applicable Editor interface. Use actual asset metrics and existing checks when binding resources; correct the owning sources and reconcile interfaces before consuming affected content. Verification applies to its recorded input version; changed inputs require revalidating affected evidence.
-Image-tool request JSON is a tool input, not a Scene/UI layout. Reuse existing Skills and entries; machine indexes and task coverage graphs are not required. Add no separate plan or task database.
+Image-tool request JSON is a tool input, not a Scene/UI layout. Reuse existing Skills and entries; ordinary task/progress notes are allowed. Do not duplicate design records or create machine indexes, task coverage graphs or a task database merely for BGS.
 
 ## Quality and evidence
 - Skill invocation, complete documents, valid JSON and successful tools do not establish design quality.

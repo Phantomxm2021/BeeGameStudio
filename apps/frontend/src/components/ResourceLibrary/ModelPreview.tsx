@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as THREE from 'three'
@@ -924,7 +925,7 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           </button>
           <ProjectSelect ariaLabel="Model animation" value={String(selectedAnimation)} onValueChange={value => setSelectedAnimation(Number(value))} options={animations.map((clip, index) => ({ value: String(index), label: clip.name || `Animation ${index + 1}` }))} className="min-w-0 flex-1" triggerClassName="type-caption-2 h-7 truncate rounded-md border-0 bg-transparent px-1 py-1" />
-          <span className="type-code-sm shrink-0 text-muted-foreground">{formatAnimationTime(timelineTime)} / {formatAnimationTime(activeDuration)}</span>
+          <span className="type-code-sm shrink-0 text-muted-foreground"><AnimatedNumber duration={0.06}>{formatAnimationTime(timelineTime)}</AnimatedNumber> / <AnimatedNumber>{formatAnimationTime(activeDuration)}</AnimatedNumber></span>
           <button
             type="button"
             aria-label={isLooping ? 'Disable animation loop' : 'Enable animation loop'}

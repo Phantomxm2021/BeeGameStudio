@@ -7,6 +7,7 @@ import {
   isSecretEnvelope,
 } from './security/secret-crypto'
 import {
+  defaultModelApiProtocol,
   mapStoredModelConfigToRuntime,
 } from '@bee-game-studio/agent-workflow'
 import type {
@@ -399,7 +400,7 @@ export class SupabaseDashboardStore {
       name: input.name,
       provider: input.provider,
       base_url: input.baseUrl ?? null,
-      api_protocol: input.apiProtocol ?? null,
+      api_protocol: input.apiProtocol ?? defaultModelApiProtocol(input.provider),
       api_key_ciphertext: encryptSecret(input.apiKey, 'model-config:api-key'),
       models: { balanced: input.model },
       published: input.published ?? true,

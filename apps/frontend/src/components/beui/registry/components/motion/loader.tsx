@@ -1,5 +1,7 @@
 "use client";
 
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
+
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useId, useState } from "react";
 import { EASE_IN_OUT } from "../../lib/ease";
@@ -502,7 +504,7 @@ function Percent({ size, speed, reduce }: PartProps) {
         className="font-mono font-medium tabular-nums"
         style={{ fontSize: size * 0.42, lineHeight: 1 }}
       >
-        {p}%
+        <AnimatedNumber>{p}</AnimatedNumber>%
       </span>
       <span
         className="w-full overflow-hidden rounded-full bg-current/15"

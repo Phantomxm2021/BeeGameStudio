@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import type { SceneDocument, SceneAsset } from '../../../../packages/scene-editor/src/model';
 export { parseTileSet, parseGridData, parseTilemapData, parseTilemapRendererData, validateTilemapGrid } from '../../../../packages/scene-editor/src/tilemap-data';
 
@@ -13,6 +13,7 @@ export type {
 } from '../../../../packages/scene-editor/src/model';
 
 export interface SceneEditorProps {
+  renderNumber?: (value: number) => ReactNode;
   onUploadAssets?: (files: File[]) => Promise<Record<string, SceneAsset>>;
   initialDocument?: SceneDocument;
   initialView?: { position: [number, number, number]; target: [number, number, number]; showGizmos?: boolean };

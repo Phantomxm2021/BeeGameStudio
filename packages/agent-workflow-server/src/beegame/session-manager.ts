@@ -298,6 +298,8 @@ export type BeeGameSessionRunnerStartInput = {
   sessionId: string
   /** Host capability discovery, separate from the user's message. */
   systemContext?: string
+  /** Current confirmed requirements, also retained by the native instruction baseline. */
+  confirmedBriefContext?: string
   /** Host-confirmed UI check conditions; never accepted from model tool input. */
   uiLayoutConstraints?: import('./ui-layout-audit').LayoutConstraints
   resumeSessionId?: string
@@ -1451,6 +1453,7 @@ export class BeeGameSessionManager {
         (await this.runner.start({
           sessionId: record.session.id,
           systemContext: record.systemContext,
+          confirmedBriefContext: record.confirmedBriefContext,
           uiLayoutConstraints: record.uiLayoutConstraints,
           ...(record.nativeSessionId
             ? { resumeSessionId: record.nativeSessionId }
@@ -2434,9 +2437,11 @@ function recoverConfirmedBriefContext(
     const event = events[index]
     if (event?.type !== 'user.message' || !isRuntimeRecord(event.payload))
       continue
-    if (event.payload.displayKind !== 'confirmed_brief') continue
+    // Canonical context is also attached to V3 goal/change messages. The
+    // display label only governs the legacy text-marker fallback below.
     const context = event.payload.confirmedBriefContext
     if (typeof context === 'string' && context.trim()) return context.trim()
+    if (event.payload.displayKind !== 'confirmed_brief') continue
     const marker = '\nConfirmed brief:\n'
     const markerIndex = event.text.lastIndexOf(marker)
     if (markerIndex >= 0) {

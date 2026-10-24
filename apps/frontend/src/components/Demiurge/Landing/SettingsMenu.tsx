@@ -90,7 +90,7 @@ import { useToastContext } from '../../../contexts/ToastContext';
 import { InvitationSettingsPanel } from '../../Settings/InvitationSettingsPanel';
 import { UserSkillsSettingsPanel } from '../../Settings/UserSkillsSettingsPanel';
 import { ModelConfigPanel } from '../../Settings/ModelConfigPanel';
-import { getOpenCodeGoProvider, OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
+import { getOpenCodeGoProfileId, OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
 import { Dialog, DialogContent } from '../../ui/dialog';
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../../beui/registry/components/motion/popover-morph';
 import { CloseIconButton } from '../../ui/CloseIconButton';
@@ -129,7 +129,7 @@ interface SettingsMenuProps {
 type SettingsSection = 'personal' | 'connections' | 'image-connection' | 'skills' | 'mcp' | 'platform';
 type SettingsTab = 'general' | 'runtime' | 'skills' | 'model' | 'image' | 'invitations' | 'projects' | 'credit';
 type McpFormAnchor =
-  | { kind: 'new'; rect: PopoverAnchorRect }
+  | { kind: 'new' | 'command'; rect: PopoverAnchorRect }
   | { kind: 'edit'; serverId: string; rect: PopoverAnchorRect }
   | null;
 
@@ -202,8 +202,8 @@ export function SettingsMenu({
   const [isDefault, setIsDefault] = useState(true);
   const [published, setPublished] = useState(true);
   const [authMethods, setAuthMethods] = useState<ModelAuthMethod[]>(['platform']);
-  const goProvider = getOpenCodeGoProvider(baseUrl);
-  const goProfile = goProvider ? OPENCODE_GO_PROFILES[goProvider] : undefined;
+  const goProfileId = getOpenCodeGoProfileId(baseUrl, apiProtocol);
+  const goProfile = goProfileId ? OPENCODE_GO_PROFILES[goProfileId] : undefined;
   const [goModelsReady, setGoModelsReady] = useState(false);
   const goModelsComplete = !goProfile || goModelsReady;
   const [status, setStatus] = useState('');
@@ -1177,7 +1177,8 @@ export function SettingsMenu({
                             {isScanningActiveMcp ? mcpCopy.form.scanning : mcpCopy.form.scanActive}
                           </button> : null}
                           {canDiscoverHostMcp ? <div className="my-1 h-px bg-border" /> : null}
-                          <button
+                          {(['new', 'command'] as const).map(kind => <button
+                            key={kind}
                             type="button"
                             role="menuitem"
                             onClick={event => {
@@ -1186,21 +1187,22 @@ export function SettingsMenu({
                               setMcpStatus('');
                               setIsMcpActionMenuOpen(false);
                               setMcpFormAnchor({
-                                kind: 'new',
+                                kind,
                                 rect: toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()),
                               });
                             }}
                             className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-foreground transition-colors hover:bg-accent"
                           >
                             <Plus className="h-4 w-4 text-muted-foreground" />
-                            {mcpCopy.newServer}
-                          </button>
+                            {kind === 'new' ? mcpCopy.newServer : mcpCopy.newServerCommand}
+                          </button>)}
                         </div>
                       </>
                     ) : null}
-                    {mcpFormAnchor?.kind === 'new' ? (
+                    {mcpFormAnchor?.kind === 'new' || mcpFormAnchor?.kind === 'command' ? (
                       <McpServerFormPopover
-                        mode="create"
+                        key={mcpFormAnchor.kind}
+                        mode={mcpFormAnchor.kind === 'command' ? 'command' : 'create'}
                         copy={mcpCopy}
                         form={mcpForm}
                         status={mcpStatus}
@@ -1211,7 +1213,7 @@ export function SettingsMenu({
                           setMcpFormAnchor(null);
                           setMcpStatus('');
                         }}
-                        onSave={() => void handleSaveMcpServer(mcpForm, { closeAfterSave: true })}
+                        onSave={nextForm => void handleSaveMcpServer(nextForm, { closeAfterSave: true })}
                       />
                     ) : null}
                   </div>

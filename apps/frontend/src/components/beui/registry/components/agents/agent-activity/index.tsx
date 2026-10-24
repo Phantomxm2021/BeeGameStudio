@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 // beui.dev/components/agents/agent-activity
 
 import { ChevronDown } from "lucide-react";
@@ -96,7 +98,7 @@ function getSummary(
   if (type === "step" || type === "text") {
     return (
       <>
-        Thought for <span className="tabular-nums">{formatDuration(duration)}</span>
+        Thought for <span className="tabular-nums"><AnimatedNumber>{formatDuration(duration)}</AnimatedNumber></span>
       </>
     );
   }

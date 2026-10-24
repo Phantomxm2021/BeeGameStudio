@@ -58,12 +58,6 @@ export async function validateBgsModelConfig(
       model: config.model as string | undefined,
       authMethods: config.authMethods as string[],
     })
-    const native =
-      config.provider === 'openai-compatible'
-        ? 'chat-completions'
-        : 'anthropic-messages'
-    if (protocol !== native)
-      throw Error('Choose the protocol matching the OpenCode Go endpoint')
     validateOpenCodeGoConfig(
       {
         ...config,

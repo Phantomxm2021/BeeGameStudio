@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react';
-import type { OpenCodeGoProvider } from '@bee-game-studio/agent-workflow/opencode-go';
+import type { OpenCodeGoProfileId } from '@bee-game-studio/agent-workflow/opencode-go';
 import { listOpenCodeGoModels } from '../../services/modelConfigApi';
 
-export function useOpenCodeGoModels(provider?: OpenCodeGoProvider) {
+export function useOpenCodeGoModels(profileId?: OpenCodeGoProfileId) {
   const [revision, setRevision] = useState(0);
-  const [state, setState] = useState<{ provider?: OpenCodeGoProvider; revision: number; models?: string[]; error?: boolean }>({ revision: -1 });
+  const [state, setState] = useState<{ profileId?: OpenCodeGoProfileId; revision: number; models?: string[]; error?: boolean }>({ revision: -1 });
   useEffect(() => {
-    if (!provider) return;
+    if (!profileId) return;
     let active = true;
     listOpenCodeGoModels().then(catalog => {
-      if (active) setState({ provider, revision, models: catalog[provider], error: !catalog[provider]?.length });
-    }).catch(() => { if (active) setState({ provider, revision, error: true }); });
+      if (active) setState({ profileId, revision, models: catalog[profileId], error: !catalog[profileId]?.length });
+    }).catch(() => { if (active) setState({ profileId, revision, error: true }); });
     return () => { active = false; };
-  }, [provider, revision]);
-  const current = state.provider === provider && state.revision === revision;
+  }, [profileId, revision]);
+  const current = state.profileId === profileId && state.revision === revision;
   return { models: current ? state.models : undefined, error: current && !!state.error,
-    loading: !!provider && (!current || (!state.models && !state.error)),
+    loading: !!profileId && (!current || (!state.models && !state.error)),
     refresh: () => setRevision(value => value + 1) };
 }
 

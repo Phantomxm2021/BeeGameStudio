@@ -249,7 +249,7 @@ describe('ProjectHistoryModal permissions', () => {
     const consumedCredits = await screen.findByText('7 credits');
     const creditRow = consumedCredits.closest('.type-caption-1');
     expect(consumedCredits).toBeInTheDocument();
-    expect(consumedCredits).toHaveClass('text-foreground');
+    expect(consumedCredits.closest('.text-foreground')).toBeInTheDocument();
     expect(creditRow).toHaveClass('text-muted-foreground');
     expect(creditRow).not.toHaveClass('text-amber-200');
     expect(getCreditSummary).toHaveBeenCalledWith('project-1');

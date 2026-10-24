@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { createPortal } from 'react-dom';
@@ -401,7 +402,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                 <span className="block h-4 w-24 animate-pulse rounded-full bg-accent" aria-hidden="true" />
               ) : (
                 <>
-                  {projectsTotal ?? `${projects.length}${projectsHasMore ? '+' : ''}`} {t.historyProjectCountLabel || t.recentProjects}
+                  <AnimatedNumber>{`${projectsTotal ?? `${projects.length}${projectsHasMore ? '+' : ''}`} ${t.historyProjectCountLabel || t.recentProjects}`}</AnimatedNumber>
                 </>
               )}
             </DialogDescription>
@@ -531,7 +532,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                       <PresenceGate>{({ isPresent, gate }) => <div {...gate} aria-hidden={!isPresent} className="flex items-center gap-3">
                       <span className="type-caption-1 flex min-w-[5.5rem] shrink-0 justify-end text-muted-foreground">
                       {creditSummary ? (
-                        <span className="text-foreground">{formatCreditAmount(creditSummary.consumedCredits)} credits</span>
+                        <span className="text-foreground"><AnimatedNumber>{`${formatCreditAmount(creditSummary.consumedCredits)} credits`}</AnimatedNumber></span>
                       ) : (
                         <Skeleton className="h-3 w-20 rounded-full bg-accent" aria-hidden="true" />
                       )}
@@ -598,7 +599,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               {allLoadedSelected ? t.historyDeselectAll : t.historySelectLoaded}
             </button>
             <div className="flex items-center gap-4">
-              <span className="type-footnote text-muted-foreground" aria-live="polite">{t.historySelectedCount.replace('{{count}}', String(selectedIds.size))}</span>
+              <span className="type-footnote text-muted-foreground" aria-live="polite"><AnimatedNumber>{t.historySelectedCount.replace('{{count}}', String(selectedIds.size))}</AnimatedNumber></span>
               <button type="button" disabled={deletionPending || !isPresent || selectedIds.size === 0} onClick={() => setConfirmingBatchDelete(true)} className="type-footnote min-h-8 bg-transparent text-destructive active:opacity-60 disabled:opacity-40">
                 {isBatchDeleting ? <span role="status" className="flex items-center gap-2"><LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />{t.historyDeleting}</span> : t.historyDelete}
               </button>

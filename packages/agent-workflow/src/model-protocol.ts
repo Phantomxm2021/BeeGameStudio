@@ -31,3 +31,11 @@ export function resolveModelApiProtocol(
     throw Error('Unsupported model API protocol for this provider')
   return protocol as ModelApiProtocol
 }
+
+/** New connections prefer Responses; missing protocols on saved legacy records
+ * still resolve through their original provider default above. */
+export function defaultModelApiProtocol(provider: ModelProviderKind): ModelApiProtocol {
+  return provider === 'openai-compatible' || provider === 'grok'
+    ? 'responses'
+    : resolveModelApiProtocol(provider)
+}

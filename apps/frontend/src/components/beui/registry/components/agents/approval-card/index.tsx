@@ -1,5 +1,7 @@
 "use client";
 
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
+
 import {
   ArrowLeft,
   ArrowRight,
@@ -322,7 +324,7 @@ export function ApprovalCard({
             </h3>
             {questionMode && interactive ? (
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground/65">
-                {currentStep + 1}/{questions.length}
+                <AnimatedNumber>{`${currentStep + 1}/${questions.length}`}</AnimatedNumber>
               </span>
             ) : (
               <span

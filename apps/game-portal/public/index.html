@@ -27,7 +27,7 @@
       <section id="catalogue" hidden>
         <h1 id="home-title" class="visually-hidden">Bee Play · 在线玩创作者游戏</h1>
         <div id="catalogue-heading" class="catalogue-heading" hidden><h1 id="catalogue-title">创作者的游戏</h1></div>
-        <section id="featured" class="featured" aria-label="新近发布的游戏" aria-roledescription="轮播" hidden>
+        <section id="featured" class="featured" aria-label="推荐游戏" aria-roledescription="轮播" hidden>
           <div id="feature-track" class="feature-track" tabindex="0" aria-label="新近发布，左右滑动浏览"></div>
           <div class="carousel-controls">
             <button id="feature-playback" class="carousel-playback" type="button" aria-label="暂停自动播放">
@@ -67,13 +67,13 @@
           </div>
           <div class="share-feedback"><button id="close-share" class="dialog-close" type="button" aria-label="关闭分享提示"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button><p id="share-status" role="status" aria-live="polite"></p><input id="share-url" class="share-url" aria-label="游戏分享链接" readonly hidden></div>
         </section>
-        <div class="game-heading"><div class="game-heading-copy"><h1 id="game-title">游戏</h1><a id="game-author" class="author-link"></a></div></div>
+        <div class="game-heading"><div class="game-heading-copy"><h1 id="game-title">游戏</h1><a id="game-author" class="author-link"></a><p id="game-play-count" class="play-count"></p></div></div>
         <div id="game-description" class="game-description" hidden><div id="game-description-text"></div></div>
       </section>
     </main>
     </div>
     <dialog id="login-dialog" aria-labelledby="login-title"><form id="login-form"><button id="close-login" class="dialog-close" type="button" aria-label="关闭登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button><img class="brand-mark" src="/assets/bgs_logo.svg" alt="" width="32" height="32" /><h2 id="login-title">登录 Bee Play</h2><label for="email">邮箱</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required><button id="submit-login" class="primary-button" type="submit">登录</button><p id="login-error" class="form-error" role="alert"></p><div class="oauth-buttons"><button class="share-button" type="button" data-oauth="github">使用 GitHub</button><button class="share-button" type="button" data-oauth="discord">使用 Discord</button></div></form></dialog>
-    <template id="game-card"><article class="game-card"><a class="card-play" target="_blank" rel="noopener"><div class="card-art"><img class="card-image" alt="" width="1200" height="900" loading="lazy" decoding="async"></div><h3></h3></a></article></template>
+    <template id="game-card"><article class="game-card"><a class="card-play" target="_blank" rel="noopener"><div class="card-art"><img class="card-image" alt="" width="1200" height="900" loading="lazy" decoding="async"></div><h3></h3><p class="play-count"></p></a></article></template>
     <template id="feature-card"><article class="feature-slide" aria-roledescription="幻灯片"><a class="feature-link" target="_blank" rel="noopener"><img class="feature-cover" alt="" width="1600" height="900" decoding="async"></a></article></template>
   </body>
 </html>

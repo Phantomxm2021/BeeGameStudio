@@ -224,15 +224,17 @@ test('administrator can publish a subscription-only model without a platform API
   } finally { cleanups.forEach(cleanup => cleanup()) }
 })
 
-for (const provider of ['anthropic-compatible', 'openai-compatible'] as const) {
-  test(`administrators can publish and edit a platform Go ${provider} model through the existing catalog`, async () => {
+for (const profileId of ['anthropic-compatible', 'openai-compatible', 'responses'] as const) {
+  const profile = OPENCODE_GO_PROFILES[profileId]
+  const provider = profile.provider
+  const selectedModel = profileId === 'responses' ? 'new-responses-model' : profile.model
+  test(`administrators can publish and edit a platform Go ${profileId} model through the existing catalog`, async () => {
     const cleanups: Array<() => void> = []
     const app = createAgentWorkflowApp({ dashboardDataRoot: root, modelConfigStore: false, skillsConfig: false,
       currentUser: { id: 'owner', role: 'owner' }, registerCleanup: cleanup => cleanups.push(cleanup),
       outboundTargetResolver: async value => ({ url: new URL(value), addresses: ['93.184.216.34'], lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4) }),
     })
-    const profile = OPENCODE_GO_PROFILES[provider]
-    const body = { name: 'Platform Go', provider, baseUrl: profile.baseUrl, apiKey: 'platform-go-fixture-key', model: profile.model,
+    const body = { name: 'Platform Go', provider, baseUrl: profile.baseUrl, apiKey: 'platform-go-fixture-key', model: selectedModel, apiProtocol: profile.apiProtocol,
       published: true, authMethods: ['platform'], isDefault: true }
     const post = (input: object) => app.request('/api/model-configs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
     try {
@@ -244,26 +246,27 @@ for (const provider of ['anthropic-compatible', 'openai-compatible'] as const) {
       const response = await post(body)
       expect(response.status).toBe(200)
       const saved = await response.json()
-      expect(saved).toMatchObject({ provider, baseUrl: profile.baseUrl, model: profile.model, authMethods: ['platform'] })
+      expect(saved).toMatchObject({ provider, baseUrl: profile.baseUrl, model: selectedModel, authMethods: ['platform'] })
       expect(JSON.stringify(saved)).not.toContain(body.apiKey)
       expect((await (await app.request('/api/model-catalog')).json()).some((item: { id: string }) => item.id === saved.id)).toBe(true)
       const patch = (input: object) => app.request(`/api/model-configs/${saved.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
       expect((await patch({ model: 'unsupported-model' })).status).toBe(400)
       expect((await patch({ published: false })).status).toBe(200)
       expect((await patch({ published: true })).status).toBe(200)
+      expect(saved.apiProtocol).toBe(profile.apiProtocol)
       const runtime = mapModelConfigToRuntime(saved.id)!
       const env = resolveModelConnection(root, saved, runtime.env)
       expect(env[BEEGAME_MODEL_BILLING_SOURCE]).toBe('platform')
+      expect(env.BEEGAME_API_PROTOCOL).toBe(profile.apiProtocol)
       expect(env[provider === 'anthropic-compatible' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY']).toBe(body.apiKey)
       expect(env[provider === 'anthropic-compatible' ? 'ANTHROPIC_BASE_URL' : 'OPENAI_BASE_URL']).toBe(profile.baseUrl)
     } finally { cleanups.forEach(cleanup => cleanup()) }
   })
 
-  test(`OpenCode Go ${provider} is encrypted, isolated, selectable and routed through the existing runtime`, async () => {
-    const profile = OPENCODE_GO_PROFILES[provider]
+  test(`OpenCode Go ${profileId} is encrypted, isolated, selectable and routed through the existing runtime`, async () => {
     const config = personalModelConfig(root, 'alice', OPENCODE_GO_ID, provider)!
     expect(personalModelAvailable(root, 'alice', OPENCODE_GO_ID)).toBe(false)
-    saveConnection(root, config, 'byok', 'go-fixture-secret', true, { model: profile.model })
+    saveConnection(root, config, 'byok', 'go-fixture-secret', true, { model: selectedModel, apiProtocol: profile.apiProtocol })
     expect(readFileSync(join(root, '.runtime/model-connections.json'), 'utf8')).not.toContain('go-fixture-secret')
     expect(personalModelAvailable(root, 'alice', OPENCODE_GO_ID)).toBe(true)
     expect(personalModelAvailable(join(root, 'bob'), 'bob', OPENCODE_GO_ID)).toBe(false)
@@ -274,7 +277,8 @@ for (const provider of ['anthropic-compatible', 'openai-compatible'] as const) {
     expect(env?.[`${prefix}_BASE_URL`]).toBe(profile.baseUrl)
     expect(env?.[provider === 'anthropic-compatible' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY']).toBe('go-fixture-secret')
     expect(env?.ANTHROPIC_AUTH_TOKEN).toBe('')
-    expect(env?.['BEEGAME_MODEL']).toBe(profile.model)
+    expect(env?.['BEEGAME_MODEL']).toBe(selectedModel)
+    expect(env?.BEEGAME_API_PROTOCOL).toBe(profile.apiProtocol)
     expect(env?.OPENAI_AUTH_MODE).toBe('')
     const request = new Request('http://localhost/api/model-configs')
     const catalog = await repository.listModelConfigs(request, { id: 'alice', role: 'viewer' })
@@ -293,7 +297,7 @@ test('Go routes reject unsupported protocols, models and endpoints and preserve 
     registerCleanup: cleanup => cleanups.push(cleanup),
   })
   const profile = OPENCODE_GO_PROFILES['openai-compatible']
-  const body = { method: 'byok', provider: 'openai-compatible', apiKey: 'go-secret', baseUrl: profile.baseUrl, model: profile.model, preferred: true }
+  const body = { method: 'byok', provider: 'openai-compatible', apiProtocol: 'chat-completions', apiKey: 'go-secret', baseUrl: profile.baseUrl, model: profile.model, preferred: true }
   const put = (input: object) => app.request(`/api/model-connections/${OPENCODE_GO_ID}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
   try {
     expect((await put(body)).status).toBe(200)
@@ -316,8 +320,8 @@ test('Go routes reject unsupported protocols, models and endpoints and preserve 
     // Same protocol can retain the key; switching endpoints requires entering it again.
     expect((await put({ ...body, apiKey: undefined })).status).toBe(200)
     const anthropic = OPENCODE_GO_PROFILES['anthropic-compatible']
-    expect((await put({ ...body, apiKey: undefined, provider: 'anthropic-compatible', baseUrl: anthropic.baseUrl, model: anthropic.model })).status).toBe(400)
-    expect((await put({ ...body, provider: 'anthropic-compatible', baseUrl: anthropic.baseUrl, model: anthropic.model })).status).toBe(200)
+    expect((await put({ ...body, apiKey: undefined, provider: 'anthropic-compatible', apiProtocol: 'anthropic-messages', baseUrl: anthropic.baseUrl, model: anthropic.model })).status).toBe(400)
+    expect((await put({ ...body, provider: 'anthropic-compatible', apiProtocol: 'anthropic-messages', baseUrl: anthropic.baseUrl, model: anthropic.model })).status).toBe(200)
     expect(personalModelConfig(userRoot, 'alice', OPENCODE_GO_ID)?.provider).toBe('anthropic-compatible')
   } finally { cleanups.forEach(cleanup => cleanup()) }
 })
@@ -354,7 +358,8 @@ test('dynamic Go catalog and personal saves accept newly listed IDs while failur
     expect(catalog['openai-compatible']).toContain('new-chat-model')
     expect(catalog['anthropic-compatible']).toContain('new-anthropic-model')
     expect(catalog['openai-compatible']).not.toContain('gpt-6-luna')
-    const body = { method: 'byok', provider: 'openai-compatible', baseUrl: OPENCODE_GO_PROFILES['openai-compatible'].baseUrl,
+    expect(catalog.responses).toContain('new-responses-model')
+    const body = { method: 'byok', provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: OPENCODE_GO_PROFILES['openai-compatible'].baseUrl,
       apiKey: 'catalog-fixture-key', model: 'new-chat-model' }
     const put = () => app.request(`/api/model-connections/${OPENCODE_GO_ID}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
     expect((await put()).status).toBe(200)
@@ -372,7 +377,7 @@ test('dynamic Go catalog and personal saves accept newly listed IDs while failur
 for (const provider of ['anthropic-compatible', 'openai-compatible'] as const) {
   test(`previous Go ${provider} connections resolve the corrected Zen route and keep their encrypted key`, () => {
     const config = personalModelConfig(root, 'alice', OPENCODE_GO_ID, provider)!
-    saveConnection(root, config, 'byok', 'existing-go-key', true, { model: OPENCODE_GO_PROFILES[provider].model })
+    saveConnection(root, config, 'byok', 'existing-go-key', true, { model: OPENCODE_GO_PROFILES[provider].model, apiProtocol: OPENCODE_GO_PROFILES[provider].apiProtocol })
     const path = join(root, '.runtime/model-connections.json')
     const saved = JSON.parse(readFileSync(path, 'utf8'))
     const go = saved.connections[OPENCODE_GO_ID]
@@ -396,3 +401,53 @@ for (const provider of ['anthropic-compatible', 'openai-compatible'] as const) {
     expect(() => resolveModelConnection(root, personalModelConfig(root, 'alice', OPENCODE_GO_ID)!, {})).toThrow('disconnected')
   })
 }
+
+test('personal Go Responses survives save, catalog reload, reactivation and a switch to Chat Completions', async () => {
+  const cleanups: Array<() => void> = []
+  const app = createAgentWorkflowApp({ dashboardDataRoot: root, skillsConfig: false, modelConfigStore: false,
+    currentUser: { id: 'alice', role: 'viewer' },
+    outboundTargetResolver: async value => ({ url: new URL(value), addresses: ['93.184.216.34'], lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) }),
+    registerCleanup: cleanup => cleanups.push(cleanup),
+  })
+  const body = { method: 'byok', provider: 'openai-compatible', apiProtocol: 'responses',
+    baseUrl: OPENCODE_GO_PROFILES.responses.baseUrl, model: 'new-responses-model', preferred: true }
+  const put = (input: object) => app.request(`/api/model-connections/${OPENCODE_GO_ID}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
+  })
+  const readGo = async () => (await (await app.request('/api/model-catalog')).json()).find((entry: { id: string }) => entry.id === OPENCODE_GO_ID)
+  try {
+    expect((await put({ ...body, apiKey: 'responses-fixture-secret' })).status).toBe(200)
+    expect(await readGo()).toMatchObject({ apiProtocol: 'responses', connection: { apiProtocol: 'responses', hasKey: true, isPreferred: true } })
+    // Retain the same encrypted key and explicit protocol when reactivating.
+    expect((await put({ ...body, preferred: false })).status).toBe(200)
+    expect((await put(body)).status).toBe(200)
+    expect(await readGo()).toMatchObject({ apiProtocol: 'responses', connection: { apiProtocol: 'responses', isPreferred: true } })
+    expect((await put({ ...body, apiProtocol: 'chat-completions' })).status).toBe(400)
+    expect((await readGo()).apiProtocol).toBe('responses')
+    expect((await put({ ...body, apiProtocol: 'chat-completions', model: 'new-chat-model' })).status).toBe(200)
+    expect(await readGo()).toMatchObject({ apiProtocol: 'chat-completions', connection: { hasKey: true, apiProtocol: 'chat-completions' } })
+  } finally { cleanups.forEach(cleanup => cleanup()) }
+})
+
+test('new administrator, personal BYOK and Go configurations default to Responses without a protocol override', async () => {
+  expect(personalModelConfig(root, 'alice', PERSONAL_BYOK_ID)?.apiProtocol).toBe('responses')
+  expect(personalModelConfig(root, 'alice', OPENCODE_GO_ID)?.apiProtocol).toBe('responses')
+  const cleanups: Array<() => void> = []
+  const app = createAgentWorkflowApp({ dashboardDataRoot: root, skillsConfig: false, modelConfigStore: false,
+    currentUser: { id: 'owner', role: 'owner' },
+    outboundTargetResolver: async value => ({ url: new URL(value), addresses: ['93.184.216.34'], lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) }),
+    registerCleanup: cleanup => cleanups.push(cleanup),
+  })
+  const body = { name: 'Default Responses', provider: 'openai-compatible', apiKey: 'fixture-key',
+    baseUrl: OPENCODE_GO_PROFILES.responses.baseUrl, model: 'new-responses-model' }
+  try {
+    const admin = await app.request('/api/model-configs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    expect(admin.status).toBe(200)
+    expect((await admin.json()).apiProtocol).toBe('responses')
+    for (const id of [PERSONAL_BYOK_ID, OPENCODE_GO_ID]) {
+      const saved = await app.request(`/api/model-connections/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, method: 'byok' }) })
+      expect(saved.status).toBe(200)
+      expect((await saved.json()).apiProtocol).toBe('responses')
+    }
+  } finally { cleanups.forEach(cleanup => cleanup()) }
+})

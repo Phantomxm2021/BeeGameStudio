@@ -525,7 +525,7 @@ describe('SettingsMenu model settings', () => {
             expect(save.parentElement).toHaveClass('justify-end');
             expect(save).toHaveClass('rounded-full');
             await userEvent.click(save);
-            await waitFor(() => expect(saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'chat-completions', baseUrl: 'https://example.com/v1', model: 'balanced' }));
+            await waitFor(() => expect(saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'fixture-secret', true, { provider: 'openai-compatible', apiProtocol: 'responses', baseUrl: 'https://example.com/v1', model: 'balanced' }));
         } finally {
             useSystemStore.setState({ currentUser: null });
         }
@@ -612,7 +612,7 @@ describe('SettingsMenu model settings', () => {
             await openMcpSettings();
             await waitFor(() => expect(listMcpServers).toHaveBeenCalled());
             await openMcpActionsMenu();
-            expect(screen.getByRole('menuitem', { name: '新增 Server' })).toBeInTheDocument();
+            expect(screen.getByRole('menuitem', { name: '新增 MCP（手动）' })).toBeInTheDocument();
         expect(screen.queryByRole('menuitem', { name: '发现本机 MCP' })).not.toBeInTheDocument();
         } finally {
             useSystemStore.setState({ currentUser: null });
@@ -1103,8 +1103,9 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
 
         await openMcpActionsMenu();
-        await userEvent.click(screen.getByRole('menuitem', { name: '新增 Server' }));
+        await userEvent.click(screen.getByRole('menuitem', { name: '新增 MCP（手动）' }));
 
+        expect(screen.queryByLabelText('粘贴添加命令')).not.toBeInTheDocument();
         expect(screen.getByLabelText('传输')).toBeInTheDocument();
         await userEvent.click(screen.getByLabelText('传输'));
         const transportOptions = screen.getByRole('listbox', { name: '传输' });
@@ -1145,6 +1146,35 @@ describe('SettingsMenu model settings', () => {
             env: [{ key: 'UNITY_TOKEN', value: 'unity-secret-token' }],
             autoStart: true,
         }));
+    });
+
+    it.each(['bgs', 'codex'])('adds an HTTP MCP through the separate %s command menu entry', async executable => {
+        const saved = { id: 'mcp_remote', name: 'remote', enabled: true, transport: 'http', scope: 'beegame', url: 'https://example.test/mcp', env: [], autoStart: true };
+        createMcpServer.mockResolvedValue(saved);
+        renderSettings();
+        await openMcpSettings();
+        await openMcpActionsMenu();
+        expect(screen.getByRole('menuitem', { name: '新增 MCP（手动）' })).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('menuitem', { name: '新增 MCP（命令）' }));
+
+        expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('传输')).not.toBeInTheDocument();
+        expect(screen.getByLabelText('粘贴添加命令')).toHaveAttribute('placeholder', 'bgs mcp add my-server --url https://example.com/mcp');
+        expect(screen.getByRole('button', { name: '保存 Server' })).toBeDisabled();
+        fireEvent.change(screen.getByLabelText('粘贴添加命令'), { target: { value: `${executable} mcp add other --url https://example.test/mcp --unknown value` } });
+        await userEvent.click(screen.getByRole('button', { name: '保存 Server' }));
+        expect(screen.getByRole('alert')).toHaveTextContent('暂不支持其他参数');
+        expect(createMcpServer).not.toHaveBeenCalled();
+        expect(testMcpServer).not.toHaveBeenCalled();
+
+        fireEvent.change(screen.getByLabelText('粘贴添加命令'), { target: { value: `${executable} mcp add remote --url "https://example.test/mcp"` } });
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByText('remote', { exact: true })).toBeInTheDocument();
+        expect(screen.getByText(saved.url, { exact: true })).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: '保存 Server' }));
+        const { id: _id, ...input } = saved;
+        await waitFor(() => expect(createMcpServer).toHaveBeenCalledWith(input));
+        await waitFor(() => expect(testMcpServer).toHaveBeenCalledWith(saved));
     });
 
     it.each([
@@ -1430,6 +1460,25 @@ describe('SettingsMenu model settings', () => {
     });
 
 
+
+    it('lets administrators publish an OpenCode Go Responses model with protocol-specific choices', async () => {
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        await userEvent.click(screen.getByRole('button', { name: '添加模型配置' }));
+        await userEvent.click(screen.getByLabelText('Provider'));
+        await userEvent.click(await screen.findByRole('option', { name: 'OpenCode Go' }));
+        expect(screen.getByLabelText('协议')).toHaveTextContent('Responses');
+        await waitFor(() => expect(listOpenCodeGoModels).toHaveBeenCalled());
+        await userEvent.click(screen.getByRole('button', { name: '模型', exact: true }));
+        await userEvent.click(await screen.findByRole('option', { name: 'new-responses-model' }));
+        expect(screen.getByLabelText('Base URL')).toHaveValue(OPENCODE_GO_PROFILES.responses.baseUrl);
+        await userEvent.type(screen.getByLabelText('API Key'), 'go-responses-fixture');
+        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+        await waitFor(() => expect(createModelConfig).toHaveBeenCalledWith(expect.objectContaining({
+            provider: 'openai-compatible', apiProtocol: 'responses', baseUrl: OPENCODE_GO_PROFILES.responses.baseUrl,
+            model: 'new-responses-model', authMethods: ['platform'], apiKey: 'go-responses-fixture',
+        })));
+    });
 
     it('loads a legacy OpenAI connection as Chat Completions and lets the user choose Responses', async () => {
  listModelConfigs.mockResolvedValue([{id:'legacy',name:'Saved Gateway',provider:'openai-compatible',baseUrl:'https://gateway.example/v1',model: 'fixture-model',apiKeyPreview:'',isDefault:true,authMethods:['platform']}]);

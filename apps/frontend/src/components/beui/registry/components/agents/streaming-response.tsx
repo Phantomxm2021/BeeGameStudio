@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 // beui.dev/components/agents/streaming-response
 
 import {
@@ -186,7 +188,7 @@ export function StreamingResponse({
                 >
                   <CitationStack citations={sources} />
                   <span className="tabular-nums">
-                    {sources.length} {sources.length === 1 ? "source" : "sources"}
+                    <AnimatedNumber>{sources.length}</AnimatedNumber> {sources.length === 1 ? "source" : "sources"}
                   </span>
                   <motion.span
                     aria-hidden="true"

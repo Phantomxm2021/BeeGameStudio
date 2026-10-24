@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { MagneticButton } from '../motion/button';
 import { Button } from '../beui/project-button';
 
@@ -27,7 +28,7 @@ export function EditorLoadingView({
       <div className={`scene-loading-content is-${state.status}`}>
         {loading ? (
           <>
-            <div className="scene-loading-progress-meta"><strong>{state.label}</strong><span>{state.progress}%</span></div>
+            <div className="scene-loading-progress-meta"><strong>{state.label}</strong><span><AnimatedNumber>{`${state.progress}%`}</AnimatedNumber></span></div>
             <div className="scene-loading-progress" role="progressbar" aria-label={progressLabel} aria-valuemin={0} aria-valuemax={100} aria-valuenow={state.progress}>
               <span style={{ width: `${state.progress}%` }} />
             </div>

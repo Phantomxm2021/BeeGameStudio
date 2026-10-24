@@ -36,3 +36,19 @@ test('discovers stdio from Bgs and JSON client configs without exposing environm
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('configuration discovery accepts new public HTTPS hosts and filters unsafe endpoints', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-mcp-public-discovery-'))
+  try {
+    await writeFile(join(root, '.mcp.json'), JSON.stringify({ mcpServers: {
+      public: { url: 'https://new-mcp.example/mcp' },
+      local: { url: 'https://127.0.0.1/mcp' },
+      insecure: { url: 'http://new-mcp.example/mcp' },
+    } }))
+    const discovered = await discoverMcpServers({ dataDir: root, homeDir: root,
+      outboundTargetPolicyOptions: { allowedHosts: ['model.example'], allowHttp: true,
+        resolve4: () => ['93.184.216.34'], resolve6: () => [] },
+    })
+    expect(discovered.map(server => server.name)).toEqual(['public'])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

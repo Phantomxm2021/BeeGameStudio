@@ -595,9 +595,14 @@
         }
       ],
       "configured": "已配置",
-      "newServer": "新增 Server",
+      "newServer": "新增 MCP（手动）",
+      "newServerCommand": "新增 MCP（命令）",
       "noServers": "尚未添加 MCP Server",
       "form": {
+        "pasteCommand": "粘贴添加命令",
+        "pasteCommandHint": "支持 bgs mcp add 名称 --url 地址，也兼容 codex 格式。检查解析结果后保存。",
+        "commandFormatError": "请使用 bgs mcp add 名称 --url 地址（也兼容 codex），暂不支持其他参数或 Shell 表达式。",
+        "commandUrlError": "请输入完整的 HTTP 或 HTTPS 地址，不支持地址中的用户名和密码。",
         "name": "名称",
         "enabled": "启用",
         "transport": "传输",

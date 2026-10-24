@@ -76,6 +76,17 @@ test('streams text once, preserves tool lifecycle, and counts cached tokens once
   } finally { await f.close() }
 }, 30_000)
 
+test('changed requirements cannot run with an obsolete native instruction baseline', async () => {
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' })
+  try {
+    await expect(f.runtime.submit({ prompt: 'Changed goal', confirmedBriefContext: 'new confirmed goal',
+      signal: new AbortController().signal, onMessage() {},
+    })).rejects.toThrow('Confirmed requirements changed after BGS runtime preparation')
+    expect(f.events).toHaveLength(0)
+    expect(f.usage).toHaveLength(0)
+  } finally { await f.close() }
+}, 30_000)
+
 test('converted providers retain native counters as baselines without counting their usage twice', async () => {
   const f = await fixture('allow', { BEEGAME_API_PROTOCOL: 'chat-completions' })
   try {

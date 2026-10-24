@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, ChevronLeft, Copy, LoaderCircle, Play, Square, Upload } from 'lucide-react';
 import { AnimatePresence, useReducedMotion } from 'motion/react';
@@ -369,6 +370,7 @@ export function BeeGameLivePreviewPage({
             currentUserEmail={currentUser?.email}
             currentUserAvatarUrl={currentUser?.avatarUrl}
             creditBalance={accountCreditBalance?.balanceCredits}
+            canManageBeePlay={currentUser?.role === 'owner'}
             canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
             onOpenProfile={() => { closeAccountSurfaces(); setProfileOpen(true); }}
             onOpenCreditStore={() => { closeAccountSurfaces(); setCreditStoreOpen(true); }}
@@ -544,7 +546,7 @@ function ProjectHintRow({ label, value, detail }: { label: string; value: string
     <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] py-2 last:border-b-0">
       <div className="type-caption-1 shrink-0 text-[var(--text-muted)]">{label}</div>
       <div className="type-callout min-w-0 truncate text-right text-[var(--text-primary)]" title={detail}>
-        {value}
+        <AnimatedNumber>{value}</AnimatedNumber>
       </div>
     </div>
   );

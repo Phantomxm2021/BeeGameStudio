@@ -15,8 +15,18 @@ export type ImageResult = {
   providerRequestId?: string
   usage: unknown
 }
+/** Host-only completed output. The URL may be signed; never expose it in tool results or logs. */
+export type ImageResultReference = Omit<ImageResult, 'bytes'> & { url: string }
+export type ImageProviderContext = {
+  ownerId: string
+  source?: ImageSource
+  /** Persist before downloading so a failed GET or restart does not lose paid output. */
+  onResultReference?: (reference: ImageResultReference) => void
+}
 export interface ImageGenerationProvider {
-  generate(config: ImageGenerationConfig, request: ImageRequest, context?: { ownerId: string; source?: ImageSource }): Promise<ImageResult>
+  generate(config: ImageGenerationConfig, request: ImageRequest, context?: ImageProviderContext): Promise<ImageResult>
+  /** Download an already completed result; this must never submit a generation request. */
+  recover?(config: ImageGenerationConfig, reference: ImageResultReference, signal?: AbortSignal): Promise<ImageResult>
 }
 
 export class ImageProviderError extends Error {

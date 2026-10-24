@@ -533,9 +533,14 @@
         }
       ],
       "configured": "已設定",
-      "newServer": "新增 Server",
+      "newServer": "新增 MCP（手動）",
+      "newServerCommand": "新增 MCP（命令）",
       "noServers": "尚未新增 MCP Server",
       "form": {
+        "pasteCommand": "貼上新增命令",
+        "pasteCommandHint": "支援 bgs mcp add 名稱 --url 位址，也相容 codex 格式。檢查解析結果後儲存。",
+        "commandFormatError": "請使用 bgs mcp add 名稱 --url 位址（也相容 codex），暫不支援其他參數或 Shell 表達式。",
+        "commandUrlError": "請輸入完整的 HTTP 或 HTTPS 位址，不支援位址中的使用者名稱和密碼。",
         "name": "名稱",
         "enabled": "啟用",
         "transport": "傳輸",

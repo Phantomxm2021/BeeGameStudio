@@ -22,8 +22,8 @@ describe('agent workflow model configs', () => {
       expect(mapStoredModelConfigToRuntime({provider,apiKey:'fixture',model: 'selected'})).toMatchObject({modelType,env:{BEEGAME_API_PROTOCOL:protocol,BEEGAME_MODEL:'selected'}})
     }
     expect(mapStoredModelConfigToRuntime({provider:'openai-compatible',apiProtocol:'responses',apiKey:'fixture',model: undefined}).env.BEEGAME_API_PROTOCOL).toBe('responses')
-    for (const [provider,profile] of Object.entries(OPENCODE_GO_PROFILES))
-      expect(mapStoredModelConfigToRuntime({provider:provider as any,baseUrl:profile.baseUrl,apiKey:'fixture',model: profile.model}).env.BEEGAME_MODEL).toBe(profile.model)
+    for (const profile of Object.values(OPENCODE_GO_PROFILES))
+      expect(mapStoredModelConfigToRuntime({provider:profile.provider,apiProtocol:profile.apiProtocol,baseUrl:profile.baseUrl,apiKey:'fixture',model: profile.model || 'fixture-responses'}).env.BEEGAME_MODEL).toBe(profile.model || 'fixture-responses')
     expect(()=>mapStoredModelConfigToRuntime({provider:'gemini',apiProtocol:'responses',apiKey:'fixture',model: undefined})).toThrow('Unsupported')
   })
 
@@ -47,7 +47,7 @@ describe('agent workflow model configs', () => {
       env: {
         OPENAI_BASE_URL: 'https://llm.example.invalid/v1',
         OPENAI_API_KEY: 'sk-dashboard-secret',
-        BEEGAME_API_PROTOCOL:'chat-completions',
+        BEEGAME_API_PROTOCOL:'responses',
         BEEGAME_MODEL: 'balanced-model',
       },
     })
@@ -154,4 +154,14 @@ describe('agent workflow model configs', () => {
     expect(mapModelConfigToRuntime(config.id)?.env.BEEGAME_MODEL).toBe('selected')
     expect(exportModelConfigSnapshot()[0]).not.toHaveProperty('models')
   })
+})
+
+test('new compatible connections default to Responses while explicit and stored legacy protocols remain stable', () => {
+  for (const provider of ['openai-compatible', 'grok'] as const) {
+    const config = createModelConfig('default-fixture', { name: 'New', provider, apiKey: 'fixture', model: 'fixture' })
+    expect(config.apiProtocol).toBe('responses')
+    expect(mapModelConfigToRuntime(config.id)?.env.BEEGAME_API_PROTOCOL).toBe('responses')
+    expect(createModelConfig('default-fixture', { name: 'Explicit', provider, apiKey: 'fixture', model: 'fixture', apiProtocol: 'chat-completions' }).apiProtocol).toBe('chat-completions')
+    expect(mapStoredModelConfigToRuntime({ provider, apiKey: 'fixture', model: 'legacy' }).env.BEEGAME_API_PROTOCOL).toBe('chat-completions')
+  }
 })

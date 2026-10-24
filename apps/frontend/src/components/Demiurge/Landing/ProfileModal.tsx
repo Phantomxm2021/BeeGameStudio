@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { type ChangeEvent, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Camera, X } from 'lucide-react';
@@ -181,7 +182,7 @@ export function ProfileModal({
             <div className="flex items-center justify-between gap-3">
               <div className="type-callout text-foreground">{translate('intake.profile.creditUsage')}</div>
               {creditBalance ? (
-                <div className="type-footnote text-[var(--text-secondary)]">{creditBalance.balanceCredits} credits</div>
+                <div className="type-footnote text-[var(--text-secondary)]"><AnimatedNumber>{creditBalance.balanceCredits}</AnimatedNumber> credits</div>
               ) : null}
             </div>
             {creditBalance ? (
@@ -242,7 +243,7 @@ function CreditMetric({
     <div className="rounded-lg border border-border bg-background px-3 py-2">
       <div className="type-footnote text-muted-foreground">{label}</div>
       <div className={`type-headline mt-1 truncate ${tone === 'positive' ? 'text-[var(--success)]' : 'text-foreground'}`}>
-        {value}
+        <AnimatedNumber>{value}</AnimatedNumber>
       </div>
     </div>
   );

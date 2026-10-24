@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import type { ModelRequestRetryControl } from './RuntimeErrorNotice';
 import { memo, useRef, useState } from 'react';
 import { McpElicitationPanel } from './McpElicitationPanel';
@@ -362,7 +363,7 @@ export const ChatPanel = memo(({
                             <div key={message.id} className="flex min-w-0 items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[var(--text-secondary)]">
                                 <ListEnd className="h-4 w-4 shrink-0 opacity-65" aria-hidden="true" />
                                 <span className={`min-w-0 flex-1 text-sm text-[var(--text-primary)] ${expandedQueuedId === message.id ? 'break-words' : 'truncate'}`} title={filterPathsForDisplay(message.text)}>{filterPathsForDisplay(message.text)}</span>
-                                {message.attachmentCount ? <span className="flex shrink-0 items-center gap-1 text-xs" aria-label={`${message.attachmentCount} attachments`}><Paperclip className="h-3.5 w-3.5" />{message.attachmentCount}</span> : null}
+                                {message.attachmentCount ? <span className="flex shrink-0 items-center gap-1 text-xs" aria-label={`${message.attachmentCount} attachments`}><Paperclip className="h-3.5 w-3.5" /><AnimatedNumber>{message.attachmentCount}</AnimatedNumber></span> : null}
                                 <button type="button" disabled={Boolean(queueActionId) || message.state !== 'pending'}
                                     onClick={() => onSteerQueued?.(message.id)}
                                     className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"

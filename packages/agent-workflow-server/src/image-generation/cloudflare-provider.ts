@@ -1,5 +1,5 @@
 import type { ImageGenerationConfig } from './config'
-import { ImageProviderError, type ImageGenerationProvider, type ImageRequest, type ImageResult } from './provider'
+import { ImageProviderError, type ImageGenerationProvider, type ImageProviderContext, type ImageRequest, type ImageResult, type ImageResultReference } from './provider'
 
 const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 export type ImageRequestFetch = (url: string, init: RequestInit) => Promise<Response>
@@ -17,7 +17,7 @@ export class CloudflareImageProvider implements ImageGenerationProvider {
     this.resultRequest = resultRequest
   }
 
-  async generate(rawConfig: ImageGenerationConfig, input: ImageRequest): Promise<ImageResult> {
+  async generate(rawConfig: ImageGenerationConfig, input: ImageRequest, context?: ImageProviderContext): Promise<ImageResult> {
     const config = rawConfig
     const resultRequest = this.resultRequest
     if (!resultRequest)
@@ -71,28 +71,45 @@ export class CloudflareImageProvider implements ImageGenerationProvider {
     const imageUrl = typeof envelope?.result?.image === 'string' ? envelope.result.image : ''
     if (envelope?.state !== 'Completed' || !imageUrl)
       throw new ImageProviderError('Cloudflare returned no completed image', 'unknown', response.status, 'response-format')
+    const reference: ImageResultReference = {
+      url: this.resultUrl(imageUrl), mimeType: 'image/png', model: config.model,
+      ...(response.headers.get('x-request-id') ? { providerRequestId: response.headers.get('x-request-id')! } : {}),
+      // gatewayMetadata.keySource is routing metadata, not billable token usage.
+      usage: body.usage ?? envelope.usage ?? null,
+    }
+    context?.onResultReference?.(reference)
+    return this.recover(config, reference, input.signal)
+  }
+
+  private resultUrl(value: string): string {
     let parsedUrl: URL
     try {
-      parsedUrl = new URL(imageUrl)
+      parsedUrl = new URL(value)
       if (!['https:', 'http:'].includes(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password)
         throw new Error('invalid image URL')
     } catch {
-      throw new ImageProviderError('Cloudflare returned an invalid image URL', 'unknown', response.status, 'image-url-invalid')
+      throw new ImageProviderError('Cloudflare returned an invalid image URL', 'unknown', undefined, 'image-url-invalid')
     }
+    return parsedUrl.toString()
+  }
+
+  async recover(_config: ImageGenerationConfig, reference: ImageResultReference, signal?: AbortSignal): Promise<ImageResult> {
+    const resultRequest = this.resultRequest
+    if (!resultRequest)
+      throw new ImageProviderError('Cloudflare image result downloader is not configured', 'unknown', undefined, 'image-result-downloader-unconfigured')
+    const url = this.resultUrl(reference.url)
     let imageResponse: Response
-    try { imageResponse = await resultRequest(parsedUrl.toString(), { redirect: 'error', signal: input.signal }) }
+    try { imageResponse = await resultRequest(url, { redirect: 'error', signal }) }
     catch (error) {
       if (error instanceof ImageProviderError) throw error
-      throw new ImageProviderError('Cloudflare image result could not be downloaded', 'unknown', response.status, 'image-download-network')
+      throw new ImageProviderError('Cloudflare image result could not be downloaded', 'unknown', undefined, 'image-download-network')
     }
     if (!imageResponse.ok)
       throw new ImageProviderError('Cloudflare image result returned HTTP ' + imageResponse.status, 'unknown', imageResponse.status, 'image-download-http')
     const bytes = Buffer.from(await imageResponse.arrayBuffer())
     if (!bytes.subarray(0, PNG.length).equals(PNG))
-      throw new ImageProviderError('Cloudflare image result is not a PNG', 'unknown', response.status, 'image-not-png')
-    return { bytes, mimeType: 'image/png', model: config.model,
-      ...(response.headers.get('x-request-id') ? { providerRequestId: response.headers.get('x-request-id')! } : {}),
-      // gatewayMetadata.keySource is routing metadata, not billable token usage.
-      usage: body.usage ?? envelope.usage ?? null }
+      throw new ImageProviderError('Cloudflare image result is not a PNG', 'unknown', imageResponse.status, 'image-not-png')
+    const { url: _, ...metadata } = reference
+    return { ...metadata, bytes }
   }
 }

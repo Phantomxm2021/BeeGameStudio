@@ -7,7 +7,7 @@ import { startProviderBridge } from './bridge'
 import { providerConfig } from './config'
 import { parseSse } from './response-stream'
 
-const mockFetch = (respond: () => Promise<Response>): typeof fetch =>
+const mockFetch = (respond: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch =>
   Object.assign(respond, { preconnect: () => {} })
 
 const signal = () => AbortSignal.timeout(5000)
@@ -579,4 +579,26 @@ test.each(['chat-completions', 'anthropic-messages', 'gemini'] as const)('unknow
     { role: 'tool', id: 'good', content: [{ type: 'text', text: 'actual tool result' }] },
   ])
   expect(conversation({ input: input.slice(0, 1) }, protocol).messages.some(item => item.role === 'tool')).toBe(false)
+})
+
+test('Go Responses sends native input and events unchanged with stable session headers', async () => {
+  const config = { ...base, protocol: 'responses' as const, baseUrl: 'https://opencode.ai/zen/go/v1', sessionId: 'go-responses-conversation' }
+  const body = { model: 'new-responses-model', stream: true, input: [
+    { type: 'function_call_output', call_id: 'call-1', output: 'tool result' },
+  ], tools: [{ type: 'function', name: 'probe', parameters: { type: 'object' } }] }
+  const wire = 'event: response.completed\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":1}}}\n\n'
+  let calls = 0
+  const request = mockFetch(async (input, init) => {
+    calls++
+    expect(String(input)).toBe(config.baseUrl + '/responses')
+    expect(JSON.parse(String(init?.body))).toEqual(body)
+    const headers = new Headers(init?.headers)
+    expect(headers.get('x-opencode-session')).toBe('go-responses-conversation')
+    expect(headers.get('user-agent')).toBe('bee-game-studio/2.8.4')
+    expect(headers.get('authorization')).toBe('Bearer ' + config.apiKey)
+    return new Response(wire, { headers: { 'content-type': 'text/event-stream' } })
+  })
+  for (let i = 0; i < 2; i++) expect(await (await requestProvider(config, body, request, signal())).text()).toBe(wire)
+  await expect(requestProvider({ ...config, sessionId: undefined }, body, request, signal())).rejects.toThrow('stable model session')
+  expect(calls).toBe(2)
 })

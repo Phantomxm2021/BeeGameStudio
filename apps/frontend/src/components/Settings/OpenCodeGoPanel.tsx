@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { OPENCODE_GO_ID, OPENCODE_GO_PROFILES, type OpenCodeGoProvider } from '@bee-game-studio/agent-workflow/opencode-go';
+import { OPENCODE_GO_ID, OPENCODE_GO_PROFILES, getOpenCodeGoProfileId, type OpenCodeGoProfileId } from '@bee-game-studio/agent-workflow/opencode-go';
 import { ProjectSelect } from '../beui/project-select';
 import { useToastContext } from '../../contexts/ToastContext';
 import { saveModelConnection, type CatalogModel } from '../../services/modelConfigApi';
@@ -16,18 +16,20 @@ export const OpenCodeGoPanel = forwardRef<ModelConnectionsHandle, {
 }>(function OpenCodeGoPanel({ language, config, busy, setBusy, refresh, onSaveStateChange }, ref) {
   const copy = (cn: string, en: string) => language.startsWith('zh') ? cn : en;
   const { showError } = useToastContext();
-  const [provider, setProvider] = useState<OpenCodeGoProvider>(config?.provider==='anthropic-compatible'?'anthropic-compatible':'openai-compatible');
-  const [model, setModel] = useState(config?.connection.model ?? OPENCODE_GO_PROFILES[provider].model);
+  const [profileId, setProfileId] = useState<OpenCodeGoProfileId>(config?.connection.baseUrl
+    ? getOpenCodeGoProfileId(config.connection.baseUrl ?? config.baseUrl, config.connection.apiProtocol ?? config.apiProtocol) ?? 'responses'
+    : 'responses');
+  const [model, setModel] = useState(config?.connection.model ?? OPENCODE_GO_PROFILES[profileId].model);
   const [key, setKey] = useState('');
-  const profile = OPENCODE_GO_PROFILES[provider];
-  const catalog = useOpenCodeGoModels(provider);
-  const keyRequired = !config?.connection.hasKey || config.provider !== provider;
+  const profile = OPENCODE_GO_PROFILES[profileId];
+  const catalog = useOpenCodeGoModels(profileId);
+  const keyRequired = !config?.connection.hasKey || config.provider !== profile.provider;
   const complete = !catalog.loading && !catalog.error && (!keyRequired || !!key.trim()) && !!catalog.models?.includes(model);
   const save = async () => {
     if (busy || !complete) return;
     setBusy(true);
     try {
-      await saveModelConnection(OPENCODE_GO_ID, 'byok', key, true, { provider, baseUrl: profile.baseUrl, model });
+      await saveModelConnection(OPENCODE_GO_ID, 'byok', key, true, { provider: profile.provider, apiProtocol: profile.apiProtocol, baseUrl: profile.baseUrl, model });
       setKey('');
       await refresh();
     } catch { showError(copy('无法保存 OpenCode Go 连接，请检查配置。', 'Could not save the OpenCode Go connection. Check the configuration.')); }
@@ -40,9 +42,9 @@ export const OpenCodeGoPanel = forwardRef<ModelConnectionsHandle, {
     <a className="inline-block text-sm underline" href="https://opencode.ai/go/" target="_blank" rel="noopener noreferrer">{copy('订阅与用量说明', 'Subscription and usage details')}</a>
     <form className="space-y-3" autoComplete="off" onSubmit={event => { event.preventDefault(); void save(); }}>
       <OpenCodeGoCatalogStatus {...catalog} language={language} />
-      <label className="grid gap-2"><span className="text-sm">{copy('协议', 'Protocol')}</span><ProjectSelect ariaLabel={copy('协议', 'Protocol')} value={provider} disabled={busy} onValueChange={value => {
-        const next = value as OpenCodeGoProvider;
-        setProvider(next); setModel(OPENCODE_GO_PROFILES[next].model);
+      <label className="grid gap-2"><span className="text-sm">{copy('协议', 'Protocol')}</span><ProjectSelect ariaLabel={copy('协议', 'Protocol')} value={profileId} disabled={busy} onValueChange={value => {
+        const next = value as OpenCodeGoProfileId;
+        setProfileId(next); setModel(OPENCODE_GO_PROFILES[next].model);
       }} options={Object.entries(OPENCODE_GO_PROFILES).map(([value, item]) => ({ value, label: item.label }))} /></label>
       <label className="grid gap-2"><span className="text-sm">API Key</span><input aria-label="OpenCode Go API Key" type="password" autoComplete="new-password" disabled={busy} value={key} onChange={event => setKey(event.target.value)} placeholder={keyRequired ? copy('输入 OpenCode Go API Key', 'Enter your OpenCode Go API key') : copy('已保存；留空保留', 'Saved; leave blank to keep')} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
       <label className="grid gap-2"><span className="text-sm">{copy('模型', 'Model')}</span><ProjectSelect ariaLabel={copy('模型', 'Model')} value={model} disabled={busy || catalog.loading || catalog.error} onValueChange={setModel} options={[...new Set([...(catalog.models ?? []), ...(model ? [model] : [])])].map(value => ({ value, label: value, disabled: !catalog.models?.includes(value) }))} /></label>

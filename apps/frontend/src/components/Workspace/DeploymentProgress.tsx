@@ -1,3 +1,4 @@
+import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { Check, CloudUpload, Share } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Button } from '../beui/project-button';
@@ -61,7 +62,7 @@ export function DeploymentProgress({ status, projectName, version, uploadProgres
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.p key={progress?.phase || status} initial={reduced ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: reduced ? 0 : -3 }} transition={{ duration: reduced ? 0 : 0.18, ease }}
-                    className="type-footnote text-muted-foreground">{stage}</motion.p>
+                    className="type-footnote text-muted-foreground"><AnimatedNumber>{stage}</AnimatedNumber></motion.p>
                 </AnimatePresence>
               </div>
             </motion.div>

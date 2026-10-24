@@ -197,7 +197,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     [permissionDisplayModels],
   );
   const hasCurrentRuntimeSnapshot = projectStatus?.project_id === projectId;
-  const isProjectInteractionLocked = isOpeningProject || isSyncing || !hasCurrentRuntimeSnapshot;
+  // A background reconnect only refreshes reads. Lock until this project's
+  // snapshot exists, not on every session synchronization. Mutations also
+  // retain their busy checks and authoritative server validation.
+  const isProjectInteractionLocked = isOpeningProject || !hasCurrentRuntimeSnapshot;
   const projectTargetLabel = String(
     projectStatus?.project_target?.runtime || projectStatus?.project_target?.platform || '',
   ).trim();
