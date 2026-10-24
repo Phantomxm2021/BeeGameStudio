@@ -14,6 +14,15 @@ const props = { projectId: 'project', projectName: '磁轨调度', isOpen: true,
 describe('publishing confirmation', () => {
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.getDeploymentReadiness).mockResolvedValue({ allowed: true, issues: [], destination: 'remote' }); });
+  it('shows the reviewed public title instead of the internal project name', async () => {
+    const live = { id: 'version-1', sessionId: 'session', workspacePath: '/test', status: 'succeeded' as const,
+      url: 'https://game.example/', createdAt: '', updatedAt: '', publicDescription: '# 《星港夜航》\n\n## 操作\nE：补给' };
+    render(<WorkspaceDeploymentDialog {...props} deployments={[live]} />);
+    expect(await screen.findByText('星港夜航已发布')).toBeTruthy();
+    expect(screen.queryByText('磁轨调度已发布')).toBeNull();
+    expect(screen.getByRole('textbox', { name: labels.deploymentDescription })).toHaveValue(live.publicDescription);
+    expect(api.generatePublicationDescription).not.toHaveBeenCalled();
+  });
   it('checks readiness without publishing and requires an explicit confirmation', async () => {
     render(<WorkspaceDeploymentDialog {...props} />);
     const publish = await screen.findByRole('button', { name: labels.deploymentPublishAction });

@@ -1,3 +1,4 @@
+import { portalTitle, portalDescription } from '../src/seo'
 import { renderPublicationDescription } from '../../frontend/src/entrypoints/portalDescription'
 const $ = id => document.getElementById(id)
 const projectId = /^\/g\/([A-Za-z0-9_-]{1,128})\/?$/.exec(
@@ -10,7 +11,15 @@ const deploymentId =
 const isGame = Boolean(projectId || deploymentId)
 $('catalogue').hidden = isGame
 $('game-page').hidden = !isGame
+function setPageLoading(loading) {
+  $('main').classList.toggle('is-loading', loading)
+  $('main').setAttribute('aria-busy', String(loading))
+  $('page-loading').hidden = !loading
+  document.querySelector('.site-header').inert = loading
+}
 const author = new URLSearchParams(location.search).get('author')
+$('home-title').hidden = Boolean(author)
+$('catalogue-heading').hidden = !author
 const monogram = title => [...title].slice(0, 2).join('')
 const hueFor = id =>
   ([...id].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) % 360, 0) *
@@ -41,91 +50,156 @@ function coverFor(item) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`
 }
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
+const featureTrack = $('feature-track')
+const featureDots = $('feature-dots')
+const featurePlayback = $('feature-playback')
 let featureIndex = 0
-let featureWidth = $('feature-track').clientWidth
+let featureElapsed = 0
+let featurePaused = reducedMotion.matches
+let featureEnded = false
+let featureVisible = false
+let featureTransition
+let featureFrame = 0
+let featureLastTime = 0
+const featureHoldDuration = 6150
+const featureSlideDuration = 1000
 function updateCarousel() {
-  if ($('feature-track').clientWidth !== featureWidth) return
-  const slides = [...$('feature-track').children]
-  const track = $('feature-track')
-  const left =
-    track.getBoundingClientRect().left +
-    parseFloat(getComputedStyle(track).paddingLeft)
-  featureIndex = slides.reduce(
-    (nearest, slide, index) =>
-      Math.abs(slide.getBoundingClientRect().left - left) <
-      Math.abs(slides[nearest].getBoundingClientRect().left - left)
-        ? index
-        : nearest,
-    0,
-  )
-  for (const [index, dot] of [...$('feature-dots').children].entries())
+  for (const [index, dot] of [...featureDots.children].entries())
     dot.setAttribute('aria-current', String(index === featureIndex))
-  $('feature-previous').disabled = featureIndex === 0
-  $('feature-next').disabled = featureIndex >= slides.length - 1
+  featureDots.style.setProperty('--feature-progress', String(featureElapsed / featureHoldDuration))
+  featurePlayback.dataset.state = featureEnded ? 'ended' : featurePaused ? 'paused' : 'playing'
+  featurePlayback.setAttribute('aria-label', featureEnded ? '重新播放' : featurePaused ? '开始自动播放' : '暂停自动播放')
 }
-function scrollFeature(index, instant = false) {
-  const track = $('feature-track'),
-    slide = track.children[index]
-  if (!slide) return
-  track.scrollBy({
-    left:
-      slide.getBoundingClientRect().left -
-      track.getBoundingClientRect().left -
-      parseFloat(getComputedStyle(track).paddingLeft),
-    behavior: instant || reducedMotion.matches ? 'instant' : 'smooth',
-  })
+function featureOffset(index) {
+  const slide = featureTrack.children[index]
+  return featureTrack.scrollLeft + slide.getBoundingClientRect().left -
+    featureTrack.getBoundingClientRect().left - parseFloat(getComputedStyle(featureTrack).paddingLeft)
 }
-$('feature-previous').addEventListener('click', () =>
-  scrollFeature(featureIndex - 1),
-)
-$('feature-next').addEventListener('click', () =>
-  scrollFeature(featureIndex + 1),
-)
-$('feature-track').addEventListener('scroll', updateCarousel, { passive: true })
-$('feature-track').addEventListener('keydown', event => {
+function scrollFeature(index, manual = false, instant = false) {
+  if (!featureTrack.children[index]) return
+  if (manual) featurePaused = true
+  featureIndex = index
+  featureElapsed = 0
+  featureEnded = false
+  const to = featureOffset(index)
+  featureTransition = instant || reducedMotion.matches ? undefined : { from: featureTrack.scrollLeft, to, elapsed: 0 }
+  featureTrack.classList.toggle('is-moving', Boolean(featureTransition))
+  if (!featureTransition) featureTrack.scrollLeft = to
+  updateCarousel()
+  scheduleFeatureFrame()
+}
+function scheduleFeatureFrame() {
+  if (featureFrame || !featureVisible || document.hidden || featureTrack.children.length < 2) return
+  if (!featureTransition && (featurePaused || featureEnded)) return
+  featureFrame = requestAnimationFrame(advanceFeature)
+}
+function advanceFeature(time) {
+  featureFrame = 0
+  const elapsed = featureLastTime ? time - featureLastTime : 0
+  featureLastTime = time
+  if (featureTransition) {
+    const transition = featureTransition
+    transition.elapsed = Math.min(transition.elapsed + elapsed, featureSlideDuration)
+    const t = transition.elapsed / featureSlideDuration
+    const eased = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+    featureTrack.scrollLeft = transition.from + (transition.to - transition.from) * eased
+    if (t === 1) {
+      featureTransition = undefined
+      featureTrack.classList.remove('is-moving')
+    }
+  } else if (!featurePaused && !featureEnded) {
+    featureElapsed = Math.min(featureElapsed + elapsed, featureHoldDuration)
+    if (featureElapsed === featureHoldDuration) {
+      if (featureIndex < featureTrack.children.length - 1) scrollFeature(featureIndex + 1)
+      else featureEnded = true
+    }
+  }
+  updateCarousel()
+  scheduleFeatureFrame()
+  if (!featureFrame) featureLastTime = 0
+}
+function suspendFeature() {
+  cancelAnimationFrame(featureFrame)
+  featureFrame = 0
+  featureLastTime = 0
+}
+function pauseFeatureInteraction() {
+  featurePaused = true
+  featureTransition = undefined
+  featureTrack.classList.remove('is-moving')
+  suspendFeature()
+  updateCarousel()
+}
+featurePlayback.addEventListener('click', () => {
+  if (featureEnded) {
+    featurePaused = false
+    scrollFeature(0)
+  } else featurePaused = !featurePaused
+  updateCarousel()
+  scheduleFeatureFrame()
+})
+for (const event of ['pointerdown', 'wheel', 'focusin'])
+  featureTrack.addEventListener(event, pauseFeatureInteraction, { passive: true })
+featureTrack.addEventListener('scroll', () => {
+  if (featureTransition || !featureTrack.children.length) return
+  const nearest = [...featureTrack.children].reduce((best, _, index) =>
+    Math.abs(featureOffset(index) - featureTrack.scrollLeft) < Math.abs(featureOffset(best) - featureTrack.scrollLeft) ? index : best, 0)
+  if (nearest !== featureIndex) {
+    featureIndex = nearest
+    featureElapsed = 0
+    featureEnded = false
+    updateCarousel()
+  }
+}, { passive: true })
+featureTrack.addEventListener('keydown', event => {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
   event.preventDefault()
-  scrollFeature(featureIndex + (event.key === 'ArrowRight' ? 1 : -1))
+  scrollFeature(featureIndex + (event.key === 'ArrowRight' ? 1 : -1), true)
 })
-// Re-anchor the selected slide when the viewport changes; old pixel offsets
-// otherwise leave two partial slides visible after a responsive resize.
 new ResizeObserver(() => {
-  featureWidth = $('feature-track').clientWidth
-  scrollFeature(featureIndex, true)
-  updateCarousel()
-}).observe($('feature-track'))
+  if (featureTrack.children.length) {
+    featureTransition = undefined
+    featureTrack.classList.remove('is-moving')
+    featureTrack.scrollLeft = featureOffset(featureIndex)
+  }
+}).observe(featureTrack)
+new IntersectionObserver(([entry]) => {
+  featureVisible = entry.isIntersecting
+  if (featureVisible) {
+    $('featured').classList.add('has-entered')
+    scheduleFeatureFrame()
+  } else suspendFeature()
+}, { threshold: .15 }).observe(featureTrack)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) suspendFeature()
+  else scheduleFeatureFrame()
+})
+reducedMotion.addEventListener('change', () => {
+  if (reducedMotion.matches) {
+    pauseFeatureInteraction()
+    if (featureTrack.children.length) featureTrack.scrollLeft = featureOffset(featureIndex)
+  }
+})
 function paintFeatures(games) {
   for (const [index, item] of games.slice(0, 5).entries()) {
     const fragment = $('feature-card').content.cloneNode(true)
-    const slide = fragment.querySelector('.feature-slide')
-    slide.style.setProperty('--card-hue', hueFor(item.projectId))
-    slide.setAttribute(
-      'aria-label',
-      `${index + 1} / ${Math.min(games.length, 5)}：${item.title}`,
-    )
-    fragment.querySelector('.feature-link').href =
-      `/g/${encodeURIComponent(item.projectId)}`
-    fragment.querySelector('h2').textContent = item.title
-    fragment.querySelector('.feature-monogram').textContent = monogram(
-      item.title,
-    )
-    if (item.coverUrl) {
-      const image = document.createElement('img')
-      image.className = 'feature-cover'
-      image.src = item.coverUrl
-      image.alt = ''
-      fragment.querySelector('.feature-art').replaceChildren(image)
-    }
-    $('feature-track').append(fragment)
+    fragment.querySelector('.feature-slide').setAttribute('aria-label', `${index + 1} / ${Math.min(games.length, 5)}：${item.title}`)
+    const link = fragment.querySelector('.feature-link')
+    link.href = `/g/${encodeURIComponent(item.projectId)}`
+    link.setAttribute('aria-label', `游玩 ${item.title}（在新标签页打开）`)
+    fragment.querySelector('.feature-cover').src = coverFor(item)
+    featureTrack.append(fragment)
     const dot = document.createElement('button')
     dot.type = 'button'
     dot.setAttribute('aria-label', `查看 ${item.title}`)
-    dot.addEventListener('click', () => scrollFeature(index))
-    $('feature-dots').append(dot)
+    dot.innerHTML = '<span class="feature-dot-track"><span class="feature-dot-fill"></span></span>'
+    dot.addEventListener('click', () => scrollFeature(index, true))
+    featureDots.append(dot)
   }
   $('featured').hidden = games.length === 0
   $('featured').querySelector('.carousel-controls').hidden = games.length < 2
   updateCarousel()
+  scheduleFeatureFrame()
 }
 let catalogueAuthor
 const accountListeners = new Set()
@@ -251,9 +325,12 @@ const catalogueObserver = new IntersectionObserver(
 async function loadCatalogue() {
   if (catalogueLoading) return
   catalogueLoading = true
+  const initialLoad = page === 0
+  if (initialLoad) setPageLoading(true)
   catalogueObserver.unobserve(catalogueEnd)
   catalogueEnd.hidden = true
-  $('load-more').hidden = true
+  $('load-more').hidden = initialLoad
+  $('load-more').textContent = '正在加载…'
   $('load-more').disabled = true
   const params = new URLSearchParams({ page: String(page) })
   if (author) params.set('author', author)
@@ -282,6 +359,7 @@ async function loadCatalogue() {
       ? '这里还没有公开发布的游戏。'
       : '好游戏正在路上。创作者发布后，就会出现在这里。'
     catalogueEnd.hidden = games.length < 24
+    $('load-more').hidden = true
     page++
   } catch (error) {
     $('catalogue-status').hidden = false
@@ -290,6 +368,7 @@ async function loadCatalogue() {
     $('load-more').textContent = '重试'
   } finally {
     catalogueLoading = false
+    if (initialLoad) setPageLoading(false)
     $('load-more').disabled = false
     if (!catalogueEnd.hidden) catalogueObserver.observe(catalogueEnd)
   }
@@ -318,6 +397,7 @@ function loadFrame() {
   )
 }
 async function loadGame() {
+  setPageLoading(true)
   try {
     game = await readJson(
       deploymentId
@@ -339,14 +419,12 @@ async function loadGame() {
     )
       throw Error('游戏地址无效。')
     $('game-title').textContent = game.title
-    $('game-icon').textContent = monogram(game.title)
-    $('game-icon').style.setProperty('--card-hue', hueFor(game.projectId))
     $('game-frame').title = game.title
-    document.title = `${game.title} · Bee Play`
+    document.title = portalTitle(game.title)
     $('game-author').textContent = `由 ${game.authorName} 创作`
     $('game-author').href = authorUrl(game.authorId)
     const description = typeof game.description === 'string' ? game.description.trim() : ''
-    renderPublicationDescription(description)
+    renderPublicationDescription(description, game.title)
     $('game-description').hidden = !description
     $('share-button').disabled = false
     $('retry-button').disabled = false
@@ -354,6 +432,8 @@ async function loadGame() {
   } catch (error) {
     showError(error.message)
     $('retry-button').disabled = false
+  } finally {
+    setPageLoading(false)
   }
 }
 const playerMenu = $('player-menu')
@@ -478,7 +558,7 @@ $('share-button').addEventListener('click', async () => {
     location.origin,
   ).href
   try {
-    if (navigator.share) await navigator.share({ title: game.title, url })
+    if (navigator.share) await navigator.share({ title: portalTitle(game.title), text: portalDescription(game), url })
     else {
       await navigator.clipboard.writeText(url)
       $('share-status').textContent = '游戏链接已复制。'

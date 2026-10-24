@@ -37,4 +37,13 @@ const tailwind = frontendRequire('@tailwindcss/postcss')
 const cssFile = new URL('../src/account.css', import.meta.url)
 const css = await postcss([tailwind()]).process(await Bun.file(cssFile).text(), { from: cssFile.pathname })
 await Bun.write(new URL('../public/account.css', import.meta.url), css.css)
-console.log('Built Portal authentication and shared main-site account/theme controls.')
+// Publish the main site's source asset so every Portal brand mark stays identical.
+await Bun.write(new URL('../public/assets/bgs_logo.svg', import.meta.url),
+  Bun.file(new URL('../../frontend/public/assets/bgs_logo.svg', import.meta.url)))
+console.log('Built Portal authentication, shared account/theme controls and brand asset.')
+
+// Social platforms receive a PNG; use the same source logo as both sites.
+const sharp = createRequire(new URL('../../../package.json', import.meta.url))('sharp')
+const logo = Buffer.from(await Bun.file(new URL('../../frontend/public/assets/bgs_logo.svg', import.meta.url)).arrayBuffer()).toString('base64')
+const card = (await Bun.file(new URL('../src/share-card.svg', import.meta.url)).text()).replace('__BGS_LOGO__', `data:image/svg+xml;base64,${logo}`)
+await Bun.write(new URL('../public/share-card.png', import.meta.url), await sharp(Buffer.from(card)).png().toBuffer())

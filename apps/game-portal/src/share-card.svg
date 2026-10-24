@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs><radialGradient id="glow" cx=".85" cy=".1" r="1"><stop stop-color="#273847"/><stop offset="1" stop-color="#090a0c"/></radialGradient></defs>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <image href="__BGS_LOGO__" x="72" y="88" width="104" height="104"/>
+  <g fill="#f5f5f7" font-family="Helvetica, Arial, sans-serif">
+    <text x="80" y="325" font-size="104" font-weight="700" letter-spacing="-4">Bee Play</text>
+    <text x="86" y="390" font-size="30" fill="#bac0c8">Discover. Play. Share.</text>
+    <text x="86" y="540" font-size="27">Bee Game Studio (BGS)</text>
+  </g>
+</svg>

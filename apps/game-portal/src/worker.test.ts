@@ -167,7 +167,7 @@ describe('public Portal projection', () => {
     )
     const html = await response.text()
     expect(html).toContain(
-      '<title>&lt;script&gt;bad&lt;/script&gt;&quot; · Bee Play</title>',
+      '<title>&lt;script&gt;bad&lt;/script&gt;&quot; · Bee Play · Bee Game Studio（BGS）</title>',
     )
     expect(html).toContain('content="https://play.test/g/project_1"')
     expect(html).not.toContain('<script>bad</script>')
@@ -188,7 +188,7 @@ describe('public Portal projection', () => {
       env,
     )
     expect(home.status).toBe(200)
-    expect(await home.text()).toContain('Bee Play · 玩点不一样')
+    expect(await home.text()).toContain('Bee Play · 在线玩创作者游戏 | Bee Game Studio（BGS）')
   })
   test('public auth configuration never includes the service role key', async () => {
     const response = await handleGamePortalRequest(
@@ -259,6 +259,33 @@ describe('public Portal projection', () => {
 
 
 describe('Portal SEO', () => {
+  test('home owns the brand card while each game keeps its own title, introduction, cover and creator', async () => {
+    const home = await (await handleGamePortalRequest(new Request('https://play.test/'), env)).text()
+    expect(home).toContain('property="og:image" content="https://play.test/share-card.png"')
+    expect(home).toContain('property="og:image:type" content="image/png"')
+    const homeData = JSON.parse(home.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)![1]!)
+    expect(homeData).toMatchObject({ '@type': 'WebSite', name: 'Bee Play', publisher: { name: 'Bee Game Studio', alternateName: 'BGS' } })
+    for (const name of ['Harbor', 'Forest']) {
+      const cover = `https://games.example.test/deployments/${name}/files/__bgs_publication/cover.webp`
+      const html = await (await handleGamePortalRequest(new Request(`https://play.test/g/${name}`), env,
+        mockFetch({ project_id: name, public_description: `# ${name}\n\n## Controls\nPress E.\n\n## Introduction\nExplore ${name}.`, public_cover_url: cover }))).text()
+      expect(html).toContain(`property="og:title" content="${name} · Bee Play · Bee Game Studio（BGS）"`)
+      expect(html).toContain(`property="og:description" content="Explore ${name}. 在 Bee Play 即开即玩，由 Bee Game Studio（BGS）提供平台支持。"`)
+      expect(html).toContain(`property="og:image" content="${cover}"`)
+      expect(html).toContain(`name="twitter:image" content="${cover}"`)
+      expect(html).not.toContain('/share-card.png')
+      expect(html).not.toContain('content="Press E.')
+      const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)![1]!)
+      expect(data).toMatchObject({ name, creator: { name: 'Creator' }, isPartOf: { name: 'Bee Play', publisher: { name: 'Bee Game Studio' } } })
+      expect(data.publisher).toBeUndefined()
+    }
+  })
+
+  test('plain-text introductions omit a repeated title and section labels from the summary', async () => {
+    const html = await (await handleGamePortalRequest(new Request('https://play.test/g/project_1'), env,
+      mockFetch({ title: 'River·Escape', public_description: 'River · Escape\n\n游戏简介\n\nCross the river before sunset.\n\n操作\n\nMove with arrows.' }))).text()
+    expect(html).toContain('property="og:description" content="Cross the river before sunset. 在 Bee Play 即开即玩，由 Bee Game Studio（BGS）提供平台支持。"')
+  })
   test('renders Twitter cards and script-safe VideoGame JSON-LD from public metadata', async () => {
     const title = 'Game </script><script>alert(1)</script>'
     const cover = 'https://games.example.test/deployments/cover/files/__bgs_publication/cover.webp'
@@ -266,7 +293,7 @@ describe('Portal SEO', () => {
       mockFetch({ title, public_description: '**Play** with [arrows](https://example.test).', public_cover_url: cover }))).text()
     expect(html).toContain('name="twitter:card" content="summary_large_image"')
     expect(html).toContain(`name="twitter:image" content="${cover}"`)
-    expect(html).toContain('name="description" content="Play with arrows."')
+    expect(html).toContain('name="description" content="Play with arrows. 在 Bee Play 即开即玩，由 Bee Game Studio（BGS）提供平台支持。"')
     const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)![1]!)
     expect(data).toMatchObject({ '@type': 'VideoGame', name: title, url: 'https://play.test/g/project_1', image: cover })
     expect(html).not.toContain('<script>alert(1)</script>')
@@ -301,5 +328,31 @@ describe('Portal SEO', () => {
     const robots = await (await handleGamePortalRequest(new Request('https://play.test/robots.txt'), env)).text()
     expect(robots).toContain('Sitemap: https://play.test/sitemap.xml')
     expect(robots).toContain('Disallow: /api/')
+  })
+})
+
+
+describe('reviewed publication names', () => {
+  test('uses the public H1 in catalogue, game metadata and initial SEO HTML', async () => {
+    const published = mockFetch({ public_description: '# 《Night Harbor》\n\n## Controls\nE: refuel' })
+    const game = await (await fetchGameMetadata(row.project_id, env, published)).json()
+    expect(game.title).toBe('Night Harbor')
+    const catalogue = await (await handleGamePortalRequest(new Request('https://play.test/api/games'), env, published)).json()
+    expect(catalogue.games[0].title).toBe('Night Harbor')
+    const html = await (await handleGamePortalRequest(new Request('https://play.test/g/project_1'), env, published)).text()
+    expect(html).toContain('<title>Night Harbor · Bee Play · Bee Game Studio（BGS）</title>')
+    expect(html).toContain('property="og:title" content="Night Harbor · Bee Play · Bee Game Studio（BGS）"')
+    expect(html).toContain('"name":"Night Harbor"')
+  })
+  test('historical names come from that version, and unnamed releases keep the stored project title', async () => {
+    for (const [description, title] of [['# Earlier Harbor\n\nIntro', 'Earlier Harbor'], ['## Controls\nE: refuel', row.title]]) {
+      const response = await fetchDeploymentMetadata('earlier', env, async (input, init) => {
+        if (new URL(String(input)).pathname === '/rest/v1/beegame_deployments') return Response.json([
+          { project_id: row.project_id, url: row.game_url, portal_published_at: row.updated_at, public_description: description },
+        ])
+        return mockFetch({ public_description: '# Current Harbor\n\nIntro' })(input, init)
+      })
+      expect((await response.json()).title).toBe(title)
+    }
   })
 })

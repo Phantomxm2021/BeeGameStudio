@@ -1,3 +1,6 @@
+import { BGS_ORGANIZATION, PORTAL_SITE_NAME, portalTitle, portalDescription } from './seo'
+import { publicationTitle } from '../../frontend/src/utils/publicationPresentation'
+
 type AssetBinding = { fetch(request: Request): Promise<Response> }
 type FetchImplementation = (
   input: RequestInfo | URL,
@@ -27,7 +30,7 @@ const GAME_PATH = /^\/g\/([A-Za-z0-9_-]{1,128})\/?$/
 const DEPLOYMENT_PATH =
   /^\/deployments\/([A-Za-z0-9_-]{1,128})\/files\/index\.html$/
 const SELECT =
-  'project_id,owner_id,deployment_id,title,author_name,game_url,published_at,updated_at,public_cover_url'
+  'project_id,owner_id,deployment_id,title,author_name,game_url,published_at,updated_at,public_cover_url,public_description'
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -97,7 +100,7 @@ const metadata = (row: GameRow) => ({
   projectId: row.project_id,
   authorId: row.owner_id,
   authorName: row.author_name,
-  title: row.title,
+  title: publicationTitle(row.public_description, row.title),
   gameUrl: row.game_url,
   publishedAt: row.published_at,
   updatedAt: row.updated_at,
@@ -114,7 +117,7 @@ export async function fetchGameMetadata(
     const games = await rows(
       env,
       new URLSearchParams({
-        select: SELECT + ',public_description',
+        select: SELECT,
         project_id: `eq.${projectId}`,
         limit: '1',
       }),
@@ -167,14 +170,13 @@ export async function fetchDeploymentMetadata(
       !isTrustedGameUrl(deployment.url, env.BEEGAME_DELIVERY_ORIGIN)
     )
       return json({ error: 'not_found' }, 404)
-    const current = await fetchGameMetadata(
-      deployment.project_id,
-      env,
-      fetchImpl,
-    )
-    if (!current.ok) return current
+    const current = (await rows(env, new URLSearchParams({
+      select: SELECT, project_id: `eq.${deployment.project_id}`, limit: '1',
+    }), fetchImpl))[0]
+    if (!current) return json({ error: 'not_found' }, 404)
     return json({
-      ...((await current.json()) as object),
+      ...metadata(current),
+      title: publicationTitle(deployment.public_description, current.title),
       gameUrl: deployment.url,
       updatedAt: deployment.portal_published_at,
       description: deployment.public_description ?? '',
@@ -192,15 +194,6 @@ const escape = (value: string) =>
         char
       ]!,
   )
-// Public Markdown becomes a concise plain-text excerpt; all output contexts
-// still escape it independently. No private source document is consulted.
-function excerpt(value = '') {
-  return value.replace(/```[\s\S]*?```/g, ' ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]*>/g, ' ').replace(/^[ \t]*[>#*-]+[ \t]*/gm, '')
-    .replace(/[*_`~]/g, '').replace(/\s+/g, ' ').trim().slice(0, 180)
-}
 function isoDate(value?: string) {
   const date = new Date(value || '')
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
@@ -210,7 +203,7 @@ async function sitemap(request: Request, env: GamePortalEnv, fetchImpl: FetchImp
     const entries = [`<url><loc>${escape(new URL('/', request.url).href)}</loc></url>`]
     // Page through the public projection: catalogue's 24-item page is not a sitemap.
     for (let offset = 0; ; offset += 500) {
-      const page = await queryRows(env, new URLSearchParams({ select: SELECT,
+      const page = await queryRows(env, new URLSearchParams({ select: 'project_id,title,game_url,updated_at',
         order: 'project_id.asc', limit: '500', offset: String(offset) }), fetchImpl)
       for (const game of page.filter(row => isPublicGame(row, env))) {
         if (entries.length >= 50_000) throw Error('Sitemap requires splitting')
@@ -233,38 +226,42 @@ async function shell(
   const asset = await env.ASSETS.fetch(
     new Request(new URL('/index.html', request.url)),
   )
-  const title = game ? `${game.title} · Bee Play` : 'Bee Play · 玩点不一样'
-  const description = game
-    ? excerpt(game.description) || `在 Bee Play 游玩 ${game.title}，由 ${game.authorName} 创作。`
-    : '发现创作者发布的游戏，打开即玩，分享快乐。'
-  const canonical = new URL(game ? `/g/${game.projectId}` : '/', request.url)
-    .href
+  const title = portalTitle(game?.title)
+  const description = portalDescription(game ? { title: game.title, description: game.description, authorName: game.authorName } : undefined)
+  const homeUrl = new URL('/', request.url).href
+  const canonical = new URL(game ? `/g/${game.projectId}` : '/', request.url).href
+  const website = { '@type': 'WebSite', '@id': homeUrl + '#website', name: 'Bee Play', url: homeUrl, publisher: BGS_ORGANIZATION }
+  // A game always uses its own published cover. The brand card belongs only to the home page.
+  const image = game?.coverUrl || (!game && status === 200 ? new URL('/share-card.png', request.url).href : undefined)
+  const imageAlt = game ? `${game.title} 游戏封面` : 'Bee Play · Bee Game Studio（BGS）'
   const structured = game ? {
     '@context': 'https://schema.org', '@type': 'VideoGame', '@id': canonical + '#game',
     name: game.title, description, url: canonical, gamePlatform: 'Web browser',
-    applicationCategory: 'GameApplication',
+    applicationCategory: 'GameApplication', isPartOf: website,
     ...(game.authorName ? { creator: { '@type': 'Thing', name: game.authorName } } : {}),
     ...(game.coverUrl ? { image: game.coverUrl } : {}),
     ...(isoDate(game.publishedAt) ? { datePublished: isoDate(game.publishedAt) } : {}),
     ...(isoDate(game.updatedAt) ? { dateModified: isoDate(game.updatedAt) } : {}),
-  } : { '@context': 'https://schema.org', '@type': 'WebSite', name: 'Bee Play', url: canonical, description }
+  } : { '@context': 'https://schema.org', ...website, description }
   const tags = [
     `<title>${escape(title)}</title>`,
     `<meta name="description" content="${escape(description)}">`,
     `<meta property="og:title" content="${escape(title)}">`,
     `<meta property="og:description" content="${escape(description)}">`,
     '<meta property="og:type" content="website">',
-    '<meta property="og:site_name" content="Bee Play">',
+    `<meta property="og:site_name" content="${PORTAL_SITE_NAME}">`,
+    '<meta property="og:locale" content="zh_CN">',
     `<meta property="og:url" content="${escape(canonical)}">`,
-    `<meta name="twitter:card" content="${game?.coverUrl ? 'summary_large_image' : 'summary'}">`,
+    `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}">`,
     `<meta name="twitter:title" content="${escape(title)}">`,
     `<meta name="twitter:description" content="${escape(description)}">`,
-    ...(game?.coverUrl ? [
-      `<meta property="og:image" content="${escape(game.coverUrl)}">`,
-      `<meta property="og:image:alt" content="${escape(game.title)}">`,
-      '<meta property="og:image:type" content="image/webp">',
-      `<meta name="twitter:image" content="${escape(game.coverUrl)}">`,
-      `<meta name="twitter:image:alt" content="${escape(game.title)}">`,
+    ...(image ? [
+      `<meta property="og:image" content="${escape(image)}">`,
+      `<meta property="og:image:alt" content="${escape(imageAlt)}">`,
+      `<meta property="og:image:type" content="${game ? 'image/webp' : 'image/png'}">`,
+      ...(!game ? ['<meta property="og:image:width" content="1200">', '<meta property="og:image:height" content="630">'] : []),
+      `<meta name="twitter:image" content="${escape(image)}">`,
+      `<meta name="twitter:image:alt" content="${escape(imageAlt)}">`,
     ] : []),
     ...(status === 200 ? [
       `<link rel="canonical" href="${escape(canonical)}">`,

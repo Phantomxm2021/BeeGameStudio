@@ -10,6 +10,7 @@ import { PresenceGate } from '../beui/registry/lib/presence-gate';
 import { useToastContext } from '../../contexts/ToastContext';
 import { DeploymentProgress } from './DeploymentProgress';
 import { PublicationMarkdown } from '../Common/PublicationMarkdown';
+import { publicationTitle } from '../../utils/publicationPresentation';
 
 export interface WorkspaceDeploymentDialogProps {
   projectId: string;
@@ -189,6 +190,7 @@ function WorkspaceDeploymentDialogContent({
   const showCompleted = published && !showingProgress && publicationBaseline !== undefined && latest.id !== publicationBaseline;
   const historyView = showHistory && !activeStatus && !showCompleted;
   const statusView = (showingProgress || showCompleted) && !historyView;
+  const releaseTitle = publicationTitle(statusView ? latest?.publicDescription ?? description : description, projectName);
   // Keep the existing history's version numbering, using this release's real
   // position in the complete server-supplied deployment history.
   const publishedVersion = latestSuccessful ? deployments.length - deployments.findIndex(item => item.id === latestSuccessful.id) : 0;
@@ -274,7 +276,7 @@ function WorkspaceDeploymentDialogContent({
             </div>}</PresenceGate>
           </motion.div> : statusView ? <motion.div key="publication" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: reduced ? 0 : 0.15 } }} className="min-h-0 overflow-y-auto">
-            <DeploymentProgress status={showCompleted ? 'succeeded' : activeStatus || 'queued'} projectName={projectName}
+            <DeploymentProgress status={showCompleted ? 'succeeded' : activeStatus || 'queued'} projectName={releaseTitle}
               uploadProgress={latest?.uploadProgress} version={publishedVersion} copied={copied} onShare={copyLive} labels={labels} />
           </motion.div> : <motion.div key="editor" initial="hidden" animate="visible"
             exit={{ opacity: 0, y: reduced ? 0 : -5, transition: { duration: reduced ? 0 : 0.15 } }}
@@ -283,7 +285,7 @@ function WorkspaceDeploymentDialogContent({
             <PresenceGate>{({ gate }) => <div {...gate} className="flex min-h-0 flex-1 flex-col">
               <motion.h2 variants={element} className="type-body-lg shrink-0 px-6 pt-6 font-semibold sm:px-[30px]">{labels.deploy}</motion.h2>
           <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 py-6 text-center sm:px-[30px]" aria-live="polite">
-            <motion.p variants={element} className="type-body-lg shrink-0 max-w-full truncate font-semibold">{published && !showingProgress ? labels.deploymentPublishedTitle.replace('{projectName}', projectName) : projectName}</motion.p>
+            <motion.p variants={element} className="type-body-lg shrink-0 max-w-full truncate font-semibold">{published && !showingProgress ? labels.deploymentPublishedTitle.replace('{projectName}', releaseTitle) : releaseTitle}</motion.p>
             {!published && !showingProgress ? <p className="type-callout shrink-0 mt-2 max-w-[325px] text-muted-foreground">
               {failed ? labels.deploymentFailed : checking ? labels.deploymentChecking : canPublish ? labels.deploymentReadyDescription : labels.deploymentBlocked}
             </p> : null}
