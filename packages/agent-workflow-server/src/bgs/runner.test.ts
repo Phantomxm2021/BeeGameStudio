@@ -343,11 +343,13 @@ test('required Bgs skill selection fails clearly when absent and accepts a real 
   const missing=await fixture()
   try {await expect(missing.submit('$missing-fixture-skill Use method')).rejects.toThrow('Required BGS skill is unavailable')}
   finally {await missing.close()}
-  const available=await fixture()
-  try {
-    await available.submit([{type:'text',text:'Current platform facts'}, {type:'text',text:'$game-creative-director-expert Apply the method'}])
-    expect(available.events.some(event=>event.text==='Native skill selected')).toBe(true)
-  } finally {await available.close()}
+  for(const name of ['game-creative-director-expert','game-first-version']) {
+    const available=await fixture()
+    try {
+      await available.submit([{type:'text',text:'Current platform facts'}, {type:'text',text:'$'+name+' Apply the method'}])
+      expect(available.events.some(event=>event.text==='Native skill selected')).toBe(true)
+    } finally {await available.close()}
+  }
 },30000)
 
 test('an unrelated broken skill does not block valid skills, while a missing required skill still stops before submission', async () => {

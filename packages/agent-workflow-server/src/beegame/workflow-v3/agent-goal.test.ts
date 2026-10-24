@@ -225,7 +225,7 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
     await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
     expect(String(f.submissions[0]!.prompt)).not.toContain(JSON.stringify(f.body.brief))
     expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
-    expect(String(f.submissions[0]!.prompt)).toStartWith('Complete the current user assignment')
+    expect(String(f.submissions[0]!.prompt)).toStartWith('$game-first-version\n')
     expect(String(f.submissions[0]!.prompt)).not.toContain('$game-creative-director-expert')
     expect(f.starts[0].systemContext).toContain('design records live under docs/')
     expect(f.starts[0].systemContext).toContain('Bgs loads applicable AGENTS.md instructions natively')
@@ -244,9 +244,12 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
     await writeFile(join(f.root,'src/game.js'),'// retained user work')
     expect((await f.call('/agent/messages','POST',{requestKey:'feedback',runId:run.id,
       chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
-      intent:'work',text:'After playtesting, continue only the requested slice correction.'})).status).toBe(202)
+      intent:'message',text:'After playtesting, change only the movement speed.'})).status).toBe(202)
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(f.submissions).toHaveLength(2)
+    expect(f.submissions[1]!.prompt).toBe('User message:\nAfter playtesting, change only the movement speed.')
+    expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
+    expect(f.starts[1].systemContext).not.toContain('explicitly invoked game-first-version Skill')
     expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// retained user work')
     expect(run.creation?.initialDelivery).toBe('design-led-first-version')
     const refreshed=await readFile(join(f.root,'AGENTS.md'),'utf8')
@@ -298,6 +301,7 @@ test('existing React/Web sources retain their own entry across goal intake and o
     await f.call('/agent/goal','POST',f.body)
     let run=await f.wait(r=>Boolean(r.agentTurns![0]?.finishedAt))
     expect(run.creation).toBeUndefined();expect(run.webBoot).toBeUndefined()
+    expect(String(f.submissions[0]!.prompt)).not.toContain('$game-first-version')
     await f.call('/agent/messages','POST',{requestKey:'modify-existing',runId:run.id,chatSessionId:run.chatSessionId,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'work',text:'Modify only existing implementation; do not migrate the entry.'})
     run=await f.wait(r=>Boolean(r.agentTurns![1]?.finishedAt))
@@ -836,7 +840,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   run.visualHandoffVersion = visualHandoffVersion
   run.creation = { initialDelivery: 'design-led-first-version', editableContent: true }
   const first=agentProfessionalContextForRun(run), followup=agentProfessionalContextForRun(run,true)
-  expect(first).toContain('design dependencies and professional methods in the project guide')
+  expect(first).toContain('explicitly invoked game-first-version Skill')
   expect(first).not.toContain('GDD.md,')
   expect(first).not.toContain('Draft technical/resource plans first')
   expect(followup).not.toContain('eight documents')
@@ -848,6 +852,17 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   expect(agentProfessionalContextForRun({...run,creation:undefined})).not.toContain('eight documents')
   expect(agentGoalPrompt(run)).not.toContain('ORIGINAL_CONFIRMED_GOAL')
   expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
+})
+
+test('first-version workflow does not replace existing-project or playable-slice assignments', () => {
+  const run=createRun({projectId:'entry',ownerId:'owner',workspacePath:'/synthetic',chatSessionId:'chat',
+    requestKey:'entry',text:'Confirmed scope',constraints:{engine:'Unity'},ids:['goal']})
+  expect(agentGoalPrompt(run)).not.toContain('$game-first-version')
+  run.creation={initialDelivery:'playable-slice',editableContent:false}
+  expect(agentGoalPrompt(run)).not.toContain('$game-first-version')
+  expect(agentGoalPrompt(run)).toContain('one small, complete player experience')
+  run.creation={initialDelivery:'design-led-first-version',editableContent:false}
+  expect(agentGoalPrompt(run)).toStartWith('$game-first-version\n')
 })
 
 test('stable system context preserves design authority and evidence boundaries, not implementation recipes', () => {
@@ -873,10 +888,15 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).toContain('Change only movement speed')
   }
 })
-for(const contextMode of ['resume','focused'] as const) test(contextMode+' continuation preserves pause and identity without automatic execution',async()=>{
-  const f=await fixture('wait')
+for(const contextMode of ['resume','focused'] as const) test(contextMode+' continuation preserves first-version progress, pause and identity without restarting production',async()=>{
+  const f=await fixture('wait',false,undefined,undefined,undefined,0,{},undefined,true)
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  const progress='# First version progress\n- [x] Existing design work\n- [ ] Remaining implementation\n'
   try {
     await f.call('/agent/goal','POST',f.body);await f.wait(()=>f.submissions.length===1)
+    expect(String(f.submissions[0]!.prompt)).toStartWith('$game-first-version\n')
+    await mkdir(join(f.root,'docs'),{recursive:true})
+    await writeFile(join(f.root,'docs/TASKS.md'),progress)
     await f.call('/stop','POST');let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
     const msg=()=>({requestKey:'continue-1',runId:run.id,chatSessionId:run.chatSessionId,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',
@@ -889,6 +909,8 @@ for(const contextMode of ['resume','focused'] as const) test(contextMode+' conti
     expect((await f.call('/agent/messages','POST',continuation)).status).toBe(202)
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(run.agentTurns![0]!.status).toBe('interrupted');expect(run.agentTurns![1]!.status).toBe('ended')
+    expect(f.submissions[1]!.prompt).toBe('User message:\n'+continuation.text)
+    expect(await readFile(join(f.root,'docs/TASKS.md'),'utf8')).toBe(progress)
     if(contextMode==='resume')expect(run.agentTurns![1]!.nativeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
     else {
       expect(f.starts[1].resumeSessionId).toBeUndefined()
@@ -1366,11 +1388,12 @@ test('first and resumed goals retain professional coverage and design dependenci
     for (const document of ['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ART_DIRECTION.md',
       'UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md']) expect(prompt).toContain(document)
     expect(prompt).toContain('Use actual asset metrics and existing checks when binding resources')
-    expect(prompt).toContain('unrelated resources/content may remain planned')
+    expect(prompt).toContain('Unproduced inputs remain planned')
+    expect(prompt).toContain('For later edits, update only affected records and outputs')
     expect(prompt).toContain('Preserve confirmed requirements')
     expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
   }
-  expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
+  expect(agentGoalPrompt(run)).toContain('Build the confirmed first version')
   expect(agentGoalPrompt(run)).not.toContain('Plan and execute autonomously')
   expect(agentGoalPrompt(run)).not.toContain('CONFIRMED_GAME')
   expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
@@ -1420,22 +1443,19 @@ test('ordinary questions retain answers and task identity without an unlock or e
   } finally {await f.close()}
 },30000)
 
-test('new and resumed goals retain requested scope while Agent selects Skills; follow-ups preserve literal intent', () => {
+test('first-version goals select their workflow; general assignments and follow-ups retain their scope', () => {
   const run={creation:{initialDelivery:'design-led-first-version'},requirements:{text:'BRIEF budget 20000000'}} as Run
-  expect(agentGoalPrompt(run)).not.toStartWith('$')
-  expect(agentGoalPrompt(run)).toContain('Select relevant Skills, organize the work')
-  expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
-  expect(agentGoalPrompt(run)).toContain('Respect the production dependencies for work in scope')
-  expect(agentGoalPrompt(run)).toContain('do not infer additional deliverables from the project creation mode')
+  expect(agentGoalPrompt(run)).toStartWith('$game-first-version\n\n')
   expect(agentGoalPrompt(run)).not.toContain(run.requirements.text)
   expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
-  for(const other of [{...run,creation:undefined},{...run,creation:{initialDelivery:'playable-slice'}},
-    {...run,agentTurns:[{nativeSessionId:'existing-context'}]}]) {
-    expect(agentGoalPrompt(other as Run)).not.toStartWith('/')
-    expect(agentGoalPrompt(other as Run)).not.toContain('$game-creative-director-expert')
-  }
+  const general={...run,creation:undefined}
+  expect(agentGoalPrompt(general)).not.toStartWith('$')
+  expect(agentGoalPrompt(general)).toContain('Select relevant Skills, organize the work')
+  expect(agentGoalPrompt(general)).toContain('Stop at the requested boundary')
+  expect(agentGoalPrompt(general)).toContain('Respect the production dependencies for work in scope')
+  expect(agentGoalPrompt(general)).toContain('do not infer additional deliverables from the project creation mode')
   for(const intent of ['message','work','continue','change'] as const)
-    expect(agentMessagePrompt({intent,text:'继续处理'} as any)).not.toContain('/bgs-builtins:')
+    expect(agentMessagePrompt({intent,text:'继续处理'} as any)).toBe('User message:\n继续处理')
 })
 
 test('editable content describes data consumed by the confirmed engine, not an alternative game scaffold', () => {
