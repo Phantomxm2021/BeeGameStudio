@@ -66,6 +66,32 @@ sqlTest('migration bills auxiliary requests independently, keeps native snapshot
       await call('debit', 'native', 'native-' + index, tokens(n), 'runtime_snapshot', metadata)
     }
     expect(await consumed()).toBe(81_400)
+
+    // Personal/BYOK turns are observed in sessionCumulativeUsage but do not
+    // enter the runtime ledger. providerCumulativeUsage must remain equal to
+    // the billable input passed to SQL, or a later platform snapshot compares
+    // against an all-source total and overcharges.
+    const sourceSwitchSnapshots = [
+      { provider: 100, session: 100, delta: 100 },
+      { provider: 150, session: 300, delta: 50 }, // +150 personal between platform snapshots
+      { provider: 180, session: 350, delta: 30 }, // +20 personal, then +30 platform
+    ]
+    for (const [index, snapshot] of sourceSwitchSnapshots.entries()) {
+      const result = await call(
+        'record',
+        'native-source-switch',
+        'native-source-switch-' + index,
+        tokens(snapshot.provider),
+        'runtime_snapshot',
+        {
+          usageBasis: 'session-cumulative-v1',
+          providerCumulativeUsage: tokens(snapshot.provider),
+          sessionCumulativeUsage: tokens(snapshot.session),
+        },
+      )
+      expect(result.event.total_tokens_delta).toBe(snapshot.delta)
+    }
+
     await call('record', 'unknown-baseline', 'old-native', tokens(100), 'runtime_snapshot')
     await expect(call('record', 'unknown-baseline', 'new-native', tokens(150), 'runtime_snapshot',
       { usageBasis: 'session-cumulative-v1' })).rejects.toThrow('baseline is unknown')

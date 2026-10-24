@@ -114,6 +114,18 @@ describe('chat transcript compaction', () => {
     ]
     expect(compactTranscriptForChatHistory(events)).toMatchObject(events)
   })
+  test('retains host evidence recorded after the session stops, including its verdict', () => {
+    const base = { sessionId: 's', turnId: 'turn', createdAt: new Date() }
+    const events: BeeGameEvent[] = [
+      { ...base, id: 1, type: 'turn.completed', text: 'Done' },
+      { ...base, id: 2, type: 'session.stopped', text: 'Stopped' },
+      { ...base, id: 3, type: 'system.status', text: 'Host evidence: latest measurement is stale; delivery unverified',
+        payload: { type: 'system.status', subtype: 'host_evidence', quality: 'unverified',
+          deliveryEligible: false, attemptId: 'attempt-1' } },
+    ]
+    expect(compactTranscriptForChatHistory(events)).toMatchObject(events)
+  })
+
   test('preserves one completed Thinking lifecycle with its full duration', () => {
     const compacted = compactTranscriptForChatHistory([
       thinkingEvent(1, 'Checking', 'started', '2026-09-17T00:00:00.000Z'),

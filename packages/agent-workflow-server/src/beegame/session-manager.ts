@@ -58,6 +58,7 @@ import { answeredQuestionInput, UserQuestionValidationError } from './user-quest
 import { expandPath } from '@bee-game-studio/agent-workflow/runtime-path'
 import { UsageOutboxPersistenceError, SessionUsageOutbox } from './session-usage-outbox'
 import { isPersonalModelId } from '../model-connections'
+import { getModelBillingSource, type ModelBillingSource } from '../model-billing-source'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -305,7 +306,7 @@ export type BeeGameSessionRunnerStartInput = {
   /** Native replay of this exact submitted command, not merely CLI startup. */
   onNativeSubmission?(sessionId: string): void
   /** Passive provider accounting, cumulative within this native process. */
-  onNativeUsage?(usage: Usage, epoch?: string, accounting?: { incomplete: boolean }): void
+  onNativeUsage?(usage: Usage, epoch?: string, accounting?: { incomplete?: boolean; baselineOnly?: boolean; replayed?: boolean }): void
   cwd: string
   env: Record<string, string>
   language?: BeeGameSessionLanguage
@@ -435,6 +436,7 @@ type SessionRecord = {
   transcriptPath: string
   runner: BeeGameSessionRuntime | null
   runnerNeedsRefresh?: boolean
+  runnerBillingSource?: ModelBillingSource
   runtimeCleanupFailed?: boolean
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
@@ -449,8 +451,8 @@ type SessionRecord = {
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
-  /** Provider-cumulative usage captured before the active turn starts. */
-  currentTurnStartingUsage?: BeeGameRuntimeSnapshot['usage']
+  /** Platform-billable cumulative usage captured before the active turn starts. */
+  currentTurnStartingBillableUsage?: BeeGameRuntimeSnapshot['usage']
   /** The complete active model turn, including final event/usage callbacks. */
   activeTurn?: Promise<void>
   /** Serializes usage billing events without blocking the runtime callback. */
@@ -1143,7 +1145,7 @@ export class BeeGameSessionManager {
       if (record.session.status !== 'running') throw new Error('Session was stopped during turn preparation')
       const nextTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
       record.thinkingBlockStartedAt.clear()
-      record.currentTurnStartingUsage = this.deriveRuntimeSnapshot(record).usage
+      record.currentTurnStartingBillableUsage = getLatestRuntimeUsage(this.runtimeSnapshotInputs(record), true)
       record.currentTurnId = nextTurnId
       record.executionIdentity = display?.executionIdentity ? {...display.executionIdentity,turnId:nextTurnId}:undefined
       record.nextTurnIndex += 1
@@ -1418,20 +1420,26 @@ export class BeeGameSessionManager {
     settle?: () => Promise<void>,
   ): Promise<void> {
     let turnRunner: BeeGameSessionRuntime | null = null
+    let billingSource: ModelBillingSource = 'platform'
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
-      await this.assertModelRequestAllowed(record.userId)
-      let selectedEnvironment = mergeRuntimeEnv(
-        record.runtime,
-        await this.loadAdditionalRuntimeEnv(record),
-      )
+      const additionalEnv = await this.loadAdditionalRuntimeEnv(record)
+      // Only the host connection resolver supplies billing provenance. A model
+      // config's arbitrary env must not select whether the user pays BGS.
+      billingSource = getModelBillingSource(additionalEnv)
+      const previousSourceEvent = record.events.findLast(event => typeof event.payload?.billingSource === 'string')
+      const previousBillingSource = getModelBillingSource({
+        BEEGAME_MODEL_BILLING_SOURCE: previousSourceEvent?.payload?.billingSource,
+      })
+      if (billingSource === 'platform') await this.assertModelRequestAllowed(record.userId)
+      const selectedEnvironment = mergeRuntimeEnv(record.runtime, additionalEnv)
       const env: Record<string, string> = {
         ...buildRuntimeEnv(selectedEnvironment),
       }
       record.redactVisible = createResponseRedactor(env)
       if (signal.aborted || record.session.status !== 'running') return
-      if (record.runnerNeedsRefresh) {
+      if (record.runnerNeedsRefresh || (record.runner && record.runnerBillingSource !== billingSource)) {
         await this.disposeRunner(record.runner, record)
         record.runner = null
         record.runnerNeedsRefresh = false
@@ -1457,15 +1465,20 @@ export class BeeGameSessionManager {
             this.persistRuntimeSnapshot(record)
           },
           onNativeUsage: (usage, epoch, accounting) => {
+            // Resume may recover a receipt the host never saw. Its work used
+            // the prior connection, regardless of the newly selected source.
+            const receiptBillingSource = accounting?.replayed ? previousBillingSource : billingSource
             // Passive accounting stays out of model history. Persist acknowledged
             // provider work even if cancellation prevents a complete receipt.
             if (usage.total_tokens > 0 || accounting?.incomplete) this.append(record, 'usage', '', {
               type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch ?? accountingEpoch, usage,
+              billingSource: receiptBillingSource, providerReceiptIncomplete: accounting?.incomplete === true,
+              ...(accounting?.baselineOnly ? { usageBaselineOnly: true } : {}),
               ...(accounting?.incomplete ? { providerUsageIncomplete: true } : {}),
             })
             // Native receipts arrive even during tool-only turns. Settle the
             // acknowledged cumulative usage without waiting for an answer.
-            if (record.currentTurnId && !record.currentTurnUsageExternallyAccounted)
+            if (receiptBillingSource === 'platform' && !accounting?.baselineOnly && record.currentTurnId && !record.currentTurnUsageExternallyAccounted)
               void this.recordUsageSnapshot(record, record.currentTurnId, true)
           },
           cwd: record.session.cwd,
@@ -1474,17 +1487,23 @@ export class BeeGameSessionManager {
           requestPermission: request => this.requestPermission(record, request),
         }))
       record.runner = runner
+      record.runnerBillingSource = billingSource
       turnRunner = runner
       if (signal.aborted || record.session.status !== 'running') {
         await this.disposeRunner(runner, record)
         record.runner = null
         return
       }
+      // Persist provenance before dispatch, even if no usage notification
+      // reaches the host. The existing transcript then attributes resume replay.
+      if (!previousSourceEvent || previousBillingSource !== billingSource)
+        this.append(record, 'usage', '', { type: 'usage', subtype: 'model_connection', billingSource, providerReceiptIncomplete: false })
       await this.submitToRunner(
         record,
         runner,
         prompt,
         signal,
+        billingSource,
       )
       if (runner.reusable === false) {
         await this.disposeRunner(runner, record)
@@ -1538,7 +1557,7 @@ export class BeeGameSessionManager {
         this.recordDeliveryError(record.session.id, `Request cleanup failed: ${toErrorMessage(error)}`)
       }
       const terminalTurnId = record.currentTurnId
-      if (terminalTurnId && !record.currentTurnUsageExternallyAccounted) {
+      if (billingSource === 'platform' && terminalTurnId && !record.currentTurnUsageExternallyAccounted) {
         // Remote billing is accounting, not worker lifecycle authority. A
         // slow or unavailable billing service must not keep a completed native
         // turn (and therefore the whole workflow) in the running state.
@@ -1550,7 +1569,7 @@ export class BeeGameSessionManager {
       // These files back durable Chat references; a finished turn must not
       // delete earlier user uploads or tool screenshots from the same store.
       record.currentTurnId = null
-      record.currentTurnStartingUsage = undefined
+      record.currentTurnStartingBillableUsage = undefined
       record.thinkingBlockStartedAt.clear()
       record.abortController = null
       record.currentTurnUsageExternallyAccounted = undefined
@@ -1593,6 +1612,7 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
+    billingSource: ModelBillingSource,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     await runner.submit({
@@ -1630,7 +1650,7 @@ export class BeeGameSessionManager {
               }
             } catch { payload = {...message,attachmentError: "Image preview could not be attached"} }
           }
-          this.append(record, type, text, payload)
+          this.append(record, type, text, { ...payload, billingSource })
           return
         }
       },
@@ -1644,13 +1664,16 @@ export class BeeGameSessionManager {
     checkpoint = false,
   ): Promise<void> {
     if (!this.usageBillingBackend.recordUsage) return
-    const providerCumulativeUsage = getLatestRuntimeUsage(this.runtimeSnapshotInputs(record))
+    const events = this.runtimeSnapshotInputs(record)
+    const sessionCumulativeUsage = getLatestRuntimeUsage(events)
+    const billableCumulativeUsage = getLatestRuntimeUsage(events, true)
     const turnDeltaUsage = subtractRuntimeUsage(
-      providerCumulativeUsage,
-      record.currentTurnStartingUsage ?? emptyRuntimeUsage(),
+      billableCumulativeUsage,
+      record.currentTurnStartingBillableUsage ?? emptyRuntimeUsage(),
     )
     const providerUsageIncomplete = record.events.some(event =>
-      event.type === 'usage' && event.payload?.providerUsageIncomplete === true)
+      event.type === 'usage' && isPlatformUsageEvent(event) &&
+      (event.payload?.providerReceiptIncomplete ?? event.payload?.providerUsageIncomplete) === true)
     if (turnDeltaUsage.total_tokens <= 0 && !providerUsageIncomplete) return
     const terminalEvent = checkpoint ? undefined : [...record.events]
       .reverse()
@@ -1681,16 +1704,19 @@ export class BeeGameSessionManager {
     const write = {
       turnId,
       sourceMessageType: checkpoint ? 'usage_checkpoint' : terminalEvent?.type ?? 'turn_terminal',
-      // runtime_snapshot is session cumulative; the billing authority computes
-      // its own delta. Sending a turn delta here subtracts usage a second time.
-      usage: providerCumulativeUsage,
+      // The billing authority computes its own delta from platform-only
+      // cumulative usage; personal increments never enter this baseline.
+      usage: billableCumulativeUsage,
       idempotencyKey,
       metadata: {
         usageBasis: 'session-cumulative-v1',
+        billingSource: 'platform',
         ...(providerUsageIncomplete ? { providerUsageIncomplete: true } : {}),
-        providerCumulativeUsage,
+        // Existing SQL reads this field as the next billed snapshot baseline.
+        providerCumulativeUsage: billableCumulativeUsage,
+        sessionCumulativeUsage,
         turnDeltaUsage,
-        ...(!providerUsageIncomplete ? { billableFinalUsage: providerCumulativeUsage } : {}),
+        ...(!providerUsageIncomplete ? { billableFinalUsage: billableCumulativeUsage } : {}),
         terminalDigest,
         ...(typeof deliveryPhase === 'string' ? { deliveryPhase } : {}),
       },
@@ -2930,6 +2956,7 @@ function hasNativeFinalResult(
 
 export function getLatestRuntimeUsage(
   events: BeeGameEvent[],
+  billableOnly = false,
 ): BeeGameRuntimeSnapshot['usage'] {
   // Claude SDK result.modelUsage is cumulative while one native accounting
   // epoch remains active. A resumed/compacted native session may start a new
@@ -2937,7 +2964,7 @@ export function getLatestRuntimeUsage(
   // only the latest snapshot inside each monotonic epoch, then add the epochs;
   // summing every result double-counts while taking only the final result loses
   // all usage before a native counter reset.
-  const modelUsage = aggregateCumulativeModelUsage(events)
+  const modelUsage = aggregateCumulativeModelUsage(events, billableOnly)
   if (modelUsage) {
     // A turn can still be in flight after the previous result. Add only the
     // stream usage emitted after the latest modelUsage result; stream usage
@@ -2945,6 +2972,7 @@ export function getLatestRuntimeUsage(
     const inFlight = latestCumulativeUsageEvent(
       events,
       findLastModelUsageEventIndex(events),
+      billableOnly,
     )
     addRuntimeUsage(modelUsage, inFlight)
     return modelUsage
@@ -2952,7 +2980,7 @@ export function getLatestRuntimeUsage(
 
   // Before a terminal result exists, message_delta is the only authoritative
   // usage source exposed by the streaming transport.
-  const streamedUsage = latestCumulativeUsageEvent(events, -1)
+  const streamedUsage = latestCumulativeUsageEvent(events, -1, billableOnly)
   if (streamedUsage.total_tokens > 0) return streamedUsage
 
   return emptyRuntimeUsage()
@@ -2973,6 +3001,7 @@ function findLastModelUsageEventIndex(events: BeeGameEvent[]): number {
 function latestCumulativeUsageEvent(
   events: BeeGameEvent[],
   afterIndex: number,
+  billableOnly = false,
 ): BeeGameRuntimeSnapshot['usage'] {
   // Native message_delta usage is a cumulative snapshot, not a delta. Keep
   // the greatest observed value for each counter so partial snapshots (for
@@ -2987,7 +3016,8 @@ function latestCumulativeUsageEvent(
   if (epoch && events.some(event => event.type === 'usage' && event.payload?.subtype === 'native_accounting' &&
       getDashboardPayloadString(event.payload, 'nativeAccountingEpoch') === epoch)) return latest
   for (const event of events.slice(afterIndex + 1)) {
-    if (event.type !== 'usage' || event.payload?.subtype === 'native_accounting') continue
+    if (event.type !== 'usage' || event.payload?.subtype === 'native_accounting' ||
+        (billableOnly && !isPlatformUsageEvent(event))) continue
     const usage = getUsageFromEventPayload(event.payload)
     latest.prompt_tokens = Math.max(latest.prompt_tokens, usage.prompt_tokens)
     latest.completion_tokens = Math.max(
@@ -3271,39 +3301,47 @@ function getCumulativeUsageSnapshot(event: BeeGameEvent): BeeGameRuntimeSnapshot
   return null
 }
 
+function isPlatformUsageEvent(event: BeeGameEvent): boolean {
+  // Untagged historical receipts retain their original billing treatment.
+  return event.payload?.billingSource !== 'byok' && event.payload?.billingSource !== 'chatgpt-subscription'
+}
+
 function aggregateCumulativeModelUsage(
   events: BeeGameEvent[],
+  billableOnly = false,
 ): BeeGameRuntimeSnapshot['usage'] | null {
-  const groups = new Map<string, { native: boolean; snapshots: BeeGameRuntimeSnapshot['usage'][] }>()
+  const groups = new Map<string, { native: boolean; snapshots: { usage: BeeGameRuntimeSnapshot['usage']; billable: boolean; baselineOnly: boolean }[] }>()
   for (const event of events) {
     const snapshot = getCumulativeUsageSnapshot(event)
     if (!snapshot) continue
     const key = getDashboardPayloadString(event.payload, 'nativeAccountingEpoch') || 'legacy'
     const group = groups.get(key) ?? { native: false, snapshots: [] }
     group.native ||= event.type === 'usage'
-    group.snapshots.push(snapshot)
+    group.snapshots.push({ usage: snapshot, billable: isPlatformUsageEvent(event), baselineOnly: event.payload?.usageBaselineOnly === true })
     groups.set(key, group)
   }
   if (!groups.size) return null
   const total = emptyRuntimeUsage()
   for (const group of groups.values()) {
     let latest = emptyRuntimeUsage()
-    for (const snapshot of group.snapshots) {
-      if (!group.native) {
-        // Legacy SDK-only transports lack process identity/callback counters.
-        if (hasCumulativeCounterReset(latest, snapshot)) addRuntimeUsage(total, latest)
-        latest = snapshot
-      } else {
-        // stdout and stderr are independent streams. A late SDK result can
-        // precede a newer diagnostic logically; never mistake it for a reset.
-        latest = { prompt_tokens: Math.max(latest.prompt_tokens, snapshot.prompt_tokens),
+    for (const { usage: snapshot, billable, baselineOnly } of group.snapshots) {
+      let next = snapshot
+      if (group.native) {
+        // stdout and stderr are independent streams; older snapshots cannot
+        // decrease a native epoch's counters.
+        next = { prompt_tokens: Math.max(latest.prompt_tokens, snapshot.prompt_tokens),
           completion_tokens: Math.max(latest.completion_tokens, snapshot.completion_tokens),
           cache_read_tokens: Math.max(latest.cache_read_tokens, snapshot.cache_read_tokens),
           cache_creation_tokens: Math.max(latest.cache_creation_tokens, snapshot.cache_creation_tokens), total_tokens: 0 }
-        latest.total_tokens = latest.prompt_tokens + latest.completion_tokens + latest.cache_read_tokens + latest.cache_creation_tokens
+        next.total_tokens = next.prompt_tokens + next.completion_tokens + next.cache_read_tokens + next.cache_creation_tokens
       }
+      const delta = !group.native && hasCumulativeCounterReset(latest, next)
+        ? next : subtractRuntimeUsage(next, latest)
+      if (!baselineOnly && (!billableOnly || billable)) addRuntimeUsage(total, delta)
+      // Personal usage must still advance the native baseline: a resumed thread
+      // can keep the same epoch when its connection changes back to platform.
+      latest = next
     }
-    addRuntimeUsage(total, latest)
   }
   return total
 }

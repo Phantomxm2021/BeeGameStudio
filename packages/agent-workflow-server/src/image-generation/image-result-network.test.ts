@@ -1,4 +1,7 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { resolveApprovedOutboundTarget } from '@bee-game-studio/security-core'
 import { defaultImageConfig } from './config'
 import { CloudflareImageProvider } from './cloudflare-provider'
@@ -13,7 +16,6 @@ const config = {
 }
 
 const publicResolverOptions = {
-  allowedHosts: ['cdn.example.test'],
   resolve4: async (hostname: string) =>
     ['cdn.example.test', 'unapproved.example.test'].includes(hostname)
       ? ['93.184.216.34']
@@ -24,8 +26,7 @@ const publicResolverOptions = {
 function generateWithResultUrl(
   resultUrl: string,
   options: Parameters<typeof createImageResultRequest>[0] = {
-    resolveOutboundTarget: resolveApprovedOutboundTarget,
-    outboundTargetPolicyOptions: publicResolverOptions,
+    dns: publicResolverOptions,
   },
   resultResponse: Response = new Response(PNG, { headers: { 'content-type': 'image/png' } }),
   signal?: AbortSignal,
@@ -58,20 +59,19 @@ test('Cloudflare result downloads use the production approved target and pinned 
   expect(new Headers(output.resultInit?.headers).get('authorization')).toBeNull()
 })
 
-test('Cloudflare rejects private DNS and unapproved result URLs before downloading', async () => {
+test('Cloudflare rejects private DNS and internal result URLs before downloading', async () => {
   const privateDnsOptions = {
-    allowedHosts: ['private.example.test'],
     resolve4: async (hostname: string) => hostname === 'private.example.test' ? ['10.0.0.7'] : [],
     resolve6: async () => [],
   }
   for (const [resultUrl, options] of [
     ['https://private.example.test/internal.png', privateDnsOptions],
     ['https://127.0.0.1/internal.png', publicResolverOptions],
-    ['https://unapproved.example.test/result.png', publicResolverOptions],
+    ['https://169.254.169.254/internal.png', publicResolverOptions],
+    ['https://[::1]/internal.png', publicResolverOptions],
   ] as const) {
     const output = await generateWithResultUrl(resultUrl, {
-      resolveOutboundTarget: resolveApprovedOutboundTarget,
-      outboundTargetPolicyOptions: options,
+      dns: options,
     })
     expect(output.error).toBeInstanceOf(ImageProviderError)
     expect(output.error).toMatchObject({ outcome: 'unknown', code: 'image-url-not-permitted' })
@@ -117,4 +117,100 @@ test('Cloudflare refuses result downloads when the safe downloader is not inject
   }
   expect(error).toMatchObject({ outcome: 'rejected', code: 'image-result-downloader-unconfigured' })
   expect(calls).toBe(0)
+})
+
+
+test('result URL rejection logs identify the actual policy reason without signed URL contents', async () => {
+  const logged: unknown[] = []
+  const spy = spyOn(console, 'warn').mockImplementation((...args) => { logged.push(args) })
+  try {
+    for (const [resultUrl, reason, hostname, expectedDnsCalls] of [
+      ['https://cdn.example.test:8443/private-image.png?signature=secret', 'port_not_allowed', 'cdn.example.test', 0],
+      ['http://cdn.example.test/private-image.png?signature=secret', 'unsupported_protocol', 'cdn.example.test', 0],
+      ['https://unresolved.example.test/private-image.png?signature=secret', 'dns_unresolved', 'unresolved.example.test', 1],
+      ['https://private.example.test/private-image.png?signature=secret', 'address_not_public', 'private.example.test', 1],
+    ] as const) {
+      let dnsCalls = 0
+      logged.length = 0
+      const output = await generateWithResultUrl(resultUrl, {
+        dns: {
+          resolve4: async hostname => { dnsCalls++; return hostname === 'private.example.test' ? ['10.0.0.7'] : [] },
+          resolve6: async () => [],
+        },
+      })
+      expect(output.error).toMatchObject({ outcome: 'unknown', code: 'image-url-not-permitted' })
+      expect(output.calls).toEqual([config.baseUrl])
+      expect(logged).toEqual([['[image-generation]', { event: 'image-result-url-rejected', reason, hostname }]])
+      expect(dnsCalls).toBe(expectedDnsCalls)
+      expect(JSON.stringify(logged)).not.toContain('private-image.png')
+      expect(JSON.stringify(logged)).not.toContain('signature')
+      expect(JSON.stringify(logged)).not.toContain('secret')
+    }
+  } finally { spy.mockRestore() }
+})
+
+test('provider result hosts do not need the model allowlist, and model policy is unchanged', async () => {
+  const modelPolicy = { ...publicResolverOptions, allowedHosts: ['api.example.test'],
+    allowHttp: true, allowTrustedDevelopmentProxy: true }
+  const resultUrl = 'https://unapproved.example.test/result.png'
+  expect(await resolveApprovedOutboundTarget(resultUrl, modelPolicy)).toBeNull()
+  const output = await generateWithResultUrl(resultUrl, { dns: modelPolicy })
+  expect(output.result?.bytes).toEqual(PNG)
+  expect(output.calls).toEqual([config.baseUrl, resultUrl])
+  expect((output.resultInit as RequestInit & { dispatcher?: unknown }).dispatcher).toBeDefined()
+  expect(await resolveApprovedOutboundTarget(resultUrl, modelPolicy)).toBeNull()
+  const insecure = await generateWithResultUrl('http://unapproved.example.test/result.png', { dns: modelPolicy })
+  expect(insecure.error).toMatchObject({ code: 'image-url-not-permitted' })
+  expect(insecure.calls).toEqual([config.baseUrl])
+})
+
+test('image results reject fake proxy and mixed private DNS even when model policy allows the host', async () => {
+  for (const addresses of [['198.18.0.7'], ['93.184.216.34', '10.0.0.7']]) {
+    const modelPolicy = { allowedHosts: ['cdn.example.test'], allowTrustedDevelopmentProxy: true,
+      resolve4: async () => addresses, resolve6: async () => [] }
+    const output = await generateWithResultUrl('https://cdn.example.test/result.png', { dns: modelPolicy })
+    expect(output.error).toMatchObject({ outcome: 'unknown', code: 'image-url-not-permitted' })
+    expect(output.calls).toEqual([config.baseUrl])
+  }
+})
+
+test('result downloads send only an anonymous GET, never caller headers or body', async () => {
+  let received: RequestInit | undefined
+  const request = createImageResultRequest({ dns: publicResolverOptions,
+    baseFetch: (async (_url, init) => { received = init; return new Response(PNG) }) as typeof fetch })
+  await request('https://cdn.example.test/result.png', {
+    method: 'POST', headers: { authorization: 'Bearer api-secret', cookie: 'session=private' }, body: 'private payload',
+  })
+  expect(received?.method).toBe('GET')
+  expect(received?.body).toBeUndefined()
+  expect(new Headers(received?.headers).get('authorization')).toBeNull()
+  expect(new Headers(received?.headers).get('cookie')).toBeNull()
+})
+
+
+test('result CDN TLS retains CA trust without presenting configured API client credentials', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-result-tls-'))
+  const keys = ['BEEGAME_CLIENT_CERT', 'BEEGAME_CLIENT_KEY', 'BEEGAME_CLIENT_KEY_PASSPHRASE', 'NODE_EXTRA_CA_CERTS'] as const
+  const previous = keys.map(key => process.env[key])
+  try {
+    for (const [name, content] of [['cert', 'api-client-cert'], ['key', 'api-client-key'], ['ca', 'trusted-ca']])
+      writeFileSync(join(root, name), content)
+    process.env.BEEGAME_CLIENT_CERT = join(root, 'cert')
+    process.env.BEEGAME_CLIENT_KEY = join(root, 'key')
+    process.env.BEEGAME_CLIENT_KEY_PASSPHRASE = 'api-passphrase'
+    process.env.NODE_EXTRA_CA_CERTS = join(root, 'ca')
+    const output = await generateWithResultUrl('https://cdn.example.test/result.png')
+    expect(output.result?.bytes).toEqual(PNG)
+    const dispatcher = (output.resultInit as RequestInit & { dispatcher: object }).dispatcher
+    const optionsKey = Object.getOwnPropertySymbols(dispatcher).find(symbol => symbol.description === 'options')!
+    const connect = (dispatcher as Record<symbol, { connect: Record<string, unknown> }>)[optionsKey].connect
+    expect(connect.ca).toContain('trusted-ca')
+    for (const key of ['cert', 'key', 'passphrase']) expect(connect[key]).toBeUndefined()
+  } finally {
+    keys.forEach((key, i) => {
+      if (previous[i] === undefined) delete process.env[key]
+      else process.env[key] = previous[i]
+    })
+    rmSync(root, { recursive: true, force: true })
+  }
 })

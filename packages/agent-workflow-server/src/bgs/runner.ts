@@ -154,12 +154,12 @@ export function bgsProviderConfig(env: Record<string, string>): Record<string, u
     // token budget so ordinary Skill/contract reads survive that fallback;
     // oversized output and smaller per-call requests remain bounded by CLI.
     tool_output_token_limit: 10_000,
+    // The BGS ImageGen skill covers native ChatGPT and hosted API images.
+    // Replace only system guidance; preserve the native tool and user imports.
+    ...(env.BGS_HOME ? { 'skills.config': [{
+      path: join(env.BGS_HOME, 'skills', '.system', 'imagegen', 'SKILL.md'), enabled: false,
+    }] } : {}),
     ...(env.OPENAI_AUTH_MODE === 'chatgpt' ? {} : {
-      // This provider has no native image_gen, and its shell has no API key for
-      // the system skill's CLI fallback. Match by path to preserve user imports.
-      ...(env.BGS_HOME ? { 'skills.config': [{
-        path: join(env.BGS_HOME, 'skills', '.system', 'imagegen', 'SKILL.md'), enabled: false,
-      }] } : {}),
       model_provider: 'bgs', model_providers: { bgs: { name: 'BGS model connection',
         base_url: custom || 'https://api.openai.com/v1', env_key: 'OPENAI_API_KEY',
         wire_api: 'responses', requires_openai_auth: false, supports_websockets: false, request_max_retries:0,stream_max_retries:0 } },
@@ -173,6 +173,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
   readonly reusable = false
   private client!: BgsClient
   private threadId = ''
+  private resumingThread = false
   private active?: { input: BeeGameSessionSubmitInput; turnId?: string; error?: RpcObject; resolve(): void; reject(error: Error): void }
   private stopped = false
   private messages = new Map<string, string>()
@@ -238,6 +239,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       await configureBgsSkills(runtime.client, home, builtinSkills, userSkills)
       const shared = { config: { ...mcp.config, ...await bgsReasoningConfig(input.env, runtime.client) }, cwd: access.root, permissions: 'bgs-project', approvalPolicy: 'on-request',
         developerInstructions: instructions, ...(env.BEEGAME_MODEL ? { model: env.BEEGAME_MODEL } : {}) }
+      runtime.resumingThread = Boolean(input.resumeSessionId)
       const result = input.resumeSessionId
         ? await runtime.client.request('thread/resume', { ...shared, threadId: input.resumeSessionId, excludeTurns: true })
         : await runtime.client.request('thread/start', { ...shared, dynamicTools: protectedWriteTools })
@@ -247,6 +249,8 @@ class BgsRuntime implements BeeGameSessionRuntime {
       // Discover BGS catalogs without copying plugin metadata into game output.
       const skills = await runtime.client.request('skills/list', { cwds: [access.root], forceReload: true })
       runtime.skills = (skills.data ?? []).flatMap((entry:RpcObject) => entry.skills ?? [])
+      // The intervening RPC drains resume notifications before any live turn.
+      runtime.resumingThread = false
       if (skills.data?.some((entry:RpcObject) => entry.errors?.length))
         console.warn('[BGS skills] Some catalog entries are unavailable; required skills are checked on selection')
       return runtime
@@ -331,9 +335,15 @@ class BgsRuntime implements BeeGameSessionRuntime {
 
   private async notification(method: string, p: RpcObject) {
     if (method === 'thread/tokenUsage/updated') {
-      if(this.bridge && this.bridge.protocol !== 'responses')return // Converted provider usage includes cache writes Bgs does not expose.
       const total = p.tokenUsage?.total
-      if (total && typeof p.threadId === 'string') this.input.onNativeUsage?.(bgsUsage(total), 'bgs:' + p.threadId)
+      if (total && typeof p.threadId === 'string') {
+        // Converted provider receipts remain authoritative, including cache
+        // writes. Keep the native counter only as a baseline so switching a
+        // resumed thread to Responses cannot bill that earlier work again.
+        const baselineOnly = Boolean(this.bridge && this.bridge.protocol !== 'responses')
+        this.input.onNativeUsage?.(bgsUsage(total), 'bgs:' + p.threadId, { baselineOnly,
+          replayed: this.resumingThread && p.threadId === this.input.resumeSessionId })
+      }
       return
     }
     if (p.threadId && p.threadId !== this.threadId && !this.childOwners.has(p.threadId)) return

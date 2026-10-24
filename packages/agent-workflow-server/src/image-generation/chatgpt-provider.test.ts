@@ -49,6 +49,7 @@ test('subscription stream reuses the selected local login, keeps final PNG and a
     calls++
     expect(() => assertBgsAccountIdle(first)).toThrow('running model requests')
     expect(url).toBe(CHATGPT_IMAGE_ENDPOINT)
+    expect(init?.method).toBe('POST')
     const headers = new Headers(init?.headers)
     expect(headers.get('authorization')).toBe('Bearer ' + one.tokens.access_token)
     expect(headers.get('ChatGPT-Account-Id')).toBe('account-one')

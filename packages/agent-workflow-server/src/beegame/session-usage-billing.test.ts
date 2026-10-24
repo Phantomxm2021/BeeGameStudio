@@ -3,7 +3,8 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { appendChatTranscript } from './project-records'
-import { BeeGameSessionManager, type BeeGameSessionUsageBillingBackend } from './session-manager'
+import { BeeGameSessionManager, type BeeGameSessionRunner, type BeeGameSessionRuntime,
+  type BeeGameSessionUsageBillingBackend } from './session-manager'
 
 test('cumulative live and saved usage retains an earlier missing receipt after a complete response', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-partial-history-'))
@@ -310,5 +311,301 @@ test('terminal runtime_snapshot submissions stay cumulative across large, small 
     expect(debited).toEqual(recorded)
     expect(charged).toBe(1_250)
     expect(new Set(keys).size).toBe(keys.length) // Checkpoint and terminal writes have independent keys.
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+type SessionUsageBillingInput = Parameters<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>[1]
+type SessionUsageBillingReceipt = Awaited<ReturnType<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>>
+type SessionModelBillingSource = 'platform' | 'byok' | 'chatgpt-subscription'
+
+const sessionUsage = (total_tokens: number) => ({
+  prompt_tokens: total_tokens, completion_tokens: 0, cache_read_tokens: 0,
+  cache_creation_tokens: 0, total_tokens,
+})
+
+function createSessionUsageBillingFixture() {
+  const authorized: string[] = [], recorded: SessionUsageBillingInput[] = [], debited: SessionUsageBillingInput[] = []
+  const receipts = new Map<string, SessionUsageBillingReceipt>()
+  let cumulative = 0
+  const receipt = (owner: string, input: SessionUsageBillingInput, delta: number): SessionUsageBillingReceipt => ({
+    duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: cumulative,
+    creditsMicro: cumulative,
+    event: { id: input.idempotencyKey, idempotencyKey: input.idempotencyKey, userId: owner,
+      sessionId: input.sessionId, turnId: input.turnId, pricingVersion: 'fixture', usageSource: 'runtime_snapshot',
+      usage: input.usage, delta: { ...input.usage, total_tokens: delta }, weightedTokens: cumulative,
+      weightedTokensDelta: delta, creditsMicro: delta, createdAt: new Date().toISOString(), metadata: input.metadata ?? {} },
+  })
+  const recordUsage: NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']> = (owner, input) => {
+    // SQL uses this metadata field as the next cumulative billing baseline.
+    expect(input.metadata?.providerCumulativeUsage).toEqual(input.usage)
+    const existing = receipts.get(input.idempotencyKey)
+    if (existing) return { ...existing, duplicate: true }
+    const delta = Math.max(0, input.usage.total_tokens - cumulative)
+    cumulative = input.usage.total_tokens
+    const result = receipt(owner, input, delta)
+    receipts.set(input.idempotencyKey, result)
+    recorded.push(input)
+    return result
+  }
+  const debitRealtimeUsage: NonNullable<BeeGameSessionUsageBillingBackend['debitRealtimeUsage']> = (owner, input) => {
+    const result = receipts.get(input.idempotencyKey)
+    if (!result) throw Error(`Missing fixture receipt for ${input.idempotencyKey}`)
+    debited.push(input)
+    return { ...result, duplicate: false }
+  }
+  return { backend: { assertUsageAvailable: async (owner: string) => { authorized.push(owner) }, recordUsage, debitRealtimeUsage },
+    authorized, recorded, debited }
+}
+
+test('platform and personal turns share a native epoch while only platform deltas bill across refresh and resume', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-personal-session-bill-'))
+  const billing = createSessionUsageBillingFixture()
+  let source: SessionModelBillingSource = 'platform'
+  const sourceCalls: SessionModelBillingSource[] = []
+  let starts = 0
+  const nativeTotals = [100, 250, 400, 550, 600]
+  const runner = { async start(input: Parameters<BeeGameSessionRunner['start']>[0]) {
+    const total = nativeTotals[starts++]!
+    return { stop() {}, async submit(turn: Parameters<BeeGameSessionRuntime['submit']>[0]) {
+      const current = sessionUsage(total)
+      input.onNativeUsage?.(current, 'bgs:thread')
+      input.onNativeUsage?.(current, 'bgs:thread')
+      await turn.onMessage({ type: 'runtime_event', eventType: 'assistant.message', text: 'Fixture turn complete' })
+    } }
+  } }
+  const getAdditionalRuntimeEnv = () => {
+    sourceCalls.push(source)
+    return { BEEGAME_MODEL_BILLING_SOURCE: source }
+  }
+  const manager = new BeeGameSessionManager(runner, root, getAdditionalRuntimeEnv, billing.backend)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner' })
+    await manager.sendWithDisplay(session.id, 'Platform turn')
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(100)
+
+    source = 'byok'
+    const recordsBeforePersonal = billing.recorded.length, debitsBeforePersonal = billing.debited.length
+    await manager.sendWithDisplay(session.id, 'Personal turn')
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(250)
+    expect(billing.recorded.length).toBe(recordsBeforePersonal)
+    expect(billing.debited.length).toBe(debitsBeforePersonal)
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+
+    source = 'chatgpt-subscription'
+    expect(manager.refreshIdleRunners()).toBe(1)
+    const recordsBeforeSubscription = billing.recorded.length, debitsBeforeSubscription = billing.debited.length
+    await manager.sendWithDisplay(session.id, 'Subscription turn')
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(400)
+    expect(billing.recorded.length).toBe(recordsBeforeSubscription)
+    expect(billing.debited.length).toBe(debitsBeforeSubscription)
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+
+    source = 'platform'
+    expect(manager.refreshIdleRunners()).toBe(1)
+    await manager.sendWithDisplay(session.id, 'Platform turn after personal')
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(550)
+    await manager.dispose()
+
+    const resumed = new BeeGameSessionManager(runner, root, getAdditionalRuntimeEnv, billing.backend)
+    try {
+      const recovered = resumed.start({ workspacePath: root, userId: 'owner', transcriptSessionId: session.id })
+      await resumed.sendWithDisplay(recovered.id, 'Platform turn after restart')
+      await resumed.waitForSessionIdle(recovered.id)
+      await resumed.dispose()
+      expect(resumed.runtimeSnapshot(session.id, root).usage.total_tokens).toBe(600)
+    } finally { await resumed.dispose() }
+
+    expect(starts).toBe(5)
+    expect(sourceCalls).toEqual(['platform', 'byok', 'chatgpt-subscription', 'platform', 'platform'])
+    expect(billing.authorized).toEqual(['owner', 'owner', 'owner'])
+    expect([...new Set(billing.recorded.map(input => input.usage.total_tokens))]).toEqual([100, 250, 300])
+    expect([...new Set(billing.debited.map(input => input.usage.total_tokens))]).toEqual([100, 250, 300])
+    const finalBill = billing.recorded.findLast(input => input.metadata?.billableFinalUsage)
+    expect((finalBill?.metadata?.billableFinalUsage as { total_tokens?: number } | undefined)?.total_tokens).toBe(300)
+    const usageEvents = resumed.transcriptFacts(session.id).filter(event =>
+      event.type === 'usage' && event.payload?.subtype === 'native_accounting')
+    expect(new Set(usageEvents.map(event => event.payload?.billingSource))).toEqual(new Set(['platform', 'byok', 'chatgpt-subscription']))
+    expect(usageEvents.every(event => event.payload?.nativeAccountingEpoch === 'bgs:thread')).toBe(true)
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('incomplete or failed personal receipts remain nonbillable and do not poison the next platform bill', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-personal-incomplete-bill-'))
+  const billing = createSessionUsageBillingFixture()
+  let source: SessionModelBillingSource = 'chatgpt-subscription'
+  let turn = 0
+  const runner = { async start(input: Parameters<BeeGameSessionRunner['start']>[0]) {
+    return { stop() {}, async submit(turnInput: Parameters<BeeGameSessionRuntime['submit']>[0]) {
+      const total = ++turn * 100
+      if (turn <= 2) input.onNativeUsage?.(sessionUsage(total), 'bgs:thread', { incomplete: true })
+      else input.onNativeUsage?.(sessionUsage(total), 'bgs:thread')
+      if (turn === 2) throw Error('Synthetic personal transport failure')
+      if (turn === 1) await turnInput.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Personal completed' })
+      if (turn === 3) await turnInput.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Platform recovery' })
+    } }
+  } }
+  billing.backend.assertUsageAvailable = async (owner: string) => {
+    billing.authorized.push(owner)
+    if (source !== 'platform') throw Error('No platform Credits available')
+  }
+  const manager = new BeeGameSessionManager(runner, root, () => ({ BEEGAME_MODEL_BILLING_SOURCE: source }), billing.backend)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner' })
+    await manager.sendWithDisplay(session.id, 'Personal incomplete')
+    await manager.waitForSessionIdle(session.id)
+    expect(billing.authorized).toEqual([])
+    expect(manager.transcriptFacts(session.id).some(event => event.type === 'turn.completed')).toBe(true)
+    await manager.sendWithDisplay(session.id, 'Personal failed')
+    await manager.waitForSessionIdle(session.id)
+    expect(billing.recorded).toEqual([])
+    expect(billing.debited).toEqual([])
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+
+    source = 'platform'
+    manager.refreshIdleRunners()
+    await manager.sendWithDisplay(session.id, 'Platform recovery')
+    await manager.waitForSessionIdle(session.id)
+    await manager.dispose()
+
+    expect(billing.authorized).toEqual(['owner'])
+    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(300)
+    expect([...new Set(billing.recorded.map(input => input.usage.total_tokens))]).toEqual([100])
+    expect([...new Set(billing.debited.map(input => input.usage.total_tokens))]).toEqual([100])
+    const platformWrites = billing.recorded.filter(input => input.usage.total_tokens === 100)
+    expect(platformWrites.length).toBeGreaterThan(0)
+    expect(platformWrites.every(input => input.metadata?.providerUsageIncomplete === undefined)).toBe(true)
+    expect(platformWrites.every(input =>
+      (input.metadata?.billableFinalUsage as { total_tokens?: number } | undefined)?.total_tokens === 100)).toBe(true)
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('baseline-only bridge replay advances a shared epoch without charging or double-counting personal usage', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-baseline-replay-bill-'))
+  const billing = createSessionUsageBillingFixture()
+  let source: SessionModelBillingSource = 'byok'
+  const sourceCalls: SessionModelBillingSource[] = []
+  let starts = 0
+  const runner = { async start(input: Parameters<BeeGameSessionRunner['start']>[0]) {
+    const turn = ++starts
+    return { stop() {}, async submit(turnInput: Parameters<BeeGameSessionRuntime['submit']>[0]) {
+      if (turn === 1) {
+        input.onNativeUsage?.(sessionUsage(100), 'provider:epoch')
+        input.onNativeUsage?.(sessionUsage(100), 'bgs:thread', { baselineOnly: true })
+      } else {
+        input.onNativeUsage?.(sessionUsage(200), 'bgs:thread')
+      }
+      await turnInput.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Baseline replay fixture' })
+    } }
+  } }
+  const getAdditionalRuntimeEnv = () => {
+    sourceCalls.push(source)
+    return { BEEGAME_MODEL_BILLING_SOURCE: source }
+  }
+  const manager = new BeeGameSessionManager(runner, root, getAdditionalRuntimeEnv, billing.backend)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner' })
+    await manager.sendWithDisplay(session.id, 'Personal converted provider')
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(100)
+    expect(billing.authorized).toEqual([])
+    expect(billing.recorded).toEqual([])
+    expect(billing.debited).toEqual([])
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+
+    source = 'platform'
+    await manager.sendWithDisplay(session.id, 'Platform native continuation')
+    await manager.waitForSessionIdle(session.id)
+    await manager.dispose()
+
+    expect(starts).toBe(2)
+    expect(sourceCalls).toEqual(['byok', 'platform'])
+    expect(billing.authorized).toEqual(['owner'])
+    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(200)
+    expect([...new Set(billing.recorded.map(input => input.usage.total_tokens))]).toEqual([100])
+    expect([...new Set(billing.debited.map(input => input.usage.total_tokens))]).toEqual([100])
+    const platformBill = billing.recorded.findLast(input => input.metadata?.billableFinalUsage)
+    expect((platformBill?.metadata?.sessionCumulativeUsage as { total_tokens?: number } | undefined)?.total_tokens).toBe(200)
+    expect((platformBill?.metadata?.billableFinalUsage as { total_tokens?: number } | undefined)?.total_tokens).toBe(100)
+    const usageEvents = manager.transcriptFacts(session.id).filter(event =>
+      event.type === 'usage' && event.payload?.subtype === 'native_accounting')
+    expect(usageEvents.some(event => event.payload?.nativeAccountingEpoch === 'provider:epoch' &&
+      event.payload?.billingSource === 'byok' && event.payload?.usageBaselineOnly !== true)).toBe(true)
+    expect(usageEvents.some(event => event.payload?.nativeAccountingEpoch === 'bgs:thread' &&
+      event.payload?.billingSource === 'byok' && event.payload?.usageBaselineOnly === true)).toBe(true)
+    expect(usageEvents.some(event => event.payload?.nativeAccountingEpoch === 'bgs:thread' &&
+      event.payload?.billingSource === 'platform' && event.payload?.usageBaselineOnly !== true)).toBe(true)
+
+    const resumed = new BeeGameSessionManager(runner, root, getAdditionalRuntimeEnv, billing.backend)
+    try {
+      resumed.start({ workspacePath: root, userId: 'owner', transcriptSessionId: session.id })
+      expect(resumed.runtimeSnapshot(session.id, root).usage.total_tokens).toBe(200)
+      expect(starts).toBe(2)
+    } finally { await resumed.dispose() }
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('cold resume keeps a lost personal receipt nonbillable while billing the live platform increment', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-replayed-personal-bill-'))
+  const billing = createSessionUsageBillingFixture()
+  let source: SessionModelBillingSource = 'byok'
+  const sourceCalls: SessionModelBillingSource[] = []
+  let starts = 0
+  const runner = { async start(input: Parameters<BeeGameSessionRunner['start']>[0]) {
+    starts++
+    if (input.resumeSessionId) input.onNativeUsage?.(sessionUsage(100), 'bgs:thread', { replayed: true })
+    return { stop() {}, async submit(turnInput: Parameters<BeeGameSessionRuntime['submit']>[0]) {
+      if (input.resumeSessionId) input.onNativeUsage?.(sessionUsage(150), 'bgs:thread')
+      await turnInput.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Cold resume fixture' })
+    } }
+  } }
+  const getAdditionalRuntimeEnv = () => {
+    sourceCalls.push(source)
+    return { BEEGAME_MODEL_BILLING_SOURCE: source }
+  }
+  const manager = new BeeGameSessionManager(runner, root, getAdditionalRuntimeEnv, billing.backend)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner' })
+    await manager.sendWithDisplay(session.id, 'Personal turn with lost usage receipt')
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(0)
+    expect(billing.recorded).toEqual([])
+    expect(billing.debited).toEqual([])
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+    await manager.dispose()
+
+    source = 'platform'
+    const resumed = new BeeGameSessionManager(runner, root, getAdditionalRuntimeEnv, billing.backend)
+    try {
+      const recovered = resumed.start({ workspacePath: root, userId: 'owner', transcriptSessionId: session.id,
+        resumeNativeSessionId: 'native-session' })
+      await resumed.sendWithDisplay(recovered.id, 'Platform turn after cold resume')
+      await resumed.waitForSessionIdle(recovered.id)
+      await resumed.dispose()
+      expect(resumed.runtimeSnapshot(session.id, root).usage.total_tokens).toBe(150)
+
+      expect(starts).toBe(2)
+      expect(sourceCalls).toEqual(['byok', 'platform'])
+      expect(billing.authorized).toEqual(['owner'])
+      expect([...new Set(billing.recorded.map(input => input.usage.total_tokens))]).toEqual([50])
+      expect([...new Set(billing.debited.map(input => input.usage.total_tokens))]).toEqual([50])
+      const platformBill = billing.recorded.findLast(input => input.metadata?.billableFinalUsage)
+      expect((platformBill?.metadata?.sessionCumulativeUsage as { total_tokens?: number } | undefined)?.total_tokens).toBe(150)
+      expect((platformBill?.metadata?.billableFinalUsage as { total_tokens?: number } | undefined)?.total_tokens).toBe(50)
+      const usageEvents = resumed.transcriptFacts(session.id).filter(event =>
+        event.type === 'usage' && event.payload?.subtype === 'native_accounting')
+      expect(usageEvents.some(event => event.payload?.billingSource === 'byok' &&
+        event.payload?.usage?.total_tokens === 100)).toBe(true)
+      expect(usageEvents.some(event => event.payload?.billingSource === 'platform' &&
+        event.payload?.usage?.total_tokens === 150)).toBe(true)
+      expect(usageEvents.every(event => event.payload?.nativeAccountingEpoch === 'bgs:thread')).toBe(true)
+    } finally { await resumed.dispose() }
+    expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })

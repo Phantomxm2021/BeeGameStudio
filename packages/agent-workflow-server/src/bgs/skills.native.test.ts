@@ -32,7 +32,7 @@ nativeTest('two accounts discover one shared catalog and only their own imported
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 15_000)
 
-nativeTest('provider skill availability preserves imported names, user settings and the system cache', async () => {
+nativeTest('both auth modes use BGS image guidance while preserving imported skills and account settings', async () => {
   const account = await mkdtemp('/private/tmp/bgs-provider-skills-'), home = join(account, 'bgs'), user = join(account, 'skills')
   const catalog = getBuiltinSkillsDirectory()
   const systemImagegen = join(home, 'skills', '.system', 'imagegen', 'SKILL.md')
@@ -56,7 +56,11 @@ nativeTest('provider skill availability preserves imported names, user settings 
         const result = await client.request('skills/list', { cwds: [account], forceReload: true })
         expect(result.data.flatMap((entry: any) => entry.errors)).toEqual([])
         const skills = result.data.flatMap((entry: any) => entry.skills)
-        expect(skills.find((s: any) => s.path === systemImagegen)?.enabled).toBe(mode === 'chatgpt')
+        expect(skills.find((s: any) => s.path === systemImagegen)?.enabled).toBe(false)
+        expect(skills.find((s: any) => s.path === join(catalog, 'bgs-imagegen', 'SKILL.md')))
+          .toMatchObject({ name: 'bgs-imagegen', enabled: true })
+        const features = await client.request('experimentalFeature/list', { limit: 200 })
+        expect(features.data.find((feature: any) => feature.name === 'image_generation')?.enabled).toBe(true)
         expect(skills.find((s: any) => s.path === join(user, 'imagegen', 'SKILL.md'))?.enabled).toBe(true)
         expect(skills.find((s: any) => s.path === userDisabled)?.enabled).toBe(false)
         const builtinSkills = skills.filter((s: any) => s.path.startsWith(catalog + '/'))

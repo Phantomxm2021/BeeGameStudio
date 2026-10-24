@@ -11,6 +11,7 @@ import {
 import { realpath } from 'node:fs/promises'
 import { OPENCODE_GO_ID } from '@bee-game-studio/agent-workflow/opencode-go'
 import { PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, isPersonalModelId, personalModelAvailable, personalModelConfig, preferredModelId, resolveModelConnection } from './model-connections'
+import { BEEGAME_MODEL_BILLING_SOURCE, getModelBillingSource } from './model-billing-source'
 import { loadLocalImageSettings, saveLocalImageSettings, selectImageConfig, updateImageSettings } from './image-generation/config-store'
 import type { ImageProviderKind } from './image-generation/config'
 import { resolve } from 'node:path'
@@ -835,6 +836,7 @@ export class DashboardRepository {
         ...env,
         ...selectedModelEnv,
         ...hostIsolationEnv,
+        [BEEGAME_MODEL_BILLING_SOURCE]: getModelBillingSource(selectedModelEnv),
         BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(mcpServers),
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
         BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
@@ -856,6 +858,7 @@ export class DashboardRepository {
     return {
       ...platformEnv,
       ...selectedModelEnv,
+      [BEEGAME_MODEL_BILLING_SOURCE]: getModelBillingSource(selectedModelEnv),
       BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(await this.authorizeRuntimeMcpServers(
         exportMcpServersSnapshot({ dataDir }), userId, authToken)),
       BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,

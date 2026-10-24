@@ -74,7 +74,7 @@ describe('resource semantic model runtime bridge', () => {
         ownerId: 'owner-1',
         modelConfigId: 'model-1',
         modelType: 'anthropic',
-        runtimeEnv: { OPENAI_API_KEY: 'backend-secret' },
+        runtimeEnv: { OPENAI_API_KEY: 'backend-secret', BEEGAME_MODEL_BILLING_SOURCE: 'byok' },
         packId: 'pack-1', jobId: 'job-1', batchId: 'batch-1', curatorRevision: 'semantic-curator-v1',
         items: [{ elementId: 'element-1', attempt: 2, projection: { elementId: 'element-1', sourceContentHash: 'a'.repeat(64) } }],
         visualInput: SINGLE_VISUAL_INPUT,

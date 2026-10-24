@@ -31,6 +31,7 @@ describe('BeeGame skills store', () => {
       .map(entry => entry.name).sort()
     expect(names).toEqual([
       'beegame-interaction-contracts',
+      'bgs-imagegen',
       'evidence-before-completion',
       'game-art-director-expert',
       'game-audio-designer',

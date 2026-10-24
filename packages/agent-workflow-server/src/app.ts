@@ -118,6 +118,7 @@ import { ImageGenerationService } from './image-generation/service'
 import { createHostedImageGenerationProvider } from './image-generation'
 import { createImageResultRequest } from './image-generation/image-result-network'
 import { hasChatGPTAccount } from './model-connections'
+import { getModelBillingSource, isPersonalModelBillingSource } from './model-billing-source'
 import { openImageGenerationAccess } from './image-generation/access'
 import { loadRuntimeImageConfig } from './image-generation/runtime-config'
 import { loadPersonalImageConnection, publicPersonalImageConnection, savePersonalImageConnection } from './image-generation/personal-connection'
@@ -510,8 +511,10 @@ export function createAgentWorkflowApp(
   )
   const serviceFetch = createTLSAwareFetch()
   const imageResultRequest = createImageResultRequest({
-    resolveOutboundTarget,
-    outboundTargetPolicyOptions,
+    dns: {
+      resolve4: outboundTargetPolicyOptions.resolve4,
+      resolve6: outboundTargetPolicyOptions.resolve6,
+    },
   })
   const supabaseStore = createSupabaseDashboardStoreFromEnv(
     process.env,
@@ -902,6 +905,10 @@ export function createAgentWorkflowApp(
       const modelConfigId =
         typeof body.modelConfigId === 'string' ? body.modelConfigId.trim() : ''
       const modelType = parseResourceSemanticModelType(body.modelType)
+      // The resource worker resolves a persisted Supabase model row with its
+      // service role and sends that catalog credential here. It does not carry
+      // the host's model-connections BYOK/ChatGPT state, so personal billing
+      // exemptions apply only to runtimes resolved by that host boundary.
       const runtimeEnv = parseResourceSemanticRuntimeEnv(body.runtimeEnv)
       const packId = typeof body.packId === 'string' ? body.packId.trim() : ''
       const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : ''
@@ -1027,11 +1034,13 @@ export function createAgentWorkflowApp(
           querySource,
         },
         async (usage, source) => {
-          modelUsage = usage
           if (usageRecorder) await usageRecorder(usage, source)
         },
         billingConfig.mode === 'remote',
         () => beeGameSessions.assertModelRequestAllowed(ownerId),
+        usage => {
+          modelUsage = usage
+        },
       )
       return c.json({
         content,
@@ -3959,30 +3968,43 @@ async function requireOwnedModelConfigId(
 export async function generateBeeGameModelWithUsage(
   host: BeeGameModelRuntimeHost,
   input: BeeGameModelGenerateInput,
+  // Billing is deliberately separate from the observer: personal model
+  // calls still expose provider usage to callers, but never enter BGS billing.
   recordModelUsage?: (
     usage: BeeGameModelUsage,
     querySource: string,
   ) => Promise<void>,
   requireUsage = false,
   beforeModelRequest?: () => Promise<void>,
+  observeModelUsage?: (
+    usage: BeeGameModelUsage,
+    querySource: string,
+  ) => void | Promise<void>,
 ): Promise<string> {
-  await beforeModelRequest?.()
+  const billingSource = getModelBillingSource(input.runtimeEnv)
+  const billableToBeeGame = !isPersonalModelBillingSource(billingSource)
+  if (billableToBeeGame) await beforeModelRequest?.()
   let result: import('./beegame/model-runtime-host').BeeGameModelGeneration
   try {
     result = host.generateWithUsage
       ? await host.generateWithUsage(input)
       : { content: await host.generate(input) }
   } catch (error) {
-    if (error instanceof BeeGameModelRuntimeError && error.usage && recordModelUsage)
-      await recordModelUsage(error.usage, input.querySource)
+    if (error instanceof BeeGameModelRuntimeError && error.usage) {
+      await observeModelUsage?.(error.usage, input.querySource)
+      if (billableToBeeGame && recordModelUsage)
+        await recordModelUsage(error.usage, input.querySource)
+    }
     throw error
   }
-  if (result.usage && recordModelUsage) {
-    await recordModelUsage(result.usage, input.querySource)
+  if (result.usage) {
+    await observeModelUsage?.(result.usage, input.querySource)
+    if (billableToBeeGame && recordModelUsage)
+      await recordModelUsage(result.usage, input.querySource)
   }
   // An explicit incomplete receipt preserves unknown usage for reconciliation;
   // it does not invalidate a completed response or justify replaying the model.
-  if (requireUsage && !result.usage) {
+  if (billableToBeeGame && requireUsage && !result.usage) {
     throw new Error('Realtime usage billing requires provider token usage')
   }
   return result.content
@@ -6466,7 +6488,7 @@ export function compactTranscriptForChatHistory<
   for (const event of events) {
     const payload: NonNullable<BeeGameEvent['payload']> = event.payload ?? { type: event.type }
     if (event.type === 'system.status' &&
-      !['task_started', 'task_progress', 'task_notification', 'compact_boundary', 'delivery_phase', 'delivery_error'].includes(String(payload.subtype)) &&
+      !['task_started', 'task_progress', 'task_notification', 'compact_boundary', 'delivery_phase', 'delivery_error', 'host_evidence'].includes(String(payload.subtype)) &&
       !(payload.subtype === 'status' && payload.status === 'compacting')) continue
     const scope = `${event.sessionId}:${payload.parentToolUseID ?? payload.parent_tool_use_id ?? ''}`
     const body = payload.message as { id?: string } | undefined

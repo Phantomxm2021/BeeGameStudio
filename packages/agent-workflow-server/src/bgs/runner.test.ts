@@ -39,16 +39,19 @@ test('game Agent startup rejects a missing or empty catalog before starting nati
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<string, string> = {}, network = resolveOutboundTarget) {
+async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<string, string> = {}, network = resolveOutboundTarget, resumeSessionId?: string) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
   await mkdir(join(workspace, 'docs'), { recursive: true })
   const events: Record<string, any>[] = [], usage: BeeGameEvent[] = [], questions: unknown[] = []
   let sessionId = ''
   const runtime = await createBgsRunner({ command, resolveOutboundTarget: network }).start({ sessionId: 'fixture', cwd: workspace,
     env: { BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only', ...env },
+    ...(resumeSessionId ? { resumeSessionId } : {}),
     onNativeSessionId: id => { sessionId = id },
-    onNativeUsage: (value, epoch) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
-      payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value } }),
+    onNativeUsage: (value, epoch, accounting) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
+      payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value,
+        ...(accounting?.baselineOnly ? { usageBaselineOnly: true } : {}),
+        ...((accounting as { replayed?: boolean } | undefined)?.replayed ? { usageReplayed: true } : {}) } }),
     requestPermission: async request => {
       questions.push(request)
       return { behavior: permission, source: 'policy', ...(permission === 'deny' ? { message: 'Fixture policy denied the operation' } : {}), updatedInput: { ...request.input, answers: { 'Choose style': 'A' } } }
@@ -70,6 +73,33 @@ test('streams text once, preserves tool lifecycle, and counts cached tokens once
     expect(f.events.filter(e => e.eventType.startsWith('tool.')).every(e => !('cwd' in e.input))).toBe(true)
     expect(getLatestRuntimeUsage(f.usage)).toEqual({ prompt_tokens: 80, completion_tokens: 30, cache_read_tokens: 20, cache_creation_tokens: 0, total_tokens: 130 })
     expect(f.sessionId).toBe('019a0000-0000-7000-8000-000000000001')
+  } finally { await f.close() }
+}, 30_000)
+
+test('converted providers retain native counters as baselines without counting their usage twice', async () => {
+  const f = await fixture('allow', { BEEGAME_API_PROTOCOL: 'chat-completions' })
+  try {
+    await f.submit('hello')
+    expect(f.usage.length).toBeGreaterThan(0)
+    expect(f.usage.every(event => event.payload?.usageBaselineOnly === true)).toBe(true)
+    expect(f.usage.at(-1)?.payload?.usage).toMatchObject({ total_tokens: 130 })
+    // This stdio fixture makes no provider request; only a native notification.
+    expect(getLatestRuntimeUsage(f.usage).total_tokens).toBe(0)
+  } finally { await f.close() }
+}, 30_000)
+
+test('resume token usage is marked as replay while the following live turn is not', async () => {
+  const f = await fixture('allow', { BGS_FIXTURE_REPLAY_RESUME_USAGE: '1' }, resolveOutboundTarget,
+    '019a0000-0000-7000-8000-000000000001')
+  try {
+    const replayed = f.usage.filter(event => event.payload?.usageReplayed === true)
+    expect(replayed.length).toBeGreaterThan(0)
+    expect(replayed.every(event => event.payload?.nativeAccountingEpoch === 'bgs:019a0000-0000-7000-8000-000000000001')).toBe(true)
+
+    await f.submit('hello')
+    const live = f.usage.filter(event => event.payload?.usageReplayed !== true)
+    expect(live.length).toBeGreaterThan(0)
+    expect(live.every(event => event.payload?.usageReplayed !== true)).toBe(true)
   } finally { await f.close() }
 }, 30_000)
 

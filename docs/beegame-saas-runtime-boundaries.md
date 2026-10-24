@@ -74,9 +74,29 @@ In hosted SaaS mode, users should not set arbitrary workspace roots. Project pat
 
 ## Usage Billing Flow
 
-Every provider response records its token snapshot as a realtime usage event.
-The server derives the incremental weighted-token delta, converts it to
-microcredits, and debits the realtime usage wallet idempotently. The dashboard
+Only requests using BGS-provided platform API access consume BGS Credits.
+User-owned API keys and personal subscriptions or plans, including OpenCode Go,
+ChatGPT and other personally funded services, are exempt and do not require a
+positive BGS wallet balance. This policy follows credential ownership, not the
+provider brand, plan name or whether the upstream transport is an API.
+
+The host resolves ownership from the connection actually used, never from login
+status or a caller-supplied billing flag. In the existing connection types,
+key-authenticated personal plans (including OpenCode Go) use `byok`, and ChatGPT
+account login uses `chatgpt-subscription`. The exemption policy does not add login
+adapters for other subscriptions. Token statistics remain available. BGS platform
+API requests retain the wallet check and idempotent realtime billing.
+
+Native usage receipts retain their connection source. Only platform increments
+enter the session's billable cumulative total, including when a native thread
+survives connection changes or the host resumes its saved transcript. Untagged
+historical receipts retain their existing treatment; this change does not rewrite
+past bills or refund already recorded usage. Auxiliary model calls use the same
+source policy. Image requests keep their existing source-specific billing:
+personal ChatGPT/BYOK are exempt, while platform image services consume BGS Credits.
+
+For platform model responses, the server derives the incremental weighted-token
+delta, converts it to microcredits, and debits the realtime usage wallet idempotently. The dashboard
 reads usage events and summaries directly; there is no reserve, settle, refund,
 or parallel ledger flow. Summary reads call the server-side
 `beegame_usage_summary` RPC scoped to the authenticated user, with optional

@@ -77,6 +77,22 @@ non-default ports require an explicit `host:port` allowlist entry. Private,
 loopback, link-local, credential-bearing, and otherwise disallowed targets must
 be rejected before connection.
 
+Cloudflare image generation returns a separate image URL. BGS reads and
+downloads it automatically; result CDN hosts do not belong in the static
+model/MCP `BEEGAME_OUTBOUND_ALLOWED_HOSTS` list. This narrow download path uses
+its own target inspection: HTTPS, permitted ports, public DNS addresses, a
+connection pinned to those addresses, no redirects, and no API credentials.
+It does not inherit custom target approvals or the development proxy exception.
+Image bytes still pass PNG decoding before publication.
+
+A failed download keeps the attempt outcome `unknown` and must not trigger
+another generation. For `image-url-not-permitted`, inspect the host log entry
+`image-result-url-rejected`; it records the rejection reason and hostname,
+without URL paths or signed query parameters. If local DNS returns fake proxy
+addresses such as `198.18.0.0/15`, the downloader rejects them. Use a network/DNS
+path that supplies actual public addresses; adding a result host to the model
+allowlist must not bypass this check.
+
 The server upload policy currently enforces a maximum of 8 attachments per
 request, 10 MiB per attachment, 32 MiB total attachment bytes, and a 48 MiB
 request body. It validates filenames, extensions, MIME types, magic bytes,

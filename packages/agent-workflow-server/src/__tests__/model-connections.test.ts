@@ -14,6 +14,7 @@ import { DashboardRepository } from '../dashboard-repository'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
 import { SupabaseRuntimeEnvClient } from '../supabase-runtime-env-client'
 import { encryptSecret } from '../security/secret-crypto'
+import { BEEGAME_MODEL_BILLING_SOURCE, getModelBillingSource } from '../model-billing-source'
 
 let root: string
 let previousKey: string | undefined
@@ -60,6 +61,7 @@ test('BYOK is encrypted, user-isolated and takes precedence over pinned platform
   expect(connectionStatus(b, config)).toMatchObject({ method: 'platform', hasKey: false })
   const env = resolveModelConnection(a, config, { OPENAI_API_KEY: 'platform-key' })
   expect(env.OPENAI_API_KEY).toBe('personal-fixture-secret')
+  expect(env[BEEGAME_MODEL_BILLING_SOURCE]).toBe('byok')
   expect(mergeRuntimeEnv({ modelType: 'openai', env: { OPENAI_API_KEY: 'stale-platform-key' } }, env).OPENAI_API_KEY).toBe('personal-fixture-secret')
   expect(preferredModelId(a)).toBe(config.id)
   saveConnection(a, config, 'byok', undefined, false)
@@ -80,7 +82,7 @@ test('personal BYOK endpoint and selected model reach the runtime without leakin
   expect(env).toMatchObject({ OPENAI_BASE_URL: 'https://personal.example/v1', OPENAI_API_KEY: 'personal-fixture-secret', BEEGAME_MODEL: 'balanced-personal' })
   saveConnection(root, config, 'platform')
   expect(connectionStatus(root, config)).toMatchObject({ method: 'platform', hasKey: true, baseUrl: 'https://personal.example/v1', model: first })
-  expect(resolveModelConnection(root, config, { OPENAI_API_KEY: 'platform-key' }).OPENAI_API_KEY).toBe('platform-key')
+  expect(resolveModelConnection(root, config, { OPENAI_API_KEY: 'platform-key', [BEEGAME_MODEL_BILLING_SOURCE]: 'byok' })).toMatchObject({ OPENAI_API_KEY: 'platform-key', [BEEGAME_MODEL_BILLING_SOURCE]: 'platform' })
   saveConnection(root, config, 'byok')
   expect(resolveModelConnection(root, config, {}).OPENAI_API_KEY).toBe('personal-fixture-secret')
   expect(() => saveConnection(root, config, 'byok', undefined, true, { baseUrl: 'https://other.example/v1', model: first })).toThrow('API key')
@@ -128,6 +130,7 @@ test('subscription runtime excludes API keys and custom endpoints; logout fails 
   saveConnection(root, config, 'chatgpt-subscription')
   const env = resolveModelConnection(root, config, { OPENAI_API_KEY: 'platform', OPENAI_BASE_URL: config.baseUrl })
   expect(env.OPENAI_AUTH_MODE).toBe('chatgpt')
+  expect(env[BEEGAME_MODEL_BILLING_SOURCE]).toBe('chatgpt-subscription')
   expect(env.OPENAI_API_KEY).toBe('')
   expect(env.OPENAI_BASE_URL).toBe('')
   expect(() => resolveModelConnection(root, { ...config, published: false }, {})).toThrow()
@@ -143,7 +146,7 @@ test('independent ChatGPT subscription uses account credentials without a publis
   expect(personalModelAvailable(root, 'alice', PERSONAL_CHATGPT_ID)).toBe(true)
   const repository = new DashboardRepository({ dashboardDataRoot: root, getUserDataRoot: () => root, skillsConfig: false })
   const env = await repository.getRuntimeEnv(root, 'alice', undefined, PERSONAL_CHATGPT_ID)
-  expect(env).toMatchObject({ OPENAI_AUTH_MODE: 'chatgpt', OPENAI_API_KEY: '', OPENAI_BASE_URL: '' })
+  expect(env).toMatchObject({ OPENAI_AUTH_MODE: 'chatgpt', OPENAI_API_KEY: '', OPENAI_BASE_URL: '', [BEEGAME_MODEL_BILLING_SOURCE]: 'chatgpt-subscription' })
   disconnectAccount(root, 'chatgpt')
   expect(personalModelAvailable(root, 'alice', PERSONAL_CHATGPT_ID)).toBe(false)
   await expect(repository.getRuntimeEnv(root, 'alice', undefined, PERSONAL_CHATGPT_ID)).rejects.toThrow('disconnected')
@@ -190,12 +193,18 @@ test('the real repository replaces remote platform credentials with the authenti
     auth_methods: config.authMethods, published: true, base_url: null, api_key_ciphertext: encryptSecret('platform-key', 'model-config:api-key'), is_default: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
   const repository = new DashboardRepository({ dashboardDataRoot: root, getUserDataRoot: () => userRoot, skillsConfig: false,
     supabaseStore: new SupabaseDashboardStore({ url: 'https://fixture.supabase.co', anonKey: 'fixture', authToken: 'alice-token', fetchImpl: (async input => Response.json(String(input).includes('beegame_model_configs') ? [row] : [])) as typeof fetch }),
-    supabaseRuntimeEnvClient: new SupabaseRuntimeEnvClient({ url: 'https://fixture.supabase.co', anonKey: 'fixture', fetchImpl: Object.assign(async () => Response.json({ env: { OPENAI_API_KEY: 'platform-key', BEEGAME_CONFIG_DIR: '/wrong-root' } }), { preconnect: () => {} }) }),
+    supabaseRuntimeEnvClient: new SupabaseRuntimeEnvClient({ url: 'https://fixture.supabase.co', anonKey: 'fixture', fetchImpl: Object.assign(async () => Response.json({ env: { OPENAI_API_KEY: 'platform-key', BEEGAME_CONFIG_DIR: '/wrong-root', [BEEGAME_MODEL_BILLING_SOURCE]: 'platform' } }), { preconnect: () => {} }) }),
   })
   const env = await repository.getRuntimeEnv(userRoot, 'alice', 'alice-token', config.id)
   expect(env.OPENAI_API_KEY).toBe('alice-runtime-key')
   expect(env.BEEGAME_CONFIG_DIR).toBe(join(userRoot, '.runtime/app'))
   expect(env.BEEGAME_MODEL_TYPE).toBe('openai')
+  expect(env[BEEGAME_MODEL_BILLING_SOURCE]).toBe('byok')
+})
+
+test('unknown or missing billing provenance fails closed to platform', () => {
+  expect(getModelBillingSource({})).toBe('platform')
+  expect(getModelBillingSource({ [BEEGAME_MODEL_BILLING_SOURCE]: 'operator-claimed-byok' })).toBe('platform')
 })
 
 test('administrator can publish a subscription-only model without a platform API key', async () => {
@@ -244,6 +253,7 @@ for (const provider of ['anthropic-compatible', 'openai-compatible'] as const) {
       expect((await patch({ published: true })).status).toBe(200)
       const runtime = mapModelConfigToRuntime(saved.id)!
       const env = resolveModelConnection(root, saved, runtime.env)
+      expect(env[BEEGAME_MODEL_BILLING_SOURCE]).toBe('platform')
       expect(env[provider === 'anthropic-compatible' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY']).toBe(body.apiKey)
       expect(env[provider === 'anthropic-compatible' ? 'ANTHROPIC_BASE_URL' : 'OPENAI_BASE_URL']).toBe(profile.baseUrl)
     } finally { cleanups.forEach(cleanup => cleanup()) }
@@ -259,6 +269,7 @@ for (const provider of ['anthropic-compatible', 'openai-compatible'] as const) {
     expect(personalModelAvailable(join(root, 'bob'), 'bob', OPENCODE_GO_ID)).toBe(false)
     const repository = new DashboardRepository({ dashboardDataRoot: root, getUserDataRoot: () => root, skillsConfig: false })
     const env = await repository.getRuntimeEnv(root, 'alice', undefined, OPENCODE_GO_ID)
+    expect(env[BEEGAME_MODEL_BILLING_SOURCE]).toBe('byok')
     const prefix = provider === 'anthropic-compatible' ? 'ANTHROPIC' : 'OPENAI'
     expect(env?.[`${prefix}_BASE_URL`]).toBe(profile.baseUrl)
     expect(env?.[provider === 'anthropic-compatible' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY']).toBe('go-fixture-secret')

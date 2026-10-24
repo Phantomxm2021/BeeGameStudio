@@ -6,6 +6,7 @@ import { BeeGameModelRuntimeError } from '../beegame/model-runtime-host'
 import { BeeGameSessionManager, type BeeGameSessionUsageBillingBackend } from '../beegame/session-manager'
 import { UsageOutboxPersistenceError } from '../beegame/session-usage-outbox'
 import { BeeGameUsageBillingError } from '@bee-game-studio/beegame-billing-core/usage-control-client'
+import { BEEGAME_MODEL_BILLING_SOURCE } from '../model-billing-source'
 
 const usage = (tokens: number) => ({ input_tokens: tokens, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: tokens })
 type Receipt = Awaited<ReturnType<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>>
@@ -99,6 +100,51 @@ describe('model runtime usage recorder', () => {
         expect(modelCalls).toBe(1)
         expect(await f.files()).toEqual([])
       } finally { await restarted.dispose() }
+    } finally { await f.close() }
+  })
+
+  test.each(['byok', 'chatgpt-subscription'] as const)('personal %s calls bypass BGS admission and settlement but retain usage observation', async source => {
+    const f = await fixture(true)
+    let admissions = 0
+    const observed: number[] = []
+    const input = {
+      cwd: f.root,
+      runtimeEnv: { [BEEGAME_MODEL_BILLING_SOURCE]: source },
+      systemPrompt: 'Offline',
+      messages: [],
+      querySource: 'personal-auxiliary',
+    }
+    try {
+      f.state.available = false
+      await expect(f.manager.assertModelRequestAllowed('owner')).rejects.toThrow('Insufficient')
+      const successHost = {
+        async generate() { return 'Unexpected legacy call' },
+        async generateWithUsage() { return { content: 'Personal result', usage: usage(40) } },
+      }
+      expect(await generateBeeGameModelWithUsage(successHost, input, f.recorder, true, async () => { admissions++ }, value => {
+        observed.push(value.total_tokens)
+      })).toBe('Personal result')
+      const failure = new BeeGameModelRuntimeError('Synthetic personal disconnect', 'model_request', { usage: { ...usage(30), incomplete: true } })
+      await expect(generateBeeGameModelWithUsage({ async generate() { throw failure }, async generateWithUsage() { throw failure } }, input, f.recorder, true,
+        async () => { admissions++ }, value => { observed.push(value.total_tokens) })).rejects.toBe(failure)
+      expect(await generateBeeGameModelWithUsage({ async generate() { return 'No receipt' } }, input, f.recorder, true,
+        async () => { admissions++ }, value => { observed.push(value.total_tokens) })).toBe('No receipt')
+      expect(admissions).toBe(0)
+      expect(observed).toEqual([40, 30])
+      expect(f.rows.size).toBe(0)
+      expect(f.state.charged).toBe(0)
+      expect(f.state.settled).toEqual([])
+      expect(f.state.failures).toEqual([])
+    } finally { await f.close() }
+  })
+
+  test('explicit platform provenance remains billable', async () => {
+    const f = await fixture()
+    try {
+      const input = { cwd: f.root, runtimeEnv: { [BEEGAME_MODEL_BILLING_SOURCE]: 'platform' }, systemPrompt: 'Offline', messages: [], querySource: 'platform-auxiliary' }
+      await expect(generateBeeGameModelWithUsage({ async generate() { return 'Unexpected legacy call' }, async generateWithUsage() { return { content: 'Platform result', usage: usage(25) } } }, input, f.recorder, true)).resolves.toBe('Platform result')
+      expect(f.rows.size).toBe(1)
+      expect(f.state.charged).toBe(25)
     } finally { await f.close() }
   })
   test('each physical request is charged in full, including equal usage in the same logical job', async () => {

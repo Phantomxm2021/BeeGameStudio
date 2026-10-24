@@ -20,7 +20,7 @@
 
 实际游戏执行端是 [BgsRuntime](../packages/agent-workflow-server/src/bgs/runner.ts) 和 [stdio client](../packages/agent-workflow-server/src/bgs/client.ts) 启动的 branded BGS app-server。当前游戏链路不会因为仓库名或历史代码而改用 Claude Code；模型 provider bridge 与底层 Coding Agent 是不同职责。
 
-共享目录是 [`.beegame/skills/bgs-game-skills`](../.beegame/skills/bgs-game-skills/README.md)，当前 20 个独立 Skill。路径由 [skills store](../packages/beegame-skills-core/src/store.ts) 解析，native 目录注册由 [bgs/skills.ts](../packages/agent-workflow-server/src/bgs/skills.ts) 完成。账号导入文件在账号自己的配置目录中隔离；不把 Skill 正文复制进游戏产物，也不向全局个人 Codex/Claude 配置安装整包。
+共享目录是 [`.beegame/skills/bgs-game-skills`](../.beegame/skills/bgs-game-skills/README.md)，当前 21 个独立 Skill。路径由 [skills store](../packages/beegame-skills-core/src/store.ts) 解析，native 目录注册由 [bgs/skills.ts](../packages/agent-workflow-server/src/bgs/skills.ts) 完成。账号导入文件在账号自己的配置目录中隔离；不把 Skill 正文复制进游戏产物，也不向全局个人 Codex/Claude 配置安装整包。
 
 [官方说明](https://learn.chatgpt.com/docs/build-skills)描述了 metadata → 选中正文 → 按需引用的渐进披露，以及显式和隐式调用两种方式。本仓库实际行为以固定的 native 源码与测试为准，不因最新文档变化自动升级 runtime。
 
@@ -30,7 +30,7 @@
 |---|---|---|
 | BGS | 用户授权、项目/账号边界、brief 与当前证据、宿主工具、发布与交付责任 | 保留，不增加技能调度框架 |
 | Native Coding Agent | catalog 发现、元数据预算、技能选择、正文读取、上下文压缩、工具与子 Agent 执行 | 继续使用原生能力 |
-| 专业 Skill | 具体方法、何时适用、需要哪些来源、观察能支持什么结论 | 保留 20 个入口，只拆条件细节 |
+| 专业 Skill | 具体方法、何时适用、需要哪些来源、观察能支持什么结论 | 按独立入口发现，按需读取条件细节 |
 | 项目设计与实现 | 八领域决策、实际引擎/资源/代码、按项目规则编写的断言 | 不添加第九份设计文档或第二套布局/任务数据 |
 | 人/真实玩家与目标设备 | 审美、理解、趣味、舒适性及目标设备体验证据 | 缺失时明确未验证 |
 
@@ -106,3 +106,14 @@ Game Feel、技术美术、交互契约、试玩和完成证据按当前任务�
 方案自审保留了实际资源在相关实现前就绪的约束，并把路径观察限定在相关集成范围。关卡、技术美术、动作动画和手感参考已覆盖空间可供性、姿态、接触与反馈，未再扩写；没有增加入口、依赖、审核 Agent、协议、阶段或完成门禁。Skill 名称与 description 不变，原生加载机制不变。
 
 这些改动依然依赖执行模型理解并应用方法。如果它漏读或误用，静态检查无法保证体验；后续应以用户授权的真实运行证据判断效果，失败时重审责任层，不自动追加规则或付费重跑。共享 Skill 文件在后续读取时可见，新项目指南由服务加载的模板初始化；已有项目的 `AGENTS.md` 不自动覆盖，运行中上下文也不追写。本轮不借修改测试项目证明修复。
+
+
+## BGS ImageGen 适配（2026-10-24）
+
+共享目录新增 [`bgs-imagegen`](../.beegame/skills/bgs-game-skills/bgs-imagegen/SKILL.md)，从固定的 vendor ImageGen skill 克隆提示词指导与示例，两条执行路径共享一份指导：ChatGPT 原生图片工具可用且用户未选择 API 时优先原生；用户自带 Key 或平台 API 继续使用当前工具目录的 `assets.mjs`。参数、报价、恢复和资源登记引用已有工具 schema/帮助，不另写客户端、MCP 或第二份合同。
+
+BGS 的 API / ChatGPT 两种模型认证都发现同一适配 skill。会话配置仅禁用系统 `imagegen/SKILL.md`，保留原生图片工具、用户导入与设置，不修改 vendor 默认或个人 Codex 配置。原生图片按返回的 saved path 复制到项目 assets，再使用已有资源登记流程；不能为了登记同一图片再调用 API 生图。
+
+模型认证与 API 图片来源独立。原生图片复用 Codex 的当前账号、Images 请求和限额处理；`assets.mjs` 使用已配置的个人 Key 或平台服务。个人 ChatGPT 与 BYOK 请求不扣 BGS Credits；平台模型和平台图片仍按各自计费服务扣费，来源由宿主解析，skill 不决定账单。账号登录、工具发现及模拟测试不证明真实额度或可用性。显式用户来源选择优先，未知结果不自动重试或切换计费来源；这些是 skill 指导，不是新的自动路由状态机。
+
+已有 `ChatGPTSubscriptionImageProvider` 是另一个 Responses 图片适配器，真实可用性尚未验证，不能等同于原生 ImageGen 的 Images 路径。此次未更改该适配器或任何账号的图片来源，也未发起真实生成。

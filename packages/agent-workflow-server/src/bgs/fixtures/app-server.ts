@@ -12,7 +12,22 @@ createInterface({ input: process.stdin }).on('line', async line => {
   if (!request.method) { awaiting?.(request); return }
   const reply = (result: unknown) => send({ id: request.id, result })
   if (request.method === 'initialize') reply({ userAgent: 'fixture/0.163.0' })
-  else if (request.method === 'thread/start' || request.method === 'thread/resume') { resumed = request.method === 'thread/resume'; reply({ thread: { id: p.threadId ?? threadId } }) }
+  else if (request.method === 'thread/start' || request.method === 'thread/resume') {
+    resumed = request.method === 'thread/resume'
+    const resolvedThreadId = p.threadId ?? threadId
+    reply({ thread: { id: resolvedThreadId } })
+    // A real cold paginated resume can replay the last persisted cumulative
+    // usage before the next turn starts. Keep this opt-in so ordinary fixture
+    // tests retain their small, deterministic protocol transcript.
+    if (resumed && process.env.BGS_FIXTURE_REPLAY_RESUME_USAGE === '1') {
+      const historical = { inputTokens: 17, outputTokens: 5, cachedInputTokens: 2, cacheWriteInputTokens: 0 }
+      send({ method: 'thread/tokenUsage/updated', params: {
+        threadId: resolvedThreadId,
+        turnId: 'historical-turn',
+        tokenUsage: { total: historical, last: historical },
+      } })
+    }
+  }
   else if (request.method === 'thread/backgroundTerminals/clean') reply({})
   else if (request.method === 'skills/extraRoots/set') { skillRoots = p.extraRoots; reply({}) }
   else if (request.method === 'skills/list') {

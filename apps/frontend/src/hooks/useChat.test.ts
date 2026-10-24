@@ -106,6 +106,7 @@ vi.mock('../services/creditsApi', () => ({
 import { api } from '../services/api';
 import { useChat } from './useChat';
 import { settleChatActivity } from '../utils/chatActivity';
+import { projectEventMessages, projectHistoryMessages } from '../services/beeGameChatProjection';
 
 describe('useChat clarification gate handling', () => {
   it('arms only one automatic retry for a native model failure and binds it to that failed turn', async () => {
@@ -213,6 +214,42 @@ describe('useChat clarification gate handling', () => {
     }));
     expect(chatStoreState.settleActivity).not.toHaveBeenCalled();
   });
+  it('keeps projected host evidence live and in history after session stop, with the same identity', async () => {
+    const { result } = renderHook(() => useChat({ projectId: 'evidence-project' }));
+    const common = { sessionId: 'main', turnId: 'turn', createdAt: '2026-10-20T00:00:00Z' };
+    const stopped = projectEventMessages('evidence-project', {
+      ...common, id: 1, type: 'session.stopped', text: 'Stopped',
+    });
+    await act(async () => stopped.forEach(message => latestWebSocketOptions.onMessage?.(message)));
+    chatStoreState.addMessage.mockClear();
+    const evidence = projectEventMessages('evidence-project', {
+      ...common, id: 2, type: 'system.status', text: 'Host evidence: latest measurement is stale; delivery unverified',
+      payload: { type: 'system.status', subtype: 'host_evidence', quality: 'unverified', deliveryEligible: false },
+    });
+    act(() => evidence.forEach(message => latestWebSocketOptions.onMessage?.(message)));
+    const [restored] = projectHistoryMessages(evidence, new Map());
+    expect(chatStoreState.addMessage).toHaveBeenCalledTimes(1);
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: restored.id, sender: 'system', type: 'system_status', taskKind: 'host_evidence',
+      content: restored.content, timestamp: restored.timestamp,
+    }));
+    expect(result.current.isLoading).toBe(false);
+    act(() => evidence.forEach(message => latestWebSocketOptions.onMessage?.({ ...message, project_id: 'other' })));
+    expect(chatStoreState.addMessage).toHaveBeenCalledTimes(1);
+    expect(api.continueTask).not.toHaveBeenCalled();
+  });
+
+  it.each(['delivery_phase', 'session_lifecycle'])('retains existing textual %s events without a context bundle', taskKind => {
+    renderHook(() => useChat({ projectId: 'proj_1' }));
+    act(() => latestWebSocketOptions.onMessage?.({
+      type: 'context_update', project_id: 'proj_1', task_id: 'main', message_id: 'marker',
+      task_kind: taskKind, content: 'marker content', timestamp: 200,
+    }));
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'marker', sender: 'system', taskKind, content: 'marker content', timestamp: 200,
+    }));
+  });
+
   it('does not restore an active Agent state from transcript-only child history', async () => {
     const child = { id: 'child', sender: 'beegame', type: 'tool', taskId: 'parent-task',
       timestamp: 100, isSubagentTool: true, toolStatus: 'running' };

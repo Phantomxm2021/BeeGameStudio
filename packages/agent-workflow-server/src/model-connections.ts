@@ -30,6 +30,7 @@ import { bgsHome } from './bgs/auth'
 import { getSafeRuntimeProcessEnvironment } from './beegame/runtime-process-environment'
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { decryptSecret, encryptSecret } from './security/secret-crypto'
+import { BEEGAME_MODEL_BILLING_SOURCE } from './model-billing-source'
 
 type Connection = {
   method: ModelAuthMethod
@@ -399,6 +400,7 @@ export function resolveModelConnection(
     ...Object.fromEntries(AUTH_ENV.map(key => [key, ''])),
     ...env,
     BGS_MODEL_CONNECTION_RESOLVED: '1',
+    [BEEGAME_MODEL_BILLING_SOURCE]: method,
     BEEGAME_MODEL_TYPE:
       config.provider === 'anthropic-compatible'
         ? 'anthropic'
