@@ -865,6 +865,8 @@
     "deploymentAutofillHint": "根據目前專案文件整理介紹，並擷取目前建置的初始畫面。介紹整理會使用模型額度；填寫後可修改，不會自動發布。",
     "deploymentProgress": "發布進度",
     "deploymentPrepare": "建置並檢查",
+    "deploymentUploading": "正在上傳 · {percent}%",
+    "deploymentVerifying": "上傳完成，正在驗證線上版本",
     "deploymentUploadVerify": "上傳並驗證",
     "deploymentDescriptionPreview": "預覽",
     "deploymentDescriptionEdit": "編輯",

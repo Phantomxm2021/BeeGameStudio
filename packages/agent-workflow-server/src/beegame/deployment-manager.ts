@@ -23,6 +23,12 @@ export type BeeGameDeploymentStatus =
   | 'succeeded'
   | 'failed'
 
+export type BeeGameUploadProgress = {
+  uploadedBytes: number
+  totalBytes: number
+  phase: 'uploading' | 'verifying'
+}
+
 export type BeeGameDeploymentRecord = {
   id: string
   sessionId: string
@@ -46,6 +52,7 @@ export type BeeGameDeploymentRecord = {
   /** Creator-reviewed public copy; never populated directly from source documents. */
   publicDescription?: string
   publicCoverUrl?: string
+  uploadProgress?: BeeGameUploadProgress
 }
 
 export type BeeGameDeploymentRetentionItem = {
@@ -98,6 +105,7 @@ export type BeeGameDeploymentPublisher = {
     artifactHash: string
     authToken?: string
     files: BeeGameDeploymentFile[]
+    onProgress?: (progress: BeeGameUploadProgress) => Promise<void>
   }): Promise<{
     url: string
     artifactPath?: string
@@ -479,6 +487,10 @@ export class BeeGameDeploymentManager {
             artifactHash,
             ...(input.authToken ? { authToken: input.authToken } : {}),
             files,
+            onProgress: async uploadProgress => {
+              record = { ...record, uploadProgress, updatedAt: new Date().toISOString() }
+              await this.saveRecord(record)
+            },
           })
         : undefined
       const deployedAt = new Date().toISOString()

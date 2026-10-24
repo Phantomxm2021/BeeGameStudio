@@ -275,7 +275,7 @@ function WorkspaceDeploymentDialogContent({
           </motion.div> : statusView ? <motion.div key="publication" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: reduced ? 0 : 0.15 } }} className="min-h-0 overflow-y-auto">
             <DeploymentProgress status={showCompleted ? 'succeeded' : activeStatus || 'queued'} projectName={projectName}
-              version={publishedVersion} copied={copied} onShare={copyLive} labels={labels} />
+              uploadProgress={latest?.uploadProgress} version={publishedVersion} copied={copied} onShare={copyLive} labels={labels} />
           </motion.div> : <motion.div key="editor" initial="hidden" animate="visible"
             exit={{ opacity: 0, y: reduced ? 0 : -5, transition: { duration: reduced ? 0 : 0.15 } }}
             variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: reduced ? 0 : 0.045 } } }}

@@ -3,18 +3,24 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Button } from '../beui/project-button';
 import { PresenceGate } from '../beui/registry/lib/presence-gate';
 
-export function DeploymentProgress({ status, projectName, version, copied, onShare, labels }: {
+export function DeploymentProgress({ status, projectName, version, uploadProgress, copied, onShare, labels }: {
   status: 'queued' | 'building' | 'publishing' | 'succeeded';
   projectName: string;
   version: number;
+  uploadProgress?: { uploadedBytes: number; totalBytes: number; phase: 'uploading' | 'verifying' };
   copied: boolean;
   onShare: () => void;
   labels: Record<string, string>;
 }) {
   const reduced = useReducedMotion();
   const complete = status === 'succeeded';
+  const progress = status === 'publishing' ? uploadProgress : undefined;
+  const percent = progress && progress.totalBytes > 0
+    ? Math.max(0, Math.min(100, Math.floor(progress.uploadedBytes / progress.totalBytes * 100))) : undefined;
   const stage = status === 'building' ? labels.deploymentBuilding
-    : status === 'publishing' ? labels.deploymentUploadVerify : labels.deploymentQueued;
+    : status === 'publishing' ? progress?.phase === 'verifying' ? labels.deploymentVerifying
+      : percent !== undefined ? labels.deploymentUploading.replace('{percent}', String(percent)) : labels.deploymentUploadVerify
+      : labels.deploymentQueued;
   const ease = [0.22, 1, 0.36, 1] as const;
   const element = {
     hidden: { opacity: 0, y: reduced ? 0 : 7 },
@@ -44,15 +50,16 @@ export function DeploymentProgress({ status, projectName, version, copied, onSha
             {labels.deploymentVersionLive.replace('{version}', String(version))}
           </motion.p> : <>
             <motion.div variants={element} className="mt-7 w-full max-w-[246px]">
-              <div role="progressbar" aria-label={labels.deploymentProgress} aria-valuetext={stage}
+              <div role="progressbar" aria-label={labels.deploymentProgress} aria-valuetext={stage} aria-valuemin={percent === undefined ? undefined : 0} aria-valuemax={percent === undefined ? undefined : 100} aria-valuenow={percent}
                 className="relative h-1 overflow-hidden rounded-full bg-foreground/10">
-                <motion.div className="absolute inset-y-0 w-[38%] rounded-full bg-foreground/60"
+                {percent !== undefined ? <motion.div className="absolute inset-y-0 left-0 rounded-full bg-foreground/60"
+                  initial={false} animate={{ width: `${percent}%` }} transition={{ duration: reduced ? 0 : 0.3, ease }} /> : <motion.div className="absolute inset-y-0 w-[38%] rounded-full bg-foreground/60"
                   animate={reduced ? { x: '80%' } : { x: ['-110%', '365%'] }}
-                  transition={{ duration: reduced ? 0 : 2.5, repeat: reduced ? 0 : Infinity, ease: [0.45, 0, 0.55, 1] }} />
+                  transition={{ duration: reduced ? 0 : 2.5, repeat: reduced ? 0 : Infinity, ease: [0.45, 0, 0.55, 1] }} />}
               </div>
               <div className="relative mt-3 h-5">
                 <AnimatePresence mode="wait" initial={false}>
-                  <motion.p key={stage} initial={reduced ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+                  <motion.p key={progress?.phase || status} initial={reduced ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: reduced ? 0 : -3 }} transition={{ duration: reduced ? 0 : 0.18, ease }}
                     className="type-footnote text-muted-foreground">{stage}</motion.p>
                 </AnimatePresence>

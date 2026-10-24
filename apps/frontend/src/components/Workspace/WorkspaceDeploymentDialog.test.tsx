@@ -343,6 +343,16 @@ describe('publishing confirmation', () => {
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', labels.deploymentQueued);
     rerender(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record, status: 'publishing' }]} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', labels.deploymentUploadVerify);
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+    rerender(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record, status: 'publishing',
+      uploadProgress: { uploadedBytes: 37, totalBytes: 100, phase: 'uploading' } }]} />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', '正在上传 · 37%');
+    rerender(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record, status: 'publishing',
+      uploadProgress: { uploadedBytes: 100, totalBytes: 100, phase: 'verifying' } }]} />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', labels.deploymentVerifying);
+    expect(screen.queryByRole('heading', { name: labels.deploymentCompleteTitle })).toBeNull();
     expect(screen.queryByRole('textbox', { name: labels.deploymentDescription })).toBeNull();
     expect(screen.queryByText('Markdown')).toBeNull();
     expect(screen.queryByRole('button', { name: labels.deploymentAutofill })).toBeNull();

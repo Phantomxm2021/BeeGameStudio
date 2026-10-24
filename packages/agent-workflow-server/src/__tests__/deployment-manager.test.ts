@@ -28,6 +28,35 @@ describe('BeeGameDeploymentManager', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('progress is visible to polling before completion and does not declare verification success', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'dist/index.html'), '<main>fixture</main>')
+    let manager: BeeGameDeploymentManager
+    manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      publisher: {
+        publishStaticDirectory: async input => {
+          await input.onProgress!({ uploadedBytes: 37, totalBytes: 100, phase: 'uploading' })
+          const current = (await manager.list('progress'))[0]!
+          expect(mergeDeploymentRecords([{ ...current, uploadProgress: undefined, updatedAt: '' }], [current])[0]?.uploadProgress?.uploadedBytes).toBe(37)
+          expect(current.status).toBe('publishing')
+          await input.onProgress!({ uploadedBytes: 100, totalBytes: 100, phase: 'verifying' })
+          return { url: 'https://games.test/index.html' }
+        },
+        verifyPublished: async () => {
+          const current = (await manager.list('progress'))[0]!
+          expect(current.status).toBe('publishing')
+          expect(current.uploadProgress?.phase).toBe('verifying')
+          throw Error('Delivery unavailable')
+        },
+      },
+    })
+    const result = await manager.deploy({ sessionId: 'progress', workspacePath: workspace }, undefined, async () => {})
+    expect(result.status).toBe('failed')
+    expect(result.message).toContain('Delivery unavailable')
+  })
+
   test('creator-reviewed description survives publication persistence and rollback', async () => {
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
     await mkdir(join(workspace, 'dist'))

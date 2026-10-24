@@ -58,7 +58,7 @@ export function isTrustedGameUrl(
     return false
   }
 }
-async function rows(
+async function queryRows(
   env: GamePortalEnv,
   params: URLSearchParams,
   fetchImpl: FetchImplementation,
@@ -74,13 +74,16 @@ async function rows(
     signal: AbortSignal.timeout(8000),
   })
   if (!response.ok) throw Error('Unavailable')
-  return ((await response.json()) as GameRow[]).filter(
-    row =>
-      ID.test(row.project_id) &&
-      row.title?.trim() &&
-      isTrustedGameUrl(row.game_url, env.BEEGAME_DELIVERY_ORIGIN),
-  )
+  return (await response.json()) as GameRow[]
 }
+function isPublicGame(row: GameRow, env: GamePortalEnv) {
+  return ID.test(row.project_id) && Boolean(row.title?.trim()) &&
+    isTrustedGameUrl(row.game_url, env.BEEGAME_DELIVERY_ORIGIN)
+}
+async function rows(env: GamePortalEnv, params: URLSearchParams, fetchImpl: FetchImplementation) {
+  return (await queryRows(env, params, fetchImpl)).filter(row => isPublicGame(row, env))
+}
+
 function publicCover(value: string | null | undefined, gameUrl: string): string | undefined {
   if (!value) return undefined
   try {
@@ -189,6 +192,38 @@ const escape = (value: string) =>
         char
       ]!,
   )
+// Public Markdown becomes a concise plain-text excerpt; all output contexts
+// still escape it independently. No private source document is consulted.
+function excerpt(value = '') {
+  return value.replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]*>/g, ' ').replace(/^[ \t]*[>#*-]+[ \t]*/gm, '')
+    .replace(/[*_`~]/g, '').replace(/\s+/g, ' ').trim().slice(0, 180)
+}
+function isoDate(value?: string) {
+  const date = new Date(value || '')
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+async function sitemap(request: Request, env: GamePortalEnv, fetchImpl: FetchImplementation) {
+  try {
+    const entries = [`<url><loc>${escape(new URL('/', request.url).href)}</loc></url>`]
+    // Page through the public projection: catalogue's 24-item page is not a sitemap.
+    for (let offset = 0; ; offset += 500) {
+      const page = await queryRows(env, new URLSearchParams({ select: SELECT,
+        order: 'project_id.asc', limit: '500', offset: String(offset) }), fetchImpl)
+      for (const game of page.filter(row => isPublicGame(row, env))) {
+        if (entries.length >= 50_000) throw Error('Sitemap requires splitting')
+        const modified = isoDate(game.updated_at)
+        entries.push(`<url><loc>${escape(new URL(`/g/${game.project_id}`, request.url).href)}</loc>${modified ? `<lastmod>${modified}</lastmod>` : ''}</url>`)
+      }
+      if (page.length < 500) break
+    }
+    return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${entries.join('')}</urlset>`, {
+      headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=300', 'x-content-type-options': 'nosniff' },
+    })
+  } catch { return json({ error: 'unavailable' }, 503) }
+}
 async function shell(
   request: Request,
   env: GamePortalEnv,
@@ -200,14 +235,45 @@ async function shell(
   )
   const title = game ? `${game.title} · Bee Play` : 'Bee Play · 玩点不一样'
   const description = game
-    ? `在 Bee Play 游玩 ${game.title}，由 ${game.authorName} 创作。`
+    ? excerpt(game.description) || `在 Bee Play 游玩 ${game.title}，由 ${game.authorName} 创作。`
     : '发现创作者发布的游戏，打开即玩，分享快乐。'
   const canonical = new URL(game ? `/g/${game.projectId}` : '/', request.url)
     .href
-  const html = (await asset.text()).replace(
-    '<title>游戏 · Bee Play</title>',
-    `<title>${escape(title)}</title>\n<meta name="description" content="${escape(description)}">\n<meta property="og:title" content="${escape(title)}">\n<meta property="og:description" content="${escape(description)}">\n<meta property="og:type" content="website">\n<meta property="og:url" content="${escape(canonical)}">\n${game?.coverUrl ? `<meta property="og:image" content="${escape(game.coverUrl)}">\n` : ''}<link rel="canonical" href="${escape(canonical)}">`,
-  )
+  const structured = game ? {
+    '@context': 'https://schema.org', '@type': 'VideoGame', '@id': canonical + '#game',
+    name: game.title, description, url: canonical, gamePlatform: 'Web browser',
+    applicationCategory: 'GameApplication',
+    ...(game.authorName ? { creator: { '@type': 'Thing', name: game.authorName } } : {}),
+    ...(game.coverUrl ? { image: game.coverUrl } : {}),
+    ...(isoDate(game.publishedAt) ? { datePublished: isoDate(game.publishedAt) } : {}),
+    ...(isoDate(game.updatedAt) ? { dateModified: isoDate(game.updatedAt) } : {}),
+  } : { '@context': 'https://schema.org', '@type': 'WebSite', name: 'Bee Play', url: canonical, description }
+  const tags = [
+    `<title>${escape(title)}</title>`,
+    `<meta name="description" content="${escape(description)}">`,
+    `<meta property="og:title" content="${escape(title)}">`,
+    `<meta property="og:description" content="${escape(description)}">`,
+    '<meta property="og:type" content="website">',
+    '<meta property="og:site_name" content="Bee Play">',
+    `<meta property="og:url" content="${escape(canonical)}">`,
+    `<meta name="twitter:card" content="${game?.coverUrl ? 'summary_large_image' : 'summary'}">`,
+    `<meta name="twitter:title" content="${escape(title)}">`,
+    `<meta name="twitter:description" content="${escape(description)}">`,
+    ...(game?.coverUrl ? [
+      `<meta property="og:image" content="${escape(game.coverUrl)}">`,
+      `<meta property="og:image:alt" content="${escape(game.title)}">`,
+      '<meta property="og:image:type" content="image/webp">',
+      `<meta name="twitter:image" content="${escape(game.coverUrl)}">`,
+      `<meta name="twitter:image:alt" content="${escape(game.title)}">`,
+    ] : []),
+    ...(status === 200 ? [
+      `<link rel="canonical" href="${escape(canonical)}">`,
+      // Escaping '<' prevents creator text from terminating the script element.
+      `<script type="application/ld+json">${JSON.stringify(structured).replace(/</g, '\\u003c')}</script>`,
+    ] : ['<meta name="robots" content="noindex">']),
+  ]
+  let html = (await asset.text()).replace('<title>游戏 · Bee Play</title>', tags.join('\n'))
+  if (game) html = html.replace('</body>', `<noscript><h1>${escape(game.title)}</h1><p>${escape(description)}</p><p>启用 JavaScript 即可游玩。</p></noscript></body>`)
   return new Response(request.method === 'HEAD' ? null : html, {
     status,
     headers: {
@@ -227,6 +293,11 @@ export async function handleGamePortalRequest(
     path = url.pathname
   if (!['GET', 'HEAD'].includes(request.method))
     return json({ error: 'method_not_allowed' }, 405)
+  if (path === '/sitemap.xml') return sitemap(request, env, fetchImpl)
+  if (path === '/robots.txt') return new Response(
+    `User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${new URL('/sitemap.xml', request.url).href}\n`,
+    { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=300' } },
+  )
   if (path === '/api/config')
     return json({
       supabaseUrl: env.BEEGAME_SUPABASE_URL,

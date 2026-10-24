@@ -114,7 +114,12 @@ describe('R2 deployment publisher', () => {
       fetchImpl: metadataFetch(metadataEvents),
     })
 
+    const progress: Array<{ uploadedBytes: number; totalBytes: number; phase: string }> = []
     const result = await publisher.publishStaticDirectory({
+      onProgress: async value => {
+        progress.push(value)
+        expect(value.uploadedBytes).toBe(uploads.reduce((sum, file) => sum + file.bytes.byteLength, 0))
+      },
       deploymentId: 'deploy-1',
       sessionId: 'session-1',
       userId: '00000000-0000-0000-0000-000000000001',
@@ -147,6 +152,11 @@ describe('R2 deployment publisher', () => {
       'public, max-age=31536000, immutable',
     ])
     expect(uploads[2]?.cacheControl).toBeUndefined()
+    const total = uploads.reduce((sum, file) => sum + file.bytes.byteLength, 0)
+    expect(progress.map(item => item.uploadedBytes)).toEqual([0, 17, 24, total])
+    expect(progress.every(item => item.totalBytes === total)).toBe(true)
+    expect(progress.at(-1)?.phase).toBe('verifying')
+    expect(progress.slice(0, -1).every(item => item.uploadedBytes < total)).toBe(true)
     expect(result).toEqual(
       expect.objectContaining({
         url: 'https://games.test/deployments/deploy-1/files/index.html',
@@ -176,6 +186,7 @@ describe('R2 deployment publisher', () => {
   test('removes already uploaded objects when a later deployment file fails', async () => {
     const metadataEvents: Array<Record<string, unknown>> = []
     const deleted: string[] = []
+    const progress: Array<{ uploadedBytes: number; totalBytes: number; phase: string }> = []
     let uploadCount = 0
     const publisher = createR2DeploymentPublisher({
       baseUrl: 'https://supabase.test',
@@ -206,6 +217,7 @@ describe('R2 deployment publisher', () => {
 
     await expect(
       publisher.publishStaticDirectory({
+        onProgress: async value => { progress.push(value) },
         deploymentId: 'deploy-2',
         sessionId: 'session-1',
         userId: '00000000-0000-0000-0000-000000000001',
@@ -229,6 +241,8 @@ describe('R2 deployment publisher', () => {
       }),
     ).rejects.toThrow('verification failed')
 
+    expect(progress.map(item => item.uploadedBytes)).toEqual([0, 1])
+    expect(progress.every(item => item.phase === 'uploading' && item.uploadedBytes < item.totalBytes)).toBe(true)
     expect(deleted).toEqual(
       expect.arrayContaining([
         'deployments/deploy-2/files/index.html',

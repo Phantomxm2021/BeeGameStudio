@@ -238,50 +238,35 @@ export function createR2DeploymentPublisher(options: {
         throw new Error('R2 deployment publishing requires authentication')
       }
       const uploaded: UploadedDeploymentObject[] = []
-      const manifestFiles: Array<{
-        path: string
-        byteSize: number
-        contentType: string
-        sha256: string
-      }> = []
+      // Prepare exact sizes and the manifest without retaining every file in memory.
+      // Progress counts bytes only after R2 PUT, HEAD and metadata confirmation.
+      const manifestFiles = []
+      for (const file of input.files) {
+        const bytes = await file.bytes()
+        manifestFiles.push({ path: file.path, byteSize: bytes.byteLength,
+          contentType: contentTypeForDeploymentFile(file), sha256: sha256(bytes) })
+      }
+      const manifestBytes = new TextEncoder().encode(`${JSON.stringify({
+        version: 1, deploymentId: input.deploymentId, projectId: input.projectId,
+        artifactHash: input.artifactHash, files: manifestFiles,
+      }, null, 2)}\n`)
+      const totalBytes = manifestFiles.reduce((sum, file) => sum + file.byteSize, manifestBytes.byteLength)
+      let uploadedBytes = 0
       try {
-        for (const file of input.files) {
-          const bytes = await file.bytes()
-          const checksum = sha256(bytes)
-          const contentType = contentTypeForDeploymentFile(file)
+        await input.onProgress?.({ uploadedBytes, totalBytes, phase: 'uploading' })
+        for (const [index, file] of input.files.entries()) {
+          const bytes = await file.bytes(), info = manifestFiles[index]!
+          if (sha256(bytes) !== info.sha256) throw new Error(`Deployment file changed before upload: ${file.path}`)
           const object = await createAndUpload({
-            ownerId: input.userId,
-            projectId: input.projectId,
-            deploymentId: input.deploymentId,
-            logicalPath: file.path,
-            objectKey: `deployments/${input.deploymentId}/files/${file.path}`,
-            objectKind: 'deployment_file',
-            contentType,
-            bytes,
-            checksum,
-            authToken: input.authToken,
+            ownerId: input.userId, projectId: input.projectId, deploymentId: input.deploymentId,
+            logicalPath: file.path, objectKey: `deployments/${input.deploymentId}/files/${file.path}`,
+            objectKind: 'deployment_file', contentType: info.contentType, bytes,
+            checksum: info.sha256, authToken: input.authToken,
           })
           uploaded.push(object)
-          manifestFiles.push({
-            path: file.path,
-            byteSize: bytes.byteLength,
-            contentType,
-            sha256: checksum,
-          })
+          uploadedBytes += bytes.byteLength
+          await input.onProgress?.({ uploadedBytes, totalBytes, phase: 'uploading' })
         }
-        const manifestBytes = new TextEncoder().encode(
-          `${JSON.stringify(
-            {
-              version: 1,
-              deploymentId: input.deploymentId,
-              projectId: input.projectId,
-              artifactHash: input.artifactHash,
-              files: manifestFiles,
-            },
-            null,
-            2,
-          )}\n`,
-        )
         const manifest = await createAndUpload({
           ownerId: input.userId,
           projectId: input.projectId,
@@ -295,6 +280,7 @@ export function createR2DeploymentPublisher(options: {
           authToken: input.authToken,
         })
         uploaded.push(manifest)
+        await input.onProgress?.({ uploadedBytes: totalBytes, totalBytes, phase: 'verifying' })
         const url = `${publicBaseUrl}/deployments/${input.deploymentId}/files/index.html`
         return {
           url,

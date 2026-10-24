@@ -1015,6 +1015,8 @@
     "deploymentAutofillHint": "Draft an introduction from this project’s documents and capture the current build’s initial screen. Drafting uses model credits. Review or edit before publishing.",
     "deploymentProgress": "Publication progress",
     "deploymentPrepare": "Build & check",
+    "deploymentUploading": "Uploading · {percent}%",
+    "deploymentVerifying": "Upload complete. Verifying the live version",
     "deploymentUploadVerify": "Upload & verify",
     "deploymentDescriptionPreview": "Preview",
     "deploymentDescriptionEdit": "Edit",

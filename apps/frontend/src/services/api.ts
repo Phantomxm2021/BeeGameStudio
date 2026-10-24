@@ -153,6 +153,7 @@ export interface BeeGameDeploymentPayload {
   portalPublishedAt?: string
   publicDescription?: string
   publicCoverUrl?: string
+  uploadProgress?: { uploadedBytes: number; totalBytes: number; phase: 'uploading' | 'verifying' }
 }
 
 export interface BeeGameDeploymentReadiness {

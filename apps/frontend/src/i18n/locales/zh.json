@@ -1015,6 +1015,8 @@
     "deploymentAutofillHint": "根据当前工程文档整理介绍，并截取当前构建的初始画面。介绍整理会使用模型额度；填写后可修改，不会自动发布。",
     "deploymentProgress": "发布进度",
     "deploymentPrepare": "构建并检查",
+    "deploymentUploading": "正在上传 · {percent}%",
+    "deploymentVerifying": "上传完成，正在校验线上版本",
     "deploymentUploadVerify": "上传并验证",
     "deploymentDescriptionPreview": "预览",
     "deploymentDescriptionEdit": "编辑",

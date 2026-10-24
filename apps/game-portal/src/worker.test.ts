@@ -256,3 +256,50 @@ describe('public Portal projection', () => {
     ).toBe(404)
   })
 })
+
+
+describe('Portal SEO', () => {
+  test('renders Twitter cards and script-safe VideoGame JSON-LD from public metadata', async () => {
+    const title = 'Game </script><script>alert(1)</script>'
+    const cover = 'https://games.example.test/deployments/cover/files/__bgs_publication/cover.webp'
+    const html = await (await handleGamePortalRequest(new Request('https://play.test/g/project_1?tracking=1'), env,
+      mockFetch({ title, public_description: '**Play** with [arrows](https://example.test).', public_cover_url: cover }))).text()
+    expect(html).toContain('name="twitter:card" content="summary_large_image"')
+    expect(html).toContain(`name="twitter:image" content="${cover}"`)
+    expect(html).toContain('name="description" content="Play with arrows."')
+    const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)![1]!)
+    expect(data).toMatchObject({ '@type': 'VideoGame', name: title, url: 'https://play.test/g/project_1', image: cover })
+    expect(html).not.toContain('<script>alert(1)</script>')
+    const noCover = await (await handleGamePortalRequest(new Request('https://play.test/g/project_1'), env, mockFetch())).text()
+    expect(noCover).toContain('name="twitter:card" content="summary"')
+    expect(noCover).not.toContain('name="twitter:image"')
+    const missing = await (await handleGamePortalRequest(new Request('https://play.test/g/missing'), env, async () => Response.json([]))).text()
+    expect(missing).toContain('name="robots" content="noindex"')
+    expect(missing).not.toContain('application/ld+json')
+  })
+  test('sitemap reads every public page, excludes invalid URLs, and includes actual modification dates', async () => {
+    const offsets: string[] = []
+    const response = await handleGamePortalRequest(new Request('https://play.test/sitemap.xml'), env, async (input, init) => {
+      const url = new URL(String(input))
+      expect(url.pathname).toBe('/rest/v1/beegame_portal_games')
+      expect(init?.headers).toMatchObject({ apikey: 'public-key' })
+      offsets.push(url.searchParams.get('offset')!)
+      return Response.json(offsets.length === 1 ? Array.from({ length: 500 }, (_, i) => ({ ...row, project_id: `p_${i}` }))
+        : [{ ...row, project_id: 'last_game' }, { ...row, project_id: 'private', game_url: 'https://evil.test/' }])
+    })
+    const xml = await response.text()
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('application/xml')
+    expect(offsets).toEqual(['0', '500'])
+    expect(xml).toContain('<loc>https://play.test/g/last_game</loc>')
+    expect(xml).toContain('<lastmod>2026-10-23T00:00:00.000Z</lastmod>')
+    expect(xml).not.toContain('/g/private')
+    expect(xml).not.toContain('/deployments/')
+    const failed = await handleGamePortalRequest(new Request('https://play.test/sitemap.xml'), env, async () => new Response('secret', { status: 500 }))
+    expect(failed.status).toBe(503)
+    expect(await failed.text()).not.toContain('secret')
+    const robots = await (await handleGamePortalRequest(new Request('https://play.test/robots.txt'), env)).text()
+    expect(robots).toContain('Sitemap: https://play.test/sitemap.xml')
+    expect(robots).toContain('Disallow: /api/')
+  })
+})
