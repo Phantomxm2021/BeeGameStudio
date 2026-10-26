@@ -15,13 +15,13 @@ test('registers roots before retiring managed links; preserves user files and fa
   await symlink(source, join(directory, 'bgs-user-old'))
   await symlink(source, join(directory, 'personal-link'))
   await writeFile(join(directory, 'bgs-builtin-personal-file'), 'Keep')
-  const client = { request: async (method: string, params: unknown) => {
+  const client = { requestNative: async (method: string, params: unknown) => {
     expect(method).toBe('skills/extraRoots/set')
     expect(params).toEqual({ extraRoots: [builtins, user] })
     return {}
-  } } as Pick<BgsClient, 'request'>
+  } } as Pick<BgsClient, 'requestNative'>
   try {
-    const failed = { request: async () => { throw Error('registration failed') } } as Pick<BgsClient, 'request'>
+    const failed = { requestNative: async () => { throw Error('registration failed') } } as Pick<BgsClient, 'requestNative'>
     await expect(configureBgsSkills(failed, home, builtins, user)).rejects.toThrow('registration failed')
     expect((await lstat(legacy)).isSymbolicLink()).toBe(true)
     await Promise.all(Array.from({ length: 4 }, () => configureBgsSkills(client, home, builtins, user)))

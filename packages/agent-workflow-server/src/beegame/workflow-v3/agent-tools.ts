@@ -123,6 +123,20 @@ export async function openAgentTools(input: {
   let revokePreview: (() => Promise<void>) | undefined
   let closing: Promise<void> | undefined
   const workflowRequests = new Set<Promise<unknown>>()
+  // Native dynamic calls and the legacy workflow.mjs endpoint must share one
+  // host-owned closure.  The optional signal only gates admission/response;
+  // a CAS callback that already committed is never rolled back on cancellation.
+  const workflow = async (value: unknown, signal?: AbortSignal) => {
+    if (signal?.aborted || closing) throw Error('Workflow capability unavailable')
+    if (!input.workflow) throw Error('Workflow capability unavailable')
+    const operation = input.workflow(value)
+    workflowRequests.add(operation)
+    try {
+      const result = await operation
+      if (signal?.aborted) throw Error('Workflow request cancelled')
+      return result
+    } finally { workflowRequests.delete(operation) }
+  }
   let measurementServer: ReturnType<typeof Bun.serve> | undefined
   let revokeMeasurement: (() => Promise<void>) | undefined
   const close = () => closing ??= (async () => {
@@ -156,10 +170,8 @@ export async function openAgentTools(input: {
         try {
           const body=await request.json()
           if (body && typeof body==='object' && 'workflow' in body) {
-            if (Object.keys(body).length!==1 || !input.workflow || closing) throw Error('Workflow capability unavailable')
-            const operation=input.workflow(body.workflow);workflowRequests.add(operation)
-            try {return Response.json(await operation,{headers:{'Cache-Control':'no-store'}})}
-            finally {workflowRequests.delete(operation)}
+            if (Object.keys(body).length!==1) throw Error('Workflow capability unavailable')
+            return Response.json(await workflow(body.workflow),{headers:{'Cache-Control':'no-store'}})
           }
           if (body && typeof body === 'object' && 'designAction' in body) {
             if (Object.keys(body).some(key => !['designAction','documents','details'].includes(key)) || typeof body.designAction !== 'string' ||
@@ -205,7 +217,7 @@ export async function openAgentTools(input: {
       revokeMeasurement=await publishProjectPreviewCapability(root,input.sessionId,measurementServer.url.origin+'/'+token,'measurement')
       if(input.workflow) await writeFile(resolve(directory,'workflow.mjs'),[
         'import {realpath,readFile} from "node:fs/promises";',
-        'const help='+JSON.stringify('Current assignment: --status. Preparatory production handoff: --advance <JSON>. Implementation authorized by the current user request: --implement <JSON>. JSON: {summary,sections:[exact existing GDD headings],files:[actual project-relative files],nextDesign?:unfinished direction,coveredDesigns?:{direction:[exact existing GDD headings]}}. During design, coveredDesigns can also close other directions already resolved by the cited source; applicable professional methods and substantive decisions are still required. No new prose is needed when existing design suffices. Unresolved directions remain scheduled; nextDesign must remain unfinished. Advance preserves the full original assignment. Implement is allowed only when the current user request authorizes implementation. Submit once after finalizing outputs, then end this native turn. BGS verifies source identities after cleanup and continues in the same conversation; no chapter approval, model review or quality certification. No automatic retry after failure/pause.')+';',
+        'const help='+JSON.stringify('Current assignment: --status. Preparatory production handoff: --advance <JSON>. Implementation authorized by the current user request: --implement <JSON>. When the native BgsWorkflow tool is exposed, prefer BgsWorkflow({action:"status"|"advance"|"implement", ...handoff fields}); use these commands for legacy native sessions without that tool. JSON: {summary,sections:[exact existing GDD headings],files:[actual project-relative files],nextDesign?:unfinished direction,coveredDesigns?:{direction:[exact existing GDD headings]}}. During design, coveredDesigns can also close other directions already resolved by the cited source; applicable professional methods and substantive decisions are still required. No new prose is needed when existing design suffices. Unresolved directions remain scheduled; nextDesign must remain unfinished. Advance preserves the full original assignment. Implement is allowed only when the current user request authorizes implementation. Submit once after finalizing outputs, then end this native turn. BGS verifies source identities after cleanup and continues in the same conversation; no chapter approval, model review or quality certification. No automatic retry after failure/pause.')+';',
         'const args=process.argv.slice(2);if(args.length===1 && args[0]==="--help"){console.log(help);process.exit(0)}',
         'let value;if(args.length===1 && args[0]==="--status")value={action:"status"};else if(args.length===2 && ["--advance","--implement"].includes(args[0]))value={...JSON.parse(args[1]),action:args[0].slice(2)};else throw Error(help);',
         'if(await realpath(process.cwd())!=='+JSON.stringify(root)+')throw Error("Workflow belongs to another workspace");',
@@ -320,6 +332,7 @@ export async function openAgentTools(input: {
         'Read contracts as needed: bun check-content.mjs --format uiLayoutContract (layout; --format lists sections); bun resources.mjs --contract registration (resource fields); bun consumer.mjs --api (optional runtime). --help: bun assets.mjs, bun bind-content.mjs, bun media.mjs'+
         (input.measurement ? '; node measure.mjs, node handoff.mjs' : '')+(input.workflow ? '; node workflow.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
+        (input.workflow ? 'Use BgsWorkflow for status/advance/implement when exposed; otherwise use workflow.mjs for the saved native session. ' : '')+
         (input.measurement ? 'Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Reuse relevant text still in context; after edits or context loss, reread affected sections. handoff.mjs --details returns full selected files and is not a status check. Plain documents need no index or finalization. ' : ''),
       turnContext: [
         libraryState,
@@ -330,6 +343,7 @@ export async function openAgentTools(input: {
       ].join('\n'),
       // Retain tiny adapters as execution evidence, not game deliverables.
       // Revocation closes the bridge; do not delete Agent-created files.
+      workflow: input.workflow ? workflow : undefined,
       close,
     }
   } catch (error) { await close(); throw error }

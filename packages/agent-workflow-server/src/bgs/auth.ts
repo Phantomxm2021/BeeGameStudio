@@ -15,7 +15,7 @@ async function readDefaultBgsModel(configDirectory: string): Promise<string> {
   const home = bgsHomeDirectory(configDirectory)
   const client = await BgsClient.connect({ cwd: home, env: { ...getSafeRuntimeProcessEnvironment(), BGS_HOME: home }, config: { cli_auth_credentials_store: 'file' } })
   try {
-    const result = await client.request('model/list', {})
+    const result = await client.requestNative('model/list', {})
     const model = result.data?.find((entry: Record<string, unknown>) => entry.isDefault === true)?.model
     if (typeof model !== 'string' || !model) throw Error('Select an available model')
     return model
@@ -47,7 +47,7 @@ async function readChatGPTAuth(configDirectory: string) {
     env: { ...getSafeRuntimeProcessEnvironment(), BGS_HOME: home },
     config: { cli_auth_credentials_store: 'file' } })
   try {
-    const account = await client.request('account/read', { refreshToken: true })
+    const account = await client.requestNative('account/read', { refreshToken: true })
     if (account.account?.type !== 'chatgpt') throw Error('Connect your ChatGPT account first')
     const auth = JSON.parse(await readFile(join(home, 'auth.json'), 'utf8'))
     if (typeof auth.tokens?.access_token !== 'string' || !auth.tokens.access_token) throw Error('ChatGPT credentials are unavailable')

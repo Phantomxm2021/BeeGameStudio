@@ -246,3 +246,24 @@ runtime-state 不再将工具生命周期事件数当作 `memory_hits`；没有�
 默认 measurement 摘要聚焦检查状态、失败或未验证条目，并以计数呈现无问题的已验证资源，去除重复的限制说明。完整资源证据和原始观察继续保留在既有记录及 `--details` 中。这里的已验证资源计数只表示结构检查结果，不表示游戏内资源消费、玩法或视觉质量已验证。
 
 已有 `coveredDesigns` 足以合并实质上已覆盖的专业方向，本轮没有新增设计阶段。用量审计未证明需要增加计费账本或历史回填；原生累计与 provider 回执的历史缺口仍保持缺口，不补零、不补造 receipt。本轮仅修改 BGS 后端与文档，CLI/vendor 和 frontend 保持修改前内容；验证使用离线模拟及临时 fixture，未续跑测试项目或调用真实模型。
+
+
+## 原生流程工具与生成协议类型收敛（2026-10-26）
+
+新建原生线程在当前任务具备 workflow capability 时，通过已有 `thread/start.dynamicTools` 注册 `BgsWorkflow`。`status`、`advance`、`implement` 直接调用当前 BGS 回合的宿主闭包，复用原有 writer、暂停检查、handoff 来源绑定与 CAS；不增加工作流状态或模型调用。SessionManager 将 callback 从 `prepareTurn` 传给 start/submit，复用 runner 时也使用当前 submit 的 callback，不持久化函数。
+
+原生请求必须属于当前父线程及有效回合；子线程不能使用父线程的 handoff 权限。已取消或已撤销的 capability 拒绝新请求。已经进入事务的回调仍由原有 writer/CAS 约束，清理会等待它结束；请求随后取消不回滚已提交的 handoff，也不把迟到响应发回原生线程。该边界不依赖模型正确理解取消。
+
+原生 `thread/resume` 没有替换 dynamicTools 的参数，工具目录随原生会话持久化。已有会话缺少 `BgsWorkflow` 时继续使用 `workflow.mjs`；两个入口调用同一闭包。没有为旧项目新建会话、改写历史或回填脚本。工具入口简化不能保证模型一定会选择它，也不证明减少了实际模型 tokens。
+
+测量和最终 `measure.mjs --finish` 保留原入口。finish 会将 Goal 置为 complete 并关闭 native 连接；若把它直接放进等待响应的 `item/tool/call`，当前 dynamic tool 会被未结束工具检查拦截，关闭连接也会使响应丢失。本轮不为迁移 finish 增加两阶段结束协议；已有测量、预览和外部 helper 仍需要其服务。
+
+稳定的 model/account/config/skills、Goal 和 history injection 共 9 个方法，改用 `BgsClient.requestNative`，参数与响应类型直接引用 vendor 内由 Rust 生成的 TypeScript 类型。此方法沿用现有 stdio、超时、错误与取消机制，不新增 RPC 传输层。含实验字段的 thread/turn 调用、initialize 和测试扩展保留原 request，避免为了符合稳定生成类型而删掉既有字段；没有修改 CLI 或生成文件。
+
+
+ChatGPT 文字／结构化 intake 的原生 ephemeral 迁移经源码核对后未落地。本轮试接已移除，保留现有 direct Responses 路径。`environments: []` 仍会从 BGS_HOME/HOME 等根目录发现并加载 host Skills；ApplyPatch/TestSync 等工具注册取决于模型能力，接到 item 通知后关闭连接不能证明工具从未暴露。`:read-only` 提供真实的文件系统／网络限制，但不等于无 Skills、无工具的单次生成。迁移还会使请求绕过 BGS 现有 outbound 审批与 pinned fetch，改由 native provider routing 处理。当前没有验证这三项契约等价，因此不靠更多 flags、事后拦截或另一套执行循环强行替换。`maxTokens` 在原订阅路径本来就不发送，不能把它误列为此次回归；图片生成也保留现有契约。
+
+动态工具定义同时复用生成的 `DynamicToolSpec`，确保数组统一使用 canonical `type: "function"` 格式。原生协议明确拒绝 canonical 与 legacy 混合，离线注册回归检查这一契约。
+
+
+验证使用临时工作区与假 app-server，覆盖 native 新建／恢复注册、当前 callback 传递、父子权限、过期与取消请求、helper 撤销和两轮清理。既有 runner 的 81 项回归、稳定调用方的 16 项回归及相关 workflow/lifecycle 定向检查通过，后端 TypeScript 检查通过。未执行真实模型、未续跑测试项目、未重启服务；前端与 CLI/vendor 内容按实施前快照核对。

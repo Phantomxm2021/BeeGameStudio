@@ -4,8 +4,8 @@ import type { BgsClient } from './client'
 
 /** Register the shared catalog and this owner's private imports before starting
  * or resuming a thread. Native discovery reads both sources directly. */
-export async function configureBgsSkills(client: Pick<BgsClient, 'request'>, home: string, builtins: string, user: string) {
-  await client.request('skills/extraRoots/set', { extraRoots: [builtins, user] })
+export async function configureBgsSkills(client: Pick<BgsClient, 'requestNative'>, home: string, builtins: string, user: string) {
+  await client.requestNative('skills/extraRoots/set', { extraRoots: [builtins, user] })
   // Remove only our old discovery links after registration succeeds. Preserve
   // user files, system skills and the canonical source directories.
   const directory = join(home, 'skills')

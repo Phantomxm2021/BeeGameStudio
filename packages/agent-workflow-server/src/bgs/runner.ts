@@ -5,6 +5,7 @@ import { dirname, isAbsolute, relative, resolve, join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {startProviderBridge,type ProviderNetworkOptions} from '../model-providers/bridge'
 import { BgsClient, type RpcObject } from './client'
+import type { DynamicToolSpec } from './native-protocol'
 import { bgsApproval, elicitationAnswer, webSearchTool } from './interactions'
 import { bgsReasoningConfig } from './preferences'
 import { configureBgsSkills } from './skills'
@@ -18,7 +19,7 @@ import { responseLanguageInstruction } from '../beegame/response-language'
 import { BEEGAME_USER_RESPONSE_SCOPE } from '../beegame/user-response-scope'
 import { getBuiltinSkillsDirectory } from '@bee-game-studio/beegame-skills-core/store'
 
-const protectedWriteTools: RpcObject[] = ['WriteProjectFile', 'EditProjectFile'].map(name => ({ type: 'function', name,
+const protectedWriteTools: DynamicToolSpec[] = ['WriteProjectFile', 'EditProjectFile'].map(name => ({ type: 'function', name,
   description: name === 'WriteProjectFile'
     ? 'Write a BGS protected design record or AGENTS.md through the host permission authority. Ordinary project files use exec_command with project-local file operations.'
     : 'Edit a BGS protected design record or AGENTS.md through host permission. Use old_string/new_string for one replacement, or edits for multiple non-overlapping replacements against the same original file. All must match uniquely; one failure saves nothing.',
@@ -37,6 +38,16 @@ protectedWriteTools.push({ type: 'function', name: 'AskUserQuestion', descriptio
     items: { type: 'object', properties: { question: { type: 'string' }, header: { type: 'string' },
       options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, description: { type: 'string' } }, required: ['label','description'], additionalProperties: false } },
       multiSelect: { type: 'boolean' } }, required: ['question','header','options'], additionalProperties: false } } }, required: ['questions'], additionalProperties: false } })
+
+const workflowTool: DynamicToolSpec = { type: 'function', name: 'BgsWorkflow',
+  description: 'Read the current BGS assignment (status), hand off completed preparatory work (advance), or enter implementation authorized by the current user request (implement). For handoffs provide a summary, exact existing GDD headings in sections, and actual project-relative files. Optional nextDesign selects an unfinished direction; coveredDesigns maps resolved directions to existing headings. After a successful handoff, end this native turn; BGS checks source identity after cleanup and continues in the same conversation. This records author-declared readiness, not quality certification.',
+  inputSchema: { type: 'object', properties: {
+    action: { type: 'string', enum: ['status', 'advance', 'implement'] }, summary: { type: 'string' },
+    sections: { type: 'array', items: { type: 'string' } }, files: { type: 'array', items: { type: 'string' } },
+    nextDesign: { type: 'string' },
+    coveredDesigns: { type: 'object', additionalProperties: { type: 'array', items: { type: 'string' } } },
+  }, required: ['action'], additionalProperties: false },
+}
 
 // Delivery may leave its single submission command in flight. Every other
 // unfinished native tool remains a reason to reject host-controlled finish.
@@ -299,12 +310,12 @@ class BgsRuntime implements BeeGameSessionRuntime {
         ? { thread: { id: input.resumeSessionId } }
         : input.resumeSessionId
           ? await runtime.client.request('thread/resume', { ...shared, threadId: input.resumeSessionId, excludeTurns: false })
-          : await runtime.client.request('thread/start', { ...shared, dynamicTools: protectedWriteTools })
+          : await runtime.client.request('thread/start', { ...shared, dynamicTools: [...protectedWriteTools, ...(input.workflow ? [workflowTool] : [])] })
       if (typeof result.thread?.id !== 'string' || !result.thread.id) throw Error('BGS did not return a thread identity')
       runtime.threadId = result.thread.id
       if (!runtime.deferredResume) input.onNativeSessionId?.(runtime.threadId)
       // Discover BGS catalogs without copying plugin metadata into game output.
-      const skills = await runtime.client.request('skills/list', { cwds: [access.root], forceReload: true })
+      const skills = await runtime.client.requestNative('skills/list', { cwds: [access.root], forceReload: true })
       runtime.skills = (skills.data ?? []).flatMap((entry:RpcObject) => entry.skills ?? [])
       if (skills.data?.some((entry:RpcObject) => entry.errors?.length))
         console.warn('[BGS skills] Some catalog entries are unavailable; required skills are checked on selection')
@@ -345,10 +356,10 @@ class BgsRuntime implements BeeGameSessionRuntime {
   /** A cold resume may restore an active Goal before the current assignment is
    * available. Pause that persisted Goal while the thread remains unloaded. */
   private async pauseUnloadedGoalIfActive(): Promise<RpcObject | undefined> {
-    const response = await this.client.request('thread/goal/get', { threadId: this.threadId })
+    const response = await this.client.requestNative('thread/goal/get', { threadId: this.threadId })
     const goal = response.goal as RpcObject | null | undefined
     if (goal?.status === 'active') {
-      const paused = await this.client.request('thread/goal/set', {
+      const paused = await this.client.requestNative('thread/goal/set', {
         threadId: this.threadId, status: 'paused', origin: 'automatic',
       })
       return paused.goal as RpcObject
@@ -361,11 +372,11 @@ class BgsRuntime implements BeeGameSessionRuntime {
   private async pauseActiveNativeGoal(): Promise<void> {
     if (!(this.active?.nativeGoal ?? this.nativeGoal) || !this.threadId || !this.client.connected) return
     try {
-      const response = await this.client.request('thread/goal/get', { threadId: this.threadId })
+      const response = await this.client.requestNative('thread/goal/get', { threadId: this.threadId })
       let goal = (response.goal as RpcObject | null | undefined) ?? undefined
       const wasActive = goal?.status === 'active'
       if (wasActive) {
-        const paused = await this.client.request('thread/goal/set', {
+        const paused = await this.client.requestNative('thread/goal/set', {
           threadId: this.threadId, status: 'paused', origin: 'automatic',
         })
         goal = paused.goal as RpcObject | undefined
@@ -409,7 +420,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
     // the expected close must not race the normal submit rejection path.
     turn.controlledFinish = true
     try {
-      const result = await this.client.request('thread/goal/set', {
+      const result = await this.client.requestNative('thread/goal/set', {
         threadId: this.threadId, status: 'complete',
       })
       const goal = result?.goal as RpcObject | undefined
@@ -493,7 +504,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
           if (requestedBudget !== undefined && (!Number.isSafeInteger(requestedBudget) || requestedBudget <= 0))
             throw Error('BGS native Goal token budget must be a positive safe integer')
           const tokenBudget = requestedBudget
-          const result = await this.client.request('thread/goal/set', {
+          const result = await this.client.requestNative('thread/goal/set', {
             threadId: this.threadId,
             ...(objective ? { objective } : {}), status: 'active', origin: 'user',
             ...(tokenBudget !== undefined ? { tokenBudget } : {}),
@@ -509,7 +520,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
             // thread is still unloaded. Load it while paused, then append the
             // current context and assignment before reactivating the Goal.
             const existing = this.deferredResume ? await this.pauseUnloadedGoalIfActive() :
-              (await this.client.request('thread/goal/get', { threadId: this.threadId })).goal as RpcObject | null | undefined
+              (await this.client.requestNative('thread/goal/get', { threadId: this.threadId })).goal as RpcObject | null | undefined
             if (nativeGoal.mode === 'resume') {
               if (!existing) throw Error('BGS native Goal resume found no stored Goal')
               const status = typeof existing.status === 'string' ? existing.status : undefined
@@ -526,7 +537,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
               // its consumed budget and terminal scope. An explicit new Goal
               // assignment must clear that persisted scope before creating a
               // fresh one; resume never performs this reset.
-              await this.client.request('thread/goal/clear', { threadId: this.threadId })
+              await this.client.requestNative('thread/goal/clear', { threadId: this.threadId })
             }
             if (this.deferredResume) await this.resumeDeferredThread()
             const refreshedContext = this.input.resumeSessionId
@@ -538,7 +549,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
             // A cold resume restores the old thread's developer history. Add
             // the current host facts and assignment before reactivating the
             // Goal so its first continuation cannot rely on stale context.
-            await this.client.request('thread/inject_items', {
+            await this.client.requestNative('thread/inject_items', {
               threadId: this.threadId, items: nativeGoalInputItems(prompt, refreshedContext, recovery),
             })
             if (this.active !== turn) return
@@ -816,6 +827,18 @@ class BgsRuntime implements BeeGameSessionRuntime {
     if (!current()) throw Error('No active BGS turn')
     const permission = (request: DashboardPermissionRequest) => this.permission({ ...request, signal,
       ...(child ? { agentId: child } : {}) })
+    if (method === 'item/tool/call' && p.tool === 'BgsWorkflow') {
+      try {
+        // Use only this turn's writer capability, never a callback retained by
+        // thread/start or a child that inherited the parent's tool catalogue.
+        if (p.threadId !== this.threadId || !active?.input.workflow) throw Error('Workflow capability unavailable for this turn')
+        const result = await active.input.workflow(p.arguments, AbortSignal.any([signal, active.input.signal]))
+        if (!current()) throw Error('Workflow request cancelled')
+        return { contentItems: [{ type: 'inputText', text: JSON.stringify(result) }], success: true }
+      } catch (error) {
+        return { contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : 'Workflow request failed' }], success: false }
+      }
+    }
     if (method === 'item/tool/call' && ['WriteProjectFile', 'EditProjectFile'].includes(p.tool)) {
       try {
         const args = p.arguments

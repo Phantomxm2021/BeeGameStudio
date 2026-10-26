@@ -35,7 +35,7 @@ test('concurrent expired-token readers share one official-client refresh, and fa
     const fresh = token(Math.floor(Date.now() / 1000) + 3600)
     connect.mockImplementation(async options => {
       expect(options.env.BGS_HOME).toBe(join(root, 'bgs'))
-      return { async request(method: string) { calls++; expect(method).toBe('account/read'); await save(root, fresh); return { account: { type: 'chatgpt' } } },
+      return { async requestNative(method: string) { calls++; expect(method).toBe('account/read'); await save(root, fresh); return { account: { type: 'chatgpt' } } },
         async close() { closed++ } } as unknown as BgsClient
     })
     const result = await Promise.all([getValidChatGPTAuth(root), getValidChatGPTAuth(root)])

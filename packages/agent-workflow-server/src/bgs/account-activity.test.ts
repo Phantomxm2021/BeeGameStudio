@@ -68,7 +68,7 @@ test('native token refresh and model catalog reads keep account replacement bloc
   await writeFile(join(bgsHome(root), 'auth.json'), auth)
   const requested = deferred(), finish = deferred(), closing = deferred(), closed = deferred()
   const connect = spyOn(BgsClient, 'connect').mockImplementation(async () => ({
-    async request(method: string) { requested.resolve(); await finish.promise
+    async requestNative(method: string) { requested.resolve(); await finish.promise
       return method === 'account/read' ? { account: { type: 'chatgpt' } } : { data: [] } },
     async close() { closing.resolve(); await closed.promise },
   }) as unknown as BgsClient)

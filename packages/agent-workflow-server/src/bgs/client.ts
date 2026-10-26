@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { statSync } from 'node:fs'
 import { basename } from 'node:path'
+import type { BgsStableMethod, BgsStableParams, BgsStableResult } from './native-protocol'
 
 export function bgsCommand(env: Record<string, string | undefined> = process.env): string[] {
   // Model/session environments omit operator-only executable configuration.
@@ -147,6 +148,19 @@ export class BgsClient {
       try { this.write({ id, method, params }) }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error) }
     })
+  }
+
+  /**
+   * Use the generated stable app-server payloads for callers that do not rely
+   * on experimental fields. Experimental and fixture methods intentionally
+   * remain available through request().
+   */
+  requestNative<M extends BgsStableMethod>(
+    method: M,
+    params: BgsStableParams<M>,
+    timeoutMs = 30_000,
+  ): Promise<BgsStableResult<M>> {
+    return this.request<BgsStableResult<M>>(method, params, timeoutMs)
   }
 
   notify(method: string, params: unknown): void { this.write({ method, params }) }

@@ -34,16 +34,16 @@ async function readReasoningCapabilities(env: Record<string, string>, command?: 
   const client = await BgsClient.connect({ command, cwd: home,
     env: { ...getSafeRuntimeProcessEnvironment(), ...env, BGS_HOME: home },
     config: { ...bgsProviderConfig(env), cli_auth_credentials_store: 'file' } })
-  try { return reasoningCapabilities(env, (await client.request('model/list', {})).data || []) }
+  try { return reasoningCapabilities(env, (await client.requestNative('model/list', {})).data || []) }
   finally { await client.close() }
 }
 
 export async function bgsReasoningConfig(env: Record<string, string>, client: BgsClient) {
   const preferences = readReasoningPreferences(env)
   if (!Object.keys(preferences).length || !hasVerifiedReasoningCatalog(env)) return {}
-  const capabilities = reasoningCapabilities(env, (await client.request('model/list', {})).data || [])
+  const capabilities = reasoningCapabilities(env, (await client.requestNative('model/list', {})).data || [])
   if (!Object.hasOwn(preferences, capabilities.connectionKey)) return {}
-  const effort = capabilities.effort ?? (await client.request('config/read', {})).config?.model_reasoning_effort ?? capabilities.defaultEffort
+  const effort = capabilities.effort ?? (await client.requestNative('config/read', {})).config?.model_reasoning_effort ?? capabilities.defaultEffort
   if (!effort || !capabilities.efforts.includes(effort)) throw Error('Saved reasoning effort is no longer supported; update BGS settings')
   return { model_reasoning_effort: effort }
 }

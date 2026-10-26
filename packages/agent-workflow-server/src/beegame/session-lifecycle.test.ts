@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Hono } from 'hono'
 import { BeeGameSessionManager } from './session-manager'
@@ -11,6 +11,52 @@ import { getUserDashboardDataRoot } from '../local-runtime-service'
 import { loadBeeGameIntakeJob } from './intake-job-store'
 
 function gate() { let release!: () => void; return { promise: new Promise<void>(resolve => { release = resolve }), release: () => release() } }
+
+test('forwards the current workflow capability through preparation, runner start and reused submits without snapshot persistence', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-workflow-capability-lifecycle-')
+  const starts: any[] = [], submits: any[] = [], closes: string[] = []
+  let disposals = 0
+  const manager = new BeeGameSessionManager({
+    async start(input) {
+      starts.push(input)
+      return {
+        reusable: true,
+        stop() {},
+        async submit(value: any) { submits.push(value) },
+        async dispose() { disposals++ },
+      }
+    },
+  }, root, () => ({}))
+  try {
+    const session = manager.start({ workspacePath: join(root, 'game'), userId: 'owner' })
+    const first = async () => ({ turn: 'first' })
+    const second = async () => ({ turn: 'second' })
+    await manager.sendWithDisplay(session.id, 'First', {
+      prepareTurn: async () => ({ workflow: first, close: async () => { closes.push('first') } }),
+    })
+    await manager.waitForSessionIdle(session.id)
+    await manager.sendWithDisplay(session.id, 'Second', {
+      prepareTurn: async () => ({ workflow: second, close: async () => { closes.push('second') } }),
+    })
+    await manager.waitForSessionIdle(session.id)
+
+    expect(starts).toHaveLength(1)
+    expect(starts[0].workflow).toBe(first)
+    expect(submits).toHaveLength(2)
+    expect(submits[0].workflow).toBe(first)
+    expect(submits[1].workflow).toBe(second)
+    expect(submits[0].workflow).not.toBe(submits[1].workflow)
+    expect(closes).toEqual(['first', 'second'])
+    expect(disposals).toBe(0)
+
+    const snapshot = JSON.parse(await readFile(join(root, 'snapshots', `${session.id}.json`), 'utf8'))
+    expect(snapshot).not.toHaveProperty('workflow')
+  } finally {
+    await manager.dispose()
+    expect(disposals).toBe(1)
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test('runtime status exposes only aggregate session lifecycle counters', async () => {
   const root = await mkdtemp('/private/tmp/bgs-runtime-status-sessions-')

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BgsClient } from './client'
+import { BgsClient, type RpcObject } from './client'
 
 const fixture = fileURLToPath(new URL('./fixtures/client-diagnostics-app-server.mjs', import.meta.url))
 const executable = basename(process.execPath)
@@ -129,6 +129,21 @@ test('request timeout diagnostics retain method and timeout without provider tex
     expect(diagnostic).toMatchObject({ phase: 'request', method: 'diagnostic/slow', timeoutMs: 25 })
     expect((error as Error).message).toContain('diagnostic/slow')
     expect((error as Error).message).not.toContain(secret)
+  } finally {
+    await client?.close().catch(() => {})
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('requestNative keeps stable app-server calls typed while fixture methods stay generic', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-native-')
+  let client: BgsClient | undefined
+  try {
+    client = await BgsClient.connect({ command, cwd: root, env: env('ok') })
+    const result = await client.requestNative('skills/list', { cwds: [root], forceReload: true })
+    expect(JSON.stringify(result)).toBe('{}')
+    const generic = await client.request<RpcObject>('diagnostic/slow', {}, 25)
+    expect(JSON.stringify(generic)).toBe('{}')
   } finally {
     await client?.close().catch(() => {})
     await rm(root, { recursive: true, force: true })

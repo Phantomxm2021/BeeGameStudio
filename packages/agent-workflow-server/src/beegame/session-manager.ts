@@ -305,7 +305,11 @@ export type BeeGameNativeGoalInput =
   | { mode: 'start'; objective: string; tokenBudget?: number }
   | { mode: 'resume' }
 
+/** Current host turn capability; never serialized into model input or snapshots. */
+export type BeeGameWorkflowCapability = (value: unknown, signal?: AbortSignal) => Promise<unknown>
+
 export type BeeGameSessionRunnerStartInput = {
+  workflow?: BeeGameWorkflowCapability
   nativeGoal?: BeeGameNativeGoalInput
   /** Continue saved native history without inserting a new user assignment. */
   nativeRecovery?: boolean
@@ -364,6 +368,7 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
 ])
 
 export type BeeGameSessionSubmitInput = {
+  workflow?: BeeGameWorkflowCapability
   nativeGoal?: BeeGameNativeGoalInput
   nativeRecovery?: boolean
   prompt: BeeGamePromptInput
@@ -1142,7 +1147,7 @@ export class BeeGameSessionManager {
       nativeRecovery?: boolean
       onTurnAccepted?: (turnId: string) => void
       executionIdentity?: Pick<NonNullable<BeeGameRuntimeSnapshot['executionIdentity']>, 'attemptId'|'workerId'|'fence'>
-      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string;
+      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string; workflow?: BeeGameWorkflowCapability;
         uiLayoutConstraints?: BeeGameSessionRunnerStartInput['uiLayoutConstraints']; close?: () => Promise<void> }>
       onTurnSettled?: () => Promise<void>
       onTurnReady?: () => void | Promise<void>
@@ -1255,6 +1260,7 @@ export class BeeGameSessionManager {
         },
         display?.nativeGoal,
         display?.nativeRecovery,
+        context?.workflow,
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
       })
@@ -1515,6 +1521,7 @@ export class BeeGameSessionManager {
     settle?: () => Promise<void>,
     nativeGoal?: BeeGameNativeGoalInput,
     nativeRecovery?: boolean,
+    workflow?: BeeGameWorkflowCapability,
   ): Promise<void> {
     let turnRunner: BeeGameSessionRuntime | null = null
     let billingSource: ModelBillingSource = 'platform'
@@ -1553,6 +1560,7 @@ export class BeeGameSessionManager {
         record.runner ??
         (await this.runner.start({
           sessionId: record.session.id,
+          workflow,
           ...(nativeGoal ? { nativeGoal } : {}),
           ...(nativeRecovery ? { nativeRecovery } : {}),
           systemContext: record.systemContext,
@@ -1631,6 +1639,7 @@ export class BeeGameSessionManager {
         billingSource,
         nativeGoal,
         nativeRecovery,
+        workflow,
       )
       if (runner.reusable === false) {
         await this.disposeRunner(runner, record)
@@ -1749,10 +1758,12 @@ export class BeeGameSessionManager {
     billingSource: ModelBillingSource,
     nativeGoal?: BeeGameNativeGoalInput,
     nativeRecovery?: boolean,
+    workflow?: BeeGameWorkflowCapability,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     await runner.submit({
       prompt,
+      workflow,
       ...(nativeGoal ? { nativeGoal } : {}),
       ...(nativeRecovery ? { nativeRecovery } : {}),
       ...(record.language ? { language: record.language } : {}),

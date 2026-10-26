@@ -1106,3 +1106,36 @@ test('workflow helper resolves a replacement turn capability and rejects wrong o
     await rm(other, { recursive: true, force: true })
   }
 })
+
+test('native workflow binding shares the helper closure and fails closed on cancellation or close', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-native-workflow-binding-')))
+  const calls: unknown[] = []
+  const measurement = { close: async () => {} } as any
+  let aborting: AbortController | undefined
+  const tools = await openAgentTools({ workspacePath: root, sessionId: 'chat', getAuthToken: () => undefined,
+    measurement, workflow: async value => {
+      calls.push(value)
+      if (value && typeof value === 'object' && (value as any).action === 'abort-after-callback') aborting?.abort()
+      return { accepted: true, value }
+    } })
+  try {
+    await expect(tools.workflow!({ action: 'status' })).resolves.toEqual({ accepted: true, value: { action: 'status' } })
+    expect(calls).toEqual([{ action: 'status' }])
+
+    const before = new AbortController()
+    before.abort()
+    await expect(tools.workflow!({ action: 'status' }, before.signal)).rejects.toThrow('Workflow capability unavailable')
+    expect(calls).toHaveLength(1)
+
+    aborting = new AbortController()
+    await expect(tools.workflow!({ action: 'abort-after-callback' }, aborting.signal)).rejects.toThrow('Workflow request cancelled')
+    // The callback ran once; cancellation does not attempt a compensating write.
+    expect(calls).toHaveLength(2)
+
+    await tools.close()
+    await expect(tools.workflow!({ action: 'status' })).rejects.toThrow('Workflow capability unavailable')
+  } finally {
+    await tools.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

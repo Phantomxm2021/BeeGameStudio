@@ -52,7 +52,8 @@ test('game Agent startup rejects a missing or empty catalog before starting nati
 
 async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<string, string> = {}, network = resolveOutboundTarget, resumeSessionId?: string,
   nativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput, nativeRecovery = false,
-  permissionHandler?: (request: DashboardPermissionRequest) => Promise<import('../beegame/session-manager').DashboardPermissionDecision>) {
+  permissionHandler?: (request: DashboardPermissionRequest) => Promise<import('../beegame/session-manager').DashboardPermissionDecision>,
+  workflow?: import('../beegame/session-manager').BeeGameWorkflowCapability) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
   const childPidFile = join(root, 'owned-child.pid')
   await mkdir(join(workspace, 'docs'), { recursive: true })
@@ -64,6 +65,7 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
     ...(resumeSessionId ? { resumeSessionId } : {}),
     ...(nativeGoal ? { nativeGoal } : {}),
     ...(nativeRecovery ? { nativeRecovery } : {}),
+    workflow,
     onNativeSessionId: id => { sessionId = id },
     onNativeUsage: (value, epoch, accounting) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
       payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value,
@@ -865,3 +867,67 @@ test.each(['resolved', 'turn-completed', 'collab-terminal'])(
       await submitted; await f.close(); cleanup.mockRestore()
     }
   }, 10_000)
+
+
+test('native workflow registration respects new versus resumed thread capabilities', async () => {
+  for (const mode of ['ordinary', 'new-workflow', 'resumed-workflow']) {
+    const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget,
+      mode === 'resumed-workflow' ? '019a0000-0000-7000-8000-000000000001' : undefined,
+      undefined, false, undefined, mode === 'ordinary' ? undefined : async () => ({}))
+    try {
+      const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      const start = rpc.find(call => ['thread/start', 'thread/resume'].includes(call.method))
+      expect(start.params.dynamicTools?.some((tool: any) => tool.name === 'BgsWorkflow') ?? false).toBe(mode === 'new-workflow')
+      if (mode === 'resumed-workflow') expect(start.params).not.toHaveProperty('dynamicTools')
+      else expect(start.params.dynamicTools.every((tool: any) => tool.type === 'function')).toBe(true)
+    } finally { await f.close() }
+  }
+})
+
+test('native workflow uses the live parent callback and rejects cancelled, stale and child requests', async () => {
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget,
+    undefined, undefined, false, undefined, async () => { throw Error('Must not use startup callback') })
+  const client = (f.runtime as unknown as { client: BgsClient }).client
+  const abort = new AbortController()
+  const calls: unknown[] = []
+  let pendingSignal: AbortSignal | undefined, release: (() => void) | undefined
+  const submitted = f.runtime.submit({ prompt: 'hang', signal: abort.signal,
+    workflow: async (value, signal) => {
+      calls.push(value)
+      if ((value as any).action === 'advance') {
+        pendingSignal = signal
+        await new Promise<void>(resolve => { release = resolve })
+      }
+      return { assignment: 'current' }
+    }, onMessage: () => {}, requestPermission: async () => ({ behavior: 'deny' }) }).catch(error => error)
+  const emit = (...events: unknown[]) => client.request('fixture/events', { events })
+  const call = (id: string, action = 'status', threadId = f.sessionId, turnId = 'turn-1') => ({ id, method: 'item/tool/call',
+    params: { threadId, turnId, callId: id, tool: 'BgsWorkflow', arguments: { action } } })
+  const response = async (id: string) => {
+    for (let i = 0; i < 100; i++) {
+      const result = (await client.request('fixture/responses', {})).responses.find((item: any) => item.id === id)
+      if (result) return result
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    throw Error('No fixture response: ' + id)
+  }
+  try {
+    await emit(call('status'))
+    expect((await response('status')).result).toEqual({ success: true, contentItems: [{ type: 'inputText', text: '{"assignment":"current"}' }] })
+    await emit({ method: 'item/completed', params: { threadId: f.sessionId, turnId: 'turn-1', item: {
+      id: 'spawn-child', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'],
+      agentsStates: { child: { status: 'running' } }, status: 'completed' } } }, call('child', 'advance', 'child', 'child-1'))
+    expect((await response('child')).result.success).toBe(false)
+    await emit(call('stale', 'advance', f.sessionId, 'stale-turn'))
+    expect((await response('stale')).error).toBeDefined()
+    expect(calls).toEqual([{ action: 'status' }])
+    await emit(call('cancelled', 'advance'))
+    await waitUntil(() => pendingSignal !== undefined)
+    await emit({ method: 'serverRequest/resolved', params: { threadId: f.sessionId, requestId: 'cancelled' } })
+    await waitUntil(() => pendingSignal!.aborted)
+    release!()
+    await emit(call('after-cancel'))
+    expect((await response('after-cancel')).result.success).toBe(true)
+    expect((await client.request('fixture/responses', {})).responses.some((item: any) => item.id === 'cancelled')).toBe(false)
+  } finally { abort.abort(); release?.(); await submitted; await f.close() }
+})
