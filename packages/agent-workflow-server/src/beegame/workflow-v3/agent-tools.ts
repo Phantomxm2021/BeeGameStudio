@@ -137,6 +137,55 @@ export async function openAgentTools(input: {
       return result
     } finally { workflowRequests.delete(operation) }
   }
+  let measurementHelp = ''
+  const assertMeasurement = (signal?: AbortSignal) => {
+    if (closing || !input.measurement || signal?.aborted) throw Error('Measurement capability unavailable')
+  }
+  const measurement = async (value: unknown, signal?: AbortSignal): Promise<unknown> => {
+    assertMeasurement(signal)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Measurement requires an object')
+    const body = value as Record<string, unknown>
+    if (body && typeof body === 'object' && 'help' in body) {
+      if (Object.keys(body).length !== 1 || body.help !== true) throw Error('Help accepts help:true only')
+      return { help: measurementHelp }
+    }
+    if (body && typeof body === 'object' && 'designAction' in body) {
+      if (Object.keys(body).some(key => !['designAction','documents','details'].includes(key)) || typeof body.designAction !== 'string' ||
+          body.details !== undefined && typeof body.details !== 'boolean' ||
+          body.documents !== undefined && (!Array.isArray(body.documents) || body.documents.some((name: unknown) => typeof name !== 'string')))
+        throw Error('Design accepts designAction, optional document names and boolean details')
+      const identity = await input.measurement!.assertActive(body.designAction === 'finalize')
+      return await design(body.designAction, body.documents, identity, body.details === true)
+    }
+    if (body && typeof body === 'object' && 'executionInputs' in body) {
+      if (Object.keys(body).length !== 1 || body.executionInputs !== true)
+        throw Error('Execution input inspection accepts executionInputs:true only')
+      return await input.measurement!.executionInputs()
+    }
+    if(body && typeof body==='object' && 'handoffPaths' in body) {
+      if(Object.keys(body).some(key=>!['handoffPaths','details'].includes(key)) ||
+        !Array.isArray(body.handoffPaths) ||
+        body.handoffPaths.some((path:unknown)=>typeof path!=='string') ||
+        (body.details!==undefined && typeof body.details!=='boolean'))
+        throw Error('Handoff accepts explicit handoffPaths and optional boolean details only')
+      return await input.measurement!.handoff(body.handoffPaths,body.details)
+    }
+    if(body && typeof body==='object' && 'inspectRequestKey' in body) {
+      if(Object.keys(body).some(key=>!['inspectRequestKey','details'].includes(key)) ||
+        typeof body.inspectRequestKey!=='string' || !body.inspectRequestKey.trim() ||
+        (body.details!==undefined && typeof body.details!=='boolean'))
+        throw Error('Inspection accepts a nonempty inspectRequestKey and optional boolean details')
+      return await input.measurement!.inspect(body.inspectRequestKey,body.details)
+    }
+    const record=await input.measurement!.measure(body, signal)
+    return await input.measurement!.inspect(record.id)
+  }
+  // A successful finish closes the native connection from inside this call.
+  // Never add it to a drain queue that its own cleanup would await.
+  const finishDelivery = async (value: unknown, signal?: AbortSignal) => {
+    assertMeasurement(signal)
+    return input.measurement!.finish(value, signal)
+  }
   let measurementServer: ReturnType<typeof Bun.serve> | undefined
   let revokeMeasurement: (() => Promise<void>) | undefined
   const close = () => closing ??= (async () => {
@@ -173,40 +222,11 @@ export async function openAgentTools(input: {
             if (Object.keys(body).length!==1) throw Error('Workflow capability unavailable')
             return Response.json(await workflow(body.workflow),{headers:{'Cache-Control':'no-store'}})
           }
-          if (body && typeof body === 'object' && 'designAction' in body) {
-            if (Object.keys(body).some(key => !['designAction','documents','details'].includes(key)) || typeof body.designAction !== 'string' ||
-                body.details !== undefined && typeof body.details !== 'boolean' ||
-                body.documents !== undefined && (!Array.isArray(body.documents) || body.documents.some((name: unknown) => typeof name !== 'string')))
-              throw Error('Design accepts designAction, optional document names and boolean details')
-            const identity = await input.measurement!.assertActive(body.designAction === 'finalize')
-            return Response.json(await design(body.designAction, body.documents, identity, body.details === true), { headers: { 'Cache-Control':'no-store' } })
-          }
           if(body && typeof body==='object' && 'finish' in body) {
             if(Object.keys(body).length!==1)throw Error('Delivery accepts finish with requirementsRevision and optional measurementId only')
-            return Response.json(await input.measurement!.finish(body.finish),{headers:{'Cache-Control':'no-store'}})
+            return Response.json(await finishDelivery(body.finish),{headers:{'Cache-Control':'no-store'}})
           }
-          if (body && typeof body === 'object' && 'executionInputs' in body) {
-            if (Object.keys(body).length !== 1 || body.executionInputs !== true)
-              throw Error('Execution input inspection accepts executionInputs:true only')
-            return Response.json(await input.measurement!.executionInputs(), {headers:{'Cache-Control':'no-store'}})
-          }
-          if(body && typeof body==='object' && 'handoffPaths' in body) {
-            if(Object.keys(body).some(key=>!['handoffPaths','details'].includes(key)) ||
-              !Array.isArray(body.handoffPaths) ||
-              body.handoffPaths.some((path:unknown)=>typeof path!=='string') ||
-              (body.details!==undefined && typeof body.details!=='boolean'))
-              throw Error('Handoff accepts explicit handoffPaths and optional boolean details only')
-            return Response.json(await input.measurement!.handoff(body.handoffPaths,body.details),{headers:{'Cache-Control':'no-store'}})
-          }
-          if(body && typeof body==='object' && 'inspectRequestKey' in body) {
-            if(Object.keys(body).some(key=>!['inspectRequestKey','details'].includes(key)) ||
-              typeof body.inspectRequestKey!=='string' || !body.inspectRequestKey.trim() ||
-              (body.details!==undefined && typeof body.details!=='boolean'))
-              throw Error('Inspection accepts a nonempty inspectRequestKey and optional boolean details')
-            return Response.json(await input.measurement!.inspect(body.inspectRequestKey,body.details),{headers:{'Cache-Control':'no-store'}})
-          }
-          const record=await input.measurement!.measure(body)
-          return Response.json(await input.measurement!.inspect(record.id),{headers:{'Cache-Control':'no-store'}})
+          return Response.json(await measurement(body),{headers:{'Cache-Control':'no-store'}})
         } catch(error) {
           // Keep the existing text error; expose validator facts without double parsing or echoing inputs.
           const issues=error instanceof ZodError ? error.issues.map(({path,code,message})=>({path,code,message})) : undefined
@@ -227,7 +247,7 @@ export async function openAgentTools(input: {
         'const api=new URL(capability.apiUrl);if(api.protocol!=="http:" || api.hostname!=="127.0.0.1" || api.username || api.password || api.search || api.hash)throw Error("Invalid workflow endpoint");',
         'const response=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({workflow:value}),redirect:"error"});const result=await response.json();console.log(JSON.stringify(result));if(!response.ok)process.exitCode=1;',
       ].join('\n'),{flag:'wx',mode:0o600})
-      const help='Optional static-Web source-copy build + browser smoke: node <this-entry> --request <stable-id> --artifact <public-build-folder> [--report <existing-file>]... . Runs saved package.json build, replaces only that build folder. Does not install dependencies or execute a model. reports/ is evidence excluded from source copies; game/build inputs belong outside it. Selected reports are separately hashed; edits invalidate their receipt. Finalize them first; do not append receipt IDs/hashes to measured files. --inspect <measurement-ID-or-unique-request-key> [--details] reads any saved receipt in this Run and current freshness without build/browser/model work. Default inspection includes failed check identities and reasons; --details adds raw observations, not another test. Reused keys require the exact measurement ID from handoff. A same-turn request retry inspects without replay; changed inputs need an intended new request. Native/SSR, gameplay, report semantics and quality are NOT certified. --finish --requirements <current-revision> [--measurement <measurement-ID>] explicitly submits the existing .beegame/delivery/acceptance.json and closes this implementation task after validation. The latest measurement must bind that finalized report; without a measurement, a current source-bound execution receipt is required. This action starts no tests or model summary. The author summary is retained in Chat; the submitting process may close with the task. Read-only --inspect and handoff never submit delivery.';
+      const help='When exposed, prefer BgsMeasurement with the same JSON fields directly; {help:true} reads this contract. Use BgsFinishDelivery for terminal submission; it closes the native connection on success. These commands remain for saved native sessions without those tools. Optional static-Web source-copy build + browser smoke: node <this-entry> --request <stable-id> --artifact <public-build-folder> [--report <existing-file>]... . Runs saved package.json build, replaces only that build folder. Does not install dependencies or execute a model. reports/ is evidence excluded from source copies; game/build inputs belong outside it. Selected reports are separately hashed; edits invalidate their receipt. Finalize them first; do not append receipt IDs/hashes to measured files. --inspect <measurement-ID-or-unique-request-key> [--details] reads any saved receipt in this Run and current freshness without build/browser/model work. Default inspection includes failed check identities and reasons; --details adds raw observations, not another test. Reused keys require the exact measurement ID from handoff. A same-turn request retry inspects without replay; changed inputs need an intended new request. Native/SSR, gameplay, report semantics and quality are NOT certified. --finish --requirements <current-revision> [--measurement <measurement-ID>] explicitly submits the existing .beegame/delivery/acceptance.json and closes this implementation task after validation. The latest measurement must bind that finalized report; without a measurement, a current source-bound execution receipt is required. This action starts no tests or model summary. The author summary is retained in Chat; the submitting process may close with the task. Read-only --inspect and handoff never submit delivery.';
       const consumptionHelp=[
         "Optional --consumption-json JSON reuses existing static-Web drivers without a Task. JSON shape example (replace selectors with actual controls): {\"checks\":[\"ui-data-consumption\"],\"uiProbes\":[{\"document\":\"content/ui/menu.json\",\"nodeId\":\"play\",\"selector\":\"#play\",\"viewport\":[1280,720],\"steps\":[{\"click\":\"#start\"}]}]}. Put steps INSIDE each uiProbes item, not at the consumption JSON root.",
         "UI checks source-derived DOM geometry, enabled visibility, marked composition and visible text fit for selected scenarios. Optional bindingValues:{\"visible\":true,\"progress\":0.5} supplies expected values for exact saved node.bindings state keys. The host uses the shared enabled/widthRatio semantics; unsupported or missing binding inputs remain unverified. The target must be active/non-collapsed after binding and responsive resolution. Supply the actual click path for that scenario. State-dependent Touch phone cases need explicit values, not copied desktop assumptions. Values are declared test inputs, not observations of private state or proof of complete state transitions. Unselected screens, states and viewports remain outside coverage.",
@@ -237,6 +257,7 @@ export async function openAgentTools(input: {
         "Audio JSON example: {\"checks\":[\"audio-data-consumption\"],\"audioProbes\":[{\"document\":\"content/scenes/level.json\",\"nodeId\":\"board\",\"componentId\":\"sound\",\"selector\":\"#clip\",\"viewport\":[960,540],\"playSteps\":[{\"click\":\"#start\"}],\"stopSteps\":[{\"click\":\"#stop\"}]}]}. Replace document, node/component IDs, HTML audio selector, viewport and controls with actual project inputs. playSteps and stopSteps are non-empty arrays of {click:\"selector\"} only; wait steps are not supported. The saved audio-source must bind an encoded assetRef and explicit data.volume (0..1)/data.loop. These verify encoded HTML audio, not WebAudio synthesis, concurrency or listening quality.",
         "Select applicable inputs only. Probes change isolated responses, not project sources. --inspect ID [--details] reads retained evidence and unmeasured coverage without rerunning; scoped geometry/resource causality is not complete gameplay or game acceptance.",
       ].join(' ')
+      measurementHelp = help+'\n'+consumptionHelp+'\nNative BgsMeasurement accepts the same JSON request fields directly. Use {inspectRequestKey:ID,details?:boolean}, {handoffPaths:[paths],details?:boolean}, {executionInputs:true}, or {designAction,documents?:[names],details?:boolean}. Submit delivery with BgsFinishDelivery({requirementsRevision,measurementId?}); that terminal call closes the native connection.'
       await writeFile(resolve(directory,'measure.mjs'),[
         'import {realpath,readFile} from "node:fs/promises";',
         'const help='+JSON.stringify(help+'\n'+consumptionHelp+'\n--artifact is project-relative (e.g. dist), not an absolute path. Probes accept optional deviceScaleFactor (positive number, default 1); receipts record observed browser conditions and the declared click path. Other pixel densities and unselected gameplay remain untested.')+';',
@@ -333,7 +354,7 @@ export async function openAgentTools(input: {
         (input.measurement ? '; node measure.mjs, node handoff.mjs' : '')+(input.workflow ? '; node workflow.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
         (input.workflow ? 'Use BgsWorkflow for status/advance/implement when exposed; otherwise use workflow.mjs for the saved native session. ' : '')+
-        (input.measurement ? 'Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Reuse relevant text still in context; after edits or context loss, reread affected sections. handoff.mjs --details returns full selected files and is not a status check. Plain documents need no index or finalization. ' : ''),
+        (input.measurement ? 'Use BgsMeasurement when exposed for measurement, receipt inspection and handoff; {help:true} reads the probe contract without execution. BgsFinishDelivery submits the existing report and terminates this task; the native call closes with the connection. Saved sessions without these tools use measure.mjs/handoff.mjs. Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Reuse relevant text still in context; after edits or context loss, reread affected sections. handoff.mjs --details returns full selected files and is not a status check. Plain documents need no index or finalization. ' : ''),
       turnContext: [
         libraryState,
         ...(!preview ? ['Managed browser Preview is unavailable; native tools remain available.'] : []),
@@ -344,6 +365,8 @@ export async function openAgentTools(input: {
       // Retain tiny adapters as execution evidence, not game deliverables.
       // Revocation closes the bridge; do not delete Agent-created files.
       workflow: input.workflow ? workflow : undefined,
+      measurement: input.measurement ? measurement : undefined,
+      finishDelivery: input.measurement ? finishDelivery : undefined,
       close,
     }
   } catch (error) { await close(); throw error }

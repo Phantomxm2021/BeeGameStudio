@@ -186,8 +186,9 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       catch(error){if(!(error instanceof WorkflowError)||error.code!=='revision-conflict'||i===1)throw error}
     }
   }
-  async function execute(request: MeasurementRequest) {
+  async function execute(request: MeasurementRequest, signal: AbortSignal) {
     const run=await current(), prior=run.agentTurns!.find(t=>t.attemptId===input.turn.attemptId)?.measurements?.find(m=>m.requestKey===request.requestKey)
+    signal.throwIfAborted()
     if(prior) {
       if(prior.runtimeArtifact!==request.runtimeArtifact || JSON.stringify(prior.reportPaths)!==JSON.stringify(request.reportPaths) ||
           !sameJson(prior.consumption,request.consumption))
@@ -230,20 +231,21 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       // partial for the other consumption drivers.
       if (request.consumption?.checks.includes('font-data-consumption'))
         await validateFontProbeInputs(root, request.consumption)
+      signal.throwIfAborted()
       const build=await buildEditableProject(root,{editableProject:true,runtimeArtifact:request.runtimeArtifact,
-        writablePaths:[request.runtimeArtifact+'/**']},[requirements,...record.reports],[AGENT_EVIDENCE_DIRECTORY],controller.signal)
+        writablePaths:[request.runtimeArtifact+'/**']},[requirements,...record.reports],[AGENT_EVIDENCE_DIRECTORY],signal)
       record.checks.push(build)
       record.checks.push(...await registeredContentChecks(root,run.requirements.constraints,requiresBgsEditableContent(run)))
       if(build.status==='passed' && build.projectBuild) {
         record.checks.push(await runArtifactCheck(root,'runtime-smoke',{runtimeArtifact:request.runtimeArtifact,expectedOutputs:[]},
-          [requirements,...record.reports],run.requirements.constraints,controller.signal))
+          [requirements,...record.reports],run.requirements.constraints,signal))
         // Run only explicitly selected existing drivers against this actual
         // build. No synthetic Task, model, source mutation or guessed probe.
         if(record.checks.at(-1)?.status==='passed' && request.consumption)
           for(const id of request.consumption.checks) {
-            if(controller.signal.aborted)throw Error('Measurement cancelled; no automatic retry')
+            if(signal.aborted)throw Error('Measurement cancelled; no automatic retry')
             record.checks.push(await runArtifactCheck(root,id,{runtimeArtifact:request.runtimeArtifact,expectedOutputs:[],
-              ...request.consumption},[requirements,...record.reports],run.requirements.constraints,controller.signal,'selected'))
+              ...request.consumption},[requirements,...record.reports],run.requirements.constraints,signal,'selected'))
           }
         // The browser measured this output, but a concurrent native/background
         // edit can still sever its source association. Keep the failed fact.
@@ -253,7 +255,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       }
       if (record.designInputRevision !== designInputRevision(root))
         throw new WorkflowError('measurement-stale', 'Design inputs changed during measurement; inspect the affected evidence before measuring the current version')
-      if(controller.signal.aborted)throw Error('Measurement cancelled; no automatic retry')
+      if(signal.aborted)throw Error('Measurement cancelled; no automatic retry')
     } catch(error) {record.error=error instanceof Error?error.message:'Measurement failed'}
     record.finishedAt=new Date().toISOString()
     await save(record,false)
@@ -319,7 +321,8 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
         throw new WorkflowError('delivery-stale','Delivery inputs changed while execution was closing; the task is not complete')
       return true
     },
-    async finish(raw:unknown) {
+    async finish(raw:unknown, signal?:AbortSignal) {
+      signal?.throwIfAborted()
       const request=deliveryRequest.parse(raw)
       if(delivery) {
         if(!sameJson(request,delivery.request))throw new WorkflowError('delivery-conflict','This turn already submitted a different delivery')
@@ -332,6 +335,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       submitting=true
       try {
         const snapshot=await deliverySnapshot(request)
+        signal?.throwIfAborted()
         // Do not add this callback to measurement work: session cleanup closes
         // this capability while completion is in flight and must not await itself.
         const completion=Promise.resolve().then(()=>input.onDeliverySubmitted!(snapshot))
@@ -443,14 +447,15 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
         measurementTask:{attemptId:turn.attemptId,requestKey:turn.requestKey,status:turn.status,requirementsRevision:turn.requirementsRevision},
         skills:skillFacts(run)}
     },
-    measure(raw: unknown) {
+    measure(raw: unknown, signal?: AbortSignal) {
+      signal?.throwIfAborted()
       if(controller.signal.aborted)throw new WorkflowError('measurement-closed','Measurement capability has expired')
       if(work||submitting||delivery)throw new WorkflowError('measurement-busy','A measurement or delivery submission is already running; inspect it rather than replaying')
       const consumption=raw && typeof raw==='object' && !Array.isArray(raw) ? (raw as Record<string,unknown>).consumption : undefined
       if(consumption && typeof consumption==='object' && !Array.isArray(consumption) && Object.hasOwn(consumption,'steps'))
         throw new WorkflowError('measurement-input','consumption.steps is not valid: put steps inside the relevant uiProbes item, for example uiProbes:[{document,nodeId,selector,viewport,steps:[{click:"#start"}]}]. No measurement was started.',400)
       const request=measurementRequest.parse(raw)
-      work=execute(request).finally(()=>{work=undefined})
+      work=execute(request, signal ? AbortSignal.any([controller.signal, signal]) : controller.signal).finally(()=>{work=undefined})
       return work
     },
     async close() {controller.abort();await work},

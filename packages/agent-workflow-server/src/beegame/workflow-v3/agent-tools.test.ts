@@ -1139,3 +1139,44 @@ test('native workflow binding shares the helper closure and fails closed on canc
     await rm(root, { recursive: true, force: true })
   }
 })
+
+
+test('native measurement and HTTP share dispatch, and terminal delivery does not await its own cleanup', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-native-measurement-')))
+  const calls: unknown[] = []
+  let tools!: Awaited<ReturnType<typeof openAgentTools>>
+  const measured = { id: 'saved-receipt', quality: 'unverified' }
+  const adapter = {
+    measure: async (value: unknown, signal?: AbortSignal) => { calls.push(['measure', value, signal?.aborted]); return measured },
+    inspect: async (id: string, details?: boolean) => { calls.push(['inspect', id, details]); return measured },
+    executionInputs: async () => ({ files: [] }),
+    handoff: async (paths: string[]) => ({ sources: paths }),
+    finish: async (value: unknown) => { calls.push(['finish', value]); await tools.close(); return { submitted: true } },
+    close: async () => { calls.push(['close']) },
+  } as any
+  try {
+    tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined, sessionId: 'chat', measurement: adapter })
+    const capability = JSON.parse(await readFile(projectPreviewCapabilityPath(root, 'chat', 'measurement'), 'utf8'))
+    const body = { requestKey: 'one', runtimeArtifact: 'dist', reportPaths: [] }
+    const signal = new AbortController().signal
+    expect(await tools.measurement!(body, signal)).toEqual(measured)
+    const directCalls = structuredClone(calls)
+    calls.length = 0
+    const response = await fetch(capability.apiUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    expect(response.ok).toBe(true); expect(await response.json()).toEqual(measured)
+    expect(calls.map(call => (call as any[]).slice(0, 2))).toEqual(directCalls.map(call => (call as any[]).slice(0, 2)))
+    const before = calls.length
+    expect(await tools.measurement!({ help: true })).toHaveProperty('help')
+    expect(calls).toHaveLength(before)
+    expect(await tools.measurement!({ inspectRequestKey: 'saved-receipt' })).toEqual(measured)
+    expect(await tools.measurement!({ executionInputs: true })).toEqual({ files: [] })
+    expect(await tools.measurement!({ handoffPaths: ['README.md'] })).toEqual({ sources: ['README.md'] })
+    await expect(tools.measurement!({ inspectRequestKey: 'saved-receipt', requestKey: 'mixed' })).rejects.toThrow('Inspection accepts')
+    const aborted = AbortSignal.abort()
+    await expect(tools.measurement!(body, aborted)).rejects.toThrow('unavailable')
+    await expect(tools.finishDelivery!({ requirementsRevision: 'current' }, aborted)).rejects.toThrow('unavailable')
+    expect(await tools.finishDelivery!({ requirementsRevision: 'current' })).toHaveProperty('submitted', true)
+    expect(calls.filter(call => (call as any[])[0] === 'finish')).toHaveLength(1)
+    await expect(tools.measurement!(body)).rejects.toThrow('unavailable')
+  } finally { await tools?.close(); await rm(root, {recursive:true,force:true}) }
+})

@@ -2101,6 +2101,7 @@ test('publication cover capture uses only the owned current build without genera
 test('delivery finish accepts the current measured report without another measurement and is callback-idempotent',async()=>{
   const f=await fixture()
   let delivery:ReturnType<typeof createAgentMeasurement>|undefined,callbacks=0
+  let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
   try {
     await writeCurrentDeliveryReport(f.workspace)
     delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async submission=>{
@@ -2112,13 +2113,19 @@ test('delivery finish accepts the current measured report without another measur
     const measured=await delivery.measure({...request,reportPaths:[DESIGN_ACCEPTANCE_PATH]})
     expect(measured.error).toBeUndefined()
     const submission={requirementsRevision:f.run.requirements.revision,measurementId:measured.id}
-    const first=await delivery.finish(submission),second=await delivery.finish(submission)
+    tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:delivery})
+    const first=await tools.finishDelivery!(submission)
+    const capability=JSON.parse(await readFile(projectPreviewCapabilityPath(f.workspace,'chat','measurement'),'utf8'))
+    const response=await fetch(capability.apiUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({finish:submission})})
+    expect(response.ok).toBe(true)
+    const second=await response.json()
     expect(second).toEqual(first)
     expect(first).toMatchObject({measurementId:measured.id,reportPath:DESIGN_ACCEPTANCE_PATH,
       quality:'unverified',deliveryEligible:false})
+    expect(await delivery.verifyDelivery()).toBe(true)
     expect(callbacks).toBe(1)
     expect((await f.current()).agentTurns![0]!.measurements).toHaveLength(1)
-  } finally {await delivery?.close();await f.close()}
+  } finally {await tools?.close();await delivery?.close();await f.close()}
 },30000)
 
 test.each(['stale-requirements','stale-report','unverified','missing-binding'] as const)(
@@ -2210,3 +2217,25 @@ test('ordinary message finish points to implementation entry without submitting 
     expect(await f.current()).toEqual(before)
   }finally{await delivery?.close();await f.close()}
 })
+
+
+test('native request cancellation drains its build without revoking the turn or replaying the receipt', async () => {
+  const f = await fixture("await new Promise(r=>setTimeout(r,60000));"+builder)
+  const abort = new AbortController()
+  try {
+    expect(() => f.measurement.measure(request, AbortSignal.abort())).toThrow()
+    expect((await f.current()).agentTurns![0]!.measurements).toBeUndefined()
+    const pending = f.measurement.measure(request, abort.signal)
+    for(let i=0;i<100 && !(await f.current()).agentTurns![0]!.measurements?.length;i++) await Bun.sleep(5)
+    await Bun.sleep(300)
+    abort.abort()
+    const stopped = await pending
+    expect(stopped.error).toContain('cancelled')
+    expect((await f.measurement.inspect(stopped.id)).id).toBe(stopped.id)
+    const before = (await f.current()).version
+    expect((await f.measurement.measure(request)).id).toBe(stopped.id)
+    expect((await f.current()).version).toBe(before)
+    expect(await f.measurement.executionInputs()).toHaveProperty('files')
+    await expect(f.measurement.finish({ requirementsRevision: f.run.requirements.revision }, AbortSignal.abort())).rejects.toThrow()
+  } finally { await f.close() }
+}, 10000)

@@ -79,7 +79,7 @@ function agentGoalDisplayText(run: Run): string {
 }
 
 // The Goal and follow-up assignments share the same BGS delivery endpoint.
-const implementationHandoff = 'For implementation, finish the confirmed behavior and necessary technical checks, reuse valid evidence for unchanged behavior, then hand off observed results and user-playtest questions and mark the assignment complete. Submit implementation deliveries through the provided measurement --finish capability after recording current evidence; a native Goal completion alone does not submit delivery. User playtesting follows that handoff. Missing required implementation or technical evidence remains unresolved; preserve the confirmed scope.'
+const implementationHandoff = 'For implementation, finish the confirmed behavior and necessary technical checks, reuse valid evidence for unchanged behavior, then hand off observed results and user-playtest questions and mark the assignment complete. Submit implementation deliveries through BgsFinishDelivery (or the provided measure.mjs --finish when unavailable) after recording current evidence; a native Goal completion alone does not submit delivery. User playtesting follows that handoff. Missing required implementation or technical evidence remains unresolved; preserve the confirmed scope.'
 
 export function agentGoalPrompt(run: Run): string {
   if (run.creation?.initialDelivery === 'playable-slice') return [
@@ -138,7 +138,7 @@ function nativeAssignment(run: Run, turn: AgentTurn, previousGoal: NativeGoalObs
     if(remaining!==undefined && remaining<=0)throw new WorkflowError('goal-budget-exhausted','The native Goal budget is exhausted; a new context does not extend it')
     return {mode:'start',objective:previousGoal.objective,...(remaining!==undefined?{tokenBudget:remaining}:{})}
   }
-  if(turn.production)return {mode:'start',objective:'Implement the authorized assignment identified by '+turn.production.originRequestKey+' in the current production prompt. Preserve its full scope; continuously validate behavior and presentation, then submit current delivery through measure.mjs --finish. Preparation handoffs do not certify game quality.'}
+  if(turn.production)return {mode:'start',objective:'Implement the authorized assignment identified by '+turn.production.originRequestKey+' in the current production prompt. Preserve its full scope; continuously validate behavior and presentation, then submit current delivery through BgsFinishDelivery (or measure.mjs --finish when the native tool is unavailable). Preparation handoffs do not certify game quality.'}
   if(!message)return {mode:'start',objective:agentGoalPrompt(run)}
   return undefined
 }
@@ -294,7 +294,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       const handoffReason = (current.paused ? 'User paused; no automatic retry.' :
         failed ?? ((nativeGoal ? 'Codex Goal '+nativeGoal.status+'. ' : '') +
           (missingHandoff ? 'Current production assignment ended without its source-bound workflow handoff; no automatic continuation. ' : '') +
-          (missingDelivery ? 'Implementation delivery was not submitted through the current --finish capability. Inspect retained evidence and submit the existing delivery; no automatic test or model retry. ' : '') +
+          (missingDelivery ? 'Implementation delivery was not submitted through the current BgsFinishDelivery / --finish capability. Inspect retained evidence and submit the existing delivery; no automatic test or model retry. ' : '') +
           (isInitialSliceTurn(current,result)
           ? 'Initial playable-slice assignment ended; inspect the actual preview and give feedback before expanding content. This is not full-game completion. ' : '') +
           await agentTurnHandoffReason(current,saved)))

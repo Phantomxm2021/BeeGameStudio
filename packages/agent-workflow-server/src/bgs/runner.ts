@@ -49,8 +49,25 @@ const workflowTool: DynamicToolSpec = { type: 'function', name: 'BgsWorkflow',
   }, required: ['action'], additionalProperties: false },
 }
 
-// Delivery may leave its single submission command in flight. Every other
-// unfinished native tool remains a reason to reject host-controlled finish.
+const measurementTool: DynamicToolSpec = { type: 'function', name: 'BgsMeasurement',
+  description: 'Run the existing optional static-Web build and selected browser probes, or read saved evidence without rerunning. Choose one operation: requestKey + runtimeArtifact (+ finalized reportPaths, consumption); inspectRequestKey (+ details); handoffPaths (+ details); executionInputs:true; designAction (+ documents, details); or help:true for the full probe contract. Measurement is not a gameplay/visual acceptance verdict and does not submit delivery. Reusing a request key reads the same immutable receipt, never rebuilds.',
+  inputSchema: { type: 'object', properties: {
+    requestKey: { type: 'string' }, runtimeArtifact: { type: 'string' }, reportPaths: { type: 'array', items: { type: 'string' } },
+    consumption: { type: 'object', description: 'Existing checks and per-check probes. Read help:true for field contracts.', additionalProperties: true },
+    inspectRequestKey: { type: 'string' }, details: { type: 'boolean' },
+    handoffPaths: { type: 'array', items: { type: 'string' } }, executionInputs: { type: 'boolean', enum: [true] },
+    designAction: { type: 'string' }, documents: { type: 'array', items: { type: 'string' } }, help: { type: 'boolean', enum: [true] },
+  }, oneOf: [{required:['requestKey','runtimeArtifact']}, {required:['inspectRequestKey']}, {required:['handoffPaths']},
+    {required:['executionInputs']}, {required:['designAction']}, {required:['help']}], additionalProperties: false },
+}
+const finishDeliveryTool: DynamicToolSpec = { type: 'function', name: 'BgsFinishDelivery',
+  description: 'Terminal submission of the existing finalized .beegame/delivery/acceptance.json for this authorized implementation task. All other tools and child work must have finished. Validates current requirements, source identity and saved measurement/execution evidence; runs no tests or model summary. On success BGS records the submission, completes the Goal and closes this native connection, including this tool call. Host cleanup and source recheck decide delivery, not a normal tool response. Validation failures reject the submission.',
+  inputSchema: { type: 'object', properties: { requirementsRevision: { type: 'string' }, measurementId: { type: 'string' } },
+    required: ['requirementsRevision'], additionalProperties: false },
+}
+
+// Delivery may leave only its bound native submission tool, or the legacy
+// helper command, in flight. Other unfinished tools still block completion.
 const trackedNativeToolTypes = new Set(['commandExecution', 'fileChange', 'mcpToolCall', 'dynamicToolCall', 'webSearch', 'imageView'])
 
 export function editProtectedFileText(text: string, args: Record<string, unknown>): string {
@@ -220,6 +237,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
   private shared?: RpcObject
   private nativeGoal?: BeeGameNativeGoalInput
   private active?: { input: BeeGameSessionSubmitInput; turnId?: string; error?: RpcObject; nativeGoal?: BeeGameNativeGoalInput; goalArmed?: boolean; nativeSubmitted?: boolean; nativeGoalStatus?: string; nativeTurnStarted?: boolean; nativeTurnCompleted?: boolean; nativeLastTurnId?: string; controlledFinish?: boolean; resolve(): void; reject(error: Error): void }
+  private deliveryTool?: { callId: string; turnId: string; signal: AbortSignal }
   private stopped = false
   private messages = new Map<string, string>()
   private items = new Map<string, RpcObject>()
@@ -310,7 +328,8 @@ class BgsRuntime implements BeeGameSessionRuntime {
         ? { thread: { id: input.resumeSessionId } }
         : input.resumeSessionId
           ? await runtime.client.request('thread/resume', { ...shared, threadId: input.resumeSessionId, excludeTurns: false })
-          : await runtime.client.request('thread/start', { ...shared, dynamicTools: [...protectedWriteTools, ...(input.workflow ? [workflowTool] : [])] })
+          : await runtime.client.request('thread/start', { ...shared, dynamicTools: [...protectedWriteTools, ...(input.workflow ? [workflowTool] : []),
+            ...(input.measurement ? [measurementTool] : []), ...(input.finishDelivery ? [finishDeliveryTool] : [])] })
       if (typeof result.thread?.id !== 'string' || !result.thread.id) throw Error('BGS did not return a thread identity')
       runtime.threadId = result.thread.id
       if (!runtime.deferredResume) input.onNativeSessionId?.(runtime.threadId)
@@ -411,9 +430,16 @@ class BgsRuntime implements BeeGameSessionRuntime {
     if (this.liveChildren.size)
       throw Error('BGS native Goal completion requires all child agents to finish')
     const pending = [...this.items.values()]
-    const pendingCommands = pending.filter(item => item.type === 'commandExecution')
-    if (pending.some(item => item.type !== 'commandExecution') || pendingCommands.length > 1)
+    const submission = this.deliveryTool
+    if (submission) {
+      if (submission.signal.aborted || submission.turnId !== turn.turnId)
+        throw Error('Native delivery request is no longer active')
+      if (pending.length !== 1 || pending[0]?.id !== submission.callId ||
+          pending[0]?.type !== 'dynamicToolCall' || pending[0]?.tool !== 'BgsFinishDelivery')
+        throw Error('BGS native Goal completion has unfinished non-submission work')
+    } else if (pending.some(item => item.type !== 'commandExecution') || pending.length > 1) {
       throw Error('BGS native Goal completion has unfinished non-submission work')
+    }
     if (!this.client.connected) throw Error('BGS native Goal connection is closed')
 
     // Mark the controlled close before the RPC can cause the child to exit;
@@ -425,7 +451,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       })
       const goal = result?.goal as RpcObject | undefined
       if (goal?.status !== 'complete') throw Error('BGS did not persist native Goal completion')
-      if (turn.input.signal.aborted)
+      if (turn.input.signal.aborted || submission?.signal.aborted)
         throw Error('BGS native Goal completion was interrupted before cleanup')
       const hadCompleteStatus = String(turn.nativeGoalStatus) === 'complete'
       turn.nativeGoalStatus = 'complete'
@@ -827,16 +853,28 @@ class BgsRuntime implements BeeGameSessionRuntime {
     if (!current()) throw Error('No active BGS turn')
     const permission = (request: DashboardPermissionRequest) => this.permission({ ...request, signal,
       ...(child ? { agentId: child } : {}) })
-    if (method === 'item/tool/call' && p.tool === 'BgsWorkflow') {
+    if (method === 'item/tool/call' && ['BgsWorkflow', 'BgsMeasurement', 'BgsFinishDelivery'].includes(p.tool)) {
+      let submission: typeof this.deliveryTool
       try {
-        // Use only this turn's writer capability, never a callback retained by
-        // thread/start or a child that inherited the parent's tool catalogue.
-        if (p.threadId !== this.threadId || !active?.input.workflow) throw Error('Workflow capability unavailable for this turn')
-        const result = await active.input.workflow(p.arguments, AbortSignal.any([signal, active.input.signal]))
-        if (!current()) throw Error('Workflow request cancelled')
+        // Capabilities belong to the current parent turn, not the startup
+        // callback or a child inheriting its parent's tool catalogue.
+        const capability = p.tool === 'BgsWorkflow' ? active?.input.workflow :
+          p.tool === 'BgsMeasurement' ? active?.input.measurement : active?.input.finishDelivery
+        if (p.threadId !== this.threadId || !active || !capability) throw Error('Host capability unavailable for this turn')
+        const requestSignal = AbortSignal.any([signal, active.input.signal])
+        if (p.tool === 'BgsFinishDelivery') {
+          if (this.deliveryTool || typeof p.callId !== 'string' || !active.turnId || p.turnId !== active.turnId)
+            throw Error('Native delivery request is unavailable or already in progress')
+          submission = { callId: p.callId, turnId: p.turnId, signal: requestSignal }
+          this.deliveryTool = submission
+        }
+        const result = await capability(p.arguments, requestSignal)
+        if (!current()) throw Error('Host request cancelled')
         return { contentItems: [{ type: 'inputText', text: JSON.stringify(result) }], success: true }
       } catch (error) {
-        return { contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : 'Workflow request failed' }], success: false }
+        return { contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : 'Host request failed' }], success: false }
+      } finally {
+        if (submission && this.deliveryTool === submission) this.deliveryTool = undefined
       }
     }
     if (method === 'item/tool/call' && ['WriteProjectFile', 'EditProjectFile'].includes(p.tool)) {

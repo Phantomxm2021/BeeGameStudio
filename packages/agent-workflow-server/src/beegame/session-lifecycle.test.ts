@@ -12,7 +12,7 @@ import { loadBeeGameIntakeJob } from './intake-job-store'
 
 function gate() { let release!: () => void; return { promise: new Promise<void>(resolve => { release = resolve }), release: () => release() } }
 
-test('forwards the current workflow capability through preparation, runner start and reused submits without snapshot persistence', async () => {
+test('forwards current native host capabilities through preparation and reused submits without snapshot persistence', async () => {
   const root = await mkdtemp('/private/tmp/bgs-workflow-capability-lifecycle-')
   const starts: any[] = [], submits: any[] = [], closes: string[] = []
   let disposals = 0
@@ -32,11 +32,11 @@ test('forwards the current workflow capability through preparation, runner start
     const first = async () => ({ turn: 'first' })
     const second = async () => ({ turn: 'second' })
     await manager.sendWithDisplay(session.id, 'First', {
-      prepareTurn: async () => ({ workflow: first, close: async () => { closes.push('first') } }),
+      prepareTurn: async () => ({ workflow: first, measurement: first, finishDelivery: first, close: async () => { closes.push('first') } }),
     })
     await manager.waitForSessionIdle(session.id)
     await manager.sendWithDisplay(session.id, 'Second', {
-      prepareTurn: async () => ({ workflow: second, close: async () => { closes.push('second') } }),
+      prepareTurn: async () => ({ workflow: second, measurement: second, finishDelivery: second, close: async () => { closes.push('second') } }),
     })
     await manager.waitForSessionIdle(session.id)
 
@@ -50,7 +50,12 @@ test('forwards the current workflow capability through preparation, runner start
     expect(disposals).toBe(0)
 
     const snapshot = JSON.parse(await readFile(join(root, 'snapshots', `${session.id}.json`), 'utf8'))
-    expect(snapshot).not.toHaveProperty('workflow')
+    for (const name of ['workflow', 'measurement', 'finishDelivery']) {
+      expect(starts[0][name]).toBe(first)
+      expect(submits[0][name]).toBe(first)
+      expect(submits[1][name]).toBe(second)
+      expect(snapshot).not.toHaveProperty(name)
+    }
   } finally {
     await manager.dispose()
     expect(disposals).toBe(1)

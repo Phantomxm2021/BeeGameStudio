@@ -267,3 +267,20 @@ ChatGPT 文字／结构化 intake 的原生 ephemeral 迁移经源码核对后�
 
 
 验证使用临时工作区与假 app-server，覆盖 native 新建／恢复注册、当前 callback 传递、父子权限、过期与取消请求、helper 撤销和两轮清理。既有 runner 的 81 项回归、稳定调用方的 16 项回归及相关 workflow/lifecycle 定向检查通过，后端 TypeScript 检查通过。未执行真实模型、未续跑测试项目、未重启服务；前端与 CLI/vendor 内容按实施前快照核对。
+
+
+## 测量与终止提交直接接入原生工具（2026-10-26，后续）
+
+新建会话的剩余测量与交付入口改为 `BgsMeasurement` 和 `BgsFinishDelivery`，与前述 `BgsWorkflow` 一起由原生 dynamicTools 调用当前宿主 capability。测量、保存回执读取、handoff、执行输入和设计检查复用原 HTTP 分支的同一处理函数及校验；完整 probe 说明通过 `help:true` 按需读取，不把全部 probe schema 重复塞入每轮工具目录。旧 native thread 无法通过 resume 追加工具，仍使用原 helper。既有 MCP／外部入口继续兼容，没有人工改写项目历史脚本。
+
+测量增加的是每次请求的取消信号，与原任务取消信号合并后交给已有构建／浏览器驱动。单次取消停止并等待该次工作结束，保留失败或中断回执；同一 request key 继续只读原记录，不重跑。取消单次测量不撤销整个任务的其他 capability，整体退出仍统一关闭并等待工作。
+
+最终提交采用明确的终止式语义，更新前节“finish 保留 helper”的实现决定。普通动态工具返回成功响应和“立即终止任务且不再调用模型”不能混为一件事；这里选择后者。runner 仅在处理当前父线程的 `BgsFinishDelivery` 时绑定该调用的原生 turn ID、call ID 和取消信号。完成检查只允许这一项仍在执行，其他命令、动态工具、子任务和审批仍阻止完成。请求取消或回合过期不能借该例外提交。
+
+完整链路为：现有报告／需求／测量／源身份校验 → 宿主记录 delivery_submission → 原生 thread/goal/set complete → 原生连接和进程清理 → 现有交付来源复核与任务结算。终止会关闭正在等待的工具调用；原生历史可能将它记录为取消，BGS 不伪造 tool.completed 或普通成功响应，交付结果由真实宿主回执及清理后的复核决定。该工具不需要回复之后再调度第二个阶段，不启动额外模型总结，不新增持久化工作流状态。没有修改 CLI。
+
+离线验证覆盖原生正常终止、其他命令／动态工具／子任务阻止完成、请求取消、SessionManager 回执与清理顺序；真实临时构建覆盖单次取消、保留回执和不重跑；真实报告校验覆盖 native/helper 两个入口的一致性、重复提交、过期报告／需求、缺失测量绑定及清理期间源变化。原生部分使用假 app-server，不能据此声称已做真实模型验收。前端、CLI、测试项目产物均不修改；服务不重启。
+
+ChatGPT 重复接入本轮只分析，未修改调用路径。它不会自动把一次生成变成两次生成或双倍模型 tokens；当前多出的维护面是认证文件适配、HTTP/SSE 和错误处理与原生实现分别演进。具体已确认的兼容差异是 BGS 固定 `chatgpt.com/backend-api/codex/responses`，没有消费原生 `account/read.workspaceRouting` 的 backendOrigin/accountRoutingOverride；需要 workspace 路由的账号可能不兼容，未确认普通账号已发生此故障。
+
+更小的下一步是保留无工具的单次 Responses 请求，认证刷新继续交给 CLI，读取 CLI 已解析的账号／workspaceRouting，在同一 owner/account 边界内生成实际请求地址及路由头，然后通过现有出站校验、DNS 固定和禁止重定向的 fetch。文字与图片消费者须一起检查，不能只替换 URL 而绕开当前网络策略。该路由字段在本版本属于实验 API，需要离线验证字段缺失、普通／路由账号、账号不一致和目标拒绝；不能假设稳定生成类型已包含它。token 文件读取与 SSE 仍是必要的薄适配，现有接口并不能彻底替代为一个隔离的原生单次生成 API。

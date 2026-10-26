@@ -40,6 +40,23 @@ async function runNativeGoal() {
   const event = (method: string, params: any) => send({ method, params: { threadId, turnId, ...params } })
   event('turn/started', { turn: { id: turnId, status: 'inProgress' } })
   if (process.env.BGS_FIXTURE_REUSED_CHILD === '1') reusedChild(event, 'running')
+  if (process.env.BGS_FIXTURE_NATIVE_FINISH) {
+    const extra = process.env.BGS_FIXTURE_NATIVE_FINISH
+    if (extra === 'command') event('item/started', { item: { id: 'other-command', type: 'commandExecution', command: 'unfinished', status: 'inProgress' } })
+    if (extra === 'dynamic') event('item/started', { item: { id: 'other-tool', type: 'dynamicToolCall', tool: 'BgsMeasurement', status: 'inProgress' } })
+    if (extra === 'child') reusedChild(event, 'running')
+    event('item/started', { item: { id: 'native-finish', type: 'dynamicToolCall', tool: 'BgsFinishDelivery', status: 'inProgress' } })
+    const result = await new Promise<any>(resolve => {
+      awaiting = resolve
+      send({ id: 'native-finish', method: 'item/tool/call', params: { threadId, turnId,
+        callId: 'native-finish', tool: 'BgsFinishDelivery', arguments: { requirementsRevision: 'fixture-revision' } } })
+    })
+    awaiting = undefined
+    // Rejected submissions stay in the current turn. An accepted terminal
+    // submission must close the process instead of reaching a model follow-up.
+    event('item/completed', { item: { id: 'finish-result', type: 'agentMessage', text: JSON.stringify(result) } })
+    return
+  }
   if (process.env.BGS_FIXTURE_NATIVE_GOAL_FINALIZE === '1') {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
     const childPidFile = process.env.BGS_FIXTURE_NATIVE_GOAL_CHILD_PID_FILE

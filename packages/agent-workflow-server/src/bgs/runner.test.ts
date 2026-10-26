@@ -53,7 +53,8 @@ test('game Agent startup rejects a missing or empty catalog before starting nati
 async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<string, string> = {}, network = resolveOutboundTarget, resumeSessionId?: string,
   nativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput, nativeRecovery = false,
   permissionHandler?: (request: DashboardPermissionRequest) => Promise<import('../beegame/session-manager').DashboardPermissionDecision>,
-  workflow?: import('../beegame/session-manager').BeeGameWorkflowCapability) {
+  workflow?: import('../beegame/session-manager').BeeGameHostToolCapability,
+  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'measurement'|'finishDelivery'> = {}) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
   const childPidFile = join(root, 'owned-child.pid')
   await mkdir(join(workspace, 'docs'), { recursive: true })
@@ -65,7 +66,7 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
     ...(resumeSessionId ? { resumeSessionId } : {}),
     ...(nativeGoal ? { nativeGoal } : {}),
     ...(nativeRecovery ? { nativeRecovery } : {}),
-    workflow,
+    workflow, ...hostTools,
     onNativeSessionId: id => { sessionId = id },
     onNativeUsage: (value, epoch, accounting) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
       payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value,
@@ -79,7 +80,7 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
     },
   })
   const submit = (prompt: Parameters<typeof runtime.submit>[0]['prompt'], signal = new AbortController().signal,
-    submitNativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput) => runtime.submit({ prompt, signal,
+    submitNativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput) => runtime.submit({ prompt, signal, ...hostTools,
     ...(submitNativeGoal ? { nativeGoal: submitNativeGoal } : {}),
     onMessage: message => { events.push(message) }, requestPermission: async () => ({ behavior: 'deny' }) })
   return { root, workspace, childPidFile, runtime, events, usage, questions, sessionId, submit,
@@ -892,6 +893,7 @@ test('native workflow uses the live parent callback and rejects cancelled, stale
   const calls: unknown[] = []
   let pendingSignal: AbortSignal | undefined, release: (() => void) | undefined
   const submitted = f.runtime.submit({ prompt: 'hang', signal: abort.signal,
+    measurement: async value => ({ receipt: value }),
     workflow: async (value, signal) => {
       calls.push(value)
       if ((value as any).action === 'advance') {
@@ -914,6 +916,9 @@ test('native workflow uses the live parent callback and rejects cancelled, stale
   try {
     await emit(call('status'))
     expect((await response('status')).result).toEqual({ success: true, contentItems: [{ type: 'inputText', text: '{"assignment":"current"}' }] })
+    await emit({ id:'measure', method:'item/tool/call', params:{threadId:f.sessionId,turnId:'turn-1',callId:'measure',
+      tool:'BgsMeasurement',arguments:{inspectRequestKey:'saved'}} })
+    expect((await response('measure')).result).toEqual({success:true,contentItems:[{type:'inputText',text:'{"receipt":{"inspectRequestKey":"saved"}}'}]})
     await emit({ method: 'item/completed', params: { threadId: f.sessionId, turnId: 'turn-1', item: {
       id: 'spawn-child', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'],
       agentsStates: { child: { status: 'running' } }, status: 'completed' } } }, call('child', 'advance', 'child', 'child-1'))
@@ -931,3 +936,98 @@ test('native workflow uses the live parent callback and rejects cancelled, stale
     expect((await client.request('fixture/responses', {})).responses.some((item: any) => item.id === 'cancelled')).toBe(false)
   } finally { abort.abort(); release?.(); await submitted; await f.close() }
 })
+
+
+test.each(['valid', 'command', 'dynamic', 'child'])(
+  'native terminal delivery closes only its own submission and rejects other work: %s', async mode => {
+    let f!: Awaited<ReturnType<typeof fixture>>
+    let calls = 0
+    f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_FINISH: mode },
+      resolveOutboundTarget, undefined, { mode: 'start', objective: 'Deliver the fixture' }, false, undefined, undefined,
+      { measurement: async () => ({}), finishDelivery: async (value, signal) => {
+        expect(value).toEqual({ requirementsRevision: 'fixture-revision' })
+        expect(signal?.aborted).toBe(false)
+        calls++
+        await f.runtime.completeGoal!()
+        return { submitted: true }
+      } })
+    const abort = new AbortController()
+    const submitted = f.submit('Submit the saved report', abort.signal).catch(error => error)
+    try {
+      if (mode === 'valid') {
+        expect(await submitted).toBeUndefined()
+        expect(f.events.some(event => event.eventType === 'assistant.message')).toBe(false)
+        expect(f.events.findLast(event => event.subtype === 'native_goal')?.nativeGoal.status).toBe('complete')
+        expect(f.events.some(event => event.eventType === 'tool.completed' && event.toolUseID === 'native-finish')).toBe(false)
+      } else {
+        await waitUntil(() => f.events.some(event => event.eventType === 'assistant.message'))
+        expect(f.events.find(event => event.eventType === 'assistant.message')?.text).toContain('"success":false')
+      }
+      const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      const names = rpc.find(call => call.method === 'thread/start').params.dynamicTools.map((tool: any) => tool.name)
+      expect(names).toContain('BgsMeasurement'); expect(names).toContain('BgsFinishDelivery')
+      expect(rpc.filter(call => call.method === 'thread/goal/set' && call.params.status === 'complete')).toHaveLength(mode === 'valid' ? 1 : 0)
+      expect(rpc.some(call => call.method === 'turn/start')).toBe(false)
+      expect(calls).toBe(1)
+    } finally { abort.abort(); await submitted; await f.close() }
+  })
+
+
+test('cancelled native terminal delivery cannot finish the Goal after its callback resumes', async () => {
+  let f!: Awaited<ReturnType<typeof fixture>>
+  let signal: AbortSignal | undefined, release!: () => void, attempted!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const done = new Promise<void>(resolve => { attempted = resolve })
+  f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_FINISH: 'valid' },
+    resolveOutboundTarget, undefined, { mode:'start', objective:'Deliver the fixture' }, false, undefined, undefined,
+    { finishDelivery: async (_value, requestSignal) => {
+      signal = requestSignal
+      await gate
+      try { await f.runtime.completeGoal!(); return {} } finally { attempted() }
+    } })
+  const abort = new AbortController(), submitted = f.submit('Submit the saved report', abort.signal).catch(error => error)
+  const client = (f.runtime as unknown as { client: BgsClient }).client
+  try {
+    await waitUntil(() => signal !== undefined)
+    await client.request('fixture/events', { events: [{ method:'serverRequest/resolved', params:{threadId:f.sessionId,requestId:'native-finish'} }] })
+    await waitUntil(() => signal!.aborted)
+    release(); await done
+    const rpc = (await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+    expect(rpc.some(call => call.method==='thread/goal/set' && call.params.status==='complete')).toBe(false)
+    expect((await client.request('fixture/responses',{})).responses.some((item:any)=>item.id==='native-finish')).toBe(false)
+  } finally { release(); abort.abort(); await submitted; await f.close() }
+})
+
+
+test('native terminal delivery crosses SessionManager submission persistence and settlement cleanup', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-native-delivery-session-')
+  const native = createBgsRunner({ command, resolveOutboundTarget })
+  const manager = new BeeGameSessionManager({ start: input => native.start({ ...input,
+    env: { ...input.env, BGS_FIXTURE_NATIVE_FINISH:'valid' } }) }, root,
+    () => ({ BEEGAME_CONFIG_DIR:join(root,'config'), OPENAI_AUTH_MODE:'chatgpt' }))
+  let turnId = '', closed = 0
+  try {
+    const session = manager.start({workspacePath:join(root,'game'),userId:'owner'})
+    await manager.sendWithDisplay(session.id,'Submit the validated fixture',{
+      nativeGoal:{mode:'start',objective:'Deliver the fixture'},
+      executionIdentity:{attemptId:'fixture-attempt',workerId:'fixture-worker',fence:1},
+      onTurnAccepted:id=>{turnId=id},
+      prepareTurn:async()=>({finishDelivery:async value=>{
+        // Validation itself is covered with real reports in agent-measurement;
+        // this fixture exercises persistence, native shutdown and settlement.
+        await manager.completeNativeGoal(session.id,turnId,{attemptId:'fixture-attempt',
+          requirementsRevision:(value as any).requirementsRevision,reportPath:'.beegame/delivery/acceptance.json',
+          reportSha256:'a'.repeat(64),sourceSha256:'b'.repeat(64),summary:'Synthetic validated submission'})
+        return {}
+      },close:async()=>{closed++}}),
+    })
+    await manager.waitForSessionIdle(session.id)
+    const events=manager.transcript(session.id)
+    const receipt=events.findIndex(event=>event.payload?.subtype==='delivery_submission')
+    const complete=events.findIndex(event=>event.payload?.subtype==='native_goal' && (event.payload.nativeGoal as any)?.status==='complete')
+    expect(receipt).toBeGreaterThanOrEqual(0);expect(complete).toBeGreaterThan(receipt)
+    expect(events.some(event=>event.type==='turn.failed')).toBe(false)
+    expect(closed).toBe(1)
+    expect(manager.get(session.id)?.turnStatus).toBe('idle')
+  } finally {await manager.dispose();await rm(root,{recursive:true,force:true})}
+}, 10000)
