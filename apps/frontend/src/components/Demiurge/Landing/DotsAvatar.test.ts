@@ -57,7 +57,7 @@ it.each([false, true])('keeps writing badge dots legible across theme changes (r
   try {
     for (const color of ['#F5F5F5', '#181818', '#F5F5F5']) {
       renderer.update({ ...options, state: 'write', reduced, color, ink: color });
-      step(600);
+      if (!reduced) step(600);
       const [background, ...dots] = paints.slice(-4);
       expect(dots).toHaveLength(3);
       for (const dot of dots) expect(contrast(background.color, dot.color)).toBeGreaterThanOrEqual(4.5);
@@ -95,13 +95,24 @@ it('keeps thinking geometry moving, retains its loop across state changes and fi
   expect(frames.size).toBe(0);
 });
 
-it('holds the same pose when reduced motion is requested', async () => {
+it('draws reduced motion only on changes and resumes animation when enabled', async () => {
   const { animateDot } = await import('./vendor/dots-lab.js');
   const renderer = animateDot(canvas, { ...options, reduced: true, state: 'idle' });
-  const pose = step(100);
+  expect(calls.length).toBeGreaterThan(0);
+  expect(frames.size).toBe(0);
+  expect(step(100)).toBe('[]');
   renderer.look(1, -1);
   renderer.react('input');
-  expect(step(2000)).toBe(pose);
+  expect(step(2000)).toBe('[]');
+  renderer.update({ ...options, reduced: false, state: 'idle' });
+  expect(frames.size).toBe(1);
+  expect(step(2100)).not.toBe('[]');
+  renderer.update({ ...options, reduced: true, state: 'idle' });
+  expect(frames.size).toBe(0);
+  parentWidth = 148;
+  renderer.update({ ...options, reduced: true, state: 'idle' });
+  expect(canvas.style.width).toBe('148px');
+  expect(step(2200)).toBe('[]');
   renderer.dispose();
 });
 

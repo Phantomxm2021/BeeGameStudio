@@ -134,7 +134,7 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
       await observeStaticBuild(root, artifact, paths, result, signal, probes)
     } else if (id === 'font-data-consumption') {
       let probes: PreparedFontProbe[]
-      try { probes = await prepareFontProbes(root, task, result) }
+      try { probes = await prepareFontProbes(root, task, result, uiScope) }
       catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported font consumption input'; return result }
       result.coverage = { files: [...new Set(probes.flatMap(probe => [probe.document, probe.resource.path]))], limitations: [
         'Explicitly bound static single-line DOM text: saved text/fontSize mutations, actual glyph fonts, selected resource suppression and restoration.',

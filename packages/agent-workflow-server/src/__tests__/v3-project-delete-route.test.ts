@@ -97,3 +97,39 @@ test('local project deletion removes only the owner-bound workflow snapshot', as
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('project deletion refuses an owner-bound persisted writer before cleanup', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'beegame-v3-delete-writer-'))
+  const runs = new Map<string, Run>()
+  const cleanups: Array<() => void | Promise<void>> = []
+  const app = createAgentWorkflowApp({
+    currentUser: { id: 'owner', role: 'owner' }, dashboardDataRoot: root,
+    defaultWorkspacePath: root, modelConfigStore: false, skillsConfig: false,
+    workflowV3Store: {
+      read: async (id, owner) => runs.get(id)?.ownerId === owner ? runs.get(id) : undefined,
+      commit: async () => { throw new Error('Deletion must not schedule workflow work') },
+    },
+    registerCleanup: cleanup => cleanups.push(cleanup),
+  })
+  const workspace = join(root, 'users', 'owner', 'busy-project')
+  try {
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'fixture.txt'), 'retain')
+    expect((await app.request('/api/projects', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'busy-project', name: 'Busy project', root_path: workspace, created_at: Date.now() }),
+    })).status).toBe(200)
+    const run = createRun({ projectId: 'busy-project', ownerId: 'owner', workspacePath: workspace,
+      chatSessionId: 'busy-chat', requestKey: 'create', text: 'Synthetic project', constraints: {}, ids: ['goal'] })
+    run.writer = { attemptId: 'active-attempt', fence: 1, workerId: 'worker' }
+    runs.set(run.projectId, run)
+
+    const response = await app.request('/api/projects/busy-project', { method: 'DELETE' })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'workspace-busy' })
+    expect(await readFile(join(workspace, 'fixture.txt'), 'utf8')).toBe('retain')
+  } finally {
+    for (const cleanup of cleanups.reverse()) await cleanup()
+    await rm(root, { recursive: true, force: true })
+  }
+})

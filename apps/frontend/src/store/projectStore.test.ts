@@ -338,6 +338,30 @@ describe('projectStore pending review normalization', () => {
     errorLog.mockRestore()
   })
 
+  it('retains unchanged runtime branches while publishing real status and permission changes', async () => {
+    const snapshot = { status: { project_id: 'proj_1', phase: 'running',
+      execution_time: { elapsed_ms: 1000, running: true } }, pendingPermissions: [] as Array<{ gate_id: string }> }
+    getProjectRuntimeState.mockImplementation(async () => structuredClone(snapshot))
+    await useProjectStore.getState().loadProjectRuntimeState('proj_1')
+    const first = useProjectStore.getState()
+    const notify = vi.fn()
+    const unsubscribe = useProjectStore.subscribe(notify)
+    try {
+      for (let i = 0; i < 10; i++) await useProjectStore.getState().loadProjectRuntimeState('proj_1')
+      expect(notify).not.toHaveBeenCalled()
+      snapshot.status.execution_time.elapsed_ms = 2000
+      await useProjectStore.getState().loadProjectRuntimeState('proj_1')
+      const timed = useProjectStore.getState()
+      expect(timed.projectStatus?.execution_time?.elapsed_ms).toBe(2000)
+      expect(timed.pendingPermissions).toBe(first.pendingPermissions)
+      snapshot.pendingPermissions.push({ gate_id: 'new-permission' })
+      await useProjectStore.getState().loadProjectRuntimeState('proj_1')
+      expect(useProjectStore.getState().projectStatus).toBe(timed.projectStatus)
+      expect(useProjectStore.getState().pendingPermissions).toEqual([{ gate_id: 'new-permission' }])
+      expect(notify).toHaveBeenCalledTimes(2)
+    } finally { unsubscribe() }
+  })
+
   it('updates project status and pending reviews from one runtime snapshot', async () => {
     getProjectRuntimeState.mockResolvedValueOnce({
       status: {

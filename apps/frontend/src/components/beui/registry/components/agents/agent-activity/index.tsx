@@ -118,6 +118,28 @@ function getSummary(
   return `Completed ${items.length} ${items.length === 1 ? "step" : "steps"}`;
 }
 
+// Large timelines initially mount only row shells. Once visited, a row keeps
+// its disclosure state; native content visibility skips offscreen layout.
+function TimelineActivityRow({ item, defer }: { item: AgentActivityItem; defer: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(() => !defer || typeof IntersectionObserver === "undefined");
+  useEffect(() => {
+    const node = ref.current;
+    if (mounted || !node) return;
+    const observer = new IntersectionObserver(entries => {
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      setMounted(true);
+      observer.disconnect();
+    }, { root: node.closest('[data-activity-viewport]'), rootMargin: "180px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [mounted]);
+  return <div ref={ref} role="listitem" data-activity-item={item.id}
+    style={{ minHeight: mounted ? undefined : 44, contentVisibility: "auto", containIntrinsicSize: "auto 44px" }}>
+    {mounted && <ActivityRow item={item} />}
+  </div>;
+}
+
 export function AgentActivity({
   variant = "default",
   items,
@@ -176,7 +198,7 @@ export function AgentActivity({
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [timeline]);
+  }, [timeline, expanded]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -255,8 +277,9 @@ export function AgentActivity({
         open={expanded}
         openHeight={timeline ? "auto" : viewportHeight}
       >
-        <div
+        {expanded && <div
           ref={viewportRef}
+          data-activity-viewport=""
           onWheel={event => { if (timeline && event.deltaY < 0) following.current = false; }}
           onFocusCapture={() => { if (timeline) following.current = false; }}
           onScroll={event => { if (timeline) { const node = event.currentTarget; following.current = node.scrollHeight - node.clientHeight - node.scrollTop <= 2; } }}
@@ -268,6 +291,10 @@ export function AgentActivity({
           )}
           style={{ height: timeline ? undefined : viewportHeight, maxHeight: timeline ? Math.max(0, maxHeight) : undefined, maskImage, WebkitMaskImage: maskImage }}
         >
+          {timeline ? <div ref={contentRef} role="list"
+            className={cn("space-y-0.5 my-2 ml-1 border-l-2 border-foreground/10 py-0 pl-4", contentClassName)}>
+            {items.map(item => <TimelineActivityRow key={item.id} item={item} defer={items.length > 30} />)}
+          </div> : (
           <motion.div
             ref={contentRef}
             role="list"
@@ -300,7 +327,8 @@ export function AgentActivity({
               ))}
             </AnimatePresence>
           </motion.div>
-        </div>
+          )}
+        </div>}
       </AgentDisclosure>
     </div>
   );

@@ -84,6 +84,13 @@ export function createBeeGameResourceServerApp(
   const audit = async (event: { actorId: string; action: string; packId?: string; elementId?: string; metadata?: Record<string, unknown> }) => {
     try { await options.recordAuditEvent?.(event) } catch (error) { console.warn('Resource audit write failed:', error) }
   }
+  const inspectPackStorage = async (packId: string) => {
+    const storage = await options.inspectPackStorage?.(packId)
+    return {
+      missingPaths: storage?.missingPaths ?? [],
+      orphanPaths: storage?.orphanPaths ?? [],
+    }
+  }
   return {
     fetch: async (request: Request): Promise<Response> => {
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
@@ -425,16 +432,21 @@ export function createBeeGameResourceServerApp(
         if (!pack) return corsResponse(jsonError(404, 'not_found', 'Resource Pack not found'), options.corsOrigin)
         const elements = await options.repository.listElements(packId)
         const baseline = evaluateResourcePackPublishReadiness(pack, elements)
-        const storage = options.inspectPackStorage ? await options.inspectPackStorage(packId) : undefined
-        const blocking = [...baseline.blocking, ...(storage?.missingPaths || []).map(path => ({ code: 'storage_object_missing', message: `Storage object is missing: ${path}` }))]
-        const warnings = [...baseline.warnings, ...(storage?.orphanPaths || []).map(path => ({ code: 'storage_object_orphaned', message: `Storage object is not referenced by this Pack: ${path}` }))]
+        const storage = await inspectPackStorage(packId)
+        const blocking = [...baseline.blocking, ...storage.missingPaths.map(path => ({ code: 'storage_object_missing', message: `Storage object is missing: ${path}` }))]
+        const warnings = [...baseline.warnings, ...storage.orphanPaths.map(path => ({ code: 'storage_object_orphaned', message: `Storage object is not referenced by this Pack: ${path}` }))]
         return corsResponse(Response.json({ report: { blocking, warnings, canPublish: blocking.length === 0 } }), options.corsOrigin)
       }
       const publishMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)\/publish$/)
       if (publishMatch && request.method === 'POST') {
         try {
-          const pack = await options.repository.publishPack(decodeURIComponent(publishMatch[1]))
-          await audit({ actorId: user!.id, action: 'pack.published', packId: decodeURIComponent(publishMatch[1]) })
+          const packId = decodeURIComponent(publishMatch[1])
+          const storage = await inspectPackStorage(packId)
+          if (storage.missingPaths.length) {
+            throw new Error(`Storage object is missing: ${storage.missingPaths.join(', ')}`)
+          }
+          const pack = await options.repository.publishPack(packId)
+          await audit({ actorId: user!.id, action: 'pack.published', packId })
           return corsResponse(Response.json({ pack }), options.corsOrigin)
         } catch (error) {
           return corsResponse(jsonError(400, 'publish_blocked', error instanceof Error ? error.message : 'Pack cannot be published'), options.corsOrigin)
@@ -739,7 +751,6 @@ function canonicalizeCatalogFacts(value: unknown): unknown {
 }
 
 function parseResourceSelections(value: unknown): {
-  catalogRevision: string
   selections: Array<{
     resourceId: string
     packId: string
@@ -751,10 +762,13 @@ function parseResourceSelections(value: unknown): {
 } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError('Resource import request must be an object')
   const recordValue = value as Record<string, unknown>
-  const catalogRevision = requiredString(recordValue.catalogRevision, 'Resource import catalogRevision')
   const selections = recordValue.selections
   if (!Array.isArray(selections) || selections.length === 0) throw new ResourceRequestValidationError('At least one explicit Resource element selection is required')
-  return { catalogRevision, selections: selections.map((value, index) => {
+  // Older callers may still send catalogRevision, but the resolver never used
+  // it as an optimistic concurrency token. The Pack version below is the
+  // actual immutable selection check, so do not require or fabricate a
+  // meaningless revision string.
+  return { selections: selections.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ResourceRequestValidationError(`Resource import selection ${index + 1} is invalid`)
     const record = value as Record<string, unknown>
     const resourceId = requiredString(record.resourceId,

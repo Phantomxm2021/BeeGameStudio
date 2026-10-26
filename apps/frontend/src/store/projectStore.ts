@@ -301,10 +301,17 @@ export const useProjectStore = create<ProjectState>()(
           const runtimeState = await getProjectRuntimeStateSingleFlight(projectId);
           const currentActiveProjectId = get().activeProjectId;
           if (currentActiveProjectId && currentActiveProjectId !== projectId) return;
-          set({
-            projectStatus: normalizeProjectBaselineStatusPayload(runtimeState.status),
-            pendingPermissions: runtimeState.pendingPermissions,
-          });
+          const current = get();
+          const status = normalizeProjectBaselineStatusPayload(runtimeState.status);
+          // These are JSON API snapshots. Keep each unchanged branch stable;
+          // execution time may change even while the permission list does not.
+          const projectStatus = JSON.stringify(current.projectStatus) === JSON.stringify(status)
+            ? current.projectStatus : status;
+          const pendingPermissions = JSON.stringify(current.pendingPermissions) === JSON.stringify(runtimeState.pendingPermissions)
+            ? current.pendingPermissions : runtimeState.pendingPermissions;
+          if (projectStatus !== current.projectStatus || pendingPermissions !== current.pendingPermissions) {
+            set({ projectStatus, pendingPermissions });
+          }
           const tokenBudget = runtimeState.status.context?.token_budget;
           if (tokenBudget) {
             useSystemStore.getState().updateTokenUsage({

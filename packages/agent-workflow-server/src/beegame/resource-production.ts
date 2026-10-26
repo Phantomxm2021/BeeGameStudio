@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
+import { constants } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { lstat, mkdir, open, readFile, realpath, unlink } from 'node:fs/promises'
+import { hostname } from 'node:os'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { array, boolean, discriminatedUnion, literal, object, record, string, union, unknown, url } from 'zod/v4'
 import { registerBeeGameLocalResources, readBeeGameAssetManifest, type BeeGameAuthoredResourceInput, type BeeGameAssetManifest } from './asset-contracts'
@@ -43,6 +45,64 @@ function parseResourceRequest(value: unknown) {
   return request
 }
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+
+const REGISTRATION_LOCK_PATH = 'assets/manifest/registration.lock'
+const REGISTRATION_LOCK_VERSION = 1
+const REGISTRATION_LOCK_MAX_BYTES = 16 * 1024
+
+type RegistrationLockOwner = {
+  pid: number
+  host: string
+  startedAt: string
+}
+
+export type RegistrationLockInfo = {
+  path: string
+  state: 'absent' | 'present' | 'legacy'
+  owner?: RegistrationLockOwner
+  reason: string
+}
+
+/**
+ * The lock inspector is intentionally read-only. A PID and timestamp are
+ * useful diagnostics, but they are not proof that a process has exited (or
+ * that no concurrent recovery is running), so this module never removes a
+ * lock automatically.
+ */
+export async function inspectRegistrationLock(workspace: string): Promise<RegistrationLockInfo> {
+  const root = await realpath(workspace), path = await assetPath(root, REGISTRATION_LOCK_PATH)
+  let file
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    const stat = await file.stat()
+    if (!stat.isFile()) throw Error('Registration lock is not a regular file; refusing to inspect it')
+    if (stat.size > REGISTRATION_LOCK_MAX_BYTES) throw Error('Registration lock exceeds the safe inspection size')
+    const bytes = await file.readFile()
+    if (!bytes.length)
+      return { path: REGISTRATION_LOCK_PATH, state: 'legacy', reason: 'Legacy empty registration lock; owner identity is unavailable. A host operator must confirm that registration has stopped before moving it aside.' }
+    let value: unknown
+    try { value = JSON.parse(bytes.toString('utf8')) } catch {
+      return { path: REGISTRATION_LOCK_PATH, state: 'legacy', reason: 'Registration lock is not readable owner metadata. A host operator must confirm that registration has stopped before moving it aside.' }
+    }
+    if (!value || typeof value !== 'object' ||
+        (value as { version?: unknown }).version !== REGISTRATION_LOCK_VERSION ||
+        (value as { operation?: unknown }).operation !== 'register')
+      return { path: REGISTRATION_LOCK_PATH, state: 'legacy', reason: 'Registration lock uses an unknown format. A host operator must confirm that registration has stopped before moving it aside.' }
+    const owner = (value as { owner?: unknown }).owner
+    if (!owner || typeof owner !== 'object')
+      return { path: REGISTRATION_LOCK_PATH, state: 'legacy', reason: 'Registration lock has no owner metadata. A host operator must confirm that registration has stopped before moving it aside.' }
+    const pid = (owner as { pid?: unknown }).pid
+    const host = (owner as { host?: unknown }).host
+    const startedAt = (owner as { startedAt?: unknown }).startedAt
+    if (!Number.isSafeInteger(pid) || (pid as number) <= 0 || typeof host !== 'string' || !host || typeof startedAt !== 'string' || !startedAt)
+      return { path: REGISTRATION_LOCK_PATH, state: 'legacy', reason: 'Registration lock has incomplete owner metadata. A host operator must confirm that registration has stopped before moving it aside.' }
+    return { path: REGISTRATION_LOCK_PATH, state: 'present', owner: { pid: pid as number, host, startedAt }, reason: 'Registration lock is present. PID and timestamp are diagnostics only; they do not prove that the owner has exited.' }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      return { path: REGISTRATION_LOCK_PATH, state: 'absent', reason: 'No registration lock is present.' }
+    throw error
+  } finally { await file?.close() }
+}
 
 /** No shell, package installation or writes outside the current assets tree. */
 async function assetPath(root: string, path: string) {
@@ -207,13 +267,16 @@ export async function produceResources(workspace: string, value: unknown, fetche
     for (const item of request.resources) for (const path of item.file_paths) await assetPath(root, path)
     const ids = request.resources.map(item => item.id)
     if (new Set(ids).size !== ids.length) throw Error('Duplicate resource IDs in one registration batch')
-    const lockPath = await assetPath(root, 'assets/manifest/registration.lock')
+    const lockPath = await assetPath(root, REGISTRATION_LOCK_PATH)
     await mkdir(dirname(lockPath), { recursive: true })
     const lock = await open(lockPath, 'wx', 0o600).catch(error => {
       if (error.code === 'EEXIST') throw Error('Resource registration is already active or was interrupted; inspect the existing lock before retrying')
       throw error
     })
     try {
+      const owner = { pid: process.pid, host: hostname(), startedAt: new Date().toISOString() }
+      await lock.writeFile(JSON.stringify({ version: REGISTRATION_LOCK_VERSION, operation: 'register', owner }) + '\n')
+      await lock.sync()
       const manifest = await registerBeeGameLocalResources(root, request.resources as BeeGameAuthoredResourceInput[], {
         projectTarget: request.projectTarget as BeeGameAssetManifest['project_target'],
         requirements: request.requirements as BeeGameAssetManifest['requirements'],
@@ -270,6 +333,7 @@ export async function produceResources(workspace: string, value: unknown, fetche
 
 export const RESOURCE_HELP = `Usage: bun <resources-entry> request.json
   --register-from request-1.json request-2.json   Combine registration requests
+  --registration-lock                              Inspect registration lock owner/state (read-only)
   --list [RESOURCE-ID ...] [--details]           Read saved resource records
   --contract registration                      Input fields and complete minimal request
   --contract atlas | --contract tilemap         Format-specific reference
@@ -279,13 +343,16 @@ export const RESOURCE_HELP = `Usage: bun <resources-entry> request.json
 Operations: register, audio, fonts. Image/atlas processing uses the supplied media.mjs entry.
 For locally authored files, omit source and supply resource.reason; the host computes hashes and registry modules. Explicit source is web or resource-library with provenance. User-provided files use the upload/import path.
 Read --contract registration before first registration. Once established, projectTarget cannot be changed through registration; supply files in its listed formats. Keep actual requirement IDs consistent; these inputs are not the saved Manifest format.
+If registration.lock remains, the host operator must first confirm that BGS and every independent resources registration process have exited and that no other recovery is running. Then inspect this lock and move exactly assets/manifest/registration.lock aside while preserving a backup. Agents must not remove it based on a PID or their own confirmation.
 No package installation is needed. Tools do not certify artistic or gameplay quality.`
 
 const RESOURCE_DETAILS = `Usage: bun <resources-entry> --capabilities
   bun <resources-entry> request.json
   bun <resources-entry> --register-from registration-1.json registration-2.json
+  bun <resources-entry> --registration-lock
   bun <resources-entry> --list [RESOURCE-ID ...] [--details]
 --list reads the current registry without writing: all IDs/fulfills/default roots/statuses/file counts. Specified IDs also return exact member paths. --details returns full selected records including hashes/provenance. Do not cat every resource module or reread large persisted output merely to find binding operands.
+--registration-lock is read-only. If a lock remains after an interruption, the host operator must confirm that BGS and every independent resources registration process have exited and no other recovery is running, inspect the metadata, then move exactly assets/manifest/registration.lock aside while preserving a backup. Agents must not remove it based on a PID or their own confirmation.
 No package installation is needed. Existing image processing/atlas packing stays at media.mjs.
 atlas: media.mjs atlas fields plus resource:{id,fulfills,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}, registrationOutput:"assets/atlas-registration.json". Produces the actual atlas/frame table and a ready-to-register request with exact output paths. No manual rectangles, hashes or registry edits. Registration requests can be combined with --register-from. Existing images/media.mjs remain supported.
 register: {operation:"register",resources:[{id,fulfills,root_path,file_paths,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}],projectTarget?,requirements?}.
@@ -319,9 +386,13 @@ export async function runResourceProductionCli(args = process.argv.slice(2)) {
         aiMusicGeneration: false, fontSubsetting: false, atlasCommand: 'Use the supplied media entry with --help',
         imageRuntimeConfigured: Boolean(process.env.BEEGAME_SHARP_MODULE) })); return
     }
+    const root = await realpath(process.cwd())
+    if (args[0] === '--registration-lock') {
+      if (args.length !== 1) throw Error('Usage: --registration-lock')
+      console.log(JSON.stringify(await inspectRegistrationLock(root))); return
+    }
     const details = args.includes('--details')
     args = args.filter(arg => arg !== '--details')
-    const root = await realpath(process.cwd())
     if (args[0] === '--list') {
       console.log(JSON.stringify(await listRegisteredResources(root, args.slice(1), details))); return
     }

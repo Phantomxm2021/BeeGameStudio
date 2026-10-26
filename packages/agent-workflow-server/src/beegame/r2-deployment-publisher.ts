@@ -202,9 +202,34 @@ export function createR2DeploymentPublisher(options: {
               : 'Deployment object upload failed',
         },
       }).catch(() => undefined)
-      await options.driver.deleteObject(locator).catch(() => undefined)
+      try {
+        await options.driver.deleteObject(locator)
+      } catch (cleanupError) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}; failed to clean up failed upload object: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+        )
+      }
       throw error
     }
+  }
+
+  const cleanupUploaded = async (
+    uploaded: readonly UploadedDeploymentObject[],
+    authToken: string,
+  ): Promise<void> => {
+    let failure: unknown
+    for (const object of [...uploaded].reverse()) {
+      try {
+        await options.driver.deleteObject(object.locator)
+        await patchObject(object.id, authToken, {
+          status: 'deleted',
+          deleted_at: new Date().toISOString(),
+        })
+      } catch (error) {
+        failure ??= error
+      }
+    }
+    if (failure) throw failure
   }
 
   return {
@@ -212,7 +237,13 @@ export function createR2DeploymentPublisher(options: {
       const entrypoint = files.find(file => file.path === 'index.html')
       if (!entrypoint) throw new Error('Deployment is missing index.html')
       for (const file of files) {
-        const fileUrl = file.path === 'index.html' ? url : new URL(file.path, url).href
+        // The delivery Worker adds its play bridge to index.html on ordinary
+        // GETs. Ask it for the stored source bytes during verification so the
+        // integrity check remains exact while the normal public page keeps its
+        // runtime instrumentation.
+        const fileUrl = file.path === 'index.html'
+          ? verificationSourceUrl(url)
+          : new URL(file.path, url).href
         const publicResponse = await fetchImpl(fileUrl, {
           redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15_000),
         }).catch(() => {
@@ -287,16 +318,22 @@ export function createR2DeploymentPublisher(options: {
           artifactPath: `r2://${bucket}/deployments/${input.deploymentId}`,
           manifestStorageObjectId: manifest.id,
           message: 'Static deployment published as an immutable R2 version',
+          cleanup: (() => {
+            let cleaned = false
+            return async () => {
+              if (cleaned) return
+              await cleanupUploaded(uploaded, input.authToken!)
+              cleaned = true
+            }
+          })(),
         }
       } catch (error) {
-        for (const object of uploaded.reverse()) {
-          await options.driver
-            .deleteObject(object.locator)
-            .catch(() => undefined)
-          await patchObject(object.id, input.authToken, {
-            status: 'deleted',
-            deleted_at: new Date().toISOString(),
-          }).catch(() => undefined)
+        try {
+          await cleanupUploaded(uploaded, input.authToken)
+        } catch (cleanupError) {
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)}; cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          )
         }
         throw error
       }
@@ -306,6 +343,12 @@ export function createR2DeploymentPublisher(options: {
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+function verificationSourceUrl(url: string): string {
+  const source = new URL(url)
+  source.searchParams.set('bgs_verification', 'raw')
+  return source.href
 }
 
 function contentTypeForDeploymentFile(file: BeeGameDeploymentFile): string {

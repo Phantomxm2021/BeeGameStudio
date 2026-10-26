@@ -784,7 +784,11 @@ export class SupabaseDashboardStore {
     return normalized
   }
 
-  async deleteProject(ownerId: string, id: string): Promise<boolean> {
+  async deleteProject(
+    ownerId: string,
+    id: string,
+    beforeMetadataDelete?: () => Promise<void>,
+  ): Promise<boolean> {
     const deploymentStoragePrefixes =
       await this.listProjectDeploymentStoragePrefixes(ownerId, id)
     await this.deleteStoragePrefixes(this.assetBucket, [
@@ -797,6 +801,7 @@ export class SupabaseDashboardStore {
     for (const [bucket, prefixes] of deploymentStoragePrefixes) {
       await this.deleteStoragePrefixes(bucket, prefixes)
     }
+    await beforeMetadataDelete?.()
     await this.deleteWhere('beegame_assets', {
       owner_id: ownerId,
       project_id: id,

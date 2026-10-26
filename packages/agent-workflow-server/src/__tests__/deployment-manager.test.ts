@@ -28,6 +28,75 @@ describe('BeeGameDeploymentManager', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('runtime status reports recovery readiness without exposing deployment records', async () => {
+    const manager = new BeeGameDeploymentManager({ dataRoot: root, runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+    await manager.list()
+    expect(await manager.runtimeStatus()).toEqual({ active: 0, recovery: 'ready' })
+    const recordsPath = join(root, 'deployments', 'deployments.json')
+    await mkdir(join(root, 'deployments'), { recursive: true })
+    await writeFile(recordsPath, '{not-json')
+    expect(await manager.runtimeStatus()).toEqual({ active: 0, recovery: 'unknown' })
+    await writeFile(recordsPath, JSON.stringify([{}]))
+    expect(await manager.runtimeStatus()).toEqual({ active: 0, recovery: 'unknown' })
+    await writeFile(recordsPath, '[]')
+    expect(await manager.runtimeStatus()).toEqual({ active: 0, recovery: 'ready' })
+    await rm(recordsPath)
+    expect(await manager.runtimeStatus()).toEqual({ active: 0, recovery: 'ready' })
+  })
+
+  test('does not replace an unreadable deployment record file during retention', async () => {
+    const recordsPath = join(root, 'deployments', 'deployments.json')
+    await mkdir(join(root, 'deployments'), { recursive: true })
+    await writeFile(recordsPath, '{ definitely-not-json\n')
+    const manager = new BeeGameDeploymentManager({ dataRoot: root })
+    await expect(manager.applyRetention({ dryRun: false })).rejects.toThrow()
+    expect(await readFile(recordsPath, 'utf8')).toBe('{ definitely-not-json\n')
+  })
+
+  test('retention keeps remote records when the local manager cannot delete them', async () => {
+    const recordsPath = join(root, 'deployments', 'deployments.json')
+    await mkdir(join(root, 'deployments'), { recursive: true })
+    const record = (id: string, artifactPath: string) => ({
+      id, sessionId: 'retention', projectId: 'retention-project', workspacePath: workspace,
+      status: 'succeeded' as const, url: `https://games.test/deployments/${id}/`, artifactPath,
+      createdAt: `2026-01-0${id === 'old' ? '1' : '2'}T00:00:00.000Z`,
+      updatedAt: `2026-01-0${id === 'old' ? '1' : '2'}T00:00:00.000Z`,
+      deployedAt: `2026-01-0${id === 'old' ? '1' : '2'}T00:00:00.000Z`,
+    })
+    await writeFile(recordsPath, JSON.stringify([
+      record('old', 'r2://delivery/deployments/old'),
+      record('new', 'r2://delivery/deployments/new'),
+    ]))
+    const manager = new BeeGameDeploymentManager({ dataRoot: root })
+    const result = await manager.applyRetention({ dryRun: false, keepSuccessfulPerProject: 1 })
+    expect(result.deleted).toEqual([])
+    expect(result.skipped.map(item => item.id)).toEqual(['old'])
+    expect((await manager.list()).map(item => item.id).sort()).toEqual(['new', 'old'])
+  })
+
+  test('cleans a completed publication when public verification fails', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'fixture' } }))
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'dist', 'index.html'), '<main>Published</main>')
+    let cleaned = 0
+    const manager = new BeeGameDeploymentManager({ dataRoot: root, runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }), publisher: {
+      async publishStaticDirectory() {
+        return {
+          url: 'https://games.test/deployments/remote/index.html',
+          artifactPath: 'r2://delivery/deployments/remote',
+          manifestStorageObjectId: 'manifest-remote',
+          cleanup: async () => { cleaned += 1 },
+        }
+      },
+      async verifyPublished() { throw Error('verification failed') },
+    } })
+    const result = await manager.deploy({ sessionId: 'cleanup', userId: 'user', projectId: 'project', workspacePath: workspace }, undefined, async () => {})
+    expect(result.status, result.message).toBe('failed')
+    expect(result.artifactPath).toBe('r2://delivery/deployments/remote')
+    expect(result.manifestStorageObjectId).toBe('manifest-remote')
+    expect(cleaned).toBe(1)
+  })
+
   test('progress is visible to polling before completion and does not declare verification success', async () => {
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
     await mkdir(join(workspace, 'dist'))
@@ -601,6 +670,99 @@ describe('BeeGameDeploymentManager', () => {
         body: '<main>Storage game</main>',
       }),
     ])
+  })
+
+  test('cleans a successful Supabase publication with the storage prefix-delete API', async () => {
+    const requests: Array<{ url: string; method: string; body: string }> = []
+    const publisher = createSupabaseStorageDeploymentPublisher({
+      supabaseUrl: 'https://project.supabase.co', anonKey: 'anon-key', bucket: 'beegame-deployments',
+      fetch: (async (input, init) => {
+        requests.push({
+          url: String(input), method: init?.method ?? 'GET',
+          body: init?.body ? await new Response(init.body).text() : '',
+        })
+        return new Response('{}', { status: 200 })
+      }) as typeof fetch,
+    })
+    const published = await publisher.publishStaticDirectory({
+      deploymentId: 'cleanup-success', sessionId: 'session', userId: 'user',
+      workspacePath: '/workspace', outputDir: '/workspace/dist', artifactHash: 'hash',
+      authToken: 'user-jwt', files: [
+        { path: 'index.html', bytes: async () => new TextEncoder().encode('<main>game</main>'), text: async () => '<main>game</main>' },
+        { path: 'assets/game.js', bytes: async () => new TextEncoder().encode('start()'), text: async () => 'start()' },
+      ],
+    })
+
+    await published.cleanup!()
+    await published.cleanup!()
+    const deletes = requests.filter(request => request.method === 'DELETE')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0]).toEqual(expect.objectContaining({
+      url: 'https://project.supabase.co/storage/v1/object/beegame-deployments',
+    }))
+    expect(JSON.parse(deletes[0]!.body)).toEqual({ prefixes: [
+      'deployments/user/cleanup-success/index.html',
+      'deployments/user/cleanup-success/assets/game.js',
+    ] })
+  })
+
+  test('cleans attempted Supabase objects when the second upload disconnects after acceptance', async () => {
+    const requests: Array<{ url: string; method: string; body: string }> = []
+    let uploads = 0
+    const publisher = createSupabaseStorageDeploymentPublisher({
+      supabaseUrl: 'https://project.supabase.co', anonKey: 'anon-key', bucket: 'beegame-deployments',
+      fetch: (async (input, init) => {
+        const method = init?.method ?? 'GET'
+        requests.push({ url: String(input), method, body: init?.body ? await new Response(init.body).text() : '' })
+        if (method === 'POST') {
+          uploads++
+          if (uploads === 2) throw new Error('connection reset after object acceptance')
+          return new Response('{}', { status: 200 })
+        }
+        return new Response(null, { status: 204 })
+      }) as typeof fetch,
+    })
+
+    await expect(publisher.publishStaticDirectory({
+      deploymentId: 'cleanup-partial', sessionId: 'session', userId: 'user',
+      workspacePath: '/workspace', outputDir: '/workspace/dist', artifactHash: 'hash',
+      authToken: 'user-jwt', files: [
+        { path: 'index.html', bytes: async () => new Uint8Array([1]), text: async () => '' },
+        { path: 'game.js', bytes: async () => new Uint8Array([2]), text: async () => '' },
+      ],
+    })).rejects.toThrow('connection reset after object acceptance')
+
+    const deletes = requests.filter(request => request.method === 'DELETE')
+    expect(deletes).toHaveLength(1)
+    expect(JSON.parse(deletes[0]!.body)).toEqual({ prefixes: [
+      'deployments/user/cleanup-partial/index.html',
+      'deployments/user/cleanup-partial/game.js',
+    ] })
+  })
+
+  test('surfaces Supabase cleanup failure after a partial upload failure', async () => {
+    let uploads = 0
+    const publisher = createSupabaseStorageDeploymentPublisher({
+      supabaseUrl: 'https://project.supabase.co', anonKey: 'anon-key', bucket: 'beegame-deployments',
+      fetch: (async (_input, init) => {
+        if (init?.method === 'POST') {
+          uploads++
+          return uploads === 2
+            ? new Response('upload broke', { status: 502, statusText: 'Bad Gateway' })
+            : new Response('{}', { status: 200 })
+        }
+        return new Response('cleanup broke', { status: 503, statusText: 'Unavailable' })
+      }) as typeof fetch,
+    })
+
+    await expect(publisher.publishStaticDirectory({
+      deploymentId: 'cleanup-failure', sessionId: 'session', userId: 'user',
+      workspacePath: '/workspace', outputDir: '/workspace/dist', artifactHash: 'hash',
+      authToken: 'user-jwt', files: [
+        { path: 'index.html', bytes: async () => new Uint8Array([1]), text: async () => '' },
+        { path: 'game.js', bytes: async () => new Uint8Array([2]), text: async () => '' },
+      ],
+    })).rejects.toThrow('cleanup failed: Deployment storage cleanup failed: 503 Unavailable')
   })
 
   test('fails when the project has no build script', async () => {

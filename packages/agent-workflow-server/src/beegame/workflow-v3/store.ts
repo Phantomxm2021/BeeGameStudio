@@ -14,10 +14,20 @@ export const previewRunState = (run: PreviewRunState): PreviewRunState => ({
 export type WorkflowStore = {
   read(projectId: string, actorId: string): Promise<Run | undefined>
   readPreviewState?(projectId: string, actorId: string): Promise<PreviewRunState | undefined>
+  /** Read-only count of persisted unresolved writers in the configured store. */
+  writerStatus?(): Promise<WorkflowWriterStatus>
   /** Remove the owner-bound local workflow snapshot and its append-only events. */
   delete?(projectId: string, actorId: string): Promise<void>
   commit(projectId: string, actorId: string, expectedVersion: number, next: Run, event: string): Promise<void>
 }
+
+export type WorkflowWriterStatus = {
+  writers: number | null
+  state: 'idle' | 'active' | 'unknown'
+  scope: 'configured-store'
+}
+
+const unknownWriterStatus = (): WorkflowWriterStatus => ({ writers: null, state: 'unknown', scope: 'configured-store' })
 // JSONB may reorder keys. Compare JSON values, normalizing optional fields
 // as storage does, not the serialization order of an authorization.
 export function sameJson(a: unknown, b: unknown): boolean {
@@ -41,12 +51,33 @@ const queues = new Map<string, Promise<void>>()
 export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
   mkdirSync(dataRoot, { recursive: true })
   const root = realpathSync(dataRoot)
-  const filename = (projectId: string) => join(root, 'workflow-v3', digest(projectId)+'.json')
+  const workflowRoot = join(root, 'workflow-v3')
+  const filename = (projectId: string) => join(workflowRoot, digest(projectId)+'.json')
   const load = async (projectId: string): Promise<{ run: Run; events: unknown[] } | undefined> => {
     try { return JSON.parse(await readFile(filename(projectId), 'utf8')) }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
   }
   return {
+    async writerStatus() {
+      let names: string[]
+      try { names = (await readdir(workflowRoot)).filter(name => name.endsWith('.json')) }
+      catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'ENOENT'
+          ? { writers: 0, state: 'idle', scope: 'configured-store' }
+          : unknownWriterStatus()
+      }
+      let writers = 0
+      try {
+        for (const name of names) {
+          const value = JSON.parse(await readFile(join(workflowRoot, name), 'utf8')) as { run?: Run }
+          if (!value || !value.run || typeof value.run !== 'object') return unknownWriterStatus()
+          if (value.run.writer) writers += 1
+        }
+      } catch {
+        return unknownWriterStatus()
+      }
+      return { writers, state: writers ? 'active' : 'idle', scope: 'configured-store' }
+    },
     async readPreviewState(projectId, actorId) {
       const value = await load(projectId)
       if (value && value.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
@@ -104,6 +135,8 @@ export function assertCommit(projectId: string, actorId: string, version: number
     throw new WorkflowError('invalid-commit', 'Invalid identity or revision', 400)
   if (prior && (prior.id !== next.id || prior.chatSessionId !== next.chatSessionId || prior.workspacePath !== next.workspacePath))
     throw new WorkflowError('immutable-source', 'Run identity and original requirements cannot be overwritten')
+  if (prior && prior.productionWorkflow !== next.productionWorkflow)
+    throw new WorkflowError('immutable-source', 'Production workflow is selected at intake only')
   if (prior && !sameJson(prior.creation, next.creation))
     throw new WorkflowError('immutable-source', 'Observed project creation facts cannot be rewritten')
   if (prior?.webBoot && !sameJson(prior.webBoot, next.webBoot))
@@ -153,9 +186,13 @@ export function assertCommit(projectId: string, actorId: string, version: number
   if (prior?.agentTurns) for (const old of prior.agentTurns) {
     const turn=next.agentTurns?.find(t=>t.attemptId===old.attemptId)
     if(!turn || ['attemptId','requestKey','sessionId','workerId','fence','startedAt','requirementsRevision'].some(k=>turn[k as keyof typeof turn]!==old[k as keyof typeof old]) ||
-        !sameJson(turn.message,old.message) ||
+        !sameJson(turn.message,old.message) || !sameJson(turn.production,old.production) ||
+        old.productionHandoff && !sameJson(turn.productionHandoff,old.productionHandoff) ||
         old.status!=='running' && !sameJson(old,turn) || old.quiescedAt && turn.quiescedAt!==old.quiescedAt)
       throw new WorkflowError('immutable-exit-evidence','Native goal execution history cannot be removed or rewritten')
+    if(turn.productionHandoff && !old.productionHandoff && (old.status!=='running' || old.quiescedAt ||
+        prior.writer?.attemptId!==turn.attemptId || next.writer?.attemptId!==turn.attemptId))
+      throw new WorkflowError('stale-attempt','Production handoff requires the active writer')
     if(turn.quiescedAt && !old.quiescedAt && (old.status!=='running' || turn.status!=='running' ||
         prior.writer?.attemptId!==turn.attemptId || next.writer?.attemptId!==turn.attemptId ||
         prior.writer.workerId!==turn.workerId || next.writer.workerId!==turn.workerId ||
@@ -211,6 +248,29 @@ export function createRemoteWorkflowStore(config: { url: string; serviceKey: str
     return response.json()
   }
   return {
+    async writerStatus() {
+      try {
+        const query = new URLSearchParams({ select: 'project_id', 'state->>writer': 'not.is.null' })
+        const response = await (config.fetchImpl ?? fetch)(config.url.replace(/\/+$/, '') + '/rest/v1/beegame_workflow_v3?' + query, {
+          method: 'HEAD',
+          headers: {
+            apikey: config.serviceKey,
+            authorization: 'Bearer ' + config.serviceKey,
+            Prefer: 'count=exact',
+          },
+          signal: AbortSignal.timeout(5_000),
+        })
+        if (!response.ok) return unknownWriterStatus()
+        const range = response.headers.get('content-range')
+        const match = range?.match(/\/(\d+|\*)$/)
+        if (!match || match[1] === '*') return unknownWriterStatus()
+        const writers = Number(match[1])
+        if (!Number.isSafeInteger(writers) || writers < 0) return unknownWriterStatus()
+        return { writers, state: writers ? 'active' : 'idle', scope: 'configured-store' }
+      } catch {
+        return unknownWriterStatus()
+      }
+    },
     async readPreviewState(projectId, actorId) {
       // The existing project FK is one-to-one. Filter the live project owner,
       // as the read RPC does, and project only the fields needed by Preview.

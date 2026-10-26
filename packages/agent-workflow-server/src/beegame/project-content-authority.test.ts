@@ -16,6 +16,9 @@ test('content authority binds minimal consumer indexes and host-generated revisi
     const original = projectContentAuthority(workspace)
     const snapshot = snapshotDesignDocuments(workspace, ['GDD.md'])
     index.outputs[0].id = 'current-output'
+    for (const item of index.implementationItems ?? [])
+      for (const reference of item.requirementRefs ?? [])
+        if (reference.document === 'GDD.md' && reference.id === 'play') reference.id = 'current-output'
     await writeFile(path, JSON.stringify(index))
     const changed = projectContentAuthority(workspace)
     expect(changed.documentRevision).not.toBe(original.documentRevision)

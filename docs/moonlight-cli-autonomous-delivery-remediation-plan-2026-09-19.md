@@ -269,7 +269,7 @@
 
 本文覆盖当前无 Game IR 主线的实现/验收/日志修订方向。以下历史文档用于理解设计目的，不作为已正确实现的证明：
 
-- [原生交付架构](beegame-native-game-delivery-architecture.md)
+- [当前 README 的运行边界](../README.md#runtime-boundary)（旧版原生交付架构文档已移除）
 - [资源与 Content 契约](beegame-resource-content-contract.md)
 - [引擎中立 Content 实践规划](engine-neutral-content-package-practice-plan-2026-09-15.md)
 

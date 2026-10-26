@@ -29,6 +29,7 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
   try {
     expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true})
     for(const path of ['.beegame','.beegame-attachments','transcripts','logs'])await mkdir(join(f.root,path))
+    await writeFile(join(f.root,'.gitignore'),'# Git configuration is not game source\nnode_modules/\n')
     await writeFile(join(f.root,'logs/index.json'),'{}')
     await writeFile(join(f.root,'.beegame-attachments/brief.txt'),'Reference input, not imported project source')
     expect(await observeProjectCreation(f.root,brief)).toEqual(f.run.creation)
@@ -45,6 +46,10 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
     expect(await readFile(join(f.root,'README.md'),'utf8')).toBe('Existing user source')
     await expect(readFile(join(f.root,'package.json'))).rejects.toThrow()
     await rm(join(f.root,'README.md'))
+    await rm(join(f.root,'.gitignore'))
+    await symlink(join(f.root,'logs/index.json'),join(f.root,'.gitignore'))
+    expect(await observeProjectCreation(f.root,brief)).toBeUndefined()
+    await rm(join(f.root,'.gitignore'))
     await rm(join(f.root,'.beegame-attachments'),{recursive:true})
     await symlink(join(f.root,'.beegame'),join(f.root,'.beegame-attachments'))
     expect(await observeProjectCreation(f.root,brief)).toBeUndefined()

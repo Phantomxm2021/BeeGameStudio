@@ -29,8 +29,8 @@ function nodeBindings(value: unknown, location = 'node', bindings: UiNodeBinding
   return bindings
 }
 
-/** Saved task files plus their explicit composition/camera links. No eight-document
- * authority and no scan of unrelated task folders. Missing linked files are inputs,
+/** Saved task files plus their explicit composition/camera links.
+ * No scan of unrelated task folders. Missing linked files are inputs,
  * not grounds for replacing the link with an easier geometry check. */
 export async function runContentCheck(root: string, id: 'content-structure' | 'content-layout' | 'content-resources', task: Pick<TaskSpec, 'expectedOutputs'>, inputs: FileVersion[], constraints: Record<string, unknown>): Promise<CheckResult> {
   const result: CheckResult = { id, version: CHECK_VERSIONS[id], status: 'unverified', inputs: [...inputs],

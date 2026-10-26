@@ -149,14 +149,22 @@ describe('agentic resource exploration routes', () => {
     }))
   })
 
-  test('resolves signed dependency closures only for explicit selections', async () => {
+  test('resolves signed nested and shared dependency closures only for explicit selections', async () => {
     const repository = createInMemoryResourceRepository({
       packs: [pack],
       elements: [
         {
           ...element('scene', 'models/scene.glb', ['scene']), specs: { contentHash: 'a'.repeat(64), boundsSizeX: 8, hasNormals: true },
+          dependencies: ['material', 'texture'],
+          dependencyBindings: [
+            { referencePath: 'Textures/material.json', dependencyElementId: 'material', kind: 'material' },
+            { referencePath: 'shared/base.png', dependencyElementId: 'texture', kind: 'image' },
+          ],
+        },
+        {
+          ...element('material', 'materials/material.json', ['terrain']), category: 'textures', kind: 'material',
           dependencies: ['texture'],
-          dependencyBindings: [{ referencePath: 'Textures/base.png', dependencyElementId: 'texture' }],
+          dependencyBindings: [{ referencePath: '../shared/base.png', dependencyElementId: 'texture', kind: 'image' }],
         },
         { ...element('texture', 'textures/base.png', ['terrain']), category: 'textures', kind: 'image' },
       ],
@@ -186,16 +194,17 @@ describe('agentic resource exploration routes', () => {
         resourceId: 'scene-root', elementId: 'scene', sourceUrl: expect.stringContaining('https://storage.example/'),
       technicalFacts: expect.objectContaining({ boundsSizeX: 8, hasNormals: true }),
     }))
-    expect(body.selections[0].dependencies).toHaveLength(1)
-    expect(body.selections[0].dependencies[0]).toEqual(expect.objectContaining({
-      elementId: 'texture', referencePath: 'Textures/base.png', sourceUrl: expect.stringContaining('https://storage.example/'),
-    }))
+    expect(body.selections[0].dependencies).toHaveLength(3)
+    expect(body.selections[0].dependencies).toEqual([
+      expect.objectContaining({ key: 'root.0', parentKey: 'root', elementId: 'material', elementPath: 'materials/material.json', referencePath: 'Textures/material.json', kind: 'material', sourceUrl: expect.stringContaining('https://storage.example/') }),
+      expect.objectContaining({ key: 'root.0.0', parentKey: 'root.0', elementId: 'texture', elementPath: 'textures/base.png', referencePath: '../shared/base.png', kind: 'image', sourceUrl: expect.stringContaining('https://storage.example/') }),
+      expect.objectContaining({ key: 'root.1', parentKey: 'root', elementId: 'texture', elementPath: 'textures/base.png', referencePath: 'shared/base.png', kind: 'image', sourceUrl: expect.stringContaining('https://storage.example/') }),
+    ])
   })
 
   test('resolves an exact selected element when unrelated catalog facts changed', async () => {
     const app = appFor({ packs: [pack], elements: [element('tower', 'models/tower.glb', ['building'])] })
     const response = await post(app, '/api/resource-library/resolve', {
-      catalogRevision: 'stale-revision',
       selections: [{
         resourceId: 'tower', packId: pack.id, expectedPackVersion: pack.version,
         elementId: 'tower', selectionReason: ['Selected from the frozen match.'],

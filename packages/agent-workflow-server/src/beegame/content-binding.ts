@@ -168,7 +168,7 @@ export async function bindContent(workspace: string, request: unknown, signal?: 
 }
 
 /** File-authorized native use: real saved content/registry/member versions,
- * not an invented eight-document release. This only binds the explicit batch;
+ * bound to the explicit batch;
  * design intent, missing original requirements and runtime use remain unverified. */
 export async function bindCurrentContent(workspace:string, request:unknown, signal?:AbortSignal) {
   const files=contentBindingRequestSchema.parse(request),root=await realpath(workspace)

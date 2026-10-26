@@ -324,11 +324,32 @@ export class DashboardRepository {
     request: Request,
     user: BeeGameUserContext,
     id: string,
+    beforeMetadataDelete?: () => Promise<void>,
   ): Promise<boolean> {
+    // Do not run provider cleanup for a project that is not visible to this
+    // owner. In addition to preserving the boolean delete contract, this keeps
+    // an unknown or foreign id from triggering storage side effects.
+    const project = await this.getProject(request, user, id)
+    if (!project) return false
+    if (this.options.projectAssetStorage?.deleteProjectFiles) {
+      const authToken =
+        this.options.getAuthToken?.(request) ?? getBearerToken(request)
+      if (!authToken)
+        throw new Error('Project asset storage requires authentication')
+      // Remove provider-owned objects before deleting the project rows. A
+      // failed object deletion leaves metadata available for a retry.
+      await this.options.projectAssetStorage.deleteProjectFiles({
+        ownerId: user.id,
+        projectId: id,
+        authToken,
+      })
+    }
     const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.deleteProject(user.id, id)
-      : this.getProjectStore(request).deleteProject(id)
+    if (supabase) {
+      return supabase.deleteProject(user.id, id, beforeMetadataDelete)
+    }
+    if (beforeMetadataDelete) await beforeMetadataDelete()
+    return this.getProjectStore(request).deleteProject(id)
   }
 
   async listProjectSessions(
@@ -961,7 +982,7 @@ export class DashboardRepository {
     return created
   }
 
-  private async assertProjectQuotaAllowsUpsert(
+  async assertProjectQuotaAllowsUpsert(
     request: Request,
     user: BeeGameUserContext,
     projectId: string,

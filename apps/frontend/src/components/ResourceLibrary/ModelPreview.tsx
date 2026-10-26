@@ -218,33 +218,50 @@ export async function applyBoundBaseColorTextures(
 ): Promise<void> {
   const loader = new THREE.TextureLoader()
   const textures = new Map<string, THREE.Texture>()
-  await Promise.all(Object.values(bindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : []).map(async elementId => {
+  const elementIds = [...new Set(Object.values(bindings).flatMap(binding => binding.baseColor ? [binding.baseColor] : []))]
+  // Wait for every load even after a failure so late textures can be released.
+  const results = await Promise.allSettled(elementIds.map(async elementId => {
     const url = textureUrls[elementId]
-    if (!url || textures.has(elementId)) return
+    if (!url) return
     const texture = await loader.loadAsync(url)
     texture.colorSpace = THREE.SRGBColorSpace
     textures.set(elementId, texture)
   }))
-  object.traverse(node => {
-    if (!(node instanceof THREE.Mesh)) return
-    const materials = Array.isArray(node.material) ? node.material : [node.material]
-    materials.forEach(material => {
-      const elementId = bindings[material.name]?.baseColor
-      const sourceTexture = elementId ? textures.get(elementId) : undefined
-      if (!sourceTexture) return
-      // Texture transform belongs to a material binding, not the image asset.
-      // Clone the loaded image so different material slots can safely use the
-      // same atlas with their own UV channel or transform.
-      const texture = sourceTexture.clone()
-      applyTextureTransform(texture, materialTextureTransform(material))
-      const standard = material as THREE.MeshStandardMaterial
-      standard.map = texture
-      // A bound base-color image is authoritative; inherited FBX diffuse
-      // colors should not tint or wash out the atlas.
-      standard.color.set(0xffffff)
-      standard.needsUpdate = true
+  try {
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
+    const assigned = new Set<THREE.Material>()
+    const replaced = new Set<THREE.Texture>()
+    object.traverse(node => {
+      if (!(node instanceof THREE.Mesh)) return
+      const materials = Array.isArray(node.material) ? node.material : [node.material]
+      materials.forEach(material => {
+        if (assigned.has(material)) return
+        const elementId = bindings[material.name]?.baseColor
+        const sourceTexture = elementId ? textures.get(elementId) : undefined
+        if (!sourceTexture) return
+        assigned.add(material)
+        // Each material owns its UV transform, even when images are shared.
+        const texture = sourceTexture.clone()
+        applyTextureTransform(texture, materialTextureTransform(material))
+        const standard = material as THREE.MeshStandardMaterial
+        if (standard.map) replaced.add(standard.map)
+        standard.map = texture
+        standard.color.set(0xffffff)
+        standard.needsUpdate = true
+      })
     })
-  })
+    // An old map can also be used by an unmodified slot/material.
+    object.traverse(node => {
+      if (!(node instanceof THREE.Mesh)) return
+      for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+        for (const value of Object.values(material)) if (value instanceof THREE.Texture) replaced.delete(value)
+      }
+    })
+    replaced.forEach(texture => texture.dispose())
+  } finally {
+    textures.forEach(texture => texture.dispose())
+  }
 }
 
 export async function persistModelMetrics(
@@ -641,9 +658,14 @@ export function modelAnimations(object: THREE.Object3D): THREE.AnimationClip[] {
   return Array.isArray(animations) ? animations : []
 }
 
-export function ModelPreview({ url, sourcePath, extension, materialTextureBindings = {}, textureUrls = {}, externalResourceUrls = {}, externalReferences = [], onMetrics, onMetricsError }: ModelPreviewProps) {
+const EMPTY_BINDINGS: MaterialTextureBindings = {}
+const EMPTY_URLS: Readonly<Record<string, string>> = {}
+const EMPTY_REFERENCES: string[] = []
+
+export function ModelPreview({ url, sourcePath, extension, materialTextureBindings = EMPTY_BINDINGS, textureUrls = EMPTY_URLS, externalResourceUrls = EMPTY_URLS, externalReferences = EMPTY_REFERENCES, onMetrics, onMetricsError }: ModelPreviewProps) {
   const { t } = useTranslation('resourceLibrary')
   const host = useRef<HTMLDivElement>(null)
+  const requestRenderRef = useRef<(() => void) | undefined>(undefined)
   const onMetricsRef = useRef(onMetrics)
   const onMetricsErrorRef = useRef(onMetricsError)
   const mixerRef = useRef<THREE.AnimationMixer | undefined>(undefined)
@@ -673,9 +695,14 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
     const stage = stageRef.current
     const model = modelRef.current
     if (stage && model) applyPreviewStageMode(stage, model, previewMode, previewMaterialStatesRef.current)
+    requestRenderRef.current?.()
   }, [previewMode])
   useEffect(() => { selectedAnimationRef.current = selectedAnimation }, [selectedAnimation])
-  useEffect(() => { isPlayingRef.current = isPlaying; if (activeActionRef.current) activeActionRef.current.paused = !isPlaying }, [isPlaying])
+  useEffect(() => {
+    isPlayingRef.current = isPlaying
+    if (activeActionRef.current) activeActionRef.current.paused = !isPlaying
+    requestRenderRef.current?.()
+  }, [isPlaying])
   useEffect(() => {
     isLoopingRef.current = isLooping
     const action = activeActionRef.current
@@ -686,6 +713,7 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
     // selected action from its authored first pose whenever its loop mode changes.
     restartAnimationAction(action, mixerRef.current, isLooping, isPlayingRef.current)
     setTimelineTime(0)
+    requestRenderRef.current?.()
   }, [isLooping])
   useEffect(() => {
     const nextAction = animationActionsRef.current[selectedAnimation]
@@ -701,6 +729,7 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
     activeActionRef.current = nextAction
     activeClipRef.current = nextAction.getClip()
     setTimelineTime(0)
+    requestRenderRef.current?.()
   }, [selectedAnimation])
 
   useEffect(() => {
@@ -741,13 +770,23 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
     const timer = new THREE.Timer()
     timer.connect(document)
 
+    const requestRender = () => {
+      if (!active || frame) return
+      // Starting after an idle period must not advance an animation by that gap.
+      timer.reset()
+      frame = requestAnimationFrame(draw)
+    }
+    requestRenderRef.current = requestRender
     const resize = () => {
       const { width, height } = container.getBoundingClientRect()
       renderer.setSize(width || 1, height || 1)
       camera.aspect = (width || 1) / (height || 1)
       camera.updateProjectionMatrix()
+      requestRender()
     }
     const draw = (timestamp: DOMHighResTimeStamp) => {
+      frame = 0
+      if (!active) return
       timer.update(timestamp)
       if (mixer && isPlayingRef.current) {
         mixer.update(timer.getDelta())
@@ -774,9 +813,10 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
       }
       controls.update()
       renderer.render(scene, camera)
-      frame = requestAnimationFrame(draw)
+      if (mixer && isPlayingRef.current && !frame) frame = requestAnimationFrame(draw)
     }
-    resize(); frame = requestAnimationFrame(draw)
+    controls.addEventListener('change', requestRender)
+    resize()
     const observer = new ResizeObserver(resize)
     observer.observe(container)
 
@@ -791,7 +831,20 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
         }
         if (unresolvedTextures.size) applyMissingTextureFallback(loaded.object, [...unresolvedTextures])
         enableVertexColors(loaded.object)
-        await applyBoundBaseColorTextures(loaded.object, materialTextureBindings, textureUrls).catch(() => undefined)
+        try {
+          await applyBoundBaseColorTextures(loaded.object, materialTextureBindings, textureUrls)
+        } catch (reason) {
+          if (active) {
+            const textureError = normalizeModelPreviewError(reason)
+            console.error('Resource model textures failed', textureError)
+            setError(`Model textures failed: ${textureError.message}`)
+            onMetricsErrorRef.current?.(textureError)
+          }
+        }
+        if (!active) {
+          disposeObject(loaded.object)
+          return
+        }
         model = loaded.object
         modelRef.current = loaded.object
         previewMaterialStatesRef.current = new Map()
@@ -830,6 +883,7 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
         scene.add(key.target, fill.target, rim.target)
         camera.lookAt(center)
         controls.update()
+        requestRender()
         if (onMetricsRef.current) {
           void persistModelMetrics(onMetricsRef.current, calculateModelMetrics(loaded.object, [...unresolvedTextures], loaded.animations)).then(metricsError => {
             if (!metricsError || !active) return
@@ -849,6 +903,8 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
     return () => {
       active = false
       cancelAnimationFrame(frame)
+      if (requestRenderRef.current === requestRender) requestRenderRef.current = undefined
+      controls.removeEventListener('change', requestRender)
       timer.dispose()
       observer.disconnect()
       controls.dispose()
@@ -881,6 +937,7 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
     const bounded = Math.min(Math.max(value, 0), activeDuration)
     mixerRef.current?.setTime(bounded)
     setTimelineTime(bounded)
+    requestRenderRef.current?.()
   }
   const togglePlayback = () => {
     if (isPlaying) {

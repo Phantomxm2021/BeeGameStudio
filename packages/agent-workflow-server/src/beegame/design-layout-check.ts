@@ -4,9 +4,15 @@ import { inspectUiLayout, isUiControl, rectanglesIntersect } from '../../../scen
 import { parseBeeGameContentDocument } from './game-content-schema'
 import { auditUiInteractiveBounds, isViewportPair, readUiLayoutCameras, type LayoutConstraints, type UiDocument, type LayoutDiagnostic, type LayoutMeasurement } from './ui-layout-audit'
 import { designSupportingFiles } from './design-handoff'
+import { PROJECT_DOCUMENTS } from './project-content-authority'
 import { collectContentSourceFiles } from './content-source-files'
 import { sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
 import { sceneLayoutDraftIssues, contentDraftStructureIssues } from './game-content-package'
+
+// The single GDD owns the authored UI/Scene source links. Keep the owner
+// derived from the shared authority so this consumer cannot silently revive a
+// retired per-discipline document.
+const DESIGN_OWNER = PROJECT_DOCUMENTS[0]
 
 /** One shared calculator for the same UI files during design and Content.
  * Neither boundary trusts an Agent-supplied geometry PASS. */
@@ -19,7 +25,7 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
   const compositions: { file: string; underlay: string; clearance: string }[] = []
   const targetsChecked: Array<{ source: string; viewports: unknown[] }> = []
   const unverified = ['Actual font fit, rendered appearance, runtime composition and prose coverage are not certified.']
-  const diagnostics: Array<LayoutDiagnostic & { source: string; owner: 'UI_UX_SPEC.md' }> = []
+  const diagnostics: Array<LayoutDiagnostic & { source: string; owner: typeof DESIGN_OWNER }> = []
   const measurements: Array<LayoutMeasurement & { source: string; scene?: string }> = []
   const workspace = realpathSync(workspacePath)
   const xr = confirmed?.dimension === 'VR' || confirmed?.dimension === 'AR'
@@ -87,7 +93,7 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
         const problems: LayoutDiagnostic[] = [], measured: LayoutMeasurement[] | undefined = details ? [] : undefined
         const source = options.scenePath ? ` Scene ${options.scenePath}` : ''
         const bounds = auditUiInteractiveBounds(document, options, { deferTileSets, deferred: pending, diagnostics: problems, measurements: measured })
-        diagnostics.push(...problems.map(item => ({ ...item, source: name, ...(options.scenePath ? { scene: options.scenePath } : {}), owner: 'UI_UX_SPEC.md' as const })))
+        diagnostics.push(...problems.map(item => ({ ...item, source: name, ...(options.scenePath ? { scene: options.scenePath } : {}), owner: DESIGN_OWNER })))
         measurements.push(...(measured ?? []).map(item => ({ ...item, source: name, scene: options.scenePath })))
         issues.push(...bounds.map(issue => `${name}:${source} ${issue}`))
         deferred.push(...pending.map(issue => `${name}:${source} ${issue}`))
@@ -95,7 +101,7 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       issues.push(`${name}: ${message}`)
-      diagnostics.push({ source: name, owner: 'UI_UX_SPEC.md', kind: 'input-invalid', message })
+      diagnostics.push({ source: name, owner: DESIGN_OWNER, kind: 'input-invalid', message })
     }
   }
   // A file alone cannot establish clearance against a retained layer in another
@@ -163,7 +169,7 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
       for (const region of below) if (region.node.outsideViewport || region.node.outsideCameraView) {
         const message = `${size.join('x')} preserved ${region.file}#${region.node.id} exceeds its viewport/Camera.`
         issues.push(`${file}:${sceneLabel} ${message}`)
-        diagnostics.push({ source: file, owner: 'UI_UX_SPEC.md', scene, node: region.node.id, viewport: size,
+        diagnostics.push({ source: file, owner: DESIGN_OWNER, scene, node: region.node.id, viewport: size,
           kind: 'underlay-bounds', message, closeWhen: 'Keep the protected underlay visible in this composition.',
           geometry: { space: 'host logical pixels', underlay: region.file, bounds: region.node.bounds, corners: region.node.corners } })
       }
@@ -173,7 +179,7 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
         if (rectanglesIntersect(protectedRegion.node.corners, occluder.corners)) {
           const message = `${size.join('x')} occluder ${occluder.id} intersects preserved ${protectedRegion.file}#${protectedRegion.node.id}.`
           issues.push(`${file}:${sceneLabel} ${message}`)
-          diagnostics.push({ source: file, owner: 'UI_UX_SPEC.md', scene, node: occluder.id, viewport: size,
+          diagnostics.push({ source: file, owner: DESIGN_OWNER, scene, node: occluder.id, viewport: size,
             kind: 'underlay-occlusion', message, closeWhen: 'Remove the intersection without changing the agreed preserve policy.',
             geometry: { space: 'host logical pixels', bounds: occluder.bounds, corners: occluder.corners,
               protectedRegion: { source: protectedRegion.file, node: protectedRegion.node.id,
@@ -183,7 +189,7 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     issues.push(`${file}: ${message}`)
-    diagnostics.push({ source: file, owner: 'UI_UX_SPEC.md', kind: 'composition-invalid', message,
+    diagnostics.push({ source: file, owner: DESIGN_OWNER, kind: 'composition-invalid', message,
       closeWhen: 'Correct the composition input and rerun; clearance was not verified.' })
   }
   return { valid: !issues.length, issues: [...new Set(issues)], diagnostics, deferred: [...new Set(deferred)], files: files.map(path => relative(workspace, path).split(sep).join('/')), compositions,
@@ -200,7 +206,7 @@ export function checkReviewUiLayouts(workspace: string, confirmed?: LayoutConstr
   const savedFiles = new Set<string>(check.files)
   let expected: string[] = []
   try {
-    expected = designSupportingFiles(workspace, ['UI_UX_SPEC.md']).filter(file => file.startsWith('content/ui/'))
+    expected = designSupportingFiles(workspace, [DESIGN_OWNER]).filter(file => file.startsWith('content/ui/'))
     for (const file of expected) if (!savedFiles.has(file))
       issues.push(`${file}: required owner-linked UI source is missing from the saved batch.`)
     const ids = new Set<string>()
@@ -218,7 +224,7 @@ export function checkReviewUiLayouts(workspace: string, confirmed?: LayoutConstr
     if (!compositions && confirmed?.dimension !== 'VR' && confirmed?.dimension !== 'AR')
       issues.push('UI Review needs ui-screen/ui-hud compositions; navigation-only ui-flow cannot establish layout geometry.')
   } catch (error) { issues.push(String(error instanceof Error ? error.message : error)) }
-  return { ...check, valid: !issues.length, issues: issues.map(issue => `UI_UX_SPEC.md: ${issue}`),
+  return { ...check, valid: !issues.length, issues: issues.map(issue => `${DESIGN_OWNER}: ${issue}`),
     coverage: { ...check.coverage, expected, missing: expected.filter(file => !savedFiles.has(file)),
       undeclared: check.files.filter(file => !expected.includes(file)) } }
 }
@@ -229,7 +235,7 @@ export function checkReviewUiLayouts(workspace: string, confirmed?: LayoutConstr
 export function checkReviewSceneLayouts(workspace: string) {
   const issues: string[] = [], files: string[] = []
   try {
-    const expected = designSupportingFiles(workspace, ['LEVEL_SCENE_DESIGN.md'])
+    const expected = designSupportingFiles(workspace, [DESIGN_OWNER])
       .filter(path => path.startsWith('content/scenes/'))
     // UI-only work needs no empty Scene; an existing directory is still checked
     // for aliases, malformed files and every newly added Scene.
@@ -249,7 +255,7 @@ export function checkReviewSceneLayouts(workspace: string) {
       if (doc.kind === 'scene-2d') sceneCameraInput2d(doc.data)
     } catch (error) { issues.push(`${file}: ${error instanceof Error ? error.message : String(error)}`) }
   } catch (error) { issues.push(error instanceof Error ? error.message : String(error)) }
-  return { valid: !issues.length, files, issues: issues.map(issue => `LEVEL_SCENE_DESIGN.md: ${issue}`),
+  return { valid: !issues.length, files, issues: issues.map(issue => `${DESIGN_OWNER}: ${issue}`),
     note: 'Scene schema, identity, hierarchy and authored Camera selection only. 2D required visibility uses linked UI game-view targets; dynamic traversal, 3D/XR framing and resource-dependent bounds need later checks.' }
 }
 
@@ -269,7 +275,7 @@ export function checkReviewDesignLayouts(workspace: string, confirmed?: LayoutCo
   for (const file of scene.files) try {
     const doc = parseBeeGameContentDocument(JSON.parse(readFileSync(join(workspace, file), 'utf8')))
     if (doc.kind === 'scene-2d' && doc.data.settings?.requiredVisibleNodeIds !== undefined && !connected.has(file))
-      issues.push(`UI_UX_SPEC.md: ${file}: required Scene visibility needs a layoutCamera link to this same Scene in an active UI game-view; standalone camera data is not visibility evidence.`)
+      issues.push(`${DESIGN_OWNER}: ${file}: required Scene visibility needs a layoutCamera link to this same Scene in an active UI game-view; standalone camera data is not visibility evidence.`)
   } catch { /* Already diagnosed above. */ }
   return { ...ui, valid: !issues.length, issues, files: [...scene.files, ...ui.files], sceneNote: scene.note,
     inputs: { confirmed: confirmed ?? {}, deferTileSets },

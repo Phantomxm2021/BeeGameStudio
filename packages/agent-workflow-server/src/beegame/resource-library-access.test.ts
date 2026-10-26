@@ -52,6 +52,29 @@ test('native HTTP access reuses user auth, supports metadata/download and forbid
   await expect(fetch(base + '/api/resource-search')).rejects.toThrow()
 })
 
+test('native HTTP access forwards explicit dependency-closure resolution', async () => {
+  const calls: { url: string; method: string; body: string }[] = []
+  const access = openResourceLibraryAccess({
+    baseUrl: 'https://library.test',
+    getAuthToken: () => 'user-token',
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body: String(init?.body ?? '') })
+      return Response.json({ selections: [{ resourceId: 'scene', dependencies: [{ elementId: 'texture' }] }] })
+    },
+  })
+  const body = JSON.stringify({ selections: [{ resourceId: 'scene' }] })
+  try {
+    const response = await fetch(access.baseUrl + '/api/resource-library/resolve', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ selections: [{ resourceId: 'scene', dependencies: [{ elementId: 'texture' }] }] })
+    expect(calls).toEqual([{ url: 'https://library.test/api/resource-library/resolve', method: 'POST', body }])
+    expect((await fetch(access.baseUrl + '/api/resource-library/resolve')).status).toBe(405)
+    expect(calls).toHaveLength(1)
+  } finally { access.close() }
+})
+
 test('unavailable auth and upstream errors are not empty search results', async () => {
   let authenticated = false
   const access = openResourceLibraryAccess({

@@ -3,7 +3,6 @@ import {mkdtemp,realpath,mkdir,writeFile,readFile,rm,symlink,access} from 'node:
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {readProjectGuide,projectGuideContext,PROJECT_GUIDE_TEMPLATE,PROJECT_WORKING_CONVENTIONS,projectNavigationSnapshot,projectGuideTemplate,initializeProjectGuide} from './project-guide'
-import {DESIGN_WRITING_ORDER} from '@bee-game-studio/agent-workflow/design-review-result'
 import {readDesignHandoff} from '../workflow-read-tools'
 import {runGameContentCommand} from '../game-content-validation-cli'
 
@@ -59,7 +58,7 @@ test('one navigation batch supplies saved commands and actual pointers without p
     for(const dir of ['docs','src','tests','content/scenes','.beegame/tmp'])await mkdir(join(root,dir),{recursive:true})
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'actual-dev-command',test:'touch MUST_NOT_RUN'}}))
     await writeFile(join(root,'project.godot'),'NATIVE_ROUTE_AUTHORITY')
-    await writeFile(join(root,'docs/merged.md'),'PRIVATE_PROSE_PARAMETERS 0.6s 13/13 PASS')
+    await writeFile(join(root,'docs/merged.md'),'PRIVATE_PROSE_PARAMETERS 0.6s 13/13 SAVED_VERDICT_PASS')
     await writeFile(join(root,'src/game.ts'),'GAME_SOURCE_NOT_COPIED')
     await writeFile(join(root,'tests/journey.mjs'),'TEST_PRECONDITIONS_NOT_GUESSED')
     await writeFile(join(root,'content/index.json'),JSON.stringify({documents:[{path:'scenes/native.json'}]}))
@@ -70,7 +69,7 @@ test('one navigation batch supplies saved commands and actual pointers without p
     expect(first.facts).toMatchObject({designFiles:['docs/merged.md'],codeFiles:['src/game.ts'],testFiles:['tests/journey.mjs'],
       registeredContent:['content/scenes/native.json'],commands:{dev:'actual-dev-command',test:'touch MUST_NOT_RUN'},issues:[]})
     for(const path of ['project.godot','docs/merged.md','src/game.ts','tests/journey.mjs','content/scenes/native.json'])expect(first.value).not.toContain(path)
-    for(const absent of ['PRIVATE_PROSE','0.6s','13/13','PASS','NOT_NAVIGATION','CAPABILITY_SECRET','.beegame/tmp/','.beegame/delivery/','AUTHOR_ADDED_PROSE','BEEGAME_PREVIEW_TEST_MODULE','Vite'])
+    for(const absent of ['PRIVATE_PROSE','0.6s','13/13','SAVED_VERDICT_PASS','NOT_NAVIGATION','CAPABILITY_SECRET','.beegame/tmp/','.beegame/delivery/','AUTHOR_ADDED_PROSE','BEEGAME_PREVIEW_TEST_MODULE','Vite'])
       expect(first.value).not.toContain(absent)
     await expect(access(join(root,'MUST_NOT_RUN'))).rejects.toThrow()
     expect(await readFile(join(root,'AGENTS.md'),'utf8')).toBe(before)
@@ -142,17 +141,20 @@ test('initial guide stays portable and never overwrites a saved file or link',as
     expect(guide).toContain('one overview board covering all game screens and key states in the current assignment')
     expect(guide).toContain('pixel-size deviations alone do not require regeneration or block reference delivery')
     expect(guide).toContain('Resolve consequential conflicts before affected production')
-    expect(guide).toContain('use ASSET_PLAN.md and the selected visual/audio designs for the current part')
+    expect(guide).toContain('use the resources/content and selected visual/audio chapters in docs/GDD.md for the current part')
     expect(guide).not.toContain('complete UI screens/key states, scenes and needed props')
     expect(guide).toContain('do not create runtime scene/UI content here')
     expect(guide).toContain('Use actual asset metrics and existing checks when binding resources')
-    expect(guide).toContain('for a full new game, create the eight design documents')
-    expect(guide).toContain('maintain affected records for subsequent changes')
-    expect(guide).toContain('The Agent chooses methods and work order')
-    for (const document of DESIGN_WRITING_ORDER) expect(guide).toContain(document)
+    expect(guide).toContain('create and maintain docs/GDD.md')
+    expect(guide).toContain('vision/gameplay, systems/balance, level/scene, art direction, UI/UX, audio, resources/content and technical design')
+    expect(guide).toContain('The Agent chooses chapter order and implementation methods')
     expect(guide).toContain('Verification applies to its recorded input version')
+    expect(guide).toContain('Implementation requires a currently validated existing measure.mjs --finish')
+    expect(guide).toContain('Later generic design/resource assignments do not inherit implementation scope')
+    expect(guide).toContain('An editable Scene/UI delivery PASS requires the existing verification.visualComparisons to cite a displayable source design and an actual image observation')
+    expect(guide).toContain('the host checks paths, statuses and evidence binding structurally, not semantic visual fidelity')
     expect(guide).not.toContain('Technical/resource plans start as drafts')
-    expect(guide).not.toContain('Finalize TECHNICAL_DESIGN.md tasks from these inputs')
+    expect(guide).not.toContain('Finalize GDD.md tasks from these inputs')
     expect(guide).not.toContain('Planning geometry supports layout checks')
     expect(guide).not.toContain('For follow-ups,')
     expect(guide).not.toContain('instead of Shell readers')
@@ -253,13 +255,11 @@ test('unsafe, non-text and oversized guides are diagnosed without stale content 
   }finally{await rm(root,{recursive:true,force:true})}
 })
 
-test('document navigation preserves all eight documents without a duplicate Skill recommendation table',async()=>{
+test('document navigation exposes the single GDD without a duplicate Skill recommendation table',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-writing-order-')))
   try {
-    expect(DESIGN_WRITING_ORDER).toEqual(['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md',
-      'ART_DIRECTION.md','UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md'])
-    expect(readDesignHandoff(root,{}).documents.map(item=>item.document)).toEqual(DESIGN_WRITING_ORDER)
-    for (const document of DESIGN_WRITING_ORDER) expect(PROJECT_WORKING_CONVENTIONS).toContain(document)
+    expect(readDesignHandoff(root,{}).documents.map(item=>item.document)).toEqual(['GDD.md'])
+    expect(PROJECT_WORKING_CONVENTIONS).toContain('docs/GDD.md')
     expect(PROJECT_WORKING_CONVENTIONS).not.toContain('| Design responsibility | Skills |')
     expect(PROJECT_WORKING_CONVENTIONS).not.toContain('gameplay-programmer')
     const selected=runGameContentCommand(root,['--format','projectGuide']) as any

@@ -10,6 +10,14 @@ function gameOptions() {
   }))
 }
 
+test('host-assigned choice IDs stay unique when model IDs collide or are missing', () => {
+  const options = gameOptions().map((option, index) => ({ ...option, id: index < 2 ? 'same' : '' }))
+  const result = parseBeeGameIntakeContent(JSON.stringify({ options }))
+  expect(result.options.map(option => option.id)).toEqual(['mode_1', 'mode_2', 'mode_3'])
+  expect(result.options.map(option => option.title)).toEqual(options.map(option => option.title))
+  expect(result.options.map(option => option.gameplay)).toEqual(options.map(option => option.gameplay))
+})
+
 test.each([
   { inputs: ['Keyboard / Mouse', 'touch', 'GAMEPAD', 'hand_tracking'], expected: ['Keyboard/mouse', 'Touch', 'Gamepad', 'Hand tracking'] },
   { inputs: ['Keyboard', 'Mouse', 'Touchscreen'], expected: ['Keyboard/mouse', 'Touch'] },

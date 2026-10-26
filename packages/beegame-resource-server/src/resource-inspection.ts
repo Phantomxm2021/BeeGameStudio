@@ -19,6 +19,7 @@ export function inspectResourceBytes(name: string, bytes: Uint8Array): Record<st
   const extension = extensionOf(name)
   let facts: Record<string, string | number | boolean> = {}
   if (extension === 'png') facts = inspectPng(bytes)
+  else if (extension === 'wav') facts = inspectWav(bytes)
   else if (extension === 'glb') facts = inspectGlb(bytes)
   else if (extension === 'gltf') facts = inspectGltfText(new TextDecoder().decode(bytes))
   else if (extension === 'obj') facts = inspectObjText(new TextDecoder().decode(bytes))
@@ -85,6 +86,49 @@ function inspectPng(bytes: Uint8Array): Record<string, number> {
   if (bytes.length < 24 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) return {}
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   return { width: view.getUint32(16), height: view.getUint32(20) }
+}
+
+/** Deliberately narrow: complete RIFF/WAVE PCM16 mono/stereo metadata only.
+ * Unsupported or malformed audio remains unverified instead of becoming a
+ * guessed technical fact. This mirrors the existing bounded WAV skill helper
+ * without importing a project/skill artifact into the resource service. */
+function inspectWav(bytes: Uint8Array): Record<string, string | number> {
+  if (bytes.length < 44 || readAscii(bytes, 0, 4) !== 'RIFF' || readAscii(bytes, 8, 4) !== 'WAVE') return {}
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (view.getUint32(4, true) + 8 !== bytes.length) return {}
+  let format: { encoding: number; channels: number; sampleRate: number; byteRate: number; blockAlign: number; bitDepth: number } | undefined
+  let dataSize: number | undefined
+  for (let offset = 12; offset < bytes.length;) {
+    if (offset + 8 > bytes.length) return {}
+    const size = view.getUint32(offset + 4, true), start = offset + 8
+    const next = start + size + (size % 2)
+    if (next < start || next > bytes.length) return {}
+    const chunk = readAscii(bytes, offset, 4)
+    if (chunk === 'fmt ') {
+      if (format || size < 16) return {}
+      format = {
+        encoding: view.getUint16(start, true), channels: view.getUint16(start + 2, true),
+        sampleRate: view.getUint32(start + 4, true), byteRate: view.getUint32(start + 8, true),
+        blockAlign: view.getUint16(start + 12, true), bitDepth: view.getUint16(start + 14, true),
+      }
+    } else if (chunk === 'data') {
+      if (dataSize !== undefined) return {}
+      dataSize = size
+    }
+    offset = next
+  }
+  if (!format || dataSize === undefined || format.encoding !== 1 || format.bitDepth !== 16 ||
+      ![1, 2].includes(format.channels) || !format.sampleRate ||
+      format.blockAlign !== format.channels * 2 || format.byteRate !== format.sampleRate * format.blockAlign ||
+      !dataSize || dataSize % format.blockAlign) return {}
+  const frames = dataSize / format.blockAlign
+  return { encoding: 'PCM16', sampleRate: format.sampleRate, channelCount: format.channels,
+    frames, durationMs: frames * 1000 / format.sampleRate }
+}
+
+function readAscii(bytes: Uint8Array, start: number, length: number): string {
+  if (start < 0 || start + length > bytes.length) return ''
+  return String.fromCharCode(...bytes.subarray(start, start + length))
 }
 
 function inspectGlb(bytes: Uint8Array): Record<string, string | number | boolean> {

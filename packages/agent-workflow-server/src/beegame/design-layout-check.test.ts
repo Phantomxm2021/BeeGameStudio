@@ -15,8 +15,18 @@ function fixture() {
   roots.push(root)
   mkdirSync(join(root, 'content/ui'), { recursive: true })
   mkdirSync(join(root, 'docs'))
+  // One GDD owns the independent UI/Scene sections used by these checks.
+  // Individual tests may replace this source when they need a different link
+  // set; saving a UI draft only supplies the ordinary menu link if it is still
+  // absent.
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n')
   const path = join(root, 'content/ui/menu.json')
-  return { root, path, save: (value: unknown) => writeFileSync(path, JSON.stringify(value)) }
+  return { root, path, save: (value: unknown) => {
+    writeFileSync(path, JSON.stringify(value))
+    const gdd = join(root, 'docs/GDD.md')
+    if (readFileSync(gdd, 'utf8') === '# Game\n')
+      writeFileSync(gdd, '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n')
+  } }
 }
 
 function sceneDraft() {
@@ -25,13 +35,13 @@ function sceneDraft() {
   const path = join(f.root, 'content/scenes/level.json')
   const saveScene = () => writeFileSync(path, JSON.stringify(scene))
   saveScene()
-  writeFileSync(join(f.root, 'docs/LEVEL_SCENE_DESIGN.md'), '# Scene\n[Level](../content/scenes/level.json)\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n\n## Scene layout\n[Level](../content/scenes/level.json)\n')
   return { ...f, scene, scenePath: path, saveScene }
 }
 
 test('UI Review rejects illegal resource slots before freezing but accepts genuinely unbound image drafts', () => {
   const f = fixture(), ui = uiLayoutFixture() as any
-  writeFileSync(join(f.root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n')
   ui.data.nodes.push({ id: 'decoration', role: 'emitter', parentId: 'root',
     layout: { size: [20, 20] }, assetRef: 'future-effect' })
   f.save(ui)
@@ -51,7 +61,7 @@ test('Review checks saved Scenes without new owner links and still reports missi
   rmSync(f.scenePath)
   expect(checkReviewSceneLayouts(f.root).valid).toBe(false)
   f.saveScene()
-  writeFileSync(join(f.root, 'docs/LEVEL_SCENE_DESIGN.md'), '# Scene\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## Scene layout\n')
   expect(checkReviewSceneLayouts(f.root)).toMatchObject({valid:true, files:['content/scenes/level.json']})
   const later=sceneLayoutFixture(); later.id='later'
   later.data.cameraNodeId = 'missing'
@@ -85,7 +95,7 @@ test('joint Review uses the same required Scene inside the allocated UI game-vie
   f.scene.data.settings.requiredVisibleNodeIds = ['board']
   f.scene.data.nodes[1].components = [{ id: 'visual', type: 'sprite-renderer', data: { size: [700, 300] } }]
   f.saveScene(); f.save(ui)
-  writeFileSync(join(f.root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n\n## Scene layout\n[Level](../content/scenes/level.json)\n')
   expect(checkReviewDesignLayouts(f.root).issues.join(' ')).toContain('needs a layoutCamera link')
   ui.data.nodes.push({ id: 'game-view', role: 'container', parentId: 'root', layout: { size: [300, 300] } })
   ui.data.nodes[0].data.layoutCamera = { nodeId: 'game-view', path: 'content/scenes/level.json' }
@@ -137,14 +147,14 @@ test('shared UI checks every linked Scene; a second level cannot escape framing 
   other.data.nodes[0].components[0].data.framing = 'keep-height'
   other.data.nodes[1].components[0].data.size = [1200, 300]
   writeFileSync(join(f.root, 'content/scenes/other.json'), JSON.stringify(other))
-  writeFileSync(join(f.root, 'docs/LEVEL_SCENE_DESIGN.md'), '# Scene\n[First](../content/scenes/level.json)\n[Second](../content/scenes/other.json)\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n\n## Scene layout\n[First](../content/scenes/level.json)\n[Second](../content/scenes/other.json)\n')
   ui.data.nodes.push({ id: 'game-view', role: 'container', parentId: 'root', layout: { size: [560, 300] } })
   ui.data.nodes[0].data.layoutCamera = [
     { nodeId: 'game-view', path: 'content/scenes/level.json' },
     { nodeId: 'game-view', path: 'content/scenes/other.json' },
   ]
   f.save(ui)
-  writeFileSync(join(f.root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n\n## Scene layout\n[First](../content/scenes/level.json)\n[Second](../content/scenes/other.json)\n')
   const failed = checkReviewDesignLayouts(f.root)
   expect(failed.issues.join(' ')).toContain('Scene content/scenes/other.json')
   expect(failed.issues.join(' ')).toContain('required visibility failed: board')
@@ -169,7 +179,7 @@ test('Review defers only unavailable TileSet visual bounds; Content remains stri
   ui.data.nodes.push({ id: 'game-view', role: 'container', parentId: 'root', layout: { size: [560, 300] } })
   ui.data.nodes[0].data.layoutCamera = { nodeId: 'game-view', path: 'content/scenes/level.json' }
   f.save(ui)
-  writeFileSync(join(f.root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n\n## Scene layout\n[Level](../content/scenes/level.json)\n')
   const before = readFileSync(f.scenePath, 'utf8')
   const review = checkReviewDesignLayouts(f.root)
   expect(review.issues).toEqual([])
@@ -242,7 +252,7 @@ function layers() {
   f.save(base)
   const overlayPath = join(f.root, 'content/ui/overlay.json')
   writeFileSync(overlayPath, JSON.stringify(overlay))
-  writeFileSync(join(f.root, 'docs/UI_UX_SPEC.md'), '# UI\n[Base](../content/ui/menu.json)\n[Overlay](../content/ui/overlay.json)\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Base](../content/ui/menu.json)\n[Overlay](../content/ui/overlay.json)\n')
   return { ...f, base, overlay, overlayPath, saveOverlay: () => writeFileSync(overlayPath, JSON.stringify(overlay)) }
 }
 
@@ -371,31 +381,31 @@ test('final inputs are recalculated without resources, a new report or implicit 
 test('Review recomputes linked saved geometry without a Content package or claimed PASS', () => {
   const { root } = fixture()
   mkdirSync(join(root, 'content/ui'), { recursive: true })
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Layout](../content/ui/menu.json)\n')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Layout](../content/ui/menu.json)\n')
   const path = join(root, 'content/ui/menu.json')
   const ui = uiLayoutFixture(28)
   writeFileSync(path, JSON.stringify(ui))
   const before = readFileSync(path, 'utf8')
   expect(runGameContentCommand(root, ['--review-layouts'])).toMatchObject({ valid: false, runtimeVerified: false })
-  expect(checkReviewUiLayouts(root).issues.join(' ')).toContain('UI_UX_SPEC.md: content/ui/menu.json:')
+  expect(checkReviewUiLayouts(root).issues.join(' ')).toContain('GDD.md: content/ui/menu.json:')
   expect(readFileSync(path, 'utf8')).toBe(before)
   ui.data.nodes[1]!.layout!.size![1] = 52
   writeFileSync(path, JSON.stringify(ui))
   expect(checkReviewUiLayouts(root)).toMatchObject({ valid: true, files: ['content/ui/menu.json'] })
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n')
   expect(checkReviewUiLayouts(root).valid).toBe(true)
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Layout](content/ui/menu.json)\n')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Layout](content/ui/menu.json)\n')
   const wrongBase=checkReviewUiLayouts(root)
   expect(wrongBase.valid).toBe(true)
   // Prose links have their own existing checker; geometry does not invent links.
-  expect(checkDesignDocumentReferences(root, 'UI_UX_SPEC.md').issues.join(' ')).toContain('content/ui/menu.json')
+  expect(checkDesignDocumentReferences(root, 'GDD.md').issues.join(' ')).toContain('content/ui/menu.json')
   expect(readFileSync(path,'utf8')).toBe(JSON.stringify(ui))
 })
 
 test('an expanded control is checked at all declared targets, including the compact allocation', () => {
   const { root } = fixture()
   mkdirSync(join(root, 'content/ui'), { recursive: true })
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Expanded layout](../content/ui/expanded.json)\n')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Expanded layout](../content/ui/expanded.json)\n')
   const ui = { schema: 'beegame-content.v1', id: 'expanded', kind: 'ui-hud', assetRefs: [], data: {
     rootId: 'root', nodes: [
       { id: 'root', role: 'hud-root', data: { orientation: 'Landscape', referenceResolution: [1000,600],
@@ -416,7 +426,7 @@ test('an expanded control is checked at all declared targets, including the comp
 test('one UI file permits binding completion but preserves the design fingerprint', () => {
   const { root, save } = fixture()
   mkdirSync(join(root, 'content/ui'), { recursive: true })
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Layout](../content/ui/menu.json)\n')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Layout](../content/ui/menu.json)\n')
   const ui = uiLayoutFixture()
   writeFileSync(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
   const bound = structuredClone(ui) as any
@@ -434,7 +444,7 @@ test('one UI file permits binding completion but preserves the design fingerprin
 
 test('Review checks overflowing flow labels in a panel with no controls', () => {
   const { root, save } = fixture()
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Layout](../content/ui/menu.json)\n')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Layout](../content/ui/menu.json)\n')
   const ui = uiLayoutFixture() as any
   ui.data.nodes = [ui.data.nodes[0],
     { id: 'info', role: 'container', parentId: 'root',
@@ -493,12 +503,13 @@ test('Scene atlas bindings preserve the fingerprint; geometry and unknown data r
 
 test('reviewed compositions have distinct identities; XR without screen UI remains exempt', () => {
   const { root } = fixture()
-  // XR is exempt from screen geometry, not from supplying its owner design.
-  expect(checkReviewUiLayouts(root, { dimension: 'VR' }).valid).toBe(false)
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\nWorld-space UI only; no screen composition.\n')
+  // XR is exempt from screen geometry when the authoritative GDD has no
+  // screen composition to review.
+  expect(checkReviewUiLayouts(root, { dimension: 'VR' }).valid).toBe(true)
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\nWorld-space UI only; no screen composition.\n')
   expect(checkReviewUiLayouts(root, { dimension: 'VR' }).valid).toBe(true)
   mkdirSync(join(root, 'content/ui'), { recursive: true })
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n[Expanded](../content/ui/expanded.json)\n')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n[Expanded](../content/ui/expanded.json)\n')
   for (const file of ['menu.json', 'expanded.json']) writeFileSync(join(root, 'content/ui', file), JSON.stringify(uiLayoutFixture()))
   expect(checkReviewUiLayouts(root).issues.join(' ')).toContain('duplicate reviewed UI composition id')
 })
@@ -506,7 +517,7 @@ test('reviewed compositions have distinct identities; XR without screen UI remai
 test('Content cannot reorder reviewed flow children even when both layouts fit', () => {
   const { root, save } = fixture()
   mkdirSync(join(root, 'content/ui'), { recursive: true })
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n')
   const ui = uiLayoutFixture() as any
   ui.data.nodes[0].layout.container = { direction: 'column', gap: 10 }
   ui.data.nodes[1].layout = { size: [200, 52] }
@@ -696,8 +707,7 @@ test('checks declared world/screen clearance through the real camera projection 
 
 test('joint layout inspection supports incremental UI-only content without an empty Scene or new prose links', () => {
   const f = fixture()
-  writeFileSync(join(f.root, 'docs/UI_UX_SPEC.md'), '# UI\nPlanned screens.\n')
-  writeFileSync(join(f.root, 'docs/LEVEL_SCENE_DESIGN.md'), '# Scene\nUI-only.\n')
+  writeFileSync(join(f.root, 'docs/GDD.md'), '# Game\n\n## UI layout\nPlanned screens.\n\n## Scene layout\nUI-only.\n')
   f.save(uiLayoutFixture())
   const later = uiLayoutFixture(); later.id = 'later'
   writeFileSync(join(f.root, 'content/ui/later.json'), JSON.stringify(later))

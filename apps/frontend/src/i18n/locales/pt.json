@@ -53,7 +53,6 @@
       "capacity": "O modelo selecionado está no limite da capacidade. Tente outro modelo.",
       "retry": "Tentar novamente",
       "retryNow": "Tentar novamente agora",
-      "retryIn": "Tentar novamente em {{seconds}} s",
       "retrying": "Tentando novamente…"
     },
     "previewTitle": "Prévia",

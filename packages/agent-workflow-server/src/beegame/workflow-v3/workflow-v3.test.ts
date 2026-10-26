@@ -1,6 +1,8 @@
 import { test, expect } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createRun, type Run } from './state'
-import { assertCommit, createRemoteWorkflowStore, previewRunState } from './store'
+import { assertCommit, createLocalWorkflowStore, createRemoteWorkflowStore, previewRunState } from './store'
 
 function run(root = '/tmp/synthetic-game'): Run {
   return createRun({ projectId: 'synthetic', ownerId: 'alice', workspacePath: root, chatSessionId: 'chat',
@@ -103,4 +105,40 @@ test('Preview projects current owner and minimal Run state without reading histo
   status=503;result={message:'private database detail'}
   await expect(store.readPreviewState!('synthetic','alice')).rejects.toThrow('Preview state could not be read (503)')
   expect(calls).toBe(6)
+})
+
+test('local writer status counts persisted unresolved writers and reports corrupt storage as unknown', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-workflow-writer-status-')
+  try {
+    const store = createLocalWorkflowStore(root)
+    expect(await store.writerStatus!()).toEqual({ writers: 0, state: 'idle', scope: 'configured-store' })
+    const current = run()
+    current.writer = { attemptId: 'attempt', fence: 1, workerId: 'worker' }
+    await store.commit('synthetic', 'alice', 0, current, 'created')
+    expect(await store.writerStatus!()).toEqual({ writers: 1, state: 'active', scope: 'configured-store' })
+    await writeFile(join(root, 'workflow-v3', 'corrupt.json'), '{not-json')
+    expect(await store.writerStatus!()).toEqual({ writers: null, state: 'unknown', scope: 'configured-store' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('remote writer status uses a host-only HEAD count and treats missing counts as unknown', async () => {
+  let mode: 'count' | 'missing' | 'failure' = 'count'
+  const store = createRemoteWorkflowStore({ url: 'https://db.invalid', serviceKey: 'host-only', fetchImpl: async (input, init) => {
+    const url = new URL(String(input))
+    expect(url.pathname).toBe('/rest/v1/beegame_workflow_v3')
+    expect(url.searchParams.get('select')).toBe('project_id')
+    expect(url.searchParams.get('state->>writer')).toBe('not.is.null')
+    expect(init?.method).toBe('HEAD')
+    expect(new Headers(init?.headers).get('prefer')).toBe('count=exact')
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer host-only')
+    if (mode === 'failure') return new Response(null, { status: 503 })
+    return new Response(null, { status: 200, headers: mode === 'count' ? { 'content-range': '0-0/2' } : {} })
+  } })
+  expect(await store.writerStatus!()).toEqual({ writers: 2, state: 'active', scope: 'configured-store' })
+  mode = 'missing'
+  expect(await store.writerStatus!()).toEqual({ writers: null, state: 'unknown', scope: 'configured-store' })
+  mode = 'failure'
+  expect(await store.writerStatus!()).toEqual({ writers: null, state: 'unknown', scope: 'configured-store' })
 })

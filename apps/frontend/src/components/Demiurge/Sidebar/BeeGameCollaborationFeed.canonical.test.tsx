@@ -44,7 +44,7 @@ const renderWithActivitiesExpanded: typeof render = (...args) => {
   return result;
 };
 
-it('keeps one compact tool row through progress and completion without mounting payloads', () => {
+it('streams a tool result in one row, collapses on success and reopens its output', () => {
   const start: ChatDisplayMessage = { id: 'inline-start', sender: 'beegame', content: '', type: 'tool',
     toolName: 'Shell', toolUseId: 'inline-call', toolStatus: 'running', timestamp: 1000, turnId: 'inline-turn',
     toolInput: { command: 'bun run build --raw-input-marker' } };
@@ -54,15 +54,16 @@ it('keeps one compact tool row through progress and completion without mounting 
   const progress = { ...start, id: 'inline-progress', timestamp: 2000, toolOutput: 'raw-output-marker' };
   rerender(<BeeGameCollaborationFeed messages={[start, progress]} isLoading />);
   expect(screen.getByRole('group', { name: 'Run script · build' })).toBe(row);
+  expect(row).toHaveTextContent('raw-output-marker');
   rerender(<BeeGameCollaborationFeed messages={[start, { ...progress, toolStatus: 'completed', toolExitCode: 0 }]} />);
   expect(screen.getByRole('group', { name: 'Run script · build' })).toBe(row);
   expect(row).toHaveAccessibleDescription('Completed');
   expect(container.querySelectorAll('[data-tool-id]')).toHaveLength(1);
-  fireEvent.click(row);
+  expect(row).not.toHaveTextContent('raw-output-marker');
+  fireEvent.click(within(row).getByRole('button'));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  expect(row.querySelector('button, details')).toBeNull();
   expect(container).not.toHaveTextContent('raw-input-marker');
-  expect(container).not.toHaveTextContent('raw-output-marker');
+  expect(within(row).getByRole('log')).toHaveTextContent('raw-output-marker');
 });
 
 it('shows a confirmed edit as a status row without a diff panel', () => {
@@ -88,7 +89,7 @@ it('never marks a failed edit as an applied file diff', () => {
   expect(screen.getByRole('group', { name: 'Edit Example.ts' })).toHaveAccessibleDescription('Failed');
 });
 
-it('shows a compact command title and state without exposing the command or output', () => {
+it('shows a compact command title and expands the returned output', () => {
   const command = `/bin/zsh -lc 'curl -sL -A "Mozilla/5.0" "https://fonts.example.com/css?family=Example" | head -40'`;
   const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed lang="zh" messages={[
     { id: 'command-start', sender: 'beegame', content: '', type: 'tool', toolName: 'Shell', toolUseId: 'command-one',
@@ -102,9 +103,11 @@ it('shows a compact command title and state without exposing the command or outp
   expect(container.querySelectorAll('[data-tool-state]')).toHaveLength(1);
   expect(container).not.toHaveTextContent(command);
   expect(container).not.toHaveTextContent('raw-download-result');
+  fireEvent.click(within(row).getByRole('button'));
+  expect(within(row).getByRole('log')).toHaveTextContent('raw-download-result');
 });
 
-it('never exposes nested MCP input/output or legacy JSON details in a tool row', () => {
+it('expands nested MCP output without rendering input as the result', () => {
   const payload = JSON.stringify({ content: [{ type: 'text', text: 'raw-mcp-payload' }], structuredContent: null, _meta: null });
   const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed lang="zh" messages={[
     { id: 'mcp-read', sender: 'beegame', content: '', type: 'tool', toolName: 'ReadDesignHandoff',
@@ -113,12 +116,12 @@ it('never exposes nested MCP input/output or legacy JSON details in a tool row',
   ]} />);
   const row = screen.getByRole('group', { name: 'ReadDesignHandoff' });
   expect(row).toHaveAccessibleDescription('完成');
-  fireEvent.click(row);
+  expect(row.querySelector('pre')).toBeNull();
+  fireEvent.click(within(row).getByRole('button'));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  expect(row.querySelector('button, details, pre')).toBeNull();
-  expect(container).not.toHaveTextContent('raw-mcp-payload');
+  expect(within(row).getByRole('log')).toHaveTextContent(payload);
   expect(container).not.toHaveTextContent('raw-section');
-  expect(container).not.toHaveTextContent('structuredContent');
+  expect(container).toHaveTextContent('structuredContent');
 });
 
 it('keeps failure and incomplete statuses separate from the compact title and never invents old command metrics', () => {
@@ -226,8 +229,9 @@ it.each(['failed', 'stopped', 'incomplete'] as const)('keeps the %s status on it
   expect(screen.getByRole('group', { name: /internal-check.mjs/ })).toHaveAccessibleDescription({
     failed: '失败', stopped: '已停止', incomplete: '未完成',
   }[reason]);
-  expect(screen.queryByText('Internal diagnostic output')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /internal-check/ })).not.toBeInTheDocument();
+  const trigger = screen.getByRole('button', { name: /internal-check/ });
+  if (trigger.getAttribute('aria-expanded') === 'false') fireEvent.click(trigger);
+  expect(screen.getByRole('log')).toHaveTextContent('Internal diagnostic output');
 });
 
 it('does not declare the entire task failed or successful from an individual tool result', () => {
@@ -266,11 +270,11 @@ it('keeps growing activity in a bounded scroll viewport without a translating lo
     const list = within(activity).getByRole('list');
     expect(activity).toHaveAttribute('data-content', 'text');
     expect(activity.querySelector('[role="region"] > div')).toHaveStyle({ maxHeight: '360px' });
-    await waitFor(() => expect(list).toHaveStyle({ transform: 'none' }));
+    expect(list.style.transform || 'none').toBe('none');
     expect(resize).toBeDefined();
     height = 420;
     act(() => resize!());
-    await waitFor(() => expect(list).toHaveStyle({ transform: 'none' }));
+    expect(list.style.transform || 'none').toBe('none');
     unmount();
   } finally {
     measuredHeight.mockRestore();
@@ -382,8 +386,10 @@ it('shows child tools only inside the subagent detail while keeping main tools i
   fireEvent.click(within(screen.getByTestId('beegame-subagent-row')).getByRole('button'));
   const activity = screen.getByTestId('subagent-activity-list');
   expect(activity.querySelectorAll('[data-tool-id]')).toHaveLength(11);
-  expect(within(activity).queryByRole('button')).not.toBeInTheDocument();
-  expect(screen.queryByText('source output 0')).not.toBeInTheDocument();
+  expect(within(activity).getAllByRole('button')).toHaveLength(11);
+  fireEvent.click(within(activity).getAllByRole('button')[0]);
+  expect(within(activity).getByRole('log')).toHaveTextContent('source output 0');
+  expect(screen.getByText('source output 0')).toBeInTheDocument();
   expect(screen.queryByText('source output 10')).not.toBeInTheDocument();
   expect(screen.queryByText('main result')).not.toBeInTheDocument();
 });
@@ -708,11 +714,11 @@ it('expands a tool record to show its image and opens the full image', async () 
   fireEvent.click(details);
   const row = screen.getByRole('group', { name: 'Read', exact: true });
   expect(row).toHaveAccessibleDescription('Completed');
-  const record = row.closest('details')!;
-  expect(record).not.toHaveAttribute('open');
-  expect(screen.getByAltText('screenshot.png')).not.toBeVisible();
-  fireEvent.click(record.querySelector('summary')!);
-  expect(record).toHaveAttribute('open');
+  const record = row;
+  expect(record.querySelector('button[aria-expanded]')).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByAltText('screenshot.png')).not.toBeInTheDocument();
+  fireEvent.click(record.querySelector('button[aria-expanded]')!);
+  expect(record.querySelector('button[aria-expanded]')).toHaveAttribute('aria-expanded', 'true');
   const image = screen.getByRole('img', { name: 'screenshot.png' });
   await waitFor(() => expect(image).toBeVisible());
   expect(record).toContainElement(image);
@@ -721,9 +727,9 @@ it('expands a tool record to show its image and opens the full image', async () 
   fireEvent.click(screen.getByRole('button', { name: 'Enlarge image: screenshot.png' }));
   expect(await screen.findByRole('dialog')).toContainElement(screen.getAllByRole('img', { name: 'screenshot.png' }).at(-1)!);
   fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
-  fireEvent.click(record.querySelector('summary')!);
-  expect(record).not.toHaveAttribute('open');
-  expect(screen.getByAltText('screenshot.png')).not.toBeVisible();
+  fireEvent.click(record.querySelector('button[aria-expanded]')!);
+  expect(record.querySelector('button[aria-expanded]')).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByAltText('screenshot.png')).not.toBeInTheDocument();
 });
 
 it('shows image attachments once after live tool completion and retains them through later progress and a final reply', () => {
@@ -737,9 +743,9 @@ it('shows image attachments once after live tool completion and retains them thr
   const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[start]} isLoading />);
   expect(screen.queryByRole('img', { name: 'design.png' })).not.toBeInTheDocument();
   rerender(<BeeGameCollaborationFeed messages={[start, end]} isLoading />);
-  const record = screen.getByRole('group', { name: 'imageView' }).closest('details')!;
-  expect(record).not.toHaveAttribute('open');
-  fireEvent.click(record.querySelector('summary')!);
+  const record = screen.getByRole('group', { name: 'imageView' });
+  expect(record.querySelector('button[aria-expanded]')).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(record.querySelector('button[aria-expanded]')!);
   expect(screen.getAllByRole('img', { name: 'design.png' })).toHaveLength(1);
   rerender(<BeeGameCollaborationFeed messages={[start, end, progress, final]} />);
   expect(screen.getAllByRole('img', { name: 'design.png' })).toHaveLength(1);
@@ -756,11 +762,11 @@ it('restores native image previews through transcript projection without exposin
         attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'failed.png' }] } },
   ])));
   const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} />);
-  const record = container.querySelector('details')!;
-  fireEvent.click(record.querySelector('summary')!);
+  const record = container.querySelector('[data-tool-id]')!;
+  fireEvent.click(record.querySelector('button[aria-expanded]')!);
   await waitFor(() => expect(screen.getByRole('img', { name: 'restored.png' })).toBeVisible());
   expect(screen.queryByRole('img', { name: 'failed.png' })).not.toBeInTheDocument();
-  expect(container.querySelectorAll('details')).toHaveLength(1);
+  expect(container.querySelectorAll('[data-tool-id]')).toHaveLength(2);
 });
 
 it('keeps generated and viewed images in their own tool records', async () => {
@@ -772,13 +778,13 @@ it('keeps generated and viewed images in their own tool records', async () => {
       toolName: 'Shell', toolStatus: 'completed', toolInput: { description: 'Generate image' },
       attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'generated.png' }] },
   ]} />);
-  const records = container.querySelectorAll('details');
+  const records = container.querySelectorAll('[data-tool-id]');
   expect(records).toHaveLength(2);
-  fireEvent.click(records[1].querySelector('summary')!);
+  fireEvent.click(records[1].querySelector('button[aria-expanded]')!);
   await waitFor(() => expect(within(records[1]).getByRole('img', { name: 'generated.png' })).toBeVisible());
-  expect(screen.getByAltText('reference.png')).not.toBeVisible();
-  fireEvent.click(records[0].querySelector('summary')!);
-  expect(within(records[0]).getByRole('img', { name: 'reference.png' })).toBeVisible();
+  expect(screen.queryByAltText('reference.png')).not.toBeInTheDocument();
+  fireEvent.click(records[0].querySelector('button[aria-expanded]')!);
+  await waitFor(() => expect(within(records[0]).getByRole('img', { name: 'reference.png' })).toBeVisible());
 });
 const FAILURE_TURN_ID = 'beegame-turn-beegame_bcc8df40769c4754895fac37064035d5-1';
 const CHECKLIST_MIXED_MESSAGE_ID = '021789434990692846a816464a9af9c0791e0f68a2ce03cbd3227';
@@ -886,7 +892,7 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
         toolOutput: '<tool_use_error>Error: No such tool available: TodoWrite传统" string="true</tool_use_error>' },
     ]} lang="zh" />);
     expect(screen.getByRole('group', { name: 'TodoWrite传统" string="true' })).toHaveAccessibleDescription('失败');
-    expect(screen.queryByText(/No such tool available: TodoWrite传统/)).not.toBeInTheDocument();
+    expect(screen.getByRole('log')).toHaveTextContent('No such tool available: TodoWrite传统');
   });
 
   it('does not create execution details for thinking-only messages', () => {
@@ -909,7 +915,7 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     expect(row).toHaveAccessibleDescription('Failed');
     fireEvent.click(row);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.queryByText('Detailed failure, not a completed step')).not.toBeInTheDocument();
+    expect(within(row).getByRole('log')).toHaveTextContent('Detailed failure, not a completed step');
   });
   it('updates the open subagent drawer as progress and terminal result arrive', () => {
     const message: ChatDisplayMessage = { id: 'subagent-live', sender: 'beegame', content: 'Subagent: Audit assets',
@@ -963,6 +969,8 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     expect(detail.querySelectorAll('[data-tool-id="slow-bash"]')).toHaveLength(1);
     expect(pendingTool).toHaveAccessibleDescription('Completed');
     expect(pendingTool).not.toHaveTextContent('TOOL_FINISHED');
+    fireEvent.click(pendingTool!.querySelector('button[aria-expanded]')!);
+    expect(pendingTool).toHaveTextContent('TOOL_FINISHED');
   });
   it('starts with the real idea and keeps three independent turns in source order', () => {
     expect(sampleMessages[0]).toMatchObject({
@@ -1176,4 +1184,25 @@ it('keeps the old tool inactive across stop, history replay and a new live turn'
     expect(container.querySelector('[data-tool-id="old-stored-tool"]')).toHaveAttribute('data-tool-state', 'incomplete');
     expect(screen.getAllByTestId('beegame-work-status')).toHaveLength(1);
   } finally { useChatStore.getState().clearMessages(); }
+});
+
+it('does not mount failed tool output until execution details open, and releases it on close', () => {
+  const output = 'long result line\n'.repeat(10_000) + 'final marker';
+  const message: ChatDisplayMessage = { id: 'large-result', sender: 'beegame', content: '', type: 'tool',
+    toolName: 'Shell', toolStatus: 'failed', timestamp: 1000, toolOutput: output };
+  const { container, rerender } = render(<BeeGameCollaborationFeed messages={[message]} />);
+  expect(container.querySelector('[data-tool-id]')).toBeNull();
+  const disclosure = container.querySelector('[data-variant="timeline"] > button');
+  if (!disclosure) throw new Error('Missing execution details');
+  fireEvent.click(disclosure);
+  expect(container.querySelector('code')?.textContent).toContain('final marker');
+  expect(container.querySelector('code')!.textContent.length).toBeLessThan(13_000);
+  expect(screen.getByRole('button', { name: 'Show more output' })).toBeInTheDocument();
+  expect(container.querySelector('code')?.childElementCount).toBe(0);
+  fireEvent.click(disclosure);
+  expect(container.querySelector('[data-tool-id]')).toBeNull();
+  rerender(<BeeGameCollaborationFeed messages={[{ ...message, toolOutput: output + ' updated' }]} />);
+  expect(container.querySelector('code')).toBeNull();
+  fireEvent.click(disclosure);
+  expect(container.querySelector('code')?.textContent).toContain('final marker updated');
 });

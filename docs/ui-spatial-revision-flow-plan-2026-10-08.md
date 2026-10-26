@@ -5,6 +5,8 @@
 日期：2026-10-08  
 状态：下表所列主线改动已实现并完成本地回归；条件项、真实交付效果与净成本尚未完成验收
 
+> 历史边界（2026-10-25 维护）：本文是 2026-10-08 的实施／审计记录，保留当时的改动、验证和成本证据，不是当前入口或验收凭证。下文未明确标为当前的文件名、命令和实现位置均按当时工作树理解；部分旧路径现已不存在。当前运行时边界以 [README](../README.md)、[workflow-v3 工具](../packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts)、[workflow-v3 路由](../packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts)、[应用入口](../packages/agent-workflow-server/src/app.ts) 及任务提供的动态工具描述为准。
+
 ## 本轮落地记录（2026-10-08）
 
 ### v1.8 补齐记录
@@ -78,7 +80,7 @@ v1.7 的落地声明不充分：任务输入已取消首屏门槛，但原生作
 | P1 | 实施顺序要求先定位尚未复现的目录异常，再处理已证实的 P0；基础音频建设也容易变成前置条件 | 按依赖分批交付；目录追因并行，音频能力按缺口启动，不阻塞检查入口与范围修复 |
 | P1 | 资源上下文分组未明确共享 Manifest 写入与中断恢复 | 保留现有资源阶段和总任务；独立产物可分工，共享注册由一个现有负责人汇总，不并发覆盖或重开已完成任务 |
 
-代码依据：[检查覆盖](../packages/agent-workflow-server/src/beegame/design-layout-check.ts)、[设计指纹](../packages/agent-workflow-server/src/beegame/design-handoff.ts)、[CLI 检查选项](../packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts)、[宿主调度与重算](../packages/agent-workflow-server/src/beegame/project-delivery.ts)、[读取结束核对](../src/beegame/saved-draft-check.ts)、[原生生产任务](../src/beegame/production-task.ts)。这些文件用于说明现状，不把现有行为当作正确性标准。
+代码依据（2026-10-08 记录）：[检查覆盖](../packages/agent-workflow-server/src/beegame/design-layout-check.ts)、[设计指纹](../packages/agent-workflow-server/src/beegame/design-handoff.ts)、[CLI 检查选项](../packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts)。当时的宿主调度、读取结束核对、原生生产任务分别记为 `project-delivery.ts`、`src/beegame/saved-draft-check.ts`、`src/beegame/production-task.ts`（历史路径，当前树不存在）；当前工作流边界见 [workflow-v3 工具](../packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts)、[workflow-v3 路由](../packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts) 和 [应用入口](../packages/agent-workflow-server/src/app.ts)。这些记录用于说明当时事实，不把现有行为当作正确性标准。
 
 成本证据来自 `classic-sokoban-puzzle--4144f83024e4` 的原生会话 `9b72bc5c-40b6-4534-88b1-b69f23684579`（2026-10-08 03:57—05:32 UTC）：已记录 363 次完成响应、25,871,274 Token，其中 UI 3,417,624、资源制作 8,882,931、审查／修订／复核合计 8,050,154。Revision 与 Verify 首次交接后的补读部分共 1,898,574 Token，包含实际发现遗漏后的有效修正，不能全算可节省量。一次失败流式请求的完整用量不可得。资源／Content 独立原生任务及工作区内工具结果归档已有实现，实施时核对剩余缺口，不重复建设；其存在也不证明本方案已验收。
 
@@ -174,7 +176,7 @@ v1.7 的落地声明不充分：任务输入已取消首屏门槛，但原生作
 
 | 归因 | 已证实的问题 | 调整动作及实施位置 | 优先级 |
 | --- | --- | --- | --- |
-| BGS 流程设计 | 定向 Revision Verify 在结束时被要求补读整份文档 | 在任务生成、读取核对与放行检查统一范围；重点核对 `project-author.ts`、`project-conversation.ts`、`src/beegame/saved-draft-check.ts` 与 `design-review.ts` | P0 |
+| BGS 流程设计 | 定向 Revision Verify 在结束时被要求补读整份文档 | 在任务生成、读取核对与放行检查统一范围；重点核对当时工作树中的 `project-author.ts`、`project-conversation.ts`、`src/beegame/saved-draft-check.ts` 与 `design-review.ts`（历史路径，当前树不存在） | P0 |
 | BGS 材料设计 | 正文反复维护动态生产状态，制造跨文档同步修订 | 按前述“文档内容与交付状态”执行；清理生成要求，不改写旧项目证据 | P0 |
 | BGS 执行接口 | 布局报告、回执和归档读取存在摸索或口径差异 | 复用宿主实际入口，直接返回完整问题和准确定位；回执提交校验与最终放行共用必要规则 | P0 |
 | Agent 执行策略 | 自造检查工具、猜字段、全文重写 | 将已验证入口交到当前任务，按报告和来源局部修订；确有缺口才写最小任务脚本 | P1，与对应入口修复一起实施 |
@@ -195,7 +197,7 @@ P0 先消除确定的流程和接口返工；P1 随后处理生产工具复用�
 
 ### 检查与读取入口直接可用
 
-继续使用现有 `check-content.mjs`、`inspect-design.mjs`、资源检查和绑定入口，不新增包办生产的工具平台。
+历史方案当时记录继续使用 `check-content.mjs`、`inspect-design.mjs`、资源检查和绑定入口；这些命令名及 `inspect-design.mjs` 不再是当前固定路径。当前检查入口由任务提供的动态工具描述决定，字段和布局边界见 [布局计算参考](../.beegame/skills/bgs-game-skills/game-ui-ux-designer/references/layout-calculation.md) 与 [内容校验实现](../packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts)。
 
 - 对当前任务直接给出适用命令、输入路径、参数和结果位置。算法诊断与宿主放行使用同一实现；前置条件不同造成的差异须明确，不能把草稿检查通过写成生产通过。
 - 同次结果返回全部问题、覆盖和缺口。详细几何或大结果按需读取，不能只给一个文件路径后让 Agent 猜里面的字段。
@@ -508,7 +510,7 @@ Revision 修改前使用仍适用的原报告；完成相关修改后统一重�
 
 ### 第五步 完成技术接线与冻结前设计收口
 
-涉及现有 `project-delivery.ts`、`project-conversation.ts`、`project-author.ts`、`src/beegame/design-review.ts` 与相关结束检查。
+涉及当时工作树中的 `project-delivery.ts`、`project-conversation.ts`、`project-author.ts`、`src/beegame/design-review.ts` 与相关结束检查（历史路径，当前树不存在）。当前调度边界见 [workflow-v3 路由](../packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts)。
 
 先调整技术接线与状态维护，再接入本步已有的 Review Revision Verify：
 
@@ -535,7 +537,7 @@ Revision 修改前使用仍适用的原报告；完成相关修改后统一重�
 
 ### 第六步 取消冻结后的默认自动回修
 
-涉及现有 `affectedDesignRepair`、`prepareProjectDependentDesign`、`advanceProjectDeliveryAfterTurn`、`requestProjectDesignResolution`、`project-conversation.ts` 的调度与任务交接。
+涉及当时工作树中的 `affectedDesignRepair`、`prepareProjectDependentDesign`、`advanceProjectDeliveryAfterTurn`、`requestProjectDesignResolution`、`project-conversation.ts` 的调度与任务交接（历史函数／路径，当前树不保证存在）。
 
 1. 逐条核对资源、Content、实现、验收进入或结束时的自动回审触发。冻结基线存在时，不能仅因旧 follow-up 到期、新的作者指控或设计指纹变化，自动授予设计修改权限并启动 Review 或 Revision。
 2. 保留来源变化、权限与版本检查。已发现的未授权修改不能因关闭自动修订就获得追认；继续暂停受影响依赖，说明变化来源和缺少的决定，保留原基线及证据。
@@ -551,7 +553,7 @@ Revision 修改前使用仍适用的原报告；完成相关修改后统一重�
 
 ### 第七步 调整资源工具交接与上下文边界
 
-涉及现有 `project-delivery.ts`、`project-conversation.ts`、`direction-authors.ts`、`src/beegame/native-assignments.ts`、资源验证及原生工具结果读取入口。先检查现有能力，不预设每个文件都必须新增机制。
+涉及当时工作树中的 `project-delivery.ts`、`project-conversation.ts`、`direction-authors.ts`、`src/beegame/native-assignments.ts`、资源验证及原生工具结果读取入口（历史路径，当前树不存在）。先检查现有能力，不预设每个文件都必须新增机制。
 
 内部工具按前述三批推进。复用现有图像依赖、`sprite-sheet.ts`、`tilemap-contract.ts`、`programmatic-audio-resource.ts`、`asset-contracts.ts`、`asset-contract-audit.ts` 与资源验证入口；按职责提取必要公共能力，不通过导入整个预览器或复制现有检查代码实现生产。帮助和任务交接只有在入口实际可运行后才宣告可用。
 

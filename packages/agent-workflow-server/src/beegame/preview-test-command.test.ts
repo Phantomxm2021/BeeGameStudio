@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 // All scripts, capabilities and receipts belong to temporary synthetic fixtures.
-let root: string, moduleUrl: string, environment: Record<string, string>, slowIdentity: boolean
+let root: string, moduleUrl: string, environment: Record<string, string>, slowIdentity: boolean, identityRun: string, identityAttempt: string
 const running = new Set<ReturnType<typeof Bun.spawn>>()
 
 beforeEach(async () => {
@@ -17,6 +17,8 @@ beforeEach(async () => {
   for (const name of ['package.json', 'browsers.json', 'index.mjs']) await writeFile(join(client, name), '{}')
   moduleUrl = pathToFileURL(join(bundle, 'preview-test-command.mjs')).href
   slowIdentity = false
+  identityRun = 'run'
+  identityAttempt = 'attempt'
   const common = { version: 1, workspace: root, executionId: 'execution', sessionId: 'session' }
   const preview = join(root, 'preview-capability.json'), measurement = join(root, 'measurement-capability.json')
   await writeFile(preview, JSON.stringify({ ...common, apiUrl: 'http://127.0.0.1:1' }))
@@ -39,7 +41,7 @@ function launch(expression: string) {
        options.signal?.throwIfAborted();
        if(new URL(url).pathname==='/status')return Response.json({preview:{status:'idle'}});
        if(${slowIdentity})await new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true}));
-       return Response.json({runId:'run',attemptId:'attempt',requirementsRevision:'requirements',
+       return Response.json({runId:${JSON.stringify(identityRun)},attemptId:${JSON.stringify(identityAttempt)},requirementsRevision:'requirements',
          files:[{path:'test.mjs',sha256:'synthetic'}],dependencySha256:'dependencies'});
      };
      const {runPreviewTest,inspectPreviewTest}=await import(${JSON.stringify(moduleUrl)});
@@ -107,6 +109,7 @@ test('ordinary exit codes and complete output remain facts, not quality verdicts
     const { code, result } = await complete(launch(`runPreviewTest('test.mjs',[${JSON.stringify(String(exitCode))}])`))
     expect(code).toBe(exitCode ? 1 : 0)
     expect(result).toMatchObject({ status: 'exited', exitCode, quality: 'unverified' })
+    expect(result.args).toEqual([String(exitCode)])
     expect(result).not.toHaveProperty('passed')
     expect((await readFile(join(root, result.stdoutPath), 'utf8')).length).toBeGreaterThan(80000)
     expect(await readFile(join(root, result.stderrPath), 'utf8')).toContain('failure details')
@@ -119,6 +122,107 @@ test('ordinary exit codes and complete output remain facts, not quality verdicts
     } else expect(result).not.toHaveProperty('failureOutput')
   }
   expect(await readFile(join(root, 'calls.txt'), 'utf8')).toBe('xx')
+})
+
+test('requestKey executes once, returns the retained receipt, and records argv', async () => {
+  await writeFile(join(root, 'test.mjs'), `import {appendFileSync} from 'node:fs';
+    appendFileSync('calls.txt', process.argv[2]+'\\n'); console.log('one execution');`)
+  const first = await complete(launch("runPreviewTest('test.mjs',['alpha'],{requestKey:'preview-once'})"))
+  expect(first.code).toBe(0)
+  expect(first.result).toMatchObject({status:'exited',exitCode:0,args:['alpha']})
+  expect(first.result.reused).toBeUndefined()
+  const second = await complete(launch("runPreviewTest('test.mjs',['alpha'],{requestKey:'preview-once'})"))
+  expect(second.code).toBe(0)
+  expect(second.result).toMatchObject({status:'exited',exitCode:0,args:['alpha'],reused:true,
+    currentFreshness:{status:'unchanged-at-boundaries'}})
+  expect(await readFile(join(root, 'calls.txt'), 'utf8')).toBe('alpha\n')
+  const receipt = JSON.parse(await readFile(join(root, first.result.reportPath), 'utf8'))
+  expect(receipt).toMatchObject({args:['alpha'],requestKeyHash:expect.any(String)})
+})
+
+test('requestKey scope is the current run and attempt, so a new turn can reuse the key freshly', async () => {
+  await writeFile(join(root, 'test.mjs'), `import {appendFileSync} from 'node:fs';
+    appendFileSync('calls.txt', process.argv[2]+'\\n');`)
+  const first = await complete(launch("runPreviewTest('test.mjs',['turn-one'],{requestKey:'same-key'})"))
+  expect(first.code).toBe(0)
+  identityAttempt = 'new-attempt'
+  const second = await complete(launch("runPreviewTest('test.mjs',['turn-two'],{requestKey:'same-key'})"))
+  expect(second.code).toBe(0)
+  expect(second.result.reused).toBeUndefined()
+  expect(second.result.args).toEqual(['turn-two'])
+  expect(await readFile(join(root, 'calls.txt'), 'utf8')).toBe('turn-one\nturn-two\n')
+})
+
+test('requestKey conflicts on changed argv or source identity', async () => {
+  await writeFile(join(root, 'test.mjs'), "console.log('version one')")
+  const first = await complete(launch("runPreviewTest('test.mjs',['one'],{requestKey:'preview-conflict'})"))
+  expect(first.code).toBe(0)
+  const argvConflict = await complete(launch(`(async()=>{try{return await runPreviewTest('test.mjs',['two'],{requestKey:'preview-conflict'})}
+    catch(error){return {error:error.message,exitCode:0}}})()`))
+  expect(argvConflict.code).toBe(0)
+  expect(argvConflict.result.error).toContain('PREVIEW_REQUEST_CONFLICT')
+  await writeFile(join(root, 'test.mjs'), "console.log('version two')")
+  const sourceConflict = await complete(launch(`(async()=>{try{return await runPreviewTest('test.mjs',['one'],{requestKey:'preview-conflict'})}
+    catch(error){return {error:error.message,exitCode:0}}})()`))
+  expect(sourceConflict.code).toBe(0)
+  expect(sourceConflict.result.error).toContain('PREVIEW_REQUEST_CONFLICT')
+})
+
+test('failed and interrupted keyed receipts are retained and never replayed', async () => {
+  await writeFile(join(root, 'test.mjs'), `import {appendFileSync} from 'node:fs';
+    appendFileSync('calls.txt','failure\\n'); process.exitCode=7;`)
+  const failed = await complete(launch("runPreviewTest('test.mjs',[],{requestKey:'failure-key'})"))
+  expect(failed.code).toBe(1)
+  expect(failed.result).toMatchObject({status:'exited',exitCode:7})
+  const failedAgain = await complete(launch("runPreviewTest('test.mjs',[],{requestKey:'failure-key'})"))
+  expect(failedAgain.code).toBe(1)
+  expect(failedAgain.result).toMatchObject({status:'exited',exitCode:7,reused:true})
+  expect(await readFile(join(root, 'calls.txt'), 'utf8')).toBe('failure\n')
+
+  await writeFile(join(root, 'test.mjs'), `import {appendFileSync,writeFileSync} from 'node:fs';
+    appendFileSync('calls.txt','interrupt\\n'); writeFileSync('ready.txt','ready'); setInterval(()=>{},1000);`)
+  const child = launch("runPreviewTest('test.mjs',[],{requestKey:'interrupt-key'})")
+  await ready('ready.txt')
+  child.kill('SIGTERM')
+  const interrupted = await complete(child)
+  expect(interrupted.code).toBe(1)
+  expect(interrupted.result).toMatchObject({status:'interrupted',exitCode:null})
+  const interruptedAgain = await complete(launch("runPreviewTest('test.mjs',[],{requestKey:'interrupt-key'})"))
+  expect(interruptedAgain.code).toBe(1)
+  expect(interruptedAgain.result).toMatchObject({status:'interrupted',exitCode:null,reused:true})
+  expect(await readFile(join(root, 'calls.txt'), 'utf8')).toBe('failure\ninterrupt\n')
+}, 15000)
+
+test('concurrent keyed execution reserves at most one child and rejects an unfinished duplicate', async () => {
+  await writeFile(join(root, 'test.mjs'), `import {appendFileSync,writeFileSync} from 'node:fs';
+    appendFileSync('calls.txt','once\\n'); writeFileSync('ready.txt','ready'); setInterval(()=>{},1000);`)
+  const first = launch("runPreviewTest('test.mjs',[],{requestKey:'concurrent-key'})")
+  await ready('ready.txt')
+  const second = await complete(launch(`(async()=>{try{return await runPreviewTest('test.mjs',[],{requestKey:'concurrent-key'})}
+    catch(error){return {error:error.message,exitCode:0}}})()`))
+  expect(second.code).toBe(0)
+  expect(second.result.error).toContain('PREVIEW_REQUEST_INFLIGHT')
+  first.kill('SIGTERM')
+  const finished = await complete(first)
+  expect(finished.code).toBe(1)
+  expect(finished.result.status).toBe('interrupted')
+  expect(await readFile(join(root, 'calls.txt'), 'utf8')).toBe('once\n')
+}, 15000)
+
+test('keyed execution fails closed without a current observed identity while legacy execution stays fresh', async () => {
+  await writeFile(join(root, 'test.mjs'), "console.log('legacy')")
+  const measurement = environment.BEEGAME_MEASUREMENT_CAPABILITY_FILE
+  delete environment.BEEGAME_MEASUREMENT_CAPABILITY_FILE
+  const keyed = await complete(launch(`(async()=>{try{return await runPreviewTest('test.mjs',[],{requestKey:'no-identity'})}
+    catch(error){return {error:error.message,exitCode:0}}})()`))
+  expect(keyed.code).toBe(0)
+  expect(keyed.result.error).toContain('PREVIEW_REQUEST_IDENTITY_UNVERIFIED')
+  environment.BEEGAME_MEASUREMENT_CAPABILITY_FILE = measurement
+  const first = await complete(launch("runPreviewTest('test.mjs')"))
+  const second = await complete(launch("runPreviewTest('test.mjs')"))
+  expect(first.code).toBe(0)
+  expect(second.code).toBe(0)
+  expect(second.result.reused).toBeUndefined()
 })
 
 test('failure excerpts retain bounded UTF-8 log ends and redact credentials without rewriting full logs', async () => {

@@ -155,7 +155,7 @@ test('ordinary Chat preserves discussion text and rejects the retired discuss mo
 
 async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false,resourceLibraryBaseUrl?:string,
   openAgentPreview?:(value:any)=>AgentPreviewAccess,openAgentImage?:(value:any)=>AgentImageAccess, extraEvents=0,
-  faults:{claimResponses?:number;exitWrites?:boolean;exitFailures?:number;missingEntrySkill?:boolean}={},libraryAuthToken?:string,blankProject=false) {
+  faults:{afterSettlement?:()=>Promise<void>;claimResponses?:number;exitWrites?:boolean;exitFailures?:number;missingEntrySkill?:boolean;nativeGoalStatus?:'active'|'complete'|'blocked'|'budgetLimited';nativeGoalBudget?:number|null;pauseTokens?:number;pauseUnavailable?:boolean;noAssistant?:boolean}={},libraryAuthToken?:string,blankProject=false, onSubmit?:(root:string,input:BeeGameSessionSubmitInput,context:string)=>Promise<void>) {
   const container=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-goal-unit-')))
   const root=blankProject?join(container,'project'):container
   if(blankProject)await mkdir(root)
@@ -165,6 +165,7 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     if(faults.exitWrites && args[4]==='agent.writer-quiesced'){faults.exitFailures=(faults.exitFailures??0)+1;throw Error('Synthetic exit persistence outage')}
     await local.commit(...args)
     events.push(args[4])
+    if(args[4]==='agent.turn-settled')await faults.afterSettlement?.()
     if((faults.claimResponses??0)>0 && ['agent.turn-claimed','requirements.changed'].includes(args[4])) {
       faults.claimResponses!--;throw Error('Synthetic committed claim response lost')
     }
@@ -173,16 +174,21 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
   const sessions=new BeeGameSessionManager({async start(input){starts.push(input);const nativeId=input.resumeSessionId??(starts.length===1?'11111111':String(starts.length).padStart(8,'0'))+'-2222-4333-8444-555555555555';input.onNativeSessionId?.(nativeId);const onNativeUsage=input.onNativeUsage;return {
     async submit(input) {
       submissions.push(input)
+      const goalEvent=async(status:string,tokensUsed=48)=>input.onMessage({type:'runtime_event',runtime:'bgs',eventType:'system.status',
+        subtype:'native_goal',threadId:nativeId,nativeGoal:{status,objective:'Synthetic original assignment',tokenBudget:faults.nativeGoalBudget??null,tokensUsed,timeUsedSeconds:1}})
+      if(faults.nativeGoalStatus && input.nativeGoal)await goalEvent('active')
       const prompt = typeof input.prompt === 'string' ? input.prompt : ''
       if (prompt.startsWith('/bgs-builtins:') && !faults.missingEntrySkill) await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'system.status', text: 'Loaded entry skill', skill: {name:prompt.slice(1,prompt.indexOf(' ')),messageId:'entry-body',source:'command',status:'loaded'} })
       await writeFile(join(root,'candidate.txt'),'Synthetic partial candidate')
+      await onSubmit?.(root,input,String(starts.at(-1).systemContext))
       for(let i=0;i<extraEvents;i++)await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic audit event ' + i, assistantBlockId: 'synthetic-' + i })
       if(mode==='wait') await new Promise<void>(resolve=>{
         if(input.signal.aborted)resolve();else input.signal.addEventListener('abort',()=>resolve(),{once:true})
       })
+      if(faults.nativeGoalStatus && input.nativeGoal)await goalEvent(input.signal.aborted && !faults.pauseUnavailable ? 'paused' : faults.nativeGoalStatus, input.signal.aborted ? faults.pauseTokens : undefined)
       if(mode==='fail')throw new Error('Synthetic native failure')
       onNativeUsage?.({prompt_tokens:40,completion_tokens:8,cache_read_tokens:0,cache_creation_tokens:0,total_tokens:48})
-      await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic end, not game acceptance' })
+      if(!faults.noAssistant)await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic end, not game acceptance' })
     },stop(){},
   }}},join(container,'native'),async userDataRoot=>({BEEGAME_CONFIG_DIR:userDataRoot ?? join(root,'wrong-shared-config')}),{},true)
   const userDataRoot=join(root,'owner-config')
@@ -220,13 +226,15 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
     expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true})
     const initialMessage = f.sessions.transcript(run.chatSessionId).find(event => event.type === 'user.message')!
     expect(initialMessage, run.blockedReason).toBeDefined()
-    expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
+    expect(initialMessage.payload?.displayText).toBe('Production: design / gameplay')
     expect(JSON.parse(String(initialMessage.payload?.confirmedBriefContext))).toEqual(f.body.brief)
     await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
     expect(String(f.submissions[0]!.prompt)).not.toContain(JSON.stringify(f.body.brief))
     expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
-    expect(String(f.submissions[0]!.prompt)).toStartWith('$game-first-version\n')
-    expect(String(f.submissions[0]!.prompt)).not.toContain('$game-creative-director-expert')
+    expect(String(f.submissions[0]!.prompt)).toContain('Current professional design question (gameplay)')
+    expect(String(f.submissions[0]!.prompt)).toContain('$game-creative-director-expert')
+    expect(f.submissions[0]!.nativeGoal).toBeUndefined()
+    expect(run.productionWorkflow).toBe(1)
     expect(f.starts[0].systemContext).toContain('design records live under docs/')
     expect(f.starts[0].systemContext).toContain('Bgs loads applicable AGENTS.md instructions natively')
     const guide=await readFile(join(f.root,'AGENTS.md'),'utf8')
@@ -244,12 +252,9 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
     await writeFile(join(f.root,'src/game.js'),'// retained user work')
     expect((await f.call('/agent/messages','POST',{requestKey:'feedback',runId:run.id,
       chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
-      intent:'message',text:'After playtesting, change only the movement speed.'})).status).toBe(202)
+      intent:'work',text:'After playtesting, continue only the requested slice correction.'})).status).toBe(202)
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(f.submissions).toHaveLength(2)
-    expect(f.submissions[1]!.prompt).toBe('User message:\nAfter playtesting, change only the movement speed.')
-    expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
-    expect(f.starts[1].systemContext).not.toContain('explicitly invoked game-first-version Skill')
     expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// retained user work')
     expect(run.creation?.initialDelivery).toBe('design-led-first-version')
     const refreshed=await readFile(join(f.root,'AGENTS.md'),'utf8')
@@ -301,7 +306,6 @@ test('existing React/Web sources retain their own entry across goal intake and o
     await f.call('/agent/goal','POST',f.body)
     let run=await f.wait(r=>Boolean(r.agentTurns![0]?.finishedAt))
     expect(run.creation).toBeUndefined();expect(run.webBoot).toBeUndefined()
-    expect(String(f.submissions[0]!.prompt)).not.toContain('$game-first-version')
     await f.call('/agent/messages','POST',{requestKey:'modify-existing',runId:run.id,chatSessionId:run.chatSessionId,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'work',text:'Modify only existing implementation; do not migrate the entry.'})
     run=await f.wait(r=>Boolean(r.agentTurns![1]?.finishedAt))
@@ -684,7 +688,7 @@ test('focused new work requires a settled exit and remains an explicit request, 
       const malformed=structuredClone(run);delete malformed.agentTurns!.at(-1)![field]
       const executor=createAgentGoalExecutor({store:{...f.store,async read(){return malformed}},sessions:f.sessions})
       await expect(executor.message(malformed,make('missing-'+field) as Parameters<typeof executor.message>[1],{}))
-        .rejects.toThrow('No saved native conversation/exit evidence')
+        .rejects.toThrow('No saved native conversation or settled turn')
       expect(f.submissions).toHaveLength(1)
     }
     f.setMode('normal')
@@ -807,7 +811,7 @@ test('shared guide supplies design methods once without a compatibility fallback
     expect(context.split('## Professional methods')).toHaveLength(2)
     expect(context.split('## Required design dependencies')).toHaveLength(2)
     expect(context.split(PRODUCTION_DEPENDENCIES)).toHaveLength(2)
-    for(const value of ['Select and read applicable Skills','TECHNICAL_DESIGN.md','PROJECT_SPECIFIC_ROUTE',
+    for(const value of ['Select and read applicable Skills','docs/GDD.md','PROJECT_SPECIFIC_ROUTE',
       'unknown paid replay or automatic paid retry','respect exclusions and the project budget','required licenses'])expect(context).toContain(value)
   }
 })
@@ -840,7 +844,7 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   run.visualHandoffVersion = visualHandoffVersion
   run.creation = { initialDelivery: 'design-led-first-version', editableContent: true }
   const first=agentProfessionalContextForRun(run), followup=agentProfessionalContextForRun(run,true)
-  expect(first).toContain('explicitly invoked game-first-version Skill')
+  expect(first).toContain('design dependencies and professional methods in the project guide')
   expect(first).not.toContain('GDD.md,')
   expect(first).not.toContain('Draft technical/resource plans first')
   expect(followup).not.toContain('eight documents')
@@ -852,17 +856,6 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   expect(agentProfessionalContextForRun({...run,creation:undefined})).not.toContain('eight documents')
   expect(agentGoalPrompt(run)).not.toContain('ORIGINAL_CONFIRMED_GOAL')
   expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
-})
-
-test('first-version workflow does not replace existing-project or playable-slice assignments', () => {
-  const run=createRun({projectId:'entry',ownerId:'owner',workspacePath:'/synthetic',chatSessionId:'chat',
-    requestKey:'entry',text:'Confirmed scope',constraints:{engine:'Unity'},ids:['goal']})
-  expect(agentGoalPrompt(run)).not.toContain('$game-first-version')
-  run.creation={initialDelivery:'playable-slice',editableContent:false}
-  expect(agentGoalPrompt(run)).not.toContain('$game-first-version')
-  expect(agentGoalPrompt(run)).toContain('one small, complete player experience')
-  run.creation={initialDelivery:'design-led-first-version',editableContent:false}
-  expect(agentGoalPrompt(run)).toStartWith('$game-first-version\n')
 })
 
 test('stable system context preserves design authority and evidence boundaries, not implementation recipes', () => {
@@ -879,7 +872,7 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).not.toContain('local_path')
     expect(prompt).not.toContain('request a separate shared PNG sheet')
     expect(prompt).not.toContain('computed equal-cell grid')
-    expect(prompt.length).toBeLessThan(7000)
+    expect(prompt.split(PROJECT_WORKING_CONVENTIONS)).toHaveLength(2)
   }
   for(const intent of ['message','change','continue'] as const) {
     const prompt=agentMessagePrompt({...message,intent})
@@ -888,15 +881,10 @@ test('stable system context preserves design authority and evidence boundaries, 
     expect(prompt).toContain('Change only movement speed')
   }
 })
-for(const contextMode of ['resume','focused'] as const) test(contextMode+' continuation preserves first-version progress, pause and identity without restarting production',async()=>{
-  const f=await fixture('wait',false,undefined,undefined,undefined,0,{},undefined,true)
-  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
-  const progress='# First version progress\n- [x] Existing design work\n- [ ] Remaining implementation\n'
+for(const contextMode of ['resume','focused'] as const) test(contextMode+' continuation preserves pause, identity and native budget without automatic execution',async()=>{
+  const f=await fixture('wait',false,undefined,undefined,undefined,0,{nativeGoalStatus:'active',nativeGoalBudget:80,pauseTokens:60})
   try {
     await f.call('/agent/goal','POST',f.body);await f.wait(()=>f.submissions.length===1)
-    expect(String(f.submissions[0]!.prompt)).toStartWith('$game-first-version\n')
-    await mkdir(join(f.root,'docs'),{recursive:true})
-    await writeFile(join(f.root,'docs/TASKS.md'),progress)
     await f.call('/stop','POST');let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
     const msg=()=>({requestKey:'continue-1',runId:run.id,chatSessionId:run.chatSessionId,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',
@@ -909,10 +897,11 @@ for(const contextMode of ['resume','focused'] as const) test(contextMode+' conti
     expect((await f.call('/agent/messages','POST',continuation)).status).toBe(202)
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
     expect(run.agentTurns![0]!.status).toBe('interrupted');expect(run.agentTurns![1]!.status).toBe('ended')
-    expect(f.submissions[1]!.prompt).toBe('User message:\n'+continuation.text)
-    expect(await readFile(join(f.root,'docs/TASKS.md'),'utf8')).toBe(progress)
-    if(contextMode==='resume')expect(run.agentTurns![1]!.nativeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
-    else {
+    if(contextMode==='resume') {
+      expect(run.agentTurns![1]!.nativeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
+      expect(f.submissions[1]!.nativeGoal).toEqual({mode:'resume'})
+    } else {
+      expect(f.submissions[1]!.nativeGoal).toEqual({mode:'start',objective:'Synthetic original assignment',tokenBudget:20})
       expect(f.starts[1].resumeSessionId).toBeUndefined()
       expect(run.agentTurns![1]!.nativeSessionId).not.toBe(run.agentTurns![0]!.nativeSessionId)
       const facts=JSON.parse(f.starts[1].systemContext.split('BGS saved evidence (not game acceptance): ')[1]!).executionContext
@@ -1257,7 +1246,7 @@ test('lost goal claim response records a no-start failure without leaving a writ
     const legacy=(await base.read(run.projectId,run.ownerId))!;delete legacy.agentTurns![0]!.notStarted
     await expect(executor.message(legacy,{requestKey:'no-proof',runId:actual.id,chatSessionId:actual.chatSessionId,
       expectedVersion:actual.version,requirementsRevision:actual.requirements.revision,intent:'work',text:'Synthetic new work'},{}))
-      .rejects.toThrow('No saved native conversation/exit evidence')
+      .rejects.toThrow('No saved native conversation or settled turn')
   }finally{await executor.dispose();await sessions.dispose();await rm(root,{recursive:true,force:true})}
 })
 test('proven no-start requires a new explicit work request; duplicate goal, pause and stale authorization never dispatch',async()=>{
@@ -1286,7 +1275,7 @@ test('proven no-start requires a new explicit work request; duplicate goal, paus
     await expect(f.store.commit(run.projectId,run.ownerId,ended.version,forged,'forged')).rejects.toThrow('history')
   }finally{await f.close()}
 })
-test('original host can explicitly persist observed native exit after DB failure; restarted workers cannot infer it',async()=>{
+test('original host can explicitly persist observed native exit after DB failure',async()=>{
   const faults={exitWrites:true,exitFailures:0},f=await fixture('normal',false,undefined,undefined,undefined,0,faults)
   const other=createAgentGoalExecutor({store:f.store,sessions:f.sessions})
   try {
@@ -1294,7 +1283,7 @@ test('original host can explicitly persist observed native exit after DB failure
     let run=await f.wait(()=>faults.exitFailures>0)
     expect(run.agentTurns![0]!.quiescedAt).toBeUndefined();expect(f.submissions).toHaveLength(1)
     const detail=await (await f.call('')).json();expect(detail.recoveryEvidence).toBe('original-host')
-    await expect(other.recover(run,{expectedVersion:run.version,attemptId:run.writer!.attemptId,fence:run.writer!.fence})).rejects.toThrow('No durable native exit')
+    expect(await other.recoveryEvidence(run)).toBe('host-idle')
     faults.exitWrites=false
     const response=await f.call('/recover-writer','POST',{expectedVersion:run.version,attemptId:run.writer!.attemptId,fence:run.writer!.fence})
     expect(response.status,await response.clone().text()).toBe(200)
@@ -1304,18 +1293,17 @@ test('original host can explicitly persist observed native exit after DB failure
     expect(f.submissions).toHaveLength(1);expect(run.deliveryEligible).toBe(false)
   }finally{await other.dispose();await f.close()}
 })
-test('a reconstructed worker cannot unlock a goal writer without recorded native exit',async()=>{
+test('a reconstructed executor cannot unlock an active project turn',async()=>{
   const f=await fixture('wait')
-  const unknownSessions=new BeeGameSessionManager({async start(){throw Error('No model allowed')}},join(f.root,'unknown'),async()=>({}),{},true)
-  const recovery=createAgentGoalExecutor({store:f.store,sessions:unknownSessions})
+  const recovery=createAgentGoalExecutor({store:f.store,sessions:f.sessions})
   try {
     await f.call('/agent/goal','POST',f.body)
     const run=await f.wait(()=>f.submissions.length===1)
     await expect(recovery.recover(run,{expectedVersion:run.version,attemptId:run.writer!.attemptId,fence:run.writer!.fence}))
-      .rejects.toThrow('No durable native exit')
-    await expect(recovery.resume(run)).rejects.toThrow('No durable native exit')
+      .rejects.toThrow('still active')
+    await expect(recovery.resume(run)).rejects.toThrow('still active')
     expect(f.submissions).toHaveLength(1);expect((await f.store.read('goal-project','owner'))!.writer).toEqual(run.writer)
-  }finally{await recovery.dispose();await unknownSessions.dispose();await f.close()}
+  }finally{await recovery.dispose();await f.close()}
 })
 test('lost change claim response preserves the authorized requirement change without launching another native turn',async()=>{
   const f=await fixture(),executor=createAgentGoalExecutor({sessions:f.sessions,store:{read:f.store.read,async commit(...args){
@@ -1385,15 +1373,14 @@ test('first and resumed goals retain professional coverage and design dependenci
   for (const professional of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
     const prompt=PROJECT_WORKING_CONVENTIONS+'\n'+professional
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
-    for (const document of ['GDD.md','LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ART_DIRECTION.md',
-      'UI_UX_SPEC.md','AUDIO_DESIGN.md','ASSET_PLAN.md','TECHNICAL_DESIGN.md']) expect(prompt).toContain(document)
+    for (const section of ['docs/GDD.md','vision/gameplay','systems/balance','level/scene',
+      'art direction','UI/UX','audio','resources/content','technical design']) expect(prompt).toContain(section)
     expect(prompt).toContain('Use actual asset metrics and existing checks when binding resources')
-    expect(prompt).toContain('Unproduced inputs remain planned')
-    expect(prompt).toContain('For later edits, update only affected records and outputs')
+    expect(prompt).toContain('unrelated resources/content may remain planned')
     expect(prompt).toContain('Preserve confirmed requirements')
     expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
   }
-  expect(agentGoalPrompt(run)).toContain('Build the confirmed first version')
+  expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
   expect(agentGoalPrompt(run)).not.toContain('Plan and execute autonomously')
   expect(agentGoalPrompt(run)).not.toContain('CONFIRMED_GAME')
   expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
@@ -1443,19 +1430,22 @@ test('ordinary questions retain answers and task identity without an unlock or e
   } finally {await f.close()}
 },30000)
 
-test('first-version goals select their workflow; general assignments and follow-ups retain their scope', () => {
+test('new and resumed goals retain requested scope while Agent selects Skills; follow-ups preserve literal intent', () => {
   const run={creation:{initialDelivery:'design-led-first-version'},requirements:{text:'BRIEF budget 20000000'}} as Run
-  expect(agentGoalPrompt(run)).toStartWith('$game-first-version\n\n')
+  expect(agentGoalPrompt(run)).not.toStartWith('$')
+  expect(agentGoalPrompt(run)).toContain('Select relevant Skills, organize the work')
+  expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
+  expect(agentGoalPrompt(run)).toContain('Respect the production dependencies for work in scope')
+  expect(agentGoalPrompt(run)).toContain('do not infer additional deliverables from the project creation mode')
   expect(agentGoalPrompt(run)).not.toContain(run.requirements.text)
   expect(agentGoalPrompt(run)).toContain('bgsConfirmedBrief')
-  const general={...run,creation:undefined}
-  expect(agentGoalPrompt(general)).not.toStartWith('$')
-  expect(agentGoalPrompt(general)).toContain('Select relevant Skills, organize the work')
-  expect(agentGoalPrompt(general)).toContain('Stop at the requested boundary')
-  expect(agentGoalPrompt(general)).toContain('Respect the production dependencies for work in scope')
-  expect(agentGoalPrompt(general)).toContain('do not infer additional deliverables from the project creation mode')
+  for(const other of [{...run,creation:undefined},{...run,creation:{initialDelivery:'playable-slice'}},
+    {...run,agentTurns:[{nativeSessionId:'existing-context'}]}]) {
+    expect(agentGoalPrompt(other as Run)).not.toStartWith('/')
+    expect(agentGoalPrompt(other as Run)).not.toContain('$game-creative-director-expert')
+  }
   for(const intent of ['message','work','continue','change'] as const)
-    expect(agentMessagePrompt({intent,text:'继续处理'} as any)).toBe('User message:\n继续处理')
+    expect(agentMessagePrompt({intent,text:'继续处理'} as any)).not.toContain('/bgs-builtins:')
 })
 
 test('editable content describes data consumed by the confirmed engine, not an alternative game scaffold', () => {
@@ -1468,4 +1458,408 @@ test('editable content describes data consumed by the confirmed engine, not an a
   expect(context).toContain('Dynamic simulation state and game logic belong in code')
   expect(agentProfessionalContextForRun({...run,creation:{...run.creation!,editableContent:false}}))
     .not.toContain('editable data consumed by the confirmed engine')
+})
+
+
+test('initial build completion requires delivery while later design-only work retains its own scope',async()=>{
+  const faults={nativeGoalStatus:'complete' as const,noAssistant:true}
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,faults)
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(f.submissions).toHaveLength(1)
+    expect(f.starts[0].nativeGoal).toEqual(f.submissions[0]!.nativeGoal)
+    expect(f.submissions[0]!.nativeGoal).toEqual({mode:'start',objective:agentGoalPrompt(run)})
+    expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
+    expect(run.status).toBe('blocked')
+    expect(run.blockedReason).toContain('Implementation delivery was not submitted')
+    expect(run.writer).toBeUndefined()
+    expect(run.deliveryEligible).toBe(false)
+    expect(run.agentTurns![0]!.status).toBe('ended')
+    const events=f.sessions.transcript(run.chatSessionId)
+    expect(events.some(event=>event.type==='turn.completed')).toBe(true)
+    expect(events.some(event=>event.type==='turn.empty')).toBe(false)
+    expect(events.find(event=>event.payload?.subtype==='host_evidence')?.payload)
+      .toMatchObject({quality:'unverified',deliveryEligible:false})
+    faults.noAssistant=false // Ordinary completion requires an actual final response; it has no terminal Goal event.
+    await f.call('/agent/messages','POST',{requestKey:'design-only-after-build',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'work',text:'Review the GDD design only; do not implement or run the game.'})
+    const designOnly=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(designOnly.status).toBe('completed')
+    expect(designOnly.agentTurns![1]!.status).toBe('ended')
+    expect(designOnly.deliveryEligible).toBe(false)
+  }finally{await f.close()}
+})
+
+test('interrupted initial build continuation still requires delivery before completion',async()=>{
+  const faults:{nativeGoalStatus:'active'|'complete'}={nativeGoalStatus:'active'}
+  const f=await fixture('wait',false,undefined,undefined,undefined,0,faults)
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(()=>f.submissions.length===1)
+    await f.call('/stop','POST')
+    run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.agentTurns![0]!.status).toBe('interrupted')
+    await f.call('/resume','POST',{planRevision:run.planRevision})
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    f.setMode('normal');faults.nativeGoalStatus='complete'
+    const continuation={requestKey:'continue-initial-build',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue' as const,
+      continuationOf:run.agentTurns![0]!.attemptId,text:'Continue the interrupted implementation.'}
+    expect((await f.call('/agent/messages','POST',continuation)).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions).toHaveLength(2)
+    expect(f.submissions[1]!.nativeGoal).toEqual({mode:'resume'})
+    expect(run.agentTurns![1]!.status).toBe('ended')
+    expect(run.status).toBe('blocked')
+    expect(run.blockedReason).toContain('Implementation delivery was not submitted')
+    expect(run.deliveryEligible).toBe(false)
+    expect(f.sessions.transcript(run.chatSessionId).some(event=>event.payload?.subtype==='delivery_submission')).toBe(false)
+  }finally{await f.close()}
+})
+
+for(const status of ['blocked','budgetLimited'] as const)test(`native Goal ${status} ends execution without claiming completion or dispatching another request`,async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{nativeGoalStatus:status})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.status).toBe('blocked')
+    expect(run.blockedReason).toContain('Codex Goal '+status)
+    expect(run.deliveryEligible).toBe(false)
+    expect(run.writer).toBeUndefined()
+    expect(f.submissions).toHaveLength(1)
+  }finally{await f.close()}
+})
+
+test('explicit continuation preserves native Goal while ordinary Chat does not activate it',async()=>{
+  const f=await fixture('wait',false,undefined,undefined,undefined,0,{nativeGoalStatus:'active'})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(()=>f.submissions.length===1)
+    const native=run.chatSessionId
+    await f.call('/stop','POST')
+    run=await f.wait(r=>!r.writer)
+    const previous=run.agentTurns![0]!
+    expect(previous.status).toBe('interrupted')
+    await f.call('/resume','POST',{planRevision:run.planRevision})
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    f.setMode('normal')
+    const request={requestKey:'goal-native-resume',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',
+      continuationOf:previous.attemptId,text:'Continue the interrupted work.'}
+    expect((await f.call('/agent/messages','POST',request)).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions[1]!.nativeGoal).toEqual({mode:'resume'})
+    expect(f.starts[1].nativeGoal).toEqual({mode:'resume'})
+    expect(f.starts[1].resumeSessionId).toBe(previous.nativeSessionId)
+    expect(run.chatSessionId).toBe(native)
+    const question={requestKey:'goal-question',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,text:'Explain the current progress only.'}
+    expect((await f.call('/agent/messages','POST',question)).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[2]?.finishedAt))
+    expect(f.submissions[2]!.nativeGoal).toBeUndefined()
+    expect(f.starts[2].nativeGoal).toBeUndefined()
+    expect(f.submissions[2]!.prompt).toBe('User message:\n'+question.text)
+    expect(f.submissions).toHaveLength(3)
+  }finally{await f.close()}
+})
+
+test('native completion observation cannot hide an execution failure',async()=>{
+  const f=await fixture('fail',false,undefined,undefined,undefined,0,{nativeGoalStatus:'complete'})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.status).toBe('blocked')
+    expect(run.agentTurns![0]!.status).toBe('failed')
+    expect(run.deliveryEligible).toBe(false)
+  }finally{await f.close()}
+})
+
+
+test('BGS assignments preserve full scope without automatically imposing a token budget',async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{nativeGoalStatus:'complete'})
+  try {
+    Object.assign(f.body.brief.settings,{tokenBudget:999999999})
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(f.submissions[0]!.nativeGoal).toEqual({mode:'start',objective:agentGoalPrompt(run)})
+    expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
+    expect(run.requirements.text).toBe(JSON.stringify(f.body.brief))
+    const work={requestKey:'budgeted-followup',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'work',text:'Finish the requested remaining behavior.'}
+    expect((await f.call('/agent/messages','POST',work)).status).toBe(202)
+    await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions[1]!.nativeGoal).toBeUndefined()
+    expect(f.submissions[1]!.prompt).toContain(work.text)
+    expect(f.starts[1].systemContext).toContain('workflow.mjs --implement')
+  }finally{await f.close()}
+})
+
+for(const contextMode of ['resume','focused'] as const)test(contextMode+' continuation preserves an unlimited Goal regardless of its recorded token usage',async()=>{
+  const f=await fixture('wait',false,undefined,undefined,undefined,0,{nativeGoalStatus:'active',nativeGoalBudget:null,pauseTokens:2000000,pauseUnavailable:true})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(()=>f.submissions.length===1)
+    await f.call('/stop','POST');run=await f.wait(r=>!r.writer)
+    const previous=run.agentTurns![0]!
+    await f.call('/resume','POST',{planRevision:run.planRevision});run=(await f.store.read(run.projectId,run.ownerId))!
+    f.setMode('normal')
+    expect((await f.call('/agent/messages','POST',{requestKey:'bounded-legacy-'+contextMode,runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',contextMode,
+      continuationOf:previous.attemptId,text:'Continue the saved assignment.'})).status).toBe(202)
+    await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions[1]!.nativeGoal).toEqual(contextMode==='resume' ? {mode:'resume'} :
+      {mode:'start',objective:'Synthetic original assignment'})
+  }finally{await f.close()}
+})
+
+test('focused continuation preserves an explicitly configured native budget when pause accounting is unavailable',async()=>{
+  const f=await fixture('wait',false,undefined,undefined,undefined,0,{nativeGoalStatus:'active',nativeGoalBudget:80,pauseUnavailable:true})
+  try {
+    await f.call('/agent/goal','POST',f.body);await f.wait(()=>f.submissions.length===1)
+    await f.call('/stop','POST');let run=await f.wait(r=>!r.writer)
+    const previous=run.agentTurns![0]!
+    await f.call('/resume','POST',{planRevision:run.planRevision});run=(await f.store.read(run.projectId,run.ownerId))!
+    expect((await f.call('/agent/messages','POST',{requestKey:'unknown-budget',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',contextMode:'focused',
+      continuationOf:previous.attemptId,text:'Continue.'})).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions).toHaveLength(1)
+    expect(run.status).toBe('blocked')
+    expect(run.blockedReason).toContain('no final usage snapshot')
+  }finally{await f.close()}
+})
+
+
+async function workflowCommand(root:string,context:string,value:unknown) {
+  const directory=JSON.parse(context.match(/Current BGS tools directory \(relative to project root\): ("[^"\n]+")./)![1]!)
+  const command=await readFile(join(root,directory,'workflow.mjs'),'utf8')
+  const sessionId=JSON.parse(command.match(/capability.sessionId!==("[^"\n]+")/)![1]!)
+  const {apiUrl:endpoint}=JSON.parse(await readFile(projectPreviewCapabilityPath(root,sessionId,'measurement'),'utf8'))
+  const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({workflow:value})})
+  const result=await response.json() as any
+  if(!response.ok)throw Error(result.error)
+  return result
+}
+
+test('four-stage production uses focused design, chosen order and one conversation; Goal starts at implementation',async()=>{
+  const stages:string[]=[],directions:string[]=[],contexts:string[]=[]
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{nativeGoalStatus:'complete'},undefined,true,async(root,input,context)=>{
+    const {assignment}=await workflowCommand(root,context,{action:'status'})
+    stages.push(assignment.stage);contexts.push(context)
+    if(assignment.stage==='implementation')return // No forged delivery: native complete must remain blocked.
+    directions.push(assignment.discipline ?? assignment.stage)
+    await mkdir(join(root,'docs'),{recursive:true})
+    await writeFile(join(root,'docs/GDD.md'),'# Synthetic design\n\n## Decisions\nConcrete synthetic sources for host lifecycle checks.\n')
+    await writeFile(join(root,'docs/design.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>')
+    const value={action:'advance',summary:'Synthetic handoff, not game acceptance',sections:['Decisions'],files:assignment.stage==='visual'?['docs/design.svg']:[],
+      ...(assignment.discipline==='gameplay'?{nextDesign:'technical'}:{})}
+    const saved=await workflowCommand(root,context,value)
+    const again=await workflowCommand(root,context,value)
+    expect(again.next).toEqual(saved.next)
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  try {
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    const run=await f.wait(r=>r.agentTurns?.length===11 && Boolean(r.agentTurns.at(-1)?.finishedAt))
+    expect(stages).toEqual([...Array(8).fill('design'),'visual','resources','implementation'])
+    expect(directions.slice(0,2)).toEqual(['gameplay','technical'])
+    expect(f.submissions[1]!.prompt).toContain('Preceding author handoff:')
+    expect(f.submissions[1]!.prompt).toContain('Decisions')
+    expect(f.submissions[1]!.prompt).toContain('docs/GDD.md')
+    expect(new Set(directions.slice(0,8)).size).toBe(8)
+    expect(f.submissions.slice(0,10).every(s=>s.nativeGoal===undefined)).toBe(true)
+    expect(f.submissions[10]!.nativeGoal).toMatchObject({mode:'start'})
+    expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
+    expect(run.agentTurns!.every(t=>!t.message)).toBe(true)
+    expect(run.agentTurns!.slice(0,10).every(t=>t.status==='ended' && t.productionHandoff)).toBe(true)
+    expect(run.status).toBe('blocked')
+    expect(run.blockedReason).toContain('delivery was not submitted')
+    expect(run.deliveryEligible).toBe(false)
+    expect(new Set(contexts.map(c=>c.match(/Current BGS tools directory[^\n]+/)![0])).size).toBe(11)
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    expect(f.submissions).toHaveLength(11)
+  }finally{await f.close()}
+},30000)
+
+for(const outcome of ['missing','changed','failed','paused'] as const)test('production does not automatically advance after '+outcome,async()=>{
+  let handed=false
+  const f=await fixture(outcome==='failed'?'fail':outcome==='paused'?'wait':'normal',false,undefined,undefined,undefined,0,{},undefined,true,async(root,_input,context)=>{
+    if(outcome==='missing')return
+    await mkdir(join(root,'docs'),{recursive:true})
+    await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Decisions\nSaved design facts.\n')
+    await workflowCommand(root,context,{action:'advance',summary:'Synthetic handoff',sections:['Decisions'],files:[]})
+    if(outcome==='changed')await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Decisions\nChanged after handoff.\n')
+    handed=true
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    if(outcome==='paused') {await f.wait(()=>handed);await f.call('/stop','POST')}
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.status).toBe('blocked');expect(f.submissions).toHaveLength(1);expect(run.writer).toBeUndefined()
+    if(outcome==='changed')expect(run.blockedReason).toContain('changed after submission')
+    if(outcome==='missing') {
+      expect(run.blockedReason).toContain('without its source-bound workflow handoff')
+      const response=await f.call('/agent/messages','POST',{requestKey:'explicit-resume',runId:run.id,chatSessionId:run.chatSessionId,
+        expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:run.agentTurns![0]!.attemptId,text:'Continue the unfinished design'})
+      expect(response.status,await response.clone().text()).toBe(202)
+      run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+      expect(run.agentTurns![1]!.production).toEqual(run.agentTurns![0]!.production)
+      expect(f.submissions[1]!.nativeGoal).toBeUndefined()
+    }
+  }finally{await f.close()}
+},30000)
+
+for(const intent of ['message','work','change'] as const)test(`later ${intent} implementation entry retains only that user assignment; ordinary design ends without Goal`,async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{nativeGoalStatus:'complete'},undefined,false,async(root,input,context)=>{
+    if(String(input.prompt)==='User message:\nImplement only the authorized local correction.')
+      await workflowCommand(root,context,{action:'implement',summary:'Current local implementation',sections:[],files:[]})
+  })
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    const message=(requestKey:string,text:string)=>({requestKey,runId:run.id,chatSessionId:run.chatSessionId,expectedVersion:run.version,
+      requirementsRevision:run.requirements.revision,intent,text})
+    await f.call('/agent/messages','POST',message('design-only','Revise only the design.'))
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(run.status).toBe('completed');expect(f.submissions[1]!.nativeGoal).toBeUndefined()
+    expect(f.starts[1].systemContext).toContain('If the current request authorizes Scene/UI assembly')
+    expect(f.submissions).toHaveLength(2)
+    await f.call('/agent/messages','POST',message('local-implementation','Implement only the authorized local correction.'))
+    run=await f.wait(r=>Boolean(r.agentTurns?.[3]?.finishedAt))
+    expect(f.submissions[2]!.nativeGoal).toBeUndefined()
+    expect(f.submissions[3]!.nativeGoal).toMatchObject({mode:'start'})
+    expect(f.submissions[3]!.prompt).toContain('Original authorized assignment:\nImplement only the authorized local correction.')
+    expect(f.submissions[3]!.prompt).not.toContain('full confirmed new-game brief')
+    expect(run.status).toBe('blocked')
+    expect(run.agentTurns![3]!.production?.originRequestKey).toBe('local-implementation')
+    expect(run.agentTurns![2]!.message?.intent).toBe(intent)
+    expect(new Set(run.agentTurns!.map(turn=>turn.nativeSessionId)).size).toBe(1)
+    expect(run.blockedReason).toContain('delivery was not submitted')
+    expect(run.deliveryEligible).toBe(false)
+    expect(f.submissions).toHaveLength(4)
+  }finally{await f.close()}
+},30000)
+
+
+test('pause between settled stages preserves the next assignment for explicit continuation without replay',async()=>{
+  let paused=false
+  const faults:{afterSettlement?:()=>Promise<void>}={}
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,faults,undefined,true,async(root,_input,context)=>{
+    if(paused)return
+    await mkdir(join(root,'docs'),{recursive:true});await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Decisions\nSaved source.\n')
+    await workflowCommand(root,context,{action:'advance',summary:'First design ready',sections:['Decisions'],files:[],nextDesign:'audio',coveredDesigns:{levels:['Decisions']}})
+  })
+  faults.afterSettlement=async()=>{if(!paused){paused=true;await f.call('/stop','POST')}}
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let run=await f.wait(r=>Boolean(r.paused) && !r.writer)
+    expect(run.status).toBe('blocked');expect(f.submissions).toHaveLength(1)
+    expect(run.agentTurns![0]!.status).toBe('ended')
+    expect(run.agentTurns![0]!.productionHandoff?.next.discipline).toBe('audio')
+    expect(run.agentTurns![0]!.productionHandoff?.next.completedDesigns).toEqual(['gameplay','levels'])
+    await f.call('/resume','POST',{planRevision:run.planRevision})
+    run=(await f.store.read(run.projectId,run.ownerId))!
+    const response=await f.call('/agent/messages','POST',{requestKey:'continue-after-stage',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:run.agentTurns![0]!.attemptId,text:'Continue from the saved stage handoff.'})
+    expect(response.status,await response.clone().text()).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions).toHaveLength(2)
+    expect(run.agentTurns![1]!.production).toEqual(run.agentTurns![0]!.productionHandoff!.next)
+    expect(run.agentTurns![1]!.production?.discipline).toBe('audio')
+    expect(f.submissions[1]!.nativeGoal).toBeUndefined()
+  }finally{await f.close()}
+},30000)
+
+test('combined professional coverage advances only unfinished directions without rewriting existing design',async()=>{
+  const stages:string[]=[],directions:string[]=[]
+  const source='# Synthetic design\n## Rules\nSynthetic rules and quantitative boundaries.\n## Space\nSynthetic spatial decisions.\n## Presentation\nSynthetic visual and interaction decisions.\n## Sound\nSynthetic audible behavior.\n## Inputs\nSynthetic resource representations.\n## Runtime\nSynthetic consuming interfaces.\n'
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{nativeGoalStatus:'complete'},undefined,true,async(root,_input,context)=>{
+    const {assignment}=await workflowCommand(root,context,{action:'status'})
+    stages.push(assignment.stage)
+    if(assignment.stage==='implementation')return
+    if(assignment.discipline==='gameplay') {
+      await mkdir(join(root,'docs'),{recursive:true})
+      await writeFile(join(root,'docs/GDD.md'),source)
+    }
+    if(assignment.stage==='visual')await writeFile(join(root,'docs/design.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>')
+    if(assignment.discipline)directions.push(assignment.discipline)
+    const combined:Record<string,{sections:string[];coveredDesigns?:Record<string,string[]>}>={
+      gameplay:{sections:['Rules'],coveredDesigns:{levels:['Space'],balance:['Rules']}},
+      art:{sections:['Presentation'],coveredDesigns:{ui:['Presentation']}},
+      audio:{sections:['Sound'],coveredDesigns:{resources:['Inputs']}},
+      technical:{sections:['Runtime']},
+    }
+    await workflowCommand(root,context,{action:'advance',summary:'Synthetic coverage, not semantic certification',
+      ...(combined[assignment.discipline] ?? {sections:['Presentation']}),files:assignment.stage==='visual'?['docs/design.svg']:[]})
+    expect(await readFile(join(root,'docs/GDD.md'),'utf8')).toBe(source)
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>r.agentTurns?.length===7 && Boolean(r.agentTurns.at(-1)?.finishedAt))
+    expect(directions).toEqual(['gameplay','art','audio','technical'])
+    expect(stages).toEqual(['design','design','design','design','visual','resources','implementation'])
+    expect(run.agentTurns![3]!.production?.completedDesigns).toEqual(['gameplay','levels','balance','art','ui','audio','resources'])
+    expect(run.agentTurns![0]!.productionHandoff?.request.coveredDesigns).toEqual({levels:['Space'],balance:['Rules']})
+    expect(f.submissions[1]!.prompt).toContain('"coveredDesigns":{"levels":["Space"],"balance":["Rules"]}')
+    expect(f.submissions.slice(0,6).every(s=>s.nativeGoal===undefined)).toBe(true)
+    expect(f.submissions[6]!.nativeGoal).toMatchObject({mode:'start'})
+    expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
+    expect(run.requirements.text).toBe(JSON.stringify(f.body.brief))
+    expect(run.deliveryEligible).toBe(false)
+    expect(run.blockedReason).toContain('delivery was not submitted')
+  }finally{await f.close()}
+},30000)
+
+
+test('empty continuation resumes native history through the existing message route without replaying an assignment', async () => {
+  const f = await fixture('fail')
+  try {
+    await f.call('/agent/goal', 'POST', f.body)
+    const run = await f.wait(r => Boolean(r.agentTurns?.[0]?.finishedAt))
+    const previous = run.agentTurns![0]!
+    expect(f.submissions).toHaveLength(1)
+    const body = { requestKey: 'native-recovery', runId: run.id, chatSessionId: run.chatSessionId,
+      expectedVersion: run.version, requirementsRevision: run.requirements.revision,
+      intent: 'continue', continuationOf: previous.attemptId, text: '' }
+    expect((await f.call('/agent/messages', 'POST', { ...body, contextMode: 'focused' })).status).toBe(400)
+    expect((await f.call('/agent/messages', 'POST', { ...body, continuationOf: 'stale' })).status).toBe(400)
+    expect((await f.call('/agent/messages', 'POST', { ...body, expectedVersion: run.version - 1 })).status).toBe(409)
+    expect(f.submissions).toHaveLength(1)
+    f.setMode('normal')
+    const response = await f.call('/agent/messages', 'POST', body)
+    expect(response.status, await response.clone().text()).toBe(202)
+    const after = await f.wait(r => Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.starts[1]).toMatchObject({ nativeRecovery: true, resumeSessionId: previous.nativeSessionId })
+    expect(f.submissions[1]).toMatchObject({ nativeRecovery: true, prompt: [] })
+    expect(f.submissions[1]!.nativeGoal).toEqual({mode:'resume'})
+    expect(f.starts[1].systemContext).not.toContain('This bounded assignment starts without a native Goal')
+    expect(after.requirements).toEqual(run.requirements)
+    expect((await f.call('/agent/messages', 'POST', body)).status).toBe(202)
+    expect(f.submissions).toHaveLength(2)
+  } finally { await f.close() }
+})
+
+
+test('manual recovery of ordinary Chat does not reactivate an earlier Goal, including repeated failures', async () => {
+  const f = await fixture('normal', false, undefined, undefined, undefined, 0, { nativeGoalStatus: 'blocked' })
+  try {
+    await f.call('/agent/goal', 'POST', f.body)
+    let run = await f.wait(r => Boolean(r.agentTurns?.[0]?.finishedAt))
+    f.setMode('fail')
+    expect((await f.call('/agent/messages', 'POST', { requestKey: 'question', runId: run.id, chatSessionId: run.chatSessionId,
+      expectedVersion: run.version, requirementsRevision: run.requirements.revision, text: 'Explain progress only.' })).status).toBe(202)
+    run = await f.wait(r => Boolean(r.agentTurns?.[1]?.finishedAt))
+    for (let index = 2; index <= 3; index++) {
+      expect((await f.call('/agent/messages', 'POST', { requestKey: 'retry-' + index, runId: run.id, chatSessionId: run.chatSessionId,
+        expectedVersion: run.version, requirementsRevision: run.requirements.revision,
+        intent: 'continue', continuationOf: run.agentTurns!.at(-1)!.attemptId, text: '' })).status).toBe(202)
+      run = await f.wait(r => Boolean(r.agentTurns?.[index]?.finishedAt))
+      expect(f.submissions[index]).toMatchObject({ nativeRecovery: true, prompt: [] })
+      expect(f.submissions[index]!.nativeGoal).toBeUndefined()
+    }
+  } finally { await f.close() }
 })

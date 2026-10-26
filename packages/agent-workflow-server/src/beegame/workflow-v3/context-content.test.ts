@@ -39,7 +39,7 @@ test('Skill evidence records completion without treating a failed load as succes
   expect(loaded[0]).toMatchObject({ status: 'loaded', parentToolUseID: 'child', eventId: 3 })
 })
 
-test('scoped content checks need no eight documents, catch overflow, distinguish unbound drafts and preserve unrelated files', async () => {
+test('scoped content checks need no GDD, catch overflow, distinguish unbound drafts and preserve unrelated files', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-v3-layout-'))
   try {
     await mkdir(join(root, 'content/ui'), { recursive: true })

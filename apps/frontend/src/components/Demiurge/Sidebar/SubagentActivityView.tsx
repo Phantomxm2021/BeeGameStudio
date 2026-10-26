@@ -27,7 +27,7 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
             const state = entry.status === 'running' ? (running ? 'running' : 'incomplete')
                 : entry.status === 'cancelled' ? 'stopped' : entry.status;
             return <ToolActivityRow key={entry.id} id={entry.id} name={entry.toolName}
-                input={{ command: entry.command, file_path: entry.filePath }} state={state} lang={lang}
+                input={{ command: entry.command, file_path: entry.filePath }} output={entry.output} state={state} lang={lang}
                 duration={entry.elapsedTimeSeconds === undefined ? undefined : `${entry.elapsedTimeSeconds}s`} />;
         })}
     </div>;

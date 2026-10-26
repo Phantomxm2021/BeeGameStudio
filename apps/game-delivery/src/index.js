@@ -53,8 +53,11 @@ function createDeliveryWorker(options = {}) {
         request.method === "HEAD" ? null : object.body,
         { status: 200, headers },
       );
+      const sourceVerification =
+        new URL(request.url).searchParams.get("bgs_verification") === "raw";
       if (
         request.method === "GET" &&
+        !sourceVerification &&
         target.path === "index.html" &&
         target.contentType.toLowerCase().startsWith("text/html")
       ) {

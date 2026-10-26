@@ -6,7 +6,7 @@ const headings = {
 } as const;
 const sectionKind = (heading: string) => (Object.keys(headings) as PublicationSection['kind'][])
   .find(kind => (headings[kind] as readonly string[]).includes(heading.toLowerCase()));
-const headingText = (line: string) => line.trim().replace(/^#{1,6}\s+/, '').replace(/\s+#+$/, '').replace(/^(?:\*\*|__)(.*)(?:\*\*|__)$/, '$1').trim();
+const headingText = (line: string) => line.trim().replace(/^#{1,6}\s+/, '').replace(/\s+#+$/, '').replace(/^(?:\*\*|__)(.*)(?:\*\*|__)$/, '$1').replace(/\\([!-/:-@\[-`{-~])/g, '$1').trim();
 
 /** A reviewed public H1 names the release; never infer a title from body prose or private documents. */
 export function publicationTitle(description: string | undefined, fallback: string): string {

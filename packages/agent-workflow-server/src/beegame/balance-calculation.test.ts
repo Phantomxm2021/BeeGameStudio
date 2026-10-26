@@ -87,7 +87,7 @@ test('dependency reading accepts stale inputs but rejects altered results and un
 
 test('Scene calculation consumes discovered saved sources; freshness and host handoff never rerun the model', async () => {
   await fixture(async workspace => {
-    await writeDesignDocumentFixture(workspace, 'LEVEL_SCENE_DESIGN.md')
+    await writeDesignDocumentFixture(workspace, 'GDD.md')
     await mkdir(join(workspace, 'docs/calc'), { recursive: true })
     await mkdir(join(workspace, 'content/scenes/with spaces'), { recursive: true })
     const extra = { ...sceneLayoutFixture(), id: 'extra' }
@@ -101,13 +101,13 @@ test('Scene calculation consumes discovered saved sources; freshness and host ha
     await writeFile(join(workspace, 'model.mjs'), sceneModel)
     await writeFile(join(workspace, 'rules.txt'), 'fixture rule')
     const output = 'docs/calc/scene.md'
-    const docPath = join(workspace, 'docs/LEVEL_SCENE_DESIGN.md')
+    const docPath = join(workspace, 'docs/GDD.md')
     await writeFile(docPath, await readFile(docPath, 'utf8') + '\n[Calculation](calc/scene.md)\n')
     expect((await command(workspace, 'model.mjs', output, '--scenes')).code).toBe(0)
     const result = await readFile(join(workspace, output), 'utf8')
     expect(result).toContain('content/scenes/with spaces/extra level.json')
     expect((await command(workspace, '--check-result', output)).code).toBe(0)
-    expect(checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md']).valid).toBe(true)
+    expect(checkDesignHandoff(workspace, ['GDD.md']).valid).toBe(true)
     expect(await readFile(join(workspace, 'executions.txt'), 'utf8')).toBe('run\n')
 
     for (const [path, replacement, message] of [
@@ -121,7 +121,7 @@ test('Scene calculation consumes discovered saved sources; freshness and host ha
       const check = await command(workspace, '--check-result', output)
       expect(check.code).toBe(1)
       expect(check.stdout).toContain(message!)
-      expect(checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md']).issues.join(' ')).toContain(message!)
+      expect(checkDesignHandoff(workspace, ['GDD.md']).issues.join(' ')).toContain(message!)
       await writeFile(file, original)
     }
     await writeFile(join(workspace, 'content/scenes/new.json'), JSON.stringify({ ...extra, id: 'new' }))
@@ -142,7 +142,7 @@ test('missing calculation records are unverified, not semantic failures or permi
 
 test('Scene models and freshness share design inputs; bindings do not invalidate, geometry and exact reads do', async () => {
   await fixture(async workspace => {
-    await writeDesignDocumentFixture(workspace, 'LEVEL_SCENE_DESIGN.md')
+    await writeDesignDocumentFixture(workspace, 'GDD.md')
     const path = 'content/scenes/level.json', file = join(workspace, path)
     const scene = sceneLayoutFixture() as any
     scene.data.nodes[1].components = [{ id: 'art', type: 'sprite-renderer', data: { size: [24, 24], color: '#123456' } }]
@@ -158,15 +158,15 @@ test('Scene models and freshness share design inputs; bindings do not invalidate
     const saved = await readFile(join(workspace, output), 'utf8')
     expect(saved).toContain('scene-design-v1')
     expect(readCalculationInputs(workspace, output)).toContain(path)
-    const owner = join(workspace, 'docs/LEVEL_SCENE_DESIGN.md')
+    const owner = join(workspace, 'docs/GDD.md')
     await writeFile(owner, await readFile(owner, 'utf8') + '\n[Calculation](calc/result.md)\n')
-    const baseline = checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md'])
+    const baseline = checkDesignHandoff(workspace, ['GDD.md'])
     expect(baseline.issues).toEqual([])
     scene.assetRefs = ['atlas']; scene.data.nodes[1].components[0].assetRef = 'atlas'
     Object.assign(scene.data.nodes[1].components[0].data, { member: 'assets/atlas.png', frame: 'tile' })
     await writeFile(file, JSON.stringify(scene, null, 2))
     expect((await command(workspace, '--check-result', output)).code).toBe(0)
-    const bound = checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md'])
+    const bound = checkDesignHandoff(workspace, ['GDD.md'])
     expect(bound.issues).toEqual([])
     expect(bound.snapshots).toEqual(baseline.snapshots)
     expect(bound.evidenceHashes).toEqual(baseline.evidenceHashes)
@@ -222,9 +222,9 @@ test.each(['- Version: v1.0\n', '- 版本：v1.0\r\n'])('design calculation iden
     await mkdir(join(workspace, 'docs'))
     const source = '# Balance\n' + versionLine + '## Rules\nRate: 3\n'
     const body = source.replace(versionLine, '')
-    await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'), source)
+    await writeFile(join(workspace, 'docs/GDD.md'), source)
     const formula = `export async function calculate({readText}) {
-      const body = await readText('docs/BALANCE_DESIGN.md');
+      const body = await readText('docs/GDD.md');
       if (body.includes('Version:') || body.includes('版本：')) throw Error('Host metadata leaked into calculation inputs');
       return {tables:[{title:'Rate',columns:['units'],rows:[[Number(body.match(/Rate: (\\d+)/)[1])]]}],checks:[],limitations:['Synthetic source identity fixture']};
     }`
@@ -234,13 +234,13 @@ test.each(['- Version: v1.0\n', '- 版本：v1.0\r\n'])('design calculation iden
     expect(original).toContain(createHash('sha256').update(body).digest('hex'))
     expect(original).toContain('design-body-without-version')
     expect(original).toContain(createHash('sha256').update(formula).digest('hex'))
-    expect(await readFile(join(workspace, 'docs/BALANCE_DESIGN.md'), 'utf8')).toBe(source)
+    expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe(source)
 
-    await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'), source.replace('v1.0', 'v1.1'))
+    await writeFile(join(workspace, 'docs/GDD.md'), source.replace('v1.0', 'v1.1'))
     expect((await command(workspace, 'model.mjs', 'calculated.md')).code).toBe(0)
     expect(await readFile(join(workspace, 'calculated.md'), 'utf8')).toBe(original)
 
-    await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'), source.replace('Rate: 3', 'Rate: 4'))
+    await writeFile(join(workspace, 'docs/GDD.md'), source.replace('Rate: 3', 'Rate: 4'))
     expect((await command(workspace, 'model.mjs', 'calculated.md')).code).toBe(0)
     const changedSource = await readFile(join(workspace, 'calculated.md'), 'utf8')
     expect(changedSource).not.toBe(original)
@@ -255,15 +255,15 @@ test('ambiguous version lines and non-design sources retain their exact source b
   await fixture(async workspace => {
     await mkdir(join(workspace, 'docs'))
     const bytes = '# Source\n- Version: v1.0\n- Version: v2.0\nRate: 3\n'
-    await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'), bytes)
+    await writeFile(join(workspace, 'docs/GDD.md'), bytes)
     await writeFile(join(workspace, 'source.md'), bytes)
     await writeFile(join(workspace, 'model.mjs'), model.replace("const p = await readJson('parameters.json');",
-      "const p = await readJson('parameters.json'); await readText('docs/BALANCE_DESIGN.md'); await readText('source.md');")
+      "const p = await readJson('parameters.json'); await readText('docs/GDD.md'); await readText('source.md');")
       .replace('calculate({readJson})', 'calculate({readJson,readText})'))
     expect((await command(workspace, 'model.mjs', 'calculated.md')).code).toBe(0)
     const result = await readFile(join(workspace, 'calculated.md'), 'utf8')
     const digest = createHash('sha256').update(bytes).digest('hex')
-    expect(result).toContain('| docs/BALANCE_DESIGN.md | ' + digest + ' | exact-bytes |')
+    expect(result).toContain('| docs/GDD.md | ' + digest + ' | exact-bytes |')
     expect(result).toContain('| source.md | ' + digest + ' | exact-bytes |')
   })
 })

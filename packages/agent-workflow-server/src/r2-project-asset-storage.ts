@@ -1,8 +1,10 @@
 import {
+  assertSafeObjectKey,
   createR2StorageDriver,
   resolveProjectStorageConfiguration,
   sha256Hex,
   type ProjectStorageDriver,
+  type ProjectStorageBucketRole,
   type StorageObjectLocator,
 } from '@bee-game-studio/beegame-storage-core'
 /*
@@ -20,7 +22,7 @@ type ProjectStorageObjectRow = {
   owner_user_id: string
   project_id: string | null
   provider: 'r2'
-  bucket_role: 'project-private'
+  bucket_role: ProjectStorageBucketRole
   bucket: string
   object_key: string
   logical_path: string | null
@@ -45,6 +47,12 @@ export type ProjectAssetStorage = {
     authToken: string
     storageUri: string
   }): Promise<void>
+  /** Delete every active R2 object owned by one project before its metadata. */
+  deleteProjectFiles?(input: {
+    ownerId: string
+    projectId: string
+    authToken: string
+  }): Promise<void>
 }
 
 const R2_OBJECT_URI_PREFIX = 'r2-object://'
@@ -67,6 +75,7 @@ export function createR2ProjectAssetStorageFromEnv(
     baseUrl,
     anonKey,
     bucket: configuration.buckets['project-private'],
+    deliveryBucket: configuration.buckets.delivery,
     driver: createR2StorageDriver(configuration.r2),
   })
 }
@@ -75,6 +84,7 @@ export function createR2ProjectAssetStorage(options: {
   baseUrl: string
   anonKey: string
   bucket: string
+  deliveryBucket?: string
   driver: ProjectStorageDriver
   fetchImpl?: FetchImplementation
 }): ProjectAssetStorage {
@@ -84,6 +94,7 @@ export function createR2ProjectAssetStorage(options: {
   const baseUrl = options.baseUrl.replace(/\/+$/, '')
   const bucket = options.bucket.trim()
   if (!bucket) throw new Error('R2 project asset bucket is required')
+  const deliveryBucket = options.deliveryBucket?.trim() || undefined
   const fetchImpl = options.fetchImpl ?? fetch
   const request = async <T>(
     path: string,
@@ -111,8 +122,8 @@ export function createR2ProjectAssetStorage(options: {
     id: string,
     authToken: string,
     body: Record<string, unknown>,
-  ): Promise<void> => {
-    await request<ProjectStorageObjectRow[]>(
+  ): Promise<ProjectStorageObjectRow[]> => {
+    return request<ProjectStorageObjectRow[]>(
       `beegame_storage_objects?id=eq.${encodeURIComponent(id)}`,
       authToken,
       {
@@ -126,9 +137,31 @@ export function createR2ProjectAssetStorage(options: {
     )
   }
 
+  const markObjectDeleted = async (
+    row: ProjectStorageObjectRow,
+    authToken: string,
+  ): Promise<void> => {
+    const deletedAt = new Date().toISOString()
+    const patched = await patchObject(row.id, authToken, {
+      status: 'deleted',
+      deleted_at: deletedAt,
+    })
+    if (
+      !patched.some(
+        candidate =>
+          candidate.id === row.id &&
+          candidate.status === 'deleted' &&
+          typeof candidate.deleted_at === 'string' &&
+          candidate.deleted_at.length > 0,
+      )
+    ) {
+      throw new Error('R2 project storage metadata did not confirm deletion')
+    }
+  }
+
   const locator = (row: ProjectStorageObjectRow): StorageObjectLocator => ({
     provider: 'r2',
-    bucketRole: 'project-private',
+    bucketRole: row.bucket_role,
     bucket: row.bucket,
     objectKey: row.object_key,
   })
@@ -216,10 +249,33 @@ export function createR2ProjectAssetStorage(options: {
       const row = rows[0]
       if (!row) return
       await options.driver.deleteObject(locator(row))
-      await patchObject(row.id, input.authToken, {
-        status: 'deleted',
-        deleted_at: new Date().toISOString(),
-      })
+      await markObjectDeleted(row, input.authToken)
+    },
+
+    async deleteProjectFiles(input) {
+      const processed = new Set<string>()
+      for (;;) {
+        const rows = await request<ProjectStorageObjectRow[]>(
+          `beegame_storage_objects?owner_user_id=eq.${encodeURIComponent(input.ownerId)}&project_id=eq.${encodeURIComponent(input.projectId)}&provider=eq.r2&deleted_at=is.null&select=*&order=id.asc&limit=100&offset=0`,
+          input.authToken,
+        )
+        if (!rows.length) break
+        for (const row of rows) {
+          if (processed.has(row.id))
+            throw new Error('R2 project storage metadata did not confirm deletion')
+          processed.add(row.id)
+          if (row.owner_user_id !== input.ownerId || row.project_id !== input.projectId || row.provider !== 'r2')
+            throw new Error('R2 project storage metadata ownership check failed')
+          if (row.bucket_role !== 'project-private' && row.bucket_role !== 'delivery')
+            throw new Error(`R2 project storage role is not project-owned: ${row.bucket_role}`)
+          const expectedBucket = row.bucket_role === 'project-private' ? bucket : deliveryBucket
+          if (!expectedBucket || row.bucket !== expectedBucket)
+            throw new Error('R2 project storage bucket does not match configured project storage')
+          const objectKey = assertSafeObjectKey(row.object_key)
+          await options.driver.deleteObject({ ...locator(row), objectKey })
+          await markObjectDeleted(row, input.authToken)
+        }
+      }
     },
   }
 }

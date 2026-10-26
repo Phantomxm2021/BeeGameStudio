@@ -1,0 +1,136 @@
+import { expect, test } from 'bun:test'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { BgsClient } from './client'
+
+const fixture = fileURLToPath(new URL('./fixtures/client-diagnostics-app-server.mjs', import.meta.url))
+const executable = basename(process.execPath)
+const command = [process.execPath, fixture] as const
+const secret = 'SYNTHETIC_PROVIDER_SECRET_MUST_NOT_ESCAPE'
+
+function env(mode: string): Record<string, string> {
+  return { PATH: process.env.PATH || '', HOME: process.env.HOME || '/tmp', BGS_HOME: '/private/tmp/bgs-client-diagnostics-home',
+    BGS_CLIENT_DIAGNOSTICS_MODE: mode }
+}
+
+function info(error: unknown): Record<string, any> {
+  const value = (error as any)?.bgsErrorInfo
+  expect(value).toBeDefined()
+  const serialized = JSON.stringify(value)
+  expect(serialized).not.toContain(secret)
+  expect(serialized).not.toContain(fixture)
+  expect(serialized).not.toContain('--listen')
+  return value
+}
+
+test('spawn diagnostics distinguish a missing cwd from the executable without exposing paths or argv', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-diagnostic-')
+  const missing = join(root, 'missing-cwd')
+  let observed: Error | undefined, succeeded = false
+  try {
+    let error: unknown
+    try { await BgsClient.connect({ command, cwd: missing, env: env('ok'), onExit: caught => { observed = caught } }); succeeded = true }
+    catch (caught) { error = caught; observed ||= caught as Error }
+    expect(succeeded).toBe(false)
+    const diagnostic = info(error)
+    expect(diagnostic).toMatchObject({ phase: 'spawn', code: 'ENOENT', executable,
+      cwd: { kind: 'missing' } })
+    expect(observed).toBe(error as Error)
+    expect((error as Error).message).not.toContain(missing)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('spawn diagnostics classify a cwd that exists but is not a directory', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-diagnostic-')
+  const file = join(root, 'cwd-file')
+  await writeFile(file, 'not a directory')
+  try {
+    let error: unknown
+    try { await BgsClient.connect({ command, cwd: file, env: env('ok') }) }
+    catch (caught) { error = caught }
+    const diagnostic = info(error)
+    expect(['ENOTDIR', 'ENOENT']).toContain(diagnostic.code)
+    expect(diagnostic).toMatchObject({ phase: 'spawn', executable, cwd: { kind: 'not-directory' } })
+    expect((error as Error).message).not.toContain(file)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('spawn diagnostics identify a missing executable separately from a valid cwd', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-diagnostic-')
+  const missingExecutable = join(root, 'missing-bgs-executable')
+  try {
+    let error: unknown
+    try { await BgsClient.connect({ command: [missingExecutable, fixture], cwd: root, env: env('ok') }) }
+    catch (caught) { error = caught }
+    const diagnostic = info(error)
+    expect(diagnostic).toMatchObject({ phase: 'spawn', code: 'ENOENT', executable: basename(missingExecutable),
+      cwd: { kind: 'directory' } })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('spawn diagnostics preserve EACCES instead of inferring ENOENT', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-diagnostic-')
+  const deniedExecutable = join(root, 'denied-bgs-executable')
+  await writeFile(deniedExecutable, '#!/bin/sh\nexit 0\n')
+  await chmod(deniedExecutable, 0o600)
+  try {
+    let error: unknown, succeeded = false
+    try { await BgsClient.connect({ command: [deniedExecutable], cwd: root, env: env('ok') }); succeeded = true }
+    catch (caught) { error = caught }
+    expect(succeeded).toBe(false)
+    const diagnostic = info(error)
+    expect(diagnostic).toMatchObject({ phase: 'spawn', code: 'EACCES', executable: basename(deniedExecutable),
+      cwd: { kind: 'directory' } })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('process exit diagnostics retain exit code and keep stderr/provider text private', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-diagnostic-')
+  let observed: Error | undefined
+  let client: BgsClient | undefined
+  try {
+    client = await BgsClient.connect({ command, cwd: root, env: env('exit'), onExit: error => { observed = error } })
+    await client.closed
+    const diagnostic = info(observed)
+    expect(diagnostic).toMatchObject({ phase: 'exit', executable, cwd: { kind: 'directory' }, exitCode: 23, signal: null })
+    expect(observed?.message).not.toContain(secret)
+  } finally {
+    await client?.close().catch(() => {})
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+if (process.platform !== 'win32') test('process signal diagnostics retain signal without exposing stderr', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-diagnostic-')
+  let observed: Error | undefined
+  let client: BgsClient | undefined
+  try {
+    client = await BgsClient.connect({ command, cwd: root, env: env('signal'), onExit: error => { observed = error } })
+    await client.closed
+    const diagnostic = info(observed)
+    expect(diagnostic).toMatchObject({ phase: 'exit', executable, cwd: { kind: 'directory' }, exitCode: null, signal: 'SIGTERM' })
+    expect(observed?.message).not.toContain(secret)
+  } finally {
+    await client?.close().catch(() => {})
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('request timeout diagnostics retain method and timeout without provider text', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-diagnostic-')
+  let client: BgsClient | undefined
+  try {
+    client = await BgsClient.connect({ command, cwd: root, env: env('timeout') })
+    let error: unknown
+    try { await client.request('diagnostic/slow', {}, 25) }
+    catch (caught) { error = caught }
+    const diagnostic = info(error)
+    expect(diagnostic).toMatchObject({ phase: 'request', method: 'diagnostic/slow', timeoutMs: 25 })
+    expect((error as Error).message).toContain('diagnostic/slow')
+    expect((error as Error).message).not.toContain(secret)
+  } finally {
+    await client?.close().catch(() => {})
+    await rm(root, { recursive: true, force: true })
+  }
+})

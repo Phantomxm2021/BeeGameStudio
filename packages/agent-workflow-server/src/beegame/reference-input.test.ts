@@ -12,11 +12,14 @@ import { inspectDesignAcceptance, readRuntimeAcceptanceReport } from './runtime-
 test.each(['none','partial','complete'] as const)('reference pictures are inputs, not an AI-source delivery gate: %s documents',async kind=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-reference-input-'))
   try {
-    const documents=kind==='none'?[]:kind==='partial'?['GDD.md','ART_DIRECTION.md'] as const:PROJECT_DOCUMENTS
+    // The single GDD is the only authoritative design source. Keep the
+    // partial/complete cases to exercise acceptance metadata, not retired
+    // per-discipline document names.
+    const documents=kind==='none'?[]:['GDD.md'] as const
     await writeDesignDocumentsFixture(root,documents)
-    if(kind==='complete') for(const name of ['UI_UX_SPEC.md','LEVEL_SCENE_DESIGN.md']) {
-      const path=join(root,'docs',name)
-      await writeFile(path,(await readFile(path,'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm,''))
+    if (kind === 'complete') {
+      const gdd = join(root, 'docs/GDD.md')
+      await writeFile(gdd, (await readFile(gdd, 'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm, ''))
     }
     const picture='assets/visual/reference #1.PNG'
     const bytes=await sharp({create:{width:8,height:8,channels:4,background:'red'}}).png().toBuffer()
@@ -27,7 +30,7 @@ test.each(['none','partial','complete'] as const)('reference pictures are inputs
     await writeFile(join(root,'assets/visual/notes.md'),'Production notes')
     await writeFile(join(root,'assets/visual/notes.html'),'<p>Production notes</p>')
     if(kind!=='none') {
-      const doc=join(root,'docs/ART_DIRECTION.md')
+      const doc=join(root,'docs/GDD.md')
       await writeFile(doc,await readFile(doc,'utf8')+[
         '', '[Reference](../assets/visual/reference%20%231.PNG)',
         '[Runtime screenshot](../evidence/screenshot.png)',

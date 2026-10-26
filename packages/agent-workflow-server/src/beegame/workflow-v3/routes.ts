@@ -4,7 +4,7 @@ import { z } from 'zod/v4'
 import type { BeeGameUserContext } from '../../auth/user-context'
 import { hasBeeGamePermission } from '../../auth/user-context'
 import type { BeeGameProjectMetadata } from '../../project-metadata-store'
-import { readSessionTranscriptFromDisk, type BeeGameSessionManager } from '../session-manager'
+import { readSessionTranscriptFromDisk, readSessionTranscriptFactsFromDisk, type BeeGameSessionManager } from '../session-manager'
 import { validateBeeGameAttachments, BeeGameUploadPolicyError } from '../../security/upload-policy'
 import { createV3Executor } from './execution'
 import { createRun, digest, WorkflowError, type Run, type AgentTurn } from './state'
@@ -81,7 +81,7 @@ export function registerV3Routes(app: Hono, input: {
   }
   async function attemptEvents(run: Run, attempt: Pick<AgentTurn,'sessionId'|'attemptId'>) {
     if (input.sessions.get(attempt.sessionId)) return { events: input.sessions.transcriptFacts(attempt.sessionId) }
-    try { return { events: await readSessionTranscriptFromDisk(attempt.sessionId, run.workspacePath) } }
+    try { return { events: await readSessionTranscriptFactsFromDisk(attempt.sessionId, run.workspacePath, ['permission.resolved']) } }
     catch (error) {
       // A never-started attempt may have no transcript; corrupt/unavailable
       // history is not proof of no decision and must not hide live questions.
@@ -321,6 +321,7 @@ export function registerV3Routes(app: Hono, input: {
         run=createRun({projectId:ctx.project.id,ownerId:ctx.user.id,workspacePath:ctx.workspace,
           chatSessionId:body.chatSessionId,requestKey:body.requestKey,text,constraints,ids:['goal']})
         run.creation=await observeProjectCreation(ctx.workspace,body.brief)
+        if(run.creation?.initialDelivery==='design-led-first-version')run.productionWorkflow=1
         await ctx.store.commit(ctx.project.id,ctx.user.id,0,run,'agent.goal-confirmed')
       }
       // Persist mode before any model dispatch; retry can reconcile this same
@@ -386,7 +387,7 @@ export function registerV3Routes(app: Hono, input: {
         const selection={turnId,limit:query.limit,beforeId:query.beforeId}
         try {
           const page=input.sessions.get(run.chatSessionId) ? input.sessions.transcriptPage(run.chatSessionId,selection) :
-            auditEventPage(await readSessionTranscriptFromDisk(run.chatSessionId,run.workspacePath),selection)
+            auditEventPage(await readSessionTranscriptFromDisk(run.chatSessionId,run.workspacePath,{...selection,limit:selection.limit+1,newestFirst:true}),selection)
           return c.json({runId:run.id,attemptId,...page,historyUnavailable:[]})
         } catch {
           return c.json({runId:run.id,attemptId,events:[],hasMore:false,nextBeforeId:null,

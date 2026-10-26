@@ -78,7 +78,7 @@ describe('RightSidebar tabs', () => {
             messages={[{ id: 'failure', sender: 'system', type: 'error', turnId: 'failed-turn',
                 content, timestamp: Date.now() }]}
             projectStatus={{ project_id: 'generic-failure', phase: 'paused', blocked: true }}
-            autoRetryTurnId="failed-turn" onContinueTask={onContinueTask} onSendMessage={vi.fn()}
+            onContinueTask={onContinueTask} onSendMessage={vi.fn()}
             waitingPermission={getWaitingPermissionState([])} />);
         const retry = screen.getByRole('button', { name: 'Retry now' });
         expect(retry).toHaveTextContent('Retry');
@@ -86,7 +86,7 @@ describe('RightSidebar tabs', () => {
         await act(async () => vi.advanceTimersByTime(20_000));
         expect(onContinueTask).not.toHaveBeenCalled();
         fireEvent.click(retry);
-        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn', false);
+        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn');
     });
 
     it.each(['later-turn', 'active', 'other-project', 'delivery-notice'] as const)('does not resume a stale, live or successfully ended execution: %s', async kind => {
@@ -99,7 +99,7 @@ describe('RightSidebar tabs', () => {
                 ...(kind === 'later-turn' ? [{ id: 'later', sender: 'assistant', turnId: 'new-turn',
                     content: 'Completed', timestamp: 2 }] : [])]}
             projectStatus={{ project_id: kind === 'other-project' ? 'other' : 'current-project', phase: 'paused', blocked: true }}
-            autoRetryTurnId="old-turn" onContinueTask={onContinueTask} onSendMessage={vi.fn()}
+            onContinueTask={onContinueTask} onSendMessage={vi.fn()}
             waitingPermission={getWaitingPermissionState([])} />);
         await act(async () => vi.advanceTimersByTime(20_000));
         expect(screen.queryByRole('button', { name: 'Retry now' })).not.toBeInTheDocument();
@@ -119,20 +119,22 @@ describe('RightSidebar tabs', () => {
         expect(onContinueTask).not.toHaveBeenCalled();
         const error = screen.getByRole('alert');
         expect(within(error).getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry');
-        view.rerender(<RightSidebar {...props} autoRetryTurnId="failed-turn" />);
-        expect(within(error).getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry in 10s');
+        view.rerender(<RightSidebar {...props} />);
+        expect(within(error).getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry');
         await act(async () => vi.advanceTimersByTime(10_000));
-        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn', true);
+        expect(onContinueTask).not.toHaveBeenCalled();
+        fireEvent.click(within(error).getByRole('button', { name: 'Retry now' }));
+        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn');
     });
 
-    it('keeps incomplete streams manual even if a stale automatic retry ID is supplied', async () => {
+    it('keeps incomplete stream recovery manual', async () => {
         vi.useFakeTimers();
         const onContinueTask = vi.fn().mockResolvedValue(undefined);
         render(<RightSidebar projectId="incomplete-stream" lang="en" progress={0} isLoading={false}
             messages={[{ id: 'incomplete', sender: 'system', type: 'error', turnId: 'failed-turn',
                 content: 'API Error: OpenAI stream ended before a terminal finish_reason was received', timestamp: Date.now() }]}
             projectStatus={{ project_id: 'incomplete-stream', phase: 'paused', blocked: true }}
-            autoRetryTurnId="failed-turn" onContinueTask={onContinueTask} onSendMessage={vi.fn()}
+            onContinueTask={onContinueTask} onSendMessage={vi.fn()}
             waitingPermission={getWaitingPermissionState([])} />);
         const button = screen.getByRole('button', { name: 'Retry now' });
         expect(button).toHaveTextContent('Retry');
@@ -140,7 +142,7 @@ describe('RightSidebar tabs', () => {
         await act(async () => vi.advanceTimersByTime(20_000));
         expect(onContinueTask).not.toHaveBeenCalled();
         fireEvent.click(button);
-        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn', false);
+        expect(onContinueTask).toHaveBeenCalledExactlyOnceWith('failed-turn');
     });
 
     it('keeps retry disabled during stop without showing a recovery panel', async () => {
@@ -150,7 +152,7 @@ describe('RightSidebar tabs', () => {
             messages: [{ id: 'failed', sender: 'system', type: 'error' as const, turnId: 'failed-turn',
                 content: 'API Error: Connection error.', timestamp: Date.now() }],
             projectStatus: { project_id: 'waiting-for-cleanup', phase: 'paused', blocked: true },
-            autoRetryTurnId: 'failed-turn', onContinueTask, onSendMessage: vi.fn(),
+            onContinueTask, onSendMessage: vi.fn(),
             waitingPermission: getWaitingPermissionState([]) };
         const view = render(<RightSidebar {...props} isStopping />);
         await act(async () => vi.advanceTimersByTime(20_000));
@@ -159,7 +161,7 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByRole('button', { name: 'Settle previous execution' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
         view.rerender(<RightSidebar {...props} isStopping={false} />);
-        expect(screen.getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry in 10s');
+        expect(screen.getByRole('button', { name: 'Retry now' })).toHaveTextContent('Retry');
     });
 
     it('does not add a separate continuation panel to a paused task', async () => {
@@ -389,7 +391,6 @@ describe('RightSidebar tabs', () => {
     });
     beforeEach(() => {
         vi.clearAllMocks();
-        vi.mocked(beeGameAdapter.listQueuedMessages).mockResolvedValue([]);
         vi.mocked(api.getChatHistoryPaginationState).mockReturnValue({ initialized: false, hasMore: false });
     });
 
@@ -408,6 +409,32 @@ describe('RightSidebar tabs', () => {
         fireEvent.scroll(viewport, { target: { scrollTop: 0 } });
         expect(api.getOlderChatHistory).not.toHaveBeenCalled();
         fireEvent.wheel(viewport, { deltaY: -100 });
+        fireEvent.scroll(viewport, { target: { scrollTop: 0 } });
+        await waitFor(() => expect(api.getOlderChatHistory).toHaveBeenCalledTimes(1));
+    });
+
+    it.each(['pointer', 'touch'] as const)('does not fetch history when a %s tap toggles execution details', async input => {
+        vi.mocked(api.getChatHistoryPaginationState).mockReturnValue({ initialized: true, hasMore: true });
+        const { container } = render(<RightSidebar projectId="disclosure-history" lang="en"
+            messages={[{ id: 'tool', sender: 'beegame', type: 'tool', content: '', timestamp: 1,
+                toolName: 'Shell', toolStatus: 'failed', toolOutput: 'diagnostic output' }]}
+            progress={0} onSendMessage={vi.fn()} isLoading={false}
+            waitingPermission={{ kind: 'none', isBlockingChat: false, isWaitingStatus: false, message: '', placeholder: 'Type...' }}
+        />);
+        const viewport = screen.getByRole('region', { name: 'Conversation' });
+        const details = container.querySelector('[data-variant="timeline"] > button');
+        if (!details) throw new Error('Missing execution details');
+        for (let i = 0; i < 2; i++) {
+            // Also clear any stale intent left by a previous wheel gesture.
+            fireEvent.wheel(viewport, { deltaY: -100 });
+            if (input === 'pointer') fireEvent.pointerDown(details);
+            else fireEvent.touchStart(details, { touches: [{ clientY: 100 }] });
+            fireEvent.click(details);
+            fireEvent.scroll(viewport, { target: { scrollTop: 0 } });
+            expect(api.getOlderChatHistory).not.toHaveBeenCalled();
+        }
+        if (input === 'pointer') fireEvent.pointerDown(viewport);
+        else fireEvent.touchMove(viewport, { touches: [{ clientY: 140 }] });
         fireEvent.scroll(viewport, { target: { scrollTop: 0 } });
         await waitFor(() => expect(api.getOlderChatHistory).toHaveBeenCalledTimes(1));
     });
@@ -844,70 +871,16 @@ describe('RightSidebar tabs', () => {
         await waitFor(() => expect(screen.getByText('new.md')).toBeInTheDocument());
     });
 
-    it('shows a queued message above the composer with Steer and delete actions', async () => {
-        vi.mocked(beeGameAdapter.listQueuedMessages).mockResolvedValue([
-            { id: 'queued-1', text: 'Adjust player speed', state: 'pending', attachmentCount: 2 },
-        ] as never);
-        render(<RightSidebar projectId="proj_1" lang="en" messages={[]} progress={0}
-            onSendMessage={vi.fn()} isLoading waitingPermission={getWaitingPermissionState()} />);
-        const row = await screen.findByTestId('beegame-queued-messages');
-        expect(within(row).getByText('Adjust player speed')).toBeInTheDocument();
-        expect(within(row).getByLabelText('2 attachments')).toBeInTheDocument();
-        fireEvent.click(within(row).getByRole('button', { name: 'Steer queued message' }));
-        await waitFor(() => expect(beeGameAdapter.steerQueuedMessage).toHaveBeenCalledWith('proj_1', 'queued-1'));
-    });
-
-    it('does not show another project’s queued messages during project switching', async () => {
-        vi.mocked(beeGameAdapter.listQueuedMessages).mockImplementation(async project => project === 'first'
-            ? [{ id: 'first-queued', text: 'First project request', state: 'pending', attachmentCount: 0 } as never]
-            : []);
-        const props = { lang: 'en' as const, messages: [], progress: 0,
-            onSendMessage: vi.fn(), isLoading: false, waitingPermission: getWaitingPermissionState() };
-        const view = render(<RightSidebar {...props} projectId="first" />);
-        expect(await screen.findByText('First project request')).toBeInTheDocument();
-        view.rerender(<RightSidebar {...props} projectId="second" />);
-        expect(screen.queryByText('First project request')).not.toBeInTheDocument();
-    });
-
-    it('does not carry an unfinished queue action or its error into another project', async () => {
-        const oldDelete = deferred<void>();
-        vi.mocked(beeGameAdapter.listQueuedMessages).mockImplementation(async project => [{
-            id: `${project}-queued`, text: `${project} request`, state: 'pending', attachmentCount: 0,
-        }] as never);
-        vi.mocked(beeGameAdapter.deleteQueuedMessage).mockReturnValueOnce(oldDelete.promise);
-        const props = { lang: 'en' as const, messages: [], progress: 0,
-            onSendMessage: vi.fn(), isLoading: false, waitingPermission: getWaitingPermissionState() };
-        const view = render(<RightSidebar {...props} projectId="first" />);
-        expect(await screen.findByText('first request')).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Delete queued message' }));
-        expect(beeGameAdapter.deleteQueuedMessage).toHaveBeenCalledWith('first', 'first-queued');
-
-        view.rerender(<RightSidebar {...props} projectId="second" />);
-        expect(await screen.findByText('second request')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Steer queued message' })).toBeEnabled();
-        await act(async () => oldDelete.reject(new Error('first project failed')));
-        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Steer queued message' })).toBeEnabled();
-    });
-
-    it('does not revive a deleted queue item from an older polling response', async () => {
-        const stale = deferred<Awaited<ReturnType<typeof beeGameAdapter.listQueuedMessages>>>();
-        const item = { id: 'to-delete', text: 'Remove this', state: 'pending', attachmentCount: 0 } as never;
-        let calls = 0;
-        vi.mocked(beeGameAdapter.listQueuedMessages).mockImplementation(async () => {
-            calls += 1;
-            if (calls === 1) return [item];
-            if (calls === 2) return stale.promise;
-            return [];
-        });
-        render(<RightSidebar projectId="queue-race" lang="en" messages={[]} progress={0}
-            onSendMessage={vi.fn()} isLoading waitingPermission={getWaitingPermissionState()} />);
-        expect(await screen.findByText('Remove this')).toBeInTheDocument();
-        await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2));
-        fireEvent.click(screen.getByRole('button', { name: 'Delete queued message' }));
-        await waitFor(() => expect(screen.queryByText('Remove this')).not.toBeInTheDocument());
-        await act(async () => stale.resolve([item]));
-        expect(screen.queryByText('Remove this')).not.toBeInTheDocument();
+    it('does not poll the retired queue while a task is running', async () => {
+        vi.useFakeTimers();
+        try {
+            const view = render(<RightSidebar projectId="proj_1" lang="en" messages={[]} progress={0}
+                onSendMessage={vi.fn()} isLoading waitingPermission={getWaitingPermissionState()} />);
+            await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+            expect((beeGameAdapter as unknown as { listQueuedMessages: ReturnType<typeof vi.fn> }).listQueuedMessages).not.toHaveBeenCalled();
+            expect(screen.queryByTestId('beegame-queued-messages')).not.toBeInTheDocument();
+            view.unmount();
+        } finally { vi.useRealTimers(); }
     });
 
     it('queues chat input while the runtime is busy', async () => {
@@ -1393,6 +1366,37 @@ describe('RightSidebar tabs', () => {
         await user.click(screen.getByRole('button', { name: '资源' }));
 
         expect(await screen.findByText(/还没有资源合同/)).toBeInTheDocument();
+    });
+
+    it('pauses asset polling while hidden and resumes without overlapping requests', async () => {
+        vi.useFakeTimers();
+        const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+        const manifest = { version: 9, requirements: [], resources: [] };
+        const read = vi.mocked(api.getProjectAssets).mockResolvedValue(manifest as never);
+        const view = render(<RightSidebar projectId="poll-assets" lang="zh" messages={[]} progress={0}
+            onSendMessage={vi.fn()} isLoading={false} waitingPermission={getWaitingPermissionState()} />);
+        try {
+            fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
+            fireEvent.click(screen.getByRole('button', { name: '资源' }));
+            await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+            expect(read).not.toHaveBeenCalled();
+            const pending = deferred<Awaited<ReturnType<typeof api.getProjectAssets>>>();
+            read.mockReturnValueOnce(pending.promise);
+            hidden.mockReturnValue(false);
+            act(() => document.dispatchEvent(new Event('visibilitychange')));
+            expect(read).toHaveBeenCalledTimes(1);
+            hidden.mockReturnValue(true);
+            act(() => document.dispatchEvent(new Event('visibilitychange')));
+            hidden.mockReturnValue(false);
+            act(() => document.dispatchEvent(new Event('visibilitychange')));
+            expect(read).toHaveBeenCalledTimes(1);
+            await act(async () => pending.resolve(manifest as never));
+            await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+            expect(read).toHaveBeenCalledTimes(2);
+            view.unmount();
+            await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+            expect(read).toHaveBeenCalledTimes(2);
+        } finally { view.unmount(); hidden.mockRestore(); vi.useRealTimers(); }
     });
 
     it('stops polling when a project has a retired asset manifest schema', async () => {

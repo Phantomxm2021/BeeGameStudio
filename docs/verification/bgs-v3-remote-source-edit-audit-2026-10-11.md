@@ -12,7 +12,7 @@
 
 ## 实际入口与身份
 
-- 脚本：`scripts/verify-workflow-v3-agent-edit.ts`。要求显式 `--apply --env-file PATH --source-project OWNED_ID`；恢复使用 `--resume-project SYNTHETIC_ID`。
+- 历史脚本：`scripts/verify-workflow-v3-agent-edit.ts` 已移除。这里记录的参数（`--apply --env-file PATH --source-project OWNED_ID`、`--resume-project SYNTHETIC_ID`）只描述当时执行路径，不是当前入口。
 - 仅创建带固定 synthetic 名称的新项目，工作区必须为系统临时目录下 `bgs-v3-agent-edit-*` 的直接子目录；既有真实项目仅读取 owner/workspace 元数据。
 - 新增验收项目：`v3-agent-edit-4892f9a6-3482-4217-b017-518939691a63`；Run：`ea33cd64-d2e5-49bf-a0b9-de92795ee64d`。
 - 合成工作区：`/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-agent-edit-DE8fNL`。

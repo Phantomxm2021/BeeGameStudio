@@ -11,6 +11,7 @@ import { parseSpriteSheet, readUiData, spriteSheetSelection } from './game-conte
 import { writeBeeGameAssetManifest } from './asset-contracts'
 import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contract'
 import { auditAssetContract } from './asset-contract-audit'
+import { resolveExactResourceElement, type ResourceElement, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
 
 async function run(cwd: string, script: string, ...args: string[]) {
   const child = Bun.spawn([process.execPath, script, ...args], {
@@ -258,6 +259,7 @@ test('library fetch requires a stored hash, checks bytes and removes mismatches 
             return new Response(${JSON.stringify(bytes)});
           }
           if (url.origin !== 'https://library.test') throw Error('Unexpected external request');
+          if (url.pathname.endsWith('/resource-library/resolve')) return Response.json({selections:[{resourceId:'element',sourceUrl:'https://asset.test/file',sourceHash:${JSON.stringify(storedHash)},dependencies:[]}]});
           if (url.pathname.endsWith('/resource-url')) return Response.json({url:'https://asset.test/file'});
           if (url.pathname.includes('/elements/')) return Response.json({element:{path:'original/sample.bin',specs:${JSON.stringify({ contentHash: storedHash })}}});
           return Response.json({pack:{license:'CC0',version:'1.2'}});
@@ -270,14 +272,123 @@ test('library fetch requires a stored hash, checks bytes and removes mismatches 
         expect(JSON.parse(stdout)).toMatchObject({ source: 'resource-library', sha256: hash, registrationSource: {type:'resource-library',pack_id:'pack',pack_version:'1.2',element_id:'element',element_path:'original/sample.bin'} })
         expect(await readFile(join(root, 'assets/sample.bin'), 'utf8')).toBe(bytes)
         const again = Bun.spawn([process.execPath, '--preload', preload, script, 'fetch', 'pack', 'element', 'assets/sample.bin'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
-        expect(await again.exited).not.toBe(0)
+        expect(await again.exited).toBe(0)
+        expect(JSON.parse(await new Response(again.stdout).text())).toMatchObject({ reused: true, sha256: hash })
         expect(await readFile(join(root, 'assets/sample.bin'), 'utf8')).toBe(bytes)
+        await rm(join(root, 'assets/sample.bin'))
+        await writeFile(join(root, 'outside.bin'), bytes)
+        await symlink(join(root, 'outside.bin'), join(root, 'assets/sample.bin'))
+        const linked = Bun.spawn([process.execPath, '--preload', preload, script, 'fetch', 'pack', 'element', 'assets/sample.bin'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+        const linkedStderr = await new Response(linked.stderr).text()
+        expect(await linked.exited).not.toBe(0)
+        expect(linkedStderr).toContain('must not be a link')
+        expect(await readFile(join(root, 'outside.bin'), 'utf8')).toBe(bytes)
       } else {
         expect(code).not.toBe(0)
         expect(stderr).toContain(name === 'mismatch' ? 'hash does not match' : 'valid stored content hash')
         expect(await Bun.file(join(root, 'assets/sample.bin')).exists()).toBe(false)
       }
     }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('library fetch resolves a nested dependency closure beside the selected asset', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-library-dependency-'))
+  const scene = 'synthetic scene', material = 'synthetic material', texture = 'synthetic texture'
+  const sceneHash = createHash('sha256').update(scene).digest('hex')
+  const materialHash = createHash('sha256').update(material).digest('hex')
+  const textureHash = createHash('sha256').update(texture).digest('hex')
+  const selectedPack = {
+    id: 'pack', name: 'Synthetic Pack', styles: [], gameTypes: [], dimension: '3D',
+    primaryCategory: '3d-assets', categories: ['models'], license: 'CC0', version: '1.2', status: 'published',
+  } as ResourcePack
+  const selectedElements = [
+    {
+      id: 'element', packId: 'pack', name: 'Scene', path: 'models/scene.glb', category: 'models', kind: 'model',
+      assetKind: 'model', usageTags: ['scene'], specs: {}, dependencies: ['material', 'texture'], status: 'ready',
+      dependencyBindings: [
+        { referencePath: 'Textures/material.json', dependencyElementId: 'material', kind: 'material' },
+        { referencePath: 'shared/base%20.png', dependencyElementId: 'texture', kind: 'image' },
+      ],
+    },
+    {
+      id: 'material', packId: 'pack', name: 'Material', path: 'materials/material.json', category: 'models', kind: 'material',
+      specs: {}, dependencies: ['texture'], status: 'ready',
+      dependencyBindings: [{ referencePath: '../shared/base%20.png', dependencyElementId: 'texture', kind: 'image' }],
+    },
+    { id: 'texture', packId: 'pack', name: 'Texture', path: 'textures/base .png', category: 'textures', kind: 'image', specs: {}, dependencies: [], status: 'ready' },
+  ] as ResourceElement[]
+  const resolved = resolveExactResourceElement(selectedPack, selectedElements, 'element')
+  expect(resolved?.dependencies).toHaveLength(3)
+  const dependencyRecords = resolved!.dependencies!.map(dependency => ({
+    ...dependency,
+    sourceUrl: dependency.elementId === 'material' ? 'https://asset.test/material' : 'https://asset.test/texture',
+    sourceHash: dependency.elementId === 'material' ? materialHash : textureHash,
+  }))
+  try {
+    const script = join(root, 'assets.mjs'), preload = join(root, 'fake-transport.mjs')
+    await writeProjectAssetCommand(script, { libraryBaseUrl: 'https://library.test' })
+    await writeFile(preload, `
+      globalThis.fetch = async input => {
+        const url = new URL(input);
+        if (url.origin === 'https://asset.test') {
+          if (url.pathname.endsWith('/scene')) return new Response(${JSON.stringify(scene)});
+          if (url.pathname.endsWith('/material')) return new Response(${JSON.stringify(material)});
+          if (url.pathname.endsWith('/texture')) return new Response(${JSON.stringify(texture)});
+          throw Error('Unexpected asset URL');
+        }
+        if (url.origin !== 'https://library.test') throw Error('Unexpected external request');
+        if (url.pathname.endsWith('/resource-library/resolve')) return Response.json({selections:[{resourceId:'element',sourceUrl:'https://asset.test/scene',sourceHash:${JSON.stringify(sceneHash)},dependencies:${JSON.stringify(dependencyRecords)}}]});
+        if (url.pathname.includes('/elements/')) return Response.json({element:{path:'models/scene.glb',specs:{contentHash:${JSON.stringify(sceneHash)}}}});
+        return Response.json({pack:{license:'CC0',version:'1.2'}});
+      };
+    `)
+    const child = Bun.spawn([process.execPath, '--preload', preload, script, 'fetch', 'pack', 'element', 'assets/models/scene.glb'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+    const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+    expect(code, stderr).toBe(0)
+    expect(JSON.parse(stdout)).toMatchObject({
+      sha256: sceneHash,
+      root_path: 'assets/models/scene.glb',
+      file_paths: ['assets/models/scene.glb', 'assets/models/Textures/material.json', 'assets/models/shared/base .png'],
+      dependencies: [
+        { key: 'root.0', parent_key: 'root', element_id: 'material', element_path: 'materials/material.json', reference_path: 'Textures/material.json', local_path: 'assets/models/Textures/material.json', kind: 'material' },
+        { key: 'root.0.0', parent_key: 'root.0', element_id: 'texture', element_path: 'textures/base .png', reference_path: '../shared/base%20.png', local_path: 'assets/models/shared/base .png', kind: 'image' },
+        { key: 'root.1', parent_key: 'root', element_id: 'texture', element_path: 'textures/base .png', reference_path: 'shared/base%20.png', local_path: 'assets/models/shared/base .png', kind: 'image' },
+      ],
+    })
+    expect(await readFile(join(root, 'assets/models/scene.glb'), 'utf8')).toBe(scene)
+    expect(await readFile(join(root, 'assets/models/Textures/material.json'), 'utf8')).toBe(material)
+    expect(await readFile(join(root, 'assets/models/shared/base .png'), 'utf8')).toBe(texture)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('library fetch rejects dependency target collisions with different hashes before downloading', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-library-dependency-conflict-'))
+  const scene = 'synthetic scene', first = 'first dependency', second = 'second dependency'
+  const sceneHash = createHash('sha256').update(scene).digest('hex')
+  const firstHash = createHash('sha256').update(first).digest('hex')
+  const secondHash = createHash('sha256').update(second).digest('hex')
+  try {
+    const script = join(root, 'assets.mjs'), preload = join(root, 'fake-transport.mjs')
+    await writeProjectAssetCommand(script, { libraryBaseUrl: 'https://library.test' })
+    await writeFile(preload, `
+      globalThis.fetch = async input => {
+        const url = new URL(input);
+        if (url.origin === 'https://asset.test') throw Error('Unexpected download before dependency conflict validation');
+        if (url.origin !== 'https://library.test') throw Error('Unexpected external request');
+        if (url.pathname.endsWith('/resource-library/resolve')) return Response.json({selections:[{resourceId:'element',sourceUrl:'https://asset.test/scene',sourceHash:${JSON.stringify(sceneHash)},dependencies:[
+          {key:'root.0',parentKey:'root',elementId:'first',elementPath:'first.bin',referencePath:'shared.bin',sourceUrl:'https://asset.test/first',sourceHash:${JSON.stringify(firstHash)}},
+          {key:'root.1',parentKey:'root',elementId:'second',elementPath:'second.bin',referencePath:'shared.bin',sourceUrl:'https://asset.test/second',sourceHash:${JSON.stringify(secondHash)}}
+        ]}]});
+        if (url.pathname.includes('/elements/')) return Response.json({element:{path:'models/scene.glb',specs:{contentHash:${JSON.stringify(sceneHash)}}}});
+        return Response.json({pack:{license:'CC0',version:'1.2'}});
+      };
+    `)
+    const child = Bun.spawn([process.execPath, '--preload', preload, script, 'fetch', 'pack', 'element', 'assets/models/scene.glb'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+    const [stderr, code] = await Promise.all([new Response(child.stderr).text(), child.exited])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('different content hashes')
+    expect(await Bun.file(join(root, 'assets/models/scene.glb')).exists()).toBe(false)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

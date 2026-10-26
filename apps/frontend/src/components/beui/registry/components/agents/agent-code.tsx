@@ -50,7 +50,8 @@ export interface AgentCodeLineProps {
 const LIGHT_THEME = "github-light-high-contrast";
 const DARK_THEME = "github-dark-high-contrast";
 let agentCodeHighlighter: Promise<Highlighter> | null = null;
-const tokenCache = new Map<string, AgentCodeTokenLines>();
+// Keep large outputs as one text node; highlighting is for small code excerpts.
+const MAX_HIGHLIGHT_CHARACTERS = 16_000;
 
 function getAgentCodeHighlighter() {
   if (!agentCodeHighlighter) {
@@ -62,63 +63,46 @@ function getAgentCodeHighlighter() {
   return agentCodeHighlighter;
 }
 
-function tokenCacheKey(code: string, language: AgentCodeLanguage) {
-  return `${language}\u0000${code}`;
-}
-
 export function useAgentCodeTokens(
   code: string,
   language: AgentCodeLanguage,
 ) {
-  const key = tokenCacheKey(code, language);
-  const cached = tokenCache.get(key);
+  const highlight = language !== "text" && code.length <= MAX_HIGHLIGHT_CHARACTERS;
+  // Retain only this mounted block's current tokens, not every streamed version.
   const [result, setResult] = useState<{
-    key: string;
     code: string;
     language: AgentCodeLanguage;
     lines: AgentCodeTokenLines;
-  } | null>(cached ? { key, code, language, lines: cached } : null);
+  } | null>(null);
 
   useEffect(() => {
-    const current = tokenCache.get(key);
-    if (current) {
-      setResult({ key, code, language, lines: current });
+    if (!highlight) {
+      setResult(null);
       return;
     }
-
     let cancelled = false;
     getAgentCodeHighlighter().then((highlighter) => {
       if (cancelled) return;
-      if (!highlighter) return;
       const lines = highlighter
         .codeToTokensWithThemes(code, {
           lang: language,
-          themes: {
-            light: LIGHT_THEME,
-            dark: DARK_THEME,
-          },
+          themes: { light: LIGHT_THEME, dark: DARK_THEME },
         })
-        .map((line: Array<{ content: string; offset: number; variants: { light?: { color?: string }; dark?: { color?: string } } }>) =>
-          line.map((token) => ({
-            content: token.content,
-            offset: token.offset,
-            light: token.variants.light?.color,
-            dark: token.variants.dark?.color,
-          })),
-      );
-      tokenCache.set(key, lines);
-      setResult({ key, code, language, lines });
+        .map((line) => line.map((token) => ({
+          content: token.content,
+          offset: token.offset,
+          light: token.variants.light?.color,
+          dark: token.variants.dark?.color,
+        })));
+      setResult({ code, language, lines });
+    }).catch(() => {
+      if (!cancelled) console.warn("Code highlighting unavailable; displaying plain text.");
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [code, key, language]);
+    return () => { cancelled = true; };
+  }, [code, language, highlight]);
 
-  if (result?.key === key) return result.lines;
-  if (result?.language === language && code.startsWith(result.code)) {
-    return result.lines;
-  }
-  return null;
+  // Never reuse a tokenized prefix: it can hide a newly appended partial line.
+  return highlight && result?.code === code && result.language === language ? result.lines : null;
 }
 
 export function AgentCodeLine({
@@ -155,11 +139,11 @@ export function AgentCode({
 }: AgentCodeProps) {
   const tokens = useAgentCodeTokens(code, language);
   let offset = 0;
-  const lines = code.split("\n").map((content) => {
+  const lines = tokens ? code.split("\n").map((content) => {
     const line = { content, offset };
     offset += content.length + 1;
     return line;
-  });
+  }) : [];
 
   return (
     <pre
@@ -169,12 +153,12 @@ export function AgentCode({
       )}
     >
       <code>
-        {lines.map((line, index) => (
+        {tokens ? lines.map((line, index) => (
           <Fragment key={line.offset}>
             <AgentCodeLine code={line.content} tokens={tokens?.[index]} />
             {index < lines.length - 1 ? "\n" : null}
           </Fragment>
-        ))}
+        )) : code}
       </code>
     </pre>
   );

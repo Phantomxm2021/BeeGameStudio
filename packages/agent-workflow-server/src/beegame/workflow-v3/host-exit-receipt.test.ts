@@ -26,8 +26,9 @@ async function fixture(autonomous=true) {
   const hostIdentity={machine:'synthetic-host',boot:'boot-a'}
   const receipts=()=>createHostExitReceipts({dataRoot:join(root,'host'),key,identity:async()=>({...hostIdentity})})!
   let calls=0
-  const sessions=new BeeGameSessionManager({async start(){calls++;throw Error('Recovery cannot start native')}},join(root,'sessions'),async()=>({}),{},true)
-  return {root,workspace,key,run,store,receipts,sessions,hostIdentity,get calls(){return calls},
+  const starts:Array<{resumeSessionId?:string}>=[]
+  const sessions=new BeeGameSessionManager({async start(input){calls++;starts.push(input);throw Error('Synthetic runner boundary; no native process')}},join(root,'sessions'),async()=>({}),{},true)
+  return {root,workspace,key,run,store,receipts,sessions,hostIdentity,starts,get calls(){return calls},
     current:async()=>(await store.read(run.projectId,run.ownerId))!,
     close:async()=>{await sessions.dispose();await rm(root,{recursive:true,force:true})}}
 }
@@ -130,39 +131,46 @@ for(const mode of ['agent','source','no-start'] as const)test('signed exit survi
   }finally{await executor?.dispose();await f.close()}
 },30000)
 
-test('SIGKILL before observed exit cannot create a recovery proof',async()=>{
+for(const mode of ['before-exit','during-native'] as const)test('host SIGKILL releases only interrupted bookkeeping without inventing native exit: '+mode,async()=>{
   const f=await fixture(),executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions,exitReceipts:f.receipts()})
   try {
-    const run=await killAt(f,'before-exit')
-    expect(await f.receipts().read(run)).toBeUndefined();expect(await executor.recoveryEvidence(run)).toBe('unavailable')
-    await expect(executor.recover(run,identity(run))).rejects.toThrow('No durable native exit')
-    expect(await f.current()).toEqual(run);expect(f.calls).toBe(0)
+    const run=await killAt(f,mode),before=identity(run)
+    expect(await f.receipts().read(run)).toBeUndefined()
+    expect(await executor.recoveryDiagnostic(run)).toEqual({evidence:'host-idle',code:'native-exit-unobserved'})
+    expect(await f.current()).toEqual(run) // Discovery never mutates.
+    await expect(executor.recover(run,{...before,fence:before.fence+1})).rejects.toThrow('current writer')
+    await expect(executor.recover(run,{...before,expectedVersion:before.expectedVersion-1})).rejects.toThrow('current Run')
+    const recovered=await executor.recover(run,before)
+    expect(recovered.writer).toBeUndefined();expect(recovered.paused).toBeDefined()
+    const turn=recovered.agentTurns![0]!
+    expect(turn.status).toBe('interrupted');expect(turn.finishedAt).toBeDefined()
+    expect(turn.quiescedAt).toBeUndefined();expect(turn.usage).toBeUndefined();expect(turn.notStarted).toBeUndefined()
+    expect(turn.nativeSessionId).toBe(mode==='during-native'?'11111111-2222-4333-8444-555555555555':undefined)
+    expect(recovered.status).toBe('blocked');expect(recovered.deliveryEligible).toBe(false);expect(f.calls).toBe(0)
+    expect(recovered.requirements).toEqual(run.requirements)
+    expect(await executor.recover(recovered,before)).toEqual(recovered)
+    expect(await f.receipts().read(run)).toBeUndefined()
+    expect(await readFile(join(f.workspace,'untouched.txt'),'utf8')).toBe('Retained independent synthetic result')
+    if(mode==='during-native')expect(await readFile(join(f.workspace,'candidate.txt'),'utf8')).toContain('Synthetic candidate')
   }finally{await executor.dispose();await f.close()}
 },30000)
 
-test('signed ownership permits explicit recovery after a verified reboot, never same-boot or foreign-host inference',async()=>{
-  const f=await fixture(),executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions,exitReceipts:f.receipts()})
+test('explicit continuation after interrupted recovery stays bound to the original native conversation',async()=>{
+  const f=await fixture(),executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions})
   try {
-    const run=await killAt(f,'during-native'),identityBefore=identity(run)
-    expect(await f.receipts().read(run)).toBeUndefined()
-    expect(await executor.recoveryDiagnostic(run)).toEqual({evidence:'unavailable',code:'same-boot'})
-    await expect(executor.recover(run,identityBefore)).rejects.toThrow('No durable native exit')
-    f.hostIdentity.machine='another-host';f.hostIdentity.boot='boot-b'
-    expect(await executor.recoveryDiagnostic(run)).toEqual({evidence:'unavailable',code:'foreign-host'})
-    await expect(executor.recover(run,identityBefore)).rejects.toThrow('No durable native exit')
-    f.hostIdentity.machine='synthetic-host'
-    expect(await executor.recoveryEvidence(run)).toBe('host-reboot')
-    expect((await f.current()).writer).toEqual(run.writer) // Discovery cannot mutate or run work.
-    const recovered=await executor.recover(run,identityBefore)
-    expect(recovered.writer).toBeUndefined();expect(recovered.paused).toBeDefined()
-    expect(recovered.agentTurns![0]!.status).toBe('interrupted')
-    expect(recovered.agentTurns![0]!.nativeSessionId).toBe('11111111-2222-4333-8444-555555555555')
-    expect(recovered.agentTurns![0]!.notStarted).toBeUndefined()
-    expect(recovered.agentTurns![0]!.usage).toBeUndefined() // Never invent accounting.
-    expect(recovered.deliveryEligible).toBe(false);expect(f.calls).toBe(0)
-    expect(await executor.recover(recovered,identityBefore)).toEqual(recovered)
-    expect((await f.receipts().read(run))!.quiescedAt).toBe(recovered.agentTurns![0]!.quiescedAt)
-    expect(await readFile(join(f.workspace,'candidate.txt'),'utf8')).toContain('Synthetic candidate')
+    const run=await killAt(f,'during-native')
+    const recovered=await executor.recover(run,identity(run)),turn=recovered.agentTurns![0]!
+    expect(f.calls).toBe(0);expect(turn.quiescedAt).toBeUndefined()
+    const message={requestKey:'explicit-continue',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:recovered.version,requirementsRevision:run.requirements.revision,
+      intent:'continue' as const,continuationOf:turn.attemptId,text:'Explicit synthetic continuation'}
+    await expect(executor.message(recovered,message,{})).rejects.toThrow('resume')
+    expect(f.calls).toBe(0)
+    const resumed=await executor.resume(recovered)
+    await executor.message(resumed,{...message,expectedVersion:resumed.version},{})
+    for(let i=0;i<100 && !f.calls;i++)await Bun.sleep(5)
+    expect(f.calls).toBe(1) // Local fake runner throws before any native process.
+    expect(f.starts[0]?.resumeSessionId).toBe(turn.nativeSessionId)
   }finally{await executor.dispose();await f.close()}
 },30000)
 
@@ -170,6 +178,7 @@ test('missing, tampered or inaccessible ownership never supplies reboot evidence
   const f=await fixture()
   try {
     const run=await killAt(f,'before-exit'),receipts=f.receipts()
+    await receipts.claim!(run) // Exercise the retained legacy receipt reader independently.
     f.hostIdentity.boot='boot-b'
     const unavailable=createHostExitReceipts({dataRoot:join(f.root,'host'),key:f.key,
       identity:async()=>{throw Error('Synthetic identity probe failure')}})!
@@ -183,7 +192,7 @@ test('missing, tampered or inaccessible ownership never supplies reboot evidence
   }finally{await f.close()}
 },30000)
 
-test('reboot recovery cannot adopt another attempt or an unacknowledged native session snapshot',async()=>{
+test('interrupted recovery cannot adopt another attempt or an unacknowledged native session snapshot',async()=>{
   for(const mismatch of ['attempt','unsubmitted']) {
     const f=await fixture(),executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions,exitReceipts:f.receipts()})
     try {
@@ -205,14 +214,16 @@ test('reboot recovery cannot adopt another attempt or an unacknowledged native s
   }
 },30000)
 
-test('ownership recording failure rejects before claiming or submitting native work',async()=>{
+test('native recovery does not require a host boot identity provider',async()=>{
   const f=await fixture()
   const receipts=createHostExitReceipts({dataRoot:join(f.root,'host'),key:f.key,
     identity:async()=>{throw Error('Synthetic host identity failure')}})!
   const executor=createAgentGoalExecutor({store:f.store,sessions:f.sessions,exitReceipts:receipts})
   try {
-    await expect(executor.start(f.run,{})).rejects.toThrow('kernel host/boot')
-    expect(await f.current()).toEqual(f.run)
+    const run=await killAt(f,'before-exit')
+    expect(await executor.recoveryEvidence(run)).toBe('host-idle')
+    const recovered=await executor.recover(run,identity(run))
+    expect(recovered.writer).toBeUndefined();expect(recovered.agentTurns![0]!.quiescedAt).toBeUndefined()
     expect(f.calls).toBe(0)
   }finally{await executor.dispose();await f.close()}
 })

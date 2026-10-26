@@ -26,3 +26,19 @@ export function checkTextSeparation(gameFrame: Frame, selectors: string[]): Prom
   overlaps: Array<{ first: string; second: string; width: number; height: number }>
   note: string
 }>
+
+/** Static project HTML on an isolated routed origin, not a running game Preview. */
+export function designFilePath(path: string): Promise<string>
+export function withDesignPage<T>(options: {
+  path: string
+  query?: string
+  apiUrl?: string
+  contextOptions?: BrowserContextOptions
+  beforeNavigate?: (input: { page: Page; context: BrowserContext }) => void | Promise<void>
+  runtimeErrorPolicy?: 'observe' | 'fail'
+}, inspect: (input: {
+  page: Page; frame: Page; gameFrame: Frame; context: BrowserContext; browser: Browser
+  environment: { scope: 'design-document'; gamePreview: false }
+  observedEnvironment: unknown; observeEnvironment: () => Promise<unknown>
+  runtimeErrors: PreviewRuntimeErrors; runtimeErrorDetails: Record<keyof PreviewRuntimeErrors, unknown[]>
+}) => T | Promise<T>): Promise<T>

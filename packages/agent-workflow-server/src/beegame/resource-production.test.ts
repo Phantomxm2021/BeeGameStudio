@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { produceResources, mergeRegistrationRequests, listRegisteredResources, RESOURCE_HELP } from './resource-production'
+import { produceResources, mergeRegistrationRequests, listRegisteredResources, RESOURCE_HELP, inspectRegistrationLock } from './resource-production'
 import { assetManifestAuthoringExamples, renderAssetManifestAuthoringContract } from './asset-manifest-authoring-contract'
 import { readBeeGameAssetManifest } from './asset-contracts'
 import { sharedContentChecker, RESOURCE_PRODUCTION_ENTRY } from './content-checker-runtime'
@@ -239,6 +239,30 @@ test('batch registration computes hashes, preserves web provenance and leaves re
     await expect(produceResources(root, { ...request, resources: [{ ...input, local_file_hashes: {} }] })).rejects.toThrow()
     // Failure released the lock; a valid retry can proceed.
     expect((await produceResources(root, request)).valid).toBe(true)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('registration lock inspection is bounded, read-only and treats owner metadata as diagnostics', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-registration-lock-'))
+  const lockPath = join(root, 'assets/manifest/registration.lock')
+  try {
+    await mkdir(join(root, 'assets/manifest'), { recursive: true })
+    expect((await inspectRegistrationLock(root)).state).toBe('absent')
+    await writeFile(lockPath, '')
+    expect((await inspectRegistrationLock(root)).state).toBe('legacy')
+    expect(await readFile(lockPath)).toHaveLength(0)
+
+    await writeFile(lockPath, JSON.stringify({ version: 1, operation: 'register', owner: {
+      pid: process.pid, host: 'synthetic-host', startedAt: '2026-10-25T00:00:00.000Z',
+    } }))
+    expect(await inspectRegistrationLock(root)).toMatchObject({ state: 'present', owner: { pid: process.pid, host: 'synthetic-host' } })
+
+    await writeFile(lockPath, 'x'.repeat(16 * 1024 + 1))
+    await expect(inspectRegistrationLock(root)).rejects.toThrow('safe inspection size')
+
+    await rm(lockPath)
+    await symlink(join(root, 'assets/manifest/other-lock'), lockPath)
+    await expect(inspectRegistrationLock(root)).rejects.toThrow()
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

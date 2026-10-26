@@ -723,7 +723,6 @@
       "capacity": "Selected model is at capacity. Please try a different model.",
       "retry": "Retry",
       "retryNow": "Retry now",
-      "retryIn": "Retry in {{seconds}}s",
       "retrying": "Retrying…"
     },
     "subagentActivity": {
@@ -1017,7 +1016,7 @@
       "deploymentUrlPending": "Available after publishing",
       "deploymentAutofill": "Auto-fill",
     "deploymentAutofilling": "Filling…",
-    "deploymentAutofillHint": "Draft an introduction from this project’s documents and capture the current build’s initial screen. Drafting uses model credits. Review or edit before publishing.",
+    "deploymentAutofillHint": "Fill the introduction and gameplay from the confirmed brief, add documented controls from the GDD, and capture the current build’s initial screen. No model call is needed. Review or edit before publishing.",
     "deploymentProgress": "Publication progress",
     "deploymentPrepare": "Build & check",
     "deploymentUploading": "Uploading · {percent}%",
@@ -1060,7 +1059,7 @@
       "cachedInputTokens": "Cached input tokens",
       "freshInputTokens": "Input",
       "cacheReadTokens": "Cached Input",
-      "cacheCreationTokens": "Cache Creation Tokens",
+      "cacheCreationTokens": "Cache write tokens",
       "outputTokens": "Output",
       "totalTokens": "Total tokens",
       "rawProcessedTokens": "Processed Total (includes cache)",

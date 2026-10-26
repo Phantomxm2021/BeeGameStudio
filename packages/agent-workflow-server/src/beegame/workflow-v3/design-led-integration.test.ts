@@ -57,7 +57,7 @@ test('Agent-authored Web project chooses public helpers and consumes its registe
     for(const path of ['src','scripts','assets/visual','assets/runtime','content/ui','content/scenes'])
       await mkdir(join(workspace,path),{recursive:true})
     await writeFile(join(workspace,'assets/visual/design.png'),visual)
-    for(const name of ['UI_UX_SPEC.md','LEVEL_SCENE_DESIGN.md'])
+    for(const name of ['GDD.md'])
       await writeFile(join(workspace,'docs',name),await readFile(join(workspace,'docs',name),'utf8')+'\n[Selected](../assets/visual/design.png)\n')
     expect((await command('handoff.mjs','--design','finalize')).valid).toBe(true)
     expect((await command('handoff.mjs','--design','baseline')).valid).toBe(true)
@@ -178,10 +178,14 @@ await copyRegisteredRuntimeFiles(process.cwd(),'dist');`)
       {kind:'resource-binding',document:uiPath,nodeId:'button',property:'frame',change:'right to left',observed:JSON.stringify(afterButton)},
       {kind:'resource-binding',document:scenePath,nodeId:'image',property:'frame',change:'left to right',observed:JSON.stringify(afterScene)},
     ].map(check=>({...check,expected:check.observed,status:'passed',evidencePaths:[evidence]}))
+    await page.screenshot({path:join(workspace,'reports/actual.png')})
+    // Author comparison fields test the handoff contract only; this fixture
+    // deliberately makes no semantic image-agreement or game-quality assertion.
     await writeFile(join(workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({scope:'delivery',status:'passed',
       summary:'Synthetic helper integration; not game or visual-quality acceptance',environment:'Local Chrome fixture',
-      evidencePaths:[evidence],artifactPaths:['dist'],verification:{target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],
-        designRevision:implementation.designRevision,requirementChecks:designRequirementChecksFixture(workspace,[evidence]),contentChecks}}))
+      evidencePaths:[evidence,'assets/visual/design.png','reports/actual.png'],artifactPaths:['dist'],verification:{target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],
+        designRevision:implementation.designRevision,requirementChecks:designRequirementChecksFixture(workspace,[evidence]),contentChecks,
+        visualComparisons:[{state:'Synthetic author comparison transport',sourcePath:'assets/visual/design.png',observationPaths:['reports/actual.png'],status:'matched',differences:[]}]}}))
     expect(await command('handoff.mjs','--design','acceptance')).toMatchObject({valid:true,quality:'unverified'})
     expect((await measurement.handoff()).acceptance.valid).toBe(true)
     await writeFile(join(workspace,uiPath),JSON.stringify(ui))
@@ -196,7 +200,7 @@ await copyRegisteredRuntimeFiles(process.cwd(),'dist');`)
     // An author cannot remove both the registry and its design links to erase
     // the host's confirmed editable-content requirement at final handoff.
     await rm(join(workspace,'content/index.json'))
-    for(const name of ['UI_UX_SPEC.md','LEVEL_SCENE_DESIGN.md']) {
+    for(const name of ['GDD.md']) {
       const path=join(workspace,'docs',name)
       await writeFile(path,(await readFile(path,'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm,''))
     }

@@ -15,6 +15,7 @@ function storageStub(overrides: Partial<R2ResourceStorage> = {}): R2ResourceStor
   return {
     upload: async () => ({ storageObjectId: 'object-new' }),
     getFile: async () => undefined,
+    headObject: async () => ({ byteSize: 1, metadata: {} }),
     createDownloadUrl: async (storageObjectId, packId) => `https://r2.test/${packId}/${storageObjectId}`,
     updateLogicalPath: async () => undefined,
     delete: async () => true,
@@ -171,6 +172,50 @@ describe('Supabase resource lifecycle handlers', () => {
     await expect(handlers.deleteResourceFolder('pack-1', 'folder-root')).resolves.toBe(true)
   })
 
+  test('renames a folder through the atomic Supabase RPC contract', async () => {
+    const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    let storagePathUpdates = 0
+    const handlers = createSupabaseResourceAuthoringHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      r2Storage: storageStub({ updateLogicalPath: async () => { storagePathUpdates += 1 } }),
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        requests.push({ url, method: init?.method ?? 'GET', ...(init?.body ? { body: JSON.parse(String(init.body)) as Record<string, unknown> } : {}) })
+        if (url.endsWith('/rpc/beegame_rename_resource_folder')) return Response.json({ id: 'folder-root', pack_id: 'pack-1', name: 'assets', path: 'assets' })
+        throw new Error(`Unexpected request: ${url}`)
+      },
+    })
+
+    await expect(handlers.updateResourceFolder('pack-1', 'folder-root', { name: 'assets' })).resolves.toEqual({
+      id: 'folder-root', packId: 'pack-1', name: 'assets', path: 'assets',
+    })
+    expect(requests).toEqual([expect.objectContaining({
+      url: 'https://supabase.test/rest/v1/rpc/beegame_rename_resource_folder',
+      method: 'POST',
+      body: { p_pack_id: 'pack-1', p_folder_id: 'folder-root', p_name: 'assets' },
+    })])
+    expect(storagePathUpdates).toBe(0)
+  })
+
+  test('does not fall back to partial folder or storage writes when the rename RPC fails', async () => {
+    const requests: string[] = []
+    let storagePathUpdates = 0
+    const handlers = createSupabaseResourceAuthoringHandlers({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      r2Storage: storageStub({ updateLogicalPath: async () => { storagePathUpdates += 1 } }),
+      fetchImpl: async (input, init) => {
+        const url = String(input)
+        requests.push(`${init?.method ?? 'GET'} ${url}`)
+        if (url.endsWith('/rpc/beegame_rename_resource_folder')) return new Response(null, { status: 500 })
+        throw new Error(`Unexpected fallback request: ${url}`)
+      },
+    })
+
+    await expect(handlers.updateResourceFolder('pack-1', 'folder-root', { name: 'assets' })).rejects.toThrow('rename failed (500)')
+    expect(requests).toEqual(['POST https://supabase.test/rest/v1/rpc/beegame_rename_resource_folder'])
+    expect(storagePathUpdates).toBe(0)
+  })
+
   test('reports missing and orphaned R2 objects without mutating either side', async () => {
     const inspector = createSupabaseResourceStorageInspector({
       baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
@@ -184,11 +229,96 @@ describe('Supabase resource lifecycle handlers', () => {
       fetchImpl: async (input, init) => {
         const url = String(input)
         if (url.includes('beegame_resource_packs')) return Response.json([{ cover_path: 'cover/preview.png' }])
-        if (url.includes('beegame_resource_elements')) return Response.json([{ path: 'models/tree.glb' }, { path: 'textures/tree.png' }])
+        if (url.includes('beegame_resource_elements')) return new URL(url).searchParams.has('id') ? Response.json([]) : Response.json([{ id: 'element-model', path: 'models/tree.glb' }, { id: 'element-texture', path: 'textures/tree.png' }])
         return new Response(null, { status: 500 })
       },
     })
     await expect(inspector('pack-1')).resolves.toEqual({ missingPaths: ['textures/tree.png'], orphanPaths: ['unused.txt'] })
+  })
+
+  test('does not treat ready metadata as present when the R2 object HEAD is missing', async () => {
+    const inspector = createSupabaseResourceStorageInspector({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      r2Storage: storageStub({
+        listPackObjects: async () => [{ id: 'model', logicalPath: 'models/tree.glb', status: 'ready' }],
+        headObject: async () => undefined,
+      }),
+      fetchImpl: async (input) => {
+        const url = String(input)
+        if (url.includes('beegame_resource_packs')) return Response.json([{ cover_path: null }])
+        if (url.includes('beegame_resource_elements')) return new URL(url).searchParams.has('id') ? Response.json([]) : Response.json([{ id: 'element-model', path: 'models/tree.glb' }])
+        return new Response(null, { status: 500 })
+      },
+    })
+
+    await expect(inspector('pack-1')).resolves.toEqual({ missingPaths: ['models/tree.glb'], orphanPaths: [] })
+  })
+
+  test('paginates expected element paths without assuming the REST page cap matches the request', async () => {
+    const elements = Array.from({ length: 5 }, (_, index) => ({ id: `element-${String(index).padStart(4, '0')}`, path: `models/item-${index}.glb` }))
+    const elementRequests: string[] = []
+    const inspector = createSupabaseResourceStorageInspector({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      r2Storage: storageStub({ listPackObjects: async () => [] }),
+      fetchImpl: async input => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/beegame_resource_packs')) return Response.json([{ cover_path: null }])
+        elementRequests.push(url.toString())
+        const afterId = url.searchParams.get('id')?.replace(/^gt\./, '')
+        return Response.json(elements.filter(element => !afterId || element.id > afterId).slice(0, Math.min(2, Number(url.searchParams.get('limit')))))
+      },
+    })
+
+    const report = await inspector('pack-1')
+
+    expect(report.missingPaths).toHaveLength(5)
+    expect(elementRequests).toHaveLength(4)
+    expect(elementRequests[0]).toContain('limit=1000')
+    expect(elementRequests[1]).toContain('id=gt.element-0001')
+    expect(elementRequests[3]).toContain('id=gt.element-0004')
+  })
+
+  test('limits concurrent object HEAD checks and propagates HEAD failures', async () => {
+    const objects = Array.from({ length: 32 }, (_, index) => ({ id: `object-${index}`, logicalPath: `models/item-${index}.glb`, status: 'ready' }))
+    let active = 0
+    let maximum = 0
+    const inspector = createSupabaseResourceStorageInspector({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      r2Storage: storageStub({
+        listPackObjects: async () => objects,
+        headObject: async () => {
+          active += 1
+          maximum = Math.max(maximum, active)
+          await new Promise(resolve => setTimeout(resolve, 1))
+          active -= 1
+          return { byteSize: 1, metadata: {} }
+        },
+      }),
+      fetchImpl: async input => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/beegame_resource_packs')) return Response.json([{ cover_path: null }])
+        return url.searchParams.has('id') ? Response.json([]) : Response.json([{ id: 'element-1', path: 'models/item-0.glb' }])
+      },
+    })
+
+    await expect(inspector('pack-1')).resolves.toEqual(expect.objectContaining({ missingPaths: [], orphanPaths: expect.arrayContaining(['models/item-31.glb']) }))
+    expect(maximum).toBeGreaterThan(1)
+    expect(maximum).toBeLessThanOrEqual(16)
+
+    const failingInspector = createSupabaseResourceStorageInspector({
+      baseUrl: 'https://supabase.test', serviceRoleKey: 'secret',
+      r2Storage: storageStub({
+        listPackObjects: async () => [objects[0]!],
+        headObject: async () => { throw new Error('R2 access denied') },
+      }),
+      fetchImpl: async input => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/beegame_resource_packs')) return Response.json([{ cover_path: null }])
+        return url.searchParams.has('id') ? Response.json([]) : Response.json([{ id: 'element-1', path: 'models/item-0.glb' }])
+      },
+    })
+
+    await expect(failingInspector('pack-1')).rejects.toThrow('R2 access denied')
   })
 
   test('deletes every R2 object before deleting Pack metadata', async () => {

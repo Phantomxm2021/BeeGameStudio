@@ -30,12 +30,10 @@ export function sceneLayoutFixture() {
 
 export function designHandoffFixture(name: DesignDocument): DesignHandoff {
   return { version: 2, documentVersion: '1.0',
-    outputs: [{ id: name === 'GDD.md' ? 'play' : 'ready', section: 'Design',
-      acceptance: { section: 'Design', method: name === 'GDD.md' ? 'test' : 'inspection' } }],
-    ...(name === 'TECHNICAL_DESIGN.md' ? { implementationItems: PROJECT_DOCUMENTS.map(document => ({
-      id: 'fixture-' + document.slice(0, -3), section: 'Design',
-      requirementRefs: [{ document, id: document === 'GDD.md' ? 'play' : 'ready' }],
-    })) } : {}),
+    outputs: [{ id: 'play', section: 'Design',
+      acceptance: { section: 'Design', method: 'test' } }],
+    implementationItems: [{ id: 'fixture-GDD', section: 'Design',
+      requirementRefs: [{ document: 'GDD.md', id: 'play' }] }],
     evidence: [] }
 }
 
@@ -49,17 +47,17 @@ export function designRequirementChecksFixture(workspace: string, evidencePaths:
 export function designDocumentFixture(name: DesignDocument, handoff: unknown = designHandoffFixture(name)) {
   const version = (handoff as { documentVersion?: string })?.documentVersion ?? '1.0'
   return '# Design\n- Version: v' + version + '\nFixture decision.\n' +
-    (name === 'UI_UX_SPEC.md' ? '\n[Reviewed UI constraints](../content/ui/menu.json)\n' : '') +
-    (name === 'LEVEL_SCENE_DESIGN.md' ? '\n[Reviewed Scene layout](../content/scenes/level.json)\n' : '')
+    '\n## UI\n[Reviewed UI constraints](../content/ui/menu.json)\n' +
+    '\n## Scene\n[Reviewed Scene layout](../content/scenes/level.json)\n'
 }
 export async function writeDesignDocumentFixture(workspace: string, name: DesignDocument, handoff: unknown = designHandoffFixture(name), body = designDocumentFixture(name, handoff)) {
   await mkdir(join(workspace, 'docs'), { recursive: true })
   await mkdir(join(workspace, '.beegame/design-handoffs'), { recursive: true })
-  if (name === 'UI_UX_SPEC.md' && !await Bun.file(join(workspace, 'content/ui/menu.json')).exists()) {
+  if (name === 'GDD.md' && !await Bun.file(join(workspace, 'content/ui/menu.json')).exists()) {
     await mkdir(join(workspace, 'content/ui'), { recursive: true })
     await writeFile(join(workspace, 'content/ui/menu.json'), JSON.stringify(uiLayoutFixture()))
   }
-  if (name === 'LEVEL_SCENE_DESIGN.md' && !await Bun.file(join(workspace, 'content/scenes/level.json')).exists()) {
+  if (name === 'GDD.md' && !await Bun.file(join(workspace, 'content/scenes/level.json')).exists()) {
     await mkdir(join(workspace, 'content/scenes'), { recursive: true })
     await writeFile(join(workspace, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
   }

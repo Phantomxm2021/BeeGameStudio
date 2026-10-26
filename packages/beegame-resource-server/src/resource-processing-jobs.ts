@@ -122,13 +122,25 @@ export function createSupabaseResourceProcessingHandlers(options: {
   const updateAggregate = async (jobId: string): Promise<JobRow | undefined> => {
     const [job] = await request<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(jobId)}&select=*`)
     if (!job || job.status === 'cancelled') return job
-    const items = await request<ItemRow>(`beegame_resource_processing_items?job_id=eq.${encodeURIComponent(jobId)}&select=*`)
+    const pageSize = 1_000
+    const items: ItemRow[] = []
+    let afterId: string | undefined
+    while (true) {
+      const page = await request<ItemRow>(`beegame_resource_processing_items?job_id=eq.${encodeURIComponent(jobId)}${afterId ? `&id=gt.${encodeURIComponent(afterId)}` : ''}&order=id.asc&limit=${pageSize}&select=*`)
+      items.push(...page)
+      if (page.length === 0) break
+      const nextAfterId = page.at(-1)?.id
+      if (!nextAfterId || nextAfterId === afterId) throw new Error('Resource processing item pagination did not advance')
+      afterId = nextAfterId
+    }
     const completed = items.filter(item => item.status === 'completed').length
     const failed = items.filter(item => item.status === 'failed').length
     const pending = items.some(item => item.status === 'queued' || item.status === 'running')
-    const status: ResourceProcessingJobStatus = pending ? 'running' : failed ? 'failed' : 'completed'
+    const itemCountMatches = items.length === job.total_items
+    const status: ResourceProcessingJobStatus = pending ? 'running' : !itemCountMatches ? 'failed' : failed ? 'failed' : 'completed'
+    const aggregateFailed = itemCountMatches ? failed : Math.max(failed, job.total_items - completed)
     const usage = items.reduce((total, item) => addUsage(total, usageFromRow(item)), emptyUsage())
-    return (await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(jobId)}`, 'PATCH', { status, completed_items: completed, failed_items: failed, ...usageToRow(usage), updated_at: new Date().toISOString() }))[0]
+    return (await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(jobId)}`, 'PATCH', { status, completed_items: completed, failed_items: aggregateFailed, ...usageToRow(usage), updated_at: new Date().toISOString() }))[0]
   }
   const run = async (jobId: string): Promise<void> => {
     if (activeJobs.has(jobId)) return
@@ -304,12 +316,23 @@ export function createSupabaseResourceProcessingHandlers(options: {
       const jobId = `resource-job-${crypto.randomUUID()}`
       const [row] = await mutate<JobRow>('beegame_resource_processing_jobs', 'POST', { id: jobId, pack_id: packId, kind, analysis_mode: analysisMode, status: ids.length ? 'queued' : 'completed', total_items: ids.length, completed_items: 0, failed_items: 0, ...usageToRow(emptyUsage()), ...(startOptions.ownerId ? { owner_id: startOptions.ownerId } : {}), ...(startOptions.modelConfigId ? { model_config_id: startOptions.modelConfigId } : {}), ...(startOptions.retryOfJobId ? { retry_of_job_id: startOptions.retryOfJobId } : {}), created_at: now, updated_at: now })
       if (ids.length) {
-        await mutate<ItemRow>('beegame_resource_processing_items', 'POST', ids.map(elementId => ({
-          id: `resource-item-${crypto.randomUUID()}`, job_id: jobId, element_id: elementId, status: 'queued', attempts: 0,
-          ...(sourceHashById.get(elementId) ? { source_content_hash: sourceHashById.get(elementId) } : {}),
-          ...(curatorRevision ? { curator_revision: curatorRevision } : {}),
-          created_at: now, updated_at: now,
-        })))
+        try {
+          await mutate<ItemRow>('beegame_resource_processing_items', 'POST', ids.map(elementId => ({
+            id: `resource-item-${crypto.randomUUID()}`, job_id: jobId, element_id: elementId, status: 'queued', attempts: 0,
+            ...(sourceHashById.get(elementId) ? { source_content_hash: sourceHashById.get(elementId) } : {}),
+            ...(curatorRevision ? { curator_revision: curatorRevision } : {}),
+            created_at: now, updated_at: now,
+          })))
+        } catch (error) {
+          try {
+            await mutate<JobRow>(`beegame_resource_processing_jobs?id=eq.${encodeURIComponent(jobId)}&status=in.(queued,running)`, 'PATCH', {
+              status: 'failed', completed_items: 0, failed_items: ids.length, updated_at: new Date().toISOString(),
+            })
+          } catch (cleanupError) {
+            console.warn('Resource processing job creation cleanup failed:', cleanupError)
+          }
+          throw error
+        }
         schedule(jobId)
       }
       return toJob(row)

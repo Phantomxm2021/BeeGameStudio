@@ -17,8 +17,8 @@ test('new documents are reported as absent while invalid sources retain the actu
     })
     expect(readDesignHandoff(root, {read:[{document:'GDD.md'}]}).valid).toBe(false)
     mkdirSync(join(root, 'docs'))
-    writeFileSync(join(root, 'docs/LEVEL_SCENE_DESIGN.md'), '# Source')
-    symlinkSync(join(root, 'docs/LEVEL_SCENE_DESIGN.md'), join(root, 'docs/GDD.md'))
+    writeFileSync(join(root, 'docs/actual.md'), '# Source')
+    symlinkSync(join(root, 'docs/actual.md'), join(root, 'docs/GDD.md'))
     expect(designSourceLocations(root, ['GDD.md'])[0]?.unavailable).toContain('cannot contain symlinks')
   } finally { rmSync(root, {recursive:true, force:true}) }
 })
@@ -50,10 +50,10 @@ test('explicit Review source batch retains unselected promises, exact bytes and 
   try {
     mkdirSync(join(root, 'docs')); mkdirSync(join(root, 'tests')); mkdirSync(join(root, 'transcripts'))
     const design = '# Sound\n## Limits\nAt most three voices; measured level <= 0.25.\n## Evidence\nOnly silence tested.\n'
-    writeFileSync(join(root, 'docs/AUDIO_DESIGN.md'), design)
+    writeFileSync(join(root, 'docs/GDD.md'), design)
     writeFileSync(join(root, 'tests/probe.mjs'), '// AUTHOR TEST PASSED: silence only\n')
     writeFileSync(join(root, 'transcripts/private.jsonl'), 'PRIVATE_HISTORY_NOT_A_SOURCE')
-    const files = ['docs/AUDIO_DESIGN.md', 'tests/probe.mjs']
+    const files = ['docs/GDD.md', 'tests/probe.mjs']
     const result: any = runGameContentCommand(root, ['--review-sources', ...files, '--details'])
     expect(result.valid).toBe(true); expect(result.semanticCoverage).toBe('not-certified')
     expect(result.sources).toHaveLength(2); expect(result.sources[0].text).toBe(design)
@@ -66,10 +66,10 @@ test('explicit Review source batch retains unselected promises, exact bytes and 
     expect(missing.valid).toBe(false); expect(missing.sources[0].sha256).toBe(result.sources[0].sha256)
     expect(missing.sources[2].unavailable).toBeTruthy()
     symlinkSync(join(root, 'docs'), join(root, 'linked'))
-    for (const path of ['../outside', '/tmp/outside', 'linked/AUDIO_DESIGN.md', 'transcripts/private.jsonl', 'docs/../docs/AUDIO_DESIGN.md']) {
+    for (const path of ['../outside', '/tmp/outside', 'linked/GDD.md', 'transcripts/private.jsonl', 'docs/../docs/GDD.md']) {
       expect((runGameContentCommand(root, ['--review-sources', path]) as any).valid).toBe(false)
     }
-    expect(readFileSync(join(root, 'docs/AUDIO_DESIGN.md'), 'utf8')).toBe(design)
+    expect(readFileSync(join(root, 'docs/GDD.md'), 'utf8')).toBe(design)
     expect(() => runGameContentCommand(root, ['--review-sources'])).toThrow('Usage')
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

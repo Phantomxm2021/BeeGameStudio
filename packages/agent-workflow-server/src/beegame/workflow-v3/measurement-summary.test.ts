@@ -39,7 +39,8 @@ test('summary omits routine inventories, retains all problems, and details retur
   expect('observation' in compact.checks[1]! ? compact.checks[1].observation : undefined).toBe(observation)
   expect(compact.detailsHint).toContain('details:true')
   for (const summary of [compact, detailed]) {
-    expect(summary.resourceStructureCoverage).toEqual(assetContract)
+    const expectedResources=summary===compact ? {...assetContract,resourcesScope:'issues-only',routineVerifiedResourceCount:0} : assetContract
+    expect(summary.resourceStructureCoverage).toEqual(expectedResources)
     expect(summary.checks[0]!.coverage).toEqual({ files: [ui[0]!.document, scene[0]!.document],
       limitations: ['Static structure only'], uiSurfaceCompatibility: surface })
     expect('observation' in summary.checks[0]! ? summary.checks[0].observation : undefined).toBe(record.checks[0]!.observation)
@@ -99,9 +100,8 @@ test('compact resource evidence preserves problems and provisional resources; de
     ] }
   const before = JSON.stringify(record)
   const compact = measurementSummary(record, false), detailed = measurementSummary(record, true)
-  expect(compact.resourceStructureCoverage).toEqual({ ...assetContract, resources: [
-    { id: 'intact', status: 'verified', sourceType: 'resource-library', provisional: false, issues: [] }, ...problems,
-  ] })
+  const expectedResources={ ...assetContract, resourcesScope:'issues-only',routineVerifiedResourceCount:1, resources:problems }
+  expect(compact.resourceStructureCoverage).toEqual(expectedResources)
   expect(compact.checks[0]).toMatchObject({ status: 'failed', observation: record.checks[0]!.observation,
     coverage: { files: [assetContract.manifestPath], limitations: ['Static resource evidence only'] } })
   expect(compact).toMatchObject({ quality: 'unverified', deliveryEligible: false })

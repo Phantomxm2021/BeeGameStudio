@@ -272,10 +272,10 @@ export function animateDot(canvas, initial) {
     pageInk=options.ink;
     drawBlob(c,n,{...dot,color:options.color,ink:options.color==='#181818'?'light':'dark'}, {...pose,t:T,p,st:{id},scale:1},{hero:true,u:.3,cy:.56});
   };
-  const tick=now=>{draw(now);frameId=requestAnimationFrame(tick);};
-  draw(performance.now());frameId=requestAnimationFrame(tick);
+  const tick=now=>{frameId=0;draw(now);if(!options.reduced)frameId=requestAnimationFrame(tick);};
+  draw(performance.now());if(!options.reduced)frameId=requestAnimationFrame(tick);
   return {
-    update(next){if(next.state!==options.state){fromPose=lastPose;transitionAt=stateAt=performance.now();}options=next;draw(performance.now());},
+    update(next){if(next.state!==options.state){fromPose=lastPose;transitionAt=stateAt=performance.now();}options=next;draw(performance.now());if(options.reduced){cancelAnimationFrame(frameId);frameId=0;}else if(!frameId){previousFrame=performance.now();frameId=requestAnimationFrame(tick);}},
     look(x,y){target.x=clamp(x,-1,1);target.y=clamp(y,-1,1);lookAt=performance.now();},
     resetLook(){lookAt=-1e9;},
     react(kind='tap'){reactionKind=kind;reactionAt=performance.now();},

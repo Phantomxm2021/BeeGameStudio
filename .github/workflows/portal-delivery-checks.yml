@@ -1,0 +1,48 @@
+name: Portal and Delivery checks
+
+on:
+  pull_request:
+    paths:
+      - 'apps/game-portal/**'
+      - 'apps/game-delivery/**'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/portal-delivery-checks.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/game-portal/**'
+      - 'apps/game-delivery/**'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/portal-delivery-checks.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-delivery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portal-delivery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25.2.1'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+      - name: Install locked workspace dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Run Portal, Delivery Worker, and publisher regressions
+        # Backend changes run the publisher suite in backend-checks.yml.
+        # App-only changes also need this cross-component check.
+        run: >-
+          bun test
+          apps/game-portal/src
+          apps/game-delivery/src
+          packages/agent-workflow-server/src/__tests__/r2-deployment-publisher.test.ts

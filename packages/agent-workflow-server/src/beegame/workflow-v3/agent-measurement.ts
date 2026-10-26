@@ -8,16 +8,17 @@ import { runArtifactCheck } from './runtime-checks'
 import { runContentCheck } from './content-checks'
 import { contentIndexSchema, isContentEntryKind } from '../game-content-schema'
 import { readVersion, versionsMatch } from './checks'
-import { projectPathSchema, taskSchema, isInitialSliceTurn, WorkflowError, type AgentTurn, type Run, type AgentMeasurement, type SkillUse, type CheckResult } from './state'
+import { projectPathSchema, taskSchema, isInitialSliceTurn, digest, WorkflowError, type AgentTurn, type Run, type AgentMeasurement, type SkillUse, type CheckResult } from './state'
 import { CHECK_VERSIONS } from './check-versions'
 import { sameJson, type WorkflowStore } from './store'
-import { inspectAgentMeasurementInputs } from './measured-build'
+import { blockingRegisteredContentChecks, inspectAgentMeasurementInputs } from './measured-build'
 import { reviewSourceSnapshot } from '../design-source-reading'
 import { projectNavigationSnapshot } from './project-guide'
 import { priorMainSkillLoads } from './context'
-import { inspectDesignAcceptance } from '../runtime-acceptance'
+import { artifactDigest, inspectDesignAcceptance } from '../runtime-acceptance'
 import { snapshotDesignRevisionFiles, designRevisionFileDigest, designInputRevision, DESIGN_ACCEPTANCE_PATH, readDesignImplementationChecklist, readDesignAcceptanceRequirements } from '../design-handoff'
 import { requiresBgsEditableContent } from './web-project-start'
+import { validateFontProbeInputs } from './font-consumption'
 
 export const AGENT_CONSUMPTION_CHECKS = ['ui-data-consumption','scene-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'] as const
 export const AGENT_CONSUMPTION_SUPPORT = {
@@ -48,6 +49,13 @@ export const measurementRequest = z.object({
   consumption:consumptionRequest.optional(),
 }).strict()
 export type MeasurementRequest = z.infer<typeof measurementRequest>
+
+const deliveryRequest = z.object({ requirementsRevision:z.string().min(1), measurementId:z.string().min(1).optional() }).strict()
+export type AgentDeliverySubmission = {
+  attemptId:string; requirementsRevision:string; reportPath:string; reportSha256:string;
+  measurementId?:string; sourceSha256:string; summary:string;
+}
+
 
 /** Use the existing deterministic checkers when a Web project declares BGS
  * content. Missing content is not guessed for older/source-only projects; a
@@ -126,7 +134,7 @@ export function agentSkillFacts(run:Run,turn:AgentTurn,liveUses?:SkillUse[]) {
  * No Task, plan, model round or game-quality decision is created. A durable
  * request is recorded BEFORE executing scripts; unknown outcomes never replay. */
 export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store: WorkflowStore; executionContext?: ()=>Record<string, unknown>|undefined;
-  skillUses?: ()=>SkillUse[] }) {
+  skillUses?: ()=>SkillUse[]; onDeliverySubmitted?: (submission:AgentDeliverySubmission)=>Promise<void> }) {
   // Capture once for this user turn, not at compact, context read or finalize.
   let before: Record<string, string | null> | undefined, snapshotError: string | undefined
   try { before = snapshotDesignRevisionFiles(input.run.workspacePath) }
@@ -146,6 +154,8 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
   }
   const controller = new AbortController()
   let work: Promise<AgentMeasurement> | undefined
+  let delivery: {request:z.infer<typeof deliveryRequest>; snapshot:AgentDeliverySubmission; completion:Promise<void>} | undefined
+  let submitting = false
   const sameWriter = (run: Run) => run.id === input.run.id && run.workspacePath === input.run.workspacePath &&
     run.writer?.attemptId === input.turn.attemptId && run.writer.fence === input.turn.fence && run.writer.workerId === input.turn.workerId
   async function current() {
@@ -201,7 +211,8 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       record.reports=await Promise.all(request.reportPaths.map(path=>readVersion(root,path)))
       if (request.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
         const acceptance = await inspectDesignAcceptance(root,run.creation?.initialDelivery === 'design-led-first-version',requiresBgsEditableContent(run),
-          {runId:run.id,requirementsRevision:run.requirements.revision})
+          {runId:run.id,requirementsRevision:run.requirements.revision},
+        {requireVisualComparison:requiresBgsEditableContent(run)})
         // Reject unsupported PASS claims before building as well as malformed
         // reports. Honest blocked/failed reports remain diagnostic inputs.
         if (acceptance.diagnostic && (acceptance.diagnostic.category === 'report-invalid' ||
@@ -212,6 +223,13 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
             record.reports.push(await readVersion(root,evidence.path))
       }
       const requirements={path:'requirement:'+run.requirements.revision,sha256:run.requirements.sha256}
+      // Reject only source-side font probe inputs that are already impossible
+      // to observe. This shares the driver's preparation rules and runs before
+      // the editable build; packed bytes, glyphs and runtime geometry still
+      // belong to the post-build driver. A selected UI probe may remain
+      // partial for the other consumption drivers.
+      if (request.consumption?.checks.includes('font-data-consumption'))
+        await validateFontProbeInputs(root, request.consumption)
       const build=await buildEditableProject(root,{editableProject:true,runtimeArtifact:request.runtimeArtifact,
         writablePaths:[request.runtimeArtifact+'/**']},[requirements,...record.reports],[AGENT_EVIDENCE_DIRECTORY],controller.signal)
       record.checks.push(build)
@@ -241,8 +259,88 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     await save(record,false)
     return record
   }
+  async function deliverySnapshot(request:z.infer<typeof deliveryRequest>):Promise<AgentDeliverySubmission> {
+    const run=await current()
+    if(run.paused)throw new WorkflowError('run-paused','Delivery cannot finish a paused task')
+    if(request.requirementsRevision!==run.requirements.revision)
+      throw new WorkflowError('delivery-stale','The submitted requirements revision is not current')
+    if(input.turn.message?.intent==='message')
+      throw new WorkflowError('delivery-scope','Enter the authorized implementation assignment through workflow.mjs --implement before delivery')
+    if(input.turn.message?.intent==='discuss')
+      throw new WorkflowError('delivery-scope','Discussion does not submit an implementation delivery')
+    const root=run.workspacePath
+    const acceptance=await inspectDesignAcceptance(root,run.creation?.initialDelivery==='design-led-first-version',requiresBgsEditableContent(run),
+      {runId:run.id,requirementsRevision:run.requirements.revision},
+        {requireVisualComparison:requiresBgsEditableContent(run)})
+    if(!acceptance.valid)
+      throw new WorkflowError('delivery-unverified',acceptance.summary)
+    const records=run.agentTurns!.flatMap(turn=>turn.measurements??[])
+    const latest=records.findLast(record=>record.requirementsRevision===run.requirements.revision)
+    const measured=request.measurementId ? records.find(record=>record.id===request.measurementId) : latest
+    if(request.measurementId && !measured)
+      throw new WorkflowError('delivery-unverified','The selected measurement does not belong to this Run')
+    if(measured) {
+      if(latest?.id!==measured.id || !measured.reportPaths.includes(DESIGN_ACCEPTANCE_PATH))
+        throw new WorkflowError('delivery-unverified','Submit the latest measurement with the finalized acceptance report already bound; inspect existing evidence before measuring new inputs')
+      const freshness=await inspectAgentMeasurementInputs(run,measured)
+      if(!freshness.current)throw new WorkflowError(freshness.code,freshness.reason)
+      const failed=measured.checks.filter(check=>check.status==='failed'||check.status==='execution-error')
+      const blocking=blockingRegisteredContentChecks(measured)
+      if(failed.length||blocking.length)
+        throw new WorkflowError('delivery-unverified','Saved checks still require repair: '+[...new Set([...failed,...blocking].map(check=>check.id))].join(', '))
+      const artifact=measured.checks.find(check=>check.id==='build')?.projectBuild?.artifact
+      if(!artifact || !acceptance.artifacts.some(item=>item.path===artifact.path && item.sha256===artifact.sha256))
+        throw new WorkflowError('delivery-unverified','The delivery report does not identify the measured artifact bytes')
+    } else {
+      // Native/SSR tasks need no static-Web build. Only the already-validated
+      // execution receipts can bind a report to tested source bytes; an arbitrary
+      // log or a newly computed file hash is not a source-to-execution receipt.
+      const checks=[...(acceptance.verification?.requirementChecks??[]),...(acceptance.verification?.contentChecks??[])]
+      const paths=checks.length ? checks.filter(check=>check.status==='passed').flatMap(check=>check.evidencePaths) : acceptance.evidence.map(item=>item.path)
+      const canonical=await Promise.all(paths.map(async path=>(await realpath(resolve(root,path))).slice((await realpath(root)).length+1)))
+      if(!canonical.some(path=>/^\.beegame\/tmp\/preview-test-[^/]+\/(execution\.json|stdout\.txt|stderr\.txt)$/.test(path)))
+        throw new WorkflowError('delivery-unverified','Delivery needs a current saved measurement or a successful source-bound execution receipt. Arbitrary logs do not establish current execution; no test was started')
+    }
+    const reportSha256=await artifactDigest(root,DESIGN_ACCEPTANCE_PATH)
+    const sourceSha256=digest(JSON.stringify({files:await projectFiles(root,'',[AGENT_EVIDENCE_DIRECTORY]),
+      dependencies:await projectDependencies(root),design:designInputRevision(root),reportSha256,
+      evidence:acceptance.evidence,artifacts:acceptance.artifacts}))
+    return {attemptId:input.turn.attemptId,requirementsRevision:run.requirements.revision,
+      reportPath:DESIGN_ACCEPTANCE_PATH,reportSha256,...(measured?{measurementId:measured.id}:{}),sourceSha256,summary:acceptance.summary}
+  }
   return {
     designFileChanges,
+    // Called again after owned processes and capabilities have quiesced. A
+    // cleanup-time edit cannot silently change the delivered bytes.
+    async verifyDelivery() {
+      if(!delivery)return false
+      await delivery.completion
+      if(!sameJson(delivery.snapshot,await deliverySnapshot(delivery.request)))
+        throw new WorkflowError('delivery-stale','Delivery inputs changed while execution was closing; the task is not complete')
+      return true
+    },
+    async finish(raw:unknown) {
+      const request=deliveryRequest.parse(raw)
+      if(delivery) {
+        if(!sameJson(request,delivery.request))throw new WorkflowError('delivery-conflict','This turn already submitted a different delivery')
+        await delivery.completion
+        return {...delivery.snapshot,quality:'unverified',deliveryEligible:false}
+      }
+      if(controller.signal.aborted)throw new WorkflowError('measurement-closed','Turn capability has expired')
+      if(!input.onDeliverySubmitted)throw new WorkflowError('delivery-unavailable','This execution has no delivery completion capability')
+      if(work||submitting)throw new WorkflowError('measurement-busy','Wait for the current measurement or delivery submission; no automatic retry')
+      submitting=true
+      try {
+        const snapshot=await deliverySnapshot(request)
+        // Do not add this callback to measurement work: session cleanup closes
+        // this capability while completion is in flight and must not await itself.
+        const completion=Promise.resolve().then(()=>input.onDeliverySubmitted!(snapshot))
+        delivery={request,snapshot,completion}
+        await completion
+        return {...snapshot,quality:'unverified',deliveryEligible:false}
+      } catch(error) {delivery=undefined;throw error}
+      finally {submitting=false}
+    },
     async assertActive(write = false) {
       if (controller.signal.aborted) throw new WorkflowError('measurement-closed', 'Turn capability has expired')
       const run = await current()
@@ -301,7 +399,8 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       const measurement=latest ? {freshness:await inspectAgentMeasurementInputs(run,latest.record),
         attemptId:latest.attemptId,...measurementSummary(latest.record,details)} : null
       const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',requiresBgsEditableContent(run),
-        {runId:run.id,requirementsRevision:run.requirements.revision})
+        {runId:run.id,requirementsRevision:run.requirements.revision},
+        {requireVisualComparison:requiresBgsEditableContent(run)})
       return {
         ...(input.executionContext?.()?{executionContext:input.executionContext!()}:{}),
         designFileChanges:designFileChanges(),
@@ -346,7 +445,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     },
     measure(raw: unknown) {
       if(controller.signal.aborted)throw new WorkflowError('measurement-closed','Measurement capability has expired')
-      if(work)throw new WorkflowError('measurement-busy','A measurement is already running; inspect it rather than replaying')
+      if(work||submitting||delivery)throw new WorkflowError('measurement-busy','A measurement or delivery submission is already running; inspect it rather than replaying')
       const consumption=raw && typeof raw==='object' && !Array.isArray(raw) ? (raw as Record<string,unknown>).consumption : undefined
       if(consumption && typeof consumption==='object' && !Array.isArray(consumption) && Object.hasOwn(consumption,'steps'))
         throw new WorkflowError('measurement-input','consumption.steps is not valid: put steps inside the relevant uiProbes item, for example uiProbes:[{document,nodeId,selector,viewport,steps:[{click:"#start"}]}]. No measurement was started.',400)
@@ -360,7 +459,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
 
 // Response is compact; the existing Run retains full file/check evidence. A
 // missing smoke, execution error or incomplete durable record is never PASS.
-function uiObservationFeedback(id:string, observation:string) {
+function uiObservationFeedback(id:string, observation:string, compact = true) {
   if(id!=='ui-data-consumption')return undefined
   try {
     const actual=JSON.parse(observation)
@@ -380,12 +479,15 @@ function uiObservationFeedback(id:string, observation:string) {
         restored:fit(p.textFit.restored)}}:{})})}))
     // Project only host-observed facts. No new verdict, geometry recalculation,
     // source modification or truncation of probe identities/reasons.
-    return {driver:actual.driver,probes,errors:actual.errors,missingFiles:actual.missingFiles,unsupported:actual.unsupported,
+    return {driver:actual.driver,probes,errors:actual.errors,missingFiles:actual.missingFiles,
+      // A browser batch can report the same host limitation once per probe.
+      // Keep the fact, but do not repeat identical prose in the compact view.
+      unsupported:compact ? [...new Set(actual.unsupported ?? [])] : actual.unsupported,
       limitations:actual.limitations}
   }catch{return undefined} // Plain preparation/driver errors remain verbatim.
 }
 export function measurementSummary(record: AgentMeasurement, details = true) {
-  const feedback=record.checks.map(c=>uiObservationFeedback(c.id,c.observation))
+  const feedback=record.checks.map(c=>uiObservationFeedback(c.id,c.observation,!details))
   const diagnostics=feedback.flatMap((value,i)=>value?.probes.map((probe:any)=>({checkId:record.checks[i]!.id,...probe}))??[])
   const registered=record.checks.find(c=>c.id==='content-structure')?.coverage?.files ?? []
   const sampled=new Set(record.checks.filter(c=>AGENT_CONSUMPTION_CHECKS.some(id=>id===c.id) && c.status==='passed')
@@ -395,12 +497,15 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
   const assetContract=bindingCheck?.coverage?.assetContract
   // Keep failures and provisional resources fully inspectable in the compact
   // receipt; routine file evidence remains in the saved record and --details.
-  const resourceStructureCoverage=assetContract && !details ? {...assetContract,
-    resources:assetContract.resources.map(resource=>{
-      if(resource.status!=='verified' || resource.provisional || resource.issues.length)return resource
-      const {rootPath,filePaths,fileEvidence,...summary}=resource
-      return summary
-    })} : assetContract
+  // Compact reads expose only resources that need attention. The count keeps
+  // the saved evidence's routine-resource scope visible without copying a
+  // repetitive inventory; details:true remains the complete source of IDs and
+  // file evidence.
+  const resourceStructureCoverage=assetContract && !details ? (()=>{
+    const routine=assetContract.resources.filter(resource=>resource.status==='verified' && !resource.provisional && !resource.issues.length)
+    return {...assetContract,routineVerifiedResourceCount:routine.length,resourcesScope:'issues-only',
+      resources:assetContract.resources.filter(resource=>!routine.includes(resource))}
+  })() : assetContract
   // Preserve individual host observations and their scope; a layout PASS is
   // never promoted to image use, nor a sampled node to a whole-screen PASS.
   const uiObservations=record.checks.flatMap(check=>{
@@ -447,8 +552,9 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
       const {id,status,observation,coverage,artifacts}=check
       // These inventories already have dedicated fields above. Keep one copy;
       // compact reads retain failed observations, not every successful binding.
-      const {uiNodeBindings,sceneNodeBindings,assetContract,...scope}=coverage ?? {}
-      return {id,status,...(coverage?{coverage:check===bindingCheck?scope:coverage}:{}),
+      const compactCoverage=!details && coverage ? {...coverage,limitations:[...new Set(coverage.limitations)]} : coverage
+      const {uiNodeBindings,sceneNodeBindings,assetContract,...scope}=compactCoverage ?? {}
+      return {id,status,...(coverage?{coverage:check===bindingCheck?scope:compactCoverage}:{}),
         ...(details?{observation,artifacts,limitations:coverage?.limitations}:status!=='passed'?{
           observation:feedback[i]?JSON.stringify(feedback[i]):observation}:{})}
     }),

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, parse } from 'node:path'
 import { tmpdir } from 'node:os'
+import { BeeGamePreviewManager } from '../preview-manager'
 import { buildEditableProject, projectDependencies, projectFiles } from './editable-project'
 
 // Use the Vite installation already used by the frontend. The fixture is a
@@ -151,3 +152,42 @@ export default defineConfig({
     },
   )
 }
+
+
+test.skipIf(!fixtureSupported)('managed Vite observes source and imported content edits inside Seatbelt without a restart',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-vite-watch-')))
+  const manager=new BeeGamePreviewManager()
+  const options={sessionId:'offline-watch',workspacePath:root,mode:'development' as const}
+  try {
+    const version=await copyViteDependencies(root)
+    await mkdir(join(root,'content'))
+    await writeFile(join(root,'package.json'),JSON.stringify({type:'module',scripts:{dev:'vite'},devDependencies:{vite:version}}))
+    await writeFile(join(root,'index.html'),'<script type="module" src="/main.js"></script>')
+    await writeFile(join(root,'main.js'),'export const value = "source-before";')
+    await writeFile(join(root,'content/data.json'),'{"value":"content-before"}')
+    const started=await manager.start(options)
+    expect(started.status,started.message).toBe('running')
+    const serverUrl=manager.internalUrl(options.sessionId)!
+    const read=async(path:string)=>await(await fetch(new URL('/previews/offline-watch/'+path,serverUrl))).text()
+    expect(await read('main.js')).toContain('source-before')
+    expect(await read('content/data.json?import&raw')).toContain('content-before')
+    await writeFile(join(root,'main.js'),'export const value = "source-after";')
+    await writeFile(join(root,'content/data.json'),'{"value":"content-after"}')
+    expect(await manager.start(options)).toEqual(started)
+    let source='',content=''
+    const deadline=Date.now()+5000
+    do {
+      await Bun.sleep(50)
+      source=await read('main.js');content=await read('content/data.json?import&raw')
+      if(source.includes('source-after') && content.includes('content-after'))break
+    }while(Date.now()<deadline)
+    expect(source).toContain('source-after')
+    expect(content).toContain('content-after')
+    expect(manager.internalUrl(options.sessionId)).toBe(serverUrl)
+  } finally {
+    manager.dispose()
+    // The owned process group exits asynchronously before fixture removal.
+    await Bun.sleep(1100)
+    await rm(root,{recursive:true,force:true})
+  }
+},30000)

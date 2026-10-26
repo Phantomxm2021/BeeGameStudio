@@ -63,6 +63,20 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditab
 }
 const request={requestKey:'measure-1',runtimeArtifact:'dist',reportPaths:['README.md']}
 
+async function writeCurrentDeliveryReport(workspace:string) {
+  await mkdir(join(workspace,'.beegame/delivery'),{recursive:true})
+  // The report is inspected before the optional measurement runs, so leave a
+  // current artifact in place for the initial report validation. The normal
+  // fixture build then refreshes the same public artifact.
+  await mkdir(join(workspace,'dist'),{recursive:true})
+  await writeFile(join(workspace,'dist/index.html'),await readFile(join(workspace,'src/index.html')))
+  await writeFile(join(workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({
+    scope:'delivery',status:'passed',summary:'Current fixture delivery',environment:'Offline fixture',
+    evidencePaths:['README.md'],artifactPaths:['dist'],verification:{
+      target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],
+    }}))
+}
+
 test('author report coverage survives reads and turn summaries without overriding host measurement failure',async()=>{
   const f=await fixture("throw Error('SYNTHETIC BUILD FAILURE')")
   try {
@@ -137,7 +151,7 @@ test('author report coverage survives reads and turn summaries without overridin
     expect(acceptedHandoff).toMatchObject({quality:'unverified',deliveryEligible:false})
     const acceptedReason=await agentTurnHandoffReason(await f.current(),f.turn)
     expect(acceptedReason).toContain('declared=passed; checked=passed; delivery checks=passed')
-    expect(acceptedReason).toContain('Indexed requirement checks: passed=8, failed=0, unverified=0')
+    expect(acceptedReason).toContain('Indexed requirement checks: passed=1, failed=0, unverified=0')
     expect(acceptedReason).toContain('game quality remains unverified')
     expect(acceptedReason).not.toContain(completeReport.summary)
     const run=await f.settle()
@@ -462,6 +476,59 @@ test('required editable content cannot be omitted behind a successful build; dia
     const run=await f.settle()
     await expect(selectAgentMeasuredBuild(run,record.id,false,'delivery')).rejects.toThrow('content/index.json')
     await expect(selectAgentMeasuredBuild(run,record.id,false,'preview')).resolves.toBeDefined()
+  }finally{await f.close()}
+},30000)
+
+test('required editable delivery rejects a PASS without visual comparison before build, handoff and finish',async()=>{
+  const f=await fixture("throw Error('BUILD MUST NOT RUN')",[],true)
+  let delivery:ReturnType<typeof createAgentMeasurement>|undefined,callbacks=0
+  try {
+    await mkdir(join(f.workspace,'content/ui'),{recursive:true})
+    await writeFile(join(f.workspace,'content/ui/menu.json'),JSON.stringify(uiLayoutFixture()))
+    await writeFile(join(f.workspace,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',
+      dimension:'2d',documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'menu',sceneModel:'game-object-v2',
+      files:['ui/menu.json'],documents:[{id:'menu',path:'ui/menu.json',kind:'ui-screen',loadPhase:'startup'}]}))
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    await mkdir(join(f.workspace,'dist'),{recursive:true})
+    await writeFile(join(f.workspace,'dist/index.html'),await readFile(join(f.workspace,'src/index.html')))
+    const contentCheck={kind:'ui-layout',document:'content/ui/menu.json',nodeId:'play',property:'layout',
+      change:'Synthetic layout observation',expected:'The authored button layout is consumed',observed:'Synthetic fixture observation',
+      status:'passed',evidencePaths:['README.md']}
+    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({scope:'delivery',status:'passed',
+      summary:'Synthetic editable delivery',environment:'Target runtime',evidencePaths:['README.md'],artifactPaths:['dist'],
+      verification:{target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],contentChecks:[contentCheck]}}))
+
+    const handoff=await f.measurement.handoff()
+    expect(handoff.acceptance).toMatchObject({valid:false,status:'blocked',diagnostic:{category:'verification-incomplete'}})
+    expect(handoff.acceptance.summary).toContain('at least one source-to-observation visual comparison')
+
+    const measured=await f.measurement.measure({...request,requestKey:'required-visual-precheck',reportPaths:[DESIGN_ACCEPTANCE_PATH]})
+    expect(measured.error).toContain('at least one source-to-observation visual comparison')
+    expect(measured.checks).toEqual([])
+    expect(measured.error).not.toContain('BUILD MUST NOT RUN')
+
+    delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async()=>{callbacks++}})
+    await expect(delivery.finish({requirementsRevision:f.run.requirements.revision})).rejects.toThrow('at least one source-to-observation visual comparison')
+    expect(callbacks).toBe(0)
+  } finally {await delivery?.close();await f.close()}
+},30000)
+
+test('an impossible selected font probe is rejected before the editable build',async()=>{
+  const f=await fixture("throw Error('FONT BUILD MUST NOT RUN')")
+  try {
+    const source='content/ui/menu.json'
+    await mkdir(join(f.workspace,'content/ui'),{recursive:true})
+    await writeFile(join(f.workspace,source),JSON.stringify(uiLayoutFixture()))
+    await writeFile(join(f.workspace,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',
+      dimension:'2d',documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'menu',sceneModel:'game-object-v2',
+      files:['ui/menu.json'],documents:[{id:'menu',path:'ui/menu.json',kind:'ui-screen',loadPhase:'startup'}]}))
+    const measured=await f.measurement.measure({...request,requestKey:'font-input-precheck',consumption:{
+      checks:['font-data-consumption'],uiProbes:[{document:source,nodeId:'play',selector:'#play',viewport:[600,360]}]}})
+    expect(measured.error).toContain('No font-bound static DOM text to observe')
+    expect(measured.error).toContain(source+'#play')
+    expect(measured.error).not.toContain('FONT BUILD MUST NOT RUN')
+    expect(measured.checks).toEqual([])
+    expect(await Bun.file(join(f.workspace,'dist/index.html')).exists()).toBe(false)
   }finally{await f.close()}
 },30000)
 
@@ -1075,6 +1142,34 @@ test('compact composition diagnostics retain failing node identities without rep
   expect(JSON.stringify(record)).toBe(before)
   const detailed = measurementSummary(record, true).checks[0]!
   expect('observation' in detailed ? detailed.observation : undefined).toBe(observation)
+})
+
+test('compact summary keeps failing resource identities while collapsing repeated routine and unsupported text',()=>{
+  const resource=(id:string,status:'verified'|'failed'|'unverified',issues:string[]=[]):any=>({id,status,sourceType:'resource-library',
+    provisional:false,issues,rootPath:`assets/${id}.dat`,filePaths:[`assets/${id}.dat`],fileEvidence:[{path:`assets/${id}.dat`,sha256:'a'.repeat(64),facts:{}}]})
+  const assetContract={present:true,valid:false,manifestPath:'assets/asset-manifest.json',requirements:[],bindings:[],issues:['broken resource'],
+    resources:[resource('routine-a','verified'),resource('routine-b','verified'),resource('routine-c','verified'),
+      resource('failed','failed',['File does not exist: assets/failed.dat']),resource('unverified','unverified')]}
+  const repeated='Selected runtime limitation: unsupported host behavior remains unverified.'
+  const observation=JSON.stringify({probes:[{document:'content/ui/menu.json',nodeId:'font',viewport:[600,360],status:'unverified',reason:'Font node was not observed'}],
+    errors:[],missingFiles:[],unsupported:[repeated,repeated],limitations:[repeated]})
+  const record:any={id:'resource-summary',requestKey:'resource-summary',requirementsRevision:'r',runtimeArtifact:'dist',reports:[],reportPaths:[],
+    checks:[{id:'content-resources',status:'failed',observation:'broken resource',coverage:{files:['assets/asset-manifest.json'],limitations:[repeated,repeated],assetContract}},
+      {id:'ui-data-consumption',status:'unverified',observation}]}
+  const before=JSON.stringify(record),full=measurementSummary(record,true),compact=measurementSummary(record,false)
+  expect(full.resourceStructureCoverage!.resources).toHaveLength(5)
+  expect('observation' in full.checks[1]! ? JSON.parse(full.checks[1]!.observation).unsupported : undefined).toEqual([repeated,repeated])
+  expect(compact.resourceStructureCoverage).toMatchObject({routineVerifiedResourceCount:3})
+  expect(compact.resourceStructureCoverage!.resources).toHaveLength(2)
+  expect(compact.resourceStructureCoverage!.resources.map(item=>item.id)).toEqual(['failed','unverified'])
+  expect(compact.resourceStructureCoverage!.resources.find(item=>item.id==='failed')!.issues).toEqual(['File does not exist: assets/failed.dat'])
+  expect(compact.checks[0]).toMatchObject({coverage:{limitations:[repeated]}})
+  const compactCheck=compact.checks[1]!
+  const compactObservation=JSON.parse('observation' in compactCheck ? compactCheck.observation : '{}')
+  expect(compactObservation.unsupported).toEqual([repeated])
+  expect(compact.diagnostics?.[0]).toMatchObject({document:'content/ui/menu.json',nodeId:'font',reason:'Font node was not observed'})
+  expect(compact.deliveryEligible).toBe(false)
+  expect(JSON.stringify(record)).toBe(before)
 })
 
 test('compact inspection retains every batch identity and failure while omitting passed text-fit detail',()=>{
@@ -1791,7 +1886,7 @@ test('design file diff spans the entire user turn, survives repeated reads and d
     // A context/handoff read (as happens after compact) cannot reset the start.
     await reader.context()
     expect(reader.designFileChanges().files).toContainEqual({path,change:'modified'})
-    const doc=join(f.workspace,'docs/UI_UX_SPEC.md')
+    const doc=join(f.workspace,'docs/GDD.md')
     await writeFile(doc,'# Design\n- Version: v1.0\nReference removed.\n')
     await rm(join(f.workspace,path))
     expect(reader.designFileChanges().files).toContainEqual({path,change:'deleted'})
@@ -2001,4 +2096,117 @@ test('publication cover capture uses only the owned current build without genera
     changeDuringCapture=true
     expect((await post(path)).status).toBe(409)
   }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.close()}
+})
+
+test('delivery finish accepts the current measured report without another measurement and is callback-idempotent',async()=>{
+  const f=await fixture()
+  let delivery:ReturnType<typeof createAgentMeasurement>|undefined,callbacks=0
+  try {
+    await writeCurrentDeliveryReport(f.workspace)
+    delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async submission=>{
+      callbacks++
+      expect(submission.measurementId).toBeDefined()
+      expect(submission.reportPath).toBe(DESIGN_ACCEPTANCE_PATH)
+      expect(submission.requirementsRevision).toBe(f.run.requirements.revision)
+    }})
+    const measured=await delivery.measure({...request,reportPaths:[DESIGN_ACCEPTANCE_PATH]})
+    expect(measured.error).toBeUndefined()
+    const submission={requirementsRevision:f.run.requirements.revision,measurementId:measured.id}
+    const first=await delivery.finish(submission),second=await delivery.finish(submission)
+    expect(second).toEqual(first)
+    expect(first).toMatchObject({measurementId:measured.id,reportPath:DESIGN_ACCEPTANCE_PATH,
+      quality:'unverified',deliveryEligible:false})
+    expect(callbacks).toBe(1)
+    expect((await f.current()).agentTurns![0]!.measurements).toHaveLength(1)
+  } finally {await delivery?.close();await f.close()}
+},30000)
+
+test.each(['stale-requirements','stale-report','unverified','missing-binding'] as const)(
+  'delivery finish rejects %s without submitting a host callback',async kind=>{
+    const f=await fixture()
+    let delivery:ReturnType<typeof createAgentMeasurement>|undefined,callbacks=0
+    try {
+      await writeCurrentDeliveryReport(f.workspace)
+      delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async()=>{callbacks++}})
+      const measured=await delivery.measure({requestKey:'delivery-'+kind,runtimeArtifact:'dist',
+        reportPaths:kind==='missing-binding'?['README.md']:[DESIGN_ACCEPTANCE_PATH]})
+      expect(measured.error).toBeUndefined()
+      if(kind==='stale-requirements') {
+        await expect(delivery.finish({requirementsRevision:'stale-'+f.run.requirements.revision,measurementId:measured.id})).rejects.toThrow()
+      } else if(kind==='stale-report') {
+        const report=JSON.parse(await readFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),'utf8'))
+        report.summary='Acceptance report changed after measurement'
+        await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(report))
+        await expect(delivery.finish({requirementsRevision:f.run.requirements.revision,measurementId:measured.id})).rejects.toThrow()
+      } else if(kind==='unverified') {
+        const next=await f.current(),record=next.agentTurns![0]!.measurements!.find(item=>item.id===measured.id)!
+        record.checks.find(check=>check.id==='runtime-smoke')!.status='unverified'
+        next.version++
+        await f.store.commit(next.projectId,next.ownerId,next.version-1,next,'test.delivery-unverified')
+        await expect(delivery.finish({requirementsRevision:f.run.requirements.revision,measurementId:measured.id})).rejects.toThrow()
+      } else {
+        await expect(delivery.finish({requirementsRevision:f.run.requirements.revision,measurementId:measured.id})).rejects.toThrow()
+      }
+      expect(callbacks).toBe(0)
+    } finally {await delivery?.close();await f.close()}
+  },30000)
+
+test('delivery verification rejects source or artifact edits made while host submission is in flight',async()=>{
+  const f=await fixture()
+  let delivery:ReturnType<typeof createAgentMeasurement>|undefined,finish:Promise<unknown>|undefined
+  let release=()=>{},entered!:()=>void
+  const submitted=new Promise<void>(resolve=>{entered=resolve})
+  const hold=new Promise<void>(resolve=>{release=resolve})
+  try {
+    await writeCurrentDeliveryReport(f.workspace)
+    delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async()=>{
+      entered()
+      await hold
+    }})
+    const measured=await delivery.measure({...request,reportPaths:[DESIGN_ACCEPTANCE_PATH]})
+    expect(measured.error).toBeUndefined()
+    finish=delivery.finish({requirementsRevision:f.run.requirements.revision,measurementId:measured.id})
+    await submitted
+    await writeFile(join(f.workspace,'src/index.html'),'Source changed during delivery callback')
+    await writeFile(join(f.workspace,'dist/index.html'),'Artifact changed during delivery callback')
+    release()
+    await finish
+    await expect(delivery.verifyDelivery()).rejects.toThrow()
+  } finally {
+    release()
+    await finish?.catch(()=>{})
+    await delivery?.close()
+    await f.close()
+  }
+},30000)
+
+
+test('public input identity does not waive package requirements for an actual Web build',async()=>{
+  const f=await fixture()
+  try {
+    await rm(join(f.workspace,'package.json'))
+    const identity=await f.measurement.executionInputs()
+    expect(identity.files.some(file=>file.path==='src/index.html')).toBe(true)
+    const measured=await f.measurement.measure({requestKey:'missing-package',runtimeArtifact:'dist'})
+    expect(measured.error).toContain('Editable export needs a saved package.json')
+    expect(measured.checks.some(check=>check.status==='passed')).toBe(false)
+  } finally {await f.close()}
+})
+
+
+test('ordinary message finish points to implementation entry without submitting delivery',async()=>{
+  const f=await fixture()
+  let delivery:ReturnType<typeof createAgentMeasurement>|undefined,callbacks=0
+  try {
+    f.turn.message={requestKey:f.turn.requestKey,runId:f.run.id,chatSessionId:'chat',expectedVersion:f.run.version,
+      requirementsRevision:f.run.requirements.revision,intent:'message',text:'Implement the current correction'}
+    delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async()=>{callbacks++}})
+    const before=await f.current()
+    await expect(delivery.finish({requirementsRevision:f.run.requirements.revision})).rejects.toMatchObject({
+      code:'delivery-scope',message:'Enter the authorized implementation assignment through workflow.mjs --implement before delivery'})
+    f.turn.message.intent='discuss'
+    await expect(delivery.finish({requirementsRevision:f.run.requirements.revision})).rejects.toThrow('Discussion does not submit')
+    expect(callbacks).toBe(0)
+    expect(await f.current()).toEqual(before)
+  }finally{await delivery?.close();await f.close()}
 })

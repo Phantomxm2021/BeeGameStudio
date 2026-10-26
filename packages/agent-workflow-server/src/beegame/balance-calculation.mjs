@@ -11,7 +11,7 @@ Run from the project root. This executes project-authored code with the native t
 permissions, not inside the BGS server or a sandbox supplied by this helper.
 
 The model exports async calculate({readJson, readText}). Readers accept workspace-relative
-paths. For the eight docs/<DESIGN_NAME>.md sources, readText returns and hashes the
+paths. For docs/GDD.md, readText returns and hashes the
 body without its unique valid host-maintained Version line. readJson of content/scenes
 and --scenes supply design-only Scene data: registered asset declarations and known
 resource locator slots are omitted from BOTH the model input and freshness hash.
@@ -31,10 +31,10 @@ Static formulas or bounds do not require simulated actions. Only when claiming a
 executed scenario, show relevant initial states, requests, actual constrained actions
 and resulting states in observations or tables. Preserve that scope in prose.
 
-Joint Review inspects an existing calculation against its source definitions and
+Review an existing calculation against its source definitions and
 actual results. No second verifier or simulator is a document requirement.
 The optional --verify entry is for separately authorized code execution, not
-bounded read-only Inspect/Verify. A separate module exports
+read-only review. A separate module exports
 async verify({tables, observations, readJson, readText}) and returns
 {checks:[{name, passed:boolean, details:string}], limitations:string[]} with at least
 one check. The verifier receives data snapshots, not the model's passed flags or
@@ -67,7 +67,7 @@ Unrecorded imports, a passing script and a valid table do not prove the model,
 assumptions, visual quality, runtime behavior or game feel correct.`
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const designDocument = /^docs\/(?:GDD|TECHNICAL_DESIGN|ART_DIRECTION|AUDIO_DESIGN|LEVEL_SCENE_DESIGN|BALANCE_DESIGN|UI_UX_SPEC|ASSET_PLAN)\.md$/
+const designDocument = /^docs\/GDD\.md$/
 function calculationSource(path, bytes, scope) {
   if (scope === 'scene-design-v1') {
     if (!/^content\/scenes\/.+\.json$/.test(path)) throw Error('Invalid Scene design source: ' + path)

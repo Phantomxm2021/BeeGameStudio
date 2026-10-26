@@ -248,8 +248,8 @@ FontFace 加载成功不等于所有字符都由该字体绘制。已知缺字�
 
 - [项目事件与用量记录](/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/classic-snake-arcade--21485f566a4a/.beegame/chat/project-events.jsonl)
 - [原生主会话及同目录子任务记录](/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/.runtime/app/projects/-Users-nswell-Documents-PhantomsXR-Projects-InternalProjects-Others-BeeGameStudio-Projects-users-30fb0202-1f77-414f-82da-f92936e7bba3-classic-snake-arcade--21485f566a4a/0f59a087-c0de-4fe1-933d-cc860a6f90a0.jsonl)
-- [阶段任务与上下文](../packages/agent-workflow-server/src/beegame/project-conversation.ts)
-- [原生分派及等待](../src/beegame/native-assignments.ts)
+- 历史阶段任务与上下文：`packages/agent-workflow-server/src/beegame/project-conversation.ts`（旧路径，当前树不存在）；当前任务工具边界见 [workflow-v3 工具](../packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts)。
+- 历史原生分派及等待：`src/beegame/native-assignments.ts`（旧路径，当前树不存在）；当前路由与宿主边界见 [workflow-v3 路由](../packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts) 和 [应用入口](../packages/agent-workflow-server/src/app.ts)。
 - 历史浏览器检查路径：`packages/agent-workflow-server/src/beegame/design-browser-inspection.mjs`（2026-10-22 已退役，见页首维护说明）
 - [Preview 生命周期](../packages/agent-workflow-server/src/beegame/preview-test-access.ts)
 - [UI Editor 绘制](../apps/frontend/src/components/Workspace/UiEditorOverlay.tsx)

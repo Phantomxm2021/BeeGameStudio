@@ -20,10 +20,13 @@ export function DotsAvatar({ token, mood, label, inputValue = '' }: { token: str
     let disposed = false;
     const observer = new MutationObserver(() => renderer.current?.update(options()));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    // Reduced-motion avatars have no frame loop to notice layout changes.
+    const resize = new ResizeObserver(() => renderer.current?.update(options()));
+    if (canvasRef.current?.parentElement) resize.observe(canvasRef.current.parentElement);
     void import('./vendor/dots-lab.js').then(({ animateDot }) => {
       if (!disposed && canvasRef.current) renderer.current = animateDot(canvasRef.current, options());
     });
-    return () => { disposed = true; observer.disconnect(); renderer.current?.dispose(); renderer.current = null; };
+    return () => { disposed = true; observer.disconnect(); resize.disconnect(); renderer.current?.dispose(); renderer.current = null; };
   }, [options]);
   useEffect(() => {
     const previousMood = latest.current.mood;

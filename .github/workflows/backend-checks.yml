@@ -87,6 +87,11 @@ jobs:
           packages/agent-workflow-server/src/beegame/workflow-v3/project-guide.test.ts
           packages/beegame-resource-server/src/__tests__/resource-dependency-bindings.test.ts
           packages/beegame-resource-server/src/__tests__/resource-inspection.test.ts
+          packages/beegame-resource-server/src/__tests__/r2-resource-storage.test.ts
+          packages/beegame-resource-server/src/__tests__/r2-resource-lifecycle.test.ts
+          packages/beegame-resource-server/src/__tests__/lifecycle-handlers.test.ts
+          packages/beegame-resource-server/src/__tests__/resource-processing-jobs.test.ts
+          packages/beegame-resource-server/src/__tests__/resource-folder-rename.sql.test.ts
           packages/agent-workflow-server/src/image-generation
           packages/agent-workflow-server/src/beegame/project-asset-command.test.ts
           packages/agent-workflow-server/src/beegame/model-runtime-security.test.ts
@@ -96,11 +101,31 @@ jobs:
           packages/agent-workflow-server/src/__tests__/asset-manifest-async-read.test.ts
           packages/agent-workflow-server/src/__tests__/v3-legacy-session-mutation.test.ts
           packages/agent-workflow-server/src/__tests__/v3-project-delete-route.test.ts
+          packages/agent-workflow-server/src/__tests__/session-worker-boundaries.test.ts
+          packages/agent-workflow-server/src/__tests__/intake-scope.test.ts
+          packages/agent-workflow-server/src/__tests__/runtime-status-route.test.ts
+          packages/agent-workflow-server/src/__tests__/r2-deployment-publisher.test.ts
+          packages/agent-workflow-server/src/beegame/publication-description.test.ts
+          packages/agent-workflow-server/src/beegame/resource-library-access.test.ts
+          packages/agent-workflow-server/src/beegame/resource-production.test.ts
+          packages/agent-workflow-server/src/beegame/session-usage-outbox.test.ts
+          packages/beegame-resource-server/src/__tests__/selection-route.test.ts
+          packages/agent-workflow-server/src/__tests__/project-bootstrap-preflight.test.ts
+          packages/agent-workflow-server/src/__tests__/formal-v3-bootstrap.test.ts
+          packages/agent-workflow-server/src/__tests__/dashboard-repository.test.ts
+          packages/agent-workflow-server/src/__tests__/r2-project-asset-storage.test.ts
+          packages/beegame-resource-server/src/__tests__/app.test.ts
           scripts/__tests__/saas-preflight.test.ts
           scripts/__tests__/supabase-rest-pagination.test.ts
           scripts/__tests__/docker-runtime-permissions.test.ts
           scripts/__tests__/beegame-owner-bootstrap.test.ts
           scripts/__tests__/beegame-migration-cli.test.ts
+      - name: Run deployment lifecycle regressions
+        run: |
+          bun test packages/agent-workflow-server/src/__tests__/deployment-manager.test.ts -t 'does not replace an unreadable deployment record file during retention'
+          bun test packages/agent-workflow-server/src/__tests__/deployment-manager.test.ts -t 'retention keeps remote records when the local manager cannot delete them'
+          bun test packages/agent-workflow-server/src/__tests__/deployment-manager.test.ts -t 'cleans a completed publication when public verification fails'
+          bun test packages/agent-workflow-server/src/__tests__/deployment-manager.test.ts -t 'cleans a successful Supabase publication|cleans attempted Supabase objects|surfaces Supabase cleanup failure'
 
   native:
     # Existing native fixtures exercise macOS Seatbelt and use /private/tmp.

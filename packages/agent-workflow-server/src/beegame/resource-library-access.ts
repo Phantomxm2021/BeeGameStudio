@@ -25,11 +25,12 @@ export function openResourceLibraryAccess(input: {
       const path = url.pathname.slice(prefix.length)
       // Exact read-only API shapes. In particular no arbitrary URL, upload,
       // inspection job, catalog mutation or administrative endpoint is proxied.
-      const catalogQuery = request.method === 'POST' && (
+      const bodyQuery = request.method === 'POST' && (
         path === '/api/resource-catalog/packs' ||
-        /^\/api\/resource-catalog\/packs\/[\w-]+\/elements$/.test(path)
+        /^\/api\/resource-catalog\/packs\/[\w-]+\/elements$/.test(path) ||
+        path === '/api/resource-library/resolve'
       )
-      const readable = catalogQuery || request.method === 'GET' && (
+      const readable = bodyQuery || request.method === 'GET' && (
         path === '/api/resource-search' ||
         /^\/api\/resource-packs(?:\/[\w-]+(?:\/elements(?:\/[\w-]+(?:\/resource-url)?)?)?)?$/.test(path)
       )
@@ -41,7 +42,7 @@ export function openResourceLibraryAccess(input: {
         const response = await (input.fetchImpl ?? fetch)(new URL(path + url.search, upstream), {
           method: request.method,
           headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
-          ...(catalogQuery ? { body: await request.text() } : {}),
+          ...(bodyQuery ? { body: await request.text() } : {}),
           redirect: 'error',
           signal: AbortSignal.timeout(30_000),
         })
@@ -60,7 +61,7 @@ export function openResourceLibraryAccess(input: {
     baseUrl: base,
     instruction: [
       'Built-in resource library is available. Its catalog exposes pack/element facets, previews, license and dependency metadata; access failures are not empty search results.',
-      'Use the optional project asset command described in the current project context for catalog browsing and selected-file download.',
+      'Use the optional project asset command described in the current project context for catalog browsing and explicit selected-file download; fetch resolves and downloads the selected element dependency closure.',
     ].join('\n'),
     catalogObserved() { return catalogObserved },
     close() { server.stop(true) },

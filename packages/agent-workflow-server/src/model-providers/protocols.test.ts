@@ -288,6 +288,65 @@ test('tool calls complete without usage and retain their identity and arguments'
   expect(result).not.toHaveProperty('usage')
 })
 
+test('the provider adapter omits only an empty exec_command justification before native dispatch', async () => {
+  const cases = [
+    {
+      name: 'exec_command',
+      args: '{"command":"printf ok","justification":""}',
+      expected: '{"command":"printf ok"}',
+    },
+    {
+      name: 'exec_command', namespace: 'functions',
+      args: '{"command":"printf ok","justification":""}',
+      expected: '{"command":"printf ok"}',
+    },
+    {
+      name: 'exec_command',
+      args: '{"command":"printf ok","justification":"needs approval"}',
+      expected: '{"command":"printf ok","justification":"needs approval"}',
+    },
+    {
+      name: 'exec_command',
+      args: '{"command":"printf ok","justification":"","sandbox_permissions":"use_default"}',
+      expected: '{"command":"printf ok","justification":"","sandbox_permissions":"use_default"}',
+    },
+    {
+      name: 'probe',
+      args: '{"value":"fixture","justification":""}',
+      expected: '{"value":"fixture","justification":""}',
+    },
+    {
+      name: 'exec_command',
+      args: '{"command":',
+      expected: '{"command":',
+    },
+  ]
+  for (const [index, item] of cases.entries()) {
+    const tools = item.namespace
+      ? [{ type: 'namespace', name: item.namespace, tools: [{ type: 'function', name: item.name }] }]
+      : [{ type: 'function', name: item.name }]
+    const response = await requestProvider(base, {
+      input: 'Synthetic command request', tools, stream: true,
+    }, mockFetch(async () => sse([{
+      choices: [{ delta: { tool_calls: [{ index: 0, id: 'exec-' + index,
+        function: { name: item.name, arguments: item.args } }] }, finish_reason: 'tool_calls' }],
+    }])), signal())
+    const events = []
+    for await (const event of parseSse(response)) events.push(event)
+    const result: any = events.find(event => event.type === 'response.completed')?.response
+    const call = result?.output.find((entry: any) => entry.type === 'function_call')
+    expect(call).toMatchObject({ name: item.name, arguments: item.expected, status: 'completed' })
+    expect(events.find(event => event.type === 'response.function_call_arguments.done')).toMatchObject({
+      arguments: item.expected,
+    })
+    if (item.namespace) expect(call.namespace).toBe(item.namespace)
+    else expect(call).not.toHaveProperty('namespace')
+    // The provider's opaque raw response remains an opaque replay record; the
+    // normalized function_call above is the only item dispatched natively.
+    expect(result?.output.some((entry: any) => entry.type === 'reasoning')).toBe(true)
+  }
+})
+
 test('truncation stays incomplete and missing terminal events fail regardless of usage', async () => {
   const incomplete = mockFetch(async () =>
     sse([

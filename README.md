@@ -70,6 +70,8 @@ Then apply `supabase/migrations/20261020030000_usage_wallet_initialization.sql`.
 
 Deploy the updated billing service before the runtime host. Remote billing now exposes the service-token-protected `/api/internal/usage/authorize` endpoint; an older or unavailable billing service blocks new model work rather than allowing unbilled requests. This endpoint requires no additional database migration.
 
+Before deploying the resource server, apply [the resource folder rename migration](supabase/migrations/20261025010000_resource_folder_rename_transaction.sql) after the existing Resource authoring and R2 storage schema. Folder renames now update folder, element, and storage logical paths in one database transaction. A missing RPC fails explicitly; there is no fallback to separate writes. Physical R2 object keys are unchanged.
+
 ## Adding an HTTP MCP server
 
 Remote MCP endpoints accept public HTTPS without adding each hostname to `BEEGAME_OUTBOUND_ALLOWED_HOSTS`; that setting continues to govern model/provider requests. The MCP policy rejects embedded credentials, private/local/metadata IPs and nonstandard ports (the existing 443/80 port policy), checks every DNS answer and pins the connection to the approved IP. Redirects remain disabled. If local DNS returns only proxy Fake-IP addresses in `198.18.0.0/15`, BGS obtains real IPv4 addresses through [Cloudflare DNS over HTTPS](https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/dns-json/), bootstrapped at `1.1.1.1` with TLS hostname verification, then applies the same public-IP checks. An unavailable or invalid fallback never permits the synthetic address. Other private DNS answers are rejected without fallback. Saving, imported configuration discovery, connection testing and the native MCP relay share this policy. Host-authorized bounded loopback discovery remains separate.
@@ -89,6 +91,7 @@ In Settings → MCP → Actions, choose **Add MCP (command)** and paste `bgs mcp
 - With remote billing, each auxiliary request (including repair calls) and agent turn first settles the owner's pending usage and checks available credit. Insufficient credit blocks subsequent model work while preserving already generated results. This is a positive-balance check, not a maximum-cost reservation; concurrently authorized work can still finish.
 - Subscription account replacement/logout waits for agent turns, native process cleanup, auxiliary workers, image requests, token refresh and model catalog reads to finish. A UI stop alone does not release the credential guard. This coordination is scoped to one BGS host process; do not run separate hosts against the same owner credential directory.
 - Shutdown rejects new HTTP work, drains admitted requests and detached intake jobs, then closes sessions and their settlement outbox. Direct session-manager starts and sends are also rejected once its disposal begins.
+- `GET /api/admin/runtime-status` requires `lifecycle.admin` and returns read-only host activity counts, cleanup failures, pending usage settlement and unresolved writers in the configured workflow store. It stays readable during drain without counting itself as work. Missing observations are `unknown`; `idle` is a snapshot, not permission to restart. Check external resource-service jobs and independently launched processes separately; remote workflow counts can include other hosts.
 - Auxiliary tasks use provider sampling defaults. Explicit API `temperature` values are validated and forwarded unchanged, including zero; provider rejection is surfaced without retries. The subscription transport rejects explicit temperature. Tasks do not force a common temperature across models because [reasoning-model support varies](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.4).
 - Bgs runs with an explicit permission profile. Project files are writable; host configuration, other projects and protected design files are outside ordinary write access. Required OS sandbox support must be available; there is no unsandboxed fallback.
 - `WriteProjectFile` and `EditProjectFile` route protected design/guide edits through BGS's current permission authority. The design lock cannot be bypassed with a shell or native patch tool. `AskUserQuestion` preserves the existing BGS question and authorization flow.
@@ -98,9 +101,47 @@ In Settings → MCP → Actions, choose **Add MCP (command)** and paste `bgs mcp
 
 ## Existing projects and history
 
+Project Git initialization maintains one marked BGS block at the beginning of
+`.gitignore` and Git's local `info/exclude`. Custom rules stay intact after that
+block, including negations. The shared `info/exclude` contains only common rules;
+engine rules stay in each worktree's `.gitignore`. Bootstrap and cloning pass the confirmed engine;
+starting a turn uses the current/recovered confirmed brief. React, Unity, Godot
+and Unreal select small fixed rule lists; an absent/unknown engine gets only
+common rules. Existing non-Git sessions remain non-Git. Repeated setup is a
+no-op; changing the engine replaces owned rules instead of accumulating them.
+The exact previous BGS template is migrated; edited legacy text stays custom.
+Commits, configuration, staged changes and working files are not removed.
+
+Common rules cover BGS transcripts, runtime caches and diagnostic records,
+Node dependencies, local environment files and OS metadata. Engine rules cover
+React output/Vite/TypeScript caches; Unity Library/Temp/obj/Logs/UserSettings;
+Godot .godot/.import/.mono directories; and Unreal Intermediate/Saved/DerivedDataCache
+and direct plugin Intermediate directories. Native caches are root-scoped.
+Unreal Binaries and Build are deliberately retained: compiled distributions and
+platform build inputs can be required. Custom export folders are not guessed.
+Source, assets, reports, lockfiles, Unity .meta and package/project settings,
+Godot .uid and individual .import files, and plugin binaries remain visible
+unless the project's own rules exclude them. Already tracked files stay tracked.
+
+Directory boundaries follow [Unity's project directories](https://docs.unity.com/en-us/engine/6000.7/manual/get-started/project-configuration/default-directories),
+[Godot's version-control guidance](https://docs.godotengine.org/en/stable/tutorials/best_practices/version_control_systems.html)
+and [Unreal's directory structure](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-directory-structure).
+Godot export presets are retained as configuration; legacy Godot 3/4.0 projects
+may store credentials there and need their own version-specific rule. BGS does
+not infer engine versions or hide all resource/binary extensions.
+
+Ignore rules prevent future indexing; they do not remove existing Git objects.
+For a bloated repository, first identify its writer and inspect refs, index,
+reflogs and object types. Temporary indexes used by external diff clients can
+still write blobs into the original object database. Only prune unreachable
+objects after writers are quiescent and recovery needs are checked; use a fixed
+cutoff and inspect `git prune --dry-run --expire=<cutoff>` first. BGS does not
+rewrite history or prune automatically. A repository without commits is not a
+version-history backup.
+
 Live session ingestion accepts only structured BGS `runtime_event` messages; provider usage arrives through the runtime accounting callback. The retired Claude SDK stream/result adapter and output-file polling projection are removed. BGS Chat transcripts and verification evidence remain readable. Bgs threads are marked explicitly in persisted runtime/workflow records. A legacy agent session is continued from existing project files and BGS handoff facts in a new Bgs context; its UUID is never treated as a Bgs resumable thread. No existing game artifacts, credentials or historical evidence are rewritten by this source migration.
 
-Chat tools expand in place with BeUI ToolResult; full details and subagents remain available in a drawer. Complete tool output is retained separately from the short message summary, and native command progress carries cumulative output. Confirmed file edits with actual diff data use one FileDiff entry. Native diffs are projected from their structured field, including legacy Bgs file-change receipts that stored it in output; arbitrary shell output is not classified as a file change. Markdown code blocks and file reads use CodeBlock, preserving copied source and any known read-line gutter. Activity follows new output until the user scrolls up or starts inspecting an entry, and inspected results stay expanded when the turn ends. These are presentation changes, not project validation or edits to historical transcripts.
+Chat tools expand in place with BeUI ToolResult; full details and subagents remain available in a drawer. Complete tool output is retained separately from the short message summary, and native command progress carries only the new text chunk; the final receipt owns the complete result. Confirmed file edits with actual diff data use one FileDiff entry. Native diffs are projected from their structured field, including legacy Bgs file-change receipts that stored it in output; arbitrary shell output is not classified as a file change. Markdown code blocks and file reads use CodeBlock, preserving copied source and any known read-line gutter. Activity follows new output until the user scrolls up or starts inspecting an entry, and inspected results stay expanded when the turn ends. These are presentation changes, not project validation or edits to historical transcripts.
 
 ## Verification
 
@@ -143,3 +184,8 @@ Historical architecture notes and `docs/verification` retain their original evid
 ## Notices
 
 BGS is developed by PhantomLab. Retained source and dependencies keep their applicable copyright and license notices; see [NOTICE.md](NOTICE.md). The upstream Codex package is Apache-2.0 licensed. This does not declare a new license for the entire BGS repository.
+
+
+Project Chat has one event-body store: `.beegame/chat/project-events.jsonl`. Session recovery, status queries, SSE and paged history all read it; no per-session `transcripts/` files or mirrored event journal are created. Event IDs increase across the project, while host recovery filters facts by session. There is no old-directory fallback or automatic log migration. `logs/index.json` only locates sessions, and bounded transport diagnostics remain separate.
+
+History indexes retain byte offsets and small routing metadata. A cold index scans the canonical file in 256 KiB chunks; later reads scan appended bytes only and materialize the selected page. Display reads limit full record bodies to 4 MiB and total full bodies per page to 8 MiB, with explicit omission markers for oversized details; authoritative permission/usage reads fail on an oversized required record rather than treating an omission as evidence. A torn final record blocks resumed appends without rewriting the source. HTTP event batches are capped at 500 rows; transcript endpoints expose cursors instead of loading all bodies before paging. The old duplicate log files are neither read nor automatically deleted.

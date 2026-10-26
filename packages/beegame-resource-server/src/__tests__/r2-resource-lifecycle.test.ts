@@ -11,6 +11,7 @@ function storageStub(
   return {
     upload: async () => ({ storageObjectId: 'object-new' }),
     getFile: async () => undefined,
+    headObject: async () => ({ byteSize: 1, metadata: {} }),
     createDownloadUrl: async () => undefined,
     updateLogicalPath: async () => undefined,
     delete: async () => false,

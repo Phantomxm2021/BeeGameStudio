@@ -4,11 +4,22 @@ import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { createBgsRunner, bgsUsage, bgsProviderConfig, editProtectedFileText, bgsApplicationContext } from './runner'
 import { BeeGameSessionManager, getLatestRuntimeUsage, type BeeGameEvent, type DashboardPermissionRequest } from '../beegame/session-manager'
+import { appendChatTranscript } from '../beegame/project-records'
 import * as browserCleanup from '../beegame/native-test-browser-cleanup'
+import type { BgsClient } from './client'
 
 const resolveOutboundTarget: typeof import('@bee-game-studio/security-core').resolveApprovedOutboundTarget = async (value) => ({ url: new URL(value), addresses: ['93.184.216.34'],
   lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) })
 const command = [process.execPath, fileURLToPath(new URL('./fixtures/app-server.ts', import.meta.url))]
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw Error('Fixture condition did not become true')
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
 test('application context preserves complete UTF-8 values within native field limits and ordering', () => {
   expect(bgsApplicationContext('fixture')).toEqual({})
   for (const value of ['', 'a'.repeat(3999), 'a'.repeat(4000), 'a'.repeat(4001),
@@ -39,27 +50,37 @@ test('game Agent startup rejects a missing or empty catalog before starting nati
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<string, string> = {}, network = resolveOutboundTarget, resumeSessionId?: string) {
+async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<string, string> = {}, network = resolveOutboundTarget, resumeSessionId?: string,
+  nativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput, nativeRecovery = false,
+  permissionHandler?: (request: DashboardPermissionRequest) => Promise<import('../beegame/session-manager').DashboardPermissionDecision>) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
+  const childPidFile = join(root, 'owned-child.pid')
   await mkdir(join(workspace, 'docs'), { recursive: true })
   const events: Record<string, any>[] = [], usage: BeeGameEvent[] = [], questions: unknown[] = []
   let sessionId = ''
   const runtime = await createBgsRunner({ command, resolveOutboundTarget: network }).start({ sessionId: 'fixture', cwd: workspace,
-    env: { BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only', ...env },
+    env: { BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only', BGS_FIXTURE_RPC_TRACE: join(root, 'rpc.jsonl'),
+      ...(env.BGS_FIXTURE_NATIVE_GOAL_FINALIZE === '1' ? { BGS_FIXTURE_NATIVE_GOAL_CHILD_PID_FILE: childPidFile } : {}), ...env },
     ...(resumeSessionId ? { resumeSessionId } : {}),
+    ...(nativeGoal ? { nativeGoal } : {}),
+    ...(nativeRecovery ? { nativeRecovery } : {}),
     onNativeSessionId: id => { sessionId = id },
     onNativeUsage: (value, epoch, accounting) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
       payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value,
         ...(accounting?.baselineOnly ? { usageBaselineOnly: true } : {}),
-        ...((accounting as { replayed?: boolean } | undefined)?.replayed ? { usageReplayed: true } : {}) } }),
+        ...(accounting?.replayed ? { usageReplayed: true } : {}),
+        ...(accounting?.nativeTurnId ? { nativeTurnId: accounting.nativeTurnId } : {}) } }),
     requestPermission: async request => {
       questions.push(request)
+      if (permissionHandler) return permissionHandler(request)
       return { behavior: permission, source: 'policy', ...(permission === 'deny' ? { message: 'Fixture policy denied the operation' } : {}), updatedInput: { ...request.input, answers: { 'Choose style': 'A' } } }
     },
   })
-  const submit = (prompt: Parameters<typeof runtime.submit>[0]['prompt'], signal = new AbortController().signal) => runtime.submit({ prompt, signal,
+  const submit = (prompt: Parameters<typeof runtime.submit>[0]['prompt'], signal = new AbortController().signal,
+    submitNativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput) => runtime.submit({ prompt, signal,
+    ...(submitNativeGoal ? { nativeGoal: submitNativeGoal } : {}),
     onMessage: message => { events.push(message) }, requestPermission: async () => ({ behavior: 'deny' }) })
-  return { root, workspace, runtime, events, usage, questions, sessionId, submit,
+  return { root, workspace, childPidFile, runtime, events, usage, questions, sessionId, submit,
     async close() { await runtime.dispose?.(); await rm(root, { recursive: true, force: true }) } }
 }
 
@@ -76,11 +97,126 @@ test('streams text once, preserves tool lifecycle, and counts cached tokens once
   } finally { await f.close() }
 }, 30_000)
 
+test('native Goal injects the current assignment before activation and owns continuation boundaries', async () => {
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget, undefined,
+    { mode: 'start', objective: 'Finish the native fixture Goal' })
+  try {
+    await f.submit('native assignment')
+    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal')
+      .map(event => event.nativeGoal?.status)).toEqual(['active', 'complete'])
+    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal_turn_started')).toHaveLength(1)
+    expect(f.events.find(event => event.eventType === 'assistant.message')?.text).toBe('Native Goal: native assignment')
+    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal_turn_completed')).toHaveLength(1)
+  } finally { await f.close(); cleanup.mockRestore() }
+}, 30_000)
+
+test('host-controlled native Goal completion closes the turn without another model turn and cleans owned children', async () => {
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  const f = await fixture('allow', {
+    OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_GOAL_FINALIZE: '1',
+  }, resolveOutboundTarget, undefined, { mode: 'start', objective: 'Finalize the delivery' })
+  let submit: Promise<void> | undefined
+  let childPid = 0
+  try {
+    submit = f.submit('delivery submission')
+    await waitUntil(() => f.events.some(event => event.eventType === 'tool.started' && event.toolUseID === 'submission-command'))
+    childPid = Number(await readFile(f.childPidFile, 'utf8'))
+    expect(childPid).toBeGreaterThan(0)
+    expect(() => process.kill(childPid, 0)).not.toThrow()
+
+    await (f.runtime as unknown as { completeGoal(): Promise<void> }).completeGoal()
+    await submit
+    await waitUntil(() => {
+      try { process.kill(childPid, 0); return false } catch { return true }
+    })
+
+    expect(f.events.filter(event => event.eventType === 'assistant.message')).toHaveLength(0)
+    expect(f.events.filter(event => event.eventType?.startsWith('tool.')).map(event => event.eventType))
+      .toEqual(['tool.started', 'tool.completed'])
+    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal_turn_started')).toHaveLength(1)
+    expect(f.events.findLast(event => event.eventType === 'system.status' && event.subtype === 'native_goal')?.nativeGoal?.status).toBe('complete')
+    expect(getLatestRuntimeUsage(f.usage)).toMatchObject({ total_tokens: 130 })
+  } finally {
+    await submit?.catch(() => {})
+    await f.close()
+    cleanup.mockRestore()
+    if (childPid) { try { process.kill(childPid, 'SIGKILL') } catch {} }
+  }
+}, 30_000)
+
+test('host-controlled completion publishes the goal/set response when no Goal update notification follows', async () => {
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  const f = await fixture('allow', {
+    OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_GOAL_FINALIZE: '1',
+    BGS_FIXTURE_NATIVE_GOAL_FINALIZE_NO_UPDATED: '1',
+  }, resolveOutboundTarget, undefined, { mode: 'start', objective: 'Finalize without a Goal update notification' })
+  let submit: Promise<void> | undefined
+  let childPid = 0
+  try {
+    submit = f.submit('delivery submission without update')
+    await waitUntil(() => f.events.some(event => event.eventType === 'tool.started' && event.toolUseID === 'submission-command'))
+    childPid = Number(await readFile(f.childPidFile, 'utf8'))
+    expect(childPid).toBeGreaterThan(0)
+    await (f.runtime as unknown as { completeGoal(): Promise<void> }).completeGoal()
+    await submit
+    await waitUntil(() => {
+      try { process.kill(childPid, 0); return false } catch { return true }
+    })
+
+    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal')
+      .map(event => event.nativeGoal?.status)).toEqual(['active', 'complete'])
+    expect(f.events.filter(event => event.eventType === 'assistant.message')).toHaveLength(0)
+    expect(getLatestRuntimeUsage(f.usage)).toMatchObject({ total_tokens: 130 })
+  } finally {
+    await submit?.catch(() => {})
+    await f.close()
+    cleanup.mockRestore()
+    if (childPid) { try { process.kill(childPid, 'SIGKILL') } catch {} }
+  }
+}, 30_000)
+
+test('native Goal keeps one outer turn across multiple native continuations', async () => {
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_GOAL_TURNS: '2' }, resolveOutboundTarget, undefined,
+    { mode: 'start', objective: 'Run two native continuations' })
+  try {
+    await f.submit('two-turn assignment')
+    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal_turn_started')).toHaveLength(2)
+    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal_turn_completed')).toHaveLength(2)
+    expect(f.events.filter(event => event.eventType === 'assistant.message').map(event => event.text)).toEqual([
+      'Native Goal: two-turn assignment', 'Native Goal: two-turn assignment',
+    ])
+    expect(f.events.findLast(event => event.eventType === 'system.status' && event.subtype === 'native_goal')?.nativeGoal?.status).toBe('complete')
+  } finally { await f.close(); cleanup.mockRestore() }
+}, 30_000)
+
+test('native Goal tool requests wait for ordered turn admission when a prior host event is slow', async () => {
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  const f = await fixture('allow', {
+    OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_GOAL_WRITE: '1',
+  }, resolveOutboundTarget, undefined, { mode: 'start', objective: 'Write the protected design record' })
+  try {
+    await f.runtime.submit({
+      prompt: 'delayed native write', signal: AbortSignal.timeout(30_000),
+      onMessage: async message => {
+        f.events.push(message)
+        if (message.eventType === 'system.status' && message.subtype === 'native_goal' &&
+          (message.nativeGoal as { status?: unknown } | undefined)?.status === 'active')
+          await new Promise(resolve => setTimeout(resolve, 50))
+      },
+      requestPermission: async () => ({ behavior: 'allow', source: 'policy' }),
+    })
+    expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('Native Goal protected write')
+    expect(f.events.some(event => event.subtype === 'native_goal_turn_started')).toBe(true)
+  } finally { await f.close(); cleanup.mockRestore() }
+}, 30_000)
+
 test('changed requirements cannot run with an obsolete native instruction baseline', async () => {
   const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' })
   try {
     await expect(f.runtime.submit({ prompt: 'Changed goal', confirmedBriefContext: 'new confirmed goal',
-      signal: new AbortController().signal, onMessage() {},
+      signal: new AbortController().signal, onMessage() {}, requestPermission: async () => ({ behavior: 'deny' }),
     })).rejects.toThrow('Confirmed requirements changed after BGS runtime preparation')
     expect(f.events).toHaveLength(0)
     expect(f.usage).toHaveLength(0)
@@ -100,17 +236,19 @@ test('converted providers retain native counters as baselines without counting t
 }, 30_000)
 
 test('resume token usage is marked as replay while the following live turn is not', async () => {
-  const f = await fixture('allow', { BGS_FIXTURE_REPLAY_RESUME_USAGE: '1' }, resolveOutboundTarget,
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_REPLAY_RESUME_USAGE: '1' }, resolveOutboundTarget,
     '019a0000-0000-7000-8000-000000000001')
   try {
     const replayed = f.usage.filter(event => event.payload?.usageReplayed === true)
     expect(replayed.length).toBeGreaterThan(0)
     expect(replayed.every(event => event.payload?.nativeAccountingEpoch === 'bgs:019a0000-0000-7000-8000-000000000001')).toBe(true)
+    expect(replayed.every(event => event.payload?.nativeTurnId === 'historical-turn')).toBe(true)
 
     await f.submit('hello')
     const live = f.usage.filter(event => event.payload?.usageReplayed !== true)
     expect(live.length).toBeGreaterThan(0)
     expect(live.every(event => event.payload?.usageReplayed !== true)).toBe(true)
+    expect(live.every(event => event.payload?.nativeTurnId === 'turn-1')).toBe(true)
   } finally { await f.close() }
 }, 30_000)
 
@@ -155,7 +293,9 @@ test('native command lifecycle retains cwd through progress and a completion tha
   try {
     await f.submit('command-progress')
     const progress = f.events.filter(e => e.eventType === 'tool.progress')
-    expect(progress.map(e => e.output)).toEqual(['Bu', 'Built'])
+    expect(progress.map(e => e.text)).toEqual(['Bu', 'ilt'])
+    expect(progress.map(e => e.output)).toEqual(['Bu', 'ilt'])
+    expect(f.events.find(e => e.eventType === 'tool.completed')?.output).toBe('Built')
     const tools = f.events.filter(e => e.eventType.startsWith('tool.'))
     expect(tools.map(e => e.eventType)).toEqual(['tool.started', 'tool.progress', 'tool.progress', 'tool.completed'])
     expect(tools.map(e => e.input)).toEqual(Array(4).fill({ command: 'bun run build', cwd: join(f.workspace, 'command-workdir') }))
@@ -227,6 +367,36 @@ test('failure, process loss and unfinished child work never resolve as success',
   }
 }, 30_000)
 
+test.each(['running', 'pending', 'turn-started'])(
+  'reused child %s prevents premature parent completion', async outcome => {
+    const f = await fixture()
+    try { await expect(f.submit('reused-child:' + outcome)).rejects.toThrow('unfinished child work') }
+    finally { await f.close() }
+  })
+
+test.each(['completed', 'turn-completed', 'errored', 'interrupted', 'shutdown', 'notFound'])(
+  'reused child terminal state %s releases the running slot', async outcome => {
+    const f = await fixture()
+    try {
+      await f.submit('reused-child:' + outcome)
+      expect(f.events.findLast(event => event.childThreadId === 'reused-child')?.childStatus)
+        .toBe(outcome === 'turn-completed' ? 'completed' : outcome)
+    } finally { await f.close() }
+  })
+
+test('host-controlled Goal completion refuses a running reused child', async () => {
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_GOAL_FINALIZE: '1',
+    BGS_FIXTURE_REUSED_CHILD: '1' }, resolveOutboundTarget, undefined, {mode:'start',objective:'Offline reused-child check'})
+  const abort = new AbortController()
+  const submitted = f.submit('delivery submission', abort.signal).catch(error => error)
+  try {
+    await waitUntil(() => f.events.some(event => event.toolUseID === 'submission-command'))
+    await expect((f.runtime as unknown as {completeGoal():Promise<void>}).completeGoal())
+      .rejects.toThrow('requires all child agents to finish')
+    expect(f.events.findLast(event => event.subtype === 'native_goal')?.nativeGoal?.status).toBe('active')
+  } finally { abort.abort(); await submitted; await f.close() }
+})
+
 test('failed turns retain upstream error details from completion or the preceding error notification', async () => {
   for (const prompt of ['failure-details', 'failure-notification']) {
     const f = await fixture()
@@ -239,10 +409,11 @@ test('failed turns retain upstream error details from completion or the precedin
   }
 }, 10000)
 
-test('cancellation closes a waiting process before returning', async () => {
+test.each(['hang', 'reused-child:cancel'])('cancellation closes waiting work before returning: %s', async prompt => {
   const f = await fixture(), abort = new AbortController()
   try {
-    const result = f.submit('hang', abort.signal)
+    const result = f.submit(prompt, abort.signal)
+    if (prompt !== 'hang') await waitUntil(() => f.events.some(event => event.childThreadId === 'reused-child' && event.childStatus === 'running'))
     setTimeout(() => abort.abort(), 30)
     await expect(result).rejects.toThrow()
     await expect(f.submit('hello')).rejects.toThrow('stopped')
@@ -343,13 +514,11 @@ test('required Bgs skill selection fails clearly when absent and accepts a real 
   const missing=await fixture()
   try {await expect(missing.submit('$missing-fixture-skill Use method')).rejects.toThrow('Required BGS skill is unavailable')}
   finally {await missing.close()}
-  for(const name of ['game-creative-director-expert','game-first-version']) {
-    const available=await fixture()
-    try {
-      await available.submit([{type:'text',text:'Current platform facts'}, {type:'text',text:'$'+name+' Apply the method'}])
-      expect(available.events.some(event=>event.text==='Native skill selected')).toBe(true)
-    } finally {await available.close()}
-  }
+  const available=await fixture()
+  try {
+    await available.submit([{type:'text',text:'Current platform facts'}, {type:'text',text:'$game-creative-director-expert Apply the method'}])
+    expect(available.events.some(event=>event.text==='Native skill selected')).toBe(true)
+  } finally {await available.close()}
 },30000)
 
 test('an unrelated broken skill does not block valid skills, while a missing required skill still stops before submission', async () => {
@@ -363,7 +532,7 @@ test('an unrelated broken skill does not block valid skills, while a missing req
       let submitted = false
       const events: Record<string, any>[] = []
       runtime = await createBgsRunner({ command, resolveOutboundTarget }).start({ sessionId: required, cwd: game,
-        env: { BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only', BGS_FIXTURE_SKILL_CATALOG_ERROR: '1' },
+        env: { BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only', BGS_FIXTURE_RPC_TRACE: join(root, 'rpc.jsonl'), BGS_FIXTURE_SKILL_CATALOG_ERROR: '1' },
         onNativeSubmission: () => { submitted = true } })
       const result = runtime.submit({ prompt: '$'+required+' Apply the method', signal: AbortSignal.timeout(5000),
         onMessage: value => { events.push(value) }, requestPermission: async () => ({ behavior: 'deny' }) })
@@ -533,3 +702,166 @@ test('a unique line-prefix helps locate stale text without applying fuzzy or par
     {old_string:'# Design',new_string:'# Changed'}, {old_string:stale,new_string:'replacement'},
   ]})).toThrow('Nothing saved')
 })
+
+
+test('BGS bounds native child concurrency without enabling tools or overriding child models', () => {
+  for (const goals of [false, true]) {
+    const config = bgsProviderConfig({ OPENAI_AUTH_MODE: 'chatgpt' }, { goals })
+    expect(config['agents.max_concurrent_threads_per_session']).toBe(2)
+    expect(config).not.toHaveProperty('agents.enabled')
+    expect(config).not.toHaveProperty('agents.default_subagent_model')
+    expect(config).not.toHaveProperty('agents.default_subagent_reasoning_effort')
+  }
+})
+
+
+test('doubling streamed output doubles persisted bytes instead of replaying all prior chunks', async () => {
+  const sizes: number[] = []
+  for (const count of [64, 128]) {
+    const f = await fixture()
+    try {
+      await f.submit(`command-volume:${count}`)
+      const path = join(f.workspace, 'volume.jsonl')
+      const events = f.events.filter(event => event.eventType.startsWith('tool.'))
+      for (const [id, event] of events.entries()) appendChatTranscript(path, {
+        id, sessionId: 'fixture', type: event.eventType, text: event.text, payload: event, createdAt: new Date(0),
+      })
+      sizes.push((await readFile(path)).byteLength)
+      expect(events.filter(e => e.eventType === 'tool.progress').map(e => e.text).join('')).toBe('x'.repeat(count * 1024))
+      expect(events.at(-1)?.output).toBe('x'.repeat(count * 1024))
+    } finally { await f.close() }
+  }
+  expect(sizes[1]).toBeLessThan(sizes[0]! * 2.1)
+  expect(sizes[1]).toBeLessThan(1024 * 1024)
+}, 30_000)
+
+
+test('provider retry policy is left to the native CLI defaults for API and ChatGPT connections', () => {
+  for (const env of [{}, { OPENAI_AUTH_MODE: 'chatgpt' }] as Record<string, string>[]) {
+    const config = bgsProviderConfig(env) as any
+    expect(config.model_providers?.bgs).not.toHaveProperty('request_max_retries')
+    expect(config.model_providers?.bgs).not.toHaveProperty('stream_max_retries')
+  }
+})
+
+test('native retry notifications remain progress within the original submission', async () => {
+  const f = await fixture()
+  try {
+    await f.submit('native-retry')
+    expect(f.events.find(event => event.eventType === 'system.status' && event.willRetry === true)).toMatchObject({ willRetry: true })
+    expect(f.events.filter(event => event.eventType?.startsWith('assistant.')).map(event => event.text).join('')).toBe('Hello Bgs')
+    const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    expect(rpc.filter(call => call.method === 'turn/start')).toHaveLength(1)
+  } finally { await f.close() }
+})
+
+for (const status of [undefined, 'active', 'paused', 'blocked', 'complete', 'budgetLimited', 'usageLimited'])
+  test(`manual native recovery respects persisted Goal state: ${status ?? 'ordinary turn'}`, async () => {
+    const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+    const savedGoal = { objective: 'Original objective', tokenBudget: 5000, tokensUsed: 123, status }
+    const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt',
+      ...(status ? { BGS_FIXTURE_SAVED_GOAL: JSON.stringify(savedGoal) } : {}),
+    }, resolveOutboundTarget, '019a0000-0000-7000-8000-000000000001', status ? { mode: 'resume' } : undefined, true)
+    try {
+      if (['complete', 'budgetLimited', 'usageLimited'].includes(status ?? '')) {
+        await expect(f.submit('')).rejects.toThrow('already ' + status)
+      } else await f.submit('')
+      const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      expect(rpc.some(call => call.method === 'thread/start' || call.method === 'thread/goal/clear')).toBe(false)
+      for (const resume of rpc.filter(call => call.method === 'thread/resume')) {
+        expect(resume.params.excludeTurns).toBe(false)
+      }
+      const starts = rpc.filter(call => call.method === 'turn/start')
+      if (!status) {
+        expect(starts).toHaveLength(1)
+        expect(starts[0].params).toMatchObject({ threadId: '019a0000-0000-7000-8000-000000000001', input: [] })
+        expect(rpc.findIndex(call => call.method === 'thread/resume')).toBeLessThan(rpc.indexOf(starts[0]))
+      } else {
+        expect(starts).toHaveLength(0)
+        const activations = rpc.filter(call => call.method === 'thread/goal/set' && call.params.status === 'active')
+        const terminal = ['complete', 'budgetLimited', 'usageLimited'].includes(status)
+        expect(activations).toHaveLength(terminal ? 0 : 1)
+        for (const call of activations) {
+          expect(call.params).not.toHaveProperty('objective')
+          expect(call.params).not.toHaveProperty('tokenBudget')
+        }
+        const injected = rpc.filter(call => call.method === 'thread/inject_items').flatMap(call => call.params.items)
+        expect(injected.some(item => item.role === 'user')).toBe(false)
+        if (!terminal) expect(f.events.find(event => event.subtype === 'native_goal' && event.nativeGoal?.status === 'active')?.nativeGoal)
+          .toMatchObject({ objective: 'Original objective', tokenBudget: 5000, tokensUsed: 123 })
+      }
+    } finally { await f.close(); cleanup.mockRestore() }
+  })
+
+
+test('ordinary native recovery leaves an unrelated persisted Goal dormant', async () => {
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt',
+    BGS_FIXTURE_SAVED_GOAL: JSON.stringify({ objective: 'Earlier implementation', status: 'paused', tokenBudget: 5000, tokensUsed: 123 }),
+  }, resolveOutboundTarget, '019a0000-0000-7000-8000-000000000001', undefined, true)
+  try {
+    await f.submit('')
+    const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    expect(rpc.some(call => call.method.startsWith('thread/goal/'))).toBe(false)
+    expect(rpc.find(call => call.method === 'turn/start')?.params.input).toEqual([])
+  } finally { await f.close() }
+})
+
+
+test.each(['resolved', 'turn-completed', 'collab-terminal'])(
+  'child cancellation blocks late protected writes and permits a fresh reused turn: %s', async mode => {
+    const waits: Array<{ request: DashboardPermissionRequest; allow(): void }> = []
+    const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+    const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget, undefined, undefined, false,
+      request => request.phase === 'recheck' ? Promise.resolve({ behavior: 'allow' }) : new Promise(resolve => {
+        waits.push({ request, allow: () => resolve({ behavior: 'allow' }) })
+      }))
+    const client = (f.runtime as unknown as { client: BgsClient }).client
+    const abort = new AbortController(), submitted = f.submit('hang', abort.signal).catch(error => error)
+    const emit = (...events: unknown[]) => client.request('fixture/events', { events })
+    const childStatus = (tool: string, status: string) => ({ method: 'item/completed', params: {
+      threadId: f.sessionId, turnId: 'turn-1', item: { id: tool + '-' + status, type: 'collabAgentToolCall',
+        tool, receiverThreadIds: ['child'], agentsStates: { child: { status } }, status: 'completed' },
+    } })
+    const write = (id: string, turnId: string, content: string) => ({ id, method: 'item/tool/call', params: {
+      threadId: 'child', turnId, callId: id, tool: 'WriteProjectFile', arguments: { file_path: 'docs/GDD.md', content },
+    } })
+    const terminal = { method: 'turn/completed', params: { threadId: 'child', turn: { id: 'child-1', status: 'interrupted' } } }
+    const responses = async () => (await client.request('fixture/responses', {})).responses as Array<any>
+    try {
+      await writeFile(join(f.workspace, 'docs/GDD.md'), 'original')
+      // A child listener may attach after turn/started; the first live request supplies its turn ID.
+      await emit(childStatus('spawnAgent', 'running'), write('old', 'child-1', 'late old write'))
+      await waitUntil(() => waits.length === 1)
+      const cancel = mode === 'resolved'
+        ? { method: 'serverRequest/resolved', params: { threadId: 'child', requestId: 'old' } }
+        : mode === 'turn-completed' ? terminal : childStatus('wait', 'interrupted')
+      await emit(cancel)
+      await waitUntil(() => waits[0]!.request.signal?.aborted === true)
+      waits[0]!.allow()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('original')
+      expect((await responses()).some(response => response.id === 'old')).toBe(false)
+      if (mode === 'resolved') await emit(terminal)
+      await emit(childStatus('sendInput', 'running'), write('late', 'child-1', 'must not revive'))
+      await waitUntil(() => f.questions.length === 1)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect((await responses()).find(response => response.id === 'late')?.error).toBeDefined()
+      expect(waits).toHaveLength(1)
+      await emit(write('new', 'child-2', 'new authorized write'))
+      await waitUntil(() => waits.length === 2)
+      expect(waits[1]!.request.signal?.aborted).toBe(false)
+      waits[1]!.allow()
+      await waitUntil(() => f.questions.length === 3) // allow plus the live host authority recheck
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect((await responses()).find(response => response.id === 'new')?.result.success).toBe(true)
+      expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('new authorized write')
+      await emit({ method: 'turn/completed', params: { threadId: 'child', turn: { id: 'child-2', status: 'completed' } } },
+        childStatus('sendInput', 'running'), write('older-late', 'child-1', 'must stay ended across multiple reuses'))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect((await responses()).find(response => response.id === 'older-late')?.error).toBeDefined()
+      expect(waits).toHaveLength(2)
+    } finally {
+      abort.abort(); for (const wait of waits) wait.allow()
+      await submitted; await f.close(); cleanup.mockRestore()
+    }
+  }, 10_000)

@@ -25,7 +25,7 @@ import { LandingImageBackground } from './Landing/LandingImageBackground';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
-import { SettingsMenu } from './Landing/SettingsMenu';
+import { DeferredSettingsMenu as SettingsMenu } from './Landing/DeferredSettingsMenu';
 import { LandingSiteMenu, type LandingPage } from './Landing/LandingSiteMenu';
 import { AuthDialog } from './Landing/AuthDialog';
 import type { AuthMode, AuthFeedbackDialog, LegalDocumentKind, LegalDocumentBundle, Translate } from './Landing/types';

@@ -19,6 +19,8 @@ test.each([false, true])('formal project bootstrap starts the same V3 native goa
     workflowV3Store: store, modelConfigStore: false, skillsConfig: false,
     sessionRunner: { async start(input) {
       systemContexts.push(input.systemContext ?? '')
+      expect(await readFile(join(input.cwd, '.git/HEAD'), 'utf8')).toBe('ref: refs/heads/main\n')
+      expect(await readFile(join(input.cwd, '.gitignore'), 'utf8')).toContain('# Engine: React')
       workspaces.push(input.cwd)
       const nativeId = input.resumeSessionId ?? '11111111-2222-4333-8444-555555555555'
       input.onNativeSessionId?.(nativeId)
@@ -36,7 +38,7 @@ test.each([false, true])('formal project bootstrap starts the same V3 native goa
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({
         project: { id: 'formal-game', name: 'New game', created_at: Date.now() },
         brief: { idea: 'Make a small game', option: { title: 'Selected game' },
-          settings: { orientation: 'Landscape', resourceLibraryUsage: 'optional' },
+          settings: { engine: 'React', orientation: 'Landscape', resourceLibraryUsage: 'optional' },
           ...(withReference ? { attachments: [{ type: 'file', filename: 'brief.txt', mediaType: 'text/plain',
             data: Buffer.from('Synthetic reference only').toString('base64') }] } : {}),
           documentLanguage: 'en', gameUserVisibleLanguage: 'en', agentResponseLanguage: 'en' },
@@ -45,9 +47,9 @@ test.each([false, true])('formal project bootstrap starts the same V3 native goa
     const body = await response.json() as { session: { id: string }; project: { root_path: string } }
     for (let i = 0; i < 100 && prompts.length === 0; i++) await Bun.sleep(5)
     expect(prompts).toHaveLength(1)
-    // Bootstrap starts the confirmed goal, not a planning-only first turn.
-    expect(prompts[0]).toContain('Stop at the requested boundary')
-    expect(prompts[0]).not.toContain('$game-creative-director-expert')
+    // Bootstrap preserves the full brief and starts its focused professional design task.
+    expect(prompts[0]).toContain('Current professional design question (gameplay)')
+    expect(prompts[0]).toContain('$game-creative-director-expert')
     const workspace = await realpath(body.project.root_path)
     expect(workspaces).toEqual([workspace])
     if (withReference) {
@@ -58,7 +60,6 @@ test.each([false, true])('formal project bootstrap starts the same V3 native goa
     const guide = await readFile(join(workspace, 'AGENTS.md'))
     // Native BGS loads the saved guide from cwd. Host context carries its
     // identity and the current tool contract, not a duplicate guide body.
-    expect(guide.toString('utf8')).toContain('machine indexes and task coverage graphs are not required')
     expect(guide.toString('utf8')).toContain('The current user assignment determines deliverables and stopping point')
     expect(guide.toString('utf8')).toContain('Select and read applicable Skills')
     expect(systemContexts[0]).toContain('Project working conventions and navigation: AGENTS.md (SHA-256 ' +
@@ -92,7 +93,8 @@ test.each([false, true])('formal project bootstrap starts the same V3 native goa
     expect(followup.status, await followup.clone().text()).toBe(202)
     for (let i = 0; i < 100 && prompts.length < 2; i++) await Bun.sleep(5)
     expect(prompts[1]).toContain('Why is the game difficult?')
-    for (let i = 0; i < 100 && !(await store.read('formal-game', 'owner'))?.agentTurns?.[1]?.quiescedAt; i++) await Bun.sleep(5)
+    // Native exit is persisted before workflow settlement; wait for the terminal record.
+    for (let i = 0; i < 100 && !(await store.read('formal-game', 'owner'))?.agentTurns?.[1]?.finishedAt; i++) await Bun.sleep(5)
     const afterChat = (await store.read('formal-game', 'owner'))!
     expect(afterChat.agentTurns?.[1]).toMatchObject({ status: 'ended', message: { intent: 'message' } })
     expect(discussionMessagesSinceMeasurement(afterChat,

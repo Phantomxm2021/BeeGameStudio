@@ -8,7 +8,7 @@ In BGS, `ReadVerificationResults {}` reads the newest saved host result, includi
 
 ## Preview receipts
 
-For BGS Preview, resolve the current supplied entry and its help. `--run` retains an `execution.json`, `stdoutPath` and `stderrPath`; `--inspect <execution.json>` reads that receipt and current boundary identity without running the test. Read the relevant saved output for assertion meaning: exit zero and unchanged identity do not prove correct coverage. Changed inputs or a host freshness rejection still require the appropriate new check; do not relabel old evidence. Expired access needs current authorized capability, not a copied URL or relaxed permissions.
+For BGS Preview, resolve the current supplied entry and its help. `--run` retains an `execution.json`, `stdoutPath` and `stderrPath`; `--inspect <execution.json>` reads that receipt and current boundary identity without running the test. When source and inputs are unchanged, reuse the existing stable request key (`--request`), retained receipt or measurement ID to read the result rather than executing another check. Read the relevant saved output for assertion meaning: exit zero and unchanged identity do not prove correct coverage. Changed inputs or a host freshness rejection still require the appropriate new check; do not relabel old evidence. If a check fails, inspect its saved cause and change the relevant condition before rerunning; do not repeat the same failed command merely to refresh output. Expired access needs current authorized capability, not a copied URL or relaxed permissions.
 
 ## Authored UI and Scene sources
 

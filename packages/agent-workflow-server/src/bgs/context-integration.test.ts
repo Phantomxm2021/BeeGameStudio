@@ -77,16 +77,17 @@ localTest('native resume receives current BGS context as well as project instruc
   let nativeSessionId = '', runtime: Awaited<ReturnType<typeof runner.start>> | undefined
   try {
     for (const [index, marker] of ['INITIAL_GUIDE_MARKER', 'UPDATED_GUIDE_MARKER', 'SHORT_GUIDE_MARKER', 'FOCUSED_GUIDE_MARKER'].entries()) {
-      await writeFile(join(game, 'AGENTS.md'), '# Project instructions\n' + marker + '\n')
+      const guide = PROJECT_GUIDE_TEMPLATE + '\n# Project instructions\n' + marker + '\n'
+      await writeFile(join(game, 'AGENTS.md'), guide)
       run.requirements.text = index === 2 ? 'SHORT_CURRENT_BRIEF' : longBrief + '\nCURRENT_BRIEF_' + marker
       const systemContext = index === 2 ? 'CURRENT_TOOLS_DIRECTORY_' + marker : [
-        agentProfessionalContextForRun(run, index > 0), PROJECT_GUIDE_TEMPLATE,
+        agentProfessionalContextForRun(run, index > 0),
         projectGuideContext(await readProjectGuide(game)),
         'Current BGS tools directory: .beegame/tmp/goal-tools-' + marker,
         'CURRENT_TOOLS_DIRECTORY_' + marker,
         'BGS saved evidence (not game acceptance): ' + JSON.stringify({
           documents: Array.from({ length: 8 }, (_, i) => ({ path: 'docs/design-' + i + '.md', sha256: 'f'.repeat(64),
-            headings: ['目标与范围', '设计决定与开放问题'], status: 'saved; quality not verified' })),
+            headings: Array.from({ length: 16 }, (_, heading) => '设计决定与开放问题 ' + heading), status: 'saved; quality not verified' })),
           authorization: 'CURRENT_AUTHORIZATION_' + marker,
         }),
       ].join('\n')
@@ -108,6 +109,11 @@ localTest('native resume receives current BGS context as well as project instruc
       })
       const sent = JSON.stringify(inputs.at(-1))
       expect(sent).not.toContain('tokens truncated')
+      // Exercise native AGENTS loading rather than duplicating the template
+      // inside the host context: the complete current contract must arrive.
+      expect(inputs.at(-1)!.some(item => item.role === 'user' &&
+        (item.content ?? []).some((block: any) => block.text?.includes(guide)))).toBe(true)
+      expect(systemContext).not.toContain(PROJECT_GUIDE_TEMPLATE)
       expect(latestContext(inputs.at(-1)!, 'bgsRuntime')).toBe(systemContext)
       expect(latestContext(inputs.at(-1)!, 'bgsConfirmedBrief')).toBe(run.requirements.text)
       expect(sent.split(index === 2 ? 'SHORT_CURRENT_BRIEF' : 'CURRENT_BRIEF_' + marker)).toHaveLength(2)

@@ -1,6 +1,5 @@
-import { createReadStream } from 'node:fs'
-import { join } from 'node:path'
-import { createInterface } from 'node:readline'
+import { projectChatPath } from './project-records'
+import { ChatJsonlReader } from './chat-jsonl-reader'
 
 type Usage = {
   inputTokens: number
@@ -355,19 +354,7 @@ export function summarizeDeliveryEvents(
 export async function readDeliveryPhaseReport(
   workspacePath: string, billingEvents?: readonly DeliveryBillingEvent[],
 ): Promise<DeliveryPhaseReport> {
-  const file = join(workspacePath, '.beegame', 'chat', 'project-events.jsonl')
-  const events: Event[] = []
-  const lines = createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity })
-  let index = 0
-  for await (const line of lines) {
-    index++
-    if (!line.trim()) continue
-    let event: Event
-    try { event = JSON.parse(line) as Event }
-    catch { throw new Error('Invalid project event JSON at line ' + index) }
-    if (['system.status', 'turn.started', 'turn.completed', 'session.stopped',
-      'tool.started', 'tool.failed', 'result', 'usage'].includes(String(event.type)))
-      events.push(event)
-  }
+  const events = await new ChatJsonlReader<Event>().readFacts(projectChatPath(workspacePath), event => event,
+    ['system.status', 'turn.started', 'turn.completed', 'session.stopped', 'tool.started', 'tool.failed', 'result', 'usage'])
   return summarizeDeliveryEvents(events, billingEvents)
 }

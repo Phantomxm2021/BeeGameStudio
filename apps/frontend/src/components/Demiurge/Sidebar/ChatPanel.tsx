@@ -1,8 +1,7 @@
-import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import type { ModelRequestRetryControl } from './RuntimeErrorNotice';
-import { memo, useRef, useState } from 'react';
+import { memo, useRef } from 'react';
 import { McpElicitationPanel } from './McpElicitationPanel';
-import { CornerDownRight, Ellipsis, FileText, ListEnd, Paperclip, Plus, Trash2, X } from 'lucide-react';
+import { FileText, Plus, X } from 'lucide-react';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
 import {
     MessageScroller,
@@ -24,11 +23,6 @@ interface ChatPanelProps {
     messages: ChatDisplayMessage[];
     retry?: ModelRequestRetryControl;
     isLoading: boolean;
-    queuedMessages?: Array<{ id: string; text: string; state: 'pending' | 'dispatching'; attachmentCount?: number }>;
-    queueActionId?: string | null;
-    queueError?: string | null;
-    onSteerQueued?: (id: string) => void;
-    onDeleteQueued?: (id: string) => void;
     streamingMessageId?: string | null;
     onStop?: () => void | Promise<void>;
     isStopping?: boolean;
@@ -199,11 +193,6 @@ export const ChatPanel = memo(({
     messages,
     retry,
     isLoading,
-    queuedMessages = [],
-    queueActionId,
-    queueError,
-    onSteerQueued,
-    onDeleteQueued,
     streamingMessageId = null,
     onStop,
     isStopping = false,
@@ -241,7 +230,7 @@ export const ChatPanel = memo(({
     const text = useBeeGameText(lang);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
     const historyScrollIntentRef = useRef(false);
-    const [expandedQueuedId, setExpandedQueuedId] = useState<string | null>(null);
+    const historyTouchYRef = useRef<number | null>(null);
     const composerPlaceholder = text.chatPlaceholder || waitingPermission.placeholder;
     const attachFileLabel = text.attachFile || text.attachImage || 'Attach file';
     const activeBeeGamePermissions = pendingPermissions.filter(isBeeGamePermission).concat(
@@ -283,8 +272,20 @@ export const ChatPanel = memo(({
                     // Layout changes and the initial jump to the latest message
                     // must never fetch another history page.
                     onWheel: event => { historyScrollIntentRef.current = event.deltaY < 0; },
-                    onTouchStart: () => { historyScrollIntentRef.current = true; },
-                    onPointerDown: () => { historyScrollIntentRef.current = true; },
+                    onTouchStart: event => {
+                        historyScrollIntentRef.current = false;
+                        historyTouchYRef.current = event.touches[0]?.clientY ?? null;
+                    },
+                    onTouchMove: event => {
+                        const y = event.touches[0]?.clientY;
+                        if (y !== undefined && historyTouchYRef.current !== null)
+                            historyScrollIntentRef.current = y > historyTouchYRef.current;
+                        historyTouchYRef.current = y ?? null;
+                    },
+                    onTouchEnd: () => { historyTouchYRef.current = null; },
+                    // Only a drag on the viewport itself can mean scrollbar use.
+                    // Clicking a disclosure must not turn its layout shift into pagination.
+                    onPointerDown: event => { historyScrollIntentRef.current = event.target === event.currentTarget; },
                     onKeyDown: event => {
                         historyScrollIntentRef.current = ['ArrowUp', 'PageUp', 'Home'].includes(event.key);
                     },
@@ -357,29 +358,6 @@ export const ChatPanel = memo(({
                         onResolveToolPermission={onResolveToolPermission}
                     />
                 ))}
-                {queuedMessages.length > 0 ? (
-                    <div className="max-h-40 space-y-1.5 overflow-y-auto overscroll-contain px-2 pb-2" data-testid="beegame-queued-messages">
-                        {queuedMessages.map(message => (
-                            <div key={message.id} className="flex min-w-0 items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[var(--text-secondary)]">
-                                <ListEnd className="h-4 w-4 shrink-0 opacity-65" aria-hidden="true" />
-                                <span className={`min-w-0 flex-1 text-sm text-[var(--text-primary)] ${expandedQueuedId === message.id ? 'break-words' : 'truncate'}`} title={filterPathsForDisplay(message.text)}>{filterPathsForDisplay(message.text)}</span>
-                                {message.attachmentCount ? <span className="flex shrink-0 items-center gap-1 text-xs" aria-label={`${message.attachmentCount} attachments`}><Paperclip className="h-3.5 w-3.5" /><AnimatedNumber>{message.attachmentCount}</AnimatedNumber></span> : null}
-                                <button type="button" disabled={Boolean(queueActionId) || message.state !== 'pending'}
-                                    onClick={() => onSteerQueued?.(message.id)}
-                                    className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"
-                                    aria-label="Steer queued message"><CornerDownRight className="h-4 w-4" />Steer</button>
-                                <button type="button" disabled={Boolean(queueActionId) || message.state !== 'pending'}
-                                    onClick={() => onDeleteQueued?.(message.id)}
-                                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-40"
-                                    aria-label="Delete queued message"><Trash2 className="h-4 w-4" /></button>
-                                <button type="button" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors hover:bg-[var(--surface-hover)]"
-                                    onClick={() => setExpandedQueuedId(current => current === message.id ? null : message.id)}
-                                    aria-label="Expand queued message"><Ellipsis className="h-4 w-4" /></button>
-                            </div>
-                        ))}
-                    </div>
-                ) : null}
-                {queueError ? <p role="alert" className="px-4 pb-2 text-xs text-[var(--destructive)]">{filterPathsForDisplay(queueError)}</p> : null}
                 {(
                     <div className="min-w-0" data-testid="beegame-chat-composer">
                         {attachments.length > 0 ? (

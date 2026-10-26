@@ -36,6 +36,7 @@ type ViteModule = {
       port: number
       strictPort: true
       hmr: false
+      watch?: { usePolling: true }
     }
   }) => Promise<ViteServer>
 }
@@ -346,6 +347,10 @@ export async function startVitePreviewHost(
       port: options.port,
       strictPort: true,
       hmr: false,
+      // Seatbelt blocks directory watcher events; Vite would otherwise serve
+      // stale transformed modules after edits. Keep refresh inside the existing
+      // file permissions instead of relying on Agent-requested server restarts.
+      ...(process.env.BGS_SANDBOX === 'seatbelt' ? { watch: { usePolling: true as const } } : {}),
     },
   })
   await server.listen()

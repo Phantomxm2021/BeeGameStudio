@@ -1,6 +1,6 @@
 import { registerPortalSsoRoutes } from './auth/portal-sso-routes'
 import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
-import { publicationDescriptionSources, PUBLIC_DESCRIPTION_PROMPT, validatePublicDescriptionDraft } from './beegame/publication-description'
+import { readPublicationControls, PUBLIC_DESCRIPTION_SOURCE_INVALID, publicationDescriptionFromBrief, PUBLIC_DESCRIPTION_BRIEF_MISSING, PUBLIC_DESCRIPTION_TOO_LONG } from './beegame/publication-description'
 import { UsageOutboxPersistenceError } from './beegame/session-usage-outbox'
 import {createBgsRunner} from './bgs/runner'
 import { registerBgsSettingsRoutes } from './bgs/settings-routes'
@@ -12,6 +12,7 @@ import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
 import { createMeasuredPreview, type MeasuredPreviewManager, type CandidatePreview } from './beegame/workflow-v3/measured-preview'
 import { createPreviewStorageStore } from './beegame/preview-storage-store'
 import { WorkflowError, createRun } from './beegame/workflow-v3/state'
+import { agentGoalSchema } from './beegame/workflow-v3/agent-goal'
 import { copyProjectForClone } from './beegame/project-clone'
 import { projectExecutionTime } from './beegame/workflow-v3/execution-time'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, type WorkflowStore } from './beegame/workflow-v3/store'
@@ -22,7 +23,8 @@ import { openPreviewTestAccess } from './beegame/preview-test-access'
 import { appendRuntimeDiagnostic } from './beegame/project-records'
 import { readChatAttachment } from './beegame/chat-attachments'
 import { materializeBeeGameAttachments } from './beegame/session-manager'
-import { appendProjectChatTimeline, projectChatEventsAfter } from './beegame/project-chat-timeline'
+import { readChatHistoryPage } from './beegame/chat-history'
+export { compactTranscriptForChatHistory, findTodoWriteEvents, paginateTranscriptEvents } from './beegame/chat-history'
 import { runtimeActivity } from './beegame/runtime-activity'
 import { z } from 'zod/v4'
 import { registerDevProjectPurgeRoutes } from './dev-project-purge'
@@ -56,12 +58,18 @@ import {
 } from '../../beegame-resource-core/src/semantic-curation'
 import {
   BeeGameSessionManager,
+  deriveObservedRoleTokens,
   formatBeeGameEventForDisplay,
   deleteSessionArtifactsFromTranscript,
   getLatestRuntimeUsage,
   liveProjectConversationEvents,
   readSessionTranscriptFromDisk,
+  readSessionTranscriptPageFromDisk,
+  readInlineArtifactText,
+  readSessionTranscriptFactsFromDisk,
+  projectChatSource,
   recoverLatestProjectSessionFromDisk,
+  recoverConfirmedBriefContext,
   type BeeGameEvent,
   type BeeGameRuntimeSnapshot,
   type BeeGameSession,
@@ -166,6 +174,7 @@ import {
 } from './dashboard-repository'
 import {
   createManagedProjectWorkspacePath,
+  initializeProjectRepository,
   deleteWorkspaceDirectoryIfSafe,
   getDashboardDataRoot,
   getUserDashboardDataRoot,
@@ -406,6 +415,7 @@ export function createAgentWorkflowApp(
   validateSecretStorageAtStartup()
   const app = new Hono()
   let closing = false
+  const runtimeStatusPath = '/api/admin/runtime-status'
   const activeRequests = new Set<Promise<unknown>>()
   const trackRequest = <T>(request: Promise<T>): Promise<T> => {
     activeRequests.add(request)
@@ -418,6 +428,9 @@ export function createAgentWorkflowApp(
     while (activeRequests.size) await Promise.allSettled([...activeRequests])
   })
   app.use('*', async (c, next) => {
+    // Diagnostics must remain readable while draining, and must not count
+    // their own request as active work. Normal API authentication still runs.
+    if (c.req.method === 'GET' && c.req.path === runtimeStatusPath) return next()
     if (closing) return c.json({ error: 'BeeGame runtime is shutting down' }, 503, { 'Retry-After': '1' })
     await trackRequest(next())
   })
@@ -1282,6 +1295,36 @@ export function createAgentWorkflowApp(
     return c.json(await dashboardRepository.listAuditEvents(c.req.raw, user))
   })
 
+  app.get(runtimeStatusPath, async c => {
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), ROUTE_PERMISSION.lifecycleAdmin)
+    if (forbidden) return c.json(forbidden, 403)
+    c.header('Cache-Control', 'private, no-store')
+    const workflowV3 = await v3Store?.writerStatus?.().catch(() => undefined) ??
+      { writers: null, state: 'unknown' as const, scope: 'configured-store' as const }
+    const deployments = await beeGameDeployments.runtimeStatus()
+    // Read the in-memory counters after the asynchronous store observation.
+    // This remains a diagnostic snapshot, not a reservation for shutdown.
+    const sessions = beeGameSessions.runtimeStatus()
+    const usageOutbox = sessions.usageOutbox
+    const appStatus = { closing, activeRequests: activeRequests.size,
+      intakeJobsRunning: [...intakeJobs.values()].filter(job => job.status === 'running').length }
+    const busy = appStatus.activeRequests > 0 || appStatus.intakeJobsRunning > 0 ||
+      sessions.activeTurns > 0 || sessions.preparingTurns > 0 || sessions.pendingPermissions > 0 ||
+      sessions.activeNativeTasks > 0 || sessions.runnerDisposals > 0 || sessions.cleanupFailures > 0 ||
+      deployments.active > 0 || usageOutbox.pendingEntries > 0 || usageOutbox.activeFlushes > 0 ||
+      workflowV3.state === 'active'
+    const unknown = workflowV3.state === 'unknown' || deployments.recovery === 'unknown' || usageOutbox.state === 'unknown'
+    return c.json({ observedAt: new Date().toISOString(), scope: 'bgs-runtime-host',
+      state: closing ? 'draining' : busy ? 'busy' : unknown ? 'unknown' : 'idle',
+      app: appStatus, sessions, deployments, workflowV3,
+      limitations: [
+        'Read-only snapshot, not authorization or a lock for restarting services.',
+        'The configured workflow store may include unresolved writers from other hosts.',
+        'External resource-service jobs and processes outside this runtime are not inspected.',
+      ],
+    })
+  })
+
   app.get('/api/admin/projects/lifecycle', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.lifecycleAdmin)
@@ -2070,6 +2113,7 @@ export function createAgentWorkflowApp(
       workspacePath = await createManagedProjectWorkspacePath({ defaultWorkspacePath: options.defaultWorkspacePath,
         userId: user.id, projectName: name, projectId })
       await copyProjectForClone(sourcePath, workspacePath)
+      await initializeProjectRepository(workspacePath, { engine: brief.settings.engine })
       assertIdle()
       if ((await v3Store.read(source.id, user.id))?.version !== sourceRun.version)
         throw new WorkflowError('clone-source-changed', 'Project execution changed while cloning; no copy was retained')
@@ -2145,16 +2189,15 @@ export function createAgentWorkflowApp(
         ? [] : validateBeeGameAttachments(brief.attachments)
       if (brief.creationMode !== undefined && brief.creationMode !== 'creative' && brief.creationMode !== 'blueprint')
         return c.json({ error: 'Invalid creation mode' }, 400)
-      try { resolveConfirmedOrientation(brief) }
-      catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
-      const [workspacePath, modelConfigId] = await Promise.all([
-        createManagedProjectWorkspacePath({
-          defaultWorkspacePath: options.defaultWorkspacePath,
-          userId: user.id,
-          projectName: projectFolderName || projectName,
-          projectId,
-        }),
-        resolveDefaultModelConfigId(
+      const languageValue = body.language ?? brief.language
+      const language = isBeeGameSessionLanguage(languageValue) ? languageValue : undefined
+      // Validate the same canonical brief consumed by V3 before creating any
+      // project, session or attachment. Reference paths are filled by the host.
+      const confirmedBrief = agentGoalSchema.shape.brief.parse(JSON.parse(extractConfirmedBriefContext(
+        buildConfirmedBriefPrompt({ ...brief, referenceFiles: [] }, language),
+      )))
+      await dashboardRepository.assertProjectQuotaAllowsUpsert(c.req.raw, user, projectId)
+      const modelConfigId = await resolveDefaultModelConfigId(
           c.req.raw,
           user,
           undefined,
@@ -2162,9 +2205,15 @@ export function createAgentWorkflowApp(
             dashboardRepository.modelConfigExists(request, requestUser, id),
           (request, requestUser) =>
             dashboardRepository.listModelConfigs(request, requestUser),
-        ),
-      ])
+        )
       if (modelConfigId) await assertPermittedModelConfigRuntime(modelConfigId)
+      const workspacePath = await createManagedProjectWorkspacePath({
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        userId: user.id,
+        projectName: projectFolderName || projectName,
+        projectId,
+      })
+      await initializeProjectRepository(workspacePath, { engine: confirmedBrief.settings.engine })
       const referenceFiles = await materializeBeeGameAttachments(workspacePath, referenceAttachments)
       const references = referenceFiles.map((file, index) => ({
         ...file,
@@ -2182,10 +2231,6 @@ export function createAgentWorkflowApp(
           updated_at: Date.now(),
         },
       })
-      const languageValue = body.language ?? brief.language
-      const language = isBeeGameSessionLanguage(languageValue)
-        ? languageValue
-        : undefined
       const session = beeGameSessions.start({
         workspacePath,
         projectId,
@@ -2204,12 +2249,11 @@ export function createAgentWorkflowApp(
       )
 
       // Only server-created references enter the brief, never caller-supplied paths.
-      const confirmedBriefPrompt = buildConfirmedBriefPrompt({ ...brief, referenceFiles: references }, language)
-      const confirmedBriefContext = extractConfirmedBriefContext(confirmedBriefPrompt)
+      confirmedBrief.reference_files = references
       await v3Routes.startAgentGoal(c.req.raw, projectId, {
         requestKey: projectId,
         chatSessionId: session.id,
-        brief: JSON.parse(confirmedBriefContext),
+        brief: confirmedBrief,
       })
 
       return c.json(
@@ -2390,24 +2434,14 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
-      const timeline = await getProjectChatTimelineEvents({
-        sessionId: sessionRef.sessionId,
-        workspacePath: sessionRef.workspacePath,
-        dashboardDataRoot,
-        beeGameSessions,
-      })
-      const visibleEvents = compactTranscriptForChatHistory(liveProjectConversationEvents(timeline))
-      const todoEvents = findTodoWriteEvents(visibleEvents)
-      const pagination = {
+      const source = projectChatSource(sessionRef.workspacePath)
+      const page = await readChatHistoryPage(source.path, source.reader, {
         limit: parseTranscriptPageLimit(c.req.query('limit')),
         beforeId: parsePositiveInteger(c.req.query('before')),
-      }
-      return c.json({
-        sessionId: sessionRef.sessionId,
-        workspacePath: sessionRef.workspacePath,
-        todoEvents,
-        ...paginateTranscriptEvents(visibleEvents, pagination),
       })
+      const format = (event: BeeGameEvent) => formatBeeGameEventForDisplay(event, beeGameSessions.language(sessionRef.sessionId))
+      return c.json({ sessionId: sessionRef.sessionId, workspacePath: sessionRef.workspacePath,
+        ...page, events: page.events.map(format), todoEvents: page.todoEvents.map(format) })
     } catch (err) {
       return tracedRouteError(c, 'project.transcript', err, 404)
     }
@@ -2752,25 +2786,27 @@ export function createAgentWorkflowApp(
     try {
       const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
       if (!project?.root_path) return c.json({ error: 'Project workspace not found' }, 404)
-      const sources = await publicationDescriptionSources(project.root_path)
       const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
-      const modelConfigId = await resolveDefaultModelConfigId(c.req.raw, user, undefined,
-        (request, owner, id) => dashboardRepository.modelConfigExists(request, owner, id),
-        (request, owner) => dashboardRepository.listModelConfigs(request, owner))
-      const runtimeEnv = await dashboardRepository.getRuntimeEnv(getCurrentUserDataRoot(c.req.raw), user.id,
-        getRequestAuthToken(c.req.raw), modelConfigId)
-      const recordUsage = createUsageRecorder({ sessionId: `publication-description:${randomUUID()}`, projectId: project.id,
-        submit: usage => beeGameSessions.recordExternalUsage(user.id, usage) })
-      const language = typeof body.language === 'string' && body.language.length <= 32 ? body.language : undefined
-      const content = await generateBeeGameModelWithUsage(modelRuntimeHost, {
-        cwd: getCurrentUserDataRoot(c.req.raw), runtimeEnv,
-        systemPrompt: [BEEGAME_USER_RESPONSE_SCOPE, PUBLIC_DESCRIPTION_PROMPT,
-          language ? `Write in the selected UI language: ${language}.` : 'Use the language of the source documents.'].join('\n'),
-        messages: [{ role: 'user', content: JSON.stringify(sources) }],
-        maxTokens: 2048, querySource: 'beegame_publication_description',
-      }, recordUsage, true, () => beeGameSessions.assertModelRequestAllowed(user.id))
-      return c.json({ description: validatePublicDescriptionDraft(content) })
-    } catch (error) { return tracedRouteError(c, 'project.publication-description', error) }
+      const run = await v3Store?.read(project.id, user.id)
+      let brief = run?.requirements.text
+      if (run && normalizeResolvedPath(run.workspacePath) !== normalizeResolvedPath(project.root_path))
+        throw Error('Run workspace binding changed')
+      if (!run && project.runtime_snapshot?.workflow_protocol !== 'bgs.workflow.v3') {
+        // Historical projects retain the same canonical brief in their chat
+        // facts. Read it without creating or resuming a project session.
+        const source = projectChatSource(project.root_path)
+        try {
+          const events = await source.reader.readFacts(source.path, row => row, ['user.message'])
+          brief = recoverConfirmedBriefContext(events)
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      }
+      const language = isBeeGameSessionLanguage(body.language) ? body.language : undefined
+      return c.json({ description: publicationDescriptionFromBrief(brief, language, await readPublicationControls(project.root_path)) })
+    } catch (error) {
+      return publicSessionRouteError(c, 'project.publication-description', error, 400, [
+        PUBLIC_DESCRIPTION_BRIEF_MISSING, PUBLIC_DESCRIPTION_TOO_LONG, PUBLIC_DESCRIPTION_SOURCE_INVALID,
+      ])
+    }
   })
 
   app.get('/api/projects/:id/preview', async c => {
@@ -3228,6 +3264,28 @@ export function createAgentWorkflowApp(
         user.id,
         project.id,
       )
+      // Project metadata is not the complete workflow state. Read the
+      // owner-bound Run before stopping or deleting any live session so a
+      // durable writer cannot be mistaken for an idle project. The in-memory
+      // session check covers a writer that has not committed its Run yet.
+      const persistedRun = await v3Store?.read(project.id, user.id)
+      const workspacePaths = [
+        persistedRun?.workspacePath,
+        project.root_path,
+        liveSession?.cwd,
+      ].filter((path): path is string => Boolean(path))
+      if (
+        persistedRun?.writer ||
+        workspacePaths.some(workspacePath =>
+          beeGameSessions.hasActiveProjectTurn(user.id, project.id, workspacePath),
+        )
+      ) {
+        throw new WorkflowError(
+          'workspace-busy',
+          'Wait for the project writer and owned tools to stop before deleting the project',
+          409,
+        )
+      }
       if (liveSession) {
         beeGamePreviews.stop(liveSession.id, liveSession.cwd)
         previewCapabilities.revokeSession(liveSession.id)
@@ -3237,11 +3295,11 @@ export function createAgentWorkflowApp(
       // an explicit owner-checked removal during the normal project delete.
       // Remote storage is deleted by its project FK cascade and may not expose
       // this optional local-only operation.
-      await v3Store?.delete?.(projectId, user.id)
       const deleted = await dashboardRepository.deleteProject(
         request,
         user,
         projectId,
+        async () => { await v3Store?.delete?.(projectId, user.id) },
       )
       const deletedWorkspacePath =
         deleted && project?.root_path
@@ -3290,6 +3348,8 @@ export function createAgentWorkflowApp(
     try {
       return c.json(await deleteOwnedProject(c.req.raw, user, c.req.param('id')))
     } catch (error) {
+      if (error instanceof WorkflowError)
+        return c.json({ error: error.message, code: error.code }, error.status)
       return tracedRouteError(c, 'project.delete', error)
     }
   })
@@ -3601,12 +3661,6 @@ async function discoverBeeGameProjectArtifacts(
   const root = resolve(workspacePath)
   const artifacts: BeeGameArtifactIndexItem[] = []
   await collectArtifactsFromDirectory(root, 'docs', 'Document', artifacts)
-  await collectArtifactsFromDirectory(
-    root,
-    'transcripts',
-    'Transcript',
-    artifacts,
-  )
   await collectArtifactFile(
     root,
     'assets/asset-manifest.json',
@@ -3676,7 +3730,6 @@ async function collectArtifactFile(
 function isDiscoverableArtifactPath(relativePath: string): boolean {
   const normalized = relativePath.split('\\').join('/')
   if (normalized.startsWith('docs/')) return /\.md$/i.test(normalized)
-  if (normalized.startsWith('transcripts/')) return /\.jsonl$/i.test(normalized)
   return normalized === 'assets/asset-manifest.json'
 }
 
@@ -3699,7 +3752,7 @@ async function readBeeGameProjectArtifact(
   }
   return {
     path: relative(workspaceRoot, targetPath).split('\\').join('/'),
-    content: await readFile(actualTarget, 'utf8'),
+    content: await readInlineArtifactText(actualTarget),
   }
 }
 
@@ -4206,19 +4259,19 @@ async function generateBeeGameIntakeOptions(input: {
     BEEGAME_USER_RESPONSE_SCOPE,
     'This intake only accepts requests to make a game. If the input is primarily an informational question rather than a game idea, return exactly {"request_scope":"out_of_scope"}. Do not answer that question, invent game directions, or reveal internal details. A request to make a game about a topic is still a game idea.',
     'Do not emit analysis, reasoning, thinking tags, or a thinking summary. Return the requested JSON object directly.',
-    'First decide whether the user is requesting a game. For a game idea, understand it before proposing game modes. The options are target briefs that help the user choose a direction, not full design documents and not project management delivery strategies.',
+    'First decide whether the user is requesting a game. For a game idea, understand it before proposing game modes. The options are target briefs that help the user choose a direction, not a full GDD and not project management delivery strategies.',
     'For a game idea, return only JSON with this schema: maturity, needs_clarification, clarification, clarification_questions, detected_constraints, recommended_next_step, options.',
     'maturity must be one of vague, directional, concrete.',
     'For a game idea, always return exactly 3 valid, meaningfully distinct game directions for the user to choose from, including when the submitted idea is already concrete.',
     'For a game idea, do not ask the user for clarification during intake. Set needs_clarification=false, leave clarification empty, leave clarification_questions empty, and set recommended_next_step="choose_direction".',
-    'Each option must include id, title, projectFolderName, gameplay, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+    'Each option must include title, projectFolderName, gameplay, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
     'Keep each option concise. BeeGame derives the expanded planning fields after the user chooses a direction; do not duplicate the same explanation across multiple fields.',
     'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
     'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
     'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
     'The direction must be suitable for a complete game later, but this intake option should stay lightweight: name the mode, explain the core gameplay, and summarize the first target the user is choosing.',
     'Each option.scope is the first complete playable release, not a future roadmap. When the user has not specified content breadth, keep one coherent core loop and only enough representative content to prove it (usually one or two levels if the game has levels). Defer extra modes, large campaigns, cosmetic sets, and nonessential screens; preserve quantities and features the user explicitly requested.',
-    'Do not write full GDD, art direction, UI/UX specification, asset inventory, or implementation plan in intake options. Those belong to the confirmed planning/build stage.',
+    'Do not write the full GDD, its art direction/UI/UX/resources/implementation chapters, or a separate asset inventory in intake options. Those belong to the confirmed planning/build stage.',
     'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
     'The production setting fields are selected values, not optional suggestions. Choose them by understanding the full user request and the proposed game mode, not by keyword matching.',
     'Choose recommendedPlatform only from: Web, Mobile, PC, Console, VR/AR.',
@@ -4420,7 +4473,8 @@ function normalizeBeeGameIntakeOption(
   const gameplay = String(value.gameplay || '').trim()
   const pitch = String(value.pitch || '').trim() || gameplay
   const option = {
-    id: String(value.id || '').trim() || `mode_${optionIndex + 1}`,
+    // These IDs identify UI choices, not model-authored design facts.
+    id: `mode_${optionIndex + 1}`,
     title: String(value.title || '').trim(),
     projectFolderName: getStringField(
       value,
@@ -5102,7 +5156,7 @@ async function getProjectRuntimeEvents(input: {
     events = input.beeGameSessions.events(input.sessionId)
   } catch (err) {
     if (toErrorMessage(err) !== 'Session not found') throw err
-    const transcript = await readSessionTranscriptFromDisk(
+    const transcript = await readSessionTranscriptFactsFromDisk(
       input.sessionId,
       input.workspacePath,
     )
@@ -5148,14 +5202,13 @@ async function collectProjectChatTimelineEvents(input: {
   dashboardDataRoot?: string
   beeGameSessions: BeeGameSessionManager
 }): Promise<BeeGameEvent[]> {
-  const mainEvents = await getProjectRuntimeEvents(input)
-  const timeline = await appendProjectChatTimeline(input.workspacePath, mainEvents, input.after)
-  const savedLanguage = mainEvents.find(event => event.type === 'session.started')?.payload?.language
+  const source = projectChatSource(input.workspacePath)
+  const { rows } = await source.reader.read(source.path, { afterId: input.after ?? 0 })
+  const savedLanguage = (await source.reader.entries(source.path)).find(entry =>
+    entry.header.sessionId === input.sessionId && entry.header.type === 'session.started')?.header.payload?.language
   const language = input.beeGameSessions.language(input.sessionId) ??
     (isBeeGameSessionLanguage(savedLanguage) ? savedLanguage : undefined)
-  // Existing journal rows retain their original text. Apply today's display
-  // formatting after reading them, without rewriting durable evidence/cursors.
-  return timeline.map(event => formatBeeGameEventForDisplay(event, language))
+  return rows.map(event => formatBeeGameEventForDisplay({ ...event, createdAt: new Date(event.createdAt) }, language))
 }
 
 // Keep this below Bun's/default reverse-proxy idle window. Otherwise a quiet
@@ -5212,22 +5265,22 @@ export function createProjectEventsSseStream(input: {
         let after = input.after
         let lastHeartbeatAt = Date.now()
         const deadline = Date.now() + PROJECT_EVENTS_SSE_MAX_CONNECTION_MS
-        let pendingEvents: BeeGameEvent[] = []
+        let pendingEvents = false
         const unsubscribe = input.beeGameSessions.subscribeProjectEvents(
           {
             userId: input.userId,
             projectId: input.projectId,
             workspacePath: input.workspacePath,
           },
-          event => {
-            pendingEvents.push(event)
+          () => {
+            pendingEvents = true
             wake?.()
             wake = undefined
           },
         )
         const emitEvents = (events: BeeGameEvent[]) => {
           if (closed || signal.aborted) return
-          const unseen = projectChatEventsAfter(events, after)
+          const unseen = events.filter(event => event.id > after)
           if (unseen.length === 0) return
           after = unseen[unseen.length - 1]!.id
           const payload = JSON.stringify({
@@ -5256,10 +5309,9 @@ export function createProjectEventsSseStream(input: {
         try {
           await reconcileTimeline()
           while (!closed && !signal.aborted && Date.now() < deadline) {
-            if (pendingEvents.length > 0) {
-              const events = pendingEvents
-              pendingEvents = []
-              emitEvents(await appendProjectChatTimeline(input.workspacePath, events, after))
+            if (pendingEvents) {
+              pendingEvents = false
+              await reconcileTimeline()
               continue
             }
             const timeUntilDeadline = deadline - Date.now()
@@ -5648,16 +5700,16 @@ function deriveBeeGameContextVisibility(
   const eventUsage = getLatestRuntimeUsage(events)
   const usage = eventUsage.total_tokens > 0 ? eventUsage : snapshot?.usage
   if (!usage) return null
-  const toolUseCount = events.filter(event =>
-    event.type.startsWith('tool.'),
-  ).length
+  // Compatibility counter: counts tool.* lifecycle events, not tool calls.
+  const toolLifecycleEventCount = events.filter(event => event.type.startsWith('tool.')).length
+  // A missing snapshot is not evidence that the coordinator consumed every token.
+  const roleTokens = snapshot?.roleTokens ?? deriveObservedRoleTokens(events, usage)
   return {
     bundle_id: 'beegame-runtime',
     phase: snapshot?.phaseName || 'idle',
     status: 'active',
     summary: 'BeeGame runtime observability is active for this session.',
     blackboard_record_count: events.length,
-    memory_hits: toolUseCount,
     rag_sources: [],
     selected_skills: [],
     runtime_features: [],
@@ -5674,14 +5726,11 @@ function deriveBeeGameContextVisibility(
       cache_read_tokens: usage.cache_read_tokens,
       cache_creation_tokens: usage.cache_creation_tokens,
       total_tokens: usage.total_tokens,
-      role_tokens: snapshot?.roleTokens ?? {
-        mainAgent: usage.total_tokens,
-        otherSubagents: 0,
-      },
+      role_tokens: roleTokens,
     },
     counters: {
       eventCount: events.length,
-      toolUseCount,
+      toolUseCount: toolLifecycleEventCount,
     },
   }
 }
@@ -5866,7 +5915,10 @@ function registerBeeGameSessionRoutes(
         c.req.param('id'),
         options.getAuthToken(c.req.raw),
       )
-      return c.json(beeGameSessions.events(c.req.param('id'), after))
+      const id = c.req.param('id'), workspace = await getSessionWorkspacePath(c.req.raw, id)
+      const page = await readSessionTranscriptPageFromDisk(id, workspace, { afterId: after })
+      c.header('x-beegame-history-has-more', String(page.hasMore))
+      return c.json(page.rows.map(event => formatBeeGameEventForDisplay({ ...event, createdAt: new Date(event.createdAt) }, beeGameSessions.language(id))))
     } catch (err) {
       return publicSessionRouteError(c, 'beegame-session.events', err, 404, [
         'Session not found',
@@ -5914,15 +5966,19 @@ function registerBeeGameSessionRoutes(
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
-      const transcript = beeGameSessions.transcript(c.req.param('id'))
-      const visibleTranscript = chatHistoryView
-        ? compactTranscriptForChatHistory(transcript)
-        : transcript
-      return c.json(
-        pagination
-          ? paginateTranscriptEvents(visibleTranscript, pagination)
-          : visibleTranscript,
-      )
+      const id = c.req.param('id'), workspace = await getSessionWorkspacePath(c.req.raw, id)
+      const source = projectChatSource(workspace)
+      const selection = pagination ?? { limit: parseTranscriptPageLimit(c.req.query('limit')), beforeId: parsePositiveInteger(c.req.query('before')) }
+      const result = chatHistoryView
+        ? await readChatHistoryPage(source.path, source.reader, { ...selection, sessionId: id })
+        : await readSessionTranscriptPageFromDisk(id, workspace, { ...selection, newestFirst: true }).then(page => ({
+          events: page.rows.map(event => ({ ...event, createdAt: new Date(event.createdAt) })),
+          page: { hasMore: page.hasMore, nextBeforeId: page.nextBeforeId },
+        }))
+      const events = result.events.map(event => formatBeeGameEventForDisplay(event, beeGameSessions.language(id)))
+      c.header('x-beegame-history-has-more', String(result.page.hasMore))
+      if (result.page.nextBeforeId !== null) c.header('x-beegame-history-before', String(result.page.nextBeforeId))
+      return c.json(pagination ? { events, page: result.page } : events)
     } catch (err) {
       return publicSessionRouteError(
         c,
@@ -6440,68 +6496,6 @@ function registerBeeGameSessionRoutes(
   })
 }
 
-export function paginateTranscriptEvents<T extends { id: number; createdAt: Date | string }>(
-  events: T[],
-  options: { limit: number; beforeId?: number },
-): {
-  events: T[]
-  page: { hasMore: boolean; nextBeforeId: number | null }
-} {
-  // Source transcript IDs may restart in each file. The project journal gives
-  // every event a unique ID, but its append order is not necessarily its chat
-  // time when a delayed transcript is reconciled. Use time for presentation and
-  // the project ID only to break equal timestamps and locate the page cursor.
-  const ordered = [...events].sort((a, b) => {
-    const time = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    return time || a.id - b.id
-  })
-  const beforeIndex = options.beforeId === undefined
-    ? ordered.length
-    : ordered.findIndex(event => event.id === options.beforeId)
-  const eligible =
-    options.beforeId === undefined
-      ? ordered
-      : ordered.slice(0, Math.max(0, beforeIndex))
-  const pageEvents = eligible.slice(
-    Math.max(0, eligible.length - options.limit),
-  )
-  return {
-    events: pageEvents,
-    page: {
-      hasMore: eligible.length > pageEvents.length,
-      nextBeforeId: pageEvents[0]?.id ?? null,
-    },
-  }
-}
-
-export function findTodoWriteEvents<
-  T extends {
-    type: BeeGameEvent['type']
-    payload?: BeeGameEvent['payload']
-  },
->(events: T[]): T[] {
-  return events.filter(event => {
-    if (
-      event.type !== 'tool.started' &&
-      event.type !== 'tool.progress' &&
-      event.type !== 'tool.completed' &&
-      event.type !== 'tool.failed'
-    ) return false
-    const toolName =
-      typeof event.payload?.toolName === 'string'
-        ? event.payload.toolName.trim().toLowerCase()
-        : ''
-    if (toolName !== 'todowrite' && toolName !== 'todo_write') return false
-    const input = event.payload?.input
-    return Boolean(
-      input &&
-      typeof input === 'object' &&
-      !Array.isArray(input) &&
-      Array.isArray((input as { todos?: unknown }).todos),
-    )
-  })
-}
-
 function parseTranscriptPageLimit(value: string | undefined): number {
   const parsed = parsePositiveInteger(value) ?? 300
   return Math.min(500, Math.max(50, parsed))
@@ -6511,71 +6505,6 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
   if (!value) return undefined
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
-}
-
-export function compactTranscriptForChatHistory<
-  T extends {
-    id: number
-    sessionId?: string
-    turnId?: string
-    type: BeeGameEvent['type']
-    text: string
-    createdAt: BeeGameEvent['createdAt']
-    payload?: BeeGameEvent['payload']
-  },
->(events: T[]): T[] {
-  const result: T[] = []
-  const positions = new Map<string, number>()
-  for (const event of events) {
-    const payload: NonNullable<BeeGameEvent['payload']> = event.payload ?? { type: event.type }
-    if (event.type === 'system.status' &&
-      !['task_started', 'task_progress', 'task_notification', 'compact_boundary', 'delivery_phase', 'delivery_error', 'host_evidence'].includes(String(payload.subtype)) &&
-      !(payload.subtype === 'status' && payload.status === 'compacting')) continue
-    const scope = `${event.sessionId}:${payload.parentToolUseID ?? payload.parent_tool_use_id ?? ''}`
-    const body = payload.message as { id?: string } | undefined
-    const messageId = payload.assistantBlockId ?? payload.messageId ?? body?.id
-    const thinking = event.type === 'assistant.thinking'
-    const text = event.type === 'assistant.partial' || event.type === 'assistant.message'
-    const tool = ['tool.started', 'tool.progress', 'tool.completed', 'tool.failed'].includes(event.type)
-    const key = thinking
-      ? `thinking:${scope}:${payload.thinkingBlockId ?? event.turnId ?? 'default'}:${payload.thinkingStartedAt ?? ''}`
-      : text && messageId ? `text:${scope}:${messageId}`
-      : tool && payload.toolUseID ? `tool:${scope}:${payload.toolUseID}` : undefined
-    const position = key ? positions.get(key) : undefined
-    const previous = position === undefined ? undefined : result[position]
-    // A terminal snapshot owns its block. Delayed checkpoints cannot reopen it.
-    if (previous && text && previous.type === 'assistant.message' && event.type === 'assistant.partial') continue
-    if (previous && thinking && previous.payload?.status === 'ended' && payload.status !== 'ended') continue
-    const content = thinking && event.text === 'Thinking' ? '' : event.text
-    const snapshot = payload.contentMode === 'snapshot' || event.type === 'assistant.message'
-    const mergedText = thinking || text
-      ? thinking && !content ? previous?.text ?? '' : snapshot ? content : (previous?.text ?? '') + content
-      : event.text
-    const merged = {
-      ...event,
-      text: mergedText,
-      payload: {
-        ...(previous?.payload ?? {}),
-        ...payload,
-        type: event.type,
-        sourceSequence: previous?.payload?.sourceSequence ?? event.id,
-        ...(thinking || text ? { contentMode: 'snapshot' } : {}),
-        ...(thinking ? {
-          ...(previous?.payload?.status === 'ended' ? { status: 'ended' } : {}),
-          thinkingStartedAt: previous?.payload?.thinkingStartedAt ?? payload.thinkingStartedAt ??
-            new Date(event.createdAt).toISOString(),
-        } : {}),
-        ...(tool ? { toolStartedAt: previous?.payload?.toolStartedAt ??
-          (event.type === 'tool.started' ? new Date(event.createdAt).toISOString() : undefined) } : {}),
-      },
-    } as T
-    if (position === undefined) {
-      if (key) positions.set(key, result.length)
-      result.push(merged)
-    } else result[position] = merged
-  }
-  // IDs remain cursor positions; sourceSequence retains first appearance order.
-  return result
 }
 
 type RecoveredTranscriptEvent = Awaited<
@@ -6687,7 +6616,7 @@ function buildConfirmedBriefPrompt(
     'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
     'Use the confirmed brief as the source of truth. Keep the project documents and resulting game consistent with its explicit choices and constraints.',
-    'Screen games support the confirmed Landscape or Portrait direction only. Preserve any user-confirmed dimensions; otherwise UI_UX_SPEC owns reference resolution, minimum usable host dimensions and layout/adaptation, coordinated with LEVEL_SCENE_DESIGN world/framing requirements. GDD records the confirmed orientation and core gameplay, not invented host dimensions or an adaptation method. Other directions or insufficient space show a rotation/size message instead of another composition or unusable whole-screen shrinking. Input methods are independent: Touch does not imply Portrait and Landscape does not imply mouse-only. VR/AR world-space interfaces use their confirmed spatial requirements.',
+    'Screen games support the confirmed Landscape or Portrait direction only. Preserve any user-confirmed dimensions; otherwise the UI/UX chapter in docs/GDD.md owns reference resolution, minimum usable host dimensions and layout/adaptation, coordinated with the level/scene chapter\'s world/framing requirements. The GDD records the confirmed orientation and core gameplay, not invented host dimensions or an adaptation method. Other directions or insufficient space show a rotation/size message instead of another composition or unusable whole-screen shrinking. Input methods are independent: Touch does not imply Portrait and Landscape does not imply mouse-only. VR/AR world-space interfaces use their confirmed spatial requirements.',
     'Use default_first_release_scope only for unspecified content breadth when a playable release is requested; it does not expand a scoped document or design assignment. Preserve explicit user requirements; a model-suggested option or scope does not by itself authorize an expansive first release.',
     '',
     'Confirmed brief:',

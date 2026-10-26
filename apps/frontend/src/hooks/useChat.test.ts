@@ -109,20 +109,18 @@ import { settleChatActivity } from '../utils/chatActivity';
 import { projectEventMessages, projectHistoryMessages } from '../services/beeGameChatProjection';
 
 describe('useChat clarification gate handling', () => {
-  it('arms only one automatic retry for a native model failure and binds it to that failed turn', async () => {
+  it('requires an explicit retry for each native failure and binds it to the failed turn', async () => {
     vi.mocked(api.continueTask).mockResolvedValue({ resume_task_id: 'retry-turn' } as any);
     const { result } = renderHook(() => useChat({ projectId: 'retry-project' }));
     act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'retry-project', task_id: 'session',
       message_id: 'failure-1', turn_id: 'failed-turn', content: 'API Error: Connection error.' }));
-    expect(result.current.autoRetryTurnId).toBe('failed-turn');
     expect(api.continueTask).not.toHaveBeenCalled();
-    await act(async () => result.current.continueTask('failed-turn', true));
+    await act(async () => result.current.continueTask('failed-turn'));
     expect(api.continueTask).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      project_id: 'retry-project', failed_turn_id: 'failed-turn', automatic_retry: true,
+      project_id: 'retry-project', failed_turn_id: 'failed-turn',
     }));
     act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'retry-project', task_id: 'session',
       message_id: 'failure-2', turn_id: 'retry-turn', content: 'API Error: Connection error.' }));
-    expect(result.current.autoRetryTurnId).toBeNull();
     expect(api.continueTask).toHaveBeenCalledTimes(1);
   });
 
@@ -137,7 +135,6 @@ describe('useChat clarification gate handling', () => {
     const { result } = renderHook(() => useChat({ projectId: 'incomplete-stream' }));
     act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'incomplete-stream', task_id: 'session',
       message_id: 'incomplete', turn_id: 'incomplete-turn', content }));
-    expect(result.current.autoRetryTurnId).toBeNull();
     expect(api.continueTask).not.toHaveBeenCalled();
   });
 
@@ -149,7 +146,6 @@ describe('useChat clarification gate handling', () => {
     expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'error', turnId: 'failed-turn', taskKind: 'runtime_error', content: 'HTTP 401 Unauthorized',
     }));
-    expect(result.current.autoRetryTurnId).toBeNull();
     await act(async () => result.current.continueTask('failed-turn'));
     expect(api.continueTask).toHaveBeenCalledTimes(2);
     expect(api.continueTask).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -157,21 +153,17 @@ describe('useChat clarification gate handling', () => {
     }));
   });
 
-  it('cancels automatic retry on a stop or project switch, and ignores non-model failures', async () => {
+  it('never submits recovery on failures, stop, project switch or disconnect', async () => {
     vi.mocked(api.stopTask).mockResolvedValue({ state: 'stopped' } as any);
     const { result, rerender } = renderHook(({ projectId }) => useChat({ projectId }), { initialProps: { projectId: 'A' } });
     act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'A', task_id: 's', turn_id: 'a',
       message_id: 'failure-a', content: 'API Error: Connection error.' }));
-    expect(result.current.autoRetryTurnId).toBe('a');
     await act(async () => result.current.stopTask());
-    expect(result.current.autoRetryTurnId).toBeNull();
     rerender({ projectId: 'B' });
     act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'A', task_id: 's', turn_id: 'other',
       content: 'API Error: Connection error.' }));
-    expect(result.current.autoRetryTurnId).toBeNull();
     act(() => latestWebSocketOptions.onMessage?.({ type: 'error', project_id: 'B', task_id: 's', turn_id: 'b',
       content: 'Permission denied for tool.' }));
-    expect(result.current.autoRetryTurnId).toBeNull();
     act(() => latestWebSocketOptions.onClose?.());
     expect(api.continueTask).not.toHaveBeenCalled();
   });
@@ -181,7 +173,7 @@ describe('useChat clarification gate handling', () => {
     vi.mocked(api.continueTask).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     const { result, rerender } = renderHook(({ projectId }) => useChat({ projectId }), { initialProps: { projectId: 'A' } });
     let pending!: Promise<void>;
-    act(() => { pending = result.current.continueTask('failed-turn', true); });
+    act(() => { pending = result.current.continueTask('failed-turn'); });
     rerender({ projectId: 'B' });
     await act(async () => { finish({ resume_task_id: 'old-retry' }); await pending; });
     expect(result.current.currentTaskId).toBeNull();

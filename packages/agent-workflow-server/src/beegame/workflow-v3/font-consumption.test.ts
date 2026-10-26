@@ -8,9 +8,11 @@ import { type TaskSpec } from './state'
 import { uiLayoutFixture } from '../fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
+import { validateFontProbeInputs } from './font-consumption'
+import { runArtifactCheck } from './runtime-checks'
 
 for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-size', 'responsive', 'compact-default', 'compact-default-ignore-size', 'wrong-text', 'ignore-text', 'ignore-size', 'fetch-only', 'wrong-member',
-  'missing-glyph', 'rich-text', 'dynamic', 'missing-probe', 'missing-viewport', 'stale-font', 'unrelated-error', 'suppression-error', 'same-rendering', 'mixed-fonts', 'legacy-gap'] as const) {
+  'missing-glyph', 'rich-text', 'dynamic', 'missing-probe', 'missing-viewport', 'partial-font-scope', 'stale-font', 'unrelated-error', 'suppression-error', 'same-rendering', 'mixed-fonts', 'legacy-gap'] as const) {
   test('actual target DOM consumes bound text/font: '+mode, async () => {
     const root = await mkdtemp(join(tmpdir(), 'bgs-v3-fonts-'))
     try {
@@ -27,7 +29,7 @@ for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-
       await writeBeeGameAssetManifest(root,manifest)
       const ui = uiLayoutFixture() as any
       ui.assetRefs = [resource.id]
-      Object.assign(ui.data.nodes[0].data,{referenceResolution:[1280,720],targetViewports:mode==='missing-viewport'?[[1280,720],[720,1280]]:[[1280,720]]})
+      Object.assign(ui.data.nodes[0].data,{referenceResolution:[1280,720],targetViewports:['missing-viewport','partial-font-scope'].includes(mode)?[[1280,720],[720,1280]]:[[1280,720]]})
       ui.data.nodes[0].layout.size = [1280,720]
       const node = ui.data.nodes[1]
       node.layout.size = [500,80]; node.text = mode === 'missing-glyph' ? '\u{10ffff}' : 'Signal 19AB'
@@ -37,6 +39,9 @@ for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-
       if(mode.startsWith('compact-default'))node.responsive={compact:{style:{fontSize:23}}}
       if(mode==='dynamic')node.bindings={text:'score'}
       if(mode==='missing-probe')ui.data.nodes.push({...node,id:'extra'})
+      if(mode==='partial-font-scope'){
+        const unselected=structuredClone(node);unselected.id='unselected-font';unselected.text='Secondary';ui.data.nodes.push(unselected)
+      }
       if(mode==='combined-probes')ui.data.nodes.push({id:'close',parentId:'root',role:'button',layout:{anchor:'middle-center',position:[0,160],size:[200,52]}})
       const source = 'content/ui/menu.json', body = JSON.stringify(ui), selected = explicit ? memberFont : defaultFont
       await mkdir(join(root,'content/ui'),{recursive:true});await writeFile(join(root,source),body)
@@ -71,8 +76,14 @@ for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-
       const task:TaskSpec = {id:'font',kind:'game.verify',goal:'Observe saved DOM text/font usage',dependsOn:[],requirementIds:['req.text'],
         inputs:[],writablePaths:[],expectedOutputs:['dist/index.html'],runtimeArtifact:'dist',checks:mode==='combined-probes'?['font-data-consumption','ui-data-consumption']:[mode==='legacy-gap'?'ui-data-consumption':'font-data-consumption'],
         uiProbes:[{document:source,nodeId:'play',selector:'#play',viewport},...(mode==='combined-probes'?[{document:source,nodeId:'close',selector:'#close',viewport}]:[])]}
-      const checks = (await runChecks(root,task,[])).checks, result = checks[0]!
-      const expected = ['consume','combined-probes','explicit-member','inherited-size','responsive','compact-default','legacy-gap'].includes(mode) ? 'passed'
+      if(mode==='partial-font-scope'){
+        await validateFontProbeInputs(root,task)
+        const registered=(await runChecks(root,task,[])).checks[0]!
+        expect(registered.status).toBe('unverified')
+        expect(registered.observation).toContain('omit authored target viewports')
+      }
+      const checks = mode==='partial-font-scope' ? [await runArtifactCheck(root,'font-data-consumption',task,[],{},undefined,'selected')] : (await runChecks(root,task,[])).checks, result = checks[0]!
+      const expected = ['consume','combined-probes','explicit-member','inherited-size','responsive','compact-default','legacy-gap','partial-font-scope'].includes(mode) ? 'passed'
         : ['wrong-text','ignore-text','ignore-size','compact-default-ignore-size','unrelated-error'].includes(mode) ? 'failed' : 'unverified'
       expect(result.status,result.observation).toBe(expected)
       if(mode==='combined-probes')expect(checks[1]!.status,checks[1]!.observation).toBe('passed')
@@ -90,3 +101,19 @@ for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-
     }finally{await rm(root,{recursive:true,force:true})}
   },30000)
 }
+
+test('source-only font input validation rejects an unbound selected node without an artifact', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-v3-font-input-'))
+  try {
+    const source = 'content/ui/menu.json'
+    await mkdir(join(root, 'content/ui'), { recursive: true })
+    await writeFile(join(root, source), JSON.stringify(uiLayoutFixture()))
+    await writeFile(join(root, 'content/index.json'), JSON.stringify({
+      schema: 'beegame-content-package.v2', id: 'fixture', sceneModel: 'game-object-v2', dimension: '2d',
+      documentRevision: '0'.repeat(64), assetManifestRevision: '0'.repeat(64), entryScene: 'menu',
+      files: ['ui/menu.json'], documents: [{ id: 'menu', kind: 'ui-screen', path: 'ui/menu.json', loadPhase: 'startup' }],
+    }))
+    await expect(validateFontProbeInputs(root, { uiProbes: [{ document: source, nodeId: 'play', selector: '#play', viewport: [600, 360] }] }))
+      .rejects.toThrow('No font-bound static DOM text to observe')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

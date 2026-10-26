@@ -53,7 +53,6 @@
       "capacity": "Das ausgewählte Modell ist ausgelastet. Bitte versuche ein anderes Modell.",
       "retry": "Erneut versuchen",
       "retryNow": "Jetzt erneut versuchen",
-      "retryIn": "Erneut versuchen in {{seconds}} s",
       "retrying": "Neuer Versuch…"
     },
     "previewTitle": "Vorschau",

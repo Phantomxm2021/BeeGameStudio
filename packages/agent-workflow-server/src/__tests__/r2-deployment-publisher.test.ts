@@ -4,6 +4,7 @@ import type {
   StorageObjectLocator,
 } from '@bee-game-studio/beegame-storage-core'
 import { createR2DeploymentPublisher } from '../beegame/r2-deployment-publisher'
+import { createDeliveryWorker } from '../../../../apps/game-delivery/src/index.js'
 
 function metadataFetch(events: Array<Record<string, unknown>>, publicHtml = '<main>game</main>'): typeof fetch {
   const rows = new Map<string, Record<string, unknown>>()
@@ -36,6 +37,68 @@ function metadataFetch(events: Array<Record<string, unknown>>, publicHtml = '<ma
 }
 
 describe('R2 deployment publisher', () => {
+  test('verifies through the delivery Worker while preserving public instrumentation and authorization', async () => {
+    const deploymentId = 'deploy-worker'
+    const sourceHtml = '<!doctype html><html><head><title>Game</title></head><body>Play</body></html>'
+    let isPublic = true
+    const delivery = createDeliveryWorker({
+      fetchImpl: (async input => {
+        if (String(input).endsWith('/rpc/beegame_is_deployment_public')) return Response.json(isPublic)
+        return new Response('Unexpected Worker upstream request', { status: 500 })
+      }) as typeof fetch,
+    })
+    const env = {
+      DELIVERY_BUCKET: {
+        get: async (key: string) => key.endsWith('manifest.json')
+          ? { body: JSON.stringify({ version: 1, deploymentId, files: [{
+            path: 'index.html', byteSize: new TextEncoder().encode(sourceHtml).byteLength,
+            contentType: 'text/html; charset=utf-8', sha256: '0'.repeat(64),
+          }] }) }
+          : { body: sourceHtml },
+      },
+      SUPABASE_URL: 'https://supabase.test',
+      SUPABASE_ANON_KEY: 'anon-key',
+      PORTAL_ORIGIN: 'https://portal.test',
+    }
+    const publicFetch = (async input => delivery.fetch(new Request(String(input)), env)) as typeof fetch
+    const publisher = createR2DeploymentPublisher({
+      baseUrl: 'https://supabase.test', anonKey: 'anon-key', bucket: 'delivery-data',
+      publicBaseUrl: 'https://games.test', driver: { provider: 'r2' } as ProjectStorageDriver,
+      fetchImpl: publicFetch,
+    })
+    const url = `https://games.test/deployments/${deploymentId}/files/index.html`
+    const files = [{ path: 'index.html', bytes: async () => new TextEncoder().encode(sourceHtml), text: async () => '' }]
+
+    const ordinaryPage = await delivery.fetch(new Request(url), env)
+    expect(await ordinaryPage.text()).toContain('beegame:play')
+    await publisher.verifyPublished!(url, files)
+
+    isPublic = false
+    await expect(publisher.verifyPublished!(url, files)).rejects.toThrow('(HTTP 404)')
+  })
+
+  test('requests the uninstrumented entrypoint for exact public verification', async () => {
+    let requestedUrl = ''
+    const publisher = createR2DeploymentPublisher({
+      baseUrl: 'https://supabase.test',
+      anonKey: 'anon-key',
+      bucket: 'delivery-data',
+      publicBaseUrl: 'https://games.test',
+      driver: { provider: 'r2' } as ProjectStorageDriver,
+      fetchImpl: (async input => {
+        requestedUrl = String(input)
+        return new Response('<html><head></head><body>game</body></html>', {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+      }) as typeof fetch,
+    })
+    const bytes = new TextEncoder().encode('<html><head></head><body>game</body></html>')
+    await publisher.verifyPublished!('https://games.test/deployments/test/files/index.html', [
+      { path: 'index.html', bytes: async () => bytes, text: async () => '' },
+    ])
+    expect(new URL(requestedUrl).searchParams.get('bgs_verification')).toBe('raw')
+  })
+
   test('rejects a public page whose referenced asset is missing', async () => {
     const publisher = createR2DeploymentPublisher({
       baseUrl: 'https://supabase.test', anonKey: 'anon-key', bucket: 'delivery-data',
@@ -84,6 +147,7 @@ describe('R2 deployment publisher', () => {
     const metadataEvents: Array<Record<string, unknown>> = []
     const uploads: Array<{ locator: StorageObjectLocator; bytes: Uint8Array; cacheControl?: string }> =
       []
+    const deleted: string[] = []
     const sizes = new Map<string, number>()
     const driver: ProjectStorageDriver = {
       provider: 'r2',
@@ -98,7 +162,7 @@ describe('R2 deployment publisher', () => {
         byteSize: sizes.get(locator.objectKey) ?? 0,
         metadata: {},
       }),
-      deleteObject: async () => undefined,
+      deleteObject: async locator => { deleted.push(locator.objectKey) },
       copyObject: async () => undefined,
       createMultipartUpload: async () => 'unused',
       createMultipartPartUploadUrl: async () => 'unused',
@@ -181,6 +245,12 @@ describe('R2 deployment publisher', () => {
     await publisher.verifyPublished!(result.url, [{ path: 'index.html',
       bytes: async () => new TextEncoder().encode('<main>game</main>'),
       text: async () => '<main>game</main>' }])
+    await result.cleanup!()
+    expect(deleted).toEqual([
+      'deployments/deploy-1/manifest.json',
+      'deployments/deploy-1/files/assets/game.js',
+      'deployments/deploy-1/files/index.html',
+    ])
   })
 
   test('removes already uploaded objects when a later deployment file fails', async () => {
@@ -255,5 +325,80 @@ describe('R2 deployment publisher', () => {
         expect.objectContaining({ operation: 'patch', status: 'deleted' }),
       ]),
     )
+  })
+
+  test('surfaces current-object cleanup failure while cleaning earlier uploaded objects', async () => {
+    const metadataEvents: Array<Record<string, unknown>> = []
+    const deleted: string[] = []
+    let uploadCount = 0
+    const publisher = createR2DeploymentPublisher({
+      baseUrl: 'https://supabase.test', anonKey: 'anon-key', bucket: 'delivery-data',
+      publicBaseUrl: 'https://games.test', fetchImpl: metadataFetch(metadataEvents),
+      driver: {
+        provider: 'r2',
+        putObject: async () => { uploadCount++ },
+        getObject: async () => undefined,
+        createUploadUrl: async () => 'unused',
+        createDownloadUrl: async () => 'unused',
+        headObject: async locator => uploadCount === 1 && locator.objectKey.endsWith('index.html')
+          ? { byteSize: 1, metadata: {} }
+          : undefined,
+        deleteObject: async locator => {
+          if (locator.objectKey.endsWith('game.js')) throw new Error('current object delete unavailable')
+          deleted.push(locator.objectKey)
+        },
+        copyObject: async () => undefined,
+        createMultipartUpload: async () => 'unused',
+        createMultipartPartUploadUrl: async () => 'unused',
+        completeMultipartUpload: async () => undefined,
+        abortMultipartUpload: async () => undefined,
+      },
+    })
+
+    await expect(publisher.publishStaticDirectory({
+      deploymentId: 'current-cleanup-failure', sessionId: 'session', userId: 'user', projectId: 'project',
+      workspacePath: '/workspace', outputDir: '/workspace/dist', artifactHash: 'hash', authToken: 'user-token',
+      files: [
+        { path: 'index.html', bytes: async () => new Uint8Array([1]), text: async () => '' },
+        { path: 'game.js', bytes: async () => new Uint8Array([2]), text: async () => '' },
+      ],
+    })).rejects.toThrow('verification failed; failed to clean up failed upload object: current object delete unavailable')
+
+    expect(deleted).toEqual(['deployments/current-cleanup-failure/files/index.html'])
+    expect(metadataEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ operation: 'patch', status: 'failed' }),
+        expect.objectContaining({ operation: 'patch', status: 'deleted' }),
+      ]),
+    )
+  })
+
+  test('surfaces R2 cleanup failure after an incomplete publication', async () => {
+    const metadataEvents: Array<Record<string, unknown>> = []
+    let uploadCount = 0
+    const publisher = createR2DeploymentPublisher({
+      baseUrl: 'https://supabase.test', anonKey: 'anon-key', bucket: 'delivery-data',
+      publicBaseUrl: 'https://games.test', fetchImpl: metadataFetch(metadataEvents),
+      driver: {
+        provider: 'r2',
+        putObject: async () => { uploadCount++ },
+        getObject: async () => undefined,
+        createUploadUrl: async () => 'unused',
+        createDownloadUrl: async () => 'unused',
+        headObject: async () => uploadCount === 1 ? { byteSize: 1, metadata: {} } : undefined,
+        deleteObject: async () => { throw new Error('R2 delete unavailable') },
+        copyObject: async () => undefined,
+        createMultipartUpload: async () => 'unused',
+        createMultipartPartUploadUrl: async () => 'unused',
+        completeMultipartUpload: async () => undefined,
+        abortMultipartUpload: async () => undefined,
+      },
+    })
+
+    await expect(publisher.publishStaticDirectory({
+      deploymentId: 'cleanup-failure', sessionId: 'session', userId: 'user', projectId: 'project',
+      workspacePath: '/workspace', outputDir: '/workspace/dist', artifactHash: 'hash', authToken: 'user-token',
+      files: [{ path: 'index.html', bytes: async () => new Uint8Array([1]), text: async () => '' }],
+    })).rejects.toThrow('R2 deployment object verification failed; failed to clean up failed upload object: R2 delete unavailable; cleanup failed: R2 delete unavailable')
   })
 })

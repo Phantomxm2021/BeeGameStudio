@@ -54,6 +54,28 @@ describe('systemStore token usage', () => {
     expect(document.documentElement).toHaveClass('dark');
   });
 
+  it('does not notify on identical or older usage, and preserves unrelated usage references', () => {
+    const usage = { input_tokens: 100, output_tokens: 20, total_tokens: 120 };
+    const update = useSystemStore.getState().updateTokenUsage;
+    update(usage, 'project', 'task');
+    const first = useSystemStore.getState();
+    const notify = vi.fn();
+    const unsubscribe = useSystemStore.subscribe(notify);
+    try {
+      update({ ...usage }, 'project', 'task');
+      update({ input_tokens: 80, output_tokens: 10, total_tokens: 90 }, 'project', 'task');
+      expect(notify).not.toHaveBeenCalled();
+      update({ ...usage, providerUsageIncomplete: true }, 'project', 'task');
+      const incomplete = useSystemStore.getState();
+      expect(incomplete.taskUsage.task.providerUsageIncomplete).toBe(true);
+      update(usage, 'project', 'new-task');
+      expect(useSystemStore.getState().tokenUsage).toBe(incomplete.tokenUsage);
+      expect(useSystemStore.getState().taskUsage.task).toBe(incomplete.taskUsage.task);
+      expect(first.taskUsage.task.providerUsageIncomplete).toBeUndefined();
+      expect(notify).toHaveBeenCalledTimes(2);
+    } finally { unsubscribe(); }
+  });
+
   it('keeps project and task token usage monotonic for cumulative snapshots', () => {
     const store = useSystemStore.getState();
 

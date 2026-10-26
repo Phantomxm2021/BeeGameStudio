@@ -1,25 +1,113 @@
-import { readdir, readFile } from 'node:fs/promises'
+import { appendFileSync } from 'node:fs'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n')
 const threadId = '019a0000-0000-7000-8000-000000000001'
 let skillRoots: string[] = []
+const serverResponses: any[] = []
 let turn = 0
 let resumed = false
+let injectedItems: any[] = []
+let nativeGoal: any = process.env.BGS_FIXTURE_SAVED_GOAL ? JSON.parse(process.env.BGS_FIXTURE_SAVED_GOAL) : undefined
+let nativeGoalRunning = false
 let awaiting: ((value: any) => void) | undefined
+let finalizationRelease: (() => void) | undefined
+let finalizationDone: Promise<void> | undefined
+let finalizationDoneResolve: (() => void) | undefined
+
+// Replay an idle native child receiving another assignment.
+function reusedChild(event: (method: string, params: any) => void, outcome: string) {
+  event('item/completed', { item: { id: 'spawn-reused', type: 'collabAgentToolCall', tool: 'spawnAgent',
+    receiverThreadIds: ['reused-child'], agentsStates: { 'reused-child': { status: 'completed' } }, status: 'completed' } })
+  event('item/completed', { item: { id: 'send-reused', type: 'collabAgentToolCall', tool: 'sendInput',
+    receiverThreadIds: ['reused-child'], agentsStates: outcome === 'pending' ? {} :
+      { 'reused-child': { status: outcome === 'turn-started' ? 'completed' : 'running' } }, status: 'completed' } })
+  if (outcome === 'turn-started')
+    event('turn/started', { threadId: 'reused-child', turnId: 'child-next', turn: { id: 'child-next', status: 'inProgress' } })
+  if (outcome === 'turn-completed')
+    event('turn/completed', { threadId: 'reused-child', turnId: 'child-next', turn: { id: 'child-next', status: 'completed' } })
+  else if (['completed','errored','interrupted','shutdown','notFound'].includes(outcome))
+    event('item/completed', { item: { id: 'wait-reused', type: 'collabAgentToolCall', tool: 'wait',
+      receiverThreadIds: ['reused-child'], agentsStates: { 'reused-child': { status: outcome } }, status: 'completed' } })
+}
+
+async function runNativeGoal() {
+  if (nativeGoalRunning || !nativeGoal || nativeGoal.status !== 'active') return
+  nativeGoalRunning = true
+  const turnId = 'goal-turn-' + ++turn
+  const event = (method: string, params: any) => send({ method, params: { threadId, turnId, ...params } })
+  event('turn/started', { turn: { id: turnId, status: 'inProgress' } })
+  if (process.env.BGS_FIXTURE_REUSED_CHILD === '1') reusedChild(event, 'running')
+  if (process.env.BGS_FIXTURE_NATIVE_GOAL_FINALIZE === '1') {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+    const childPidFile = process.env.BGS_FIXTURE_NATIVE_GOAL_CHILD_PID_FILE
+    if (childPidFile && child.pid) await writeFile(childPidFile, String(child.pid))
+    event('item/started', { item: { id: 'submission-command', type: 'commandExecution', command: 'finish-delivery', status: 'inProgress' } })
+    finalizationDone = new Promise<void>(resolve => { finalizationDoneResolve = resolve })
+    await new Promise<void>(resolve => { finalizationRelease = resolve })
+    finalizationRelease = undefined
+    event('item/completed', { item: { id: 'submission-command', type: 'commandExecution', command: 'finish-delivery', status: 'completed', aggregatedOutput: 'done', exitCode: 0, durationMs: 1 } })
+    const usage = { inputTokens: 100, outputTokens: 30, cachedInputTokens: 20, cacheWriteInputTokens: 0 }
+    if (process.env.BGS_FIXTURE_NATIVE_GOAL_FINALIZE_NO_UPDATED !== '1')
+      event('thread/goal/updated', { goal: nativeGoal })
+    event('thread/tokenUsage/updated', { tokenUsage: { total: usage, last: usage } })
+    finalizationDoneResolve?.()
+    finalizationDoneResolve = undefined
+    finalizationDone = undefined
+    nativeGoalRunning = false
+    return
+  }
+  if (process.env.BGS_FIXTURE_NATIVE_GOAL_WRITE === '1') {
+    const result = await new Promise<any>(resolve => {
+      awaiting = resolve
+      send({ id: 'native-goal-write', method: 'item/tool/call', params: { threadId, turnId,
+        callId: 'native-goal-write', tool: 'WriteProjectFile',
+        arguments: { file_path: 'docs/GDD.md', content: 'Native Goal protected write' } } })
+    })
+    awaiting = undefined
+    if (!result.result?.success) {
+      event('item/completed', { item: { id: 'native-write-failure', type: 'agentMessage',
+        text: 'Native Goal write failed: ' + String(result.result?.contentItems?.[0]?.text || 'unknown') } })
+    }
+  }
+  await new Promise(resolve => setTimeout(resolve, 5))
+  const text = injectedItems.flatMap(item => item.content ?? []).find((item: any) => item.type === 'input_text')?.text
+  const usage = { inputTokens: 100, outputTokens: 30, cachedInputTokens: 20, cacheWriteInputTokens: 0 }
+  const targetTurns = Math.max(1, Number(process.env.BGS_FIXTURE_NATIVE_GOAL_TURNS || 1))
+  const turnNumber = (nativeGoal.turnsCompleted || 0) + 1
+  const terminal = turnNumber >= targetTurns
+  nativeGoal = { ...nativeGoal, status: terminal ? 'complete' : 'active', turnsCompleted: turnNumber,
+    tokensUsed: (nativeGoal.tokensUsed || 0) + usage.inputTokens + usage.outputTokens }
+  if (terminal) send({ method: 'thread/goal/updated', params: { threadId, turnId, goal: nativeGoal } })
+  event('item/completed', { item: { id: 'native-answer', type: 'agentMessage', text: text ? 'Native Goal: ' + text : 'Native Goal completed' } })
+  event('thread/tokenUsage/updated', { tokenUsage: { total: usage, last: usage } })
+  event('turn/completed', { turn: { id: turnId, status: 'completed' } })
+  if (!terminal) {
+    send({ method: 'thread/goal/updated', params: { threadId, turnId, goal: nativeGoal } })
+    setTimeout(() => void runNativeGoal(), 0)
+  }
+  nativeGoalRunning = false
+}
+
 createInterface({ input: process.stdin }).on('line', async line => {
   const request = JSON.parse(line), p = request.params ?? {}
-  if (!request.method) { awaiting?.(request); return }
+  if (!request.method) { serverResponses.push(request); awaiting?.(request); return }
+  if (process.env.BGS_FIXTURE_RPC_TRACE) appendFileSync(process.env.BGS_FIXTURE_RPC_TRACE, JSON.stringify(request) + '\n')
   const reply = (result: unknown) => send({ id: request.id, result })
-  if (request.method === 'initialize') reply({ userAgent: 'fixture/0.163.0' })
+  if (request.method === 'fixture/events') { for (const event of p.events) send(event); reply({}) }
+  else if (request.method === 'fixture/responses') reply({ responses: serverResponses })
+  else if (request.method === 'initialize') reply({ userAgent: 'fixture/0.163.0' })
   else if (request.method === 'thread/start' || request.method === 'thread/resume') {
     resumed = request.method === 'thread/resume'
     const resolvedThreadId = p.threadId ?? threadId
     reply({ thread: { id: resolvedThreadId } })
+    if (request.method === 'thread/resume' && nativeGoal?.status === 'active') void runNativeGoal()
     // A real cold paginated resume can replay the last persisted cumulative
     // usage before the next turn starts. Keep this opt-in so ordinary fixture
     // tests retain their small, deterministic protocol transcript.
-    if (resumed && process.env.BGS_FIXTURE_REPLAY_RESUME_USAGE === '1') {
+    if (resumed && !p.excludeTurns && process.env.BGS_FIXTURE_REPLAY_RESUME_USAGE === '1') {
       const historical = { inputTokens: 17, outputTokens: 5, cachedInputTokens: 2, cacheWriteInputTokens: 0 }
       send({ method: 'thread/tokenUsage/updated', params: {
         threadId: resolvedThreadId,
@@ -27,6 +115,26 @@ createInterface({ input: process.stdin }).on('line', async line => {
         tokenUsage: { total: historical, last: historical },
       } })
     }
+  }
+  else if (request.method === 'thread/inject_items') { injectedItems.push(...(p.items ?? [])); reply({}) }
+  else if (request.method === 'thread/goal/get') reply({ goal: nativeGoal ?? null })
+  else if (request.method === 'thread/goal/clear') { nativeGoal = undefined; injectedItems = []; reply({ cleared: true }); send({ method: 'thread/goal/cleared', params: { threadId: p.threadId } }) }
+  else if (request.method === 'thread/goal/set') {
+    nativeGoal = {
+      threadId: p.threadId, objective: p.objective ?? nativeGoal?.objective ?? 'Native fixture Goal',
+      tokenBudget: p.tokenBudget ?? nativeGoal?.tokenBudget ?? null, status: p.status ?? nativeGoal?.status ?? 'active',
+      tokensUsed: nativeGoal?.tokensUsed ?? 0,
+    }
+    if (nativeGoal.status === 'complete') {
+      const done = finalizationDone
+      finalizationRelease?.()
+      if (done) await done
+      reply({ goal: nativeGoal })
+      return
+    }
+    reply({ goal: nativeGoal })
+    send({ method: 'thread/goal/updated', params: { threadId: p.threadId, goal: nativeGoal } })
+    if (nativeGoal.status === 'active') void runNativeGoal()
   }
   else if (request.method === 'thread/backgroundTerminals/clean') reply({})
   else if (request.method === 'skills/extraRoots/set') { skillRoots = p.extraRoots; reply({}) }
@@ -45,9 +153,11 @@ createInterface({ input: process.stdin }).on('line', async line => {
     const turnId = 'turn-' + ++turn
     reply({ turn: { id: turnId, status: 'inProgress' } })
     const event = (method: string, params: any) => send({ method, params: { threadId, turnId, ...params } })
-    const prompt = p.input?.findLast((i: any) => i.type === 'text')?.text
+    event('turn/started', { turn: { id: turnId, status: 'inProgress' } })
+    const prompt = p.input?.findLast((i: any) => i.type === 'text')?.text ?? ''
     await new Promise(resolve => setTimeout(resolve, 5))
     if (prompt?.startsWith('$')) { event('item/completed',{item:{id:'skill-answer',type:'agentMessage',text:p.input.some((i:any)=>i.type==='skill')?'Native skill selected':'Skill input missing'}}) }
+    if (prompt === 'native-retry') event('error', { error: { message: 'Temporary native failure' }, willRetry: true })
     if (prompt === 'hang') { setInterval(() => {}, 1000); return }
     if (prompt === 'crash') { process.exit(3) }
     if (prompt === 'failure-details' || prompt === 'failure-notification') {
@@ -111,6 +221,10 @@ createInterface({ input: process.stdin }).on('line', async line => {
       })
       awaiting = undefined
       event('item/completed', { item: { id: 'question-result', type: 'agentMessage', text: JSON.stringify(result.result), phase: 'final_answer' } })
+    } else if (prompt.startsWith('reused-child:')) {
+      const outcome = prompt.slice('reused-child:'.length)
+      reusedChild(event, outcome)
+      if (outcome === 'cancel') return
     } else if (prompt === 'unfinished-child') {
       event('item/completed', { item: { id: 'spawn', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'], agentsStates: { child: { status: 'running' } }, status: 'completed' } })
     } else {
@@ -120,7 +234,9 @@ createInterface({ input: process.stdin }).on('line', async line => {
         event('item/commandExecution/outputDelta', { itemId: 'shell-1', delta: 'Bu' })
         event('item/commandExecution/outputDelta', { itemId: 'shell-1', delta: 'ilt' })
       }
-      event('item/completed', { item: { id: 'shell-1', type: 'commandExecution', command: 'bun run build', status: 'completed', aggregatedOutput: 'Built', exitCode: prompt === 'command-fail' ? 2 : 0, durationMs: 1200 } })
+      const volume = prompt.startsWith('command-volume:') ? Number(prompt.split(':')[1]) : 0
+      for (let i = 0; i < volume; i++) event('item/commandExecution/outputDelta', { itemId: 'shell-1', delta: 'x'.repeat(1024) })
+      event('item/completed', { item: { id: 'shell-1', type: 'commandExecution', command: 'bun run build', status: 'completed', aggregatedOutput: volume ? 'x'.repeat(volume * 1024) : 'Built', exitCode: prompt === 'command-fail' ? 2 : 0, durationMs: 1200 } })
       event('item/agentMessage/delta', { itemId: 'answer', delta: 'Hello ' })
       event('item/agentMessage/delta', { itemId: 'answer', delta: 'Bgs' })
       event('item/completed', { item: { id: 'answer', type: 'agentMessage', text: 'Hello Bgs', phase: 'final_answer' } })

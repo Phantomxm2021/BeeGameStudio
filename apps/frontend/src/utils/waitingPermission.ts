@@ -59,10 +59,17 @@ export const deriveDashboardStatus = ({
   if (canContinue) return 'paused';
   if (hasWaitingPermission) return 'waiting_approval';
 
-  const lastStatusMsg = [...messages]
-    .reverse()
-    .find((m) => m.sender === 'system' && (m.content === 'finished' || m.content === '任务已停止'));
-  if (lastStatusMsg?.content === 'finished') return 'finished';
-  if (lastStatusMsg?.content === '任务已停止') return 'stopped';
+  return deriveChatTerminalStatus(messages);
+};
+
+export const deriveChatTerminalStatus = (
+  messages: ReadonlyArray<{ sender: string; content: string }>,
+): 'finished' | 'stopped' | 'idle' => {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.sender !== 'system') continue;
+    if (message.content === 'finished') return 'finished';
+    if (message.content === '任务已停止') return 'stopped';
+  }
   return 'idle';
 };

@@ -1,11 +1,10 @@
 import { AnimatedNumber } from '@/components/beui/motion/animated-number';
-import { canAutomaticallyRetryModelFailure } from '../../utils/modelRequestFailure';
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload } from '../../services/api';
 import type { ChatAttachmentPayload } from '../../services/api';
-import { beeGameAdapter, isBeeGameProjectPackageArtifactId, type BeeGameQueuedMessage } from '../../services/beeGameAdapter';
+import { beeGameAdapter, isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { isBeeGamePermission } from './Sidebar/SidebarUtils';
 import type { WaitingPermissionState } from '../../utils/waitingPermission';
@@ -57,9 +56,7 @@ interface RightSidebarProps {
     ) => Promise<boolean>;
     isLoading: boolean;
     onStopTask?: () => void | Promise<void>;
-    onContinueTask?: (failedTurnId?: string, automatic?: boolean) => void | Promise<void>;
-    autoRetryTurnId?: string | null;
-    onCancelRetry?: () => void;
+    onContinueTask?: (failedTurnId?: string) => void | Promise<void>;
     isStopping?: boolean;
     isRuntimeBusy?: boolean;
     onResolveToolPermission?: (
@@ -103,8 +100,6 @@ export function RightSidebar({
     isLoading,
     onStopTask,
     onContinueTask,
-    autoRetryTurnId,
-    onCancelRetry,
     isStopping = false,
     isRuntimeBusy = false,
     onResolveToolPermission,
@@ -126,12 +121,6 @@ export function RightSidebar({
     const [chatInput, setChatInput] = useState('');
     const [editDraft, setEditDraft] = useState('');
     const [isSubmittingMessage, setIsSubmittingMessage] = useState(false);
-    const [queuedState, setQueuedState] = useState<{ projectId: string; messages: BeeGameQueuedMessage[] }>(
-        { projectId, messages: [] },
-    );
-    const queuedMessages = queuedState.projectId === projectId ? queuedState.messages : [];
-    const [queueActionId, setQueueActionId] = useState<string | null>(null);
-    const [queueError, setQueueError] = useState<string | null>(null);
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([]);
     const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -171,7 +160,6 @@ export function RightSidebar({
     const messagesRef = useRef(messages);
     messagesRef.current = messages;
     const activeProjectRef = useRef(projectId);
-    const queueRequestRef = useRef(0);
     const historyRequestRef = useRef(0);
     const stopHistoryAnchorTrackingRef = useRef<(() => void) | null>(null);
     const pendingHistoryScrollRestoreRef = useRef<{
@@ -208,7 +196,6 @@ export function RightSidebar({
 
     useEffect(() => {
         activeProjectRef.current = projectId;
-        queueRequestRef.current += 1;
         historyRequestRef.current += 1;
         stopHistoryAnchorTrackingRef.current?.();
         pendingHistoryScrollRestoreRef.current = null;
@@ -229,9 +216,6 @@ export function RightSidebar({
         setHasOlderHistory(false);
         setIsLoadingOlderHistory(false);
         setShowAssets(false);
-        setQueuedState({ projectId, messages: [] });
-        setQueueActionId(null);
-        setQueueError(null);
     }, [projectId]);
 
     useEffect(() => {
@@ -351,39 +335,6 @@ export function RightSidebar({
     // is still alive. Runtime state carries the live child-task snapshot.
     const isAgentWorking = isLoading || isRuntimeBusy;
     const isComposerLocked = isSubmittingMessage;
-    const refreshQueuedMessages = useCallback(async () => {
-        const requestedProjectId = projectId;
-        const requestId = ++queueRequestRef.current;
-        try {
-            const messages = await beeGameAdapter.listQueuedMessages(requestedProjectId);
-            if (activeProjectRef.current === requestedProjectId && queueRequestRef.current === requestId)
-                setQueuedState({ projectId: requestedProjectId, messages });
-        } catch {
-            // Chat remains usable if queue status is temporarily unavailable.
-        }
-    }, [projectId]);
-    useEffect(() => {
-        queueMicrotask(() => { void refreshQueuedMessages(); });
-        if (!isAgentWorking && queuedMessages.length === 0) return;
-        const timer = window.setInterval(() => { void refreshQueuedMessages(); }, 3000);
-        return () => window.clearInterval(timer);
-    }, [isAgentWorking, queuedMessages.length, refreshQueuedMessages]);
-    const handleQueuedAction = async (messageId: string, action: 'steer' | 'delete') => {
-        if (queueActionId) return;
-        const requestedProjectId = projectId;
-        setQueueActionId(messageId);
-        setQueueError(null);
-        try {
-            if (action === 'steer') await beeGameAdapter.steerQueuedMessage(requestedProjectId, messageId);
-            else await beeGameAdapter.deleteQueuedMessage(requestedProjectId, messageId);
-            if (activeProjectRef.current === requestedProjectId) await refreshQueuedMessages();
-        } catch (error) {
-            if (activeProjectRef.current === requestedProjectId)
-                setQueueError(error instanceof Error ? error.message : 'Queued message action failed');
-        } finally {
-            if (activeProjectRef.current === requestedProjectId) setQueueActionId(null);
-        }
-    };
     const canMutateAssets = canUploadAssets && !isRuntimeBusy;
     const artifactView = useMemo(
         () => buildArtifactViewModel(artifacts),
@@ -436,7 +387,6 @@ export function RightSidebar({
         setIsSubmittingMessage(true);
         try {
             const accepted = await onSendMessage(content, requestAttachments, requestSupersedesMessageId);
-            if (accepted) void refreshQueuedMessages();
             const currentDraft = currentDraftRef.current[kind];
             const sameAttachments = currentDraft.attachments.length === submittedDraft.attachments.length
                 && currentDraft.attachments.every((attachment, index) => attachment.data === submittedDraft.attachments[index]?.data && attachment.filename === submittedDraft.attachments[index]?.filename);
@@ -644,7 +594,11 @@ export function RightSidebar({
         if (activeTab === 'artifacts' && showAssets) {
             let refreshTimer: number | undefined;
             let cancelled = false;
+            let inFlight = false;
+            let invalidManifest = false;
             const fetchAssets = async () => {
+                if (cancelled || document.hidden || inFlight || invalidManifest) return;
+                inFlight = true;
                 const requestProjectId = projectId;
                 const requestId = ++assetLoadRequestRef.current;
                 try {
@@ -660,21 +614,29 @@ export function RightSidebar({
                     ) {
                         console.error('Failed to load project assets:', err);
                     } else {
+                        invalidManifest = true;
                         setAssetManifest(null);
                         return;
                     }
                 } finally {
+                    inFlight = false;
                     if (activeProjectRef.current === requestProjectId && assetLoadRequestRef.current === requestId) {
                         setIsAssetsLoading(false);
                     }
                 }
-                if (!cancelled && activeProjectRef.current === requestProjectId && assetLoadRequestRef.current === requestId) {
+                if (!cancelled && !document.hidden && activeProjectRef.current === requestProjectId && assetLoadRequestRef.current === requestId) {
                     refreshTimer = window.setTimeout(() => void fetchAssets(), 5000);
                 }
             };
+            const onVisibilityChange = () => {
+                if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+                if (!document.hidden) void fetchAssets();
+            };
+            document.addEventListener('visibilitychange', onVisibilityChange);
             void fetchAssets();
             return () => {
                 cancelled = true;
+                document.removeEventListener('visibilitychange', onVisibilityChange);
                 if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
             };
         }
@@ -702,10 +664,8 @@ export function RightSidebar({
         projectStatus.blocked && !isAgentWorking && onContinueTask);
     const retry = canRetryTurn && lastError && retryTurnId ? {
         messageId: lastError.id,
-        autoRetry: autoRetryTurnId === retryTurnId && canAutomaticallyRetryModelFailure(lastError.content),
         disabled: !canSendMessage || isStopping || isComposerLocked || waitingPermission.isBlockingChat,
-        onRetry: (automatic: boolean) => onContinueTask?.(retryTurnId, automatic),
-        onCancel: () => onCancelRetry?.(),
+        onRetry: () => onContinueTask?.(retryTurnId),
     } : undefined;
 
     return (
@@ -744,11 +704,6 @@ export function RightSidebar({
                                 onStop={onStopTask}
                                 isStopping={isStopping}
                                 isComposerLocked={isComposerLocked}
-                                queuedMessages={queuedMessages}
-                                queueActionId={queueActionId}
-                                queueError={queueError}
-                                onSteerQueued={id => { void handleQueuedAction(id, 'steer'); }}
-                                onDeleteQueued={id => { void handleQueuedAction(id, 'delete'); }}
                                 chatInput={chatInput}
                                 onChatInputChange={setChatInput}
                                 editDraft={editDraft}

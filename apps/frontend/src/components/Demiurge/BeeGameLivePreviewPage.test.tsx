@@ -157,13 +157,13 @@ describe('dashboard header', () => {
   );
 
   it('opens project usage in the BeUI popover with separate token categories', () => {
-    render(<BeeGameLivePreviewPage {...props} projectExecutionTime={{ elapsed_ms: 2 * 60 * 60_000, running: false }} credits={{ consumedCredits: 1.25 }} tokenUsage={{ prompt_tokens: 123, input_tokens: 100, cache_read_tokens: 200, cached_input_tokens: 250, completion_tokens: 300, total_tokens: 600 }} />);
+    render(<BeeGameLivePreviewPage {...props} projectExecutionTime={{ elapsed_ms: 2 * 60 * 60_000, running: false }} credits={{ consumedCredits: 1.25 }} tokenUsage={{ prompt_tokens: 123, input_tokens: 100, cache_read_tokens: 200, cache_creation_tokens: 50, cached_input_tokens: 250, completion_tokens: 300, total_tokens: 650 }} />);
     const trigger = screen.getByTestId('beegame-project-info-trigger');
     expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
     fireEvent.click(trigger);
     const panel = within(screen.getByTestId('beegame-project-hint'));
-    for (const label of ['项目运行时间', '已消耗 Credit', '输入 Tokens', '缓存输入 Tokens', '输出']) expect(panel.getByText(label)).toBeInTheDocument();
-    for (const value of ['2小时 0分钟', '1.25', '100', '250', '300']) expect(panel.getByText(value)).toBeInTheDocument();
+    for (const label of ['项目运行时间', '已消耗 Credit', '输入 Tokens', '缓存输入 Tokens', '缓存写入 Tokens', '输出']) expect(panel.getByText(label)).toBeInTheDocument();
+    for (const value of ['2小时 0分钟', '1.25', '100', '250', '50', '300']) expect(panel.getByText(value)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
@@ -186,7 +186,7 @@ describe('dashboard header', () => {
       expect(panel.getByText('2分钟')).toBeInTheDocument();
       view.rerender(<BeeGameLivePreviewPage {...props} projectExecutionTime={null} />);
       expect(panel.queryByText('2分钟')).not.toBeInTheDocument();
-      expect(panel.getAllByText('—')).toHaveLength(5);
+      expect(panel.getAllByText('—')).toHaveLength(6);
     } finally {
       view.unmount();
       vi.useRealTimers();
@@ -195,10 +195,13 @@ describe('dashboard header', () => {
 
   it('labels live session tokens separately from settled project totals', () => {
     render(<BeeGameLivePreviewPage {...props} tokenUsageScope="session" settledProjectTokens={900}
-      credits={{ consumedCredits: 0.5 }} tokenUsage={{ input_tokens: 12, cached_input_tokens: 34, output_tokens: 5, total_tokens: 51 }} />);
+      credits={{ consumedCredits: 0.5 }} tokenUsage={{ input_tokens: 12, cached_input_tokens: 34, cache_creation_tokens: 0, output_tokens: 5, total_tokens: 51 }} />);
     fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     const panel = within(screen.getByTestId('beegame-project-hint'));
     expect(panel.getByText('输入 Tokens（当前会话）')).toBeInTheDocument();
+    expect(panel.getByText('缓存写入 Tokens（当前会话）')).toBeInTheDocument();
+    const cacheWriteRow = panel.getByText('缓存写入 Tokens（当前会话）').parentElement!;
+    expect(within(cacheWriteRow).getByText('0', { selector: '.sr-only' })).toBeInTheDocument();
     expect(panel.getByText('项目已结算 Tokens')).toBeInTheDocument();
     expect(panel.getByText('900')).toBeInTheDocument();
   });
@@ -221,7 +224,7 @@ describe('dashboard header', () => {
   it('does not turn unavailable usage into zero', () => {
     render(<BeeGameLivePreviewPage {...props} />);
     fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
-    expect(within(screen.getByTestId('beegame-project-hint')).getAllByText('—')).toHaveLength(5);
+    expect(within(screen.getByTestId('beegame-project-hint')).getAllByText('—')).toHaveLength(6);
   });
 
   it('copies the displayed project name from the project info popover', async () => {

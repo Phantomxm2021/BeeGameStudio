@@ -12,19 +12,16 @@ import { deriveCurrentProjectTodos } from '../utils/projectTodos'
 
 const authenticatedFetchMock = vi.mocked(authenticatedFetch)
 
-it.each(['stale', 'paused', 'paused-between-reads'] as const)('does not automatically retry a %s turn', async kind => {
+it('rejects a stale retry before resuming or recovering a paused writer', async () => {
   authenticatedFetchMock.mockReset();
   const run = { id: 'run', version: 7, planRevision: 2, chatSessionId: 'chat', requirements: { revision: 'r' },
-    agentTurns: [{ attemptId: 'failed', turnId: kind === 'stale' ? 'newer-turn' : 'failed-turn', status: 'failed' }],
-    ...(kind === 'paused' ? { paused: { at: 'now' } } : {}) };
+    paused: { at: 'now' }, writer: { attemptId: 'newer' }, writerLiveness: 'orphaned', recoveryEvidence: 'host-idle',
+    agentTurns: [{ attemptId: 'newer', turnId: 'newer-turn', status: 'failed' }] };
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat', turnStatus: 'idle' } })))
     .mockResolvedValueOnce(new Response(JSON.stringify({ run })));
-  if (kind === 'paused-between-reads') authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-    run: { ...run, paused: { at: 'now' } },
-  })));
-  await expect(beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn', automatic_retry: true }))
-    .rejects.toThrow(kind === 'stale' ? '任务回合已改变' : '任务已被暂停');
-  expect(authenticatedFetchMock.mock.calls.some(([url]) => String(url).endsWith('/agent/messages') || String(url).endsWith('/resume'))).toBe(false);
+  await expect(beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn' }))
+    .rejects.toThrow('任务回合已改变');
+  expect(authenticatedFetchMock.mock.calls).toHaveLength(2);
 });
 
 it('retries the selected failed turn in the same conversation with a single continuation submission', async () => {
@@ -35,11 +32,11 @@ it('retries the selected failed turn in the same conversation with a single cont
     .mockResolvedValueOnce(new Response(JSON.stringify({ run })))
     .mockResolvedValueOnce(new Response(JSON.stringify({ run })))
     .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run', turn: { attemptId: 'retry' } })));
-  await beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn', automatic_retry: true });
+  await beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn' });
   const calls = authenticatedFetchMock.mock.calls.filter(([url]) => String(url).endsWith('/agent/messages'));
   expect(calls).toHaveLength(1);
   expect(JSON.parse(calls[0]![1]!.body as string)).toMatchObject({ runId: 'run', chatSessionId: 'chat',
-    intent: 'continue', continuationOf: 'failed' });
+    intent: 'continue', continuationOf: 'failed', text: '' });
   expect(authenticatedFetchMock.mock.calls.some(([url]) => String(url).includes('model-config'))).toBe(false);
 });
 
@@ -123,7 +120,7 @@ it('explicit writer recovery does not resume or dispatch a model message', async
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({run:{
     id:'run-1',version:7,chatSessionId:'chat-1',requirements:{revision:'r'},
     writer:{attemptId:'first',fence:1},agentTurns:[{attemptId:'first',status:'running'}],
-  },writerLiveness:'unknown',recoveryEvidence:'host-reboot'})))
+  },writerLiveness:'unknown',recoveryEvidence:'host-idle'})))
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({run:{
     id:'run-1',paused:{at:'now'},agentTurns:[{attemptId:'first',status:'interrupted'}],
   }})))
@@ -134,14 +131,14 @@ it('explicit writer recovery does not resume or dispatch a model message', async
   expect(JSON.parse(authenticatedFetchMock.mock.calls[1]![1]!.body as string)).toEqual({expectedVersion:7,attemptId:'first',fence:1})
 })
 
-it('settles a proven leftover writer during an explicit message without a recovery panel', async () => {
+it('settles an interrupted leftover writer during an explicit message without a recovery panel', async () => {
   authenticatedFetchMock.mockReset();
   const run = { id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1',
     requirements: { revision: 'r' }, writer: { attemptId: 'first', fence: 1 },
     agentTurns: [{ attemptId: 'first', status: 'running' }] };
   const settled = { ...run, version: 8, writer: undefined, paused: { at: 'now' },
     agentTurns: [{ attemptId: 'first', status: 'interrupted' }] };
-  const unresolved = { run, writerLiveness: 'unknown', recoveryEvidence: 'persisted' };
+  const unresolved = { run, writerLiveness: 'unknown', recoveryEvidence: 'host-idle' };
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat-1' } })))
     .mockResolvedValueOnce(new Response(JSON.stringify(unresolved)))
     .mockResolvedValueOnce(new Response(JSON.stringify(unresolved)))
@@ -158,7 +155,7 @@ it('settles a proven leftover writer during an explicit message without a recove
   expect(JSON.parse(mutations.at(-1)![1]!.body as string)).toMatchObject({ expectedVersion: 9, text: 'Continue existing work' });
 });
 
-it('lets explicit resume wait for a paused local writer, but automatic retry never clears the pause', async () => {
+it('lets explicit resume wait for a paused local writer, but a stale failure cannot clear the pause', async () => {
   authenticatedFetchMock.mockReset();
   const run = { id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1', paused: { at: 'now' },
     requirements: { revision: 'r' }, writer: { attemptId: 'first', fence: 1 },
@@ -175,8 +172,8 @@ it('lets explicit resume wait for a paused local writer, but automatic retry nev
   authenticatedFetchMock.mockReset();
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session: { id: 'chat-1' } })))
     .mockResolvedValueOnce(new Response(JSON.stringify({ run, writerLiveness: 'local-active', recoveryEvidence: 'persisted' })));
-  await expect(beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn', automatic_retry: true }))
-    .rejects.toThrow('任务已被暂停');
+  await expect(beeGameAdapter.continueTask({ project_id: 'project', failed_turn_id: 'failed-turn' }))
+    .rejects.toThrow('任务回合已改变');
   expect(authenticatedFetchMock.mock.calls.filter(([url]) => String(url).includes('/workflow-v3/')).length).toBe(0);
 });
 

@@ -167,3 +167,22 @@ describe("MessageScroller PreviewRail", () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 200, behavior: "smooth" });
   });
 });
+
+// Tool output and elapsed time must not cause an O(history DOM) navigation scan.
+it("uses explicit previews and ignores inner activity mutations", async () => {
+  const tree = (output: string, preview: string) => <MessageScroller navigation="rail" contentProps={{ 'data-testid': 'nav-content' }}>
+    <Message from="user" data-message-preview="Request">Request</Message>
+    <Message from="assistant" data-message-preview={preview}><span>{output}</span></Message>
+  </MessageScroller>;
+  const { rerender } = render(tree("hidden tool output", "Answer"));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)); });
+  const content = screen.getByTestId("nav-content");
+  const scan = vi.spyOn(content, "querySelectorAll");
+  rerender(tree("more tool output and a changed timer", "Answer"));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)); });
+  expect(scan).not.toHaveBeenCalled();
+  rerender(tree("more tool output and a changed timer", "Updated answer"));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)); });
+  expect(scan).toHaveBeenCalledWith('[data-slot="message"]');
+  scan.mockRestore();
+});

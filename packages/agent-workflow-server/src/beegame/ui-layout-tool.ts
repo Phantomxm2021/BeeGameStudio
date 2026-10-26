@@ -30,9 +30,9 @@ export function createUiLayoutServer(workspace: string, constraints: LayoutConst
         text: name + ' failed: ' + (error instanceof Error ? error.message : String(error)) }] }
     }
   })
-  readTool('ReadDesignHandoff', 'Read saved design inputs without finalizing or locking. {} returns a compact availability list for all eight documents. {read:[{document:"GDD.md"}]} lists that document’s headings. {read:[{document:"GDD.md",sections:["Exact heading"]}]} returns only selected original prose and locations; independently readable sources remain available when others are missing. Structure is not design approval.',
+  readTool('ReadDesignHandoff', 'Read saved design inputs without finalizing or locking. {} returns a compact availability entry for docs/GDD.md. {read:[{document:"GDD.md"}]} lists that document’s chapter headings. {read:[{document:"GDD.md",sections:["Exact heading"]}]} returns only selected original prose and locations; missing chapters remain explicit. Structure is not design approval.',
     designReadSchema, input => readDesignHandoff(root, input))
-  readTool('ReadImplementationTask', 'Read existing TECHNICAL_DESIGN tasks: {} lists IDs, dependencies and issues; {id:"exact-task-id"} returns task prose plus referenced owner requirement/acceptance text, merging repeated sections. No new plan, completion inference, baseline lock or implementation permission. Missing sources remain explicit.',
+  readTool('ReadImplementationTask', 'Read optional implementation task pointers in docs/GDD.md: {} lists available IDs, dependencies, issues and GDD section navigation; {id:"exact-task-id"} returns task prose plus referenced GDD requirement/acceptance text, merging repeated sections. No new plan, completion inference, baseline lock or implementation permission. Missing sources remain explicit.',
     implementationReadSchema, input => readImplementationTask(root, input))
   readTool('CheckResourcesAndBindings', 'Check actual registered resources and all saved UI/Scene resource references, files, members and atlas frames. {} returns concise results; {detailsFor:"content/ui/hud.json"} expands exact node/component bindings without narrowing checks. Action/state wiring and visual quality require runtime evidence. Read-only; no production, registration or edits.',
     bindingsReadSchema, input => checkResourcesAndBindings(root, input))

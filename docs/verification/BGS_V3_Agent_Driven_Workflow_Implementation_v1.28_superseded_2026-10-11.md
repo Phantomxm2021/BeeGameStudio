@@ -402,7 +402,7 @@ Bun 进程内 Playwright CDP 连接在本机复现超时，而相同浏览器使
 - **回归与边界**：冻结代码后的 V3＋正常鉴权／项目会话回归 164 passed／0 failed、1388 assertions、24 文件；定向 4 passed／0 failed；实际双进程数据库并发 11 项断言通过。server 全仓类型检查仍有 3556 条既有诊断，workflow-v3 无诊断，不宣称全仓通过。本轮无正式 frontend／Claude Code／builtin-tools 修改，受保护差异摘要前后一致；没有执行 SQL、重启正式服务或调用付费模型。
 - **失败记录不隐去**：两个早期合成夹具分别因测量后新增源文件、编造 Chat 身份失效；后者被正常接口 409 拒绝，未执行任务。正确夹具最初漏 Preview origin 导致 503，只修正专用脚本配置，不开放未测预览回退。浏览器确认／选择器／下载等待等驱动问题均以实际持久结果及下载收据核对，没有按“尝试点击”算通过。
 
-记录：集成工作树 `docs/verification/bgs-v3-remote-debug-2026-10-11.json`；可重用的 opt-in 夹具入口 `scripts/verify-workflow-v3-remote-debug.ts`。合成项目和原始证据保留，临时服务收尾后关闭。
+记录：集成工作树 `docs/verification/bgs-v3-remote-debug-2026-10-11.json`；当时可重用的 opt-in 夹具脚本 `scripts/verify-workflow-v3-remote-debug.ts` 已移除，本文中的命令仅用于说明历史执行路径，不是当前入口。合成项目和原始证据保留，临时服务收尾后关闭。
 
 V3-07／08／09 的**真实数据库 debug 交互**已有本轮证据，但整项仍不勾：退出证据保存前崩溃、无证据旧写者、未知外部收费操作、完整游戏／专业运行消费、付费成本、普通 Chat 和正式部署均未由此验证。`deliveryEligible` 仍为 false，不以合成操作闭环冒充游戏交付验收。
 

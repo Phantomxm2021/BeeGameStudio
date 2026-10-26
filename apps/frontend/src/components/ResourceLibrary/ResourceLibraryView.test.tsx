@@ -318,3 +318,37 @@ describe('ResourceLibraryView workspace', () => {
     }
   })
 })
+
+test('pauses analysis polling while hidden and resumes without overlapping an in-flight request', async () => {
+  const visible = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+  const running = { id: 'job-hidden', packId: pack.id, kind: 'inspect-elements' as const, status: 'running' as const, totalItems: 1, completedItems: 0, failedItems: 0, createdAt: '', updatedAt: '' }
+  let resolve!: (value: typeof running) => void
+  const getJob = vi.fn().mockImplementation(() => new Promise<typeof running>(yes => { resolve = yes }))
+  const view = renderResourceLibrary(<ResourceLibraryView initialPackId={pack.id} apiClient={{ ...api, getLatestProcessingJob: async () => running, getProcessingJob: getJob }} />)
+  await screen.findByRole('status')
+  vi.useFakeTimers()
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(getJob).not.toHaveBeenCalled()
+    visible.mockReturnValue(false)
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    expect(getJob).toHaveBeenCalledTimes(1)
+    visible.mockReturnValue(true)
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    visible.mockReturnValue(false)
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    expect(getJob).toHaveBeenCalledTimes(1)
+    await act(async () => resolve(running))
+    visible.mockReturnValue(true)
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(getJob).toHaveBeenCalledTimes(1)
+    visible.mockReturnValue(false)
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    expect(getJob).toHaveBeenCalledTimes(2)
+    view.unmount()
+    await act(async () => resolve(running))
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(getJob).toHaveBeenCalledTimes(2)
+  } finally { view.unmount(); vi.useRealTimers(); visible.mockRestore() }
+})

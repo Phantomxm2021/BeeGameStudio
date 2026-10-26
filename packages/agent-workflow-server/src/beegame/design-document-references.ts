@@ -4,6 +4,12 @@ import { fromMarkdown } from 'mdast-util-from-markdown'
 import { createHash } from 'node:crypto'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
 
+// The shared authority currently contains one design source. Content links
+// owned by that source are retained inputs, not merely planned output paths.
+const DESIGN_OWNER = PROJECT_DOCUMENTS[0]
+const isOwnedContentSource = (path: string) =>
+  /^content\/(?:ui|scenes)\/.+\.json$/.test(path)
+
 type MarkdownNode = {
   type: string; url?: string; identifier?: string; value?: string
   position?: { start: { line: number } }; children?: MarkdownNode[]
@@ -83,8 +89,8 @@ export function checkDesignDocumentReferences(workspacePath: string, document?: 
         const namespace = join(root, directory)
         return target === namespace || target.startsWith(`${namespace}${sep}`)
       })
-      const ownedUiLayout = name === 'UI_UX_SPEC.md' && /^content\/ui\/.+\.json$/.test(relative(root, target).split(sep).join('/'))
-      const designEvidence = !documentReference && !path.endsWith('/') && (!stagedOutput || ownedUiLayout)
+      const ownedContentSource = name === DESIGN_OWNER && isOwnedContentSource(relative(root, target).split(sep).join('/'))
+      const designEvidence = !documentReference && !path.endsWith('/') && (!stagedOutput || ownedContentSource)
       const inspectTarget = documentReference || designEvidence
       if (designEvidence) checkedReferences++
       if (!inside(target)) { if (inspectTarget) issues.push(`${location}: ${documentReference ? 'document reference' : 'retained design evidence'} leaves the workspace: ${reference.path}`); continue }

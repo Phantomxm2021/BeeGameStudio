@@ -455,7 +455,7 @@ test('asset command recovers existing OpenRouter output but cannot submit new pl
       } else {
         expect(code).toBe(0)
         expect(JSON.parse(stdout)).toMatchObject({ billingState: 'pending', chargedCreditsMicro: null })
-        expect(readFileSync(join(workspace, `assets/${output}.png`))).toEqual(original.bytes)
+        expect(readFileSync(join(workspace, `assets/${output}.png`))).toEqual(Buffer.from(original.bytes))
       }
     }
     expect(calls).toBe(1)

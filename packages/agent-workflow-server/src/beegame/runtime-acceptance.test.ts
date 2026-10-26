@@ -75,6 +75,159 @@ test.each(['passed','blocked','failed'] as const)('top-level designRevision is r
   } finally {await rm(root,{recursive:true,force:true})}
 })
 
+test('optional visual comparisons retain source/observation records and bind every path to report evidence', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-visual-comparison-'))
+  try {
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, 'source.png'), 'selected design')
+    await writeFile(join(root, 'observation.png'), 'actual runtime view')
+    const comparison = { state: 'menu-idle', sourcePath: 'source.png', observationPaths: ['observation.png'],
+      status: 'matched', differences: [] }
+    const base = { scope: 'request', status: 'passed', summary: 'Local comparison', environment: 'Offline fixture',
+      evidencePaths: ['source.png', 'observation.png'], verification: { target: 'deployment', observation: 'target-runtime',
+        knownIssues: [], unverified: [], visualComparisons: [comparison] } }
+    const save = async (report: unknown) => {
+      await writeFile(join(root, DESIGN_ACCEPTANCE_PATH), JSON.stringify(report))
+      return readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH)
+    }
+    const retained = await save(base)
+    expect(retained).toMatchObject({ status: 'passed', verification: { visualComparisons: [comparison] } })
+
+    const missingSource = await save({ ...base, evidencePaths: ['observation.png'], verification: {
+      ...base.verification, visualComparisons: [{ ...comparison, sourcePath: 'missing.png' }] } })
+    expect(missingSource).toMatchObject({ status: 'blocked', diagnostic: { category: 'report-invalid' } })
+    expect(missingSource?.summary).toContain('Visual comparison path must also appear in evidencePaths')
+    const misplaced = await save({ ...base, visualComparisons: [comparison] })
+    expect(misplaced).toMatchObject({ status: 'blocked', diagnostic: { category: 'report-invalid' } })
+    expect(misplaced?.summary).toContain('inside verification.visualComparisons')
+
+    const sameCanonicalFile = await save({ ...base, evidencePaths: ['source.png', './source.png'], verification: {
+      ...base.verification, visualComparisons: [{ ...comparison, observationPaths: ['./source.png'] }] } })
+    expect(sameCanonicalFile).toMatchObject({ status: 'blocked', diagnostic: { category: 'report-invalid' } })
+    expect(sameCanonicalFile?.summary).toContain('different canonical files')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('delivery rejects declared visual differences while request reports may retain them', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-visual-comparison-status-'))
+  try {
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, 'source.png'), 'selected design')
+    await writeFile(join(root, 'observation.png'), 'actual runtime view')
+    await writeFile(join(root, 'game.js'), 'Synthetic artifact')
+    const matched = { state: 'menu-idle', sourcePath: 'source.png', observationPaths: ['observation.png'],
+      status: 'matched', differences: [] }
+    const base = { scope: 'delivery', status: 'passed', summary: 'Visual comparison', environment: 'Target runtime',
+      evidencePaths: ['source.png', 'observation.png'], artifactPaths: ['game.js'],
+      verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [], visualComparisons: [matched] } }
+    const save = async (report: unknown) => {
+      await writeFile(join(root, DESIGN_ACCEPTANCE_PATH), JSON.stringify(report))
+      return readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH)
+    }
+    const legacy = await save({ ...base, verification: { ...base.verification, visualComparisons: undefined } })
+    expect(legacy?.status).toBe('passed')
+    expect((await save(base))?.status).toBe('passed')
+
+    const different = await save({ ...base, verification: { ...base.verification, visualComparisons: [{ ...matched,
+      status: 'different', differences: ['Primary button is narrower than the selected design'] }] } })
+    expect(different).toMatchObject({ status: 'blocked', diagnostic: { category: 'product-failed' } })
+    expect(different?.summary).toContain('Primary button is narrower')
+
+    const unverified = await save({ ...base, verification: { ...base.verification, visualComparisons: [{ ...matched,
+      observationPaths: [], status: 'unverified', differences: ['No target-runtime view was captured'] }] } })
+    expect(unverified).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
+    expect(unverified?.summary).toContain('No target-runtime view')
+
+    const request = await save({ ...base, scope: 'request', verification: { ...base.verification, visualComparisons: [{ ...matched,
+      status: 'different', differences: ['Local design comparison remains unresolved'] }] } })
+    expect(request).toMatchObject({ scope: 'request', status: 'passed', declaredStatus: 'passed',
+      verification: { visualComparisons: [{ status: 'different' }] } })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('host-required visual delivery rejects missing or nonvisual comparisons while retaining legacy reports', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-required-visual-comparison-'))
+  try {
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, 'game.js'), 'Synthetic artifact')
+    await writeFile(join(root, 'source.txt'), 'Not a visual design source')
+    await writeFile(join(root, 'observation.txt'), 'Not an image observation')
+    const visual = await sharp({ create: { width: 8, height: 8, channels: 4, background: 'red' } }).png().toBuffer()
+    await writeFile(join(root, 'source.png'), visual)
+    await writeFile(join(root, 'observation.png'), visual)
+    const base = { scope: 'delivery', status: 'passed', summary: 'Editable visual delivery', environment: 'Target runtime',
+      evidencePaths: ['source.png', 'observation.png'], artifactPaths: ['game.js'],
+      verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [] as string[], unverified: [] as string[] } }
+    const matched = { state: 'menu-idle', sourcePath: 'source.png', observationPaths: ['observation.png'], status: 'matched', differences: [] }
+    const read = async (report: unknown, requireVisualComparison = false) => {
+      await writeFile(join(root, DESIGN_ACCEPTANCE_PATH), JSON.stringify(report))
+      return readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH, { requireVisualComparison })
+    }
+
+    const missing = await read({ ...base, evidencePaths: ['source.png', 'observation.png'] }, true)
+    expect(missing).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
+    expect(missing?.summary).toContain('at least one source-to-observation visual comparison')
+    const empty = await read({ ...base, verification: { ...base.verification, visualComparisons: [] } }, true)
+    expect(empty).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
+
+    const nonvisual = await read({ ...base, evidencePaths: ['source.txt', 'observation.txt'],
+      verification: { ...base.verification, visualComparisons: [{ ...matched, sourcePath: 'source.txt', observationPaths: ['observation.txt'] }] } }, true)
+    expect(nonvisual).toMatchObject({ status: 'blocked', diagnostic: { category: 'report-invalid' } })
+    expect(nonvisual?.summary).toContain('displayable design file')
+
+    const current = await read({ ...base, verification: { ...base.verification, visualComparisons: [matched] } }, true)
+    expect(current).toMatchObject({ status: 'passed', verification: { visualComparisons: [matched] } })
+    const omittedScope = await read({ ...base, scope: undefined, verification: { ...base.verification, visualComparisons: [matched] } }, true)
+    expect(omittedScope?.status).toBe('passed')
+
+    // The host condition is delivery-only. A request report may retain a
+    // textual comparison while the same flag is present for read-only tools.
+    const requestText = await read({ ...base, scope: 'request', evidencePaths: ['source.txt', 'observation.txt'],
+      verification: { ...base.verification, visualComparisons: [{ ...matched, sourcePath: 'source.txt', observationPaths: ['observation.txt'] }] } }, true)
+    expect(requestText).toMatchObject({ scope: 'request', status: 'passed' })
+    for (const status of ['failed', 'blocked'] as const) {
+      const retained = await read({ ...base, status, evidencePaths: ['source.txt', 'observation.txt'],
+        verification: { ...base.verification, visualComparisons: [{ ...matched, sourcePath: 'source.txt', observationPaths: ['observation.txt'] }] } }, true)
+      expect(retained?.status).toBe(status)
+    }
+
+    // The host requirement is not a new report field: old readers that do not
+    // request it continue to accept a valid legacy delivery report.
+    const legacy = await read({ ...base, evidencePaths: ['source.txt'], verification: base.verification })
+    expect(legacy?.status).toBe('passed')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('visual comparison statuses reject contradictory declarations as invalid reports', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-visual-comparison-contract-'))
+  try {
+    await mkdir(join(root, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(root, 'source.png'), 'selected design')
+    await writeFile(join(root, 'observation.png'), 'actual runtime view')
+    const matched = { state: 'menu-idle', sourcePath: 'source.png', observationPaths: ['observation.png'],
+      status: 'matched', differences: [] }
+    const base = { scope: 'request', status: 'passed', summary: 'Visual comparison contract', environment: 'Offline fixture',
+      evidencePaths: ['source.png', 'observation.png'],
+      verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [], visualComparisons: [matched] } }
+    const save = async (comparison: unknown) => {
+      await writeFile(join(root, DESIGN_ACCEPTANCE_PATH), JSON.stringify({ ...base,
+        verification: { ...base.verification, visualComparisons: [comparison] } }))
+      return readRuntimeAcceptanceReport(root, DESIGN_ACCEPTANCE_PATH)
+    }
+    const invalidDeclarations = [
+      { ...matched, observationPaths: [] },
+      { ...matched, differences: ['Unexpected spacing'] },
+      { ...matched, observationPaths: [], status: 'different', differences: ['No observation'] },
+      { ...matched, status: 'different', differences: [] },
+      { ...matched, observationPaths: [], status: 'unverified', differences: [] },
+    ]
+    for (const comparison of invalidDeclarations) {
+      const report = await save(comparison)
+      expect(report).toMatchObject({ status: 'blocked', diagnostic: { category: 'report-invalid' } })
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test('design-led acceptance still checks document coverage and revision without an image gate',async()=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-design-led-acceptance-'))
   try {
@@ -120,14 +273,14 @@ test('design-led acceptance still checks document coverage and revision without 
     await save({...report,verification:{...report.verification,requirementChecks:[...report.verification.requirementChecks,report.verification.requirementChecks[0]]}})
     expect((await inspectDesignAcceptance(root,true)).summary).toContain('Duplicate')
     await save(report)
-    const doc=join(root,'docs/UI_UX_SPEC.md')
+    const doc=join(root,'docs/GDD.md')
     await writeFile(doc,await readFile(doc,'utf8')+'\nChanged decision.\n')
     const changed=await inspectDesignAcceptance(root,true)
     expect(changed.diagnostic?.category).toBe('verification-incomplete')
     expect(changed.summary).toContain('verification.designRevision does not match the current design revision')
     expect(changed.summary).toContain('revalidate affected evidence')
     expect(changed.summary).not.toContain('missing')
-    await rm(join(root,'docs/AUDIO_DESIGN.md'))
+    await rm(join(root,'docs/GDD.md'))
     expect((await inspectDesignAcceptance(root,true)).summary).toContain('incomplete')
   } finally { await rm(root,{recursive:true,force:true}) }
 })
@@ -140,8 +293,8 @@ test('design acceptance binds the actual runtime registry to owner sources and r
     const visual=await sharp({create:{width:8,height:8,channels:4,background:'red'}}).png().toBuffer()
     await writeFile(join(root,'assets/visual/design.png'),visual)
 
-    for(const name of ['UI_UX_SPEC.md','LEVEL_SCENE_DESIGN.md'])
-      await writeFile(join(root,'docs',name),await readFile(join(root,'docs',name),'utf8')+'\n[Selected](../assets/visual/design.png)\n')
+    const gdd = join(root, 'docs/GDD.md')
+    await writeFile(gdd, await readFile(gdd, 'utf8') + '\n## Selected reference\n[Selected](../assets/visual/design.png)\n')
     await writeFile(join(root,'observed.txt'),'Synthetic fixture observation')
     await writeFile(join(root,'game.js'),'Synthetic artifact')
     const save=async(contentChecks=designContentChecks())=>writeFile(join(root,DESIGN_ACCEPTANCE_PATH),JSON.stringify({
@@ -170,7 +323,7 @@ test('design acceptance binds the actual runtime registry to owner sources and r
     expect(mismatch.valid).toBe(false)
     expect(mismatch.summary).toContain('sources not registered')
     expect(mismatch.summary).toContain('ui/menu.json')
-    const uiPath=join(root,'docs/UI_UX_SPEC.md')
+    const uiPath=join(root,'docs/GDD.md')
     await writeFile(uiPath,(await readFile(uiPath,'utf8')).replace('ui/menu.json','ui/actual.json'))
     await save(actualChecks)
     expect((await inspectDesignAcceptance(root,true,true)).valid).toBe(true)
@@ -179,10 +332,8 @@ test('design acceptance binds the actual runtime registry to owner sources and r
     expect((await inspectDesignAcceptance(root,true,true)).summary).toContain('actual saved document')
     // Native/source-only work is not forced to create or use shared UI/Scene.
     await rm(join(root,'content/index.json'))
-    for(const name of ['UI_UX_SPEC.md','LEVEL_SCENE_DESIGN.md']) {
-      const path=join(root,'docs',name)
-      await writeFile(path,(await readFile(path,'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm,''))
-    }
+    await writeFile(join(root, 'docs/GDD.md'), (await readFile(join(root, 'docs/GDD.md'), 'utf8'))
+      .replace(/^.*\]\(\.\.\/content\/.*$/gm, ''))
     await save([])
     expect((await inspectDesignAcceptance(root,true,false)).valid).toBe(true)
     expect((await inspectDesignAcceptance(root,true,true)).valid).toBe(false)
@@ -198,7 +349,7 @@ test('editable UI-only delivery uses the same entry kinds and still requires dec
     index.files = ['ui/menu.json']
     index.documents = index.documents.filter(entry => entry.id === 'menu')
     await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
-    const sceneDesign = join(root, 'docs/LEVEL_SCENE_DESIGN.md')
+    const sceneDesign = join(root, 'docs/GDD.md')
     await writeFile(sceneDesign, (await readFile(sceneDesign, 'utf8')).replace(/^.*\]\(\.\.\/content\/.*$/gm, ''))
     await mkdir(join(root, '.beegame/delivery'), { recursive: true })
     await writeFile(join(root, 'observed.txt'), 'Synthetic UI observation, not real game evidence')
@@ -224,21 +375,21 @@ test('editable UI-only delivery uses the same entry kinds and still requires dec
 test.each(['missing', 'failed', 'false-contract'] as const)('runtime acceptance cannot turn %s retained evidence into PASS through source hashes', async kind => {
   const workspace = await mkdtemp(join(tmpdir(), 'synthetic-runtime-evidence-'))
   try {
-    await writeDesignDocumentsFixture(workspace, ['GDD.md', 'TECHNICAL_DESIGN.md'])
+    await writeDesignDocumentsFixture(workspace, ['GDD.md'])
     await writeFile(join(workspace, 'game.js'), 'Synthetic build')
     await writeFile(join(workspace, 'observation.txt'), 'Synthetic test fixture result')
     const checks = designRequirementChecksFixture(workspace, ['observation.txt'])
-    const source = designHandoffFixture('TECHNICAL_DESIGN.md')
+    const source = designHandoffFixture('GDD.md')
     const bytes = JSON.stringify(kind === 'false-contract' ? { available: false }
       : { observation: 'target-runtime', check: 'Synthetic capability failure', passed: false, expected: true, observed: false })
     if (kind !== 'missing') await writeFile(join(workspace, 'proof.json'), bytes)
     source.evidence.push({ id: 'proof', kind: kind === 'false-contract' ? 'contract' : 'capability', path: 'proof.json',
       source: 'Synthetic fixture', sha256: createHash('sha256').update(bytes).digest('hex'),
       ...(kind === 'false-contract' ? { pointer: '/available', expected: true } : {}) })
-    await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', source)
-    const indexPath = join(workspace, designHandoffPath('TECHNICAL_DESIGN.md'))
+    await writeDesignDocumentFixture(workspace, 'GDD.md', source)
+    const indexPath = join(workspace, designHandoffPath('GDD.md'))
     const before = await readFile(indexPath, 'utf8')
-    const result = finalizeDesignDocuments(workspace, ['TECHNICAL_DESIGN.md'], snapshotDesignDocuments(workspace, ['TECHNICAL_DESIGN.md']))
+    const result = finalizeDesignDocuments(workspace, ['GDD.md'], snapshotDesignDocuments(workspace, ['GDD.md']))
     expect(result.issues.length).toBeGreaterThan(0)
     expect(result.unsafeIssues).toEqual([])
     await writeFile(join(workspace, 'acceptance.json'), JSON.stringify({ scope: 'delivery', status: 'passed', summary: 'Synthetic fixture',
@@ -252,10 +403,11 @@ test.each(['missing', 'failed', 'false-contract'] as const)('runtime acceptance 
 test('delivery checks cover every declared acceptance requirement while requests may remain partial', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'bgs-owned-acceptance-'))
   try {
-    await writeDesignDocumentsFixture(workspace, ['GDD.md', 'AUDIO_DESIGN.md'])
-    const audio = designHandoffFixture('AUDIO_DESIGN.md')
+    await writeDesignDocumentsFixture(workspace, ['GDD.md'])
+    const audio = designHandoffFixture('GDD.md')
     audio.outputs[0]!.acceptance = { section: 'Design', method: 'target-runtime' }
-    await writeDesignDocumentFixture(workspace, 'AUDIO_DESIGN.md', audio)
+    audio.outputs.push({ id: 'ready', section: 'Design', acceptance: { section: 'Design', method: 'target-runtime' } })
+    await writeDesignDocumentFixture(workspace, 'GDD.md', audio)
     await writeFile(join(workspace, 'game.js'), 'Synthetic build')
     await writeFile(join(workspace, 'observations.txt'), 'Synthetic unit-test evidence, not a real gameplay result')
     const checks = designRequirementChecksFixture(workspace, ['observations.txt'])
@@ -272,7 +424,7 @@ test('delivery checks cover every declared acceptance requirement while requests
     expect((await read([])).status).toBe('blocked')
     expect((await read([])).summary).toContain('Design requirements are unverified')
     expect((await read([checks[0]!])).status).toBe('blocked')
-    expect((await read([checks[0]!])).summary).toContain('AUDIO_DESIGN.md#ready')
+    expect((await read([checks[0]!])).summary).toContain('GDD.md#ready')
     expect((await read([], { scope: 'request' })).status).toBe('passed')
     expect((await read([{ ...checks[0]!, id: 'invented' }, checks[1]!])).diagnostic?.category).toBe('report-invalid')
     expect((await read([{ ...checks[0]!, documentSha256: 'a'.repeat(64) }, checks[1]!])).summary).toContain('Requirement source changed')
@@ -306,7 +458,7 @@ test('delivery checks cover every declared acceptance requirement while requests
     const missingCriteria = designHandoffFixture('GDD.md')
     delete missingCriteria.outputs[0]!.acceptance
     await writeDesignDocumentFixture(workspace, 'GDD.md', missingCriteria)
-    expect((await read()).summary).toContain('no declared acceptance source')
+    expect((await read()).summary).toContain('has no acceptance section')
     // Structural validation itself never repairs the source or authenticates observations.
     expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe(designDocumentFixture('GDD.md', missingCriteria))
   } finally { await rm(workspace, { recursive: true, force: true }) }
@@ -333,9 +485,21 @@ test('a delivery PASS requires actual target-runtime verification and no unresol
     expect((await read(base))?.status).toBe('passed')
     const unspecified = await read({ ...base, verification: { target: 'deployment', knownIssues: [], unverified: [] } })
     expect(unspecified?.status).toBe('blocked')
+    expect(unspecified?.diagnostic?.message).toContain('verification.observation is missing')
+    expect(unspecified?.diagnostic?.message).toContain('current value: absent')
+    expect(unspecified?.diagnostic?.message).toContain('"target-runtime" | "simulation"')
+    expect(unspecified?.diagnostic?.message).toContain('--design acceptance --help')
     const simulated = await read({ ...base, verification: { ...base.verification, observation: 'simulation' } })
     expect(simulated?.status).toBe('blocked')
-    expect(simulated?.summary).toContain('target runtime')
+    expect(simulated?.diagnostic?.message).toContain('verification.observation="simulation"')
+    expect(simulated?.diagnostic?.message).toContain('current value: "simulation"')
+    expect(simulated?.diagnostic?.message).toContain('deployment delivery requires "target-runtime"')
+    expect(simulated?.diagnostic?.message).toContain('--design acceptance --help')
+    const development = await read({ ...base, verification: { ...base.verification, target: 'development' } })
+    expect(development?.status).toBe('blocked')
+    expect(development?.diagnostic?.message).toContain('verification.target="deployment"')
+    expect(development?.diagnostic?.message).toContain('current value: "development"')
+    expect(development?.diagnostic?.message).toContain('"development" | "deployment"')
 
     const knownIssue = await read({ ...base, verification: { ...base.verification, knownIssues: ['Menu cannot be clicked'] } })
     expect(knownIssue?.status).toBe('blocked')
@@ -354,6 +518,47 @@ test('a delivery PASS requires actual target-runtime verification and no unresol
       outsideScope: ['Physical controller feel was not part of the agreed browser release'] } })
     expect(physicalOutsideScope?.status).toBe('passed')
     expect(physicalOutsideScope?.verification?.outsideScope).toHaveLength(1)
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
+test('delivery limitation reports independent synchronous failures together while preserving the first category', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'bgs-delivery-multiple-limitations-'))
+  const reportPath = '.beegame/delivery/acceptance.json'
+  try {
+    await mkdir(join(workspace, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(workspace, 'game.js'), 'current build')
+    await writeFile(join(workspace, 'source.png'), 'selected design')
+    await writeFile(join(workspace, 'observation.png'), 'runtime observation')
+    await writeFile(join(workspace, reportPath), JSON.stringify({
+      scope: 'delivery', status: 'passed', summary: 'Synthetic report with several unresolved declarations',
+      environment: 'Offline fixture', evidencePaths: ['source.png', 'observation.png'], artifactPaths: ['game.js'],
+      verification: {
+        target: 'deployment',
+        // Omitted deliberately: the first diagnostic must remain the missing-field category.
+        knownIssues: ['Primary control is not clickable'],
+        unverified: ['Audio listening was not observed'],
+        visualComparisons: [
+          { state: 'menu', sourcePath: 'source.png', observationPaths: ['observation.png'],
+            status: 'different', differences: ['The primary control is narrower'] },
+          { state: 'combat', sourcePath: 'source.png', observationPaths: ['observation.png'],
+            status: 'unverified', differences: ['No combat image was captured'] },
+        ],
+      },
+    }))
+    const result = (await readRuntimeAcceptanceReport(workspace, reportPath))!
+    expect(result).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
+    const message = result.diagnostic?.message ?? ''
+    for (const text of [
+      'verification.observation is missing',
+      'Primary control is not clickable',
+      'Audio listening was not observed',
+      'Visual comparison menu reports a difference: The primary control is narrower',
+      'Visual comparison combat is unverified: No combat image was captured',
+    ]) expect(message).toContain(text)
+    expect(message.indexOf('verification.observation is missing')).toBeLessThan(message.indexOf('Primary control is not clickable'))
+    expect(message.indexOf('Primary control is not clickable')).toBeLessThan(message.indexOf('Audio listening was not observed'))
+    expect(message.indexOf('Audio listening was not observed')).toBeLessThan(message.indexOf('Visual comparison menu reports a difference'))
+    expect(message.indexOf('Visual comparison menu reports a difference')).toBeLessThan(message.indexOf('Visual comparison combat is unverified'))
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 

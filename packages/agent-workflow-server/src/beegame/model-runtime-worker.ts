@@ -144,8 +144,13 @@ async function generate(message: ModelRuntimeWorkerRequest) {
     }
     if (result.usage) usage = responseUsage(result.usage)
     stage = 'model_response'
-    if (result.status !== 'completed' || !Array.isArray(result.output))
+    if (result.status !== 'completed' || !Array.isArray(result.output)) {
+      // Keep the provider's bounded failure category, never its private output.
+      const reason = result.incomplete_details?.reason
+      if (reason === 'max_output_tokens') throw Error('Model response reached its output token limit before completion')
+      if (reason === 'content_filter') throw Error('Model response was stopped by the provider content filter')
       throw Error('Model response was incomplete')
+    }
     let content: string
     if (input.structuredOutput) {
       const calls = result.output.filter(

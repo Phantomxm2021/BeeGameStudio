@@ -9,17 +9,17 @@ import { designInputRevision } from './design-handoff'
 import { agentTurnHandoffReason } from './workflow-v3/agent-goal'
 import type { Run, AgentTurn } from './workflow-v3/state'
 
-test('plain eight-document work flows through reads, handoff and continued refinement without indexes or invented acceptance', async () => {
+test('plain GDD work flows through reads, handoff and continued refinement without indexes or invented acceptance', async () => {
   const root = await mkdtemp('/private/tmp/bgs-plain-design-')
   try {
     await mkdir(join(root, 'docs'))
     const original = '# Design\n## Approach\nSynthetic design decision.\n'
     for (const name of PROJECT_DOCUMENTS) await writeFile(join(root, 'docs', name), original)
     expect(readDesignHandoff(root, {})).toMatchObject({ valid: true })
-    expect(readImplementationTask(root, {})).toMatchObject({ valid: true, directory: [], documents: [{ document: 'TECHNICAL_DESIGN.md' }] })
-    expect(checkDesignHandoffDraft(root, 'TECHNICAL_DESIGN.md', { finalTechnical: true }).valid).toBe(true)
+    expect(readImplementationTask(root, {})).toMatchObject({ valid: true, directory: [], documents: [{ document: 'GDD.md' }] })
+    expect(checkDesignHandoffDraft(root, 'GDD.md', { includeRequirements: true }).valid).toBe(true)
     expect(finalizeDesignDocuments(root, PROJECT_DOCUMENTS, snapshotDesignDocuments(root, PROJECT_DOCUMENTS)).issues).toEqual([])
-    expect(readDesignImplementationChecklist(root)).toMatchObject({ source: 'docs/TECHNICAL_DESIGN.md', items: [] })
+    expect(readDesignImplementationChecklist(root)).toMatchObject({ source: 'docs/GDD.md', items: [] })
     expect(await readdir(root)).toEqual(['docs'])
     for (const name of PROJECT_DOCUMENTS) expect(await readFile(join(root, 'docs', name), 'utf8')).toBe(original)
     const run = { workspacePath: root, writer: { attemptId: 'fixture' }, requirements: { revision: 'fixture' },
@@ -31,12 +31,12 @@ test('plain eight-document work flows through reads, handoff and continued refin
     expect(ended).not.toContain('Itemized acceptance')
     await writeFile(join(root, 'docs/GDD.md'), original + 'Changed decision.\n')
     expect(designInputRevision(root)).not.toBe(before)
-    expect(readDesignImplementationChecklist(root).source).toBe("docs/TECHNICAL_DESIGN.md")
+    expect(readDesignImplementationChecklist(root).source).toBe("docs/GDD.md")
     await writeFile(join(root, 'docs/GDD.md'), '')
     expect(checkDesignHandoff(root, PROJECT_DOCUMENTS).valid).toBe(false)
     await rm(join(root, 'docs/GDD.md'))
     expect(checkDesignHandoff(root, PROJECT_DOCUMENTS).valid).toBe(false)
-    await symlink(join(root, 'docs/ART_DIRECTION.md'), join(root, 'docs/GDD.md'))
+    await symlink(join(root, 'docs/GDD.md'), join(root, 'docs/GDD.md'))
     expect(checkDesignHandoff(root, PROJECT_DOCUMENTS).valid).toBe(false)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

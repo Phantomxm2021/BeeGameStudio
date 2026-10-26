@@ -10,7 +10,6 @@ Skill metadata to select a method and invoke its installed name, such as
 
 | Group | Question being answered | Independent entry points |
 |---|---|---|
-| First version | How does a new game proceed from its confirmed brief through design, implementation and delivery? | [First-version workflow](game-first-version/SKILL.md) |
 | Game design | What experience is promised, what does the player do, how is space/challenge arranged, and which numbers support it? | [Creative direction](game-creative-director-expert/SKILL.md), [systems](game-systems-designer-expert/SKILL.md), [levels](game-level-designer-expert/SKILL.md), [balance](game-balance-designer-expert/SKILL.md) |
 | Audiovisual and player experience | How should the game look, sound, respond and present information? Which spatial interactions are appropriate when XR is in scope? | [Art](game-art-director-expert/SKILL.md), [UI/UX](game-ui-ux-designer/SKILL.md), [audio](game-audio-designer/SKILL.md), [game feel](game-feel-designer/SKILL.md), [XR gameplay](spatial-computing-game-expert/SKILL.md), [XR interface](spatial-computing-ux-designer-expert/SKILL.md) |
 | Engineering and resources | Which resource representations support the designed behavior, and how do rules, input, assets and dynamic visuals work in the selected runtime? | [Gameplay programming](gameplay-programmer/SKILL.md), [technical art](game-technical-artist/SKILL.md), [resource planning and content pipeline](game-content-pipeline-engineer/SKILL.md), [image generation and editing](bgs-imagegen/SKILL.md), [interaction contracts](beegame-interaction-contracts/SKILL.md) |
@@ -23,7 +22,7 @@ collision behavior; choosing a visual language differs from implementing its
 shader; authoring UI differs from checking whether a supplied design is usable.
 One task may need both, but invoking a checking Skill does not replace the
 specialist's design method. Reuse methods already loaded in the working context.
-Groups do not imply loading all their members or running a full production cycle.
+No group requires every member or defines a fixed workflow.
 
 ## Shared material, separate purposes
 

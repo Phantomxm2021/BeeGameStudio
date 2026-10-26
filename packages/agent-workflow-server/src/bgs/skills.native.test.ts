@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { getBuiltinSkillsDirectory } from '@bee-game-studio/beegame-skills-core/store'
 import { BgsClient } from './client'
 import { configureBgsSkills } from './skills'
-import { bgsProviderConfig } from './runner'
+import { bgsProviderConfig, createBgsRunner } from './runner'
 
 const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 nativeTest('two accounts discover one shared catalog and only their own imported skills without projection links', async () => {
@@ -74,3 +74,71 @@ nativeTest('both auth modes use BGS image guidance while preserving imported ski
     }
   } finally { await rm(account, { recursive: true, force: true }) }
 }, 15_000)
+
+nativeTest('unknown model receives skill usage guidance while skill bodies remain on demand', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-skill-usage-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const selected = join(catalog, 'selected-fixture', 'SKILL.md')
+  const unselected = join(catalog, 'unselected-fixture', 'SKILL.md')
+  await mkdir(game, { recursive: true })
+  await mkdir(join(catalog, 'selected-fixture'), { recursive: true })
+  await mkdir(join(catalog, 'unselected-fixture'), { recursive: true })
+  await writeFile(selected, '---\nname: selected-fixture\ndescription: Selected fixture skill.\n---\nSELECTED_BODY_SECRET\n')
+  await writeFile(unselected, '---\nname: unselected-fixture\ndescription: Unselected fixture skill.\n---\nUNSELECTED_BODY_SECRET\n')
+
+  const inputs: any[] = []
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (new URL(request.url).pathname !== '/v1/responses') return new Response('Unexpected fixture route', { status: 404 })
+    const body = await request.json() as any
+    inputs.push(body)
+    const output = inputs.length === 1 ? [{
+      id: 'read-item', call_id: 'read-call', type: 'function_call', name: 'exec_command', status: 'completed',
+      arguments: JSON.stringify({ cmd: 'cat ' + selected }),
+    }] : [{ id: 'msg_' + inputs.length, type: 'message', role: 'assistant', status: 'completed',
+      content: [{ type: 'output_text', text: 'Fixture answer', annotations: [] }] }]
+    const response = { id: 'resp_' + inputs.length, object: 'response', created_at: 1, model: body.model, status: 'completed',
+      output, usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } }
+    return new Response([
+      { type: 'response.created', response: { ...response, status: 'in_progress', output: [] } },
+      ...output.flatMap((item, output_index) => [
+        { type: 'response.output_item.added', output_index, item: { ...item, status: 'in_progress' } },
+        { type: 'response.output_item.done', output_index, item },
+      ]),
+      { type: 'response.completed', response },
+    ].map((event, sequence_number) => `data: ${JSON.stringify({ ...event, sequence_number })}\n\n`).join(''),
+    { headers: { 'Content-Type': 'text/event-stream' } })
+  } })
+  const runner = createBgsRunner({ resolveOutboundTarget: async value => {
+    const url = new URL(value)
+    if (url.origin !== server.url.origin) throw Error('Non-local fixture request forbidden')
+    return { url, addresses: ['127.0.0.1'], lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }
+  } })
+  let runtime: Awaited<ReturnType<typeof runner.start>> | undefined
+  try {
+    runtime = await runner.start({
+      sessionId: 'skill-usage-fixture', cwd: game,
+      systemContext: 'Current BGS fixture context.', confirmedBriefContext: 'Fixture confirmed brief.',
+      env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+        OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-unknown-model' },
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+    await runtime.submit({ prompt: 'Use the selected fixture skill only when needed.', confirmedBriefContext: 'Fixture confirmed brief.',
+      signal: AbortSignal.timeout(15_000), onMessage() {}, requestPermission: async () => ({ behavior: 'deny' }) })
+
+    expect(inputs).toHaveLength(2)
+    expect(inputs[0]!.model).toBe('fixture-unknown-model')
+    expect(inputs[1]!.model).toBe('fixture-unknown-model')
+    const sent = JSON.stringify(inputs[0]!.input)
+    expect(sent).toContain('### How to use skills')
+    expect(sent).toContain('progressive disclosure')
+    expect(sent).toContain('selected-fixture/SKILL.md')
+    expect(sent).toContain('unselected-fixture/SKILL.md')
+    expect(sent).not.toContain('SELECTED_BODY_SECRET')
+    expect(sent).not.toContain('UNSELECTED_BODY_SECRET')
+    const readResult = inputs[1]!.input.find((item: any) => item.type === 'function_call_output' && item.call_id === 'read-call')
+    expect(readResult).toBeDefined()
+    // This output comes from the real native exec_command call above, rather
+    // than from the fixture server, so only the selected Skill body is read.
+    expect(String(readResult.output)).toContain('SELECTED_BODY_SECRET')
+    expect(JSON.stringify(inputs[1]!.input)).not.toContain('UNSELECTED_BODY_SECRET')
+  } finally { await runtime?.dispose?.(); server.stop(true); await rm(root, { recursive: true, force: true }) }
+}, 60_000)

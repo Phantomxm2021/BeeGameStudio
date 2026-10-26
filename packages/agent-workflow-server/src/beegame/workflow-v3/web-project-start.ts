@@ -2,15 +2,16 @@ import { readdir, realpath } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type { Run } from './state'
 
-// Only exact host records are ignored. A README, imported source, unknown dot
+// Only host records and Git configuration are ignored. A README, imported source, unknown dot
 // file or alias makes this an existing project, not permission to overwrite it.
 async function sourcePaths(root: string): Promise<string[]> {
   const paths: string[] = []
   async function visit(dir: string) {
     for (const entry of await readdir(dir, {withFileTypes:true})) {
       const path = relative(root, join(dir, entry.name))
-      // Bootstrap materializes reference uploads before observing creation.
-      if (path === '.beegame' || path === 'transcripts' ||
+      // Bootstrap initializes Git and reference uploads before observing creation.
+      if (path === '.git' || (path === '.gitignore' && entry.isFile()) ||
+          path === '.beegame' || path === 'transcripts' ||
           (path === '.beegame-attachments' && entry.isDirectory()) ||
           /^logs\/(index\.json|runtime-diagnostics\.jsonl(?:\.\d+)?)$/.test(path)) continue
       if (entry.isDirectory()) await visit(join(root,path))

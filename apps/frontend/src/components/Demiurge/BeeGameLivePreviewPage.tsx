@@ -5,7 +5,7 @@ import { AnimatePresence, useReducedMotion } from 'motion/react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../beui/project-button';
-import { SettingsMenu } from './Landing/SettingsMenu';
+import { DeferredSettingsMenu as SettingsMenu } from './Landing/DeferredSettingsMenu';
 import {
   closeResourceLibraryRoute,
   isResourceLibraryRoute,
@@ -308,6 +308,7 @@ export function BeeGameLivePreviewPage({
                   <ProjectHintRow label={labels.consumedCredits} value={formatCreditAmount(credits?.consumedCredits)} />
                   <ProjectHintRow label={`${labels.inputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.input_tokens ?? tokenUsage?.prompt_tokens)} />
                   <ProjectHintRow label={`${labels.cachedInputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.cached_input_tokens ?? tokenUsage?.cache_read_tokens)} />
+                  <ProjectHintRow label={`${labels.cacheCreationTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.cache_creation_tokens)} />
                   <ProjectHintRow label={`${labels.outputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.output_tokens ?? tokenUsage?.completion_tokens)} />
                   {tokenUsage?.providerUsageIncomplete ? <p role="status" className="type-footnote mt-2 text-[var(--text-secondary)]">
                     {lang.startsWith('zh') ? '用量回执不完整，以上仅为已确认 Tokens。' : lang.startsWith('ja')

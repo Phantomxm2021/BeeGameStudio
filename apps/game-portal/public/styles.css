@@ -323,12 +323,6 @@ h3 {
   display: flex;
   margin: 30px auto 0;
 }
-@media (min-width: 761px) {
-  #game-page {
-    width: 70%;
-    margin-inline: auto;
-  }
-}
 /* Each authored section has a separate, bounded reading area. */
 .game-description {
   margin-top: 28px;
@@ -549,9 +543,9 @@ h3 {
 }
 .player.is-expanded .player-surface,
 .player:fullscreen .player-surface {
-  width: min(100vw, 177.777778dvh);
-  height: auto;
-  aspect-ratio: 16 / 9;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
 }
 .player:is(.is-expanded, :fullscreen) .player-controls {
   position: fixed;

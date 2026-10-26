@@ -294,10 +294,10 @@ describe('local data migration', () => {
 async function createLocalDashboardData(): Promise<string> {
   const dataDir = await mkdtemp(join(tmpdir(), 'beegame-migration-'))
   const projectDir = join(dataDir, 'Project One')
-  const transcriptDir = join(projectDir, 'transcripts')
+  const transcriptDir = join(projectDir, '.beegame', 'chat')
   mkdirSync(transcriptDir, { recursive: true })
   writeFileSync(
-    join(transcriptDir, 'project-one__abcdef12.jsonl'),
+    join(transcriptDir, 'project-events.jsonl'),
     [
       JSON.stringify({
         id: 1,

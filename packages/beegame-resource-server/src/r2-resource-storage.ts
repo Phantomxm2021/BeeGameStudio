@@ -1,5 +1,6 @@
 import type {
   ProjectStorageDriver,
+  StorageObjectHead,
   StorageObjectLocator,
 } from '@bee-game-studio/beegame-storage-core'
 import {
@@ -40,6 +41,10 @@ export type R2ResourceStorage = {
     objectKind: 'resource_element' | 'resource_preview'
   }): Promise<{ storageObjectId: string }>
   getFile(storageObjectId: string, packId: string): Promise<File | undefined>
+  headObject(
+    storageObjectId: string,
+    packId: string,
+  ): Promise<StorageObjectHead | undefined>
   createDownloadUrl(
     storageObjectId: string,
     packId: string,
@@ -248,6 +253,15 @@ export function createR2ResourceStorage(options: {
         },
       )
     },
+    async headObject(storageObjectId, packId) {
+      const row = await findReadyObject(storageObjectId, packId)
+      if (!row) return undefined
+      return withResourceExternalTransport({
+        service: 'resource-object',
+        operation: 'verify resource object presence',
+        execute: () => options.driver.headObject(locator(row)),
+      })
+    },
     async createDownloadUrl(storageObjectId, packId) {
       const row = await findReadyObject(storageObjectId, packId)
       if (!row) return undefined
@@ -280,9 +294,22 @@ export function createR2ResourceStorage(options: {
       return true
     },
     async listPackObjects(packId) {
-      const rows = await request<StorageObjectRow[]>(
-        `beegame_storage_objects?pack_id=eq.${encodeURIComponent(packId)}&provider=eq.r2&deleted_at=is.null&select=id,logical_path,status`,
-      )
+      // Supabase REST caps one response at 1,000 rows; walk the stable id keyset.
+      const pageSize = 1_000
+      const rows: StorageObjectRow[] = []
+      let afterId: string | undefined
+      while (true) {
+        const page = await request<StorageObjectRow[]>(
+          `beegame_storage_objects?pack_id=eq.${encodeURIComponent(packId)}&provider=eq.r2&deleted_at=is.null${afterId ? `&id=gt.${encodeURIComponent(afterId)}` : ''}&order=id.asc&limit=${pageSize}&select=id,logical_path,status`,
+        )
+        rows.push(...page)
+        if (page.length === 0) break
+        const nextAfterId = page.at(-1)?.id
+        if (!nextAfterId || nextAfterId === afterId) {
+          throw new Error('Resource object metadata pagination did not advance')
+        }
+        afterId = nextAfterId
+      }
       return rows.map(row => ({
         id: row.id,
         ...(row.logical_path ? { logicalPath: row.logical_path } : {}),

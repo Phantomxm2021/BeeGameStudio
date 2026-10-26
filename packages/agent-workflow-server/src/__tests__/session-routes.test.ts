@@ -18,9 +18,8 @@ import {
 } from '../auth/session-routes'
 import { encryptSecret } from '../security/secret-crypto'
 import { BeeGameAuthUnavailableError } from '../auth/user-context'
-import type { BeeGamePromptInput, BeeGameSessionSubmitInput } from '../beegame/session-manager'
-import { recoverLatestProjectSessionFromDisk } from '../beegame/session-manager'
-import { appendProjectChatTimeline } from '../beegame/project-chat-timeline'
+import { BeeGameSessionManager, type BeeGamePromptInput, type BeeGameSessionSubmitInput } from '../beegame/session-manager'
+import { readSessionTranscriptFactsFromDisk, recoverLatestProjectSessionFromDisk } from '../beegame/session-manager'
 import { createLocalWorkflowStore } from '../beegame/workflow-v3/store'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
@@ -51,6 +50,81 @@ it('runtime returns recoverable 503 rather than 401 when token resolution is una
     expect(response.headers.get('retry-after')).toBe('2')
     expect(await response.json()).toMatchObject({ code: 'authentication_unavailable', recoverable: true })
   } finally { cleanups.forEach(cleanup => cleanup()) }
+})
+
+it('keeps context visibility honest when the runtime snapshot is unavailable', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-context-visibility-')))
+  temporaryDirectories.push(root)
+  const ownerId = 'context-visibility-owner'
+  const projectId = 'context-visibility-project'
+  const projectsRoot = join(root, 'projects')
+  const workspace = join(projectsRoot, 'users', ownerId, projectId)
+  await mkdir(workspace, { recursive: true })
+  const cleanups: Array<() => void | Promise<void>> = []
+  const store = createLocalWorkflowStore(join(root, 'workflow-store'))
+  const nativeId = '11111111-2222-4333-8444-555555555555'
+  const app = createAgentWorkflowApp({
+    currentUser: { id: ownerId, role: 'owner' as const },
+    dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: projectsRoot,
+    workflowV3Store: store, modelConfigStore: false as const, skillsConfig: false as const,
+    registerCleanup: cleanup => cleanups.push(cleanup),
+    sessionRunner: { start: async input => {
+      input.onNativeSessionId?.(nativeId)
+      return { reusable: false, stop() {}, submit: async turn => {
+        input.onNativeSubmission?.(nativeId)
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'tool.started',
+          text: 'Agent', toolName: 'Agent', toolUseID: 'child-agent',
+          input: { subagent_type: 'designer' } })
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'tool.completed',
+          text: 'Agent completed', toolName: 'Agent', toolUseID: 'child-agent' })
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'system.status',
+          text: 'Child finished', subtype: 'task_notification', task_id: 'child-task',
+          tool_use_id: 'child-agent', usage: { total_tokens: 25 } })
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'usage', text: '',
+          subtype: 'native_accounting', nativeAccountingEpoch: 'fixture',
+          usage: { prompt_tokens: 60, completion_tokens: 20, cache_read_tokens: 20,
+            cache_creation_tokens: 0, total_tokens: 100 } })
+        await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Done' })
+      } }
+    } },
+  })
+  const post = (url: string, body: unknown) => app.request(url, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  let snapshotSpy: { mockRestore(): void } | undefined
+  try {
+    expect((await post('/api/projects', { id: projectId, name: 'Context visibility test', root_path: workspace,
+      created_at: Date.now() })).status).toBe(200)
+    expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake',
+      model: 'fake', isDefault: true })).status).toBe(200)
+    const ensured = await post(`/api/projects/${projectId}/session/ensure`, {})
+    const { session } = await ensured.json() as { session: { id: string } }
+    const started = await post(`/api/projects/${projectId}/workflow-v3/agent/goal`,
+      goalRequest(session.id, 'context-visibility-fixture', 'Offline context visibility fixture'))
+    expect(started.status, await started.clone().text()).toBe(202)
+
+    let baseline: Record<string, any> = {}
+    for (let i = 0; i < 200; i++) {
+      baseline = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, any>
+      if (baseline.context?.token_budget?.total_tokens === 100) break
+      await Bun.sleep(5)
+    }
+    expect(baseline.context?.token_budget?.total_tokens).toBe(100)
+
+    snapshotSpy = spyOn(BeeGameSessionManager.prototype, 'runtimeSnapshot').mockImplementation(() => {
+      throw new Error('fixture snapshot unavailable')
+    })
+    const degraded = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, any>
+    expect(degraded.context?.memory_hits).toBeUndefined()
+    expect(degraded.context).toMatchObject({
+      counters: { toolUseCount: 2 },
+      token_budget: { total_tokens: 100, role_tokens: {
+        mainAgent: 0, otherSubagents: 25, unattributed: 75,
+      } },
+    })
+  } finally {
+    snapshotSpy?.mockRestore()
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
+  }
 })
 
 it('does not offer a stopped native permission as actionable after service restart', async () => {
@@ -210,19 +284,25 @@ it('keeps provider refusal actionable after host settlement and a later successf
     for (const cleanup of cleanups.splice(0)) await cleanup()
     const saved = await readFile(join(workspace, recovered!.transcriptPath), 'utf8')
     const baseId = Math.max(...saved.trim().split('\n').map(line => JSON.parse(line).id))
+    const oversizedShellOutput = 'x'.repeat(5 * 1024 * 1024)
     const append = async (offset: number, type: string, text: string, turnId = 'failed-turn') => appendFile(
       join(workspace, recovered!.transcriptPath), JSON.stringify({ id: baseId + offset, sessionId: session.id,
         turnId, type, text, createdAt: new Date().toISOString(), payload: { type, subtype: 'host_evidence',
           ...(type === 'session.stopped' ? { reason: 'agent_goal_settled' } : {}) } }) + '\n')
+    const appendShellReceipt = async (offset: number, type: 'tool.completed' | 'tool.failed', toolUseID: string, failed: boolean) =>
+      appendFile(join(workspace, recovered!.transcriptPath), JSON.stringify({ id: baseId + offset, sessionId: session.id,
+        turnId: 'failed-turn', type, text: failed ? 'Shell failed' : 'Shell completed', createdAt: new Date().toISOString(),
+        payload: { type, toolName: 'Shell', toolUseID, parentToolUseID: 'agent-parent',
+          input: { command: 'printf shell-route-fixture', cwd: workspace }, output: oversizedShellOutput,
+          exitCode: failed ? 23 : 0, durationMs: 300, status: failed ? 'failed' : 'completed', is_error: failed },
+      }) + '\n')
     await append(1, 'turn.started', 'Start')
-    await append(2, 'turn.failed', 'API Error: 400 Upstream request failed: [model_coming_soon] This model is coming soon.')
-    await append(3, 'session.stopped', 'BeeGame session stopped')
-    await append(4, 'system.status', 'Execution settled; quality unverified')
-    const raw = (await readFile(join(workspace, recovered!.transcriptPath), 'utf8')).trim().split('\n').map(line => {
-      const event = JSON.parse(line); return { ...event, createdAt: new Date(event.createdAt) }
-    })
-    // Reproduce a journal persisted before error formatting was introduced.
-    await appendProjectChatTimeline(workspace, raw)
+    await appendShellReceipt(2, 'tool.completed', 'shell-route-completed', false)
+    await appendShellReceipt(3, 'tool.failed', 'shell-route-failed', true)
+    await append(4, 'turn.failed', 'API Error: 400 Upstream request failed: [model_coming_soon] This model is coming soon.')
+    await append(5, 'session.stopped', 'BeeGame session stopped')
+    await append(6, 'system.status', 'Execution settled; quality unverified')
+    // History reads use this same canonical file without copying its rows.
     const journalPath = join(workspace, '.beegame/chat/project-events.jsonl')
     const originalJournal = await readFile(journalPath, 'utf8')
     const restarted = createAgentWorkflowApp({ ...options, registerCleanup: cleanup => cleanups.push(cleanup) })
@@ -231,15 +311,29 @@ it('keeps provider refusal actionable after host settlement and a later successf
       blocked_reason_code: 'runtime_failed' })
     expect(state.next_action).toContain('model_coming_soon')
     expect(runnerStarts).toBe(0)
+    const recoveredFacts = await readSessionTranscriptFactsFromDisk(session.id, workspace)
+    const shellFacts = recoveredFacts.filter(event => event.payload?.toolName === 'Shell')
+    expect(shellFacts).toHaveLength(2)
+    expect(shellFacts[0]).toMatchObject({ type: 'tool.completed', payload: {
+      toolUseID: 'shell-route-completed', toolName: 'Shell', parentToolUseID: 'agent-parent',
+      input: { command: 'printf shell-route-fixture', cwd: workspace }, exitCode: 0,
+      durationMs: 300, status: 'completed', is_error: false,
+    } })
+    expect(shellFacts[1]).toMatchObject({ type: 'tool.failed', payload: {
+      toolUseID: 'shell-route-failed', toolName: 'Shell', parentToolUseID: 'agent-parent',
+      input: { command: 'printf shell-route-fixture', cwd: workspace }, exitCode: 23,
+      durationMs: 300, status: 'failed', is_error: true,
+    } })
+    expect(shellFacts.every(event => event.payload?.output === undefined)).toBe(true)
     const history = await (await restarted.request(`/api/projects/${projectId}/transcript`)).json() as { events: Array<{type:string;text:string}> }
     const failure = history.events.find(event => event.type === 'turn.failed')!
     expect(failure.text).toContain('model_coming_soon')
     expect(failure.text).not.toContain('API Error: 400')
     expect(await readFile(journalPath, 'utf8')).toBe(originalJournal)
     // New terminal work supersedes the failure; later metadata has no lifecycle authority.
-    await append(5, 'turn.started', 'Next turn', 'next-turn')
-    await append(6, 'turn.completed', 'Done', 'next-turn')
-    await append(7, 'system.status', 'Later host evidence', 'next-turn')
+    await append(7, 'turn.started', 'Next turn', 'next-turn')
+    await append(8, 'turn.completed', 'Done', 'next-turn')
+    await append(9, 'system.status', 'Later host evidence', 'next-turn')
     const nextState = await (await restarted.request(`/api/projects/${projectId}/runtime-state`)).json()
     expect(nextState).toMatchObject({ phase: 'idle', blocked: false })
     expect(runnerStarts).toBe(0)

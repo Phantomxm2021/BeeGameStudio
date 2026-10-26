@@ -93,6 +93,7 @@ export async function buildEditableProject(root:string, task:Pick<TaskSpec,'edit
   let stage:string|undefined, backup=false, installed=false
   try {
     const files=await projectFiles(base,artifact,excludedReports)
+    if(!files.some(file=>file.path==='package.json'))throw new WorkflowError('project-incomplete','Editable export needs a saved package.json',400)
     const pkg=JSON.parse(await readFile(join(base,'package.json'),'utf8'))
     if(typeof pkg.scripts?.build!=='string'||!pkg.scripts.build.trim()) {result.observation='No actual package script: build';return result}
     const dependencySha256=await projectDependencies(base)

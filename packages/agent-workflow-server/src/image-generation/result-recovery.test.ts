@@ -28,7 +28,7 @@ const config = imageConfigSchema.parse({
 })
 
 async function png() {
-  return sharp({ create: { width: 2, height: 2, channels: 4, background: '#f0b429' } }).png().toBuffer()
+  return Buffer.from(await sharp({ create: { width: 2, height: 2, channels: 4, background: '#f0b429' } }).png().toBuffer())
 }
 
 function wallet() {

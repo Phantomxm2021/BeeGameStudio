@@ -98,6 +98,24 @@ export function responseToolCall(
       status: 'completed',
     }
   }
+  // Providers sometimes emit an empty permission explanation without a
+  // permission request. Remove only that meaningless field before native
+  // validation; preserve opaque provider history and all real permissions.
+  if (tool.name === 'exec_command' &&
+      (tool.namespace === undefined || tool.namespace === 'functions')) {
+    try {
+      const parsed = JSON.parse(args)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+          parsed.justification === '' &&
+          !Object.prototype.hasOwnProperty.call(parsed, 'sandbox_permissions')) {
+        const { justification: _omitted, ...normalized } = parsed
+        args = JSON.stringify(normalized)
+      }
+    } catch {
+      // Keep malformed arguments unchanged for the existing native validation
+      // path; this adapter must not turn a tool-call parse error into a retry.
+    }
+  }
   // Native tool handlers validate arguments and return errors to the model.
   // Rejecting ordinary JSON here would abort the entire response instead.
   return {

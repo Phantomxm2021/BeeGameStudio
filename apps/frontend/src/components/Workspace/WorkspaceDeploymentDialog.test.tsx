@@ -28,6 +28,7 @@ describe('publishing confirmation', () => {
     const publish = await screen.findByRole('button', { name: labels.deploymentPublishAction });
     await waitFor(() => expect(publish).toBeEnabled());
     expect(screen.getByText('磁轨调度')).toBeTruthy();
+    expect(screen.queryByText(labels.deploymentReadyDescription)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
     expect(props.onDeploy).not.toHaveBeenCalled();
     fireEvent.click(publish);

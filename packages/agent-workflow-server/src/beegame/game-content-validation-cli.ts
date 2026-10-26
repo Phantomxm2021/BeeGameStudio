@@ -145,7 +145,7 @@ export function currentPackageMetadata(workspacePath: string, paths: string[]) {
       documentRevision: createHash('sha256').update(JSON.stringify(inputs.map(({path,sha256}) => [path,sha256]))).digest('hex'),
       assetManifestRevision: createHash('sha256').update(JSON.stringify(manifest)).digest('hex'),
     } } : {}),
-    note: 'Read-only first-index compatibility metadata from the listed saved content bytes and actual Manifest, NOT a design baseline or approval. Author chooses registry/files/entry/load policy. No index or eight documents required; no files created. After saving the index use --current for package/resources and target-runtime checks for actual consumption. This snapshot is not an atomic lock or proof of complete coverage.' }
+    note: 'Read-only first-index compatibility metadata from the listed saved content bytes and actual Manifest, NOT a design baseline or approval. Author chooses registry/files/entry/load policy. No separate design document set or index required; no files created. After saving the index use --current for package/resources and target-runtime checks for actual consumption. This snapshot is not an atomic lock or proof of complete coverage.' }
 }
 
 /** Inspect only the requested content file, preserving authored values verbatim. */

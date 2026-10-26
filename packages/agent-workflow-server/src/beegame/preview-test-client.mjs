@@ -1,4 +1,5 @@
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
+import { extname, isAbsolute, resolve } from 'node:path';
 export { withPlayCapture } from './preview-play-capture.mjs';
 
 export async function resolvePreviewApi(apiUrl) {
@@ -21,7 +22,33 @@ export async function resolvePreviewApi(apiUrl) {
 
 /** Optional Node client: owns only this call's context and CDP connection.
  * The caller chooses interactions/assertions; no retries or gameplay verdicts. */
-export async function withPreviewPage({ apiUrl, mode, contextOptions = {}, beforeNavigate, runtimeErrorPolicy = 'observe' }, inspect) {
+export function withPreviewPage(options, inspect) {
+  return withManagedPage(options, inspect);
+}
+
+// Local design files use a routed origin, not unrestricted file:// navigation.
+// Reads happen in the caller's project boundary; no server or game build starts.
+export async function designFilePath(path) {
+  if (typeof path !== 'string' || isAbsolute(path) || path.includes('\\') ||
+      path.split('/').some(part => !part || part.startsWith('.') || ['node_modules', 'transcripts'].includes(part)))
+    throw Error('Design files must be public project-relative files');
+  const file = resolve(await realpath(process.cwd()), path);
+  if (await realpath(file) !== file || !(await stat(file)).isFile())
+    throw Error('Design files must be regular project files without symlink redirection');
+  return file;
+}
+
+export async function withDesignPage({ path, query = '', ...options }, inspect) {
+  if (!/\.html?$/i.test(path ?? '') || typeof query !== 'string' || query && !query.startsWith('?'))
+    throw Error('Expected a project HTML design path and optional ?query');
+  await designFilePath(path);
+  if (options.mode !== undefined) throw Error('Design rendering does not start a game Preview');
+  const url = new URL(path.split('/').map(encodeURIComponent).join('/'), 'https://bgs-design.invalid/');
+  url.search = query;
+  return withManagedPage(options, inspect, url);
+}
+
+async function withManagedPage({ apiUrl, mode, contextOptions = {}, beforeNavigate, runtimeErrorPolicy = 'observe' }, inspect, designUrl) {
   if (process.versions.bun) throw new Error('PREVIEW_NODE_REQUIRED: Run the test script with node, not bun. The shared Playwright/CDP client uses Node.');
   apiUrl = await resolvePreviewApi(apiUrl);
   const moduleUrl = process.env.BEEGAME_PLAYWRIGHT_MODULE;
@@ -39,7 +66,7 @@ export async function withPreviewPage({ apiUrl, mode, contextOptions = {}, befor
     return result;
   };
   const preview = mode === undefined ? await request('/status') : await request('/preview', { mode });
-  if (preview.preview?.status !== 'running') throw new Error('Start a running preview before inspecting it');
+  if (!designUrl && preview.preview?.status !== 'running') throw new Error('Start a running preview before inspecting it');
   const { endpoint } = await request('/browser', {});
   const { chromium } = await import(moduleUrl);
   const browser = await chromium.connectOverCDP(endpoint);
@@ -89,19 +116,44 @@ export async function withPreviewPage({ apiUrl, mode, contextOptions = {}, befor
     })); });
     // Install startup error listeners and context routes before the game's
     // first request. Registering them in inspect is too late for boot failures.
+    if (designUrl) {
+      const types = { '.html':'text/html', '.htm':'text/html', '.css':'text/css', '.js':'text/javascript',
+        '.mjs':'text/javascript', '.json':'application/json', '.svg':'image/svg+xml', '.png':'image/png',
+        '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.webp':'image/webp', '.gif':'image/gif',
+        '.woff':'font/woff', '.woff2':'font/woff2', '.ttf':'font/ttf', '.otf':'font/otf' };
+      await context.route('https://bgs-design.invalid/**', async route => {
+        try {
+          if (route.request().method() !== 'GET') throw Error('Read-only design source');
+          const path = decodeURIComponent(new URL(route.request().url()).pathname.slice(1));
+          const file = await designFilePath(path);
+          await route.fulfill({ body: await readFile(file), contentType: types[extname(file).toLowerCase()] || 'application/octet-stream' });
+        } catch {
+          await route.fulfill({ status: 404, body: 'Design resource unavailable' });
+        }
+      });
+    }
     await beforeNavigate?.({ page, context });
-    await page.goto(preview.hostUrl);
-    const iframe = page.locator(preview.frameSelector);
-    await iframe.waitFor({ state: 'attached' });
-    const element = await iframe.elementHandle();
-    const gameFrame = await element?.contentFrame();
-    await element?.dispose();
-    if (!gameFrame) throw new Error('Unverified: preview iframe has no attached game frame');
-    await gameFrame.waitForLoadState('domcontentloaded');
-    // Keyboard events belong to the active frame. Focusing the iframe neither
-    // clicks a game control nor changes game state; render readiness is still
-    // the caller's precondition. Preserve the original FrameLocator API.
-    await iframe.evaluate(element => element.focus());
+    let gameFrame, frame;
+    if (designUrl) {
+      const response = await page.goto(designUrl.href);
+      if (!response?.ok()) throw Error('Design source could not be loaded');
+      gameFrame = page.mainFrame();
+      frame = page;
+    } else {
+      await page.goto(preview.hostUrl);
+      const iframe = page.locator(preview.frameSelector);
+      await iframe.waitFor({ state: 'attached' });
+      const element = await iframe.elementHandle();
+      gameFrame = await element?.contentFrame();
+      await element?.dispose();
+      if (!gameFrame) throw new Error('Unverified: preview iframe has no attached game frame');
+      await gameFrame.waitForLoadState('domcontentloaded');
+      // Keyboard events belong to the active frame. Focusing the iframe neither
+      // clicks a game control nor changes game state; render readiness is still
+      // the caller's precondition. Preserve the original FrameLocator API.
+      await iframe.evaluate(element => element.focus());
+      frame = page.frameLocator(preview.frameSelector);
+    }
     // Preview's isolation descriptor is not the browser's actual test environment.
     // A fresh observation also works after caller-driven resize/state changes.
     const observeEnvironment = () => gameFrame.evaluate(() => ({
@@ -109,8 +161,8 @@ export async function withPreviewPage({ apiUrl, mode, contextOptions = {}, befor
       maxTouchPoints: navigator.maxTouchPoints,
       coarsePointer: matchMedia('(pointer: coarse)').matches, hover: matchMedia('(hover: hover)').matches,
     }));
-    const result = await inspect({ page, frame: page.frameLocator(preview.frameSelector), gameFrame,
-      environment: preview.environment, observedEnvironment: await observeEnvironment(), observeEnvironment, runtimeErrors, runtimeErrorDetails, context, browser });
+    const result = await inspect({ page, frame, gameFrame,
+      environment: designUrl ? { scope: 'design-document', gamePreview: false } : preview.environment, observedEnvironment: await observeEnvironment(), observeEnvironment, runtimeErrors, runtimeErrorDetails, context, browser });
     // Opt-in for tests claiming a clean runtime. A late user listener cannot
     // hide the helper's initial-load observations. Diagnostic callers keep the
     // original observe-only contract; this is not a gameplay/quality verdict.

@@ -72,9 +72,8 @@ for(const scenario of ['no-start','exit-write-outage'] as const) {
       await executor.start(run,{})
       for(let i=0;i<100;i++){run=(await base.read(projectId,source.owner_id))!;if(exitFailures && executor.writerLiveness(run)==='unknown')break;await Bun.sleep(20)}
       assert.ok(exitFailures);assert.equal(run.agentTurns![0]!.quiescedAt,undefined)
-      assert.equal(await executor.recoveryEvidence(run),'original-host');assert.equal(await other.recoveryEvidence(run),'unavailable')
+      assert.equal(await executor.recoveryEvidence(run),'original-host');assert.equal(await other.recoveryEvidence(run),'host-idle')
       const identity={expectedVersion:run.version,attemptId:run.writer!.attemptId,fence:run.writer!.fence}
-      await assert.rejects(other.recover(run,identity),/No durable native exit/)
       exitOutage=false;run=await executor.recover(run,identity)
       assert.equal(run.writer,undefined);assert.ok(run.agentTurns![0]!.quiescedAt)
       assert.equal(run.agentTurns![0]!.status,'interrupted');assert.equal(submissions,1)

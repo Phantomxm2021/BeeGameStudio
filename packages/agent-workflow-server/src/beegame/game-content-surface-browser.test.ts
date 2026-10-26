@@ -103,7 +103,7 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('shared UI backgrounds and S
 },30000)
 
 
-test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('skin button keeps its atlas pixels, live label and click action through rerender',async()=>{
+test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('skin button keeps its atlas pixels, live label and action through pointer and keyboard rerender',async()=>{
   const {chromium}=await import(sharedPlaywright().moduleUrl)
   const executablePath=process.env.BGS_LAYOUT_BROWSER_EXECUTABLE??chromium.executablePath()
   if(!existsSync(executablePath))throw Error('An installed Chromium is required; no browser download')
@@ -116,7 +116,7 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('skin button keeps its atlas
     const page=await browser.newPage()
     await page.route('**/*',(route:any)=>new URL(route.request().url()).origin===server.url.origin?route.continue():route.abort())
     await page.goto(server.url.href)
-    const result=await page.evaluate(async (example:any)=>{
+    const initial=await page.evaluate(async (example:any)=>{
       const modulePath='/consumer.mjs',lib=await import(modulePath)
       const documentData={schema:'beegame-content.v1',id:'skin-example',kind:'ui-screen',assetRefs:['ui-skins'],
         data:{rootId:'root',nodes:[{id:'root',role:'screen-root'},example]}}
@@ -127,9 +127,14 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('skin button keeps its atlas
       const assets=new Map([['ui-skins',{source:image,url:'memory',sheet:{frames:{primary:{x:2,y:0,width:1,height:1}}}}]])
       const host=document.createElement('div');document.body.append(host)
       const surface=await lib.createProductionUiSurface(host),clicks:string[]=[]
-      const data=lib.readUiData(documentData)
-      const draw=(label:string)=>surface.render(data,{width:320,height:180},{assets,state:{'play.label':label},
+      const data=lib.readUiData(documentData) as any
+      const root=data.nodes.find((node:any)=>node.id==='root'),play=data.nodes.find((node:any)=>node.id==='play')
+      const draw=(label:string,action='game.start',includePlay=true)=>{
+        play.actions={click:action}
+        data.nodes=includePlay?[root,play]:[root]
+        return surface.render(data,{width:320,height:180},{assets,state:{'play.label':label},
         onAction:(action:string,nodeId:string)=>clicks.push(action+':'+nodeId)})
+      }
       draw('Begin')
       const button=host.querySelector<HTMLButtonElement>('[data-node-id="play"]')!
       const first=button.textContent,shadow=getComputedStyle(button).textShadow
@@ -140,14 +145,46 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('skin button keeps its atlas
       updated.click()
       const second=updated.textContent
       const nextPixel=Array.from(updated.querySelector('canvas')!.getContext('2d')!.getImageData(0,0,1,1).data)
-      surface.dispose()
-      return {first,second,shadow,pixel,nextPixel,clicks,preserved:before===JSON.stringify(documentData)}
+      ;(window as any).__bgsUiSurfaceRegression={before,clicks,data,draw,host,surface,button,documentData}
+      return {first,second,shadow,pixel,nextPixel,preserved:before===JSON.stringify(documentData)}
     },{id:'play',parentId:'root',role:'button',assetRef:'ui-skins',data:{frame:'primary'},text:'Start',
       layout:{size:[240,64]},style:{fontSize:24,textShadow:'0 0 8px #38e8ff'},
       bindings:{text:'play.label'},actions:{click:'game.start'}})
-    expect(result).toMatchObject({first:'Begin',second:'Again',pixel:[0,200,255,255],nextPixel:[0,200,255,255],
-      clicks:['game.start:play','game.start:play'],preserved:true})
-    expect(result.shadow).not.toBe('none')
+    const box=await page.locator('[data-node-id="play"]').boundingBox()
+    if(!box)throw Error('Expected the production button to have a browser box')
+    await page.mouse.move(box.x+box.width/2,box.y+box.height/2)
+    await page.mouse.down()
+    await page.evaluate(()=>{(window as any).__bgsUiSurfaceRegression.draw('Pointer','game.pointer')})
+    await page.mouse.up()
+    const button=page.locator('[data-node-id="play"]')
+    await button.focus()
+    await page.keyboard.down('Space')
+    await page.evaluate(()=>{(window as any).__bgsUiSurfaceRegression.draw('Keyboard','game.keyboard')})
+    await page.keyboard.up('Space')
+    const result=await page.evaluate(()=>{
+      const test=(window as any).__bgsUiSurfaceRegression
+      const host:HTMLDivElement=test.host
+      const updated=host.querySelector<HTMLButtonElement>('[data-node-id="play"]')!
+      const sameNodeAfterRefresh=updated===test.button
+      const focusSurvived=document.activeElement===updated
+      const finalText=updated.textContent
+      const finalPixel=Array.from(updated.querySelector('canvas')!.getContext('2d')!.getImageData(0,0,1,1).data)
+      test.draw('Removed','game.removed',false)
+      const removed=!host.querySelector('[data-node-id="play"]')
+      test.draw('Restored','game.restored',true)
+      const restored=host.querySelector<HTMLButtonElement>('[data-node-id="play"]')!
+      restored.click()
+      const clicks=test.clicks.slice()
+      const preserved=test.before===JSON.stringify(test.documentData)
+      test.surface.dispose()
+      delete (window as any).__bgsUiSurfaceRegression
+      return {sameNodeAfterRefresh,focusSurvived,finalText,finalPixel,removed,restored:!!restored,clicks,preserved}
+    })
+    expect({...initial,...result}).toMatchObject({first:'Begin',second:'Again',finalText:'Keyboard',
+      pixel:[0,200,255,255],nextPixel:[0,200,255,255],finalPixel:[0,200,255,255],
+      sameNodeAfterRefresh:true,focusSurvived:true,removed:true,restored:true,
+      clicks:['game.start:play','game.start:play','game.pointer:play','game.keyboard:play','game.restored:play'],preserved:true})
+    expect(initial.shadow).not.toBe('none')
   } finally {await browser?.close();server.stop(true)}
 },30000)
 

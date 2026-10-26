@@ -11,6 +11,13 @@ describe('public release presentation', () => {
       { kind: 'gameplay', heading: '玩法', text: '坚持到天亮。\n\n\n### 怎么玩\n\n往返港口。\n\n## 提示\n注意风向。' },
     ]);
   });
+  it('displays escaped punctuation from plain brief titles without backslashes', () => {
+    const text = '# Orbit \\[A\\] \\- v1\\.0\\!\n\n## How to play\nReach the exit\\.';
+    expect(publicationTitle(text, 'Project')).toBe('Orbit [A] - v1.0!');
+    expect(publicationSections(text, 'Project')).toEqual([
+      { kind: 'gameplay', heading: 'How to play', text: 'Reach the exit\\.' },
+    ]);
+  });
   it('supports existing plain section labels and leaves unstructured prose intact', () => {
     expect(publicationSections('旧标题\n\n游戏简介\n\n一段介绍\n\n操作\n\nA / D\n\n怎么玩\n\n回到起点', '旧标题').map(section => section.text))
       .toEqual(['A / D', '一段介绍', '回到起点']);

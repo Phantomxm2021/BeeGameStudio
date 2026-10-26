@@ -126,4 +126,40 @@ describe('R2 Resource Storage', () => {
     )
     expect(deleted).toHaveLength(1)
   })
+
+  test('paginates Pack objects in stable id order beyond the REST page limit', async () => {
+    const rows = Array.from({ length: 5 }, (_, index) => ({
+      id: `object-${String(index).padStart(4, '0')}`,
+      logical_path: `models/item-${index}.glb`,
+      status: 'ready',
+    }))
+    const requests: string[] = []
+    const storage = createR2ResourceStorage({
+      baseUrl: 'https://supabase.test',
+      serviceRoleKey: 'service-role',
+      bucket: 'resource-data',
+      driver: createDriver(),
+      fetchImpl: async input => {
+        const url = String(input)
+        requests.push(url)
+        const query = new URL(url).searchParams
+        const afterId = query.get('id')?.replace(/^gt\./, '')
+        const page = rows
+          .filter(row => !afterId || row.id > afterId)
+          .slice(0, Math.min(2, Number(query.get('limit'))))
+        return Response.json(page)
+      },
+    })
+
+    const objects = await storage.listPackObjects('pack-1')
+
+    expect(objects).toHaveLength(5)
+    expect(objects[0]).toEqual({ id: 'object-0000', logicalPath: 'models/item-0.glb', status: 'ready' })
+    expect(objects.at(-1)).toEqual({ id: 'object-0004', logicalPath: 'models/item-4.glb', status: 'ready' })
+    expect(requests).toHaveLength(4)
+    expect(requests[0]).toContain('order=id.asc')
+    expect(requests[0]).toContain('limit=1000')
+    expect(requests[1]).toContain('id=gt.object-0001')
+    expect(requests[3]).toContain('id=gt.object-0004')
+  })
 })

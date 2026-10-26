@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type ComponentProps } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import { useSystemStore } from '../../store/systemStore';
@@ -13,7 +13,7 @@ import { BeeGameLivePreviewPage, type DashboardStatus } from './BeeGameLivePrevi
 import { RightSidebar } from './RightSidebar';
 import type { BeeGameDeploymentRequest, BeeGameDeploymentPayload, ChatAttachmentPayload, PendingToolPermissionItem } from '../../services/api';
 import { api } from '../../services/api';
-import { deriveDashboardStatus, getWaitingPermissionState } from '../../utils/waitingPermission';
+import { deriveChatTerminalStatus, getWaitingPermissionState } from '../../utils/waitingPermission';
 import {
   toChatDisplayMessages,
   toProjectRuntimeDisplayModel,
@@ -55,6 +55,12 @@ const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string
   }
 };
 
+function ProjectChatSidebar(props: Omit<ComponentProps<typeof RightSidebar>, 'messages'>) {
+  const messages = useChatStore(state => state.messages);
+  const displayMessages = useMemo(() => toChatDisplayMessages(messages), [messages]);
+  return <RightSidebar {...props} messages={displayMessages} />;
+}
+
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack }: DashboardViewProps) {
   const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
   const activeDeployment = deploymentHistory.find(item => ['queued', 'building', 'publishing'].includes(item.status));
@@ -84,7 +90,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
       loadProjectRuntimeState: state.loadProjectRuntimeState,
     })),
   );
-  const { messages } = useChatStore(useShallow(state => ({ messages: state.messages })));
+  const chatTerminalStatus = useChatStore(state => deriveChatTerminalStatus(state.messages));
   const { showSuccess, showError, showWarning } = useToastContext();
 
   const { creditBalance, creditSummary, refreshCredits } = useCredits(
@@ -107,8 +113,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     if (!deploymentInProgress || authenticationStatus !== 'authenticated') return;
     let cancelled = false;
     let warned = false;
+    let inFlight = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
+      if (cancelled || document.hidden || inFlight) return;
+      inFlight = true;
       try {
         const records = await api.listProjectDeployments(projectId);
         if (!cancelled) {
@@ -119,14 +128,24 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
       } catch (error) {
         if (!cancelled && !warned) { warned = true; showWarning(error instanceof Error ? error.message : String(error)); }
       } finally {
-        if (!cancelled) timer = setTimeout(poll, 2500);
+        inFlight = false;
+        if (!cancelled && !document.hidden) timer = setTimeout(poll, 2500);
       }
     };
-    timer = setTimeout(poll, 1000);
-    return () => { cancelled = true; clearTimeout(timer); };
+    const onVisibilityChange = () => {
+      clearTimeout(timer);
+      if (!document.hidden) void poll();
+    };
+    if (!document.hidden) timer = setTimeout(poll, 1000);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [projectId, deploymentInProgress, activeDeployment?.id, authenticationStatus, showWarning, showError, translateBeeGame]);
 
-  const { sendMessage, stopTask, continueTask, autoRetryTurnId, cancelAutoRetry, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState, sessionTokenUsage } = useChat({
+  const { sendMessage, stopTask, continueTask, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState, sessionTokenUsage } = useChat({
     projectId,
     onError: err => console.error(err),
     showToastError: showError,
@@ -154,7 +173,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   );
   const pendingToolPermissionCount = countPendingToolPermissions(pendingPermissions);
   usePermissionTabAttention(pendingToolPermissionCount, translateBeeGame('approvalRequestShort'));
-  const displayMessages = useMemo(() => toChatDisplayMessages(messages), [messages]);
   const permissionDisplayModels = useMemo(() => toPermissionDisplayModels(pendingPermissions), [pendingPermissions]);
   const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
   const liveSessionTokenUsage = useMemo(() => {
@@ -237,13 +255,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     if (isProjectStarting) return 'starting';
     if (projectRuntimeDisplay?.phase === 'paused' && projectRuntimeDisplay.blocked) return 'paused';
     if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
-    return deriveDashboardStatus({
-      isOffline,
-      isLoading,
-      canContinue,
-      hasWaitingPermission: waitingPermission.isWaitingStatus || hasPendingToolPermission,
-      messages: displayMessages,
-    });
+    if (isLoading) return 'running';
+    if (canContinue) return 'paused';
+    if (waitingPermission.isWaitingStatus || hasPendingToolPermission) return 'waiting_approval';
+    return chatTerminalStatus;
   }, [
     projectStatus?.acceptance?.status,
     isOffline,
@@ -255,7 +270,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     canContinue,
     hasPendingToolPermission,
     waitingPermission.isWaitingStatus,
-    displayMessages,
+    chatTerminalStatus,
     isProjectStarting,
   ]);
 
@@ -405,11 +420,10 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         onBack={onBack}
         onSetLang={onSetLang}
         collaboration={
-          <RightSidebar
+          <ProjectChatSidebar
 
         projectId={projectId}
         lang={lang}
-        messages={displayMessages}
         progress={progressPercent}
         onSendMessage={async (message, attachments?: ChatAttachmentPayload[], supersedesMessageId?: string) => {
           if (!canSendMessage) return false;
@@ -418,8 +432,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         isLoading={isLoading}
         onStopTask={stopTask}
         onContinueTask={canSendMessage ? continueTask : undefined}
-        autoRetryTurnId={autoRetryTurnId}
-        onCancelRetry={cancelAutoRetry}
         isStopping={isStopping}
         isRuntimeBusy={isExecutionBusy}
         onResolveToolPermission={hasPendingToolPermission && canApproveTool && !isProjectInteractionLocked ? resolveToolPermission : undefined}

@@ -7,6 +7,7 @@ import type { R2ResourceStorage } from '../r2-resource-storage'
 const resourceStorage: R2ResourceStorage = {
   upload: async () => ({ storageObjectId: 'object-new' }),
   getFile: async () => undefined,
+  headObject: async () => ({ byteSize: 1, metadata: {} }),
   createDownloadUrl: async (storageObjectId, packId) => `https://r2.test/${packId}/${storageObjectId}`,
   updateLogicalPath: async () => undefined,
   delete: async () => true,
@@ -520,6 +521,38 @@ describe('resource service app', () => {
     const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/publish-readiness'))
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ report: expect.objectContaining({ canPublish: true, blocking: [] }) })
+  })
+
+  test('blocks Pack publishing when its storage inspector reports a missing object', async () => {
+    const localRepository = createInMemoryResourceRepository({
+      packs: [{ id: 'storage-pack', name: 'Storage Pack',
+          styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: '2d-art', categories: ['sprites'], license: 'internal', version: '1.0.0', status: 'draft' }],
+      elements: [{ id: 'storage-element', packId: 'storage-pack', name: 'character.png', path: 'sprites/character.png', category: 'sprites', kind: 'image', assetKind: 'image', specs: { contentHash: 'a'.repeat(64) }, usageTags: ['character'], dependencies: [], status: 'ready' }],
+    })
+    const app = createBeeGameResourceServerApp({
+      repository: localRepository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      inspectPackStorage: async () => ({ missingPaths: ['sprites/character.png'], orphanPaths: [] }),
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/storage-pack/publish', { method: 'POST' }))
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: { code: 'publish_blocked', message: 'Storage object is missing: sprites/character.png' } })
+    expect((await localRepository.getPack('storage-pack'))?.status).toBe('draft')
+  })
+
+  test('fails closed when Pack storage inspection fails during publishing', async () => {
+    const app = createBeeGameResourceServerApp({
+      repository,
+      currentUser: { id: 'admin-1', role: 'owner', permissions: ['resources.manage'] },
+      inspectPackStorage: async () => { throw new Error('storage unavailable') },
+    })
+
+    const response = await app.fetch(new Request('http://resource.test/api/resource-packs/pack-1/publish', { method: 'POST' }))
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: { code: 'publish_blocked', message: 'storage unavailable' } })
   })
 
   test('filters elements by folder path without treating it as a category', async () => {

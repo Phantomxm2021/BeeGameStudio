@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { extname, isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import { contentRuntimeCheckSchema } from './content-runtime-contract'
 import { parseBeeGameContentDocument, parseBeeGameContentIndex, isContentEntryKind } from './game-content-schema'
@@ -11,7 +11,7 @@ import { designReviewResultSchema, type DesignFinding } from './design-handoff'
 import { projectFiles, projectDependencies, changedProjectPaths, AGENT_EVIDENCE_DIRECTORY } from './workflow-v3/checks'
 import { projectPathSchema } from './workflow-v3/state'
 
-export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'Compare actual results with confirmed requirements and original design sources. Record real test/runtime/inspection evidence, knownIssues and unverified outcomes; a model declaration is not independent acceptance. Existing indexed requirementChecks remain supported with their original document/id, source hashes, method, scenario, observed result, status and evidencePaths. For a delivery PASS, include a passed check for every existing design output that declares acceptance; empty or partial coverage is verification-incomplete. Request-scoped reports may remain local or partial. Do not create indexes or coverage mappings to write a report. Every cited evidence path must appear in evidencePaths. Failed or unverified checks cannot support PASS. BGS validates retained evidence and data contracts, not complete requirements, truthful observations or visual/game quality.'
+export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'Compare actual results with confirmed requirements and original design sources. Record real test/runtime/inspection evidence, knownIssues and unverified outcomes; a model declaration is not independent acceptance. Existing indexed requirementChecks remain supported with their original document/id, source hashes, method, scenario, observed result, status and evidencePaths. Record a source-design versus actual-view comparison in verification.visualComparisons as {state,sourcePath,observationPaths,status:"matched"|"different"|"unverified",differences} when the host requires visual evidence for an editable Scene/UI delivery; source and observation paths must also be in evidencePaths. In that host-required case, include at least one comparison, use a displayable design source (SVG/PNG/JPG/JPEG/WebP/GIF/PDF) and an actual image observation (SVG/PNG/JPG/JPEG/WebP/GIF); matched needs an actual observation and no differences; different needs an observation and explicit differences; unverified may have no observation but must state an explicit gap. For request, discussion, design-only, source-only or legacy reports where the host does not require visual evidence, visualComparisons remains optional. This records an author-declared comparison, not visual semantic acceptance. For a delivery PASS, verification.target must be "deployment" and verification.observation must be "target-runtime"; verification.target allows "development"|"deployment", and verification.observation allows "target-runtime"|"simulation". For a delivery PASS, include a passed check for every existing design output that declares acceptance; empty or partial coverage is verification-incomplete. Request-scoped reports may remain local or partial, including different or unverified visual comparisons. Do not create indexes or coverage mappings to write a report. Every cited evidence path must appear in evidencePaths. Failed or unverified checks cannot support PASS. BGS validates retained evidence and data contracts, not complete requirements, truthful observations or visual/game quality. Use --design acceptance --help for the acceptanceExample and this contract.'
 
 
 const requirementCheckSchema = z.object({
@@ -24,6 +24,25 @@ const requirementCheckSchema = z.object({
   evidencePaths: z.array(z.string().trim().min(1)).min(1),
 }).strict()
 
+const visualComparisonSchema = z.object({
+  state: z.string().trim().min(1),
+  sourcePath: z.string().trim().min(1),
+  observationPaths: z.array(z.string().trim().min(1)),
+  status: z.enum(['matched', 'different', 'unverified']),
+  differences: z.array(z.string().trim().min(1)),
+}).strict().superRefine((comparison, context) => {
+  if (comparison.status === 'matched' && !comparison.observationPaths.length)
+    context.addIssue({ code: 'custom', path: ['observationPaths'], message: 'matched visual comparison requires an actual observation' })
+  if (comparison.status === 'matched' && comparison.differences.length)
+    context.addIssue({ code: 'custom', path: ['differences'], message: 'matched visual comparison cannot declare differences' })
+  if (comparison.status === 'different' && !comparison.observationPaths.length)
+    context.addIssue({ code: 'custom', path: ['observationPaths'], message: 'different visual comparison requires an actual observation' })
+  if (comparison.status === 'different' && !comparison.differences.length)
+    context.addIssue({ code: 'custom', path: ['differences'], message: 'different visual comparison requires an explicit difference' })
+  if (comparison.status === 'unverified' && !comparison.differences.length)
+    context.addIssue({ code: 'custom', path: ['differences'], message: 'unverified visual comparison requires an explicit gap' })
+})
+
 // A result record, not a test plan: the Agent chooses its own checks/tools.
 const verificationSchema = z.object({
   target: z.enum(['development', 'deployment']),
@@ -33,6 +52,7 @@ const verificationSchema = z.object({
   outsideScope: z.array(z.string().trim().min(1)).optional(),
   contentChecks: z.array(contentRuntimeCheckSchema).optional(),
   requirementChecks: z.array(requirementCheckSchema).optional(),
+  visualComparisons: z.array(visualComparisonSchema).optional(),
   designRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 })
 const reportSchema = z.object({
@@ -162,7 +182,7 @@ export async function artifactDigest(workspace: string, path: string, allowDirec
 
 /** Read an Agent-authored result at a fixed project path, without a workflow dispatch. */
 export async function readRuntimeAcceptanceReport(workspace: string, reportPath: string,
-  options: { requireDesignRevision?: boolean; requireEditableContent?: boolean; executionIdentity?: ExecutionIdentity } = {}): Promise<RuntimeAcceptance | undefined> {
+  options: { requireDesignRevision?: boolean; requireEditableContent?: boolean; executionIdentity?: ExecutionIdentity; requireVisualComparison?: boolean } = {}): Promise<RuntimeAcceptance | undefined> {
   let text: string
   try {
     await artifactDigest(workspace, reportPath) // Reject symlink escapes before reading the report.
@@ -180,9 +200,12 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
       throw new Error('requirementChecks must be inside verification.requirementChecks, not at the report top level')
     if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'designRevision' in raw)
       throw new Error('designRevision must be inside verification.designRevision, not at the report top level')
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'visualComparisons' in raw)
+      throw new Error('visualComparisons must be inside verification.visualComparisons, not at the report top level')
     const report = reportSchema.parse(raw)
+    const visualComparisonRequired = options.requireVisualComparison === true && report.scope !== 'request' && report.status === 'passed'
     let limitation = report.scope !== 'request' && report.status === 'passed'
-      ? deliveryLimitation(report) : undefined
+      ? deliveryLimitation(report, visualComparisonRequired) : undefined
     if (report.scope !== 'request' && report.status === 'passed' && !limitation &&
         (options.requireDesignRevision || report.verification?.designRevision !== undefined)) {
       if (report.verification?.designRevision === undefined)
@@ -213,6 +236,23 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
       if (await realpath(resolve(workspace, path)) === reportFile) throw new Error('The acceptance report cannot be its own evidence')
       return { path, sha256: await artifactDigest(workspace, path) }
     }))
+    // Paths have already passed the shared evidence checks. Bind the declared
+    // comparison to those files without adding another evidence/hash mechanism.
+    const evidencePaths = new Set(report.evidencePaths)
+    for (const comparison of report.verification?.visualComparisons ?? []) {
+      for (const path of [comparison.sourcePath, ...comparison.observationPaths])
+        if (!evidencePaths.has(path)) throw Error(`Visual comparison path must also appear in evidencePaths: ${path}`)
+      // Only the explicit delivery gate narrows the retained file contract;
+      // request and failed/blocked reports may preserve older textual records.
+      if (visualComparisonRequired && !isVisualDesignSourcePath(comparison.sourcePath))
+        throw Error(`Required visual comparison sourcePath must be a displayable design file: ${comparison.sourcePath}`)
+      if (visualComparisonRequired) for (const path of comparison.observationPaths)
+        if (!isVisualObservationPath(path)) throw Error(`Required visual comparison observationPath must be an image capture: ${path}`)
+      const source = await realpath(resolve(workspace, comparison.sourcePath))
+      for (const path of comparison.observationPaths)
+        if (source === await realpath(resolve(workspace, path)))
+          throw Error('Visual comparison sourcePath and observationPaths must be different canonical files')
+    }
     // Bind the actual tested output, even when build directories are excluded
     // from source identity. No build command, output layout or engine is imposed.
     const artifacts = await Promise.all([...new Set(report.artifactPaths ?? [])].map(async path =>
@@ -231,9 +271,10 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
 
 /** Read-only view of the existing delivery report. Valid means declared
  * coverage/version/evidence integrity, never independent aesthetic approval. */
-export async function inspectDesignAcceptance(workspace: string, requireDesignRevision = false, requireEditableContent = false, executionIdentity?: ExecutionIdentity) {
+export async function inspectDesignAcceptance(workspace: string, requireDesignRevision = false, requireEditableContent = false,
+  executionIdentity?: ExecutionIdentity, options: { requireVisualComparison?: boolean } = {}) {
   const report = await readRuntimeAcceptanceReport(workspace, DESIGN_ACCEPTANCE_PATH,
-    {requireDesignRevision,requireEditableContent,executionIdentity})
+    {requireDesignRevision,requireEditableContent,executionIdentity,requireVisualComparison: options.requireVisualComparison})
   const checks = report?.verification?.requirementChecks ?? []
   return {path:DESIGN_ACCEPTANCE_PATH, valid:report?.scope === 'delivery' && report.status === 'passed',
     status:report?.status ?? 'unverified',scope:report?.scope,
@@ -249,16 +290,43 @@ export async function inspectDesignAcceptance(workspace: string, requireDesignRe
     note:'Reported checks, current design revision and retained evidence integrity only. Missing indexes/checks do not establish coverage. Observation truth, original semantic completeness, visual restoration and experience quality remain unverified by this read.'}
 }
 
-function deliveryLimitation(report: { verification?: z.infer<typeof verificationSchema> }): AcceptanceDiagnostic | undefined {
+const visualDesignSourceExtensions = new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf'])
+const visualObservationExtensions = new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif'])
+function isVisualDesignSourcePath(path: string) {
+  return visualDesignSourceExtensions.has(extname(path).toLowerCase())
+}
+function isVisualObservationPath(path: string) {
+  return visualObservationExtensions.has(extname(path).toLowerCase())
+}
+
+function deliveryVerificationDiagnostic(observation: z.infer<typeof verificationSchema>['observation']): AcceptanceDiagnostic {
+  const allowed = '"target-runtime" | "simulation"'
+  if (observation === undefined)
+    return diagnostic('verification-incomplete',
+      `Delivery verification is incomplete: verification.observation is missing (current value: absent). Allowed values: ${allowed}. Use "target-runtime" only after observing the actual deployment target; use "simulation" for simulated evidence. See --design acceptance --help (acceptanceExample/acceptanceInstruction).`)
+  return diagnostic('verification-incomplete',
+    `Delivery verification cannot pass with verification.observation="${observation}" (current value: "${observation}"). Allowed values: ${allowed}; deployment delivery requires "target-runtime" after observing the actual target runtime. See --design acceptance --help (acceptanceExample/acceptanceInstruction).`)
+}
+
+function deliveryLimitation(report: { verification?: z.infer<typeof verificationSchema> }, requireVisualComparison = false): AcceptanceDiagnostic | undefined {
   const checked = verificationSchema.safeParse(report.verification)
   if (!checked.success) return diagnostic('verification-incomplete', 'Delivery verification coverage is not recorded; this is not a full delivery pass.')
-  if (checked.data.target !== 'deployment') return diagnostic('verification-incomplete', 'Development verification does not establish deployment readiness.')
+  const issues: AcceptanceDiagnostic[] = []
+  if (checked.data.target !== 'deployment')
+    issues.push(diagnostic('verification-incomplete', `Delivery verification requires verification.target="deployment" (current value: "${checked.data.target}"). Allowed values: "development" | "deployment". See --design acceptance --help (acceptanceExample/acceptanceInstruction).`))
   if (checked.data.observation !== 'target-runtime')
-    return diagnostic('verification-incomplete', 'Delivery requires verification in the actual target runtime; simulated checks alone are insufficient.')
+    issues.push(deliveryVerificationDiagnostic(checked.data.observation))
   if (checked.data.knownIssues.length)
-    return diagnostic('product-failed', `Delivery still has known issues: ${checked.data.knownIssues.join('; ')}`)
+    issues.push(diagnostic('product-failed', `Delivery still has known issues: ${checked.data.knownIssues.join('; ')}`))
   if (checked.data.unverified.length)
-    return diagnostic('verification-incomplete', `Delivery still has unverified requirements: ${checked.data.unverified.join('; ')}`)
+    issues.push(diagnostic('verification-incomplete', `Delivery still has unverified requirements: ${checked.data.unverified.join('; ')}`))
+  if (requireVisualComparison && !checked.data.visualComparisons?.length)
+    issues.push(diagnostic('verification-incomplete', 'This editable Scene/UI delivery requires at least one source-to-observation visual comparison.'))
+  for (const comparison of checked.data.visualComparisons?.filter(comparison => comparison.status === 'different') ?? [])
+    issues.push(diagnostic('product-failed', `Visual comparison ${comparison.state} reports a difference: ${comparison.differences.join('; ')}`))
+  for (const comparison of checked.data.visualComparisons?.filter(comparison => comparison.status === 'unverified') ?? [])
+    issues.push(diagnostic('verification-incomplete', `Visual comparison ${comparison.state} is unverified: ${comparison.differences.join('; ')}`))
+  return issues.length ? diagnostic(issues[0]!.category, issues.map(issue => issue.message).join('; ')) : undefined
 }
 
 /** Checks declared requirement coverage/version for delivery reports, not the
@@ -299,8 +367,11 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
   // Reuse the owners' actual source links and the runtime registry, not another
   // checklist. Source-only/native projects remain valid when content is neither
   // required by the host nor declared by their design documents.
-  const designUi = bindDesignSources ? designSupportingFiles(workspace, ['UI_UX_SPEC.md']).filter(isDesignUiFile) : []
-  const designScenes = bindDesignSources ? designSupportingFiles(workspace, ['LEVEL_SCENE_DESIGN.md']).filter(isDesignSceneFile) : []
+  // A single GDD can own both UI and Scene source links. Keep the existing
+  // source classifiers so runtime binding retains their path semantics.
+  const supporting = bindDesignSources ? designSupportingFiles(workspace, PROJECT_DOCUMENTS) : []
+  const designUi = supporting.filter(isDesignUiFile)
+  const designScenes = supporting.filter(isDesignSceneFile)
   const indexPath = 'content/index.json'
   try { await artifactDigest(workspace, indexPath) }
   catch (error) {

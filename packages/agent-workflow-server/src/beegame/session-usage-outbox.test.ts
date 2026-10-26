@@ -139,3 +139,20 @@ test('an unconfirmed billing response cannot remove the pending bill', async () 
   await expect(outbox.submit(bill(100))).rejects.toThrow('did not confirm')
   expect(await files()).toHaveLength(1)
 })
+
+test('statusSnapshot reports durable pending work and in-flight flushes without settling it', async () => {
+  const { backend } = ledger()
+  let entered!: () => void
+  const enteredPromise = new Promise<void>(resolve => { entered = resolve })
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const record = backend.recordUsage!
+  backend.recordUsage = async (...args) => { entered(); await gate; return record(...args) }
+  const { outbox } = await fixture(backend)
+  const submission = outbox.submit(bill(100))
+  await enteredPromise
+  expect(outbox.statusSnapshot()).toEqual({ pendingBuckets: 1, pendingEntries: 1, activeFlushes: 1, state: 'flushing' })
+  release()
+  await submission
+  expect(outbox.statusSnapshot()).toEqual({ pendingBuckets: 0, pendingEntries: 0, activeFlushes: 0, state: 'idle' })
+})

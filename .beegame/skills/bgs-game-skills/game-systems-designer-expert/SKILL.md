@@ -9,7 +9,7 @@ description: Use for gameplay rules, core loops, progression, economy structure,
 
 Make the repeatable player action clear, coherent and worth doing. Start with the goal, legal actions, constraints, information and resulting feedback, not scalability or a catalogue of progression systems. Explain what changes on repetition: a new situation, a choice, skill expression, discovery or creative expression. A reward counter alone does not establish that value.
 
-Before settling an unfamiliar mechanic or a consequential design assumption, identify what the brief and existing research leave unresolved. Use available web search and read relevant public sources to answer that question; distinguish observed examples from your proposed adaptation. Keep useful conclusions, source links and the decisions they inform in the existing GDD sections. Reuse current, relevant research across documents; search again for a new gap or outdated information, stopping when there is enough evidence for the decision. This adds no search quota, research document or approval stage. Public examples do not override confirmed requirements or establish that the proposed game is enjoyable.
+Before settling an unfamiliar mechanic or a consequential design assumption, identify what the brief and existing research leave unresolved. Use available web search and read relevant public sources to answer that question; distinguish observed examples from your proposed adaptation. Keep useful conclusions, source links and the decisions they inform in the relevant chapters of `docs/GDD.md`. Reuse current, relevant research across chapters; search again for a new gap or outdated information, stopping when there is enough evidence for the decision. This adds no search quota, research document or approval stage. Public examples do not override confirmed requirements or establish that the proposed game is enjoyable.
 
 ---
 
@@ -64,14 +64,14 @@ Only for a live game with retention goals, consider:
 
 ## 5. Practical approach
 
-Map the rules the player can observe, identify their state transitions and shared resources, and test the smallest interaction that could contradict the intended loop. Use a resource stress test or scaling analysis only when the project actually has those systems.
+Map player-observable rules with legal actions, state transitions and shared resources. Resolve boundaries that change the result, such as simultaneous events, repeated actions, interruption/recovery and numeric interactions, before dependent implementation; cover the boundaries the game actually has. Record these decisions in the systems chapter of `docs/GDD.md` and test the smallest interaction that could contradict them when implementation is in scope. Use a resource stress test or scaling analysis only when the project actually has those systems.
 
 Use only the relevant sections for the current request; do not invent an
 economy, meta-progression, or retention plan for a game that has none.
 
 ## Reference Files
 
-Load only when the task needs extra detail:
-- `references/core-loop-contract.md` for loop contracts and player promise alignment.
-- `references/parameter-boundary-model.md` for tunable limits and risk boundaries.
-- `references/state-machine-rules-boundary.md` for gameplay transitions and outcome precedence.
+Read the reference needed for the current design decision:
+- `references/core-loop-contract.md` for a new loop and player promise alignment.
+- `references/parameter-boundary-model.md` for consequential parameter relationships and limits.
+- `references/state-machine-rules-boundary.md` for transitions, simultaneous outcomes and recovery.

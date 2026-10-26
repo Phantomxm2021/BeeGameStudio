@@ -15,7 +15,7 @@ const identity = { runId: 'run', requirementsRevision: 'requirements' }
 
 beforeEach(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-acceptance-receipts-')))
-  await writeDesignDocumentsFixture(root, ['GDD.md', 'AUDIO_DESIGN.md'])
+  await writeDesignDocumentsFixture(root, ['GDD.md'])
   for (const dir of ['tests', 'dist', 'reports', directory, '.beegame/delivery']) await mkdir(join(root, dir), { recursive: true })
   await writeFile(join(root, 'package.json'), '{}')
   await writeFile(join(root, 'game.js'), 'Synthetic source')

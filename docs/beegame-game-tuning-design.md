@@ -28,7 +28,7 @@ Related design documents:
 
 - [World Editor design](beegame-world-editor-design.md)
 - [Resource and content contract](beegame-resource-content-contract.md)
-- [Native game delivery architecture](beegame-native-game-delivery-architecture.md)
+- [Runtime boundary in the current README](../README.md#runtime-boundary) (the former native delivery architecture document was removed)
 
 ## Problem and boundary
 

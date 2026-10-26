@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
+import { projectChatPath } from './beegame/project-records'
+import { ChatJsonlReader } from './beegame/chat-jsonl-reader'
 import type { ModelConfigSnapshotRecord } from '@bee-game-studio/agent-workflow'
 import {
   readModelConfigSnapshotFromStore,
@@ -164,68 +165,25 @@ function loadLocalModelConfigs(dataDir: string): ModelConfigSnapshotRecord[] {
   return readModelConfigSnapshotFromStore({ dataDir })
 }
 
-function loadLocalSessions(
-  projects: BeeGameProjectMetadata[],
-): BeeGameLocalSessionMetadata[] {
+function loadLocalSessions(projects: BeeGameProjectMetadata[]): BeeGameLocalSessionMetadata[] {
   return projects.flatMap(project => {
     const workspacePath = project.root_path?.trim()
     if (!workspacePath) return []
-    const transcriptDir = join(workspacePath, 'transcripts')
-    if (!existsSync(transcriptDir)) return []
-    return readdirSync(transcriptDir)
-      .filter(fileName => fileName.endsWith('.jsonl'))
-      .flatMap(fileName => {
-        const transcriptPath = join(transcriptDir, fileName)
-        const metadata = readLocalTranscriptMetadata(
-          project.id,
-          workspacePath,
-          transcriptPath,
-        )
-        return metadata ? [metadata] : []
-      })
+    const transcriptPath = projectChatPath(workspacePath)
+    if (!existsSync(transcriptPath)) return []
+    const file = statSync(transcriptPath)
+    const sessions = new Map<string, BeeGameLocalSessionMetadata>()
+    for (const { header } of new ChatJsonlReader().entriesSync(transcriptPath)) {
+      if (!header.sessionId) continue
+      const time = parseDateField(header.createdAt)
+      const session = sessions.get(header.sessionId)
+      if (session) session.updatedAt = time ?? session.updatedAt
+      else sessions.set(header.sessionId, { id: header.sessionId, projectId: project.id,
+        workspacePath, status: 'idle', transcriptPath,
+        createdAt: time ?? file.birthtime, updatedAt: time ?? file.mtime })
+    }
+    return [...sessions.values()]
   })
-}
-
-function readLocalTranscriptMetadata(
-  projectId: string,
-  workspacePath: string,
-  transcriptPath: string,
-): BeeGameLocalSessionMetadata | undefined {
-  const lines = readFileSync(transcriptPath, 'utf8')
-    .split(/\r?\n/)
-    .filter(line => line.trim())
-  const events = lines
-    .map(parseTranscriptEvent)
-    .filter((event): event is Record<string, unknown> => Boolean(event))
-  const sessionId = events
-    .map(event => stringField(event.sessionId))
-    .find(Boolean)
-  if (!sessionId) return undefined
-
-  const timestamps = events
-    .map(event => parseDateField(event.createdAt))
-    .filter((date): date is Date => Boolean(date))
-  const fileStats = statSync(transcriptPath)
-  return {
-    id: sessionId,
-    projectId,
-    workspacePath,
-    status: 'idle',
-    transcriptPath,
-    createdAt: timestamps[0] ?? fileStats.birthtime,
-    updatedAt: timestamps[timestamps.length - 1] ?? fileStats.mtime,
-  }
-}
-
-function parseTranscriptEvent(line: string): Record<string, unknown> | undefined {
-  try {
-    const event = JSON.parse(line) as unknown
-    return typeof event === 'object' && event !== null && !Array.isArray(event)
-      ? event as Record<string, unknown>
-      : undefined
-  } catch {
-    return undefined
-  }
 }
 
 function parseDateField(value: unknown): Date | undefined {

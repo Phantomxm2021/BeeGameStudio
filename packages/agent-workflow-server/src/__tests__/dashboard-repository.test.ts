@@ -732,4 +732,170 @@ describe('DashboardRepository Supabase boundaries', () => {
       await rm(dataRoot, { recursive: true, force: true })
     }
   })
+
+  test('cleans provider-owned project objects before deleting project metadata', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-project-storage-delete-'))
+    const calls: Array<{ ownerId: string; projectId: string; authToken: string }> = []
+    const ordered: string[] = []
+    const projectRow = {
+      id: 'project-1',
+      owner_id: 'owner-1',
+      workspace_id: 'workspace-1',
+      name: 'Project 1',
+      root_path: null,
+      runtime_snapshot: {},
+      created_at: '2026-10-25T00:00:00.000Z',
+      updated_at: '2026-10-25T00:00:00.000Z',
+    }
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      getAuthToken: request => request.headers.get('authorization')?.replace(/^Bearer /, ''),
+      projectAssetStorage: {
+        uploadAssetFile: async () => 'r2-object://fixture',
+        deleteAssetFile: async () => undefined,
+        deleteProjectFiles: async input => { calls.push(input); ordered.push('storage') },
+      },
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: async (input, init) => {
+          const method = String(init?.method ?? 'GET').toUpperCase()
+          const url = String(input)
+          ordered.push(`supabase:${method}:${url}`)
+          if (method === 'GET' && url.includes('beegame_projects?owner_id=eq.owner-1&id=eq.project-1'))
+            return Response.json([projectRow])
+          if (method === 'DELETE' && url.includes('/beegame_projects?'))
+            return Response.json([{ id: 'project-1' }])
+          return Response.json([])
+        },
+      }),
+    })
+    try {
+      expect(await repository.deleteProject(
+        new Request('http://beegame.test/api/projects/project-1', { headers: { authorization: 'Bearer owner-token' } }),
+        { id: 'owner-1', role: 'owner' },
+        'project-1',
+      )).toBe(true)
+      expect(calls).toEqual([{ ownerId: 'owner-1', projectId: 'project-1', authToken: 'owner-token' }])
+      const storageIndex = ordered.indexOf('storage')
+      const projectDeleteIndex = ordered.findIndex(item => item.includes('supabase:DELETE:') && item.includes('/beegame_projects?'))
+      expect(storageIndex).toBeGreaterThanOrEqual(0)
+      expect(projectDeleteIndex).toBeGreaterThanOrEqual(0)
+      expect(storageIndex).toBeLessThan(projectDeleteIndex)
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not run provider cleanup for an unknown or foreign project', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-project-storage-missing-'))
+    const cleanupCalls: string[] = []
+    const requests: Array<{ method: string; url: string }> = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      getAuthToken: () => 'owner-token',
+      projectAssetStorage: {
+        uploadAssetFile: async () => 'r2-object://fixture',
+        deleteAssetFile: async () => undefined,
+        deleteProjectFiles: async input => { cleanupCalls.push(input.projectId) },
+      },
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: async (input, init) => {
+          requests.push({ method: String(init?.method ?? 'GET').toUpperCase(), url: String(input) })
+          return Response.json([])
+        },
+      }),
+    })
+    try {
+      await expect(repository.deleteProject(
+        new Request('http://beegame.test/api/projects/project-1'),
+        { id: 'owner-1', role: 'owner' },
+        'project-1',
+      )).resolves.toBe(false)
+      expect(cleanupCalls).toEqual([])
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.method).toBe('GET')
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('does not delete project metadata when provider cleanup fails', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-project-storage-failure-'))
+    const projectRow = {
+      id: 'project-1',
+      owner_id: 'owner-1',
+      workspace_id: 'workspace-1',
+      name: 'Project 1',
+      root_path: null,
+      runtime_snapshot: {},
+      created_at: '2026-10-25T00:00:00.000Z',
+      updated_at: '2026-10-25T00:00:00.000Z',
+    }
+    const requests: Array<{ method: string; url: string }> = []
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      getAuthToken: () => 'owner-token',
+      projectAssetStorage: {
+        uploadAssetFile: async () => 'r2-object://fixture',
+        deleteAssetFile: async () => undefined,
+        deleteProjectFiles: async () => { throw new Error('object cleanup failed') },
+      },
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co',
+        anonKey: 'anon-key',
+        fetchImpl: async (input, init) => {
+          const method = String(init?.method ?? 'GET').toUpperCase()
+          const url = String(input)
+          requests.push({ method, url })
+          if (method === 'GET' && url.includes('beegame_projects?owner_id=eq.owner-1&id=eq.project-1'))
+            return Response.json([projectRow])
+          return Response.json([])
+        },
+      }),
+    })
+    try {
+      await expect(repository.deleteProject(
+        new Request('http://beegame.test/api/projects/project-1'),
+        { id: 'owner-1', role: 'owner' },
+        'project-1',
+      )).rejects.toThrow('object cleanup failed')
+      expect(requests.some(request => request.method === 'DELETE')).toBe(false)
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps local project metadata when the pre-delete workflow cleanup fails', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-project-workflow-delete-failure-'))
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot,
+      getUserDataRoot: () => dataRoot,
+      skillsConfig: false,
+    })
+    const request = new Request('http://beegame.test/api/projects/project-1')
+    const user = { id: 'owner-1', role: 'owner' as const }
+    try {
+      await repository.upsertProject(request, user, {
+        id: 'project-1',
+        name: 'Project 1',
+        created_at: Date.now(),
+      })
+      await expect(
+        repository.deleteProject(request, user, 'project-1', async () => {
+          throw new Error('workflow cleanup failed')
+        }),
+      ).rejects.toThrow('workflow cleanup failed')
+      await expect(repository.getProject(request, user, 'project-1')).resolves.toEqual(
+        expect.objectContaining({ id: 'project-1', name: 'Project 1' }),
+      )
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
 })

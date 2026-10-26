@@ -106,12 +106,16 @@ export type BeeGameDeploymentPublisher = {
     authToken?: string
     files: BeeGameDeploymentFile[]
     onProgress?: (progress: BeeGameUploadProgress) => Promise<void>
-  }): Promise<{
-    url: string
-    artifactPath?: string
-    manifestStorageObjectId?: string
-    message?: string
-  }>
+  }): Promise<BeeGamePublishedDeployment>
+}
+
+export type BeeGamePublishedDeployment = {
+  url: string
+  artifactPath?: string
+  manifestStorageObjectId?: string
+  message?: string
+  /** Remove a completed remote publication when later verification or persistence fails. */
+  cleanup?: () => Promise<void>
 }
 
 export type BeeGameDeploymentManagerOptions = {
@@ -200,6 +204,7 @@ export class BeeGameDeploymentManager {
   private recordWrites: Promise<void> = Promise.resolve()
   private readonly active = new Map<string, Promise<BeeGameDeploymentRecord>>()
   private readonly ready: Promise<void>
+  private recoveryReady = false
 
   constructor(options: BeeGameDeploymentManagerOptions) {
     this.deploymentsRoot = join(options.dataRoot, 'deployments')
@@ -208,12 +213,29 @@ export class BeeGameDeploymentManager {
     this.runner = options.runner ?? runDeploymentCommand
     this.outputCandidates = options.outputCandidates ?? DEFAULT_OUTPUT_CANDIDATES
     this.publisher = options.publisher
-    this.ready = this.recoverInterrupted()
+    this.ready = this.recoverInterrupted().then(() => { this.recoveryReady = true })
+    // A corrupt records file must remain observable to callers that await
+    // readiness, but a server that has not yet asked for deployments should
+    // not produce an unhandled rejection during construction.
+    void this.ready.catch(() => undefined)
   }
 
   get destination(): 'remote' | 'local' { return this.publisher ? 'remote' : 'local' }
   isPublishing(userId: string, workspacePath: string): boolean {
     return this.active.has(`${userId}:${resolve(workspacePath)}`)
+  }
+
+  /** Read-only deployment activity and recovery readiness for host diagnostics. */
+  async runtimeStatus(): Promise<{ active: number; recovery: 'ready' | 'unknown' }> {
+    if (!this.recoveryReady) return { active: this.active.size, recovery: 'unknown' }
+    try {
+      const parsed = JSON.parse(await readFile(this.recordsPath, 'utf8'))
+      if (!Array.isArray(parsed) || parsed.some(record => !isDeploymentRecord(record)))
+        return { active: this.active.size, recovery: 'unknown' }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { active: this.active.size, recovery: 'unknown' }
+    }
+    return { active: this.active.size, recovery: 'ready' }
   }
 
   /** Return the durable queued record, not a request held open for the entire build. */
@@ -307,6 +329,7 @@ export class BeeGameDeploymentManager {
       const deleted: BeeGameDeploymentRetentionItem[] = []
       const skipped: BeeGameDeploymentRetentionItem[] = []
       if (!input.dryRun) {
+        const deletedIds = new Set<string>()
         for (const record of records.filter(item => deleteIds.has(item.id))) {
           const item = toRetentionItem(record, 'older_than_rollback_retention_window')
           const deletedArtifact = await this.deleteLocalArtifact(record)
@@ -315,10 +338,14 @@ export class BeeGameDeploymentManager {
               ...item,
               reason: 'artifact_not_local_or_missing',
             })
+            continue
           }
           deleted.push(item)
+          deletedIds.add(record.id)
         }
-        await this.saveRecords(records.filter(record => !deleteIds.has(record.id)))
+        // A remote or missing artifact was not deleted. Keep its record so
+        // retention never discards the only pointer needed for reconciliation.
+        await this.saveRecords(records.filter(record => !deletedIds.has(record.id)))
       }
 
       return {
@@ -349,6 +376,7 @@ export class BeeGameDeploymentManager {
       createdAt: now,
       updatedAt: now,
     }
+    let published: BeeGamePublishedDeployment | undefined
     await this.saveRecord(record)
     onQueued?.(record)
 
@@ -476,7 +504,7 @@ export class BeeGameDeploymentManager {
       }
       const artifactHash = await hashDirectory(artifactPath)
       const files = await createDeploymentFiles(artifactPath)
-      const published = this.publisher
+      published = this.publisher
         ? await this.publisher.publishStaticDirectory({
             deploymentId: id,
             sessionId: input.sessionId,
@@ -536,7 +564,20 @@ export class BeeGameDeploymentManager {
       await persistRecord?.(record)
       return record
     } catch (error) {
-      record = this.fail(record, error instanceof Error ? error.message : String(error))
+      record = this.fail({
+        ...record,
+        ...(published?.artifactPath ? { artifactPath: published.artifactPath } : {}),
+        ...(published?.manifestStorageObjectId
+          ? { manifestStorageObjectId: published.manifestStorageObjectId }
+          : {}),
+      }, error instanceof Error ? error.message : String(error))
+      if (published?.cleanup) {
+        try {
+          await published.cleanup()
+        } catch (cleanupError) {
+          record = this.fail(record, `${record.message}; failed to clean up remote publication: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
+        }
+      }
       try { await persistRecord?.(record) } catch (persistenceError) {
         record = this.fail(record, `${record.message}; failed to persist publication failure: ${persistenceError instanceof Error ? persistenceError.message : String(persistenceError)}`)
       }
@@ -671,12 +712,17 @@ export class BeeGameDeploymentManager {
   }
 
   private async loadRecords(): Promise<BeeGameDeploymentRecord[]> {
+    let text: string
     try {
-      const parsed = JSON.parse(await readFile(this.recordsPath, 'utf8'))
-      return Array.isArray(parsed) ? parsed.filter(isDeploymentRecord) : []
-    } catch {
-      return []
+      text = await readFile(this.recordsPath, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
     }
+    const parsed: unknown = JSON.parse(text)
+    if (!Array.isArray(parsed) || parsed.some(record => !isDeploymentRecord(record)))
+      throw new Error('Deployment records are invalid; refusing to replace them')
+    return parsed
   }
 
   private async saveRecord(record: BeeGameDeploymentRecord): Promise<void> {
@@ -740,31 +786,69 @@ export function createSupabaseStorageDeploymentPublisher(options: {
       const objectRoot = [keyPrefix, input.userId, input.deploymentId]
         .filter(Boolean)
         .join('/')
-      for (const file of input.files) {
-        const objectPath = `${objectRoot}/${file.path}`
-        const uploadUrl = `${supabaseUrl}/storage/v1/object/${encodeObjectPath(
-          options.bucket,
-        )}/${encodeObjectPath(objectPath)}`
-        const bytes = await file.bytes()
-        const body = new ArrayBuffer(bytes.byteLength)
-        new Uint8Array(body).set(bytes)
-        const response = await fetchImpl(uploadUrl, {
-          method: 'POST',
-          headers: {
-            apikey: options.anonKey,
-            authorization: `Bearer ${input.authToken}`,
-            'content-type': contentTypeForPath(file.path),
-            // Each deployment has a unique URL; its published bytes are immutable.
-            'cache-control': 'max-age=31536000',
-            'x-upsert': 'true',
+      const uploadedPaths: string[] = []
+      const cleanup = async (): Promise<void> => {
+        const prefixes = Array.from(new Set(uploadedPaths))
+        if (!prefixes.length) return
+        const response = await fetchImpl(
+          `${supabaseUrl}/storage/v1/object/${encodeObjectPath(options.bucket)}`,
+          {
+            method: 'DELETE',
+            headers: {
+              apikey: options.anonKey,
+              authorization: `Bearer ${input.authToken}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ prefixes }),
           },
-          body,
-        })
+        )
         if (!response.ok) {
+          const detail = await response.text().catch(() => '')
           throw new Error(
-            `Deployment storage upload failed: ${response.status} ${await response.text()}`,
+            `Deployment storage cleanup failed: ${response.status} ${response.statusText}${detail ? ` - ${detail}` : ''}`,
           )
         }
+      }
+      try {
+        for (const file of input.files) {
+          const objectPath = `${objectRoot}/${file.path}`
+          const uploadUrl = `${supabaseUrl}/storage/v1/object/${encodeObjectPath(
+            options.bucket,
+          )}/${encodeObjectPath(objectPath)}`
+          const bytes = await file.bytes()
+          const body = new ArrayBuffer(bytes.byteLength)
+          new Uint8Array(body).set(bytes)
+          // A request may reach storage before its response is lost. Register
+          // the unique path before sending so failure cleanup also covers that
+          // attempted object.
+          uploadedPaths.push(objectPath)
+          const response = await fetchImpl(uploadUrl, {
+            method: 'POST',
+            headers: {
+              apikey: options.anonKey,
+              authorization: `Bearer ${input.authToken}`,
+              'content-type': contentTypeForPath(file.path),
+              // Each deployment has a unique URL; its published bytes are immutable.
+              'cache-control': 'max-age=31536000',
+              'x-upsert': 'true',
+            },
+            body,
+          })
+          if (!response.ok) {
+            throw new Error(
+              `Deployment storage upload failed: ${response.status} ${await response.text()}`,
+            )
+          }
+        }
+      } catch (error) {
+        try {
+          await cleanup()
+        } catch (cleanupError) {
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)}; cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          )
+        }
+        throw error
       }
       const url = publicBaseUrl
         ? `${publicBaseUrl}/${objectRoot}/index.html`
@@ -775,6 +859,14 @@ export function createSupabaseStorageDeploymentPublisher(options: {
         url,
         artifactPath: `supabase://${options.bucket}/${objectRoot}`,
         message: 'Static deployment published to storage',
+        cleanup: (() => {
+          let cleaned = false
+          return async () => {
+            if (cleaned) return
+            await cleanup()
+            cleaned = true
+          }
+        })(),
       }
     },
   }

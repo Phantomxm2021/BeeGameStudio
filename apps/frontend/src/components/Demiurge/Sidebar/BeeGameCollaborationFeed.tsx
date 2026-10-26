@@ -145,7 +145,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         ? rawStatus : (message.toolOutput || message.tool_output) ? 'completed' : 'running';
     const rawDetail = String(message.toolDetail || message.tool_detail || '').trim();
     const fullSubagentOutput = String(message.subagentOutput || '').trim();
-    const output = fullSubagentOutput || String(message.toolOutput || message.tool_output || content).trim();
+    const output = fullSubagentOutput || String(message.toolOutput ?? message.tool_output ?? (content === name || /^Tool:/.test(content) ? '' : content)).trim();
     const kind = getToolKind(name);
     if (!name && !rawDetail && !output) return null;
     return {
@@ -581,10 +581,11 @@ export const BeeGameCollaborationFeed = memo(({
         <MessageGroup spacing="compact">
             {entriesWithDates.map(({ entry, dateKey, dateLabel, showDateSeparator }, entryIndex) => {
                 const hasLaterResponseInTurn = entry.kind === 'response' && hasLaterAgentResponseInTurn(entries, entryIndex);
+                const previewPart = entry.kind === 'response' ? [...entry.parts].reverse().find(part => part.kind === 'agent') : undefined;
                 return <Fragment key={entry.kind === 'user' || entry.kind === 'context' ? entry.message.id : entry.id}>
                     {showDateSeparator && dateKey && dateLabel ? <DateSeparator dateKey={dateKey} label={dateLabel} /> : null}
                     {entry.kind === 'user' ? (
-                        <Message key={entry.message.id} data-message-id={entry.message.id} data-history-anchor-id={`user:${entry.message.id}`} data-scroll-anchor="false" from="user" className="mb-3 min-w-0"><UserMessageCard
+                        <Message key={entry.message.id} data-message-id={entry.message.id} data-message-preview={entry.message.content.slice(0, 160)} data-history-anchor-id={`user:${entry.message.id}`} data-scroll-anchor="false" from="user" className="mb-3 min-w-0"><UserMessageCard
                             message={entry.message}
                             lang={lang}
                             onEdit={entry.message.id === latestUserMessageId && entry.message.rewindAvailable ? onEditMessage : undefined}
@@ -608,6 +609,7 @@ export const BeeGameCollaborationFeed = memo(({
                         key={entry.id}
                         data-testid={`beegame-agent-turn-${entry.id}`}
                         data-message-id={entry.turnId || entry.id}
+                        data-message-preview={previewPart?.kind === 'agent' ? displayText(previewPart.message.content.slice(0, 160)) : ''}
                         data-history-anchor-id={responseHistoryAnchorId(entry)}
                         data-scroll-anchor="false"
                         from="assistant"
@@ -682,9 +684,9 @@ export const BeeGameCollaborationFeed = memo(({
 
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
 
-function toolActivityState(tool: NormalizedTool) {
+function toolActivityState(tool: NormalizedTool, now: number) {
     const state = tool.completionReason || tool.status;
-    const endedAt = state === 'running' ? Date.now() : tool.turnCompletedAt ??
+    const endedAt = state === 'running' ? now : tool.turnCompletedAt ??
         (tool.status === 'running' ? undefined : tool.timestamp);
     const elapsed = tool.durationMs ?? (tool.startedAt === undefined || endedAt === undefined ? undefined
         : Math.max(0, endedAt - tool.startedAt));
@@ -694,21 +696,42 @@ function toolActivityState(tool: NormalizedTool) {
 }
 
 function ToolActivity({ tool, lang }: { tool: NormalizedTool; lang: Language }) {
-    const { state, duration } = toolActivityState(tool);
-    const row = <ToolActivityRow id={tool.id} name={tool.name} input={tool.input} detail={tool.detail}
-        state={state} duration={duration} lang={lang} />;
+    const now = useActivityClock(tool.status === 'running' && !tool.completionReason);
+    const { state, duration } = toolActivityState(tool, now);
     const images = tool.status === 'completed' ? (tool.attachments || []).filter(attachment => attachment.type === 'image') : [];
-    if (!images.length) return row;
-    return <details className="chat-image-activity">
-        <summary>
-            {row}
-            <ChevronDown size={14} aria-hidden="true" className="chat-image-activity-chevron" />
-        </summary>
-        <div className="chat-image-gallery chat-image-gallery--tools" data-count={images.length}
+    return <ToolActivityRow id={tool.id} name={tool.name} input={tool.input} detail={tool.detail}
+        output={tool.output} state={state} duration={duration} lang={lang}>
+        {images.length > 0 ? <div className="chat-image-gallery chat-image-gallery--tools" data-count={images.length}
             role="group" aria-label={lang === 'zh' ? '图片' : 'Images'}>
             {images.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}
-        </div>
-    </details>;
+        </div> : null}
+    </ToolActivityRow>;
+}
+
+// Only visible clocks tick; a second passing must not rebuild the tool list.
+function useActivityClock(working: boolean) {
+    const [now, setNow] = useState(Date.now);
+    useEffect(() => {
+        if (!working) return;
+        const timer = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, [working]);
+    return now;
+}
+
+function ActivityHeading({ working, startedAt, endedAt, lang, label }: {
+    working: boolean; startedAt?: number; endedAt?: number; lang: Language; label: string;
+}) {
+    const now = useActivityClock(working);
+    const end = working ? now : endedAt;
+    const elapsed = startedAt !== undefined && end !== undefined && Number.isFinite(startedAt)
+        && Number.isFinite(end) && startedAt > 0 && end >= startedAt ? end - startedAt : undefined;
+    const seconds = Math.floor((elapsed ?? 0) / 1000);
+    const duration = elapsed === undefined ? '' : elapsed < 1000
+        ? (lang === 'zh' ? '少于 1 秒' : 'less than 1s')
+        : seconds < 60 ? (lang === 'zh' ? `${seconds} 秒` : `${seconds}s`)
+        : lang === 'zh' ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    return <AnimatedNumber>{duration ? `${label} · ${duration}` : label}</AnimatedNumber>;
 }
 
 function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang, streamingMessageId, onOpenSubagent, onPreviewArtifact }: {
@@ -722,28 +745,15 @@ function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang,
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
 }) {
     const text = useBeeGameText(lang).chatActivity;
-    const [now, setNow] = useState(Date.now);
-    useEffect(() => {
-        if (!working) return;
-        const timer = setInterval(() => setNow(Date.now()), 1000);
-        return () => clearInterval(timer);
-    }, [working]);
     // Use observed start/end times, never the sum of thinking durations.
     // Completed-only legacy tools have no known start, so omit their timer.
     const first = parts[0];
     const last = parts.at(-1);
     const startedAt = first?.kind === 'tool' ? first.tool.startedAt : first?.timestamp;
-    const endedAt = working ? now : completedAt ?? (last?.kind === 'tool'
+    const endedAt = completedAt ?? (last?.kind === 'tool'
         ? last.tool.status !== 'running' && !last.tool.completionReason ? last.tool.timestamp : undefined
         : last?.kind === 'thinking' && last.durationMs !== undefined ? last.timestamp + last.durationMs : undefined);
-    const elapsed = startedAt !== undefined && endedAt !== undefined && Number.isFinite(startedAt)
-        && Number.isFinite(endedAt) && startedAt > 0 && endedAt >= startedAt ? endedAt - startedAt : undefined;
-    const seconds = Math.floor((elapsed ?? 0) / 1000);
-    const duration = elapsed === undefined ? '' : elapsed < 1000
-        ? (lang === 'zh' ? '少于 1 秒' : 'less than 1s')
-        : seconds < 60 ? (lang === 'zh' ? `${seconds} 秒` : `${seconds}s`)
-        : lang === 'zh' ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    const heading = <>{text.details}{duration && <> · <AnimatedNumber>{duration}</AnimatedNumber></>}</>;
+    const heading = <ActivityHeading working={working} startedAt={startedAt} endedAt={endedAt} lang={lang} label={text.details} />;
     const latestProgress = [...parts].reverse().find((part): part is Extract<ResponsePart, { kind: 'agent' }> =>
         part.kind === 'agent' && !part.message.requiresUserAction && messagePresentation(part.message) !== 'artifact');
     // Show the latest progress until a final reply arrives; keep artifacts and

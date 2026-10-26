@@ -1,5 +1,5 @@
-import { appendFileSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
 
 /**
@@ -32,26 +32,14 @@ export function appendChatTranscript(path: string, event: ChatTranscriptRecord):
       ...(event.payload ? { payload: event.payload } : {}),
       createdAt: event.createdAt.toISOString(),
     })}\n`, 'utf8')
-    if (event.type === 'session.started' || event.type === 'session.resumed')
-      maintainTranscriptIgnore(path)
   } catch {
     // A history write must never interrupt an active agent turn.
   }
 }
 
-/** Keep BGS-owned transcript JSONL out of an ordinary recursive source search.
- * The marker is deliberately local to the reserved directory: explicit file
- * reads and --no-ignore remain available, while source JSONL elsewhere is
- * unaffected. Existing user content and symlinks are never overwritten. */
-function maintainTranscriptIgnore(transcriptPath: string): void {
-  const directory = dirname(transcriptPath)
-  if (basename(directory) !== 'transcripts') return
-  try {
-    if (!lstatSync(directory).isDirectory()) return
-    writeFileSync(join(directory, '.ignore'), '/*.jsonl\n', { encoding: 'utf8', flag: 'wx' })
-  } catch {
-    // Preserve any existing marker; the transcript event is already saved.
-  }
+/** The single event-body store used by live Chat, recovery and history. */
+export function projectChatPath(workspacePath: string): string {
+  return resolve(workspacePath, '.beegame', 'chat', 'project-events.jsonl')
 }
 
 export function appendRuntimeDiagnostic(input: {

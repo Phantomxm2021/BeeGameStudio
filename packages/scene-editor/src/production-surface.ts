@@ -184,6 +184,8 @@ export async function createProductionUiSurface(host: HTMLElement) {
   layer.style.cssText = 'position:relative;overflow:hidden;isolation:isolate'
   host.append(layer)
   let disposed = false
+  const actionHandlers = new WeakMap<HTMLElement, { action: string; nodeId: string; onAction: (action: string, nodeId: string) => void }>()
+  const actionListeners = new WeakSet<HTMLElement>()
   return {
     render(data: UiData, viewport: UiViewport, options: UiLayoutInspectionOptions & {
       state?: Readonly<Record<string, unknown>>
@@ -232,7 +234,7 @@ export async function createProductionUiSurface(host: HTMLElement) {
         }
         return { ...node.style, opacity }
       }
-      const fragment = document.createDocumentFragment()
+      const prepared: Array<{ node: UiNode; element: HTMLElement; isButton: boolean }> = []
       for (const step of uiPaintOrder(nodes, data.rootId)) {
         if (step.phase !== 'content') continue
         const node = byId.get(step.nodeId)!
@@ -285,9 +287,8 @@ export async function createProductionUiSurface(host: HTMLElement) {
         }
         if (node.actions?.click) {
           element.style.pointerEvents = 'auto'
-          element.addEventListener('click', () => options.onAction!(node.actions!.click, node.id))
         }
-        fragment.append(element)
+        prepared.push({ node, element, isButton })
       }
       // Validation/building is completed before replacing the previous surface.
       layer.style.width = `${viewport.width}px`
@@ -295,7 +296,51 @@ export async function createProductionUiSurface(host: HTMLElement) {
       const focused = document.activeElement
       const focusedId = focused?.tagName === 'BUTTON' && layer.contains(focused)
         ? (focused as HTMLElement).dataset.nodeId : undefined
-      layer.replaceChildren(fragment)
+
+      // Keep the outer interactive node when its id and semantic element type
+      // are unchanged.  The detached drafts above make all fallible work
+      // happen before an existing surface is touched; only the commit below
+      // can replace content or remove nodes.
+      const existing = new Map<string, HTMLElement>()
+      for (const child of Array.from(layer.children)) {
+        const element = child as HTMLElement
+        const nodeId = element.dataset.nodeId
+        if (nodeId) existing.set(nodeId, element)
+      }
+      const nextElements: HTMLElement[] = []
+      for (const draft of prepared) {
+        const previous = existing.get(draft.node.id)
+        const element = previous && previous.tagName === draft.element.tagName ? previous : draft.element
+        if (element !== draft.element) {
+          element.style.cssText = draft.element.style.cssText
+          element.replaceChildren(...Array.from(draft.element.childNodes))
+        }
+        element.dataset.nodeId = draft.node.id
+        if (draft.isButton) (element as HTMLButtonElement).type = 'button'
+        if (draft.node.actions?.click && !actionListeners.has(element)) {
+          element.addEventListener('click', event => {
+            const current = actionHandlers.get(event.currentTarget as HTMLElement)
+            if (current) current.onAction(current.action, current.nodeId)
+          })
+          actionListeners.add(element)
+        }
+        if (draft.node.actions?.click)
+          actionHandlers.set(element, { action: draft.node.actions.click, nodeId: draft.node.id, onAction: options.onAction! })
+        else actionHandlers.delete(element)
+        nextElements.push(element)
+      }
+      const nextSet = new Set(nextElements)
+      for (const child of Array.from(layer.children)) {
+        const element = child as HTMLElement
+        if (!nextSet.has(element)) {
+          actionHandlers.delete(element)
+          element.remove()
+        }
+      }
+      for (let index = 0; index < nextElements.length; index++) {
+        const current = layer.children[index]
+        if (current !== nextElements[index]) layer.insertBefore(nextElements[index], current ?? null)
+      }
       if (focusedId) Array.from(layer.querySelectorAll<HTMLButtonElement>('button[data-node-id]'))
         .find(button => button.dataset.nodeId === focusedId)?.focus({ preventScroll: true })
       return geometry

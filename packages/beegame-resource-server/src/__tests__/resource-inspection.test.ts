@@ -1,10 +1,55 @@
 import { describe, expect, test } from 'bun:test'
-import { contentProfileFromInspection, inspectUploadedResource } from '../resource-inspection'
+import { contentProfileFromInspection, inspectResourceBytes, inspectUploadedResource } from '../resource-inspection'
+
+function wavFixture(values = [0, 1000, -1000, 500], sampleRate = 8000, channels = 2): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(44 + values.length * 2), view = new DataView(bytes.buffer)
+  bytes.set(new TextEncoder().encode('RIFF'), 0); view.setUint32(4, bytes.length - 8, true); bytes.set(new TextEncoder().encode('WAVEfmt '), 8)
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true)
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * channels * 2, true)
+  view.setUint16(32, channels * 2, true); view.setUint16(34, 16, true); bytes.set(new TextEncoder().encode('data'), 36)
+  view.setUint32(40, values.length * 2, true)
+  values.forEach((value, index) => view.setInt16(44 + index * 2, value, true))
+  return bytes
+}
 
 describe('resource inspection', () => {
   test('reads PNG dimensions without decoding the image', async () => {
     const bytes = new Uint8Array(24); bytes.set([137, 80, 78, 71], 0); new DataView(bytes.buffer).setUint32(16, 512); new DataView(bytes.buffer).setUint32(20, 256)
     await expect(inspectUploadedResource(new File([bytes], 'atlas.png', { type: 'image/png' }))).resolves.toEqual(expect.objectContaining({ width: 512, height: 256, contentHash: expect.any(String) }))
+  })
+
+  test('reads narrow PCM16 WAV physical facts without making a quality claim', async () => {
+    const facts = await inspectUploadedResource(new File([wavFixture()], 'tone.wav', { type: 'audio/wav' }))
+    expect(facts).toEqual(expect.objectContaining({
+      encoding: 'PCM16', sampleRate: 8000, channelCount: 2, frames: 2, durationMs: 0.25, contentHash: expect.any(String),
+    }))
+    expect(facts).not.toHaveProperty('quality')
+    expect(facts).not.toHaveProperty('capabilities')
+  })
+
+  test('leaves non-PCM WAV facts unknown instead of guessing', async () => {
+    const bytes = wavFixture(); new DataView(bytes.buffer).setUint16(20, 3, true)
+    const facts = await inspectUploadedResource(new File([bytes], 'compressed.wav', { type: 'audio/wav' }))
+    expect(facts.contentHash).toEqual(expect.any(String))
+    expect(facts.encoding).toBeUndefined()
+    expect(facts.sampleRate).toBeUndefined()
+    expect(facts.channelCount).toBeUndefined()
+    expect(facts.durationMs).toBeUndefined()
+  })
+
+  test('keeps malformed WAV facts unknown without throwing', () => {
+    const dataOverflow = wavFixture()
+    new DataView(dataOverflow.buffer).setUint32(40, 0xffff, true)
+    const truncatedChunkHeader = wavFixture().slice(0, 42)
+    new DataView(truncatedChunkHeader.buffer).setUint32(4, truncatedChunkHeader.length - 8, true)
+    const blockAlignMismatch = wavFixture()
+    new DataView(blockAlignMismatch.buffer).setUint16(32, 2, true)
+    const byteRateMismatch = wavFixture()
+    new DataView(byteRateMismatch.buffer).setUint32(28, 16_000, true)
+    for (const bytes of [dataOverflow, truncatedChunkHeader, blockAlignMismatch, byteRateMismatch]) {
+      expect(() => inspectResourceBytes('broken.wav', bytes)).not.toThrow()
+      expect(inspectResourceBytes('broken.wav', bytes)).toEqual({})
+    }
   })
 
   test('reads GLTF mesh, material, and external texture facts', async () => {

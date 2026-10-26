@@ -28,6 +28,8 @@ function truncateMessageText(text: string, limit: number) {
 }
 
 function getMessageText(message: HTMLElement) {
+  // Chat provides a bounded preview; tool logs and timers are not navigation text.
+  if (message.dataset.messagePreview !== undefined) return message.dataset.messagePreview.replace(/\s+/g, " ").trim();
   const surface =
     message.querySelector<HTMLElement>('[data-slot="message-bubble-content"]') ??
     message.querySelector<HTMLElement>('[data-slot="message-content"]') ??
@@ -137,6 +139,7 @@ export function MessageScroller({
   const scrollTimerRef = useRef<number | undefined>(undefined);
   const frameRef = useRef<number | undefined>(undefined);
   const railFrameRef = useRef<number | undefined>(undefined);
+  const railItemsDirtyRef = useRef(false);
   const railIdRef = useRef(new WeakMap<HTMLElement, string>());
   const railIdCounterRef = useRef(0);
   const railTargetsRef = useRef(new Map<string, HTMLElement>());
@@ -263,11 +266,19 @@ export function MessageScroller({
     );
   }, [navigation]);
 
-  const scheduleRailSync = useCallback(() => {
+  const scheduleRailSync = useCallback((itemsChanged = true) => {
     if (navigation !== "rail") return;
-    if (railFrameRef.current) cancelAnimationFrame(railFrameRef.current);
+    railItemsDirtyRef.current ||= itemsChanged;
+    if (railFrameRef.current) return;
     railFrameRef.current = requestAnimationFrame(() => {
-      syncRailItems();
+      railFrameRef.current = undefined;
+      if (railItemsDirtyRef.current) {
+        railItemsDirtyRef.current = false;
+        syncRailItems();
+      } else {
+        const viewport = viewportRef.current;
+        if (viewport) setRailOverflowing(viewport.scrollHeight > viewport.clientHeight + 1 && railTargetsRef.current.size > 0);
+      }
       updateActiveRailItem();
     });
   }, [navigation, syncRailItems, updateActiveRailItem]);
@@ -318,7 +329,7 @@ export function MessageScroller({
     if (!content || typeof ResizeObserver === "undefined") return;
 
     const observer = new ResizeObserver(() => {
-      scheduleRailSync();
+      scheduleRailSync(false);
       if (pauseAutoFollowRef.current || !followOutput || !followingRef.current) return;
       scrollToEnd(reduce || !smooth ? "auto" : "smooth");
     });
@@ -343,17 +354,28 @@ export function MessageScroller({
     const mutationObserver =
       typeof MutationObserver === "undefined"
         ? null
-        : new MutationObserver(scheduleRailSync);
+        : new MutationObserver((records) => {
+          const itemsChanged = records.some(record => {
+            if (record.type === "attributes") return true;
+            const target = record.target instanceof Element ? record.target : record.target.parentElement;
+            // Inside a message with an explicit preview, content changes cannot
+            // change navigation items. Layout changes use ResizeObserver below.
+            return !target?.closest('[data-slot="message"][data-message-preview]');
+          });
+          if (itemsChanged) scheduleRailSync();
+        });
     mutationObserver?.observe(content, {
       childList: true,
       characterData: true,
       subtree: true,
+      attributes: true,
+      attributeFilter: ["data-message-preview"],
     });
 
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
-        : new ResizeObserver(scheduleRailSync);
+        : new ResizeObserver(() => scheduleRailSync(false));
     resizeObserver?.observe(content);
     resizeObserver?.observe(viewport);
 

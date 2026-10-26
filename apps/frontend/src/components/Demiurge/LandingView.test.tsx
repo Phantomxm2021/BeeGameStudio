@@ -1135,7 +1135,7 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: '系统设置' }));
 
     expect(await screen.findByRole('dialog', { name: '系统设置' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '通用' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: '通用' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: '平台' })).not.toBeInTheDocument();
   });
 

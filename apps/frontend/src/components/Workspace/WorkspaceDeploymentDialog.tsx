@@ -300,8 +300,8 @@ function WorkspaceDeploymentDialogContent({
               <motion.h2 variants={element} className="type-body-lg shrink-0 px-6 pt-6 font-semibold sm:px-[30px]">{labels.deploy}</motion.h2>
           <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 py-6 text-center sm:px-[30px]" aria-live="polite">
             <motion.p variants={element} className="type-body-lg shrink-0 max-w-full truncate font-semibold">{published && !showingProgress ? labels.deploymentPublishedTitle.replace('{projectName}', releaseTitle) : releaseTitle}</motion.p>
-            {!published && !showingProgress ? <p className="type-callout shrink-0 mt-2 max-w-[325px] text-muted-foreground">
-              {failed ? labels.deploymentFailed : checking ? labels.deploymentChecking : canPublish ? labels.deploymentReadyDescription : labels.deploymentBlocked}
+            {!published && !showingProgress && (failed || checking || !canPublish) ? <p className="type-callout shrink-0 mt-2 max-w-[325px] text-muted-foreground">
+              {failed ? labels.deploymentFailed : checking ? labels.deploymentChecking : labels.deploymentBlocked}
             </p> : null}
             {failed && failureLog ? <pre className="type-code-sm shrink-0 mt-5 max-h-28 w-full overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--surface-3)] p-3 text-left text-destructive">{failureLog}</pre> : null}
             {showReadiness && readiness?.destination === 'local' ? <p role="alert" className="type-footnote shrink-0 mt-5 text-destructive">{labels.deploymentNotConfigured}</p> : null}

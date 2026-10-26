@@ -17,6 +17,11 @@ test('real auxiliary worker pins serialized addresses and returns usage on succe
         : [{ type: 'message_start', message: { usage: { input_tokens: 100, output_tokens: 0 } } }]
       return new Response(events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join(''))
     }
+    if (['max_output_tokens', 'content_filter', 'unknown'].includes(body.model)) {
+      return Response.json({ status: 'incomplete', incomplete_details: { reason: body.model },
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'PRIVATE_TRUNCATED_DRAFT' }] }],
+        usage: { input_tokens: 100, output_tokens: 2048 } })
+    }
     return Response.json({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'offline success' }] }],
       ...(body.model !== 'missing-usage' ? { usage: { input_tokens: 100, output_tokens: 20, input_tokens_details: { cached_tokens: 10 } } } : {}) })
   } })
@@ -60,6 +65,23 @@ test('real auxiliary worker pins serialized addresses and returns usage on succe
       expect(error).toBeInstanceOf(BeeGameModelRuntimeError)
       expect((error as BeeGameModelRuntimeError).usage).toMatchObject({ total_tokens: 100, incomplete: true })
     }
-    expect(requests).toBe(5)
+    for (const [model, message] of [
+      ['max_output_tokens', 'Model response reached its output token limit before completion'],
+      ['content_filter', 'Model response was stopped by the provider content filter'],
+      ['unknown', 'Model response was incomplete'],
+    ]) {
+      try {
+        await host.generateWithUsage!({ ...base, runtimeEnv: {
+          OPENAI_API_KEY: 'synthetic', OPENAI_BASE_URL: endpoint, BEEGAME_MODEL: model!,
+        } })
+        throw Error('Expected incomplete output to be rejected')
+      } catch (error) {
+        expect(error).toBeInstanceOf(BeeGameModelRuntimeError)
+        expect((error as Error).message).toBe(message!)
+        expect((error as Error).message).not.toContain('PRIVATE_TRUNCATED_DRAFT')
+        expect((error as BeeGameModelRuntimeError).usage).toMatchObject({ output_tokens: 2048, total_tokens: 2148 })
+      }
+    }
+    expect(requests).toBe(8) // One request per operation, no retries on truncation.
   } finally { upstream.stop(true) }
 }, 15_000)

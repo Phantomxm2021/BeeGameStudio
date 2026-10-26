@@ -336,23 +336,41 @@ export function createSupabaseResourceStorageInspector(options: SupabaseLifecycl
   const fetchImpl = options.fetchImpl ?? fetch
   const baseUrl = options.baseUrl.replace(/\/+$/, '')
   const headers = { apikey: options.serviceRoleKey, authorization: `Bearer ${options.serviceRoleKey}` }
+  const pageSize = 1_000
+  const headConcurrency = 16
   return async (packId: string,
   ): Promise<{ missingPaths: string[]; orphanPaths: string[] }> => {
-    const [packResponse, elementResponse] = await Promise.all([
+    const [packResponse, firstElementResponse] = await Promise.all([
       fetchImpl(`${baseUrl}/rest/v1/beegame_resource_packs?id=eq.${encodeURIComponent(packId)}&select=cover_path`, { headers }),
-      fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?pack_id=eq.${encodeURIComponent(packId)}&select=path`, { headers }),
+      fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?pack_id=eq.${encodeURIComponent(packId)}&order=id.asc&limit=${pageSize}&select=id,path`, { headers }),
     ])
-    if (!packResponse.ok || !elementResponse.ok) throw new Error('Resource storage reconciliation metadata lookup failed')
+    if (!packResponse.ok || !firstElementResponse.ok) throw new Error('Resource storage reconciliation metadata lookup failed')
     const pack = (
       (await packResponse.json()) as Array<{ cover_path?: unknown }>)[0]
-    const elements = (await elementResponse.json()) as Array<{ path?: unknown }>
     const expected = new Set<string>()
     if (typeof pack?.cover_path === 'string' && isSafeRelativeStoragePath(pack.cover_path)) expected.add(pack.cover_path)
-    for (const element of elements) if (typeof element.path === 'string' && isSafeRelativeStoragePath(element.path)) expected.add(element.path)
+    let elements = (await firstElementResponse.json()) as Array<{ id?: unknown; path?: unknown }>
+    let afterElementId: string | undefined
+    while (true) {
+      for (const element of elements) if (typeof element.path === 'string' && isSafeRelativeStoragePath(element.path)) expected.add(element.path)
+      if (elements.length === 0) break
+      const nextAfterId = elements.at(-1)?.id
+      if (typeof nextAfterId !== 'string' || nextAfterId === afterElementId) throw new Error('Resource element metadata pagination did not advance')
+      afterElementId = nextAfterId
+      const response = await fetchImpl(`${baseUrl}/rest/v1/beegame_resource_elements?pack_id=eq.${encodeURIComponent(packId)}&id=gt.${encodeURIComponent(afterElementId)}&order=id.asc&limit=${pageSize}&select=id,path`, { headers })
+      if (!response.ok) throw new Error('Resource storage reconciliation metadata lookup failed')
+      elements = (await response.json()) as Array<{ id?: unknown; path?: unknown }>
+    }
 
     const actual = new Set<string>()
-    for (const object of await options.r2Storage.listPackObjects(packId)) {
-      if (object.status === 'ready' && object.logicalPath) actual.add(object.logicalPath)
+    const objects = await options.r2Storage.listPackObjects(packId)
+    // A ready metadata row is not sufficient: publication depends on the canonical R2 object existing.
+    const readyObjects = objects.filter(object => object.status === 'ready' && object.logicalPath)
+    for (let offset = 0; offset < readyObjects.length; offset += headConcurrency) {
+      const presentObjects = await Promise.all(readyObjects.slice(offset, offset + headConcurrency).map(async object =>
+        (await options.r2Storage.headObject(object.id, packId)) ? object.logicalPath! : undefined,
+      ))
+      for (const logicalPath of presentObjects) if (logicalPath) actual.add(logicalPath)
     }
     return {
       missingPaths: [...expected].filter(path => !actual.has(path)).sort(),
@@ -425,34 +443,19 @@ export function createSupabaseResourceAuthoringHandlers(options: SupabaseAuthori
     },
     updateResourceFolder: async (packId: string, folderId: string, body: Record<string, unknown>,
     ) => {
-      const folders = await getRows<FolderRow>('beegame_resource_folders', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)
-      const folder = folders.find((item) => item.id === folderId)
-      if (!folder) return undefined
-      const name = Object.hasOwn(body, 'name') ? String(body.name || '').trim() : folder.name
-      if (!name || name.includes('/') || name.includes('\\')) throw new Error('Folder name is invalid')
-      const parent = folder.parent_id ? folders.find((item) => item.id === folder.parent_id) : undefined
-      const nextPath = parent ? `${parent.path}/${name}` : name
-      if (folders.some((item) => item.id !== folderId && item.path === nextPath)) throw new Error('Folder path already exists')
-      const oldPath = folder.path
-      const replacePath = (value: string) => value === oldPath ? nextPath : value.startsWith(`${oldPath}/`) ? `${nextPath}${value.slice(oldPath.length)}` : value
-      const elements = (await getRows<ElementRow>('beegame_resource_elements', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)).filter((item) => item.path === oldPath || item.path.startsWith(`${oldPath}/`))
-      const moves = elements.map((item) => ({ from: item.path, to: replacePath(item.path) }))
-      try {
-        for (const move of moves) {
-          const element = elements.find(item => item.path === move.from)
-          if (!element) throw new Error('Resource element metadata is inconsistent')
-          await options.r2Storage.updateLogicalPath(storageObjectId(element), packId, move.to)
-        }
-        for (const item of folders.filter((candidate) => candidate.path === oldPath || candidate.path.startsWith(`${oldPath}/`))) await patchRows<FolderRow>('beegame_resource_folders', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { ...(item.id === folderId ? { name } : {}), path: replacePath(item.path) })
-        for (const item of elements) await patchRows<ElementRow>('beegame_resource_elements', `id=eq.${encodeURIComponent(item.id)}&pack_id=eq.${encodeURIComponent(packId)}`, { path: replacePath(item.path) })
-      } catch (error) {
-        for (const move of [...moves].reverse()) {
-          const element = elements.find(item => item.path === move.from)
-          if (element) await options.r2Storage.updateLogicalPath(storageObjectId(element), packId, move.from).catch(() => undefined)
-        }
-        throw error
-      }
-      return { id: folder.id, packId, name, ...(folder.parent_id ? { parentId: folder.parent_id } : {}), path: nextPath }
+      const name = Object.hasOwn(body, 'name') ? String(body.name || '').trim() : ''
+      const response = await fetchImpl(`${rest}/rpc/beegame_rename_resource_folder`, {
+        method: 'POST',
+        headers: { ...headers, accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ p_pack_id: packId, p_folder_id: folderId, p_name: name }),
+      })
+      if (!response.ok) throw new Error(`Resource folder rename failed (${response.status})`)
+      const payload = await response.json() as unknown
+      const value = Array.isArray(payload) ? payload[0] : payload
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+      const row = value as Record<string, unknown>
+      if (typeof row.id !== 'string' || typeof row.pack_id !== 'string' || typeof row.name !== 'string' || typeof row.path !== 'string') return undefined
+      return { id: row.id, packId: row.pack_id, name: row.name, ...(typeof row.parent_id === 'string' && row.parent_id ? { parentId: row.parent_id } : {}), path: row.path }
     },
     deleteResourceFolder: async (packId: string, folderId: string) => {
       const folders = await getRows<FolderRow>('beegame_resource_folders', `pack_id=eq.${encodeURIComponent(packId)}&select=*`)

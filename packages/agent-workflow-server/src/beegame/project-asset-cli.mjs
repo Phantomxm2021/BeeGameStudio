@@ -1,7 +1,9 @@
 // Project-local command adapter; managed sessions resolve current BGS capabilities per invocation.
 // The host prepends TOOL_CONFIG when copying this file into .beegame/tmp.
 import { createHash } from 'node:crypto'
+import { constants as fsConstants } from 'node:fs'
 import {
+  lstat,
   mkdir,
   open,
   readFile,
@@ -25,7 +27,7 @@ ${workspaceUsage}
   elements <pack-id> [request-json] [--details]  Browse a selected pack's elements
   pack <pack-id>                         Read license, version and pack metadata
   element <pack-id> <element-id>         Read element and dependency metadata
-  fetch <pack-id> <element-id> <assets/path>  Download one selected library file
+  fetch <pack-id> <element-id> <assets/path>  Download one selected library file and its complete dependency closure
   inspect <assets/path> [assets/path ...] Hash local assets in one call; no provenance/quality inference
   cost [quality] [size]                 Show availability and the image Credit quote
   ui-board-plan <request.json>          Read-only: complete game-screen design board grid and prompt, no network or billing
@@ -38,7 +40,7 @@ ${workspaceUsage}
 ${atlasInputFormat} Coordinates are integer source-image pixels from the top-left; x/y >= 0, w/h > 0. Rectangles must fit the PNG and not overlap. Both inputs are project-relative files under assets/; output is a new PNG under assets/runtime/.
 For compatible small AI-generated elements, prefer one shared sheet request; use atlas to publish inspected rectangles, then resources.mjs to register the pair. atlas copies the PNG bytes unchanged; separate part files and repacking are not required for a usable intact sheet. generate returns an image, not measured frame metadata. Inspect complete artwork, state alignment and sampling gutters; nonoverlap alone does not prove suitability. atlas does not pack separate images or approve appearance. A full-screen reference board is not automatically a production sheet. Split generation for a concrete visual/use need, preserving planned atlas delivery.
 For read-only decoded alpha/bounds measurements (operation:inspect), or a demonstrated need for crop/resize/composition and packing separate sprites, use ${TOOL_CONFIG.mediaCommand ?? 'bun <current-tools-directory>/media.mjs'} --help. Replace <current-tools-directory> with the current BGS tools directory supplied in the project context; keep the project root as cwd. Alpha bounds do not identify objects or automatically define safe crops. Its JSON request supports named crop regions, explicit filtering/padding and compatible atlas output; no package installation or custom PNG encoder is needed.
-Honor explicit user source choices and reuse suitable supplied assets. Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method appropriate to the required asset type. Inspect relevant library candidates before moving on; access errors are not empty results. Search public sources for the remaining gap, checking rights, download feasibility and runtime compatibility. Stop when a usable match is found; do not exhaust whole catalogs or the web. Keep source choices and material reasons for skipping earlier sources by resource group in ASSET_PLAN.md. Prefer existing complete animations when suitable; a generated sheet does not guarantee temporal continuity, and PNG generation cannot supply a model or rig. Failed sourcing or AI generation does not authorize automatic procedural replacement of required art; that needs a concrete blocker and user authorization. Simple controls, geometric effects and an explicitly chosen procedural aesthetic may use code directly. The same atlas format supports retrieved and generated assets. Dynamic text and live geometry need not become images.
+Honor explicit user source choices and reuse suitable supplied assets. Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method appropriate to the required asset type. Inspect relevant library candidates before moving on; access errors are not empty results. Search public sources for the remaining gap, checking rights, download feasibility and runtime compatibility. Stop when a usable match is found; do not exhaust whole catalogs or the web. Keep source choices and material reasons for skipping earlier sources by resource group in the resources/content chapter of docs/GDD.md. Prefer existing complete animations when suitable; a generated sheet does not guarantee temporal continuity, and PNG generation cannot supply a model or rig. Failed sourcing or AI generation does not authorize automatic procedural replacement of required art; that needs a concrete blocker and user authorization. Simple controls, geometric effects and an explicitly chosen procedural aesthetic may use code directly. The same atlas format supports retrieved and generated assets. Dynamic text and live geometry need not become images.
 ${catalogUsage}
 Commands are optional; select sources using the policy above. No command updates the Manifest.`
 
@@ -205,6 +207,78 @@ async function assetDestination(path, createParent = true) {
   return { target, path: relative(root, target) }
 }
 
+async function existingAsset(output, expectedHash) {
+  let listed
+  try { listed = await lstat(output.target) }
+  catch (error) {
+    if (error?.code === 'ENOENT') return undefined
+    throw error
+  }
+  if (listed.isSymbolicLink()) throw new Error('Asset destination must not be a link')
+  if (!listed.isFile()) throw new Error('Asset destination already exists and is not a regular file')
+
+  // lstat alone is not enough: the path can be replaced between the check and
+  // the read. Open the same path without following a final symlink, then use
+  // the descriptor for both the identity check and the hash read. In
+  // particular, never open a FIFO just to discover that it is not a file.
+  let handle
+  try {
+    handle = await open(output.target, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return undefined
+    if (error?.code === 'ELOOP') throw new Error('Asset destination must not be a link')
+    throw error
+  }
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) throw new Error('Asset destination already exists and is not a regular file')
+    if (info.dev !== listed.dev || info.ino !== listed.ino)
+      throw new Error('Asset destination changed while it was being inspected')
+    if (!Number.isSafeInteger(info.size) || info.size > 256 * 1024 * 1024)
+      throw new Error('Asset exceeds the 256 MiB download limit')
+    const bytes = await handle.readFile()
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    if (sha256 !== expectedHash)
+      throw new Error('Asset destination already exists with a different content hash; refusing to overwrite it')
+    return { path: output.path, sha256, bytes: bytes.length, reused: true }
+  } finally {
+    await handle.close()
+  }
+}
+
+// Keep dependency URI normalization identical to the resource binding rules:
+// dots and separators are portable, while absolute paths and URI schemes are
+// rejected. A leading ../ is legal when the resolved local file remains under
+// this project's assets directory.
+function normalizeResourceReference(value) {
+  if (typeof value !== 'string') return undefined
+  const source = value.trim().replaceAll('\\', '/')
+  if (!source || source.startsWith('/') || source.includes(':')) return undefined
+  const parts = []
+  for (const part of source.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (parts.length && parts.at(-1) !== '..') parts.pop()
+      else parts.push('..')
+    } else parts.push(part)
+  }
+  return parts.join('/') || undefined
+}
+
+function dependencyOutputPath(parentPath, referencePath) {
+  let decoded
+  try { decoded = decodeURIComponent(referencePath) }
+  catch { throw new Error('Resolved resource dependency has an invalid percent-encoded reference path') }
+  const normalized = normalizeResourceReference(decoded)
+  if (!normalized)
+    throw new Error('Resolved resource dependency has no reference path')
+  const output = resolve(dirname(parentPath), normalized)
+  const assetsRoot = resolve('assets')
+  if (output !== assetsRoot && !output.startsWith(assetsRoot + sep))
+    throw new Error('Resolved resource dependency must stay inside assets/')
+  return relative(resolve('.'), output).split(sep).join('/')
+}
+
 async function saveBytes(response, output, reservedFile) {
   if (!response.ok) {
     const details = await response.text()
@@ -301,18 +375,10 @@ async function main() {
     const packId = id(args[0])
     const elementId = id(args[1])
     const output = await assetDestination(args[2])
-    const [pack, element, location] = await Promise.all([
+    const [pack, element] = await Promise.all([
       jsonRequest(base + '/api/resource-packs/' + packId),
       jsonRequest(
         base + '/api/resource-packs/' + packId + '/elements/' + elementId,
-      ),
-      jsonRequest(
-        base +
-          '/api/resource-packs/' +
-          packId +
-          '/elements/' +
-          elementId +
-          '/resource-url',
       ),
     ])
     const expectedHash = (element.element ?? element).specs?.contentHash
@@ -324,39 +390,169 @@ async function main() {
       throw new Error('Library selection requires its pack version and element path before download')
     const registrationSource = { type:'resource-library', pack_id:packId, pack_version:selectedPack.version,
       element_id:elementId, element_path:selectedElement.path }
-    const url = new URL(location.url)
-    if (url.protocol !== 'https:' || url.username || url.password)
-      throw new Error('Library returned an invalid download URL')
-    const reservedFile = await open(output.target, 'wx', 0o600)
-    let saved = false
-    try {
-      const file = await saveBytes(
-        await fetch(url, {
-          redirect: 'error',
-          signal: AbortSignal.timeout(90_000),
-        }),
-        output,
-        reservedFile,
-      )
-      if (file.sha256 !== expectedHash)
-        throw new Error(
-          'Downloaded file hash does not match the selected library element',
-        )
-      saved = true
-      console.log(
-        JSON.stringify({
-          ...file,
-          source: 'resource-library',
-          registrationSource,
-          pack: pack.pack ?? pack,
-          element: element.element ?? element,
-          note: 'Use registrationSource unchanged with resources.mjs register. Fetch required dependency files as well; include their local paths in file_paths and existing dependencies records. Download is not registration or runtime use.',
-        }),
-      )
-    } finally {
-      await reservedFile.close()
-      if (!saved) await unlink(output.target).catch(() => undefined)
+    const resolved = await jsonRequest(base + '/api/resource-library/resolve', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        selections: [{
+          resourceId: elementId,
+          packId,
+          expectedPackVersion: selectedPack.version,
+          elementId,
+          destinationPath: output.path,
+          selectionReason: ['Explicitly selected through project asset fetch'],
+        }],
+      }),
+    })
+    const selected = Array.isArray(resolved.selections) && resolved.selections.length === 1
+      ? resolved.selections[0] : undefined
+    if (!selected || typeof selected.sourceUrl !== 'string' || selected.sourceHash !== expectedHash ||
+        !Array.isArray(selected.dependencies) ||
+        !/^[a-f0-9]{64}$/.test(selected.sourceHash))
+      throw new Error('Resource library returned an incomplete or inconsistent dependency closure')
+
+    const dependencyDownloads = selected.dependencies.map((dependency, index) => {
+      if (!dependency || typeof dependency !== 'object' || Array.isArray(dependency))
+        throw new Error('Resource library returned an incomplete dependency record at index ' + index)
+      const key = dependency.key
+      const parentKey = dependency.parentKey
+      const dependencyElementId = dependency.elementId
+      const elementPath = dependency.elementPath
+      const referencePath = dependency.referencePath
+      if (typeof key !== 'string' || !key.trim() || key === 'root' ||
+          typeof parentKey !== 'string' || !parentKey.trim() ||
+          typeof dependencyElementId !== 'string' || !dependencyElementId.trim() ||
+          typeof elementPath !== 'string' || !elementPath.trim() ||
+          !referencePath || !normalizeResourceReference(referencePath))
+        throw new Error('Resource library returned incomplete dependency metadata at index ' + index)
+      if (dependency.kind !== undefined &&
+          (typeof dependency.kind !== 'string' || !dependency.kind.trim()))
+        throw new Error('Resource library returned invalid dependency kind at index ' + index)
+      if (typeof dependency.sourceUrl !== 'string' ||
+          typeof dependency.sourceHash !== 'string' || !/^[a-f0-9]{64}$/.test(dependency.sourceHash))
+        throw new Error('Resource library returned an incomplete dependency download record')
+      return {
+        key: key.trim(),
+        parentKey: parentKey.trim(),
+        elementId: dependencyElementId.trim(),
+        elementPath: elementPath.trim(),
+        referencePath,
+        ...(dependency.kind ? { kind: dependency.kind.trim() } : {}),
+        sourceUrl: dependency.sourceUrl,
+        sourceHash: dependency.sourceHash,
+      }
+    })
+    const localPathByKey = new Map([['root', output.path]])
+    const dependencyByKey = new Map()
+    for (const dependency of dependencyDownloads) {
+      if (dependencyByKey.has(dependency.key))
+        throw new Error('Resource library returned duplicate dependency key: ' + dependency.key)
+      const parentPath = localPathByKey.get(dependency.parentKey)
+      if (!parentPath)
+        throw new Error('Resource library returned dependency with unknown parent key: ' + dependency.parentKey)
+      dependencyByKey.set(dependency.key, dependency)
+      const localPath = dependencyOutputPath(parentPath, dependency.referencePath)
+      localPathByKey.set(dependency.key, localPath)
     }
+    const downloads = [{
+      sourceUrl: selected.sourceUrl,
+      sourceHash: selected.sourceHash,
+      output,
+      key: 'root',
+      parentKey: undefined,
+      elementId,
+      elementPath: selectedElement.path,
+      referencePath: undefined,
+    }, ...dependencyDownloads.map(dependency => ({
+        sourceUrl: dependency.sourceUrl,
+        sourceHash: dependency.sourceHash,
+        output: undefined,
+        key: dependency.key,
+        parentKey: dependency.parentKey,
+        elementId: dependency.elementId,
+        elementPath: dependency.elementPath,
+        referencePath: dependency.referencePath,
+        ...(dependency.kind ? { kind: dependency.kind } : {}),
+      }))]
+
+    // Resolve every local target before writing anything. This makes a
+    // conflicting closure fail as one validation error instead of leaving a
+    // partially downloaded bundle behind. Shared paths are valid only when
+    // their immutable hashes agree.
+    const planned = []
+    const targetHashes = new Map()
+    for (const download of downloads) {
+      const target = download.output ?? await assetDestination(
+        localPathByKey.get(download.key),
+      )
+      let url
+      try { url = new URL(download.sourceUrl) } catch { throw new Error('Library returned an invalid download URL') }
+      if (url.protocol !== 'https:' || url.username || url.password)
+        throw new Error('Library returned an invalid download URL')
+      const previousHash = targetHashes.get(target.path)
+      if (previousHash !== undefined && previousHash !== download.sourceHash)
+        throw new Error(`Resource dependency path conflict at ${target.path}: different content hashes were returned`)
+      targetHashes.set(target.path, download.sourceHash)
+      planned.push({ ...download, target, url })
+    }
+
+    const filesByPath = new Map()
+    const files = []
+    for (const download of planned) {
+      const target = download.target
+      const existing = filesByPath.get(target.path)
+      if (existing) {
+        files.push({ ...existing, elementId: download.elementId, ...(download.referencePath ? { referencePath: download.referencePath } : {}) })
+        continue
+      }
+      const reused = await existingAsset(target, download.sourceHash)
+      let file = reused
+      if (!file) {
+        const reservedFile = await open(target.target, 'wx', 0o600)
+        let saved = false
+        try {
+          file = await saveBytes(
+            await fetch(download.url, { redirect: 'error', signal: AbortSignal.timeout(90_000) }),
+            target,
+            reservedFile,
+          )
+          if (file.sha256 !== download.sourceHash)
+            throw new Error('Downloaded file hash does not match the selected library element')
+          saved = true
+        } finally {
+          await reservedFile.close()
+          if (!saved) await unlink(target.target).catch(() => undefined)
+        }
+      }
+      filesByPath.set(target.path, file)
+      files.push({ ...file, elementId: download.elementId, ...(download.referencePath ? { referencePath: download.referencePath } : {}) })
+    }
+    const rootFile = files[0]
+    const dependencies = dependencyDownloads.map(dependency => {
+      const localPath = localPathByKey.get(dependency.key)
+      if (!localPath) throw new Error('Resource library returned an unresolved dependency key: ' + dependency.key)
+      return {
+        key: dependency.key,
+        parent_key: dependency.parentKey,
+        element_id: dependency.elementId,
+        element_path: dependency.elementPath,
+        reference_path: dependency.referencePath,
+        local_path: localPath,
+        ...(dependency.kind ? { kind: dependency.kind } : {}),
+      }
+    })
+    const filePaths = [...new Set(files.map(file => file.path))]
+    console.log(JSON.stringify({
+      ...rootFile,
+      root_path: output.path,
+      file_paths: filePaths,
+      local_file_hashes: Object.fromEntries([...filesByPath].map(([path, file]) => [path, file.sha256])),
+      source: 'resource-library',
+      registrationSource,
+      pack: pack.pack ?? pack,
+      element: element.element ?? element,
+      dependencies,
+      note: 'Use registrationSource as source with resources.mjs register. root_path, file_paths and dependencies are ready to copy into one registration input; download is not registration or runtime use.',
+    }))
   } else if (command === 'inspect') {
     if (!args.length) throw new Error('inspect requires one or more asset paths')
     const results = await Promise.all(args.map(async path => {

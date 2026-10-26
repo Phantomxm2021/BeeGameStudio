@@ -7,6 +7,13 @@ type BillingInput = Parameters<NonNullable<BeeGameSessionUsageBillingBackend['re
 type BillingResult = Awaited<ReturnType<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>>
 export type PendingSessionUsage = { userId: string; input: Omit<BillingInput, 'authToken'> }
 
+export type SessionUsageOutboxStatus = {
+  pendingBuckets: number
+  pendingEntries: number
+  activeFlushes: number
+  state: 'idle' | 'pending' | 'flushing'
+}
+
 export class UsageOutboxPersistenceError extends Error {
   constructor(cause: unknown) {
     super('Usage could not be retained for settlement', { cause })
@@ -57,6 +64,18 @@ export class SessionUsageOutbox {
   async dispose(): Promise<void> {
     clearInterval(this.timer)
     await Promise.allSettled(this.active.values())
+  }
+
+  /** Read-only lifecycle counters; this never settles or mutates queued usage. */
+  statusSnapshot(): SessionUsageOutboxStatus {
+    let pendingEntries = 0
+    for (const entries of this.pending.values()) pendingEntries += entries.length
+    return {
+      pendingBuckets: this.pending.size,
+      pendingEntries,
+      activeFlushes: this.active.size,
+      state: this.active.size ? 'flushing' : this.pending.size ? 'pending' : 'idle',
+    }
   }
 
   async settleForUser(userId: string): Promise<void> {

@@ -9,7 +9,7 @@ import { createAgentMeasurement } from './agent-measurement'
 import { openDesignActions } from './agent-tools'
 import { designInputRevision, designHandoffPath } from '../design-handoff'
 
-test.each([false, true])('implementation reads current inputs and allows continued refinement; indexed=%s', async indexed => {
+test.each([false, true])('implementation reads current GDD inputs and allows continued refinement; indexed=%s', async indexed => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-design-inputs-')))
   try {
     await writeDesignDocumentsFixture(root)
@@ -17,10 +17,10 @@ test.each([false, true])('implementation reads current inputs and allows continu
     const action = openDesignActions(root), before = designInputRevision(root)
     expect(await action('implementation')).toMatchObject({ valid: true })
     expect(designInputRevision(root)).toBe(before)
-    const path = join(root, 'docs/TECHNICAL_DESIGN.md')
+    const path = join(root, 'docs/GDD.md')
     await writeFile(path, (await readFile(path, 'utf8')) + '\nImplementation detail refined within the current assignment.\n')
     expect(designInputRevision(root)).not.toBe(before)
-    expect(await action('finalize', ['TECHNICAL_DESIGN.md'])).toMatchObject({ valid: true })
+    expect(await action('finalize', ['GDD.md'])).toMatchObject({ valid: true })
     expect(await action('implementation')).toMatchObject({ valid: true })
     const ready = designInputRevision(root)
     await action('implementation')

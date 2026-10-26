@@ -13,7 +13,7 @@ import { sceneUiContentFormat } from './scene-ui-content-authoring'
 import { PREVIEW_ENVIRONMENT } from '@bee-game-studio/agent-workflow/preview-environment'
 import { CONTENT_CONSUMER_API } from './game-content-consumer-cli'
 import { CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
-import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
+import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 
 test('camera draft accepts the actual Scene envelope and standalone Camera; diagnoses the selected source without writes',()=>{
   const root=mkdtempSync(join(tmpdir(),'bgs-camera-input-'))
@@ -125,7 +125,7 @@ test('Scene batch discovers saved paths with spaces, reports all inputs and neve
 test('batch inspection checks missing planned pages and matches confirmed host settings', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-layout-coverage-')); roots.push(root)
   await writeDesignDocumentsFixture(root)
-  const file = join(root, 'docs/UI_UX_SPEC.md')
+  const file = join(root, 'docs/GDD.md')
   writeFileSync(file, readFileSync(file, 'utf8') + '\n[Required results](../content/ui/results.json)\n')
   const result = runGameContentCommand(root, ['--review-layouts', '--orientation', 'Portrait']) as any
   expect(result.valid).toBe(false)
@@ -228,9 +228,10 @@ test('project checker entry exposes no implementation and fails explicitly witho
 test('materialized Review geometry command fails saved errors and passes corrected inputs without writing reports', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-review-layout-cli-')); roots.push(root)
   mkdirSync(join(root, 'content/ui'), { recursive: true })
+  mkdirSync(join(root, 'content/scenes'), { recursive: true })
+  writeFileSync(join(root, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
   mkdirSync(join(root, 'docs'))
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
-  await writeDesignDocumentFixture(root, 'LEVEL_SCENE_DESIGN.md')
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n\n## Scene layout\n[Level](../content/scenes/level.json)\n')
   mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
   writeFileSync(join(root, '.beegame/delivery/check-content.mjs'), CONTENT_CHECKER_ENTRY)
   const runtime = await sharedContentChecker()
@@ -274,8 +275,9 @@ test('draft geometry checks targets without unfinished prose; final Review still
   expect(schemaFailure.issues.join(' ')).toContain('direction')
   writeFileSync(path, before)
   mkdirSync(join(root, 'docs'))
-  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
-  await writeDesignDocumentFixture(root, 'LEVEL_SCENE_DESIGN.md')
+  mkdirSync(join(root, 'content/scenes'), { recursive: true })
+  writeFileSync(join(root, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
+  writeFileSync(join(root, 'docs/GDD.md'), '# Game\n\n## UI layout\n[Menu](../content/ui/menu.json)\n\n## Scene layout\n[Level](../content/scenes/level.json)\n')
   expect(runGameContentCommand(root, ['--review-layouts'])).toMatchObject({ valid: true })
   expect(readFileSync(path, 'utf8')).toBe(before)
 })

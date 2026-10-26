@@ -27,7 +27,6 @@ import { isProjectExecutionActive } from '../utils/chatActivity'
 import type { ProjectEventPollingState } from './useProjectEventPolling'
 import { normalizeChatHistory } from '../utils/chatHistory'
 import { normalizeProjectEventSemanticType } from '../utils/messageSemantics'
-import { canAutomaticallyRetryModelFailure } from '../utils/modelRequestFailure'
 import { getWaitingPermissionState } from '../utils/waitingPermission'
 
 const newClientMessageId = (): string =>
@@ -87,9 +86,7 @@ export interface UseChatReturn {
   /**
    * Continue a paused task
    */
-  continueTask: (failedTurnId?: string, automatic?: boolean) => Promise<void>
-  autoRetryTurnId: string | null
-  cancelAutoRetry: () => void
+  continueTask: (failedTurnId?: string) => Promise<void>
 
   /**
    * Stop the current task
@@ -197,14 +194,7 @@ export const useChat = ({
   const sessionTokenUsage = useSystemStore(state => usageSession?.projectId === projectId
     ? state.taskUsage[usageSession.sessionId] : undefined)
   const [canContinue, setCanContinue] = useState(false)
-  const [autoRetryTurnId, setAutoRetryTurnId] = useState<string | null>(null)
-  const autoRetryUsed = useRef(false)
-  const lastFailure = useRef<string | undefined>(undefined)
   const continuing = useRef(false)
-  const cancelAutoRetry = useCallback(() => {
-    autoRetryUsed.current = true
-    setAutoRetryTurnId(null)
-  }, [])
   const [permissionState, setPermissionState] = useState<
     UseChatReturn['permissionState']
   >({
@@ -276,9 +266,6 @@ export const useChat = ({
     continuing.current = false
     setCurrentTaskId(null)
     setCanContinue(false)
-    setAutoRetryTurnId(null)
-    autoRetryUsed.current = false
-    lastFailure.current = undefined
     setPermissionState({
       gateId: null,
       action: null,
@@ -556,7 +543,6 @@ export const useChat = ({
             message.status === 'resuming'
           ) {
             setIsLoading(true)
-            setAutoRetryTurnId(null)
             if (message.sender) {
               setCurrentSender(message.sender)
             }
@@ -725,11 +711,6 @@ export const useChat = ({
               : errContent
           const failedTurnId = message.turnId || message.turn_id
           const failureId = message.message_id || `error-${message.task_id || 'na'}-${failedTurnId || contextualError.substring(0, 32)}`
-          if (failureId !== lastFailure.current) {
-            lastFailure.current = failureId
-            setAutoRetryTurnId(failedTurnId && canAutomaticallyRetryModelFailure(errContent) && !autoRetryUsed.current
-              ? failedTurnId : null)
-          }
           addMessage({
             id: failureId,
             messageId: failureId,
@@ -1009,8 +990,6 @@ export const useChat = ({
         emitWaitingPermissionBlock(waitingPermission.message)
         return false
       }
-      setAutoRetryTurnId(null)
-      autoRetryUsed.current = false
       const requestProjectId = projectId
       const requestGeneration = lifecycleRef.current.generation
       const isCurrentRequest = () =>
@@ -1120,12 +1099,11 @@ export const useChat = ({
    * Continue a paused task
    * Requirements: 6.4
    */
-  const continueTask = useCallback(async (failedTurnId?: string, automatic = false) => {
+  const continueTask = useCallback(async (failedTurnId?: string) => {
     const generation = lifecycleRef.current.generation
     const isCurrent = () => lifecycleRef.current.mounted &&
       lifecycleRef.current.projectId === projectId && lifecycleRef.current.generation === generation
     if (!isCurrent() || continuing.current || isSubmitting) return
-    cancelAutoRetry()
     const runtime = useProjectStore.getState().projectStatus
     if (runtime?.project_id === projectId &&
       (isProjectExecutionActive(runtime) || Boolean(runtime.active_subagents?.length))) return
@@ -1148,7 +1126,6 @@ export const useChat = ({
         project_id: projectId,
         task_id: currentTaskId || undefined,
         ...(failedTurnId ? { failed_turn_id: failedTurnId } : {}),
-        ...(automatic ? { automatic_retry: true } : {}),
       })) as ContinueTaskResponse
       if (!isCurrent()) return
 
@@ -1178,7 +1155,6 @@ export const useChat = ({
     }
   }, [
     isSubmitting,
-    cancelAutoRetry,
     projectId,
     currentTaskId,
     addMessage,
@@ -1196,7 +1172,6 @@ export const useChat = ({
    * Requirements: 6.1
    */
   const stopTask = useCallback(async () => {
-    cancelAutoRetry()
     if (isStoppingRef.current) return
     const stopTargetId = currentTaskId || projectId
     if (!stopTargetId) {
@@ -1248,7 +1223,7 @@ export const useChat = ({
       setIsStopping(false)
     }
   }, [
-    cancelAutoRetry, currentTaskId, projectId, addMessage, setCurrentSender, setIsStreaming, onError, refreshProjectVisibility])
+    currentTaskId, projectId, addMessage, setCurrentSender, setIsStreaming, onError, refreshProjectVisibility])
 
   const resolveToolPermission = useCallback(
     async (
@@ -1335,8 +1310,6 @@ export const useChat = ({
   return {
     sendMessage,
     continueTask,
-    autoRetryTurnId,
-    cancelAutoRetry,
     stopTask,
     resolveToolPermission,
     permissionState,

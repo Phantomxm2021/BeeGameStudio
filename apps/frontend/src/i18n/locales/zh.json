@@ -723,7 +723,6 @@
       "capacity": "所选模型当前已满负荷，请尝试其他模型。",
       "retry": "重试",
       "retryNow": "立即重试",
-      "retryIn": "{{seconds}} 秒后重试",
       "retrying": "重试中…"
     },
     "subagentActivity": {
@@ -1017,7 +1016,7 @@
       "deploymentUrlPending": "待发布后显示",
       "deploymentAutofill": "一键填写",
     "deploymentAutofilling": "填写中…",
-    "deploymentAutofillHint": "根据当前工程文档整理介绍，并截取当前构建的初始画面。介绍整理会使用模型额度；填写后可修改，不会自动发布。",
+    "deploymentAutofillHint": "使用已确认的 brief 填写简介和玩法，从 GDD 补充具体操作，并截取当前构建的初始画面。不调用模型；填写后可修改，不会自动发布。",
     "deploymentProgress": "发布进度",
     "deploymentPrepare": "构建并检查",
     "deploymentUploading": "正在上传 · {percent}%",
@@ -1060,7 +1059,7 @@
       "cachedInputTokens": "缓存输入 Tokens",
       "freshInputTokens": "输入",
       "cacheReadTokens": "缓存输入",
-      "cacheCreationTokens": "缓存创建 Tokens",
+      "cacheCreationTokens": "缓存写入 Tokens",
       "outputTokens": "输出",
       "totalTokens": "总 Tokens",
       "rawProcessedTokens": "处理总量（含缓存）",

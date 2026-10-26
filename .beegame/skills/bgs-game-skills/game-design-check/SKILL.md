@@ -1,6 +1,6 @@
 ---
 name: game-design-check
-description: Review saved game-design decisions and verify revisions for implementability, consistency and supported conclusions. Use for design review, including merged records and affected dependencies; not as a substitute for runtime acceptance. 中文：游戏设计审查、跨领域一致性与定向修订核对。
+description: Review saved game-design decisions and verify revisions for implementability, consistency and supported conclusions. Use for design review, including merged GDD chapters and affected dependencies; not as a substitute for runtime acceptance. 中文：游戏设计审查、跨领域一致性与定向修订核对。
 ---
 
 # Game Design Check
@@ -9,7 +9,7 @@ Check whether the assigned design can be used by its downstream team without gue
 
 ## Select the applicable checks
 
-Use the relevant sections of [document checks](references/document-checks.md); its filenames label disciplines, not required separate files. Reuse sections already in context. Review the assigned scope and actual dependencies; verify revisions through affected clauses and consumers.
+Use the relevant sections of [GDD chapter checks](references/document-checks.md); its headings label professional disciplines, not required separate files. Reuse sections already in context. Review the assigned scope and actual dependencies; verify revisions through affected clauses and consumers.
 
 Apply checks only to the confirmed game and current assignment. A check does not require adding its subject to the game, creating a new chapter, matrix or report, or executing a new review stage. A pending decision is not an omission while no current consumer needs it. A decision needed now is not optional merely because more work remains.
 
@@ -27,7 +27,7 @@ Keep findings concise in the existing review record or response: source location
 
 Read-only review does not edit. Group authorized corrections, then verify changed definitions, exceptions and consumers against the situation that exposed the finding. Retain unchanged valid evidence and unresolved findings; do not reopen unrelated prose or require another review stage or report.
 
-Collect independent source reads together; sharing a filename does not require rereading all requirements. Reuse retained results; rerun affected checks when inputs, coverage or freshness change. Diagnose tool failures rather than repeating speculative attempts. Scope changes need authorization; honor the current budget and assignment.
+Collect independent source reads together; sharing a GDD chapter does not require rereading all requirements. Reuse retained results; rerun affected checks when inputs, coverage or freshness change. Diagnose tool failures rather than repeating speculative attempts. Scope changes need authorization; honor the current budget and assignment.
 
 For supplied BGS geometry or legacy handoff inputs, use the applicable [saved-content checks](references/saved-content-checks.md), actual current sources and supplied entry. Do not create legacy indexes/batches/receipts or BGS data for native-engine/DOM tasks.
 

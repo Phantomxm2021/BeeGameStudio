@@ -94,6 +94,8 @@ export type Run = {
   writer?: { attemptId: string; fence: number; workerId: string }; fence: number;
   // Native goal turns, not host-created Task specifications or release checks.
   agentTurns?: AgentTurn[];
+  // Opt-in only at new blank-project intake; historical runs retain their scope.
+  productionWorkflow?: 1;
   // User-authorized host saves; these are neither native turns nor Task plans.
   sourceEdits?: SourceEdit[];
   // Automatic quality acceptance remains false. Explicit user publication of
@@ -113,6 +115,8 @@ export type DesignFileChanges = {
   error?: string;
 }
 export type AgentTurn = {
+  production?: import('./production-workflow').ProductionAssignment;
+  productionHandoff?: import('./production-workflow').ProductionHandoff;
   attemptId: string; requestKey: string; sessionId: string; workerId: string; fence: number;
   status: 'running' | 'ended' | 'failed' | 'interrupted'; startedAt: string; finishedAt?: string;
   turnId?: string; nativeRuntime?: 'bgs'; nativeSessionId?: string; usage?: unknown; skillUses?: SkillUse[];

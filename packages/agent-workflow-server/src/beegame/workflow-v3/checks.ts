@@ -16,7 +16,8 @@ export const AGENT_EVIDENCE_DIRECTORY = 'reports'
 // Keep other files in logs/ (they may be real game inputs), not a name-only
 // exclusion of every logging directory in the editable project.
 const hostRecord = (path:string) => path==='transcripts' || /^logs\/(index\.json|runtime-diagnostics\.jsonl(?:\.\d+)?)$/.test(path)
-/** No author-selected file list: enumerate the exportable project before build.
+/** No author-selected file list: enumerate public project inputs for identity or build.
+ * Engine/build prerequisites belong to the actual build operation.
  * Private dot files are absent from the build copy, not silently required inputs.
  * Reports are host workflow evidence, not editable game source. */
 export async function projectFiles(root: string, artifact: string, excludedReports: string[]): Promise<FileVersion[]> {
@@ -33,7 +34,6 @@ export async function projectFiles(root: string, artifact: string, excludedRepor
     }
   }
   await visit(base)
-  if (!files.some(f=>f.path==='package.json')) throw new WorkflowError('project-incomplete','Editable export needs a saved package.json',400)
   return files.sort((a,b)=>a.path.localeCompare(b.path))
 }
 export const sameFiles = (a: FileVersion[], b: FileVersion[]) => JSON.stringify(a)===JSON.stringify(b)

@@ -696,21 +696,27 @@ function PackBrowser({
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let consecutiveFailures = 0;
+    let inFlight = false;
+    const schedule = (delay: number) => {
+      if (active && !document.hidden) timer = setTimeout(() => void poll(), delay);
+    };
     const poll = async () => {
+      if (!active || document.hidden || inFlight) return;
+      inFlight = true;
       try {
         const next = await apiClient.getProcessingJob(pack.id, inspectionJob.id);
-        if (!active) return;
+        if (!active || document.hidden) return;
         consecutiveFailures = 0;
         setMoveError('');
         if (['queued', 'running'].includes(next.status)) {
           setInspectionJob(next);
-          timer = setTimeout(() => void poll(), 800);
+          schedule(800);
         } else if (!refreshedProcessingJobsRef.current.has(next.id)) {
           // Do not expose a terminal state until the refreshed workspace is
           // available. If refresh fails, keep polling instead of stranding a
           // completed 100% cover on screen.
           await onRefreshWorkspace();
-          if (!active) return;
+          if (!active || document.hidden) return;
           refreshedProcessingJobsRef.current.add(next.id);
           if (next.status === 'completed') {
             setInspectionJob(null);
@@ -722,15 +728,26 @@ function PackBrowser({
           setInspectionJob(next);
         }
       } catch (cause) {
-        if (!active) return;
+        if (!active || document.hidden) return;
         consecutiveFailures += 1;
         setMoveError(cause instanceof Error ? cause.message : String(cause));
         const retryDelayMs = Math.min(8_000, 1_000 * (2 ** Math.min(consecutiveFailures - 1, 3)));
-        timer = setTimeout(() => void poll(), retryDelayMs);
+        schedule(retryDelayMs);
+      } finally {
+        inFlight = false;
       }
     };
-    timer = setTimeout(() => void poll(), 500);
-    return () => { active = false; if (timer) clearTimeout(timer); };
+    const onVisibilityChange = () => {
+      if (timer) clearTimeout(timer);
+      if (!document.hidden) void poll();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    schedule(500);
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [apiClient, inspectionJob?.id, inspectionJob?.status, onRefreshWorkspace, pack.id, showSuccess, t]);
   useEffect(() => {
     let active = true;

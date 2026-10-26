@@ -12,6 +12,31 @@ import { loadBeeGameIntakeJob } from './intake-job-store'
 
 function gate() { let release!: () => void; return { promise: new Promise<void>(resolve => { release = resolve }), release: () => release() } }
 
+test('runtime status exposes only aggregate session lifecycle counters', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-runtime-status-sessions-')
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit() {} } } }, root, () => ({}))
+  try {
+    expect(manager.runtimeStatus()).toEqual({
+      activeTurns: 0,
+      preparingTurns: 0,
+      pendingPermissions: 0,
+      activeNativeTasks: 0,
+      runnerDisposals: 0,
+      cleanupFailures: 0,
+      usageOutbox: {
+        configured: false,
+        pendingBuckets: 0,
+        pendingEntries: 0,
+        activeFlushes: 0,
+        state: 'idle',
+      },
+    })
+  } finally {
+    await manager.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('logout stays blocked during native cleanup after stop or interruption, without blocking another owner', async () => {
   for (const interrupt of [false, true]) {
     const root = await mkdtemp('/private/tmp/bgs-owner-cleanup-'), entered = gate(), exiting = gate(), exit = gate()

@@ -486,7 +486,7 @@ export const api = {
    * @param data - 包含项目 ID 和可选的任务 ID
    * @returns 返回任务 ID 和状态
    */
-  continueTask: (data: { project_id: string; task_id?: string; failed_turn_id?: string; automatic_retry?: boolean }) =>
+  continueTask: (data: { project_id: string; task_id?: string; failed_turn_id?: string }) =>
     beeGameAdapter.continueTask(data),
 
   requestProjectAction: (data: {

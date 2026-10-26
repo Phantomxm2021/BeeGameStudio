@@ -6,7 +6,7 @@ import { digest, WorkflowError } from './state'
 import { versionsMatch } from './checks'
 
 /** A saved-source view, not an accepted package or a second design authority.
- * Uses the existing content contract, without legacy eight-document revisions. */
+ * Uses the existing content contract and saved file versions. */
 export async function readContentView(workspace: string, metadata = false) {
   const versions: { path: string; sha256: string }[] = []
   async function read(path: string) {

@@ -47,14 +47,6 @@ type BeeGameSession = {
   updatedAt: string
 }
 
-export type BeeGameQueuedMessage = {
-  id: string
-  text: string
-  createdAt: string
-  state: 'pending' | 'dispatching'
-  attachmentCount: number
-}
-
 type V3Run = {
   id: string
   version: number
@@ -94,7 +86,7 @@ function assertWriterReleased(run: V3Run): void {
   if (!run.writer) return
   if (run.writerLiveness === 'local-active')
     throw new Error('原任务仍在执行或清理中，尚未确认停止；不能继续或发送新任务。')
-  if (['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? ''))
+  if (['persisted', 'original-host', 'host-receipt', 'host-reboot', 'host-idle'].includes(run.recoveryEvidence ?? ''))
     throw new Error('旧执行仍在结算，请稍后再试。')
   const reason = ({
     'exit-receipts-not-configured': '宿主未配置退出回执',
@@ -104,6 +96,7 @@ function assertWriterReleased(run: V3Run): void {
     'foreign-host': '执行属于另一台主机',
     'same-boot': '同次开机中的旧执行退出状态未确认',
     'ownership-missing': '缺少可信宿主执行记录',
+    'execution-unresolved': '当前服务仍有未完成的执行清理',
   } as Record<string, string>)[run.recoveryDiagnostic ?? ''] ?? '旧执行退出状态未确认'
   throw new Error(`${reason}。暂停已记录不等于执行已停止；需在原主机核实并清理，不能直接解锁或重新执行。`)
 }
@@ -113,20 +106,18 @@ async function sendV3Message(projectId: string, sessionId: string, input: {
   intent?: 'continue'
   requestKey: string
   continuationOf?: string
-  allowResume?: boolean
   attachments?: ChatAttachmentPayload[]
 }): Promise<{ turn: { attemptId: string }; runId: string }> {
   let run = await currentV3Run(projectId)
   if (run.chatSessionId !== sessionId)
     throw new Error('项目会话与 V3 任务不一致，请重新打开项目。')
-  if (input.allowResume !== false && run.writer && run.writerLiveness !== 'local-active' &&
-      ['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? '')) {
+  if (run.writer && run.writerLiveness !== 'local-active' &&
+      ['persisted', 'original-host', 'host-receipt', 'host-reboot', 'host-idle'].includes(run.recoveryEvidence ?? '')) {
     await beeGameAdapter.recoverTask({ project_id: projectId })
     run = await currentV3Run(projectId)
   }
   if (!run.paused || run.writer && run.writerLiveness !== 'local-active') assertWriterReleased(run)
   if (run.paused) {
-    if (input.allowResume === false) throw new Error('任务已被暂停，已取消自动重试。')
     const resumed = await postJson<{ run: V3Run }>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow-v3/resume`,
       { planRevision: run.planRevision },
@@ -650,35 +641,18 @@ export const beeGameAdapter = {
     }
   },
 
-  async listQueuedMessages(projectId: string): Promise<BeeGameQueuedMessage[]> {
-    await currentV3Run(projectId)
-    return []
-  },
-
-  async deleteQueuedMessage(projectId: string, messageId: string): Promise<void> {
-    void projectId; void messageId
-    throw new Error('V3 不使用旧消息队列。')
-  },
-
-  async steerQueuedMessage(projectId: string, messageId: string): Promise<void> {
-    void projectId; void messageId
-    throw new Error('V3 不使用旧消息队列。')
-  },
-
   async continueTask(data: {
     project_id: string
     failed_turn_id?: string
-    automatic_retry?: boolean
     task_id?: string
   }): Promise<ContinueTaskResponse> {
-    if (data.automatic_retry && !data.failed_turn_id) throw new Error('自动重试必须绑定失败回合。')
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
     let run = await currentV3Run(data.project_id)
-    if (data.automatic_retry && run.paused)
-      throw new Error('任务已被暂停，已取消自动重试；请明确继续任务。')
-    if (!data.automatic_retry && run.writer && run.writerLiveness !== 'local-active' &&
-        ['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? '')) {
+    if (data.failed_turn_id && run.agentTurns?.at(-1)?.turnId !== data.failed_turn_id)
+      throw new Error('任务回合已改变，已取消旧错误的重试。')
+    if (run.writer && run.writerLiveness !== 'local-active' &&
+        ['persisted', 'original-host', 'host-receipt', 'host-reboot', 'host-idle'].includes(run.recoveryEvidence ?? '')) {
       await this.recoverTask({ project_id: data.project_id })
       run = await currentV3Run(data.project_id)
     }
@@ -698,11 +672,10 @@ export const beeGameAdapter = {
     if (!last || !['failed', 'interrupted'].includes(last.status) || last.notStarted)
       throw new Error('没有可续作的已中断 V3 回合；请明确发送新的执行请求。')
     const result = await sendV3Message(data.project_id, session.id, {
-      text: '继续上一次已中断的任务。',
+      text: '',
       intent: 'continue',
       requestKey: crypto.randomUUID(),
       continuationOf: last.attemptId,
-      allowResume: !data.automatic_retry,
     })
     return {
       command_id: session.id,
@@ -745,7 +718,7 @@ export const beeGameAdapter = {
     const run = await currentV3Run(data.project_id)
     if (!run.writer) return { recovered: false, paused: Boolean(run.paused) }
     if (run.writerLiveness === 'local-active' ||
-        !['persisted', 'original-host', 'host-receipt', 'host-reboot'].includes(run.recoveryEvidence ?? ''))
+        !['persisted', 'original-host', 'host-receipt', 'host-reboot', 'host-idle'].includes(run.recoveryEvidence ?? ''))
       assertWriterReleased(run)
     const result = await postJson<{ run: V3Run }>(
       `/api/projects/${encodeURIComponent(data.project_id)}/workflow-v3/recover-writer`,

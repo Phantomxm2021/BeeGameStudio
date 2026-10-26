@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { toPermissionDisplayModel, toProjectRuntimeDisplayModel } from './displayModels'
+import type { Message } from '../types/message'
+import { toChatDisplayMessages, toPermissionDisplayModel, toProjectRuntimeDisplayModel } from './displayModels'
 
 describe('displayModels', () => {
   it('maps the native project runtime and build state without legacy workflow fields', () => {
@@ -48,4 +49,14 @@ describe('displayModels', () => {
       raw: permission,
     })
   })
+})
+
+ it('reuses unchanged messages while updating streamed content and sources', () => {
+  const messages = Array.from({ length: 1000 }, (_, id) => ({ id: String(id), sender: 'assistant', content: 'a', timestamp: id } as unknown as Message))
+  const before = toChatDisplayMessages(messages)
+  const updated = messages.map((message, index) => index === 999 ? { ...message, content: 'ab' } : message)
+  const after = toChatDisplayMessages(updated)
+  expect(after.filter((message, index) => message === before[index])).toHaveLength(999)
+  expect(after[999].content).toBe('ab')
+  expect(before[999].content).toBe('a')
 })

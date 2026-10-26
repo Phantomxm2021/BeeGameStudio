@@ -11,6 +11,7 @@
  */
 
 import { create } from 'zustand';
+import { shallow } from 'zustand/shallow';
 import type { TaskCandidateAgent } from '../types/agent';
 import type { TokenUsage } from '../types/message';
 import { api } from '../services/api';
@@ -189,55 +190,59 @@ export const useSystemStore = create<SystemState>()(
       updateTokenUsage: (usage: TokenUsage, projectId: string, taskId?: string) => {
         if (!usage || !projectId) return;
 
-        set((state) => {
-          const newTaskUsage = { ...state.taskUsage };
-          const newTokenUsage = { ...state.tokenUsage };
-          const promptTokens = Number(usage.input_tokens ?? usage.prompt_tokens) || 0;
-          const completionTokens = Number(usage.output_tokens ?? usage.completion_tokens) || 0;
-          const cachedInputTokens =
-            Number(usage.cached_input_tokens) ||
-            (Number(usage.cache_read_tokens) || 0) + (Number(usage.cache_creation_tokens) || 0);
-          const safeUsage = {
-            prompt_tokens: promptTokens,
-            input_tokens: promptTokens,
-            cached_input_tokens: cachedInputTokens,
-            completion_tokens: completionTokens,
-            output_tokens: completionTokens,
-            total_tokens: Number(usage.total_tokens) || 0
-          };
+        const state = get();
+        let newTaskUsage = state.taskUsage;
+        let newTokenUsage = state.tokenUsage;
+        const promptTokens = Number(usage.input_tokens ?? usage.prompt_tokens) || 0;
+        const completionTokens = Number(usage.output_tokens ?? usage.completion_tokens) || 0;
+        const cachedInputTokens =
+          Number(usage.cached_input_tokens) ||
+          (Number(usage.cache_read_tokens) || 0) + (Number(usage.cache_creation_tokens) || 0);
+        const safeUsage = {
+          prompt_tokens: promptTokens,
+          input_tokens: promptTokens,
+          cached_input_tokens: cachedInputTokens,
+          completion_tokens: completionTokens,
+          output_tokens: completionTokens,
+          total_tokens: Number(usage.total_tokens) || 0
+        };
 
-          // Optional task-level mirror for debugging/inspection.
-          if (taskId && typeof taskId === 'string' && taskId.trim().length > 0) {
-            newTaskUsage[taskId] = {
-              ...(usage.providerUsageIncomplete || newTaskUsage[taskId]?.providerUsageIncomplete
-                ? { providerUsageIncomplete: true } : {}),
-              prompt_tokens: Math.max((newTaskUsage[taskId]?.prompt_tokens || 0), safeUsage.prompt_tokens),
-              completion_tokens: Math.max((newTaskUsage[taskId]?.completion_tokens || 0), safeUsage.completion_tokens),
-              total_tokens: Math.max((newTaskUsage[taskId]?.total_tokens || 0), safeUsage.total_tokens),
-              input_tokens: Math.max((newTaskUsage[taskId]?.input_tokens || 0), safeUsage.input_tokens),
-              cached_input_tokens: Math.max((newTaskUsage[taskId]?.cached_input_tokens || 0), safeUsage.cached_input_tokens),
-              output_tokens: Math.max((newTaskUsage[taskId]?.output_tokens || 0), safeUsage.output_tokens),
-            };
-          }
-
-          // Cumulative usage per project.
-          const currentProjectUsage = newTokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-          newTokenUsage[projectId] = {
-            ...(usage.providerUsageIncomplete || currentProjectUsage.providerUsageIncomplete
+        // Optional task-level mirror for debugging/inspection.
+        if (taskId && typeof taskId === 'string' && taskId.trim().length > 0) {
+          const nextTaskUsage = {
+            ...(usage.providerUsageIncomplete || newTaskUsage[taskId]?.providerUsageIncomplete
               ? { providerUsageIncomplete: true } : {}),
-            prompt_tokens: Math.max(currentProjectUsage.prompt_tokens || 0, safeUsage.prompt_tokens),
-            completion_tokens: Math.max(currentProjectUsage.completion_tokens || 0, safeUsage.completion_tokens),
-            total_tokens: Math.max(currentProjectUsage.total_tokens || 0, safeUsage.total_tokens),
-            input_tokens: Math.max(currentProjectUsage.input_tokens || 0, safeUsage.input_tokens),
-            cached_input_tokens: Math.max(currentProjectUsage.cached_input_tokens || 0, safeUsage.cached_input_tokens),
-            output_tokens: Math.max(currentProjectUsage.output_tokens || 0, safeUsage.output_tokens),
+            prompt_tokens: Math.max((newTaskUsage[taskId]?.prompt_tokens || 0), safeUsage.prompt_tokens),
+            completion_tokens: Math.max((newTaskUsage[taskId]?.completion_tokens || 0), safeUsage.completion_tokens),
+            total_tokens: Math.max((newTaskUsage[taskId]?.total_tokens || 0), safeUsage.total_tokens),
+            input_tokens: Math.max((newTaskUsage[taskId]?.input_tokens || 0), safeUsage.input_tokens),
+            cached_input_tokens: Math.max((newTaskUsage[taskId]?.cached_input_tokens || 0), safeUsage.cached_input_tokens),
+            output_tokens: Math.max((newTaskUsage[taskId]?.output_tokens || 0), safeUsage.output_tokens),
           };
+          if (!shallow(state.taskUsage[taskId], nextTaskUsage)) {
+            newTaskUsage = { ...state.taskUsage, [taskId]: nextTaskUsage };
+          }
+        }
 
-          return {
-            taskUsage: newTaskUsage,
-            tokenUsage: newTokenUsage
-          };
-        });
+        // Cumulative usage per project.
+        const currentProjectUsage = newTokenUsage[projectId] || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+        const nextProjectUsage = {
+          ...(usage.providerUsageIncomplete || currentProjectUsage.providerUsageIncomplete
+            ? { providerUsageIncomplete: true } : {}),
+          prompt_tokens: Math.max(currentProjectUsage.prompt_tokens || 0, safeUsage.prompt_tokens),
+          completion_tokens: Math.max(currentProjectUsage.completion_tokens || 0, safeUsage.completion_tokens),
+          total_tokens: Math.max(currentProjectUsage.total_tokens || 0, safeUsage.total_tokens),
+          input_tokens: Math.max(currentProjectUsage.input_tokens || 0, safeUsage.input_tokens),
+          cached_input_tokens: Math.max(currentProjectUsage.cached_input_tokens || 0, safeUsage.cached_input_tokens),
+          output_tokens: Math.max(currentProjectUsage.output_tokens || 0, safeUsage.output_tokens),
+        };
+
+        if (!shallow(state.tokenUsage[projectId], nextProjectUsage)) {
+          newTokenUsage = { ...state.tokenUsage, [projectId]: nextProjectUsage };
+        }
+        if (newTaskUsage !== state.taskUsage || newTokenUsage !== state.tokenUsage) {
+          set({ taskUsage: newTaskUsage, tokenUsage: newTokenUsage });
+        }
       },
 
       updateLastP2PRoute: (route: { source_agent: string; target_agent: string; timestamp: number } | null) => {

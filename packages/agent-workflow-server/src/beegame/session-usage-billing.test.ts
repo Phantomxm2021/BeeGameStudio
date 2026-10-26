@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { appendChatTranscript } from './project-records'
-import { BeeGameSessionManager, type BeeGameSessionRunner, type BeeGameSessionRuntime,
+import { BeeGameSessionManager, getLatestRuntimeUsage, getRuntimeUsageForTurn, type BeeGameSessionRunner, type BeeGameSessionRuntime,
   type BeeGameSessionUsageBillingBackend } from './session-manager'
 
 test('cumulative live and saved usage retains an earlier missing receipt after a complete response', async () => {
@@ -600,12 +600,160 @@ test('cold resume keeps a lost personal receipt nonbillable while billing the li
       expect((platformBill?.metadata?.billableFinalUsage as { total_tokens?: number } | undefined)?.total_tokens).toBe(50)
       const usageEvents = resumed.transcriptFacts(session.id).filter(event =>
         event.type === 'usage' && event.payload?.subtype === 'native_accounting')
-      expect(usageEvents.some(event => event.payload?.billingSource === 'byok' &&
-        event.payload?.usage?.total_tokens === 100)).toBe(true)
-      expect(usageEvents.some(event => event.payload?.billingSource === 'platform' &&
-        event.payload?.usage?.total_tokens === 150)).toBe(true)
+      expect(usageEvents.filter(event => event.payload?.billingSource === 'byok').map(event => event.payload?.usage))
+        .toContainEqual(expect.objectContaining({ total_tokens: 100 }))
+      expect(usageEvents.filter(event => event.payload?.billingSource === 'platform').map(event => event.payload?.usage))
+        .toContainEqual(expect.objectContaining({ total_tokens: 150 }))
       expect(usageEvents.every(event => event.payload?.nativeAccountingEpoch === 'bgs:thread')).toBe(true)
     } finally { await resumed.dispose() }
     expect(await readdir(join(root, 'session-usage-outbox'))).toEqual([])
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+for (const source of ['platform', 'byok'] as const) test(`recovered ${source} usage belongs to the original turn after cold resume`, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-usage-attribution-'))
+  const billing = createSessionUsageBillingFixture()
+  const runner: BeeGameSessionRunner = { async start(input) {
+    input.onNativeSessionId?.('native-fixture')
+    if (input.resumeSessionId) {
+      // Both duplicate replay and a smaller out-of-order checkpoint remain
+      // historical; neither creates another charge or a new-turn increment.
+      for (const total of [150, 150, 140]) input.onNativeUsage?.(sessionUsage(total), 'bgs:native-fixture',
+        { replayed: true, nativeTurnId: 'native-old' })
+    }
+    return { stop() {}, async submit(turn) {
+      input.onNativeUsage?.(sessionUsage(input.resumeSessionId ? 180 : 100), 'bgs:native-fixture',
+        { nativeTurnId: input.resumeSessionId ? 'native-new' : 'native-old' })
+      if (!input.resumeSessionId) throw Error('Synthetic interrupted turn')
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture completed' })
+    } }
+  } }
+  const env = () => ({ BEEGAME_MODEL_BILLING_SOURCE: source })
+  let manager = new BeeGameSessionManager(runner, root, env, billing.backend)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner' })
+    await manager.sendWithDisplay(session.id, 'First'); await manager.waitForSessionIdle(session.id)
+    const oldTurn = manager.transcriptFacts(session.id).find(event => event.type === 'turn.started')!.turnId!
+    expect(getRuntimeUsageForTurn(manager.transcriptFacts(session.id), oldTurn).total_tokens).toBe(100)
+    await manager.dispose()
+    const originalEvents = manager.transcriptFacts(session.id)
+    const originalPrefix = JSON.stringify(originalEvents)
+    manager = new BeeGameSessionManager(runner, root, env, billing.backend)
+    manager.start({ workspacePath: root, userId: 'owner', transcriptSessionId: session.id })
+    await manager.sendWithDisplay(session.id, 'Continue'); await manager.waitForSessionIdle(session.id)
+    const events = manager.transcriptFacts(session.id)
+    const newTurn = events.findLast(event => event.type === 'turn.started')!.turnId!
+    expect(JSON.stringify(events.slice(0, originalEvents.length))).toBe(originalPrefix)
+    expect(getRuntimeUsageForTurn(events, oldTurn).total_tokens).toBe(150)
+    expect(getRuntimeUsageForTurn(events, newTurn).total_tokens).toBe(30)
+    expect(manager.runtimeSnapshot(session.id)).toMatchObject({ usage: { total_tokens: 180 },
+      turnDiagnostics: { turnId: newTurn, usage: { total_tokens: 30 } } })
+    expect(events.filter(event => event.payload?.usageReplayed === true)).toHaveLength(3)
+    expect(events.filter(event => event.payload?.usageReplayed === true).every(event =>
+      event.payload?.usageAttributedTurnId === oldTurn && event.turnId === newTurn)).toBe(true)
+    if (source === 'platform') {
+      expect(billing.recorded.some(entry => entry.usage.total_tokens === 150 && entry.turnId === oldTurn)).toBe(true)
+      expect(billing.recorded.filter(entry => entry.usage.total_tokens === 150).every(entry => entry.turnId === oldTurn)).toBe(true)
+      expect(billing.recorded.filter(entry => entry.turnId === newTurn).every(entry =>
+        (entry.metadata?.turnDeltaUsage as { total_tokens: number }).total_tokens === 30)).toBe(true)
+      expect(billing.debited.at(-1)?.usage.total_tokens).toBe(180)
+    } else expect(billing.recorded).toEqual([])
+    await manager.dispose()
+    manager = new BeeGameSessionManager(runner, root, env, billing.backend)
+    expect(manager.runtimeSnapshot(session.id, root)).toMatchObject({ usage: { total_tokens: 180 },
+      turnDiagnostics: { turnId: newTurn, usage: { total_tokens: 30 } } })
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('recovered converted-provider counters retain attribution without fabricating missing receipts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-baseline-attribution-'))
+  const billing = createSessionUsageBillingFixture()
+  let starts = 0
+  const runner: BeeGameSessionRunner = { async start(input) {
+    const current = ++starts
+    input.onNativeSessionId?.('converted-native')
+    if (current > 1) input.onNativeUsage?.(sessionUsage(150), 'bgs:converted-native',
+      { replayed: true, baselineOnly: true, nativeTurnId: 'old-native' })
+    return { reusable: false, stop() {}, async submit(turn) {
+      input.onNativeUsage?.(sessionUsage(current === 1 ? 100 : 30), `provider:${current}`)
+      input.onNativeUsage?.(sessionUsage(current === 1 ? 100 : 180), 'bgs:converted-native',
+        { baselineOnly: true, nativeTurnId: current === 1 ? 'old-native' : 'new-native' })
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture' })
+    } }
+  } }
+  const manager = new BeeGameSessionManager(runner, root, () => ({ BEEGAME_MODEL_BILLING_SOURCE: 'byok' }), billing.backend)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner' })
+    await manager.sendWithDisplay(session.id, 'First'); await manager.waitForSessionIdle(session.id)
+    const oldTurn = manager.transcriptFacts(session.id).find(event => event.type === 'turn.started')!.turnId!
+    await manager.sendWithDisplay(session.id, 'Continue'); await manager.waitForSessionIdle(session.id)
+    const events = manager.transcriptFacts(session.id), newTurn = events.findLast(event => event.type === 'turn.started')!.turnId!
+    expect(events.find(event => event.payload?.usageReplayed)?.payload).toMatchObject({
+      usageAttributedTurnId: oldTurn, usageBaselineOnly: true, usage: { total_tokens: 150 } })
+    expect(getRuntimeUsageForTurn(events, oldTurn).total_tokens).toBe(100)
+    expect(getRuntimeUsageForTurn(events, newTurn).total_tokens).toBe(30)
+    expect(getLatestRuntimeUsage(events).total_tokens).toBe(130)
+    expect(billing.recorded).toEqual([])
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('a replay with no matching native turn remains unattributed and cannot charge the new request', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-unknown-attribution-'))
+  const billing = createSessionUsageBillingFixture()
+  const runner: BeeGameSessionRunner = { async start(input) {
+    input.onNativeUsage?.(sessionUsage(100), 'bgs:unknown', { replayed: true, nativeTurnId: 'unavailable-native-turn' })
+    return { stop() {}, async submit(turn) {
+      input.onNativeUsage?.(sessionUsage(150), 'bgs:unknown', { nativeTurnId: 'current-native-turn' })
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture' })
+    } }
+  } }
+  const manager = new BeeGameSessionManager(runner, root, () => ({}), billing.backend)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner', resumeNativeSessionId: 'unknown' })
+    await manager.sendWithDisplay(session.id, 'Continue'); await manager.waitForSessionIdle(session.id)
+    const events = manager.transcriptFacts(session.id), turnId = events.find(event => event.type === 'turn.started')!.turnId!
+    expect(events.find(event => event.payload?.usageReplayed)?.payload?.usageAttributedTurnId).toBeNull()
+    expect(getLatestRuntimeUsage(events).total_tokens).toBe(150)
+    expect(getRuntimeUsageForTurn(events, turnId).total_tokens).toBe(50)
+    expect(billing.recorded.every(entry => entry.usage.total_tokens === 50)).toBe(true)
+    expect(billing.debited.at(-1)?.usage.total_tokens).toBe(50)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+
+for (const oldConverted of [false, true]) test(`replay preserves historical baseline semantics when switching from ${oldConverted ? 'converted BYOK' : 'platform Responses'}`, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-protocol-attribution-'))
+  const billing = createSessionUsageBillingFixture()
+  let starts = 0
+  const runner: BeeGameSessionRunner = { async start(input) {
+    const second = ++starts > 1, converted = second ? !oldConverted : oldConverted
+    input.onNativeSessionId?.('switch-native')
+    if (second) input.onNativeUsage?.(sessionUsage(150), 'bgs:switch-native',
+      { replayed: true, baselineOnly: converted, nativeTurnId: 'native-old' })
+    return { reusable: false, stop() {}, async submit(turn) {
+      if (converted) input.onNativeUsage?.(sessionUsage(second ? 30 : 100), `provider:${starts}`)
+      input.onNativeUsage?.(sessionUsage(second ? 180 : 100), 'bgs:switch-native',
+        { baselineOnly: converted, nativeTurnId: second ? 'native-new' : 'native-old' })
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Fixture' })
+    } }
+  } }
+  const manager = new BeeGameSessionManager(runner, root, () => ({
+    BEEGAME_MODEL_BILLING_SOURCE: (starts === 0 ? oldConverted : !oldConverted) ? 'byok' : 'platform',
+  }), billing.backend)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner' })
+    await manager.sendWithDisplay(session.id, 'First'); await manager.waitForSessionIdle(session.id)
+    const oldTurn = manager.transcriptFacts(session.id).find(event => event.type === 'turn.started')!.turnId!
+    await manager.sendWithDisplay(session.id, 'Continue'); await manager.waitForSessionIdle(session.id)
+    const events = manager.transcriptFacts(session.id), replay = events.find(event => event.payload?.usageReplayed)!
+    const newTurn = events.findLast(event => event.type === 'turn.started')!.turnId!
+    expect(replay.payload?.usageBaselineOnly === true).toBe(oldConverted)
+    expect(replay.payload?.usageAttributedTurnId).toBe(oldTurn)
+    expect(getRuntimeUsageForTurn(events, oldTurn).total_tokens).toBe(oldConverted ? 100 : 150)
+    expect(getRuntimeUsageForTurn(events, newTurn).total_tokens).toBe(30)
+    expect(getLatestRuntimeUsage(events).total_tokens).toBe(oldConverted ? 130 : 180)
+    expect(billing.debited.at(-1)?.usage.total_tokens).toBe(oldConverted ? 30 : 150)
+    expect(billing.recorded.at(-1)?.turnId).toBe(oldConverted ? newTurn : oldTurn)
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })

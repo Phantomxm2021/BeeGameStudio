@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { z } from 'zod/v4'
-import { PROJECT_DOCUMENTS, DESIGN_WRITING_ORDER } from '@bee-game-studio/agent-workflow/design-review-result'
+import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
 import { checkDesignHandoffDraft, designReviewIndexes, type DesignHandoff } from './design-handoff'
 import { designSourceLocations, readDesignSections } from './design-source-reading'
 import { auditAssetContract } from './asset-contract-audit'
@@ -32,7 +32,7 @@ export function readDesignHandoff(workspace: string, input: unknown) {
     try { return readDesignSections(workspace, [request]).sources }
     catch (error) { issues.push(request.document + ': ' + reason(error)); return [] }
   })
-  const documents = designSourceLocations(workspace, read.length ? [...new Set(read.map(item => item.document))] : DESIGN_WRITING_ORDER)
+  const documents = designSourceLocations(workspace, read.length ? [...new Set(read.map(item => item.document))] : PROJECT_DOCUMENTS)
     .map(document => {
       if (read.length && document.unavailable) issues.push(document.document + ': ' + document.unavailable)
       const requests = read.filter(request => request.document === document.document)
@@ -48,18 +48,18 @@ export function readDesignHandoff(workspace: string, input: unknown) {
     note: 'Read availability only, not design completeness or approval. Unrequested missing documents do not fail a read. No index requirement counts, metadata changes or baseline lock. Use read:[{document:"GDD.md"}] for headings; add sections:["Exact heading"] for prose.' }
 }
 
-/** The existing technical index locates prose; it is not a second task store. */
+/** The optional GDD index locates implementation prose; it is not a second task store. */
 export function readImplementationTask(workspace: string, input: unknown) {
   const { id } = implementationReadSchema.parse(input)
   const indexes = designReviewIndexes(workspace, PROJECT_DOCUMENTS)
-  const technical = indexes.find(index => index.document === 'TECHNICAL_DESIGN.md')!
-  const items: NonNullable<DesignHandoff['implementationItems']> = 'implementationItems' in technical ? technical.implementationItems ?? [] : []
-  const issues = [...checkDesignHandoffDraft(workspace, 'TECHNICAL_DESIGN.md', { finalTechnical: true }).issues]
+  const gdd = indexes.find(index => index.document === 'GDD.md')!
+  const items: NonNullable<DesignHandoff['implementationItems']> = 'implementationItems' in gdd ? gdd.implementationItems ?? [] : []
+  const issues = [...checkDesignHandoffDraft(workspace, 'GDD.md').issues]
   const directory = items.map(item => ({ id: item.id, dependsOn: item.dependsOn,
     dependencyStatus: item.dependsOn === undefined ? 'unspecified' : 'not-verified', section: item.section }))
   const result = { scope: 'saved-implementation-task', directory, issues,
-    documents: designSourceLocations(workspace, ['TECHNICAL_DESIGN.md']),
-    note: 'Read-only technical source and optional existing task index. No index is required; an empty directory does not mean implementation is complete. Read the technical document and choose the work organization. Reading does not lock or authorize implementation.' }
+    documents: designSourceLocations(workspace, ['GDD.md']),
+    note: 'Read-only GDD source and optional existing task index. No index is required; an empty directory does not mean implementation is complete. Read the relevant GDD sections and choose the work organization. Reading does not lock or authorize implementation.' }
   if (id === undefined) return { ...result, valid: !issues.length }
   const matches = items.filter(item => item.id === id)
   if (matches.length !== 1) return { ...result, valid: false,
@@ -76,7 +76,7 @@ export function readImplementationTask(workspace: string, input: unknown) {
     if (!output.acceptance) issues.push(`Missing acceptance for ${ref.document}#${ref.id}`)
     return { ...ref, section: output.section, acceptance: output.acceptance }
   })
-  const requests = new Map<string, Set<string>>([['TECHNICAL_DESIGN.md', new Set([task.section])]])
+  const requests = new Map<string, Set<string>>([['GDD.md', new Set([task.section])]])
   for (const requirement of requirements) {
     if (!('section' in requirement)) continue
     const sections = requests.get(requirement.document) ?? new Set<string>()
@@ -103,7 +103,7 @@ export function readImplementationTask(workspace: string, input: unknown) {
   // Keep source sections intact; the selected task/requirements already identify
   // the requested work without silently rewriting authoritative prose.
   const siblings = items.filter(item => item.section === task.section)
-  if (siblings.length > 1) for (const source of sources.filter(source => source.document === 'TECHNICAL_DESIGN.md')) for (const read of source.reads)
+  if (siblings.length > 1) for (const source of sources.filter(source => source.document === 'GDD.md')) for (const read of source.reads)
     Object.assign(read, { selection: 'shared-section', note: 'Multiple tasks share this section; original source text is retained.' })
   return { ...result, directory: directory.filter(item => item.id === id), valid: !issues.length, task, requirements, sources }
 }

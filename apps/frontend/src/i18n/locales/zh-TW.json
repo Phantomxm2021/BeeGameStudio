@@ -660,7 +660,6 @@
       "capacity": "所選模型目前已滿載，請嘗試其他模型。",
       "retry": "重試",
       "retryNow": "立即重試",
-      "retryIn": "{{seconds}} 秒後重試",
       "retrying": "重試中…"
     },
     "userQuestion": {
@@ -867,7 +866,7 @@
       "deploymentUrlPending": "待發布後顯示",
       "deploymentAutofill": "一鍵填寫",
     "deploymentAutofilling": "填寫中…",
-    "deploymentAutofillHint": "根據目前專案文件整理介紹，並擷取目前建置的初始畫面。介紹整理會使用模型額度；填寫後可修改，不會自動發布。",
+    "deploymentAutofillHint": "使用已確認的 brief 填寫簡介和玩法，從 GDD 補充具體操作，並擷取目前建置的初始畫面。不呼叫模型；填寫後可修改，不會自動發布。",
     "deploymentProgress": "發布進度",
     "deploymentPrepare": "建置並檢查",
     "deploymentUploading": "正在上傳 · {percent}%",
@@ -920,7 +919,7 @@
       "cachedInputTokens": "快取輸入 Tokens",
       "freshInputTokens": "輸入",
       "cacheReadTokens": "快取輸入",
-      "cacheCreationTokens": "快取建立 Tokens",
+      "cacheCreationTokens": "快取寫入 Tokens",
       "outputTokens": "輸出",
       "rawProcessedTokens": "處理總量（含快取）",
       "weightedConsumption": "加權消耗",
