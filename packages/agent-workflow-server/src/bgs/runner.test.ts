@@ -1440,6 +1440,11 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
       } else {
         expect(error?.message).toContain({ unresolved: 'still has unresolved', 'new-defect': 'still has unresolved', 'missing-resolution': 'exactly one evidence-backed disposition', 'missing-response': 'exactly one evidence-backed disposition', 'advisory-label': 'invalid report', invalid: 'invalid JSON', failed: 'review failed', 'source-changed': 'changed during' }[outcome])
         expect(accepted).toHaveLength(0)
+        if (outcome === 'unresolved' || outcome === 'new-defect') {
+          expect(error?.message).toContain(finding.issue)
+          expect(error?.message).toContain(disposition.evidence)
+          expect(error?.message).toContain('without another automatic review')
+        }
       }
       const rounds = needsRevision ? 2 : 1
       expect(receipts).toHaveLength(['invalid', 'failed', 'source-changed', 'advisory-label'].includes(outcome) ? 0 : outcome === 'missing-resolution' ? 1 : rounds)

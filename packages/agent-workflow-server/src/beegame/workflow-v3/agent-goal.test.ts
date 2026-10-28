@@ -11,7 +11,7 @@ import { createRun, digest, type Run } from './state'
 import { PRODUCTION_WORKFLOW_GUIDANCE, DESIGN_ASSIGNMENTS } from './production-workflow'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
-import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS, VISUAL_REFERENCE_EXPECTATIONS, PRODUCTION_DEPENDENCIES } from './project-guide'
+import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS, VISUAL_REFERENCE_EXPECTATIONS } from './project-guide'
 import { createAgentMeasurement } from './agent-measurement'
 import { writeDesignDocumentsFixture } from '../fixtures/layout-fixture'
 import { readContentView } from './content-view'
@@ -67,14 +67,15 @@ test('implementation reads and exact visual saves preserve authorized requiremen
   }finally{await measurement?.close();await editor.dispose();await f.close()}
 },30000)
 
-test('resource context carries source priority and authorization without prescribing tool steps', () => {
+test('resource context preserves source preferences and authorization without a sourcing tour', () => {
   for (const prompt of [agentProfessionalContextForRun({} as Run), agentProfessionalContextForRun({} as Run, true)]) {
     expect(prompt).not.toContain('purpose: production')
     expect(prompt).not.toContain('file_paths')
     expect(prompt).not.toContain('local_path')
     expect(prompt).toContain('required licenses')
-    expect(prompt).toContain('Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method')
-    expect(prompt).toContain('does not authorize automatic procedural replacement')
+    expect(prompt).not.toContain('Default sourcing order')
+    expect(prompt).toContain('resource-library preferences')
+    expect(prompt).toContain('Failed sourcing does not authorize changing those requirements')
     expect(prompt).toContain('usage rights')
     expect(prompt).toContain('read-only quote')
     expect(prompt).toContain('no redundant per-image approval')
@@ -246,8 +247,8 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
     expect(String(f.submissions[0]!.prompt)).not.toContain(JSON.stringify(f.body.brief))
     expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
     expect(String(f.submissions[0]!.prompt)).toContain('Complete one GDD covering gameplay, levels, balance, art, ui, audio, resources and technical')
-    expect(String(f.submissions[0]!.prompt)).toContain('$game-creative-director-expert, $game-systems-designer-expert')
-    expect(String(f.submissions[0]!.prompt)).toContain('$game-level-designer-expert')
+    expect(String(f.submissions[0]!.prompt)).not.toMatch(/\$game-[A-Za-z0-9_-]+/)
+    expect(String(f.submissions[0]!.prompt)).toContain('Select relevant Skills')
     expect(f.submissions[0]!.nativeGoal).toBeUndefined()
     expect(run.productionWorkflow).toBe(1)
     expect(f.starts[0].systemContext).toContain('one GDD document task')
@@ -456,7 +457,7 @@ test('goal and follow-ups leave catalog reads to the Agent and preserve user sou
     const initial=f.starts[0].systemContext
     expect(initial).not.toContain('fixture-audio')
     expect(f.submissions[0]!.confirmedBriefContext).toContain(f.body.brief.idea)
-    expect(initial).toContain('Honor explicit resource sources and usage rights')
+    expect(initial).toContain('Honor explicit resource sources')
     expect(JSON.parse(run.requirements.text)).toEqual(f.body.brief)
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     for(const intent of ['work','change'] as const) {
@@ -625,13 +626,11 @@ test('project guide refreshes at the next work turn without repeating user histo
     await writeFile(file, PROJECT_WORKING_CONVENTIONS)
     await send('work', 'guide-current')
     expect(f.starts[2].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
-    expect(f.starts[2].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
     expect(await readFile(file, 'utf8')).toBe(PROJECT_WORKING_CONVENTIONS)
     await rm(file);await send('work','guide-missing')
     expect(f.starts[3].systemContext).toContain('No root project guide exists')
     expect(f.starts[3].systemContext).not.toContain('GUIDE_ROUTE_TWO')
     expect(f.starts[3].systemContext).not.toContain(VISUAL_REFERENCE_EXPECTATIONS)
-    expect(f.starts[3].systemContext).not.toContain(PRODUCTION_DEPENDENCIES)
     expect(run.requirements).toEqual(requirements)
     expect(run.requirementChanges).toBeUndefined()
     expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
@@ -828,7 +827,6 @@ test('shared guide supplies design methods once without a compatibility fallback
     const context=professional+'\n'+savedGuide
     expect(context.split('## Professional methods')).toHaveLength(2)
     expect(context.split('## Required design dependencies')).toHaveLength(2)
-    expect(context.split(PRODUCTION_DEPENDENCIES)).toHaveLength(2)
     for(const value of ['Select and read applicable Skills','docs/GDD.md','PROJECT_SPECIFIC_ROUTE',
       'unknown paid replay or automatic paid retry','respect exclusions and the project budget','required licenses'])expect(context).toContain(value)
   }
@@ -1392,18 +1390,17 @@ test('first and resumed goals retain professional coverage and design dependenci
   for (const professional of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
     const prompt=PROJECT_WORKING_CONVENTIONS+'\n'+professional
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
-    for (const section of ['docs/GDD.md','gameplay/systems','balance','level/scene',
-      'art','UI/UX','audio','resources/content','technical design']) expect(prompt).toContain(section)
+    for (const section of ['docs/GDD.md','gameplay','balance','space',
+      'art','UI/UX','audio','resources','technical']) expect(prompt).toContain(section)
     expect(prompt).toContain('Use actual asset metrics and existing checks when binding resources')
-    expect(prompt).toContain('without reducing the full delivery scope or requiring every screen, variant and asset up front')
+    expect(prompt).toContain('The current user assignment determines deliverables and stopping point')
     expect(prompt).toContain('Preserve confirmed requirements')
-    expect(professional).toContain('When starting concrete resource production, gameplay programming, technical art, feel tuning, debugging or verification work')
-    expect(professional).toContain('Reuse relevant guidance still in context')
-    expect(professional).toContain('when work affects implementation, verify the affected code and behavior in the target runtime')
-    expect(professional).toContain('reading a Skill or naming it does not establish effective application')
+    expect(professional).toContain('Select applicable Skills for concrete problems')
+    expect(professional).toContain('reuse guidance already in context')
+    expect(professional).toContain('verify required behavior and presentation in the target runtime')
     for(const name of ['gameplay-programmer','game-technical-artist','game-feel-designer','root-cause-debugging'])
       expect(professional).not.toContain(name)
-    expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
+    expect(prompt).toContain('Skill invocation and model review are evidence with limited coverage, not certification')
   }
   expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
   expect(agentGoalPrompt(run)).not.toContain('Plan and execute autonomously')

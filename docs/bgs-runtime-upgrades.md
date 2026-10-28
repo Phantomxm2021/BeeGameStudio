@@ -368,3 +368,14 @@ BGS 从当前 CLI 的 `debug models --bundled` 读取完整内置目录，通过
 本地验证使用合成临时项目、模拟 app-server 及真实原生 app-server 连接本地假 Responses/Chat Completions 服务。核查实质缺陷不能按 advisory 放行、逐项响应与复核不能缺项、误报可被有证据地驳回、修订新缺陷不能放行、上下文隔离、只读权限、回合身份、用量，以及暂停／失败后保留草稿并恢复。未调用付费模型、改动真实测试项目、前端或原生 CLI，也未重启现有服务；运行后端需按空闲检查规则重启后加载。沿用现有用量统计，不新增账本或预算框架。
 
 宿主只保证报告契约、执行与版本事实，无法程序化证明自然语言证据、缺陷范围或处置结论正确。模型仍可能漏检、给出虚假依据或错误宣称已修正；删除严重度开关和补齐逐项响应不能消除这些语义风险。本地模拟不证明真实发现能力、误报率、修订质量或 tokens／耗时收益，后续需另行授权的有限真实验证。
+
+
+## Host execution boundaries (2026-10-28)
+
+BGS supplies authorized scope, confirmed target, current capabilities and delivery contracts. The native CLI owns execution, continuation and Skill discovery; the Agent selects professional methods. The GDD assignment still covers all eight design responsibilities, but no longer invokes a fixed set of nine Skills. Native explicit user Skill requests remain supported. Implementation retains its existing execution Skill.
+
+The project guide now owns durable source/evidence conventions; current final-result and delivery operations stay in task and tool contracts. Shared parallel guidance retains write ownership and cleanup boundaries without prescribing a detailed delegation procedure. Resource sourcing and visual production follow explicit user preferences, rights, selected designs and budget; no universal library/public/AI sequence, image-generation-only board or blanket procedural-art ban is imposed. Inspectable visual designs, required artwork and actual runtime evidence remain required where applicable.
+
+Independent GDD review remains read-only and source-bound, with at most one author revision and one targeted follow-up. Unsupported findings can be rejected with evidence and independently checked without changing the document. Unresolved findings still block handoff; the final error now includes the findings, reviewer resolutions and author responses for a concrete decision, rather than only a summary. No automatic override, extra reviewer or retry is added. Structural validation cannot prove semantic correctness; this change does not claim to eliminate model mistakes.
+
+Existing project AGENTS.md files and generated artifacts are not rewritten. The shorter guide applies to new initialization; existing native histories may retain prior guidance. No service restart or paid run is part of this adjustment. Offline and scripted native tests validate contracts and loading behavior, not live quality, latency or monetary savings.

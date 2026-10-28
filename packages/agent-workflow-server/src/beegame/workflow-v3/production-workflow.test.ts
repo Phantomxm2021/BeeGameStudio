@@ -68,23 +68,25 @@ test('saved resource assignments still hand off to implementation',async()=>{
 })
 
 
-test('one document assignment contains all eight responsibilities and platform-specific Skills',async()=>{
+test('one document assignment covers all responsibilities without forcing Skill invocation',async()=>{
   const f=await fixture()
   try {
     expect(f.turn.production).toEqual({stage:'design',originRequestKey:'start'})
     const prompt=productionAssignmentPrompt(f.run,f.turn.production!)
     for(const design of Object.values(DESIGN_ASSIGNMENTS)) {
       expect(prompt).toContain(design.question)
-      for(const skill of design.skills)expect(prompt).toContain('$'+skill)
     }
+    expect(prompt).not.toMatch(/\$[A-Za-z][A-Za-z0-9_-]*/)
+    expect(productionAssignmentFacts(f.run,f.turn.production!)).not.toHaveProperty('requiredSkills')
     expect(prompt).toContain('WriteProjectFile/EditProjectFile')
     expect(prompt).toContain('ready or blocked status')
     expect(prompt).not.toContain('complete Markdown document in document')
     expect(prompt).not.toContain('nextDesign')
     f.run.requirements.constraints.platform='VR/AR'
     const spatial=productionAssignmentPrompt(f.run,f.turn.production!)
-    expect(spatial).toContain('$spatial-computing-ux-designer-expert')
-    expect(spatial).not.toContain('$game-ui-ux-designer')
+    expect(spatial).toContain('confirmed target')
+    expect(spatial).not.toMatch(/\$[A-Za-z][A-Za-z0-9_-]*/)
+    expect(f.run.requirements.constraints.platform).toBe('VR/AR')
   }finally{await f.close()}
 })
 

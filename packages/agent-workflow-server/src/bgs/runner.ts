@@ -749,12 +749,12 @@ class BgsRuntime implements BeeGameSessionRuntime {
         reviewer.findingCount = report.findings.length
         turn.finalOutputText = undefined; turn.finalOutputId = undefined; turn.turnId = undefined
         const resumed = await this.client.request('turn/start', { threadId: this.threadId, input: [{ type: 'text', text:
-          'The independent GDD review found material issues. Its claims are not authoritative answers. For each numbered finding, derive a disposition from the current saved definitions and affected entities/conditions; calculate disputed relations as needed. Correct supported defects and their dependencies, or reject unsupported findings with specific evidence. Make one concentrated revision using the existing working-document tools; batch related edits. Keep the original scope and recoverable draft. Do not regenerate, spawn reviewers or repeat a broad self-audit. Return ready/blocked with a short summary and reviewResponses: [{finding: <1-based index>, status: <corrected|rejected|unresolved>, evidence: <saved locations, definitions and derivation>}]. A blanket acceptance is not a response. Unresolved issues leave the task blocked. The host performs one targeted follow-up, not another revision loop.\n\n' + JSON.stringify({ findings: report.findings.map((finding, index) => ({ finding: index + 1, ...finding })) }) }] })
+          'Address these independent GDD findings under the existing author revision contract. They are claims to verify, not authoritative corrections. Return the required ready/blocked result and numbered reviewResponses.\n\n' + JSON.stringify({ findings: report.findings.map((finding, index) => ({ finding: index + 1, ...finding })) }) }] })
         if (typeof resumed.turn?.id !== 'string') throw Error('BGS did not acknowledge the GDD revision turn')
         if (this.active === turn) turn.turnId = resumed.turn.id
         return
       }
-      if (unresolved) throw Error('Independent GDD review still has unresolved findings after the single revision: ' + report.summary)
+      if (unresolved) throw Error('Independent GDD review still has unresolved findings after the single revision; preserve the draft for resolution, without another automatic review. ' + report.summary + '\n' + JSON.stringify({ findings: report.findings, resolutions: report.resolutions, authorResponses }))
       const summary = await contract.accept(value)
       turn.input.signal.throwIfAborted()
       await this.emit('assistant.message', summary + '\n\n' + report.summary, { messageId: turn.finalOutputId, assistantBlockId: turn.finalOutputId })
