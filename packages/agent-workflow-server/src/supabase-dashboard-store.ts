@@ -1,3 +1,4 @@
+import { normalizeMcpHeaders } from './mcp-http-headers'
 import { randomUUID } from 'node:crypto'
 import { decodeImageSettings, encodeImageSettings, type ImageSettings } from './image-generation/config-store'
 import { createTLSAwareFetch } from '@bee-game-studio/security-core'
@@ -636,7 +637,7 @@ export class SupabaseDashboardStore {
           method: 'PATCH',
           headers: { Prefer: 'return=minimal' },
           body: JSON.stringify({
-            env_ciphertext: { env: migratedEnv },
+            env_ciphertext: { ...envPayload, env: migratedEnv },
             updated_at: new Date().toISOString(),
           }),
         },
@@ -706,6 +707,9 @@ export class SupabaseDashboardStore {
           autoStart: normalized.autoStart,
         },
         env_ciphertext: {
+          headers: (normalized.headers ?? []).map(item => ({ ...item,
+            ...(item.value !== undefined ? { value: encryptSecret(item.value, `mcp-server:header:${item.key}`) } : {}),
+          })),
           env: (normalized.env ?? []).map(item => ({
             ...item,
             ...(item.value !== undefined
@@ -1417,6 +1421,9 @@ function rowToMcpServer(row: SupabaseMcpServerRow): McpServerConfig {
     ...(Array.isArray(config.args) ? { args: config.args.map(String) } : {}),
     ...(typeof config.url === 'string' ? { url: config.url } : {}),
     ...(typeof config.cwd === 'string' ? { cwd: config.cwd } : {}),
+    headers: normalizeEnvFromUnknown(envPayload.headers).map(item => ({ ...item,
+      ...(item.value !== undefined ? { value: decryptSecret(item.value, `mcp-server:header:${item.key}`) } : {}),
+    })),
     env: normalizeEnvFromUnknown(envPayload.env).map(item => ({
       ...item,
       ...(item.value !== undefined
@@ -1449,6 +1456,7 @@ function normalizeMcpServerInput(
     scope,
     cwd: trimString(input.cwd) || undefined,
     env,
+    headers: normalizeMcpHeaders(input.headers, existing?.headers),
     autoStart:
       typeof input.autoStart === 'boolean'
         ? input.autoStart
@@ -1470,6 +1478,7 @@ function normalizeMcpServerInput(
 function toPublicMcpServerConfig(config: McpServerConfig): McpServerConfig {
   return {
     ...config,
+    headers: (config.headers ?? []).map(item => ({ key: item.key, ...(item.value ? { valuePreview: '••••' } : {}) })),
     env: (config.env ?? []).map(item => ({
       key: item.key,
       valuePreview: previewSecret(item.value),

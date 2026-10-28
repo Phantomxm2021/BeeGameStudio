@@ -4,6 +4,9 @@ export type DesktopOAuthCallbackHandler = (
 
 export type BeeGameDesktopBridge = {
   readonly isDesktop: true
+  readonly platform?: string
+  onCommand?: (handler: (command: 'new-project' | 'toggle-sidebar' | 'focus-input') => void) => () => void
+  setTheme?: (isDark: boolean) => Promise<void>
   openExternal: (url: string) => Promise<void>
   onOAuthCallback: (handler: DesktopOAuthCallbackHandler) => () => void
 }

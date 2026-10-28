@@ -154,3 +154,41 @@ test('native command receipt records a load without pretending the model invoked
   expect(skillEvidence([{id:1,type:'assistant.message',payload},
     {id:2,type:'system.status',payload:{...payload,skill:{...payload.skill,status:'pending'}}}])).toEqual([])
 })
+
+
+test('Shell Skill evidence links native events without generating a second outcome state',()=>{
+  const skillReads=[{name:'method',path:'/catalog/method/SKILL.md'},
+    {name:'method',path:'/catalog/method/references/detail.md'}]
+  const started={id:1,type:'tool.started',payload:{toolName:'Shell',toolUseID:'read',skillReads,parentToolUseID:'child'}}
+  const complete={id:3,type:'tool.completed',payload:{...started.payload,exitCode:0,output:'Selected or truncated content'}}
+  const events=[started,{id:2,type:'tool.progress',payload:started.payload},complete,complete]
+  const before=structuredClone(events),uses=skillEvidence(events)
+  expect(uses).toHaveLength(2)
+  expect(uses.map(use=>use.path)).toEqual(skillReads.map(read=>read.path))
+  expect(uses.every(use=>use.source==='shell'&&use.eventId===complete.id&&use.parentToolUseID==='child')).toBe(true)
+  for(const event of [started,complete,{...complete,id:4,type:'tool.failed',payload:{...complete.payload,exitCode:1}},
+    {...complete,id:5,payload:{...complete.payload,exitCode:undefined}}]) {
+    const links=skillEvidence([event])
+    expect(links).toHaveLength(2)
+    expect(links.every(link=>link.eventId===event.id&&link.toolUseID===event.payload.toolUseID)).toBe(true)
+    expect(links.every(link=>!Object.hasOwn(link,'status'))).toBe(true)
+  }
+  expect(events).toEqual(before)
+  // Metadata is not inferred from commands, output claims, progress or assistant prose.
+  expect(skillEvidence([{...complete,type:'assistant.message'},
+    {id:4,type:'tool.completed',payload:{toolName:'Shell',toolUseID:'unknown',exitCode:0,
+      input:{command:'echo /catalog/method/SKILL.md'},output:'I applied method successfully'}}])).toEqual([])
+})
+
+test('Shell read links and former read statuses never enter historical loader receipts',()=>{
+  const run=createRun({projectId:'reads',ownerId:'owner',workspacePath:'/unused',chatSessionId:'chat',requestKey:'goal',text:'Goal',constraints:{},ids:['goal']})
+  const reads=skillEvidence([{id:1,type:'tool.completed',payload:{toolName:'Shell',toolUseID:'read',exitCode:0,
+    skillReads:[{name:'method',path:'/catalog/method/SKILL.md'}]}}])
+  run.agentTurns=[{attemptId:'first',requestKey:'first',sessionId:'chat',workerId:'worker',fence:1,status:'ended',
+    startedAt:'past',nativeSessionId:'same',skillUses:[...reads,{...reads[0]!,status:'read-command-completed'},
+      {...reads[0]!,name:'child-method',parentToolUseID:'child'}]},
+    {attemptId:'current',requestKey:'current',sessionId:'chat',workerId:'worker',fence:2,status:'running',startedAt:'now'}]
+  const before=structuredClone(run)
+  expect(priorMainSkillLoads(run,'current')).toEqual({recordedMainLoads:[],contextPresence:'unverified',application:'unverified'})
+  expect(run).toEqual(before)
+})

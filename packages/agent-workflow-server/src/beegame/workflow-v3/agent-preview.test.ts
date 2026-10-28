@@ -66,34 +66,56 @@ test('writer Preview uses the ordinary isolated build root, preserves the opaque
 },30000)
 
 
-test('candidate files use small state reads and retain identity, race, capability and byte guards',async()=>{
+test('candidate files minimize state reads while retaining identity, race, capability and byte guards',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-preview-state-')))
   try {
     await mkdir(join(root,'dist'));await writeFile(join(root,'dist/index.html'),'fixture')
-    for(const failure of ['none','version','writer','binding','owner','capability','bytes'] as const) {
+    for(const owned of [false,true]) for(const failure of ['none','version','writer','writer-ended','binding','owner','run-id','missing','capability','capability-before','bytes'] as const) {
       const run=createRun({projectId:'project',ownerId:'owner',workspacePath:root,chatSessionId:'chat',requestKey:'goal',text:'Fixture',constraints:{},ids:['goal']})
-      let full=0,small=0,armed=false
+      if(owned)run.writer={attemptId:'first',workerId:'w',fence:1}
+      let full=0,small=0,armed=false,capabilitySession=''
       const capabilities=createPreviewCapabilityManager()
+      const issueRoute=capabilities.issueRouteId
+      capabilities.issueRouteId=(session,owner)=>{capabilitySession=session;return issueRoute(session,owner)}
       const preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities,isBusy:()=>false,
         readRun:async()=>{full++;return structuredClone(run)},
         readPreviewState:async()=>{
           small++
-          if(armed && small===2) {
+          if(armed && small===(owned?1:2)) {
             if(failure==='version')run.version++
             if(failure==='writer')run.writer={attemptId:'other',workerId:'w',fence:2}
+            if(failure==='writer-ended')delete run.writer
+            if(failure==='run-id')run.id='other'
+            if(failure==='missing')return undefined
             if(failure==='binding')run.workspacePath+='/other'
             if(failure==='owner')run.ownerId='other'
-            if(failure==='capability')preview.dispose()
+            if(failure==='capability')capabilities.revokeSession(capabilitySession)
           }
           return previewRunState(run)
         }})
       try {
-        const opened=await preview.openCandidate(run);full=0;small=0;armed=true
+        const opened=await preview.openCandidate(run,run.writer);full=0;small=0;armed=true
+        if(failure==='capability-before')capabilities.revokeSession(capabilitySession)
         if(failure==='bytes')await writeFile(join(root,'dist/index.html'),'changed')
         const response=await preview.handle(new Request(opened.url))
-        expect(response?.status).toBe(failure==='none'?200:409)
+        const allowed=failure==='none'||(failure==='version'&&owned)||(failure==='writer-ended'&&!owned)
+        expect(response?.status).toBe(allowed?200:409)
+        if(!allowed)expect(await response?.text()).not.toBe('fixture')
         expect(full).toBe(0)
-        expect(small).toBe(failure==='bytes'?1:2)
+        expect(small).toBe(failure==='capability-before'?0:failure==='bytes'?(owned?0:1):owned?1:2)
+        if(failure==='none') {
+          for(const method of ['HEAD','OPTIONS']) {
+            small=0
+            const result=await preview.handle(new Request(opened.url,{method}))
+            expect(result?.status).toBe(method==='HEAD'?200:204)
+            expect(await result?.text()).toBe('')
+            expect(small).toBe(method==='OPTIONS'||owned?1:2)
+          }
+          small=0
+          const responses=await Promise.all(Array.from({length:6},()=>preview.handle(new Request(opened.url))))
+          expect(responses.map(item=>item?.status)).toEqual(Array(6).fill(200))
+          expect(small).toBe(owned?6:12)
+        }
       }finally{preview.dispose();await writeFile(join(root,'dist/index.html'),'fixture')}
     }
   }finally{await rm(root,{recursive:true,force:true})}

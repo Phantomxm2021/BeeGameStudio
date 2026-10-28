@@ -1,4 +1,6 @@
 import { resolveMcpOutboundTarget } from '../mcp-outbound-policy'
+import { mcpHttpHeaders } from '../mcp-http-headers'
+import type { McpServerEnvVar } from '../mcp-servers-store'
 import { modelRuntimeFetch } from './model-runtime-transport'
 import { getTLSFetchOptions, resolveApprovedOutboundTarget, type OutboundTargetPolicyOptions,
   type ApprovedOutboundTarget } from '@bee-game-studio/security-core'
@@ -9,20 +11,27 @@ export type McpHttpNetworkOptions = {
   resolveOutboundTarget?: typeof resolveApprovedOutboundTarget
 }
 
+export type McpHttpServer = { url: string; headers?: McpServerEnvVar[] }
+
 /** Native MCP has no custom DNS transport hook. Relay only the selected, pinned
  * endpoints; never give the native client an unrestricted remote URL. */
-export async function startNativeMcpHttp(servers: Record<string, string>, options: McpHttpNetworkOptions = {}) {
+export async function startNativeMcpHttp(servers: Record<string, string | McpHttpServer>, options: McpHttpNetworkOptions = {}) {
   const targets: Record<string, ApprovedOutboundTarget> = {}
-  for (const [name, url] of Object.entries(servers)) {
+  const upstreamHeaders: Record<string, Record<string, string>> = {}
+  for (const [name, config] of Object.entries(servers)) {
+    const url = typeof config === 'string' ? config : config.url
+    upstreamHeaders[name] = mcpHttpHeaders(typeof config === 'string' ? undefined : config.headers)
     const target = await resolveMcpOutboundTarget(url, options.outboundTargetPolicyOptions, options.resolveOutboundTarget)
     if (!target) throw Error('MCP endpoint is not permitted: ' + name)
     targets[name] = target
   }
   const request = createPinnedRuntimeFetch(modelRuntimeFetch, targets, { tls: getTLSFetchOptions().tls })
   const capability = crypto.randomUUID(), routes = new Map<string, ApprovedOutboundTarget>()
+  const routeHeaders = new Map<string, Record<string, string>>()
   const paths = Object.fromEntries(Object.entries(targets).map(([name, target]) => {
     const path = '/' + crypto.randomUUID() + '/mcp'
     routes.set(path, target)
+    routeHeaders.set(path, upstreamHeaders[name]!)
     return [name, path]
   }))
   const active = new Map<AbortController, Promise<void>>()
@@ -40,7 +49,7 @@ export async function startNativeMcpHttp(servers: Record<string, string>, option
         let finish!: () => void
         active.set(abort, new Promise(resolve => { finish = () => { active.delete(abort); resolve() } }))
         try {
-          const headers = new Headers()
+          const headers = new Headers(routeHeaders.get(url.pathname))
           for (const name of ['accept', 'content-type', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id']) {
             const value = incoming.headers.get(name)
             if (value !== null) headers.set(name, value)

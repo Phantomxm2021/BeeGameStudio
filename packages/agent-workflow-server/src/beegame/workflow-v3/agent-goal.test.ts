@@ -8,6 +8,7 @@ import { registerV3Routes } from './routes'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, assertCommit, type WorkflowStore } from './store'
 import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProfessionalContextForRun, focusedExecutionFacts } from './agent-goal'
 import { createRun, digest, type Run } from './state'
+import { PRODUCTION_WORKFLOW_GUIDANCE, DESIGN_ASSIGNMENTS } from './production-workflow'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
 import { initializeProjectGuide, PROJECT_WORKING_CONVENTIONS, VISUAL_REFERENCE_EXPECTATIONS, PRODUCTION_DEPENDENCIES } from './project-guide'
@@ -17,6 +18,14 @@ import { readContentView } from './content-view'
 import { createV3Executor } from './execution'
 import { openDesignActions } from './agent-tools'
 import { projectPreviewCapabilityPath } from '../project-preview-capability'
+
+async function recordSyntheticDesignReview(input: BeeGameSessionSubmitInput) {
+  const review = input.finalOutput!.designReview!
+  const {source} = await review.candidate({status:'ready',summary:'Synthetic candidate'})
+  await review.record({source,nativeThreadId:'synthetic-reviewer',nativeTurnId:'synthetic-review-turn',
+    startedAt:'2026-01-01T00:00:00.000Z',finishedAt:'2026-01-01T00:00:01.000Z',
+    report:{summary:'Synthetic independent report',findings:[]}})
+}
 
 test('implementation reads and exact visual saves preserve authorized requirements without freezing later work',async()=>{
   const f=await fixture('wait'),editor=createV3Executor({store:f.store,sessions:f.sessions})
@@ -171,9 +180,14 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     }
   }}
   const starts:any[]=[]
-  const sessions=new BeeGameSessionManager({async start(input){starts.push(input);const nativeId=input.resumeSessionId??(starts.length===1?'11111111':String(starts.length).padStart(8,'0'))+'-2222-4333-8444-555555555555';input.onNativeSessionId?.(nativeId);const onNativeUsage=input.onNativeUsage;return {
+  const sessions=new BeeGameSessionManager({async start(input){starts.push(input);const nativeId=input.resumeSessionId??(starts.length===1?'11111111':String(starts.length).padStart(8,'0'))+'-2222-4333-8444-555555555555';input.onNativeSessionId?.(nativeId);const onNativeUsage=input.onNativeUsage;let currentInput:BeeGameSessionSubmitInput|undefined;let terminalStatus:string|undefined;return {
+    async completeGoal(status:'complete'|'blocked'='complete') {
+      terminalStatus=status
+      await currentInput!.onMessage({type:'runtime_event',runtime:'bgs',eventType:'system.status',subtype:'native_goal',threadId:nativeId,
+        nativeGoal:{status,objective:'Synthetic original assignment',tokenBudget:null,tokensUsed:48,timeUsedSeconds:1}})
+    },
     async submit(input) {
-      submissions.push(input)
+      currentInput=input;submissions.push(input)
       const goalEvent=async(status:string,tokensUsed=48)=>input.onMessage({type:'runtime_event',runtime:'bgs',eventType:'system.status',
         subtype:'native_goal',threadId:nativeId,nativeGoal:{status,objective:'Synthetic original assignment',tokenBudget:faults.nativeGoalBudget??null,tokensUsed,timeUsedSeconds:1}})
       if(faults.nativeGoalStatus && input.nativeGoal)await goalEvent('active')
@@ -185,7 +199,7 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
       if(mode==='wait') await new Promise<void>(resolve=>{
         if(input.signal.aborted)resolve();else input.signal.addEventListener('abort',()=>resolve(),{once:true})
       })
-      if(faults.nativeGoalStatus && input.nativeGoal)await goalEvent(input.signal.aborted && !faults.pauseUnavailable ? 'paused' : faults.nativeGoalStatus, input.signal.aborted ? faults.pauseTokens : undefined)
+      if(!terminalStatus && faults.nativeGoalStatus && input.nativeGoal)await goalEvent(input.signal.aborted && !faults.pauseUnavailable ? 'paused' : faults.nativeGoalStatus, input.signal.aborted ? faults.pauseTokens : undefined)
       if(mode==='fail')throw new Error('Synthetic native failure')
       onNativeUsage?.({prompt_tokens:40,completion_tokens:8,cache_read_tokens:0,cache_creation_tokens:0,total_tokens:48})
       if(!faults.noAssistant)await input.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Synthetic end, not game acceptance' })
@@ -226,18 +240,21 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
     expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:false})
     const initialMessage = f.sessions.transcript(run.chatSessionId).find(event => event.type === 'user.message')!
     expect(initialMessage, run.blockedReason).toBeDefined()
-    expect(initialMessage.payload?.displayText).toBe('Production: design / gameplay')
+    expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
     expect(JSON.parse(String(initialMessage.payload?.confirmedBriefContext))).toEqual(f.body.brief)
     await expect(readFile(join(f.root,'content/index.json'),'utf8')).rejects.toThrow()
     expect(String(f.submissions[0]!.prompt)).not.toContain(JSON.stringify(f.body.brief))
     expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
-    expect(String(f.submissions[0]!.prompt)).toContain('Current professional design question (gameplay)')
-    expect(String(f.submissions[0]!.prompt)).toContain('$game-creative-director-expert')
+    expect(String(f.submissions[0]!.prompt)).toContain('Complete one GDD covering gameplay, levels, balance, art, ui, audio, resources and technical')
+    expect(String(f.submissions[0]!.prompt)).toContain('$game-creative-director-expert, $game-systems-designer-expert')
+    expect(String(f.submissions[0]!.prompt)).toContain('$game-level-designer-expert')
     expect(f.submissions[0]!.nativeGoal).toBeUndefined()
     expect(run.productionWorkflow).toBe(1)
-    expect(f.starts[0].systemContext).toContain('design records live under docs/')
-    expect(f.starts[0].systemContext).toContain('Bgs loads applicable AGENTS.md instructions natively')
+    expect(f.starts[0].systemContext).toContain('one GDD document task')
+    expect(f.starts[0].systemContext).toContain('Preserve the user-selected engine and platform')
     expect(f.starts[0].systemContext).toContain('BGS Scene/UI editing is not part of this target')
+    expect(f.starts[0].systemContext).toContain('content/index.json')
+    expect(f.submissions[0]!.finalOutput?.readOnly).toBe(true)
     const guide=await readFile(join(f.root,'AGENTS.md'),'utf8')
     expect(guide).not.toContain('Built-in Skill index')
     expect(guide).not.toContain('Collection navigator:')
@@ -1375,11 +1392,17 @@ test('first and resumed goals retain professional coverage and design dependenci
   for (const professional of [agentProfessionalContextForRun(run),agentProfessionalContextForRun(run,true)]) {
     const prompt=PROJECT_WORKING_CONVENTIONS+'\n'+professional
     expect(prompt).toContain(PROJECT_WORKING_CONVENTIONS)
-    for (const section of ['docs/GDD.md','vision/gameplay','systems/balance','level/scene',
-      'art direction','UI/UX','audio','resources/content','technical design']) expect(prompt).toContain(section)
+    for (const section of ['docs/GDD.md','gameplay/systems','balance','level/scene',
+      'art','UI/UX','audio','resources/content','technical design']) expect(prompt).toContain(section)
     expect(prompt).toContain('Use actual asset metrics and existing checks when binding resources')
-    expect(prompt).toContain('unrelated resources/content may remain planned')
+    expect(prompt).toContain('without reducing the full delivery scope or requiring every screen, variant and asset up front')
     expect(prompt).toContain('Preserve confirmed requirements')
+    expect(professional).toContain('When starting concrete resource production, gameplay programming, technical art, feel tuning, debugging or verification work')
+    expect(professional).toContain('Reuse relevant guidance still in context')
+    expect(professional).toContain('when work affects implementation, verify the affected code and behavior in the target runtime')
+    expect(professional).toContain('reading a Skill or naming it does not establish effective application')
+    for(const name of ['gameplay-programmer','game-technical-artist','game-feel-designer','root-cause-debugging'])
+      expect(professional).not.toContain(name)
     expect(prompt).toContain('Skill invocation, complete documents, valid JSON and successful tools do not establish design quality')
   }
   expect(agentGoalPrompt(run)).toContain('Stop at the requested boundary')
@@ -1646,43 +1669,43 @@ async function workflowCommand(root:string,context:string,value:unknown) {
   return result
 }
 
-test('four-stage production uses focused design, chosen order and one conversation; Goal starts at implementation',async()=>{
-  const stages:string[]=[],directions:string[]=[],contexts:string[]=[]
-  const f=await fixture('normal',false,undefined,undefined,undefined,0,{nativeGoalStatus:'complete'},undefined,true,async(root,input,context)=>{
-    const {assignment}=await workflowCommand(root,context,{action:'status'})
-    stages.push(assignment.stage);contexts.push(context)
-    if(assignment.stage==='implementation')return // No forged delivery: native complete must remain blocked.
-    directions.push(assignment.discipline ?? assignment.stage)
+test('one GDD task binds its working document and ends without production tools or another task',async()=>{
+  const source='# Synthetic design\n\nOne complete document.\n'
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{},undefined,true,async(root,input,context)=>{
+    if(!input.finalOutput)return
+    expect(input.nativeGoal).toBeUndefined()
+    expect(input.workflow).toBeUndefined();expect(input.measurement).toBeUndefined();expect(input.finishDelivery).toBeUndefined()
+    expect(input.finalOutput.readOnly).toBe(true)
+    expect(context).not.toContain('Current BGS tools directory')
+    for(const design of Object.values(DESIGN_ASSIGNMENTS))expect(String(input.prompt)).toContain(design.question)
+    await expect(readFile(join(root,'docs/GDD.md'),'utf8')).rejects.toThrow()
+    expect(input.finalOutput.writeDocument?.path).toBe('docs/GDD.md')
+    await input.finalOutput.writeDocument!.authorize()
     await mkdir(join(root,'docs'),{recursive:true})
-    await writeFile(join(root,'docs/GDD.md'),'# Synthetic design\n\n## Decisions\nConcrete synthetic sources for host lifecycle checks.\n')
-    await writeFile(join(root,'docs/design.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>')
-    const value={action:'advance',summary:'Synthetic handoff, not game acceptance',sections:['Decisions'],files:assignment.stage==='visual'?['docs/design.svg']:[],
-      ...(assignment.discipline==='gameplay'?{nextDesign:'technical'}:{})}
-    const saved=await workflowCommand(root,context,value)
-    const again=await workflowCommand(root,context,value)
-    expect(again.next).toEqual(saved.next)
+    await writeFile(join(root,'docs/GDD.md'),source)
+    await recordSyntheticDesignReview(input)
+    await input.finalOutput.accept({status:'ready',summary:'Synthetic GDD saved'})
+    await expect(input.finalOutput.writeDocument!.authorize()).rejects.toThrow('already submitted')
   })
   Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
-    const run=await f.wait(r=>r.agentTurns?.length===11 && Boolean(r.agentTurns.at(-1)?.finishedAt))
-    expect(stages).toEqual([...Array(8).fill('design'),'visual','resources','implementation'])
-    expect(directions.slice(0,2)).toEqual(['gameplay','technical'])
-    expect(f.submissions[1]!.prompt).toContain('Preceding author handoff:')
-    expect(f.submissions[1]!.prompt).toContain('Decisions')
-    expect(f.submissions[1]!.prompt).toContain('docs/GDD.md')
-    expect(new Set(directions.slice(0,8)).size).toBe(8)
-    expect(f.submissions.slice(0,10).every(s=>s.nativeGoal===undefined)).toBe(true)
-    expect(f.submissions[10]!.nativeGoal).toMatchObject({mode:'start'})
-    expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
-    expect(run.agentTurns!.every(t=>!t.message)).toBe(true)
-    expect(run.agentTurns!.slice(0,10).every(t=>t.status==='ended' && t.productionHandoff)).toBe(true)
-    expect(run.status).toBe('blocked')
-    expect(run.blockedReason).toContain('delivery was not submitted')
-    expect(run.deliveryEligible).toBe(false)
-    expect(new Set(contexts.map(c=>c.match(/Current BGS tools directory[^\n]+/)![0])).size).toBe(11)
-    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
-    expect(f.submissions).toHaveLength(11)
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.status).toBe('completed');expect(run.deliveryEligible).toBe(false)
+    expect(run.agentTurns).toHaveLength(1);expect(f.submissions).toHaveLength(1)
+    expect(run.agentTurns![0]!.productionHandoff?.next).toBeUndefined()
+    expect(await readFile(join(f.root,'docs/GDD.md'),'utf8')).toBe(source)
+    expect(f.starts[0].confirmedBriefContext).toBe(run.requirements.text)
+    await f.call('/agent/goal','POST',f.body)
+    expect(f.submissions).toHaveLength(1)
+    const question={requestKey:'after-gdd',runId:run.id,chatSessionId:run.chatSessionId,expectedVersion:run.version,
+      requirementsRevision:run.requirements.revision,text:'Explain this document.'}
+    expect((await f.call('/agent/messages','POST',question)).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions[1]!.finalOutput).toBeUndefined()
+    expect(f.submissions[1]!.nativeGoal).toBeUndefined()
+    expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
+    expect(await readFile(join(f.root,'docs/GDD.md'),'utf8')).toBe(source)
   }finally{await f.close()}
 },30000)
 
@@ -1692,7 +1715,9 @@ for(const outcome of ['missing','changed','failed','paused'] as const)test('prod
     if(outcome==='missing')return
     await mkdir(join(root,'docs'),{recursive:true})
     await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Decisions\nSaved design facts.\n')
-    await workflowCommand(root,context,{action:'advance',summary:'Synthetic handoff',sections:['Decisions'],files:[]})
+    await _input.finalOutput!.writeDocument!.authorize()
+    await recordSyntheticDesignReview(_input)
+    await _input.finalOutput!.accept({status:'ready',summary:'Synthetic handoff'})
     if(outcome==='changed')await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Decisions\nChanged after handoff.\n')
     handed=true
   })
@@ -1703,13 +1728,18 @@ for(const outcome of ['missing','changed','failed','paused'] as const)test('prod
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
     expect(run.status).toBe('blocked');expect(f.submissions).toHaveLength(1);expect(run.writer).toBeUndefined()
     if(outcome==='changed')expect(run.blockedReason).toContain('changed after submission')
+    const notices=f.sessions.transcript(run.chatSessionId).filter(e=>e.payload?.category==='workflow-blocked')
+    expect(notices).toHaveLength(outcome==='paused'?0:1)
+    if(outcome!=='paused')expect(notices[0]!.payload?.subtype).toBe('delivery_error')
     if(outcome==='missing') {
+      expect(notices[0]!.text).toContain('缺少有效交接')
       expect(run.blockedReason).toContain('without its source-bound workflow handoff')
       const response=await f.call('/agent/messages','POST',{requestKey:'explicit-resume',runId:run.id,chatSessionId:run.chatSessionId,
         expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:run.agentTurns![0]!.attemptId,text:'Continue the unfinished design'})
       expect(response.status,await response.clone().text()).toBe(202)
       run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
       expect(run.agentTurns![1]!.production).toEqual(run.agentTurns![0]!.production)
+      expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
       expect(f.submissions[1]!.nativeGoal).toBeUndefined()
     }
   }finally{await f.close()}
@@ -1747,77 +1777,47 @@ for(const intent of ['message','work','change'] as const)test(`later ${intent} i
 },30000)
 
 
-test('pause between settled stages preserves the next assignment for explicit continuation without replay',async()=>{
-  let paused=false
-  const faults:{afterSettlement?:()=>Promise<void>}={}
-  const f=await fixture('normal',false,undefined,undefined,undefined,0,faults,undefined,true,async(root,_input,context)=>{
-    if(paused)return
-    await mkdir(join(root,'docs'),{recursive:true});await writeFile(join(root,'docs/GDD.md'),'# Synthetic\n## Decisions\nSaved source.\n')
-    await workflowCommand(root,context,{action:'advance',summary:'First design ready',sections:['Decisions'],files:[],nextDesign:'audio',coveredDesigns:{levels:['Decisions']}})
+for(const outcome of ['paused','failed'] as const)test(`unfinished GDD ${outcome} retains its draft and resumes with current authority`,async()=>{
+  let resume=false,entered=false,oldAuthorize:(()=>Promise<void>)|undefined
+  const source='# Existing GDD\nExisting decisions.\n',document='# Complete GDD\nFinal decisions.\n'
+  const f=await fixture(outcome==='paused'?'wait':'fail',false,undefined,undefined,undefined,0,{},undefined,true,async(root,input)=>{
+    if(!resume) {
+      oldAuthorize=input.finalOutput!.writeDocument!.authorize
+      await oldAuthorize()
+      await mkdir(join(root,'docs'),{recursive:true});await writeFile(join(root,'docs/GDD.md'),source)
+      entered=true
+    } else {
+      expect(await readFile(join(root,'docs/GDD.md'),'utf8')).toBe(source)
+      await expect(oldAuthorize!()).rejects.toThrow('writer changed or paused')
+      await input.finalOutput!.writeDocument!.authorize()
+      await writeFile(join(root,'docs/GDD.md'),document)
+      await recordSyntheticDesignReview(input)
+      await input.finalOutput!.accept({status:'ready',summary:'Resumed document saved'})
+    }
   })
-  faults.afterSettlement=async()=>{if(!paused){paused=true;await f.call('/stop','POST')}}
   Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
   try {
     await f.call('/agent/goal','POST',f.body)
-    let run=await f.wait(r=>Boolean(r.paused) && !r.writer)
-    expect(run.status).toBe('blocked');expect(f.submissions).toHaveLength(1)
-    expect(run.agentTurns![0]!.status).toBe('ended')
-    expect(run.agentTurns![0]!.productionHandoff?.next.discipline).toBe('audio')
-    expect(run.agentTurns![0]!.productionHandoff?.next.completedDesigns).toEqual(['gameplay','levels'])
-    await f.call('/resume','POST',{planRevision:run.planRevision})
-    run=(await f.store.read(run.projectId,run.ownerId))!
-    const response=await f.call('/agent/messages','POST',{requestKey:'continue-after-stage',runId:run.id,chatSessionId:run.chatSessionId,
-      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:run.agentTurns![0]!.attemptId,text:'Continue from the saved stage handoff.'})
+    if(outcome==='paused'){await f.wait(()=>entered);await f.call('/stop','POST')}
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt)&&!r.writer)
+    const original=run.agentTurns![0]!
+    expect(original.status).toBe(outcome==='paused'?'interrupted':'failed')
+    expect(original.productionHandoff).toBeUndefined()
+    expect(await readFile(join(f.root,'docs/GDD.md'),'utf8')).toBe(source)
+    if(run.paused){await f.call('/resume','POST',{planRevision:run.planRevision});run=(await f.store.read(run.projectId,run.ownerId))!}
+    resume=true;f.setMode('normal')
+    const response=await f.call('/agent/messages','POST',{requestKey:'resume-gdd',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'continue',continuationOf:original.attemptId,text:''})
     expect(response.status,await response.clone().text()).toBe(202)
     run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
-    expect(f.submissions).toHaveLength(2)
-    expect(run.agentTurns![1]!.production).toEqual(run.agentTurns![0]!.productionHandoff!.next)
-    expect(run.agentTurns![1]!.production?.discipline).toBe('audio')
-    expect(f.submissions[1]!.nativeGoal).toBeUndefined()
+    expect(run.status).toBe('completed');expect(f.submissions).toHaveLength(2)
+    expect(f.starts[1]).toMatchObject({resumeSessionId:original.nativeSessionId,nativeRecovery:true})
+    expect(f.starts[1].systemContext).toContain('Preserve the user-selected engine and platform')
+    expect(f.starts[1].systemContext).not.toContain('BGS Scene/UI editing is not part of this target')
+    expect(run.agentTurns![1]!.production).toEqual(original.production)
+    expect(await readFile(join(f.root,'docs/GDD.md'),'utf8')).toBe(document)
   }finally{await f.close()}
 },30000)
-
-test('combined professional coverage advances only unfinished directions without rewriting existing design',async()=>{
-  const stages:string[]=[],directions:string[]=[]
-  const source='# Synthetic design\n## Rules\nSynthetic rules and quantitative boundaries.\n## Space\nSynthetic spatial decisions.\n## Presentation\nSynthetic visual and interaction decisions.\n## Sound\nSynthetic audible behavior.\n## Inputs\nSynthetic resource representations.\n## Runtime\nSynthetic consuming interfaces.\n'
-  const f=await fixture('normal',false,undefined,undefined,undefined,0,{nativeGoalStatus:'complete'},undefined,true,async(root,_input,context)=>{
-    const {assignment}=await workflowCommand(root,context,{action:'status'})
-    stages.push(assignment.stage)
-    if(assignment.stage==='implementation')return
-    if(assignment.discipline==='gameplay') {
-      await mkdir(join(root,'docs'),{recursive:true})
-      await writeFile(join(root,'docs/GDD.md'),source)
-    }
-    if(assignment.stage==='visual')await writeFile(join(root,'docs/design.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>')
-    if(assignment.discipline)directions.push(assignment.discipline)
-    const combined:Record<string,{sections:string[];coveredDesigns?:Record<string,string[]>}>={
-      gameplay:{sections:['Rules'],coveredDesigns:{levels:['Space'],balance:['Rules']}},
-      art:{sections:['Presentation'],coveredDesigns:{ui:['Presentation']}},
-      audio:{sections:['Sound'],coveredDesigns:{resources:['Inputs']}},
-      technical:{sections:['Runtime']},
-    }
-    await workflowCommand(root,context,{action:'advance',summary:'Synthetic coverage, not semantic certification',
-      ...(combined[assignment.discipline] ?? {sections:['Presentation']}),files:assignment.stage==='visual'?['docs/design.svg']:[]})
-    expect(await readFile(join(root,'docs/GDD.md'),'utf8')).toBe(source)
-  })
-  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
-  try {
-    await f.call('/agent/goal','POST',f.body)
-    const run=await f.wait(r=>r.agentTurns?.length===7 && Boolean(r.agentTurns.at(-1)?.finishedAt))
-    expect(directions).toEqual(['gameplay','art','audio','technical'])
-    expect(stages).toEqual(['design','design','design','design','visual','resources','implementation'])
-    expect(run.agentTurns![3]!.production?.completedDesigns).toEqual(['gameplay','levels','balance','art','ui','audio','resources'])
-    expect(run.agentTurns![0]!.productionHandoff?.request.coveredDesigns).toEqual({levels:['Space'],balance:['Rules']})
-    expect(f.submissions[1]!.prompt).toContain('"coveredDesigns":{"levels":["Space"],"balance":["Rules"]}')
-    expect(f.submissions.slice(0,6).every(s=>s.nativeGoal===undefined)).toBe(true)
-    expect(f.submissions[6]!.nativeGoal).toMatchObject({mode:'start'})
-    expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
-    expect(run.requirements.text).toBe(JSON.stringify(f.body.brief))
-    expect(run.deliveryEligible).toBe(false)
-    expect(run.blockedReason).toContain('delivery was not submitted')
-  }finally{await f.close()}
-},30000)
-
 
 test('empty continuation resumes native history through the existing message route without replaying an assignment', async () => {
   const f = await fixture('fail')
@@ -1867,3 +1867,211 @@ test('manual recovery of ordinary Chat does not reactivate an earlier Goal, incl
     }
   } finally { await f.close() }
 })
+
+
+for(const kind of ['blocked','invalid'] as const)test('preparation final '+kind+' is visible and never requests a model retry',async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{},undefined,true,async(root,input)=>{
+    await input.finalOutput!.writeDocument!.authorize()
+    await mkdir(join(root,'docs'),{recursive:true})
+    await writeFile(join(root,'docs/GDD.md'),'# Working draft\nUnfinished decisions.\n')
+    await input.finalOutput!.accept(kind==='blocked'
+      ? {status:'blocked',summary:'Required source unavailable'}
+      : {status:'ready',summary:'Unsupported complete-document format',document:'# Old format'})
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.status).toBe('blocked')
+    expect(run.writer).toBeUndefined()
+    expect(run.agentTurns![0]!.productionHandoff).toBeUndefined()
+    expect(f.submissions).toHaveLength(1)
+    const notices=f.sessions.transcript(run.chatSessionId).filter(e=>e.payload?.category==='workflow-blocked')
+    expect(notices).toHaveLength(1)
+    expect(notices[0]!.text).toContain(kind==='blocked'?'Required source unavailable':'未提供有效交接')
+    expect(await readFile(join(f.root,'docs/GDD.md'),'utf8')).toBe('# Working draft\nUnfinished decisions.\n')
+  }finally{await f.close()}
+})
+
+
+test.each(['blocked','failed'] as const)('submitted %s report settles the existing Goal as blocked without redispatch',async status=>{
+  const summary='Target runtime access is unavailable; required observation awaits external access.'
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{nativeGoalStatus:'active'},undefined,true,
+    async(root,input)=>{
+      await mkdir(join(root,'.beegame/delivery'),{recursive:true})
+      await writeFile(join(root,'.beegame/delivery/acceptance.json'),JSON.stringify({scope:'delivery',status,summary,
+        environment:'Offline fixture',evidencePaths:[],verification:{target:'deployment',knownIssues:[],unverified:['Required target observation']}}))
+      const identity:any=await input.measurement!({executionInputs:true})
+      await input.finishDelivery!({requirementsRevision:identity.requirementsRevision})
+    })
+  try {
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.status).toBe('blocked');expect(run.writer).toBeUndefined();expect(run.blockedReason).toBe(summary)
+    expect(run.agentTurns![0]!.status).toBe('ended');expect(run.agentTurns![0]!.quiescedAt).toBeDefined()
+    expect(run.agentTurns![0]!.measurements).toBeUndefined();expect(f.submissions).toHaveLength(1)
+    const events=f.sessions.transcript(run.chatSessionId)
+    expect(events.findLast(e=>e.payload?.subtype==='native_goal')?.payload?.nativeGoal).toMatchObject({status:'blocked'})
+    expect(events.findLast(e=>e.payload?.subtype==='delivery_submission')?.payload).toMatchObject({status,deliveryEligible:false})
+  }finally{await f.close()}
+})
+
+
+test('paused GDD rejects late writes and final submission while retaining its draft',async()=>{
+  let accept:((value:unknown)=>Promise<string>)|undefined,authorize:(()=>Promise<void>)|undefined
+  const source='# Existing GDD\nKeep existing decisions.\n'
+  const f=await fixture('wait',false,undefined,undefined,undefined,0,{},undefined,true,async(root,input)=>{
+    await mkdir(join(root,'docs'),{recursive:true});await writeFile(join(root,'docs/GDD.md'),source)
+    accept=input.finalOutput!.accept;authorize=input.finalOutput!.writeDocument!.authorize
+    await authorize()
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  try {
+    await f.call('/agent/goal','POST',f.body);await f.wait(()=>Boolean(accept))
+    await f.call('/stop','POST')
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt)&&!r.writer)
+    await expect(authorize!()).rejects.toThrow('writer changed or paused')
+    await expect(accept!({status:'ready',summary:'Late final'})).rejects.toThrow('writer changed or paused')
+    expect(await readFile(join(f.root,'docs/GDD.md'),'utf8')).toBe(source)
+    expect(run.agentTurns![0]!.productionHandoff).toBeUndefined()
+    expect(f.submissions).toHaveLength(1)
+  }finally{await f.close()}
+})
+
+for (const settings of [
+  {platform:'PC',engine:'Godot'},
+  {platform:'Web',engine:'Unity'},
+  {platform:'Web',engine:'React',bgsVisualEditing:false},
+]) test(`GDD host context preserves ${JSON.stringify(settings)} without assigning BGS editing`,async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{},undefined,true)
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,settings})
+  try {
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.requirements.constraints).toMatchObject(settings)
+    expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
+    expect(f.starts[0].systemContext).toContain('Preserve the user-selected engine and platform')
+    expect(f.starts[0].systemContext).not.toContain('This project requires BGS visual editing')
+    expect(f.submissions[0]!.finalOutput?.readOnly).toBe(true)
+  }finally{await f.close()}
+})
+
+
+test('GDD write capability rereads the current writer identity rather than caching workspace approval',async()=>{
+  let authorize:(()=>Promise<void>)|undefined
+  const f=await fixture('wait',false,undefined,undefined,undefined,0,{},undefined,true,async(_root,input)=>{
+    authorize=input.finalOutput!.writeDocument!.authorize
+  })
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null})
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    let current=await f.wait(()=>Boolean(authorize))
+    const original={...current.writer!}
+    await authorize!()
+    for(const stale of [{...original,attemptId:'other-attempt'},{...original,workerId:'other-worker'},{...original,fence:original.fence+1}]) {
+      const next=structuredClone(current);next.version++;next.writer=stale
+      await f.store.commit(current.projectId,current.ownerId,current.version,next,'synthetic-authority-change')
+      await expect(authorize!()).rejects.toThrow('writer changed or paused')
+      const restored=structuredClone(next);restored.version++;restored.writer=original
+      await f.store.commit(next.projectId,next.ownerId,next.version,restored,'synthetic-authority-restore')
+      current=restored
+    }
+    await authorize!()
+    expect(current.agentTurns![0]!.productionHandoff).toBeUndefined()
+  }finally{await f.close()}
+})
+
+for (const {settings,expected} of [
+  {settings:{platform:'Web',engine:'React'},expected:true},
+  {settings:{platform:'Mobile',engine:'React'},expected:false},
+  {settings:{platform:'Web',engine:'React',bgsVisualEditing:false},expected:false},
+  {settings:{platform:'PC',engine:'Godot'},expected:false},
+]) test(`restored creation flag follows current target in GDD and follow-up: ${JSON.stringify(settings)}`,async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{},undefined,true)
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,settings})
+  try {
+    const saved=createRun({projectId:'goal-project',ownerId:'owner',workspacePath:f.root,
+      chatSessionId:f.body.chatSessionId,requestKey:f.body.requestKey,text:JSON.stringify(f.body.brief),constraints:settings,ids:['goal']})
+    saved.creation={initialDelivery:'design-led-first-version',editableContent:true}
+    saved.productionWorkflow=1
+    await f.store.commit(saved.projectId,saved.ownerId,0,saved,'agent.goal-confirmed')
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(f.starts[0].systemContext.includes('This project requires BGS visual editing')).toBe(false)
+    expect(f.submissions[0]!.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
+    const response=await f.call('/agent/messages','POST',{requestKey:'scoped-followup',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'work',text:'Inspect the existing design only.'})
+    expect(response.status,await response.clone().text()).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.starts.length,run.agentTurns?.[1]?.error).toBe(2)
+    expect(f.starts[1].systemContext.includes('This project requires BGS visual editing')).toBe(false)
+    expect(run.requirements.constraints).toEqual(settings)
+    expect(run.creation?.editableContent).toBe(true) // Historical facts are retained, not rewritten.
+    await expect(readFile(join(f.root,'content/index.json'))).rejects.toThrow()
+  }finally{await f.close()}
+})
+
+
+for(const intent of ['message','change'] as const)test(`confirmed platform and engine remain fixed across later ${intent}`,async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{},undefined,true)
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,settings:{platform:'Web',engine:'React',dimension:'2D'}})
+  try {
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    const confirmed=structuredClone(run.requirements.constraints)
+    const request={requestKey:'later-target-request',runId:run.id,chatSessionId:run.chatSessionId,expectedVersion:run.version,
+      requirementsRevision:run.requirements.revision,intent,text:'Change the platform to PC and engine to Godot; revise only the design.'}
+    expect((await f.call('/agent/messages','POST',request)).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(run.requirements.constraints).toEqual(confirmed)
+    expect(JSON.parse(run.requirements.text).settings).toEqual(confirmed)
+    expect(JSON.parse(f.submissions[1]!.confirmedBriefContext!).settings).toEqual(confirmed)
+    expect(f.submissions[1]!.prompt).toContain(request.text) // Keep the actual request, without silently rewriting it.
+    for(const start of f.starts) {
+      expect(start.systemContext).toContain('These settings are fixed at project confirmation')
+      expect(start.systemContext).toContain('Chat messages and design edits cannot change them')
+    }
+    expect(f.starts[1].systemContext).toContain('BGS Scene/UI editing is not part of this target')
+    const rejected={...request,requestKey:'unsupported-target-field',expectedVersion:run.version,
+      requirementsRevision:run.requirements.revision,targetSettings:{platform:'PC',engine:'Godot'}}
+    expect((await f.call('/agent/messages','POST',rejected)).status).toBe(400)
+    expect((await f.call('/agent/goal','POST',{...f.body,brief:{...f.body.brief,settings:{platform:'PC',engine:'Godot'}}})).status).toBe(409)
+    expect(await f.store.read(run.projectId,run.ownerId)).toEqual(run)
+    expect(f.submissions).toHaveLength(2)
+  }finally{await f.close()}
+})
+
+for (const mode of ['missing', 'changed', 'blocking', 'reviewed'] as const)
+  test('GDD handoff requires host review of the final source: ' + mode, async () => {
+    const f = await fixture('normal', false, undefined, undefined, undefined, 0, {}, undefined, true, async (root, input) => {
+      await mkdir(join(root, 'docs'), { recursive: true })
+      await writeFile(join(root, 'docs/GDD.md'), '# Synthetic candidate\nRules.\n')
+      const contract = input.finalOutput!
+      const value = { status: 'ready', summary: 'Synthetic handoff' }
+      if (mode !== 'missing') {
+        const {source} = await contract.designReview!.candidate(value)
+        await contract.designReview!.record({ source, nativeThreadId: 'independent-fixture', nativeTurnId: 'review-turn',
+          startedAt: '2026-01-01T00:00:00.000Z', finishedAt: '2026-01-01T00:00:01.000Z',
+          report: { summary: 'Synthetic report', findings: mode === 'blocking' ? [{ location: 'Rules',
+            issue: 'Contradiction', evidence: 'The same event has two results', impact: 'The result cannot be implemented consistently' }] : [] } })
+      }
+      if (mode === 'changed') await writeFile(join(root, 'docs/GDD.md'), '# Changed after review\n')
+      await contract.accept(value)
+    })
+    Object.assign(f.body.brief, { creation_mode: 'creative', build_source: null })
+    try {
+      await f.call('/agent/goal', 'POST', f.body)
+      const run = await f.wait(r => Boolean(r.agentTurns?.[0]?.finishedAt) && !r.writer)
+      const turn = run.agentTurns![0]!
+      expect(turn.designReviews ?? []).toHaveLength(mode === 'missing' ? 0 : 1)
+      if (mode === 'reviewed') {
+        expect(turn.status).toBe('ended')
+        expect(turn.productionHandoff!.sources[0]).toEqual(turn.designReviews![0]!.source)
+      } else {
+        expect(turn.status).toBe('failed')
+        expect(turn.productionHandoff).toBeUndefined()
+        expect(turn.error).toContain({ missing: 'no completed independent review', changed: 'changed after its independent review', blocking: 'unresolved review' }[mode])
+      }
+      expect(f.submissions).toHaveLength(1)
+    } finally { await f.close() }
+  })

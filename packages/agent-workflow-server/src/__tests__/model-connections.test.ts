@@ -224,11 +224,12 @@ test('administrator can publish a subscription-only model without a platform API
   } finally { cleanups.forEach(cleanup => cleanup()) }
 })
 
-for (const profileId of ['anthropic-compatible', 'openai-compatible', 'responses'] as const) {
+for (const [profileId, override] of [['anthropic-compatible'], ['openai-compatible'], ['responses'],
+  ['responses', 'deepseek-v4.1-flash'], ['responses', 'deepseek-v4-pro'], ['responses', 'grok-4.6']] as const) {
   const profile = OPENCODE_GO_PROFILES[profileId]
   const provider = profile.provider
-  const selectedModel = profileId === 'responses' ? 'new-responses-model' : profile.model
-  test(`administrators can publish and edit a platform Go ${profileId} model through the existing catalog`, async () => {
+  const selectedModel = override ?? (profileId === 'responses' ? 'new-responses-model' : profile.model)
+  test(`administrators can publish and edit a platform Go ${profileId} ${selectedModel} model through the existing catalog`, async () => {
     const cleanups: Array<() => void> = []
     const app = createAgentWorkflowApp({ dashboardDataRoot: root, modelConfigStore: false, skillsConfig: false,
       currentUser: { id: 'owner', role: 'owner' }, registerCleanup: cleanup => cleanups.push(cleanup),
@@ -263,7 +264,7 @@ for (const profileId of ['anthropic-compatible', 'openai-compatible', 'responses
     } finally { cleanups.forEach(cleanup => cleanup()) }
   })
 
-  test(`OpenCode Go ${profileId} is encrypted, isolated, selectable and routed through the existing runtime`, async () => {
+  test(`OpenCode Go ${profileId} ${selectedModel} is encrypted, isolated, selectable and routed through the existing runtime`, async () => {
     const config = personalModelConfig(root, 'alice', OPENCODE_GO_ID, provider)!
     expect(personalModelAvailable(root, 'alice', OPENCODE_GO_ID)).toBe(false)
     saveConnection(root, config, 'byok', 'go-fixture-secret', true, { model: selectedModel, apiProtocol: profile.apiProtocol })

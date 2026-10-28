@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createBgsRunner } from './runner'
+import { createBgsRunner, bgsApplicationContext } from './runner'
 import { agentGoalPrompt, agentProfessionalContextForRun } from '../beegame/workflow-v3/agent-goal'
 import { PROJECT_GUIDE_TEMPLATE, projectGuideContext, readProjectGuide } from '../beegame/workflow-v3/project-guide'
 import { createRun } from '../beegame/workflow-v3/state'
@@ -11,16 +11,27 @@ import { createRun } from '../beegame/workflow-v3/state'
 // would count both versions of the tail. Reconstruct latest values by key.
 function latestContext(items: any[], key: string) {
   const values = new Map<string, { value: string; part?: number; total?: number }>()
-  let family: number | undefined
+  let family: number | 'stable' | undefined, currentCount = 0
   for (const item of items) for (const block of item.content ?? []) {
-    for (const match of (block.text ?? '').matchAll(new RegExp('<(' + key + '(?:_part_([0-9]+)_of_([0-9]+))?)>([\\s\\S]*?)</\\1>', 'g'))) {
+    for (const match of (block.text ?? '').matchAll(new RegExp('<(' + key + '(?:_part_([0-9]+)(?:_of_([0-9]+))?)?)>([\\s\\S]*?)</\\1>', 'g'))) {
       expect(item.role).toBe('developer')
       expect(Buffer.byteLength(match[4]!)).toBeLessThanOrEqual(4000)
-      family = match[3] ? Number(match[3]) : undefined
-      values.set(match[1]!, { value: match[4]!, part: match[2] ? Number(match[2]) : undefined, total: family })
+      const part = match[2] ? Number(match[2]) : undefined
+      const total = match[3] ? Number(match[3]) : undefined
+      if (part === undefined) {
+        const count = /^Current part count: (\d+)\./.exec(match[4]!)
+        family = count ? 'stable' : undefined
+        currentCount = count ? Number(count[1]) : 0
+      } else if (total !== undefined) family = total
+      values.set(match[1]!, { value: match[4]!, part, total })
     }
   }
   if (family === undefined) return values.get(key)?.value ?? ''
+  if (family === 'stable') return Array.from({length: currentCount}, (_, index) => {
+    const part = values.get(`${key}_part_${String(index + 1).padStart(6, '0')}`)
+    expect(part).toBeDefined()
+    return part!.value
+  }).join('')
   const parts = [...values.values()].filter(part => part.total === family).sort((a, b) => a.part! - b.part!)
   expect(parts.map(part => part.part)).toEqual(Array.from({ length: family }, (_, index) => index + 1))
   return parts.map(part => part.value).join('')
@@ -37,6 +48,25 @@ test('context observation reconstructs changed chunks and switches between scala
   expect(latestContext(history, 'fixture')).toBe('one-two-three')
   history.push(fragment('fixture_part_2_of_3', '-updated'))
   expect(latestContext(history, 'fixture')).toBe('one-updated-three')
+})
+
+test('current count excludes stale tails and legacy fragments after delta updates and restore', () => {
+  const history: any[] = [{role:'developer',content:[{text:'<fixture_part_1_of_1>legacy</fixture_part_1_of_1>'}]}]
+  let known: ReturnType<typeof bgsApplicationContext> = {}
+  for (const value of ['a'.repeat(8000), 'a'.repeat(8000)+'tail', 'a'.repeat(4000), '', 'short', '中文🎮'.repeat(6000)]) {
+    const current = bgsApplicationContext('fixture', value)
+    for (const [key, part] of Object.entries(current)) {
+      if (known[key]?.value !== part.value)
+        history.push({role:'developer',content:[{text:`<${key}>${part.value}</${key}>`}]})
+    }
+    known = current
+    expect(latestContext(history, 'fixture')).toBe(value)
+    // Fresh/compacted context receives the full current frame, not a host diff.
+    const rebuilt = Object.entries(current).map(([key, part]) =>
+      ({role:'developer',content:[{text:`<${key}>${part.value}</${key}>`}]}))
+    expect(latestContext(rebuilt, 'fixture')).toBe(value)
+    expect(latestContext(JSON.parse(JSON.stringify(history)), 'fixture')).toBe(value)
+  }
 })
 
 // Real CLI, synthetic local Responses server; no model or project artifacts.
@@ -130,5 +160,33 @@ localTest('native resume receives current BGS context as well as project instruc
       runtime = undefined
     }
     expect(inputs).toHaveLength(4)
+    const marker = 'STABLE_PREFIX_UNCHANGED_'
+    const prefix = marker.padEnd(4000, 'x'), base = prefix + 'b'.repeat(4000)
+    let prefixCopies = 0
+    // Each start is a cold resume of the same native thread. The second
+    // identical turn establishes trusted native application-context state.
+    for (const [index, systemContext] of [base, base, base + 'new-tail', prefix, '', base].entries()) {
+      runtime = await runner.start({
+        sessionId: 'context-fixture', cwd: game, resumeSessionId: nativeSessionId,
+        systemContext, confirmedBriefContext: run.requirements.text,
+        env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
+          OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-model' },
+        requestPermission: async () => ({ behavior: 'deny' }),
+      })
+      await runtime.submit({
+        prompt: 'Inspect current host context.', confirmedBriefContext: run.requirements.text,
+        signal: AbortSignal.timeout(15_000), onMessage() {},
+        requestPermission: async () => ({ behavior: 'deny' }),
+      })
+      const sent = inputs.at(-1)!
+      expect(latestContext(sent, 'bgsRuntime')).toBe(systemContext)
+      expect(latestContext(sent, 'bgsConfirmedBrief')).toBe(run.requirements.text)
+      const copies = JSON.stringify(sent).split(marker).length - 1
+      if (index === 1) { prefixCopies = copies; expect(prefixCopies).toBeGreaterThan(0) }
+      if (index === 2 || index === 3) expect(copies).toBe(prefixCopies)
+      await runtime.dispose?.()
+      runtime = undefined
+    }
+    expect(inputs).toHaveLength(10)
   } finally { await runtime?.dispose?.(); server.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 60_000)

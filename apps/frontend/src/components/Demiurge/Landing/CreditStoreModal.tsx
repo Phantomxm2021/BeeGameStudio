@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CreditCard } from 'lucide-react';
+import { ArrowUpRight, CreditCard } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
@@ -12,10 +12,13 @@ import {
 import { Button } from '../../beui/project-button';
 import { CloseIconButton } from '../../ui/CloseIconButton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
+import { isDesktopShell, openExternal } from '../../../lib/platform';
 import { useToastContext } from '../../../contexts/ToastContext';
 
 interface CreditStoreModalProps {
   isOpen: boolean;
+  presentation?: 'dialog' | 'desktop';
+  balance?: { balanceCredits: number; consumedCredits: number } | null;
   lang: Language;
   onClose: () => void;
 }
@@ -39,7 +42,8 @@ type CreditStoreTierKey = 'starter' | 'builder' | 'pro' | 'studio';
 
 const CREDIT_STORE_TIERS: CreditStoreTierKey[] = ['starter', 'builder', 'pro', 'studio'];
 
-export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProps) {
+export function CreditStoreModal({ isOpen, lang, onClose, presentation = 'dialog', balance }: CreditStoreModalProps) {
+  const desktop = presentation === 'desktop';
   const { showError } = useToastContext();
   const { i18n } = useTranslation('beegame');
   const copy = getCreditStoreCopy((key, options) => (
@@ -49,6 +53,7 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
   const [status, setStatus] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [checkoutPriceId, setCheckoutPriceId] = useState('');
+  const [selectedPriceId, setSelectedPriceId] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -61,6 +66,7 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
       .then((result) => {
         if (cancelled) return;
         setPacks(result.packs);
+        setSelectedPriceId(current => result.packs.some(pack => pack.priceId === current) ? current : result.packs[0]?.priceId || '');
         setStatus(result.packs.length ? '' : copy.notConfigured);
       })
       .catch((error) => {
@@ -82,21 +88,32 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
     setCheckoutPriceId(priceId);
     try {
       const session = await createStripeCheckoutSession(priceId);
-      window.open(session.url, '_self');
+      if (isDesktopShell()) {
+        await openExternal(session.url);
+        setCheckoutPriceId('');
+      } else window.open(session.url, '_self');
     } catch (error) {
-      showError(error instanceof Error ? error.message : copy.checkoutUnavailable);
+      const message = error instanceof Error ? error.message : copy.checkoutUnavailable;
+      if (desktop) setStatus(message); else showError(message);
       setCheckoutPriceId('');
     }
   };
 
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[min(560px,calc(100dvh-2rem))] max-w-2xl flex-col overflow-hidden p-5">
+  const selectedPack = packs.find(pack => pack.priceId === selectedPriceId);
+  const titleFor = (pack: BeeGameStripeCreditPack, index: number) => pack.displayName?.trim() || copy.tierTitle(CREDIT_STORE_TIERS[index] ?? 'studio', copy.creditAmount(pack.credits.toLocaleString()));
+  if (desktop) return <section className="desktop-credit-store">
+    <div className="desktop-credit-balance"><div><span>{i18n.getFixedT(normalizeI18nLanguage(lang), 'landing')('intake.profile.balance')}</span><strong>{balance ? balance.balanceCredits.toLocaleString() : '—'}</strong></div>{balance ? <span>{i18n.getFixedT(normalizeI18nLanguage(lang), 'landing')('intake.profile.consumed')} {balance.consumedCredits.toLocaleString()}</span> : null}</div>
+    <div className="desktop-settings-group-label">{lang.startsWith('zh') ? '购买 Credit' : 'Buy Credit'}</div>
+    {isLoading ? <p role="status" className="desktop-inline-feedback">{copy.loading}</p> : <fieldset className="desktop-credit-packs" disabled={Boolean(checkoutPriceId)}><legend className="sr-only">{copy.title}</legend>
+      {packs.map((pack, index) => <label key={pack.priceId} className="desktop-credit-pack"><input type="radio" name="desktop-credit-pack" value={pack.priceId} checked={selectedPriceId === pack.priceId} onChange={() => setSelectedPriceId(pack.priceId)} /><span>{titleFor(pack, index)}</span><span>{copy.creditAmount(pack.credits.toLocaleString())}</span></label>)}
+    </fieldset>}
+    {selectedPack && !isLoading ? <div className="desktop-purchase-row"><span>{titleFor(selectedPack, packs.indexOf(selectedPack))} · {copy.creditAmount(selectedPack.credits.toLocaleString())}</span><button type="button" className="desktop-settings-button desktop-primary" disabled={Boolean(checkoutPriceId)} onClick={() => void startCheckout(selectedPack.priceId)}>{copy.buy}<ArrowUpRight aria-hidden="true" /></button></div> : null}
+    {status ? <p role="status" className="desktop-inline-feedback">{status}</p> : null}
+  </section>;
+
+  const content = <>
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <DialogTitle className="type-title-2 text-foreground">{copy.title}</DialogTitle>
-            <DialogDescription className="type-footnote mt-1 text-muted-foreground">{copy.description}</DialogDescription>
-          </div>
+          <div className="min-w-0"><DialogTitle className="type-title-2 text-foreground">{copy.title}</DialogTitle><DialogDescription className="type-footnote mt-1 text-muted-foreground">{copy.description}</DialogDescription></div>
           <CloseIconButton label={copy.close} onClick={onClose} />
         </div>
 
@@ -138,7 +155,10 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
             {status}
           </div>
         ) : null}
-      </DialogContent>
+  </>;
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flex max-h-[min(560px,calc(100dvh-2rem))] max-w-2xl flex-col overflow-hidden p-5">{content}</DialogContent>
     </Dialog>
   );
 }
@@ -199,4 +219,8 @@ function getCreditStoreCopy(translate: (key: string, options?: Record<string, un
     },
     tierDescription: (tier) => translate(`creditStore.tiers.${tier}.description`),
   };
+}
+
+export function DesktopCreditStore(props: Omit<CreditStoreModalProps, 'presentation'>) {
+  return <CreditStoreModal {...props} presentation="desktop" />;
 }

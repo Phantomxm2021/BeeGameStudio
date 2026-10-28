@@ -115,6 +115,7 @@ vi.mock('./components/Demiurge/DashboardView', () => ({
 
 describe('App view routing', () => {
   afterEach(async () => {
+    delete window.beeGameDesktop;
     vi.useRealTimers();
     await i18n.changeLanguage('zh');
     localStorage.clear();
@@ -134,6 +135,43 @@ describe('App view routing', () => {
     activeLoadCurrentUser = loadCurrentUser;
     getChatHistory.mockReset().mockResolvedValue([]);
     window.history.pushState({}, '', '/');
+  });
+
+  it('selects the desktop layout at the app entry while preserving the shared project view', async () => {
+    window.beeGameDesktop = { isDesktop: true, platform: 'darwin', openExternal: vi.fn(), onOAuthCallback: () => () => {} };
+    render(<App />);
+    expect(await screen.findByTestId('dashboard-view')).toHaveAttribute('data-project-id', 'proj_1');
+    expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+  });
+
+  it('restores only the signed-in account last desktop project before loading metadata', async () => {
+    mockedActiveProjectId = null;
+    localStorage.setItem('bgs-desktop-last-project:owner-user', 'proj_2');
+    window.beeGameDesktop = { isDesktop: true, openExternal: vi.fn(), onOAuthCallback: () => () => {} };
+    activeLoadProjects = vi.fn(async () => {
+      expect(new URL(window.location.href).searchParams.get('project')).toBe('proj_2');
+      mockedActiveProjectId = 'proj_2';
+    });
+    render(<App />);
+    await waitFor(() => expect(activeLoadProjects).toHaveBeenCalledOnce());
+  });
+
+  it('discards a saved desktop project when metadata loading cannot restore it', async () => {
+    mockedActiveProjectId = null;
+    localStorage.setItem('bgs-desktop-last-project:owner-user', 'deleted');
+    window.beeGameDesktop = { isDesktop: true, openExternal: vi.fn(), onOAuthCallback: () => () => {} };
+    render(<App />);
+    await waitFor(() => expect(localStorage.getItem('bgs-desktop-last-project:owner-user')).toBeNull());
+    expect(new URL(window.location.href).searchParams.has('project')).toBe(false);
+  });
+
+  it('gives an explicit route precedence over the remembered desktop project', async () => {
+    window.history.replaceState({}, '', '/?project=proj_1');
+    localStorage.setItem('bgs-desktop-last-project:owner-user', 'proj_2');
+    window.beeGameDesktop = { isDesktop: true, openExternal: vi.fn(), onOAuthCallback: () => () => {} };
+    render(<App />);
+    await waitFor(() => expect(loadProjects).toHaveBeenCalledOnce());
+    expect(new URL(window.location.href).searchParams.get('project')).toBe('proj_1');
   });
 
   it('restores an HttpOnly session without requiring a browser-readable token', async () => {

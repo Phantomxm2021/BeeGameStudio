@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import { registerBgsSettingsRoutes } from './settings-routes'
-import { reasoningCapabilities } from './preferences'
+import { bgsReasoningConfig, reasoningCapabilities } from './preferences'
 import { readReasoningPreferences, reasoningConnectionKey, saveReasoningPreference } from './preferences-store'
 
 const command = [process.execPath, fileURLToPath(new URL('./fixtures/interactions-app-server.ts', import.meta.url))]
@@ -43,5 +43,46 @@ test('an OpenAI catalog never invents reasoning capabilities for third-party pro
     expect(reasoningCapabilities({ ...base, BEEGAME_MODEL: 'unknown', OPENAI_AUTH_MODE: 'chatgpt' }, models).efforts).toEqual([])
     saveReasoningPreference(base, reasoningConnectionKey(base, 'other-model'), 'high')
     expect(reasoningCapabilities(base, models).effort).toBeNull()
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('verified Go settings reuse connection preferences without consulting the OpenAI catalog', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-go-settings-')
+  const env = { BEEGAME_CONFIG_DIR: root, BEEGAME_MODEL_TYPE: 'openai', BEEGAME_API_PROTOCOL: 'chat-completions',
+    OPENAI_BASE_URL: 'https://opencode.ai/zen/go/v1', BEEGAME_MODEL: 'deepseek-v4.1-flash' }
+  const client = { requestNative: async () => { throw Error('Go settings must not consult the native catalog or global config') } }
+  const app = new Hono()
+  registerBgsSettingsRoutes(app, { command: ['must-not-spawn'], environment: async () => env, changed() {} })
+  const update = (connectionKey: string, effort: string | null) => app.request('/api/bgs/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectionKey, effort }),
+  })
+  try {
+    const initial = await (await app.request('/api/bgs/settings')).json()
+    expect(initial.efforts).toEqual(['low', 'high'])
+    expect(initial.effort).toBeNull()
+    expect(await bgsReasoningConfig(env, client)).toEqual({})
+    expect((await update(initial.connectionKey, 'max')).status).toBe(400)
+    expect((await update(initial.connectionKey, 'medium')).status).toBe(400)
+    expect((await update('stale-connection', 'low')).status).toBe(409)
+    for (const effort of ['low', 'high'] as const) {
+      expect((await update(initial.connectionKey, effort)).status).toBe(200)
+      expect(await bgsReasoningConfig(env, client)).toEqual({ model_reasoning_effort: effort })
+    }
+    expect(await bgsReasoningConfig({ ...env, BEEGAME_CONFIG_DIR: join(root, 'other-owner') }, client))
+      .toEqual({})
+    for (const other of [
+      { ...env, BEEGAME_MODEL: 'deepseek-v4-pro' },
+      { ...env, BEEGAME_API_PROTOCOL: 'responses' },
+      { ...env, OPENAI_BASE_URL: 'https://opencode.ai/inference/go/openai/v1' },
+      { ...env, OPENAI_BASE_URL: 'https://other.example/v1' },
+    ]) {
+      expect(reasoningCapabilities(other, []).efforts).toEqual([])
+      expect(reasoningCapabilities(other, []).effort).toBeNull()
+      expect(await bgsReasoningConfig(other, client)).toEqual({})
+    }
+    expect((await update(initial.connectionKey, null)).status).toBe(200)
+    expect(await bgsReasoningConfig(env, client)).toEqual({})
+    saveReasoningPreference(env, initial.connectionKey, 'unsupported-saved-value')
+    await expect(bgsReasoningConfig(env, client)).rejects.toThrow('no longer supported')
   } finally { await rm(root, { recursive: true, force: true }) }
 })

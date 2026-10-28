@@ -1,3 +1,4 @@
+import { mcpHttpHeaders } from './mcp-http-headers'
 import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
 import { modelRuntimeFetch } from './beegame/model-runtime-transport'
 import type { McpServerConfig, McpServerInput } from './mcp-servers-store'
@@ -112,7 +113,7 @@ export async function testMcpServerConnection(
   if (input.transport === 'sse') {
     return testSseEndpoint(input.url, options.timeoutMs ?? 1600, options)
   }
-  return testMcpEndpoint(input.url, options.timeoutMs ?? 1600, options)
+  return testMcpEndpoint(input.url, options.timeoutMs ?? 1600, options, false, mcpHttpHeaders(input.headers))
 }
 
 async function testStdioServer(input: McpServerInput, timeoutMs: number): Promise<McpServerTestResult> {
@@ -166,6 +167,7 @@ async function testMcpEndpoint(
   timeoutMs: number,
   options: ActiveMcpDiscoveryOptions = {},
   localOnly = false,
+  headers: Record<string, string> = {},
 ): Promise<McpServerTestResult> {
   const approved = localOnly
     ? resolveLoopbackDiscoveryTarget(rawEndpoint)
@@ -187,6 +189,7 @@ async function testMcpEndpoint(
     const response = await (localOnly ? fetch : modelRuntimeFetch)(endpoint, {
       method: 'POST',
       headers: {
+        ...headers,
         accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
       },

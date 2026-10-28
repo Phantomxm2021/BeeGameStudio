@@ -27,6 +27,8 @@ import { ThemeToggle } from '../beui/motion/theme-toggle';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../beui/registry/components/motion/popover-morph';
 import { AnimatedBadge } from '../beui/registry/components/motion/animated-badge';
+import { DesktopAccountSlot, DesktopWorkspaceHeader } from '../Desktop/DesktopLayout';
+import { useDesktopLayout } from '../Desktop/desktopLayoutContext';
 
 const ResourceLibraryPage = lazy(async () => {
   const module = await import('../ResourceLibrary/ResourceLibraryView');
@@ -158,6 +160,7 @@ export function BeeGameLivePreviewPage({
   onSetLang,
   collaboration,
 }: BeeGameLivePreviewPageProps) {
+  const desktop = useDesktopLayout();
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(() => isResourceLibraryRoute());
   const [isCreditStoreOpen, setCreditStoreOpen] = useState(false);
@@ -282,7 +285,7 @@ export function BeeGameLivePreviewPage({
         className="relative z-[90] flex h-12 min-w-0 flex-1 items-center px-2 sm:h-14"
       >
         <div className="relative flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
-          <button
+          {!desktop ? <button
             type="button"
             aria-label={backHomeLabel}
             title={backHomeLabel}
@@ -290,7 +293,7 @@ export function BeeGameLivePreviewPage({
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-transparent bg-transparent text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--surface-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-none sm:h-10 sm:w-10"
           >
             <ChevronLeft className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
-          </button>
+          </button> : null}
           <MorphPopover open={isProjectMenuOpen} onOpenChange={setProjectMenuOpen} className="min-w-0 max-w-[min(52vw,28rem)]">
             <MorphPopoverTrigger>
               <button type="button" data-testid="beegame-project-info-trigger" aria-label={`${projectName}, ${labels.projectInfo || 'Project info'}`}
@@ -320,7 +323,7 @@ export function BeeGameLivePreviewPage({
               </div>
             </MorphPopoverContent>
           </MorphPopover>
-          <ProjectSyncBadge active={isSyncing || status === 'starting'} syncingLabel={labels.syncing} syncedLabel={labels.synced} />
+          {!desktop ? <ProjectSyncBadge active={isSyncing || status === 'starting'} syncingLabel={labels.syncing} syncedLabel={labels.synced} /> : null}
           {handoffNotice ? (
             <div
               data-testid="beegame-foundation-handoff-notice"
@@ -331,7 +334,7 @@ export function BeeGameLivePreviewPage({
           ) : null}
         </div>
         <div className="workspace-header-actions ml-1 flex shrink-0 items-center gap-2 sm:ml-auto sm:gap-3">
-          <ThemeToggle />
+          {!desktop ? <ThemeToggle /> : null}
           <div data-testid="beegame-preview-deploy-control" className="flex h-10 min-w-10 shrink-0 items-stretch overflow-hidden rounded-full border border-[var(--border)] bg-[var(--surface-2)] min-[900px]:min-w-[204px]">
             <Button
               type="button"
@@ -359,7 +362,7 @@ export function BeeGameLivePreviewPage({
               <span className="max-[899px]:hidden">{isDeploying ? labels.deploying : labels.deploy}</span>
             </Button>
           </div>
-          <AccountActionsMenu
+          <DesktopAccountSlot><AccountActionsMenu
             lang={lang}
             isSettingsOpen={isSettingsOpen}
             isHistoryOpen={isHistoryOpen}
@@ -371,6 +374,8 @@ export function BeeGameLivePreviewPage({
             currentUserEmail={currentUser?.email}
             currentUserAvatarUrl={currentUser?.avatarUrl}
             creditBalance={accountCreditBalance?.balanceCredits}
+            desktopSettings={{ currentUser, creditBalance: accountCreditBalance ?? null, onSetLang,
+              onUserChanged: async () => { await loadCurrentUser(); } }}
             canManageBeePlay={currentUser?.role === 'owner'}
             canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
             onOpenProfile={() => { closeAccountSurfaces(); setProfileOpen(true); }}
@@ -380,7 +385,7 @@ export function BeeGameLivePreviewPage({
             onToggleHistory={() => { closeAccountSurfaces(); setHistoryOpen(true); }}
             onOpenLogin={() => setProfileOpen(true)}
             onSignOut={currentUser ? () => void handleSignOut() : undefined}
-          />
+          /></DesktopAccountSlot>
         </div>
       </header>
 
@@ -405,8 +410,9 @@ export function BeeGameLivePreviewPage({
 
   return (
     <div data-testid="beegame-live-preview-page" className="contents">
+      <DesktopWorkspaceHeader>{workspaceHeader}</DesktopWorkspaceHeader>
       <WorkspaceShell
-        header={workspaceHeader}
+        header={desktop ? null : workspaceHeader}
         preview={workspacePreview}
         collaboration={collaboration ?? <div className="workspace-collaboration-panel" />}
       />

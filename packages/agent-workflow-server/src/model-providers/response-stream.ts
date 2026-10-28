@@ -24,57 +24,70 @@ export type ProviderUsage = {
 
 const MAX_EVENT_SIZE = 64 * 1024 * 1024
 
+export class ProviderSseError extends Error {}
+
+// The native bridge observes receipt boundaries before forwarding each chunk.
+// Share the existing bounded SSE decoder instead of a second protocol parser.
+export class ProviderSseParser {
+  done = false
+  private decoder = new TextDecoder()
+  private buffer = ''
+  private data: string[] = []
+  private eventSize = 0
+  private skipLf = false;
+
+  *feed(chunk?: Uint8Array, final = false): Generator<Json> {
+    if (this.done) return
+    let text = this.decoder.decode(chunk, { stream: !final })
+    // SSE permits CR, LF and CRLF; a CRLF pair may cross read boundaries.
+    if (this.skipLf && text.length) {
+      if (text.startsWith('\n')) text = text.slice(1)
+      this.skipLf = false
+    }
+    this.buffer += text
+    let end: number
+    while ((end = this.buffer.search(/[\r\n]/)) >= 0) {
+      const line = this.buffer.slice(0, end), cr = this.buffer[end] === '\r'
+      this.skipLf = cr && end === this.buffer.length - 1
+      this.buffer = this.buffer.slice(end + (cr && this.buffer[end + 1] === '\n' ? 2 : 1))
+      if (!line && this.data.length) {
+        const value = this.data.join('\n')
+        this.data = []
+        this.eventSize = 0
+        if (value === '[DONE]') { this.done = true; return }
+        try {
+          yield JSON.parse(value)
+        } catch (error) {
+          if (error instanceof SyntaxError)
+            throw new ProviderSseError('Provider returned an invalid JSON event')
+          throw error
+        }
+      } else if (line.startsWith('data:')) {
+        this.data.push(line.slice(5).trimStart())
+        this.eventSize += line.length
+      }
+      if (this.eventSize + this.buffer.length > MAX_EVENT_SIZE)
+        throw new ProviderSseError('Provider response event exceeds the size limit')
+    }
+    // A provider may keep a malformed event on one very large line. The
+    // line loop above cannot enforce the bound until a delimiter arrives.
+    if (this.eventSize + this.buffer.length > MAX_EVENT_SIZE)
+      throw new ProviderSseError('Provider response event exceeds the size limit')
+    if (final) {
+      if (this.buffer.trim() || this.data.length)
+        throw new ProviderSseError('Provider stream ended inside an event')
+      this.done = true
+    }
+  }
+}
+
 export async function* parseSse(response: Response): AsyncGenerator<Json> {
   if (!response.body) throw Error('Provider returned no response stream')
-  const reader = response.body.getReader(),
-    decoder = new TextDecoder()
-  let buffer = '',
-    data: string[] = [],
-    eventSize = 0,
-    skipLf = false
+  const reader = response.body.getReader(), parser = new ProviderSseParser()
   try {
-    while (true) {
+    while (!parser.done) {
       const chunk = await reader.read()
-      let text = decoder.decode(chunk.value, { stream: !chunk.done })
-      // SSE permits CR, LF and CRLF; a CRLF pair may cross read boundaries.
-      if (skipLf && text.length) {
-        if (text.startsWith('\n')) text = text.slice(1)
-        skipLf = false
-      }
-      buffer += text
-      let end: number
-      while ((end = buffer.search(/[\r\n]/)) >= 0) {
-        const line = buffer.slice(0, end), cr = buffer[end] === '\r'
-        skipLf = cr && end === buffer.length - 1
-        buffer = buffer.slice(end + (cr && buffer[end + 1] === '\n' ? 2 : 1))
-        if (!line && data.length) {
-          const value = data.join('\n')
-          data = []
-          eventSize = 0
-          if (value === '[DONE]') return
-          try {
-            yield JSON.parse(value)
-          } catch (error) {
-            if (error instanceof SyntaxError)
-              throw Error('Provider returned an invalid JSON event')
-            throw error
-          }
-        } else if (line.startsWith('data:')) {
-          data.push(line.slice(5).trimStart())
-          eventSize += line.length
-        }
-        if (eventSize + buffer.length > MAX_EVENT_SIZE)
-          throw Error('Provider response event exceeds the size limit')
-      }
-      // A provider may keep a malformed event on one very large line. The
-      // line loop above cannot enforce the bound until a delimiter arrives.
-      if (eventSize + buffer.length > MAX_EVENT_SIZE)
-        throw Error('Provider response event exceeds the size limit')
-      if (chunk.done) {
-        if (buffer.trim() || data.length)
-          throw Error('Provider stream ended inside an event')
-        return
-      }
+      yield* parser.feed(chunk.value, chunk.done)
     }
   } finally {
     await reader.cancel().catch(() => {})

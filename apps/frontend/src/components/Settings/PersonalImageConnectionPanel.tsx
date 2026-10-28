@@ -21,8 +21,9 @@ const inputClass = 'h-10 w-full rounded-lg border border-input bg-background px-
 
 export const PersonalImageConnectionPanel = forwardRef<PersonalImageConnectionHandle, {
   language: string;
+  desktop?: boolean;
   onSaveStateChange?: (state: PersonalImageConnectionSaveState) => void;
-}>(function PersonalImageConnectionPanel({ language, onSaveStateChange }, ref) {
+}>(function PersonalImageConnectionPanel({ language, desktop = false, onSaveStateChange }, ref) {
   const { showError } = useToastContext();
   const zh = language.startsWith('zh');
   const copy = (cn: string, en: string) => zh ? cn : en;
@@ -45,7 +46,8 @@ export const PersonalImageConnectionPanel = forwardRef<PersonalImageConnectionHa
     return () => { active = false; };
   }, []);
   const hasSavedKey = Boolean(saved?.hasApiKey && saved.provider === provider && saved.baseUrl === baseUrl);
-  const disabled = busy || !saved || (source === 'byok' && (!baseUrl.trim() || !model.trim() || (!apiKey.trim() && !hasSavedKey)));
+  const dirty = Boolean(saved && (source !== saved.source || (source === 'byok' && (provider !== saved.provider || baseUrl !== saved.baseUrl || model !== saved.model || apiKey || upstreamApiKey))));
+  const disabled = (desktop && !dirty) || busy || !saved || (source === 'byok' && (!baseUrl.trim() || !model.trim() || (!apiKey.trim() && !hasSavedKey)));
   useEffect(() => { onSaveStateChange?.({ busy, disabled: Boolean(disabled) }); }, [busy, disabled, onSaveStateChange]);
   const save = async () => {
     if (disabled) return false;
@@ -59,7 +61,8 @@ export const PersonalImageConnectionPanel = forwardRef<PersonalImageConnectionHa
       setSaved(connection); setApiKey(''); setUpstreamApiKey('');
       return true;
     } catch {
-      showError(copy('保存失败，请核对服务商、接口 URL、模型及 API Key。', 'Could not save. Check provider, endpoint, model and API key.'));
+      const message = copy('保存失败，请核对服务商、接口 URL、模型及 API Key。', 'Could not save. Check provider, endpoint, model and API key.');
+      if (desktop) setError(message); else showError(message);
       return false;
     } finally { setBusy(false); }
   };
@@ -69,15 +72,15 @@ export const PersonalImageConnectionPanel = forwardRef<PersonalImageConnectionHa
     setProvider(next); setBaseUrl(saved?.provider === next ? saved.baseUrl : defaultUrls[next]);
     setModel(saved?.provider === next ? saved.model : '');
   };
-  return <div className="flex min-h-0 flex-1 flex-col gap-5 py-5">
-    <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={copy('生图连接方式', 'Image connection type')}>
+  return <fieldset disabled={desktop && busy} className={desktop ? "desktop-image-settings desktop-form-panel" : "flex min-h-0 flex-1 flex-col gap-5 py-5"}>
+    {desktop ? <div className="desktop-setting-row"><label htmlFor="desktop-image-source">{copy('生图连接方式', 'Image connection type')}</label><select id="desktop-image-source" value={source} disabled={busy || !saved} onChange={event => { setSource(event.target.value as typeof source); setError(''); }}><option value="platform">{copy('平台提供', 'Platform provided')}</option><option value="byok">{copy('自带 API Key', 'Bring your own API key')}</option></select></div> : <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={copy('生图连接方式', 'Image connection type')}>
       {([['platform', copy('平台提供', 'Platform provided'), copy('使用 Bee Game Studio 的生图服务', 'Use Bee Game Studio image generation')],
         ['byok', copy('自带 API Key', 'Bring your own API key'), copy('使用你自己的图像生成接口', 'Use your own image provider')]] as const).map(([value, title, detail]) =>
         <label key={value} className={`flex min-h-16 items-center gap-3 rounded-xl border px-4 py-3 ${source === value ? 'border-foreground bg-muted/60' : 'border-border bg-background'}`}>
           <input type="radio" name="personal-image-source" value={value} checked={source === value} onChange={() => { setSource(value); setError(''); }} className="order-last ml-auto accent-foreground" />
           <span className="grid gap-1"><span className="text-sm font-medium">{title}</span><span className="text-xs text-muted-foreground">{detail}</span></span>
         </label>)}
-    </div>
+    </div>}
     {source === 'platform' ? <div className="grid gap-3 px-1 py-2 text-sm">
       <div className="flex items-center gap-3"><CheckCircle2 className="size-4 shrink-0" /><span>{copy('无需额外配置', 'No additional setup required')}</span></div>
       <div className="flex items-center gap-3 text-muted-foreground"><Wallet className="size-4 shrink-0" /><span>{copy('生成图片时按平台规则扣除 Credits', 'Image generation uses platform Credits')}</span></div>
@@ -89,6 +92,7 @@ export const PersonalImageConnectionPanel = forwardRef<PersonalImageConnectionHa
       <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center"><label htmlFor="personal-image-model" className="text-sm font-medium">{copy('生图模型', 'Image model')}</label><input id="personal-image-model" className={inputClass} value={model} onChange={event => setModel(event.target.value)} /></div>
       <p className="py-4 text-xs text-muted-foreground">{copy('由你的服务商计费；不会扣除平台生图 Credits。', 'Your provider bills you directly; platform image Credits are not charged.')}</p>
     </div>}
+    {desktop && dirty ? <div className="desktop-local-actions"><button type="button" className="desktop-text-button" disabled={busy} onClick={() => { if (!saved) return; setSource(saved.source); setProvider(saved.provider); setBaseUrl(saved.baseUrl); setModel(saved.model); setApiKey(''); setUpstreamApiKey(''); setError(''); }}>{copy('取消', 'Cancel')}</button><button type="button" className="desktop-settings-button desktop-primary" disabled={disabled} onClick={() => void save()}>{busy ? copy('保存中…', 'Saving…') : copy('保存连接', 'Save connection')}</button></div> : null}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-  </div>;
+  </fieldset>;
 });

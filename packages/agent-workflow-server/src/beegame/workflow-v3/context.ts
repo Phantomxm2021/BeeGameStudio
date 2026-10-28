@@ -2,7 +2,8 @@ import type { Run, SkillUse } from './state'
 
 type ToolEvent = { id: number; type: string; payload?: Record<string, unknown> }
 
-/** Native loader receipts and actual tool lifecycles only; never inferred from prose. */
+/** Keep loader receipts and links from native read events to catalog files.
+ * Command outcomes stay in the referenced events; no Skill-use state is inferred. */
 export function skillEvidence(events: ToolEvent[]): SkillUse[] {
   const uses = new Map<string, SkillUse>()
   for (const event of events) {
@@ -16,6 +17,15 @@ export function skillEvidence(events: ToolEvent[]): SkillUse[] {
         ...(typeof p.parent_tool_use_id === 'string' ? { parentToolUseID: p.parent_tool_use_id } : {}) })
     }
     if (typeof toolUseID !== 'string') continue
+    if (p?.toolName === 'Shell' && ['tool.started', 'tool.completed', 'tool.failed'].includes(event.type)) {
+      for (const read of Array.isArray(p.skillReads) ? p.skillReads : []) {
+        if (typeof read?.name !== 'string' || !read.name || typeof read.path !== 'string' || !read.path) continue
+        uses.set('shell:' + toolUseID + ':' + read.name + ':' + read.path, {
+          name:read.name, path:read.path, source:'shell', toolUseID, eventId:event.id,
+          ...(typeof p.parentToolUseID === 'string' ? {parentToolUseID:p.parentToolUseID} : {}),
+        })
+      }
+    }
     if (event.type === 'tool.started' && p?.toolName === 'Skill') {
       const name = (p.input as { skill?: unknown } | undefined)?.skill
       if (typeof name === 'string') uses.set(toolUseID, { name, toolUseID, eventId: event.id, status: 'unverified',
@@ -27,7 +37,7 @@ export function skillEvidence(events: ToolEvent[]): SkillUse[] {
   return [...uses.values()]
 }
 
-/** Recorded successful main-session loads in the same native lineage. This
+/** Recorded successful main-session loader receipts in the same native lineage. This
  * is not a claim that compaction retained the method or it was applied. Child
  * loads are not transferable evidence for their parent or another child. */
 export function priorMainSkillLoads(run:Run,attemptId:string) {
@@ -38,7 +48,7 @@ export function priorMainSkillLoads(run:Run,attemptId:string) {
   const nativeId=prior.at(-1)?.nativeSessionId
   const loaded=new Map<string,{name:string;attemptId:string;toolUseID?:string;messageId?:string;source?:'command'}>()
   if(nativeId)for(const turn of prior)if(turn.nativeSessionId===nativeId)
-    for(const skill of turn.skillUses??[])if(skill.status==='loaded'&&!skill.parentToolUseID)
+    for(const skill of turn.skillUses??[])if(skill.source!=='shell'&&skill.status==='loaded'&&!skill.parentToolUseID)
       loaded.set(skill.name,{name:skill.name,attemptId:turn.attemptId,...(skill.toolUseID?{toolUseID:skill.toolUseID}:{}),
         ...(skill.messageId?{messageId:skill.messageId,source:skill.source}:{})})
   return {recordedMainLoads:[...loaded.values()],contextPresence:'unverified',application:'unverified'}

@@ -18,6 +18,22 @@ const base: ProviderConfig = {
   model: 'fixture-model',
   auth: 'bearer',
 }
+
+test('Go forwards only verified selected efforts and leaves provider default absent', () => {
+  const config: ProviderConfig = { ...base, baseUrl: 'https://opencode.ai/zen/go/v1',
+    model: 'deepseek-v4.1-flash', sessionId: 'synthetic-effort-session' }
+  const input = { model: config.model, input: 'Synthetic request' }
+  for (const effort of ['low', 'high'])
+    expect(nativeRequest(config, { ...input, reasoning: { effort } }).body).toHaveProperty('reasoning_effort', effort)
+  for (const reasoning of [undefined, { summary: 'auto' }, { effort: null }])
+    expect(nativeRequest(config, { ...input, reasoning }).body).not.toHaveProperty('reasoning_effort')
+  expect(() => nativeRequest(config, { ...input, reasoning: { effort: 'max' } })).toThrow('does not support')
+  expect(() => nativeRequest(config, { ...input, reasoning: { effort: 'medium' } })).toThrow('does not support')
+  expect(nativeRequest({ ...config, model: 'unverified' }, { model: 'unverified', input: 'Synthetic', reasoning: { effort: 'low' } }).body)
+    .not.toHaveProperty('reasoning_effort')
+  expect(nativeRequest({ ...config, baseUrl: 'https://other.example/v1' }, { ...input, reasoning: { effort: 'low' } }).body)
+    .not.toHaveProperty('reasoning_effort')
+})
 const body = {
   model: 'fixture-model',
   input: [

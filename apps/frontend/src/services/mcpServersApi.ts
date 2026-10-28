@@ -20,6 +20,7 @@ export type McpServerConfig = {
   url?: string;
   cwd?: string;
   env?: McpServerEnvVar[];
+  headers?: McpServerEnvVar[];
   autoStart?: boolean;
 };
 

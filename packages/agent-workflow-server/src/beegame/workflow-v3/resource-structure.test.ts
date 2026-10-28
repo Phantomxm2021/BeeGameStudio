@@ -11,6 +11,7 @@ import { runContentCheck } from './content-checks'
 import { measurementSummary } from './agent-measurement'
 import { checkIsCurrent } from './checks'
 import { CHECK_VERSIONS } from './check-versions'
+import { audioProbeWav } from './audio-consumption'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(),'bgs-resource-structure-'))
@@ -167,5 +168,28 @@ test.each(['2d','3d'] as const)('Scene hierarchy/component/behavior inventory su
     expect(summary.sceneBindingCoverage.limitation).toContain('XR')
     expect(summary.quality).toBe('unverified')
     expect(await readFile(join(f.root,path),'utf8')).toBe(before)
+  }finally{await f.close()}
+})
+
+
+test('encoded alpha and PCM16 facts reach resource checks without promoting loop quality or old receipts',async()=>{
+  const f=await fixture()
+  try {
+    const profile=f.manifest.requirements[0]!.acquisition_profile,resource=f.manifest.resources[0]!
+    profile.asset_kinds=['sprite'];profile.capabilities=['alpha'];resource.asset_kind='sprite';resource.capabilities=['alpha']
+    await f.save()
+    const alpha=await runContentCheck(f.root,'content-resources',{expectedOutputs:[]},[],{})
+    expect(alpha.status,alpha.observation).toBe('passed')
+    expect(alpha.coverage!.assetContract!.resources[0]!.fileEvidence[0]!.facts.hasAlpha).toBe(true)
+    expect(await checkIsCurrent(f.root,{...alpha,version:'v3-content.5'})).toBe(false)
+    profile.asset_kinds=['audio-clip'];profile.capabilities=[];resource.asset_kind='audio-clip';resource.capabilities=[]
+    resource.root_path='assets/runtime/tone.wav';resource.file_paths=[resource.root_path]
+    await writeFile(join(f.root,resource.root_path),audioProbeWav(false));await f.save()
+    const pcm=await runContentCheck(f.root,'content-resources',{expectedOutputs:[]},[],{})
+    expect(pcm.status,pcm.observation).toBe('passed')
+    expect(pcm.inputs.some(file=>file.path===resource.root_path)).toBe(true)
+    profile.capabilities=['loop'];resource.capabilities=['loop'];await f.save()
+    const loop=await runContentCheck(f.root,'content-resources',{expectedOutputs:[]},[],{})
+    expect(loop.status).toBe('unverified')
   }finally{await f.close()}
 })

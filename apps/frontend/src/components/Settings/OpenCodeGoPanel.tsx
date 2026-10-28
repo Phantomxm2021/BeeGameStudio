@@ -8,12 +8,13 @@ import { useOpenCodeGoModels, OpenCodeGoCatalogStatus } from './useOpenCodeGoMod
 
 export const OpenCodeGoPanel = forwardRef<ModelConnectionsHandle, {
   language: string;
+  desktop?: boolean;
   config?: CatalogModel;
   busy: boolean;
   setBusy: (busy: boolean) => void;
   refresh: () => Promise<unknown>;
   onSaveStateChange?: (state: ModelConnectionsSaveState) => void;
-}>(function OpenCodeGoPanel({ language, config, busy, setBusy, refresh, onSaveStateChange }, ref) {
+}>(function OpenCodeGoPanel({ language, desktop = false, config, busy, setBusy, refresh, onSaveStateChange }, ref) {
   const copy = (cn: string, en: string) => language.startsWith('zh') ? cn : en;
   const { showError } = useToastContext();
   const [profileId, setProfileId] = useState<OpenCodeGoProfileId>(config?.connection.baseUrl
@@ -21,18 +22,19 @@ export const OpenCodeGoPanel = forwardRef<ModelConnectionsHandle, {
     : 'responses');
   const [model, setModel] = useState(config?.connection.model ?? OPENCODE_GO_PROFILES[profileId].model);
   const [key, setKey] = useState('');
+  const [error, setError] = useState('');
   const profile = OPENCODE_GO_PROFILES[profileId];
   const catalog = useOpenCodeGoModels(profileId);
   const keyRequired = !config?.connection.hasKey || config.provider !== profile.provider;
   const complete = !catalog.loading && !catalog.error && (!keyRequired || !!key.trim()) && !!catalog.models?.includes(model);
   const save = async () => {
     if (busy || !complete) return;
-    setBusy(true);
+    setBusy(true); setError('');
     try {
       await saveModelConnection(OPENCODE_GO_ID, 'byok', key, true, { provider: profile.provider, apiProtocol: profile.apiProtocol, baseUrl: profile.baseUrl, model });
       setKey('');
       await refresh();
-    } catch { showError(copy('无法保存 OpenCode Go 连接，请检查配置。', 'Could not save the OpenCode Go connection. Check the configuration.')); }
+    } catch { const message = copy('无法保存 OpenCode Go 连接，请检查配置。', 'Could not save the OpenCode Go connection. Check the configuration.'); if (desktop) setError(message); else showError(message); }
     finally { setBusy(false); }
   };
   useImperativeHandle(ref, () => ({ saveByok: () => void save() }));
@@ -49,5 +51,6 @@ export const OpenCodeGoPanel = forwardRef<ModelConnectionsHandle, {
       <label className="grid gap-2"><span className="text-sm">API Key</span><input aria-label="OpenCode Go API Key" type="password" autoComplete="new-password" disabled={busy} value={key} onChange={event => setKey(event.target.value)} placeholder={keyRequired ? copy('输入 OpenCode Go API Key', 'Enter your OpenCode Go API key') : copy('已保存；留空保留', 'Saved; leave blank to keep')} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
       <label className="grid gap-2"><span className="text-sm">{copy('模型', 'Model')}</span><ProjectSelect ariaLabel={copy('模型', 'Model')} value={model} disabled={busy || catalog.loading || catalog.error} onValueChange={setModel} options={[...new Set([...(catalog.models ?? []), ...(model ? [model] : [])])].map(value => ({ value, label: value, disabled: !catalog.models?.includes(value) }))} /></label>
     </form>
+    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
   </div>;
 });

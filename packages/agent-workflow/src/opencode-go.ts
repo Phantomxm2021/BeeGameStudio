@@ -30,8 +30,14 @@ export type OpenCodeGoProvider = typeof OPENCODE_GO_PROFILES[OpenCodeGoProfileId
 export type OpenCodeGoModels = Record<OpenCodeGoProfileId, string[]>
 export const OPENCODE_GO_CATALOG_URLS = ['https://opencode.ai/inference/go/v1/models', 'https://models.dev/api.json'] as const
 
-/** IDs come from Go itself; protocol metadata uses the same registry as OpenCode.
- * Never infer a model's protocol from its name or make a paid probe request. */
+// Go also serves these models through Responses despite their default SDK
+// being Chat Completions. Keep them in both lists while Go still lists them.
+// https://opencode.ai/v2/docs/console/harnesses/codex/#models (2026-10-27)
+const GO_ADDITIONAL_RESPONSES_MODELS = new Set(['deepseek-v4.1-flash', 'deepseek-v4-pro'])
+
+/** IDs come from Go itself. SDK metadata supplies the default protocol, not an
+ * exhaustive capability list. Never infer support from a model-name prefix or
+ * make a paid probe request. */
 export async function fetchOpenCodeGoModels(fetchImpl: typeof fetch = fetch): Promise<OpenCodeGoModels> {
   const [available, registry] = await Promise.all(OPENCODE_GO_CATALOG_URLS.map(async url => {
     const response = await fetchImpl(url, { headers: { 'User-Agent': 'BeeGameStudio/2.8.4', Accept: 'application/json' },
@@ -40,17 +46,19 @@ export async function fetchOpenCodeGoModels(fetchImpl: typeof fetch = fetch): Pr
     return response.json()
   }))
   if (!Array.isArray(available?.data) || !registry?.['opencode-go']?.models) throw new Error('Invalid OpenCode Go model catalog')
-  const ids = new Set(available.data.flatMap((item: { id?: unknown }) => typeof item?.id === 'string' ? [item.id] : []))
+  const ids = new Set<string>(available.data.flatMap((item: { id?: unknown }) => typeof item?.id === 'string' ? [item.id] : []))
   const provider = registry['opencode-go']
   const models: OpenCodeGoModels = { 'anthropic-compatible': [], 'openai-compatible': [], responses: [] }
-  for (const [id, value] of Object.entries(provider.models)) {
-    if (!value || typeof value !== 'object') continue
-    const model = value as { status?: string; provider?: { npm?: string } }
-    if (!ids.has(id) || model.status === 'deprecated') continue
-    const npm = model.provider?.npm ?? provider.npm
+  for (const id of ids) {
+    // Go's registry can lag its live catalog. Reuse OpenCode's entry only when
+    // the Go-specific entry is absent; its overrides/deprecations take priority.
+    const metadata = Object.hasOwn(provider.models, id) ? provider : registry.opencode
+    const model = metadata?.models?.[id] as { status?: string; provider?: { npm?: string } } | undefined
+    if (!model || typeof model !== 'object' || model.status === 'deprecated') continue
+    const npm = model.provider?.npm ?? metadata.npm
     if (npm === '@ai-sdk/anthropic') models['anthropic-compatible'].push(id)
     if (npm === '@ai-sdk/openai-compatible') models['openai-compatible'].push(id)
-    if (npm === '@ai-sdk/openai') models.responses.push(id)
+    if (npm === '@ai-sdk/openai' || GO_ADDITIONAL_RESPONSES_MODELS.has(id)) models.responses.push(id)
   }
   for (const list of Object.values(models)) list.sort()
   if (!Object.values(models).some(list => list.length)) throw new Error('No supported OpenCode Go models in catalog')

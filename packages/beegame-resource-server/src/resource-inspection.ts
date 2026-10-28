@@ -82,10 +82,35 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('')
 }
 
-function inspectPng(bytes: Uint8Array): Record<string, number> {
+function inspectPng(bytes: Uint8Array): Record<string, number | boolean> {
   if (bytes.length < 24 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) return {}
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  return { width: view.getUint32(16), height: view.getUint32(20) }
+  const dimensions = { width: view.getUint32(16), height: view.getUint32(20) }
+  // Alpha storage is a file fact, not proof of transparent pixels or good masking.
+  // A partial header still reports dimensions, but cannot establish its absence.
+  if (bytes.length < 33 || bytes[4] !== 13 || bytes[5] !== 10 || bytes[6] !== 26 || bytes[7] !== 10 ||
+      view.getUint32(8) !== 13 || readAscii(bytes, 12, 4) !== 'IHDR') return dimensions
+  const color = bytes[25]!
+  if (![0, 2, 3, 4, 6].includes(color)) return dimensions
+  let hasAlpha = color === 4 || color === 6, imageData = false, transparency = false, paletteEntries = 0
+  for (let offset = 33; offset + 12 <= bytes.length;) {
+    const size = view.getUint32(offset), end = offset + size + 12
+    if (end > bytes.length) return dimensions
+    const kind = readAscii(bytes, offset + 4, 4)
+    if (kind === 'PLTE') {
+      if (imageData || !size || size % 3 || size > 768) return dimensions
+      paletteEntries = size / 3
+    }
+    if (kind === 'tRNS') {
+      if (imageData || transparency || !(color === 0 && size === 2 || color === 2 && size === 6 ||
+          color === 3 && size > 0 && size <= paletteEntries)) return dimensions
+      hasAlpha = true; transparency = true
+    }
+    if (kind === 'IDAT') imageData = true
+    if (kind === 'IEND') return size === 0 && imageData ? { ...dimensions, hasAlpha } : dimensions
+    offset = end
+  }
+  return dimensions
 }
 
 /** Deliberately narrow: complete RIFF/WAVE PCM16 mono/stereo metadata only.

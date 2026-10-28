@@ -1,5 +1,5 @@
 import { getOpenCodeGoProvider } from '@bee-game-studio/agent-workflow/opencode-go'
-import type { ProviderConfig } from './config'
+import { providerReasoningEfforts, type ProviderConfig } from './config'
 import {
   conversation,
   inlineImage,
@@ -28,6 +28,10 @@ export function nativeRequest(config: ProviderConfig, body: Json) {
   if (typeof model !== 'string' || !model)
     throw Error('The selected provider has no model')
   if (config.protocol === 'chat-completions') {
+    const efforts = providerReasoningEfforts({ ...config, model })
+    const effort = body.reasoning?.effort
+    if (efforts.length && effort != null && !efforts.includes(effort))
+      throw Error('The selected provider model does not support this reasoning effort')
     headers.Authorization = 'Bearer ' + config.apiKey
     const converted: Json[] = system
       ? [{ role: 'system', content: system }]
@@ -92,6 +96,7 @@ export function nativeRequest(config: ProviderConfig, body: Json) {
         messages: converted,
         stream: true,
         stream_options: { include_usage: true },
+        ...(efforts.length && effort != null ? { reasoning_effort: effort } : {}),
         ...(tools.length
           ? {
               tools: tools.map(tool => ({

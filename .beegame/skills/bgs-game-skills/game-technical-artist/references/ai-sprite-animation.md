@@ -1,14 +1,16 @@
-# AI artwork to playable sprite animation
+# Sprite frames to playable animation
 
-Use after AI production has been selected under the [source policy](../SKILL.md), for characters or effects that actually need changing drawn poses. Keep the selected art direction and the current playable slice; do not require a fixed set of actions, directions, frame counts or reference boards. A texture atlas can contain unrelated images; packing those images does not create an animation.
+Use for supplied, sourced or AI-produced 2D character/monster actions, and effects that need changing drawn poses. Follow the [source policy](../SKILL.md); suitable existing animations need no image generation. Shared motion, frame preparation and playback checks apply to every source. Keep the selected art direction and the current playable slice; do not require a fixed set of actions, directions, frame counts or reference boards. A texture atlas can contain unrelated images; packing those images does not create an animation.
 
-## Describe the motion before requesting frames
+## Describe the required motion
 
-Use an existing suitable character image as the identity reference. If none exists, establish one through the available AI image tool; a usable frame from the first inspected sheet can become the reference for subsequent actions. Do not require a separate paid concept stage. Keep face, proportions, costume, equipment, palette, line treatment, camera and facing consistent. An unapproved reference is not user-approved art.
+Identify the actions and states needed by the actual gameplay, then inspect whether the selected family supplies their changing poses. Keep face, proportions, costume, equipment, palette, line treatment, camera and facing consistent across the accepted family. Apply the source policy to incidental differences from Agent-proposed designs; a reference is not user-approved art merely because the Agent selected it.
 
-For the required action, identify its readable poses, order, loop or one-shot behavior and gameplay timing. For example, a run needs alternating contacts and passing poses, not repeated copies of one stance. Frame count follows the motion and intended display size. Generate only the action/direction coverage needed now. Mirroring is suitable only when equipment, markings, handedness and lighting remain correct.
+For the required action, identify its readable poses, order, loop or one-shot behavior and gameplay timing. For example, a run needs alternating contacts and passing poses, not repeated copies of one stance. Frame count follows the motion and intended display size. Acquire or produce only the action/direction coverage needed now. Mirroring is suitable only when equipment, markings, handedness and lighting remain correct.
 
-## Use the existing image capability
+## AI generation only when selected
+
+Skip this section for usable supplied or sourced animation. Use an existing suitable character image as the identity reference. If none exists, a usable frame from the first inspected sheet can become the reference for subsequent actions; no separate paid concept stage is required.
 
 Read the current supplied `assets.mjs --help` and obtain its actual `cost low <size>` quote before an authorized generation. Use `generate <request.json> <new-assets-path>` with the existing request fields; no new provider, keys, job manifest or generation wrapper is needed. Respect the total budget, including model work: zero image charges do not make hand-coded artwork free. If generation or budget is blocked, explain the actual blocker and seek direction rather than drawing a substitute or launching paid diagnostics/retries.
 
@@ -27,9 +29,9 @@ Example request shape for a six-pose run, only when that motion needs six poses 
 
 Group compatible poses into a readable sheet, rather than issuing one image request per frame. Split only for an actual resolution, composition or identity problem. A prompt's grid and transparent-background request are intentions, not verified output geometry or alpha.
 
-## Inspect and prepare the returned pixels
+## Inspect and prepare frames from any source
 
-Inspect the whole sheet before cutting: actual dimensions, transparency, complete silhouettes, pose order, identity changes, repeated stills and frames crossing nominal cell boundaries. The image response supplies pixels, not trustworthy frame coordinates. Rectangles can be measured; whether the pose is correct still needs visual judgment. If silhouettes overlap or required body parts are absent, a crop or packer cannot repair them. Preserve the source and report the unresolved defect; do not automatically buy another attempt.
+Inspect the source sheet or individual frames before cutting or importing; preserve usable source animation metadata. Check actual dimensions, transparency, complete silhouettes, pose order, identity changes, repeated stills and frames crossing nominal cell boundaries. For generated sheets, the image response supplies pixels, not trustworthy frame coordinates. Rectangles can be measured; whether the pose is correct still needs visual judgment. If silhouettes overlap or required body parts are absent, a crop or packer cannot repair them. Preserve the source and report the unresolved defect; do not automatically buy another attempt.
 
 Use the existing paths, based on what inspection found:
 
@@ -41,7 +43,7 @@ Register output image and sidecar through the existing Manifest/resource tools. 
 
 ## Observe the animation, not just the files
 
-Inspect the sequence at its intended size and timing, including the last-to-first transition for a loop. Look for identity flicker, scale changes, foot sliding, clipping, unintended offsets and unreadable key poses. A contact sheet helps compare poses but cannot establish cadence. Then use the supplied Preview and its shared `withPlayCapture` helper for the actual player action, contact and recovery; see [player-path capture](../../game-playtest-performance/references/play-capture.md). No separate Skill invocation is needed to access that helper.
+Inspect the sequence at its intended size and timing, including the last-to-first transition for a loop. Look for identity flicker, scale changes, foot sliding, clipping, unintended offsets and unreadable key poses. A contact sheet helps compare poses but cannot establish cadence. During resource preparation, inspect the prepared sequence in an animation viewer or an asset-only preview, without changing the game entry points or build configuration. The supplied `--sprite-sample` helper creates a standalone demo project; it is not a resource-preparation step inside a game project. If playback cannot be observed, retain that limitation rather than claim motion was verified from still images. Asset playback does not prove gameplay integration. During implementation, use the supplied Preview and its shared `withPlayCapture` helper for the actual player action, contact and recovery; see [player-path capture](../../game-playtest-performance/references/play-capture.md). No separate Skill invocation is needed to access that helper.
 
 Let the real simulation move the actor and decide hits; pose playback must not introduce a second jump trajectory or make a visual contact count as a gameplay hit. Check applicable interruption and restart behavior with normal inputs. Keep any captured first result before authorized revisions. Distinguish mechanical checks, visual observations and unverified properties in the retained evidence. A model's aesthetic approval is not user acceptance. Missing viewing evidence stays unverified; do not add automatic generation/review loops to compensate.
 

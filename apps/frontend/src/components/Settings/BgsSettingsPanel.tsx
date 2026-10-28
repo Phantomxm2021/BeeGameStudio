@@ -6,8 +6,9 @@ export type BgsSettingsSaveState = { busy: boolean; disabled: boolean };
 
 export const BgsSettingsPanel = forwardRef<BgsSettingsHandle, {
   language: string;
+  desktop?: boolean;
   onSaveStateChange?: (state: BgsSettingsSaveState) => void;
-}>(function BgsSettingsPanel({ language, onSaveStateChange }, ref) {
+}>(function BgsSettingsPanel({ language, desktop = false, onSaveStateChange }, ref) {
   const zh = language.startsWith('zh');
   const [settings, setSettings] = useState<BgsSettings>();
   const [effort, setEffort] = useState('');
@@ -21,17 +22,27 @@ export const BgsSettingsPanel = forwardRef<BgsSettingsHandle, {
       .catch(() => { if (alive) setStatus(zh ? '无法读取 BGS 设置，请检查模型连接后重新打开设置。' : 'Could not load BGS settings. Check your model connection and reopen settings.'); });
     return () => { alive = false; };
   }, [zh]);
-  const save = async () => {
+  const save = async (nextEffort = effort) => {
     if (!settings) return;
     setBusy(true); setStatus('');
     try {
-      const value = await saveBgsSettings(settings.connectionKey, effort || null);
+      const value = await saveBgsSettings(settings.connectionKey, nextEffort || null);
       setSettings(value); setEffort(value.effort || '');
-      setStatus(zh ? '已保存，下一次任务调用生效。' : 'Saved. Applies to the next task invocation.');
-    } catch { setStatus(zh ? '保存失败；若模型连接已变更，请重新打开设置。' : 'Save failed. Reopen settings if your model connection changed.'); }
+      if (!desktop) setStatus(zh ? '已保存，下一次任务调用生效。' : 'Saved. Applies to the next task invocation.');
+    } catch { if (desktop) setEffort(settings.effort || ''); setStatus(zh ? '保存失败；若模型连接已变更，请重新打开设置。' : 'Save failed. Reopen settings if your model connection changed.'); }
     finally { setBusy(false); }
   };
-  useImperativeHandle(ref, () => ({ save }));
+  useImperativeHandle(ref, () => ({ save: () => save() }));
+  if (desktop) return <section className="desktop-bgs-settings" aria-label={zh ? '创作' : 'Creation'}>
+    <div className="desktop-settings-group-label">{zh ? '创作' : 'Creation'}</div>
+    <div className="desktop-setting-row"><span>{zh ? '当前模型' : 'Current model'}</span><span className="desktop-setting-value">{settings?.model || '—'}</span></div>
+    <div className="desktop-setting-row"><label htmlFor="desktop-reasoning-effort">{zh ? '推理强度' : 'Reasoning effort'}</label><select id="desktop-reasoning-effort" value={effort} disabled={busy || !settings || (!settings.efforts.length && !settings.effort)} onChange={event => { const next = event.target.value; setEffort(next); void save(next); }}>
+      <option value="">{zh ? '使用默认值' : 'Default'}</option>
+      {settings?.effort && !settings.efforts.includes(settings.effort) ? <option value={settings.effort} disabled>{settings.effort}</option> : null}
+      {settings?.efforts.map(value => <option key={value} value={value}>{value}</option>)}
+    </select></div>
+    {status ? <p role="alert" className="desktop-inline-feedback">{status}</p> : null}
+  </section>;
   return <section className="space-y-2 py-4" aria-label={zh ? 'BGS 设置' : 'BGS settings'}>
     <div className="grid gap-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
       <label className="text-sm font-medium" htmlFor="bgs-reasoning-effort">{zh ? '推理强度' : 'Reasoning effort'}</label>

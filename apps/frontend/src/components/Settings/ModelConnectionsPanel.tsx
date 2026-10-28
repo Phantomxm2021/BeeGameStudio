@@ -1,6 +1,7 @@
 import {defaultModelApiProtocol,resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
 import {OpenCodeGoPanel} from './OpenCodeGoPanel';
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { isDesktopShell, openExternal } from '../../lib/platform';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { ProjectSelect } from '../beui/project-select';
 import { OPENCODE_GO_ID } from '@bee-game-studio/agent-workflow/opencode-go';
 import { ModelConfigPanel } from './ModelConfigPanel';
@@ -15,7 +16,7 @@ const personalIds = [BYOK_ID, CHATGPT_ID, OPENCODE_GO_ID];
 export type ModelConnectionsHandle = { saveByok: () => void };
 export type ModelConnectionsSaveState = { visible: boolean; disabled: boolean; busy: boolean };
 
-export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { language: string; onSaveStateChange?: (state: ModelConnectionsSaveState) => void; chatgptAuthorizationOnly?: boolean }>(function ModelConnectionsPanel({ language, onSaveStateChange, chatgptAuthorizationOnly = false }, ref) {
+export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { language: string; desktop?: boolean; onSaveStateChange?: (state: ModelConnectionsSaveState) => void; chatgptAuthorizationOnly?: boolean }>(function ModelConnectionsPanel({ language, desktop = false, onSaveStateChange, chatgptAuthorizationOnly = false }, ref) {
   const { showError } = useToastContext();
   const zh = language.startsWith('zh');
   const copy = (cn: string, en: string) => zh ? cn : en;
@@ -30,6 +31,9 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const [localSaveState, setLocalSaveState] = useState<ModelConnectionsSaveState>({ visible: false, busy: false, disabled: true });
+  const reportSaveState = useCallback((value: ModelConnectionsSaveState) => { setLocalSaveState(value); onSaveStateChange?.(value); }, [onSaveStateChange]);
+  const reportError = useCallback((message: string) => { if (desktop) setStatus(message); else showError(message); }, [desktop, showError]);
   const [login, setLogin] = useState<ModelLogin>();
   const [codeCopied, setCodeCopied] = useState(false);
   const loginRef = useRef<ModelLogin | undefined>(undefined);
@@ -86,21 +90,21 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
         }
         if (cancelled) return;
         setLogin(undefined); loginRef.current = undefined;
-        if (result.status !== 'complete') showError(copy('登录失败，请重新登录。', 'Login failed. Start again.'));
+        if (result.status !== 'complete') reportError(copy('登录失败，请重新登录。', 'Login failed. Start again.'));
       } catch { if (!cancelled) {
         setLogin(undefined); loginRef.current = undefined;
         if (chatgptAuthorizationOnly) {
           setModels([]);
           setStatus(copy('无法确认登录结果，请重新打开此页面检查。', 'Could not confirm the login result. Reopen this page to check.'));
-        } else showError(copy('登录已过期，请重试。', 'Login expired. Start again.'));
+        } else reportError(copy('登录已过期，请重试。', 'Login expired. Start again.'));
       } }
     };
     timer = setTimeout(poll, 2000);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [login, showError, chatgptAuthorizationOnly]);
+  }, [login, showError, chatgptAuthorizationOnly, reportError]);
   const run = async (action: () => Promise<void>, onError?: () => void) => {
     setBusy(true); setStatus('');
-    try { await action(); } catch { onError?.(); showError(copy('操作失败，请检查连接或重新登录。', 'Operation failed. Check the connection or sign in again.')); }
+    try { await action(); } catch { onError?.(); reportError(copy('操作失败，请检查连接或重新登录。', 'Operation failed. Check the connection or sign in again.')); }
     finally { if (mounted.current) setBusy(false); }
   };
   const activate = async (id: string, method: ModelAuthMethod, byokConfig?: { provider: ModelProviderKind;apiProtocol?:ModelApiProtocol; baseUrl: string; model?: string }) => {
@@ -124,9 +128,22 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     }
   };
   const beginLogin = () => {
+    if (isDesktopShell()) {
+      void run(async () => {
+        const result = await startModelLogin(subscriptionId, subscriptionMethod);
+        if (!mounted.current) { await cancelModelLogin(result.id); return; }
+        // Register before opening the browser so closing settings can cancel in flight.
+        loginRef.current = result;
+        try { await openExternal(result.url); }
+        catch (error) { if (mounted.current) await cancelModelLogin(result.id); loginRef.current = undefined; throw error; }
+        if (!mounted.current) return;
+        setCodeCopied(false); setLogin(result);
+      });
+      return;
+    }
     // Open synchronously from the click so the browser does not block the authorization tab.
     const authWindow = window.open('about:blank', '_blank');
-    if (!authWindow) { showError(copy('请允许弹出窗口后重试登录。', 'Allow pop-ups and try signing in again.')); return; }
+    if (!authWindow) { reportError(copy('请允许弹出窗口后重试登录。', 'Allow pop-ups and try signing in again.')); return; }
     authWindow.opener = null;
     void run(async () => {
       try {
@@ -141,19 +158,19 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
   const copyDeviceCode = async () => {
     if (!login?.userCode) return;
     try { await navigator.clipboard.writeText(login.userCode); setCodeCopied(true); }
-    catch { showError(copy('复制失败，请手动复制设备码。', 'Copy failed. Select the device code manually.')); }
+    catch { reportError(copy('复制失败，请手动复制设备码。', 'Copy failed. Select the device code manually.')); }
   };
   const saveByok = () => void run(async () => { await saveModelConnection(BYOK_ID, 'byok', key, true, { provider,apiProtocol, baseUrl: baseUrl.trim(), model: model.trim() }); setKey(''); await refresh(); });
   useImperativeHandle(ref, () => ({ saveByok:()=>mode==='opencode-go'?goRef.current?.saveByok():saveByok() }));
-  useEffect(() => { if(mode==='opencode-go')return;onSaveStateChange?.({ visible: mode === 'byok', disabled: busy || !byokComplete, busy }); }, [mode, busy, byokComplete, onSaveStateChange]);
+  useEffect(() => { if(mode==='opencode-go')return;reportSaveState({ visible: mode === 'byok', disabled: busy || !byokComplete, busy }); }, [mode, busy, byokComplete, reportSaveState]);
 
-  return <div className="flex min-h-0 flex-1 flex-col gap-4 py-4">
-    {!chatgptAuthorizationOnly && <ProjectSelect ariaLabel={copy('连接方式', 'Connection type')} value={mode} disabled={busy || !!login} triggerClassName="h-10" onValueChange={value => switchMode(value as Mode)} options={[{ value: 'official', label: 'Bee Game Studio LLM' }, { value: 'byok', label: 'BYOK' },{value:'opencode-go',label:'OpenCode Go'}, { value: 'chatgpt-subscription', label: 'ChatGPT account with subscription' }]} />}
-    {mode==='opencode-go' && <OpenCodeGoPanel ref={goRef} language={language} config={models.find(item=>item.id===OPENCODE_GO_ID)} busy={busy} setBusy={setBusy} refresh={refresh} onSaveStateChange={onSaveStateChange}/>}
+  return <div className={desktop ? "desktop-model-settings desktop-form-panel" : chatgptAuthorizationOnly ? "flex flex-col gap-3 pt-3" : "flex min-h-0 flex-1 flex-col gap-4 py-4"}>
+    {!chatgptAuthorizationOnly && <div className={desktop ? 'desktop-connection-mode desktop-setting-row' : ''}>{desktop ? <span>{copy('连接方式', 'Connection type')}</span> : null}<ProjectSelect ariaLabel={copy('连接方式', 'Connection type')} value={mode} disabled={busy || !!login} triggerClassName="h-10" onValueChange={value => switchMode(value as Mode)} options={[{ value: 'official', label: 'Bee Game Studio LLM' }, { value: 'byok', label: 'BYOK' },{value:'opencode-go',label:'OpenCode Go'}, { value: 'chatgpt-subscription', label: 'ChatGPT account with subscription' }]} /></div>}
+    {mode==='opencode-go' && <OpenCodeGoPanel ref={goRef} desktop={desktop} language={language} config={models.find(item=>item.id===OPENCODE_GO_ID)} busy={busy} setBusy={setBusy} refresh={refresh} onSaveStateChange={reportSaveState}/>}
     {mode === 'byok' && <div className="space-y-3">
       <ModelConfigPanel labels={{ provider: copy('服务商', 'Provider'), baseUrl: copy('接口 URL', 'Base URL'), apiKey: 'API Key', model: copy('模型', 'Model') }} provider={provider} apiProtocol={apiProtocol} onApiProtocolChange={setApiProtocol} baseUrl={baseUrl} apiKey={key} model={model} apiKeyPreview={byok?.connection.hasKey && !keyRequired ? '••••' : ''} savedPrefix={copy('已保存：', 'Saved: ')} onProviderChange={setProvider} onBaseUrlChange={setBaseUrl} onApiKeyChange={setKey} onModelChange={setModel} onSubmit={event => { event.preventDefault(); if (byokComplete && !busy) saveByok(); }} />
     </div>}
-    {(mode === 'chatgpt-subscription') && <div className="flex min-h-48 flex-1 items-center justify-center">
+    {(mode === 'chatgpt-subscription') && <div className={`flex items-center justify-center${chatgptAuthorizationOnly || desktop ? '' : ' min-h-48 flex-1'}`}>
       {!connected && !login && <div className="flex w-full max-w-sm flex-col items-center gap-4 text-center">
         <button className="rounded-full bg-foreground px-6 py-3 text-sm font-medium text-background disabled:opacity-50" disabled={busy || (chatgptAuthorizationOnly && !subscription)} onClick={beginLogin}>{copy('使用 ChatGPT 账号登录授权', 'Continue with ChatGPT')}</button>
       </div>}
@@ -170,6 +187,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
         {mode === 'chatgpt-subscription' && <a className="mt-4 inline-block text-sm underline" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">{copy('查看 ChatGPT 用量', 'View ChatGPT usage')}</a>}
       </section>}
     </div>}
-    {status && (chatgptAuthorizationOnly || (mode !== 'chatgpt-subscription')) && <p role="status" className="text-sm">{status}</p>}
+    {desktop && localSaveState.visible ? <div className="desktop-local-actions">{mode === 'byok' ? <button type="button" className="desktop-text-button" disabled={busy} onClick={() => { setProvider(byok?.provider ?? 'openai-compatible'); setApiProtocol(byok?.connection.apiProtocol ?? byok?.apiProtocol ?? 'responses'); setBaseUrl(byok?.connection.baseUrl ?? ''); setModel(byok?.connection.model ?? ''); setKey(''); setStatus(''); }}>{copy('取消', 'Cancel')}</button> : null}<button type="button" className="desktop-settings-button desktop-primary" disabled={localSaveState.disabled} onClick={() => mode === 'opencode-go' ? goRef.current?.saveByok() : saveByok()}>{localSaveState.busy ? copy('保存中…', 'Saving…') : copy('保存连接', 'Save connection')}</button></div> : null}
+    {status && (desktop || chatgptAuthorizationOnly || (mode !== 'chatgpt-subscription')) && <p role={desktop ? "alert" : "status"} className="text-sm">{status}</p>}
   </div>;
 });

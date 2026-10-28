@@ -1,18 +1,20 @@
 import { randomUUID } from 'node:crypto'
-import { initialProductionAssignment, productionAssignmentPrompt, prepareProductionHandoff, verifyProductionHandoff, type ProductionAssignment } from './production-workflow'
+import { initialProductionAssignment, productionAssignmentPrompt, PRODUCTION_WORKFLOW_GUIDANCE, prepareProductionHandoff, verifyProductionHandoff, productionOutputSchema, parseProductionResult, prepareDesignDocumentHandoff, type ProductionAssignment } from './production-workflow'
 import { z } from 'zod/v4'
 import { readSessionTranscriptFactsFromDisk, type BeeGameAttachment, type BeeGameSessionManager, type StartBeeGameSessionInput, type BeeGameNativeGoalInput, type BeeGameEvent } from '../session-manager'
 import { pauseRun, digest, isInitialSliceTurn, WorkflowError, type Run, type AgentTurn, type AgentMessage } from './state'
 import { sameJson, type WorkflowStore } from './store'
 import { skillEvidence } from './context'
 import { openAgentTools, type AgentPreviewAccess, type AgentImageAccess } from './agent-tools'
-import { createAgentMeasurement, AGENT_CONSUMPTION_CHECKS } from './agent-measurement'
+import { createAgentMeasurement, AGENT_CONSUMPTION_CHECKS, type AgentDeliverySubmission } from './agent-measurement'
 import { blockingRegisteredContentChecks, inspectAgentMeasurementInputs } from './measured-build'
 import { readProjectGuide, projectGuideContext } from './project-guide'
 import { saveHostExitReceipt, type HostExitReceipts, type HostExitFacts } from './host-exit-receipt'
 import { requiresWebVisualComparison, isWebReactTarget } from './web-project-start'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
 import { DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
+import { assertDesignReviewReady, DESIGN_REVIEW_AUTHOR_GUIDANCE } from './design-review'
+import { designDocumentSource } from './production-workflow'
 
 type AgentExecutionOptions = Partial<StartBeeGameSessionInput> & {
   attachments?: BeeGameAttachment[]
@@ -43,11 +45,12 @@ export const agentMessageSchema = z.object({
   {message:'Focused execution requires work, change or continuation'})
 
 // Business data, authorization and shared coordination; specialist methods stay in Skills.
-const enginePlatformContext = 'Preserve the user-selected engine and platform in bgsConfirmedBrief.settings. Choose architecture, entry points, source organization, build and verification methods in the technical sections of docs/GDD.md.'
+const enginePlatformContext = 'Preserve the user-selected engine and platform in bgsConfirmedBrief.settings. These settings are fixed at project confirmation. Chat messages and design edits cannot change them; if a later request proposes a different target, explain this limitation and retain the confirmed platform and engine. Choose architecture, entry points, source organization, build and verification methods in the technical sections of docs/GDD.md.'
 const savedContentContext = 'Consume applicable editable content in the actual runtime, without a second hardcoded layout. BGS Editor reads BGS Scene/UI JSON; Unity/Godot/Unreal retain native data and have no BGS native-editing adapter. Report an unmet BGS Editor requirement instead of switching engines or duplicating native content into Web JSON. Maintain resources and bindings together.'
 const professionalContextParagraphs = [
+  'When starting concrete resource production, gameplay programming, technical art, feel tuning, debugging or verification work, select applicable Skills from the installed catalog for that problem. Reuse relevant guidance still in context; read missing guidance and references as needed, without loading all methods at stage entry. Apply the selected method to the actual outputs. Inspect produced resources; when work affects implementation, verify the affected code and behavior in the target runtime. Record findings, evidence and unresolved gaps in the existing work or verification record; reading a Skill or naming it does not establish effective application. Stay within the current authorized assignment.',
   'For implementation and delivery, complete and check the confirmed behavior: build/load, resources, rules, controls and their required visible/audible presentation, including state transitions and recovery. Confirmed visual/audio requirements remain implementation responsibilities. Missing behavior is unfinished; behavior without runtime observation remains unverified. User playtesting judges how clear, satisfying or enjoyable the result is; pending subjective feedback alone does not keep implementation running. Hand off implemented scope, actual observations and unresolved issues. Full-game bot navigation and route optimization are not default deliverables. Honor explicitly requested playtests and performance investigations without claiming unverified outcomes.',
-  'Honor explicit resource sources and usage rights, and reuse suitable user-provided assets. Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method appropriate to the required asset type. Move on when earlier sources do not yield a usable match; unavailable access is not an empty search result. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Failed sourcing or AI generation does not authorize automatic procedural replacement of required art; that needs a concrete blocker and user authorization. Simple controls, geometric effects and an explicitly chosen procedural aesthetic may use code directly. Placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
+  'Honor explicit resource sources and usage rights, and reuse suitable user-provided assets. Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method appropriate to the required asset type. Move on when earlier sources do not yield a usable match; unavailable access is not an empty search result. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Failed sourcing or AI generation does not authorize automatic procedural replacement of required art; that needs a concrete blocker and user authorization. Simple controls and geometric effects may use code directly; procedural core artwork requires an explicit user choice of that aesthetic, not an Agent-authored design decision. Placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
   'Keep editable sources separate from publication output and retain required licenses.',
 ]
 // Shared on every workflow turn, including preparation and resumed projects.
@@ -81,7 +84,7 @@ function agentGoalDisplayText(run: Run): string {
 }
 
 // The Goal and follow-up assignments share the same BGS delivery endpoint.
-const implementationHandoff = 'For implementation, finish the confirmed behavior and necessary technical checks, reuse valid evidence for unchanged behavior, then hand off observed results and user-playtest questions and mark the assignment complete. Submit implementation deliveries through BgsFinishDelivery (or the provided measure.mjs --finish when unavailable) after recording current evidence; a native Goal completion alone does not submit delivery. User playtesting follows that handoff. Missing required implementation or technical evidence remains unresolved; preserve the confirmed scope.'
+const implementationHandoff = 'Complete the confirmed implementation scope and required technical observations. Reuse valid evidence for unchanged inputs; after changes, recheck affected behavior and integration. Submit the existing acceptance report through BgsFinishDelivery (or measure.mjs --finish when unavailable). A valid passed report completes delivery; an explicit blocked or failed report ends this execution as blocked, retaining the remaining scope and reason. Use that stop path when an external dependency, unavailable required observation or needed user decision prevents further authorized progress after independent work is exhausted; do not keep iterating on the same unchanged blocker. Tool coverage limitations and post-handoff subjective feedback alone do not create missing requirements. Native Goal completion alone is not delivery.'
 
 export function agentGoalPrompt(run: Run): string {
   if (run.creation?.initialDelivery === 'playable-slice') return [
@@ -140,7 +143,7 @@ function nativeAssignment(run: Run, turn: AgentTurn, previousGoal: NativeGoalObs
     if(remaining!==undefined && remaining<=0)throw new WorkflowError('goal-budget-exhausted','The native Goal budget is exhausted; a new context does not extend it')
     return {mode:'start',objective:previousGoal.objective,...(remaining!==undefined?{tokenBudget:remaining}:{})}
   }
-  if(turn.production)return {mode:'start',objective:'Implement the authorized assignment identified by '+turn.production.originRequestKey+' in the current production prompt. Preserve its full scope; continuously validate behavior and presentation, then submit current delivery through BgsFinishDelivery (or measure.mjs --finish when the native tool is unavailable). Preparation handoffs do not certify game quality.'}
+  if(turn.production)return {mode:'start',objective:'Implement the authorized assignment identified by '+turn.production.originRequestKey+' in the current production prompt. '+implementationHandoff+' Preparation handoffs do not certify game quality.'}
   if(!message)return {mode:'start',objective:agentGoalPrompt(run)}
   return undefined
 }
@@ -197,6 +200,8 @@ export function focusedExecutionFacts(run: Run, events: Awaited<ReturnType<typeo
 /** Final host receipt is computed after owned work stops. No model summary,
  * report rewrite or retry; semantic quality is still not certified. */
 export async function agentTurnHandoffReason(run: Run, turn: AgentTurn) {
+  if (turn.production?.stage === 'design' && turn.productionHandoff && !turn.productionHandoff.next)
+    return 'Complete GDD saved to docs/GDD.md. The document task ended; game implementation and quality remain unverified.'
   // A follow-up need not build again merely to carry forward an unchanged
   // receipt. Inspect the newest actual record, including failed/pending ones.
   const record=run.agentTurns?.flatMap(t=>t.measurements??[]).at(-1)
@@ -275,7 +280,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       return {evidence:'unavailable',code:error instanceof WorkflowError?error.code:'exit-evidence-read-failed'}
     }
   }
-  async function settle(run: Run, turn: AgentTurn, failed?: string, interrupted = false, nativeGoal?: NativeGoalObservation, deliveryVerified = false) {
+  async function settle(run: Run, turn: AgentTurn, failed?: string, interrupted = false, nativeGoal?: NativeGoalObservation, deliverySubmission?: AgentDeliverySubmission) {
     // Retry pure CAS settlement only, never model/tool execution.
     for (let i=0;i<2;i++) {
       const current = await read(run)
@@ -287,14 +292,14 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       result.finishedAt = new Date().toISOString()
       if (failed) result.error = failed
       delete next.writer; next.version++
-      const missingDelivery=requiresBuildDelivery(current,saved) && !deliveryVerified
+      const missingDelivery=requiresBuildDelivery(current,saved) && !deliverySubmission
       const missingHandoff=Boolean(saved.production && saved.production.stage!=='implementation' && !saved.productionHandoff)
-      const complete=!current.paused && !interrupted && !failed && !missingHandoff && !missingDelivery &&
+      const complete=!current.paused && !interrupted && !failed && !missingHandoff && !missingDelivery && (!deliverySubmission || deliverySubmission.status==='passed') &&
         (!nativeGoal || nativeGoal.status==='complete')
-      const awaitingNext=complete && Boolean(saved.productionHandoff)
+      const awaitingNext=complete && Boolean(saved.productionHandoff?.next)
       next.status=complete && !awaitingNext?'completed':'blocked'
       const handoffReason = (current.paused ? 'User paused; no automatic retry.' :
-        failed ?? ((nativeGoal ? 'Codex Goal '+nativeGoal.status+'. ' : '') +
+        failed ?? (deliverySubmission && deliverySubmission.status!=='passed' ? deliverySubmission.summary : undefined) ?? ((nativeGoal ? 'Codex Goal '+nativeGoal.status+'. ' : '') +
           (missingHandoff ? 'Current production assignment ended without its source-bound workflow handoff; no automatic continuation. ' : '') +
           (missingDelivery ? 'Implementation delivery was not submitted through the current BgsFinishDelivery / --finish capability. Inspect retained evidence and submit the existing delivery; no automatic test or model retry. ' : '') +
           (isInitialSliceTurn(current,result)
@@ -305,6 +310,10 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       try {
         await input.store.commit(run.projectId,run.ownerId,current.version,next,'agent.turn-settled')
         observedExits.delete(turn.attemptId)
+        if (next.status === 'blocked' && !awaitingNext && !current.paused && !interrupted)
+          input.sessions.recordDeliveryError(run.chatSessionId,
+            missingHandoff && !failed ? 'Current production assignment ended without its source-bound workflow handoff; no automatic continuation.' : handoffReason,
+            'workflow-blocked')
         const measured = result.measurements?.at(-1)
         input.sessions.recordHostEvidence(run.chatSessionId, {attemptId:turn.attemptId,turnId:result.turnId,
           execution:result.status,measurementId:measured?.id,checkStatuses:measured?.checks.map(({id,status})=>({id,status})) ?? [],
@@ -318,7 +327,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
   }
   async function execute(run: Run, turn: AgentTurn, options: AgentExecutionOptions) {
     let failed: string | undefined, turnId: string | undefined
-    let nativeGoal: NativeGoalObservation | undefined, deliveryVerified = false, hasImplementationGoal = false
+    let nativeGoal: NativeGoalObservation | undefined, deliverySubmission: AgentDeliverySubmission|undefined, hasImplementationGoal = false
     let tools: Awaited<ReturnType<typeof openAgentTools>> | undefined
     let preview: AgentPreviewAccess | undefined
     let image: AgentImageAccess | undefined
@@ -376,9 +385,12 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       const userPrompt = turn.message ? agentMessagePrompt(turn.message,
         run.sourceEdits?.filter(e=>e.fence>(run.agentTurns?.at(-2)?.fence??0))) : ''
       const prompt = nativeRecovery ? '' : turn.production ? [userPrompt,productionAssignmentPrompt(run,turn.production)].filter(Boolean).join('\n\n') : userPrompt || agentGoalPrompt(run)
+      const internalProduction = Boolean(turn.production && previous && !turn.message)
       await input.sessions.sendWithDisplay(session.id, prompt, {
-        displayKind:turn.message ? 'workflow_v3_'+turn.message.intent : turn.production ? 'workflow_v3_production' : 'workflow_v3_goal',
-        displayText:nativeRecovery ? '恢复原生执行' : turn.message?.text ?? (turn.production ? 'Production: '+turn.production.stage+(turn.production.discipline ? ' / '+turn.production.discipline : '') : agentGoalDisplayText(run)),
+        messageOrigin:internalProduction ? 'workflow' : 'user',
+        ...(internalProduction ? {resumeReason:'production-handoff' as const} : {}),
+        displayKind:turn.message ? 'workflow_v3_'+turn.message.intent : 'workflow_v3_goal',
+        displayText:nativeRecovery ? '恢复原生执行' : turn.message?.text ?? agentGoalDisplayText(run),
         attachments:options.attachments,
         clientMessageId:turn.message?.requestKey,
         executionIdentity:{attemptId:turn.attemptId,workerId:turn.workerId,fence:turn.fence},
@@ -395,8 +407,6 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         // slot, so resumed threads receive current capabilities and host facts.
         // Project conventions/navigation are one current file snapshot.
         prepareTurn:async ()=>{
-          const savedGuide=await readProjectGuide(run.workspacePath)
-          const guide=projectGuideContext(savedGuide)
           // A committed change whose native submission never started is not
           // in resumed model history. Carry its literal user data under this
           // new authorization. bgsConfirmedBrief supplies the current aggregate
@@ -410,6 +420,47 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
             authorized_user_changes:pendingChanges.filter(item=>item.intent==='change').map(({requestKey,text})=>({requestKey,text})),
             user_messages:pendingChanges.filter(item=>item.intent==='message').map(({requestKey,text})=>({requestKey,text})),
           }):''
+          if (turn.production?.stage === 'design') {
+            const currentDesignWriter = async () => {
+              const current = await read(run), saved = current.agentTurns!.find(t => t.attemptId === turn.attemptId)
+              if (!sameWriter(current, turn) || current.paused || !saved || saved.quiescedAt)
+                throw new WorkflowError('stale-attempt', 'Production writer changed or paused')
+              if (saved.productionHandoff) throw new WorkflowError('request-conflict', 'GDD was already submitted')
+              return current
+            }
+            return {
+              turnContext: confirmedChanges,
+              systemContext: enginePlatformContext + '\n' + (isWebReactTarget(run.requirements.constraints) ? webReactRuntimeContext : savedContentContext) + '\n' + DESIGN_REVIEW_AUTHOR_GUIDANCE + '\nThe current assignment is one GDD document task. Use the confirmed brief and necessary professional guidance. Maintain docs/GDD.md with WriteProjectFile/EditProjectFile; Shell and other project files remain read-only. This is a working document: interrupted work may leave a draft, not a completed handoff. End with only ready/blocked and a summary; do not repeat the document in the final result. BGS records the saved source and ends the task. Research only unresolved decisions; unavailable required sources are gaps, not reasons for repeated retrieval.' + confirmedChanges + (nativeRecovery ? '\n' + productionAssignmentPrompt(run, turn.production) : ''),
+              finalOutput: { readOnly: true,
+                writeDocument: { path: 'docs/GDD.md', authorize: async () => { await currentDesignWriter() } },
+                designReview: {
+                  candidate: async value => {
+                    const request = parseProductionResult(turn.production!, value)
+                    await currentDesignWriter()
+                    return { source: designDocumentSource(run.workspacePath), summary: request.summary,
+                      ...('reviewResponses' in request ? { reviewResponses: request.reviewResponses } : {}) }
+                  },
+                  record: async receipt => {
+                    const current = await currentDesignWriter()
+                    const next = structuredClone(current); next.version++
+                    const saved = next.agentTurns!.find(t => t.attemptId === turn.attemptId)!
+                    ;(saved.designReviews ??= []).push(receipt)
+                    await input.store.commit(run.projectId, run.ownerId, current.version, next, 'agent.design-reviewed')
+                  },
+                },
+                schema: productionOutputSchema(turn.production), accept: async (value: unknown) => {
+                  const request = parseProductionResult(turn.production!, value)
+                  const current = await currentDesignWriter()
+                  assertDesignReviewReady(designDocumentSource(run.workspacePath), current.agentTurns!.find(t => t.attemptId === turn.attemptId)!.designReviews ?? [])
+                  const handoff = prepareDesignDocumentHandoff(run.workspacePath, request.summary)
+                  const next = structuredClone(current); next.version++
+                  next.agentTurns!.find(t => t.attemptId === turn.attemptId)!.productionHandoff = handoff
+                  await input.store.commit(run.projectId, run.ownerId, current.version, next, 'agent.production-handoff')
+                  return request.summary
+                } },
+            }
+          }
+          const guide=projectGuideContext(await readProjectGuide(run.workspacePath))
           tools=await openAgentTools({ workspacePath:run.workspacePath, constraints:run.requirements.constraints,
             requireVisualComparison:requiresWebVisualComparison(run),
             sessionId:session.id,openPreview:options.openPreview ? async ()=>preview=await options.openPreview!() : undefined,
@@ -438,7 +489,20 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
           // reads inputs once; it does not build, review or rewrite history.
           const evidence=await measurement.context()
           return {...tools,turnContext:confirmedChanges,
-            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message))+'\n\n'+guide+'\n\n'+tools.systemContext+
+            ...(turn.production && turn.production.stage !== 'implementation' ? {finalOutput:{
+              schema:productionOutputSchema(turn.production),
+              accept:async (value:unknown)=>{
+                const request=parseProductionResult(turn.production!,value)
+                const current=await read(run), saved=current.agentTurns!.find(t=>t.attemptId===turn.attemptId)!
+                if(!sameWriter(current,turn) || current.paused || saved.quiescedAt)
+                  throw new WorkflowError('stale-attempt','Production writer changed or paused')
+                // A compatible saved native session may still use its explicit
+                // handoff tool. It must still survive the normal cleanup check.
+                if(!saved.productionHandoff) await tools!.workflow!(request)
+                return request.summary
+              },
+            }} : {}),
+            systemContext:agentProfessionalContextForRun(run,Boolean(turn.message))+(turn.production && turn.production.stage!=='implementation' ? '\n\n'+PRODUCTION_WORKFLOW_GUIDANCE : '')+'\n\n'+guide+'\n\n'+tools.systemContext+
               '\n'+tools.turnContext+(nativeRecovery ? confirmedChanges : '')+(!nativeRecovery && !turn.production && turn.message && !assignment && ['message','work','change','continue'].includes(turn.message.intent) ? '\nThis message starts without a native Goal. Answer questions and complete design/resource work within the requested boundary. If the current request authorizes Scene/UI assembly, runtime or gameplay implementation, prefer BgsWorkflow({action:"implement", ...handoff fields}) when it is exposed; otherwise submit workflow.mjs --implement with the relevant existing sources and end this turn; BGS continues that same request with a Goal. Do not expand the assignment.' : '')+'\nBGS saved evidence (not game acceptance): '+JSON.stringify(evidence)}
         },
       })
@@ -466,7 +530,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     // The terminal native claim does not excuse a cleanup-time source/report
     // change. Validate the submitted bytes after all owned writers are stopped.
     if(!failed)try {
-      deliveryVerified=await measurement.verifyDelivery()
+      deliverySubmission=await measurement.verifyDelivery()
       const handoff=(await read(run)).agentTurns!.find(t=>t.attemptId===turn.attemptId)!.productionHandoff
       if(handoff)verifyProductionHandoff(run.workspacePath,handoff)
     }
@@ -478,9 +542,9 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       designFileChanges:measurement.designFileChanges(),quiescedAt:new Date().toISOString()}})
     await saveHostExitReceipt(input.exitReceipts,run,observedExits.get(turn.attemptId)!.facts)
     await persistObservedExit(run,turn)
-    const settled=await settle(run,turn,failed,false,nativeGoal,deliveryVerified)
+    const settled=await settle(run,turn,failed,false,nativeGoal,deliverySubmission)
     const handoff=settled.agentTurns!.find(t=>t.attemptId===turn.attemptId)!.productionHandoff
-    if(!failed && !settled.paused && (!nativeGoal || nativeGoal.status==='complete') && handoff && !disposing) {
+    if(!failed && !settled.paused && (!nativeGoal || nativeGoal.status==='complete') && handoff?.next && !disposing) {
       // CAS reservation prevents a pause, source edit or user request from being
       // overwritten between settlement and automatic continuation. No replay.
       await dispatch(settled,{...options,attachments:undefined},undefined,{after:turn.attemptId,assignment:handoff.next})
@@ -553,8 +617,11 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         const history=await readSessionTranscriptFactsFromDisk(run.chatSessionId,run.workspacePath)
         if(previous.nativeSessionId && !history.length)
           throw new Error('Saved project Chat history is empty')
-        if(previous.nativeSessionId ? !history.some(e=>e.type==='user.message' && (!previous.turnId || e.turnId===previous.turnId)) :
-            history.some(e=>e.type==='user.message' || e.type==='assistant.message' || e.type==='tool.started'))
+        if(previous.nativeSessionId ? !history.some(e=>(e.type==='user.message' ||
+            previous.production && !previous.message && e.type==='turn.started' && e.payload?.messageOrigin==='workflow') &&
+            (!previous.turnId || e.turnId===previous.turnId)) :
+            history.some(e=>e.type==='user.message' || e.type==='assistant.message' || e.type==='tool.started' ||
+              e.type==='turn.started' && e.payload?.messageOrigin==='workflow'))
           throw new WorkflowError('conversation-history-mismatch',
             'Project Chat history does not cover the latest saved execution. The project directory may have been restored from an older backup; restoring files does not roll back workflow or native conversation history. Reconcile the histories before continuing; no automatic restart or replay.',409)
         if(history.some(e=>e.sessionId && e.sessionId!==run.chatSessionId))
@@ -571,7 +638,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       if(message?.intent==='continue' && previous?.status==='ended' && previous.productionHandoff)
         verifyProductionHandoff(run.workspacePath,previous.productionHandoff)
       if(message?.intent==='continue' && (message.continuationOf!==previous.attemptId ||
-          !['interrupted','failed'].includes(previous.status) && !(previous.status==='ended' && (previous.productionHandoff || previous.production && previous.production.stage!=='implementation'))))
+          !['interrupted','failed'].includes(previous.status) && !(previous.status==='ended' && (previous.productionHandoff?.next || !previous.productionHandoff && previous.production && previous.production.stage!=='implementation'))))
         throw new WorkflowError('invalid-continuation','Continuation must address the latest interrupted or failed native turn',400)
     }
     const next=structuredClone(run);next.version++;next.fence++;next.status='running'

@@ -3,6 +3,7 @@ import { BgsClient, type RpcObject } from './client'
 import { getSafeRuntimeProcessEnvironment } from '../beegame/runtime-process-environment'
 import { bgsSettingsHome, readReasoningPreferences, reasoningConnectionKey } from './preferences-store'
 import { withBgsAccountUse } from './account-activity'
+import { providerConfig, providerReasoningEfforts } from '../model-providers/config'
 
 export function hasVerifiedReasoningCatalog(env: Record<string, string>) {
   if (env.OPENAI_AUTH_MODE === 'chatgpt') return true
@@ -15,7 +16,9 @@ export function reasoningCapabilities(env: Record<string, string>, models: RpcOb
   const requested = env.BEEGAME_MODEL
   const selected = requested ? models.find(entry => entry.model === requested) : models.find(entry => entry.isDefault)
   const model = requested || selected?.model || ''
-  const efforts: string[] = hasVerifiedReasoningCatalog(env) && selected
+  const providerEfforts = env.OPENAI_AUTH_MODE === 'chatgpt' ? []
+    : providerReasoningEfforts(providerConfig({ ...env, BEEGAME_MODEL: model }, undefined, { requireApiKey: false }))
+  const efforts: string[] = providerEfforts.length ? providerEfforts : hasVerifiedReasoningCatalog(env) && selected
     ? (selected.supportedReasoningEfforts || []).map((option: RpcObject) => option.reasoningEffort).filter((value: unknown) => typeof value === 'string') : []
   const connectionKey = reasoningConnectionKey(env, model)
   return { model, connectionKey, efforts: [...new Set(efforts)],
@@ -38,9 +41,18 @@ async function readReasoningCapabilities(env: Record<string, string>, command?: 
   finally { await client.close() }
 }
 
-export async function bgsReasoningConfig(env: Record<string, string>, client: BgsClient) {
+export async function bgsReasoningConfig(env: Record<string, string>, client: Pick<BgsClient, 'requestNative'>) {
+  if (!hasVerifiedReasoningCatalog(env)) {
+    const capabilities = reasoningCapabilities(env, [])
+    if (!capabilities.efforts.length) return {}
+    if (capabilities.effort !== null && !capabilities.efforts.includes(capabilities.effort))
+      throw Error('Saved reasoning effort is no longer supported; update BGS settings')
+    // The runner explicitly selects the model on cold resume, so native does
+    // not inherit the old thread override when the current default omits it.
+    return capabilities.effort === null ? {} : { model_reasoning_effort: capabilities.effort }
+  }
   const preferences = readReasoningPreferences(env)
-  if (!Object.keys(preferences).length || !hasVerifiedReasoningCatalog(env)) return {}
+  if (!Object.keys(preferences).length) return {}
   const capabilities = reasoningCapabilities(env, (await client.requestNative('model/list', {})).data || [])
   if (!Object.hasOwn(preferences, capabilities.connectionKey)) return {}
   const effort = capabilities.effort ?? (await client.requestNative('config/read', {})).config?.model_reasoning_effort ?? capabilities.defaultEffort

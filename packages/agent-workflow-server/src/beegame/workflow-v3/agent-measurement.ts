@@ -1,3 +1,4 @@
+import { productionAssignmentFacts } from './production-workflow'
 import type { DesignFileChanges } from './state'
 import { randomUUID } from 'node:crypto'
 import { access, readFile, realpath } from 'node:fs/promises'
@@ -15,7 +16,7 @@ import { blockingRegisteredContentChecks, inspectAgentMeasurementInputs } from '
 import { reviewSourceSnapshot } from '../design-source-reading'
 import { projectNavigationSnapshot } from './project-guide'
 import { priorMainSkillLoads } from './context'
-import { artifactDigest, inspectDesignAcceptance } from '../runtime-acceptance'
+import { artifactDigest, inspectDesignAcceptance, resolvePreviewEvidenceReceipt } from '../runtime-acceptance'
 import { snapshotDesignRevisionFiles, designRevisionFileDigest, designInputRevision, DESIGN_ACCEPTANCE_PATH, readDesignImplementationChecklist, readDesignAcceptanceRequirements } from '../design-handoff'
 import { requiresWebVisualComparison } from './web-project-start'
 import { validateFontProbeInputs } from './font-consumption'
@@ -53,7 +54,7 @@ export type MeasurementRequest = z.infer<typeof measurementRequest>
 const deliveryRequest = z.object({ requirementsRevision:z.string().min(1), measurementId:z.string().min(1).optional() }).strict()
 export type AgentDeliverySubmission = {
   attemptId:string; requirementsRevision:string; reportPath:string; reportSha256:string;
-  measurementId?:string; sourceSha256:string; summary:string;
+  measurementId?:string; sourceSha256:string; summary:string; status:'passed'|'failed'|'blocked';
 }
 
 
@@ -121,13 +122,22 @@ function measurementCheckScope(record?: AgentMeasurement) {
 export function activeUserTask(run:Run,turn:AgentTurn) {
   return {scope:'active-user-turn',attemptId:turn.attemptId,requestKey:turn.requestKey,intent:turn.message?.intent??'goal',
     ...(isInitialSliceTurn(run,turn) ? {deliveryScope:'playable-slice'} : {}),
+    ...(turn.production ? {production:productionAssignmentFacts(run,turn.production,turn.attemptId)} : {}),
     source:turn.message?'user-message':'requirements',requirementsRevision:turn.requirementsRevision,
     text:turn.message?.text??run.requirements.text,continuationOf:turn.message?.continuationOf}
 }
 
 export function agentSkillFacts(run:Run,turn:AgentTurn,liveUses?:SkillUse[]) {
-  return {...priorMainSkillLoads(run,turn.attemptId),currentTurnUses:liveUses??turn.skillUses??[],
-    currentTurnEvidence:liveUses!==undefined?'live-native-load-events':turn.skillUses!==undefined?'saved-native-load-events':'not-recorded-yet'}
+  const currentTurnUses:SkillUse[]=(liveUses??turn.skillUses??[]).map(use=>{
+    if(use.source!=='shell')return use
+    // Expose old Shell records as event links too; never rewrite saved history.
+    const {status:_legacyReadStatus,...link}=use
+    return link
+  })
+  return {...priorMainSkillLoads(run,turn.attemptId),currentTurnUses,
+    currentTurnEvidence:liveUses!==undefined?'live-skill-access-events':turn.skillUses!==undefined?'saved-skill-access-events':'not-recorded-yet',
+    nativeInvocations:'not-exposed-by-app-server',
+    evidenceLimit:'Shell entries link catalog files to command events; inspect those events for execution status and exit code. Loader receipts and read commands are not native Skill invocation telemetry or proof of effective application. Neither full reading nor context retention is certified. Missing links do not establish no use.'}
 }
 
 /** Explicit optional static-Web measurement inside the existing native writer.
@@ -274,14 +284,19 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     const acceptance=await inspectDesignAcceptance(root,run.creation?.initialDelivery==='design-led-first-version',false,
       {runId:run.id,requirementsRevision:run.requirements.revision},
         {requireVisualComparison:requiresWebVisualComparison(run)})
-    if(!acceptance.valid)
+    // A declared failure/blocker is an explicit terminal handoff, not a PASS.
+    // Never reinterpret a malformed report or a rejected PASS as a stop request.
+    const stopping=acceptance.scope==='delivery' &&
+      (acceptance.declaredStatus==='blocked' || acceptance.declaredStatus==='failed') &&
+      acceptance.diagnostic?.category!=='report-invalid'
+    if(!acceptance.valid && !stopping)
       throw new WorkflowError('delivery-unverified',acceptance.summary)
     const records=run.agentTurns!.flatMap(turn=>turn.measurements??[])
     const latest=records.findLast(record=>record.requirementsRevision===run.requirements.revision)
-    const measured=request.measurementId ? records.find(record=>record.id===request.measurementId) : latest
+    const measured=request.measurementId ? records.find(record=>record.id===request.measurementId) : stopping ? undefined : latest
     if(request.measurementId && !measured)
       throw new WorkflowError('delivery-unverified','The selected measurement does not belong to this Run')
-    if(measured) {
+    if(!stopping && measured) {
       if(latest?.id!==measured.id || !measured.reportPaths.includes(DESIGN_ACCEPTANCE_PATH))
         throw new WorkflowError('delivery-unverified','Submit the latest measurement with the finalized acceptance report already bound; inspect existing evidence before measuring new inputs')
       const freshness=await inspectAgentMeasurementInputs(run,measured)
@@ -293,14 +308,14 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       const artifact=measured.checks.find(check=>check.id==='build')?.projectBuild?.artifact
       if(!artifact || !acceptance.artifacts.some(item=>item.path===artifact.path && item.sha256===artifact.sha256))
         throw new WorkflowError('delivery-unverified','The delivery report does not identify the measured artifact bytes')
-    } else {
+    } else if(!stopping) {
       // Native/SSR tasks need no static-Web build. Only the already-validated
       // execution receipts can bind a report to tested source bytes; an arbitrary
       // log or a newly computed file hash is not a source-to-execution receipt.
       const checks=[...(acceptance.verification?.requirementChecks??[]),...(acceptance.verification?.contentChecks??[])]
       const paths=checks.length ? checks.filter(check=>check.status==='passed').flatMap(check=>check.evidencePaths) : acceptance.evidence.map(item=>item.path)
-      const canonical=await Promise.all(paths.map(async path=>(await realpath(resolve(root,path))).slice((await realpath(root)).length+1)))
-      if(!canonical.some(path=>/^\.beegame\/tmp\/preview-test-[^/]+\/(execution\.json|stdout\.txt|stderr\.txt)$/.test(path)))
+      const receipts=await Promise.all(paths.map(path=>resolvePreviewEvidenceReceipt(root,path)))
+      if(!receipts.some(Boolean))
         throw new WorkflowError('delivery-unverified','Delivery needs a current saved measurement or a successful source-bound execution receipt. Arbitrary logs do not establish current execution; no test was started')
     }
     const reportSha256=await artifactDigest(root,DESIGN_ACCEPTANCE_PATH)
@@ -308,18 +323,18 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       dependencies:await projectDependencies(root),design:designInputRevision(root),reportSha256,
       evidence:acceptance.evidence,artifacts:acceptance.artifacts}))
     return {attemptId:input.turn.attemptId,requirementsRevision:run.requirements.revision,
-      reportPath:DESIGN_ACCEPTANCE_PATH,reportSha256,...(measured?{measurementId:measured.id}:{}),sourceSha256,summary:acceptance.summary}
+      reportPath:DESIGN_ACCEPTANCE_PATH,reportSha256,...(measured?{measurementId:measured.id}:{}),sourceSha256,summary:acceptance.summary,status:stopping ? acceptance.declaredStatus! : 'passed'}
   }
   return {
     designFileChanges,
     // Called again after owned processes and capabilities have quiesced. A
     // cleanup-time edit cannot silently change the delivered bytes.
     async verifyDelivery() {
-      if(!delivery)return false
+      if(!delivery)return undefined
       await delivery.completion
       if(!sameJson(delivery.snapshot,await deliverySnapshot(delivery.request)))
         throw new WorkflowError('delivery-stale','Delivery inputs changed while execution was closing; the task is not complete')
-      return true
+      return delivery.snapshot
     },
     async finish(raw:unknown, signal?:AbortSignal) {
       signal?.throwIfAborted()

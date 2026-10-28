@@ -1,5 +1,21 @@
 {
   "landing": {
+    "desktop": {
+      "toggleNavigation": "Toggle project navigation",
+      "closeNavigation": "Close project navigation",
+      "newProject": "New project",
+      "projects": "Projects",
+      "loadingProjects": "Loading projects",
+      "moreProjects": "More projects",
+      "account": "Account & settings",
+      "ideaTitle": "What game do you want to make?",
+      "chat": "Chat",
+      "files": "Project files",
+      "assets": "Project assets",
+      "resizePanels": "Resize preview and chat",
+      "resizePanelsHint": "Drag to resize; double-click to reset",
+      "loadProjectsFailed": "Unable to load more projects. Please try again."
+    },
     "avatar": {
       "conversation": "Conversation with your creative companion",
       "companion": "Your game-making companion",
@@ -614,6 +630,8 @@
         "env": "Environment",
         "argsHint": "One argument per line",
         "envHint": "One KEY=value per line. Leave saved secrets blank to keep them.",
+        "headers": "Request headers",
+        "headersHint": "One name=value per line, e.g. Authorization=Bearer key. Values are encrypted; leave a value blank to keep it, or remove the line to delete it.",
         "stdio": "stdio",
         "sse": "Legacy SSE is unsupported; use a Streamable HTTP endpoint.",
         "http": "HTTP",

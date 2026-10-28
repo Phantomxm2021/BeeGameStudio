@@ -327,11 +327,16 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
     if (atlas.status !== 'passed') return atlas
   }
   const gltf = typeof facts.meshCount === 'number'
+  const wav = root?.path.toLowerCase().endsWith('.wav') && facts.encoding === 'PCM16'
   let unknown = Boolean(facts.externalReferences), contradiction = false
   const unverifiedNeeds: string[] = []
   if (obligation.assetKinds?.length) {
     if (png) {
       if (!['image','texture','sprite','sprite-sheet','sprite-atlas'].includes(kind)) contradiction = true
+    } else if (wav) {
+      // The shared inspector proves PCM16 structure, not listening or loop quality.
+      unknown ||= !['audio-clip', 'music', 'ambience', 'voice'].includes(kind) ||
+        audit.fileEvidence.some(file => file.path.toLowerCase().endsWith('.wav') && file.facts.encoding !== 'PCM16')
     } else if (gltf) {
       const count = ({mesh:'meshCount',model:'meshCount',rig:'skinCount','animation-clip':'animationCount',
         'animation-library':'animationCount',material:'materialCount'} as Record<string,string>)[kind]
@@ -344,6 +349,10 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
     mesh:'meshCount',skeleton:'skinCount','animation-clip':'animationCount',material:'materialCount',texture:'embeddedTextureCount'}
   for (const need of [...(obligation.capabilities ?? []), ...(obligation.embeddedKinds ?? [])]) {
     if (['atlas', 'atlas-regions'].includes(need) && atlas?.status === 'passed') continue
+    if (need === 'alpha' && png && typeof facts.hasAlpha === 'boolean') {
+      if (!facts.hasAlpha) return {status:'failed',reason:resource.id+': required alpha capability is absent from the inspected PNG'} as const
+      continue
+    }
     const count = counts[need]
     if (count && gltf) {
       if (!Number(facts[count])) {

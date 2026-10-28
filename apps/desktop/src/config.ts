@@ -28,10 +28,8 @@ export function getRendererUrl(isPackaged: boolean): string {
     embedded ||
     process.env.BEEGAME_DESKTOP_APP_URL?.trim() ||
     process.env.VITE_BEEGAME_DESKTOP_APP_URL?.trim()
-  if (!configured)
-    throw new Error(
-      'Set BEEGAME_DESKTOP_APP_URL to the trusted HTTPS renderer URL before packaging.',
-    )
+  // Bundled frontend keeps the existing localhost origin without opening a server port.
+  if (!configured) return DEV_RENDERER_URL
   const url = requireHttpUrl(configured, 'BEEGAME_DESKTOP_APP_URL')
   if (url.protocol !== 'https:')
     throw new Error('BEEGAME_DESKTOP_APP_URL must use HTTPS when packaged.')

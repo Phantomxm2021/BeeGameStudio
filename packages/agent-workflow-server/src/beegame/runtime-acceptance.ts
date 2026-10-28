@@ -11,7 +11,7 @@ import { designReviewResultSchema, type DesignFinding } from './design-handoff'
 import { projectFiles, projectDependencies, changedProjectPaths, AGENT_EVIDENCE_DIRECTORY } from './workflow-v3/checks'
 import { projectPathSchema } from './workflow-v3/state'
 
-export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'Compare actual results with confirmed requirements and original design sources. Record real test/runtime/inspection evidence, knownIssues and unverified outcomes; a model declaration is not independent acceptance. Existing indexed requirementChecks remain supported with their original document/id, source hashes, method, scenario, observed result, status and evidencePaths. Record a source-design versus actual-view comparison in verification.visualComparisons as {state,sourcePath,observationPaths,status:"matched"|"different"|"unverified",differences} when the host requires visual evidence for an editable Scene/UI delivery; source and observation paths must also be in evidencePaths. In that host-required case, include at least one comparison, use a displayable design source (SVG/PNG/JPG/JPEG/WebP/GIF/PDF) and an actual image observation (SVG/PNG/JPG/JPEG/WebP/GIF); matched needs an actual observation and no differences; different needs an observation and explicit differences; unverified may have no observation but must state an explicit gap. For request, discussion, design-only, source-only or legacy reports where the host does not require visual evidence, visualComparisons remains optional. This records an author-declared comparison, not visual semantic acceptance. For a delivery PASS, verification.target must be "deployment" and verification.observation must be "target-runtime"; verification.target allows "development"|"deployment", and verification.observation allows "target-runtime"|"simulation". For a delivery PASS, include a passed check for every existing design output that declares acceptance; empty or partial coverage is verification-incomplete. Request-scoped reports may remain local or partial, including different or unverified visual comparisons. Do not create indexes or coverage mappings to write a report. Every cited evidence path must appear in evidencePaths. Failed or unverified checks cannot support PASS. BGS validates retained evidence and data contracts, not complete requirements, truthful observations or visual/game quality. Use --design acceptance --help for the acceptanceExample and this contract.'
+export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'Compare actual results with confirmed requirements and original design sources. Record real test/runtime/inspection evidence. Use verification.knownIssues for unresolved defects in the confirmed scope and verification.unverified for missing required observations; both block delivery PASS. Use verification.outsideScope (string[]) only for work outside the confirmed assignment and subjective user-playtest questions that follow implementation handoff, with the scope basis stated. Record tool coverage boundaries in verification.coverageLimitations (string[]); a tool being unable to inspect a property is not itself a product defect. Any missing required observation still belongs in unverified, even if caused by a tool limitation. outsideScope and coverageLimitations do not block PASS; neither can waive knownIssues, unverified or failed required checks. Pending subjective feedback alone does not keep implementation running. For Preview execution evidence, cite the original execution.json/stdout.txt/stderr.txt paths, or an unchanged JSON copy of execution.json with its original reportPath and original files retained. Copied text logs alone do not establish execution provenance; a model declaration is not independent acceptance. Existing indexed requirementChecks remain supported with their original document/id, source hashes, method, scenario, observed result, status and evidencePaths. Record a source-design versus actual-view comparison in verification.visualComparisons as {state,sourcePath,observationPaths,status:"matched"|"different"|"unverified",differences} when the host requires visual evidence for an editable Scene/UI delivery; source and observation paths must also be in evidencePaths. In that host-required case, include at least one comparison, use a displayable design source (SVG/PNG/JPG/JPEG/WebP/GIF/PDF) and an actual image observation (SVG/PNG/JPG/JPEG/WebP/GIF); matched needs an actual observation and no differences; different needs an observation and explicit differences; unverified may have no observation but must state an explicit gap. An observed difference blocks PASS by default. Only a variation that does not violate a confirmed requirement may include nonBlockingReason explaining that scope basis; retain its differences and observations. This author judgment is not host-certified, and cannot waive a separately recorded defect or missing required observation. For request, discussion, design-only, source-only or legacy reports where the host does not require visual evidence, visualComparisons remains optional. This records an author-declared comparison, not visual semantic acceptance. For a delivery PASS, verification.target must be "deployment" and verification.observation must be "target-runtime"; verification.target allows "development"|"deployment", and verification.observation allows "target-runtime"|"simulation". For a delivery PASS, include a passed check for every existing design output that declares acceptance; empty or partial coverage is verification-incomplete. Request-scoped reports may remain local or partial, including different or unverified visual comparisons. Do not create indexes or coverage mappings to write a report. Every cited evidence path must appear in evidencePaths. Failed or unverified checks cannot support PASS. BGS validates retained evidence and data contracts, not complete requirements, truthful observations or visual/game quality. Use --design acceptance --help for the acceptanceExample and this contract. When a real blocker prevents further authorized progress, save a delivery-scoped blocked or failed report explaining the blocker, remaining work and needed external action, then submit it through BgsFinishDelivery. This ends execution as blocked, never as a delivery PASS; no successful build or test is required to report a blocker. A rejected passed report is not automatically a stop request.'
 
 
 const requirementCheckSchema = z.object({
@@ -30,7 +30,10 @@ const visualComparisonSchema = z.object({
   observationPaths: z.array(z.string().trim().min(1)),
   status: z.enum(['matched', 'different', 'unverified']),
   differences: z.array(z.string().trim().min(1)),
+  nonBlockingReason: z.string().trim().min(1).optional(),
 }).strict().superRefine((comparison, context) => {
+  if (comparison.nonBlockingReason && comparison.status !== 'different')
+    context.addIssue({ code: 'custom', path: ['nonBlockingReason'], message: 'Only an observed difference can declare a non-blocking scope basis' })
   if (comparison.status === 'matched' && !comparison.observationPaths.length)
     context.addIssue({ code: 'custom', path: ['observationPaths'], message: 'matched visual comparison requires an actual observation' })
   if (comparison.status === 'matched' && comparison.differences.length)
@@ -50,6 +53,7 @@ const verificationSchema = z.object({
   knownIssues: z.array(z.string().trim().min(1)),
   unverified: z.array(z.string().trim().min(1)),
   outsideScope: z.array(z.string().trim().min(1)).optional(),
+  coverageLimitations: z.array(z.string().trim().min(1)).optional(),
   contentChecks: z.array(contentRuntimeCheckSchema).optional(),
   requirementChecks: z.array(requirementCheckSchema).optional(),
   visualComparisons: z.array(visualComparisonSchema).optional(),
@@ -92,6 +96,28 @@ const executionSnapshotSchema = z.object({
     files: z.array(z.object({ path: projectPathSchema, sha256 })).min(1), dependencySha256: sha256.optional() }),
 })
 
+const previewEvidencePath = /^(\.beegame\/tmp\/preview-test-[^/]+)\/(?:execution\.json|stdout\.txt|stderr\.txt)$/
+
+/** Resolve known Preview evidence, including a JSON receipt copied for reporting.
+ * Copies must still bind to the retained original; ordinary logs are not verdicts. */
+export async function resolvePreviewEvidenceReceipt(workspace: string, path: string): Promise<string | undefined> {
+  const root = await realpath(workspace)
+  const normalized = relative(root, await realpath(resolve(root, path))).split('\\').join('/')
+  const direct = previewEvidencePath.exec(normalized)
+  if (direct) return direct[1] + '/execution.json'
+  if (extname(normalized).toLowerCase() !== '.json') return undefined
+  const copiedDigest = await artifactDigest(root, normalized)
+  const text = await readFile(resolve(root, normalized), 'utf8')
+  let copy: unknown
+  try { copy = JSON.parse(text) } catch { return undefined } // Ordinary attachments may not be JSON reports.
+  if (!copy || typeof copy !== 'object' || !('reportPath' in copy) || typeof copy.reportPath !== 'string') return undefined
+  const original = previewEvidencePath.exec(copy.reportPath)
+  if (!original || copy.reportPath !== original[1] + '/execution.json') return undefined
+  if (copiedDigest !== await artifactDigest(root, copy.reportPath))
+    throw Error(`Copied Preview receipt ${path} differs from its original ${copy.reportPath}; cite the unchanged original execution evidence`)
+  return copy.reportPath
+}
+
 /** Validate only known Preview receipts used to support a passed check. Other
  * attachments can retain failed history; arbitrary logs are not parsed as verdicts. */
 async function previewEvidenceLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined,
@@ -100,11 +126,9 @@ async function previewEvidenceLimitation(workspace: string, verification: z.infe
   const supportingPaths = checks.length ? checks.filter(check => check.status === 'passed').flatMap(check => check.evidencePaths) : evidencePaths
   const receipts = new Set<string>()
   const root = await realpath(workspace)
-  for (const path of supportingPaths) {
-    // Recognize stdout/stderr too: citing the log must not bypass its execution result.
-    const normalized = relative(root, await realpath(resolve(root, path))).split('\\').join('/')
-    const match = /^(\.beegame\/tmp\/preview-test-[^/]+)\/(?:execution\.json|stdout\.txt|stderr\.txt)$/.exec(normalized)
-    if (match) receipts.add(match[1] + '/execution.json')
+  for (const path of new Set(supportingPaths)) {
+    const receipt = await resolvePreviewEvidenceReceipt(root, path)
+    if (receipt) receipts.add(receipt)
   }
   const retained: string[] = []
   let current: { files: Awaited<ReturnType<typeof projectFiles>>; dependencySha256?: string } | undefined
@@ -322,7 +346,7 @@ function deliveryLimitation(report: { verification?: z.infer<typeof verification
     issues.push(diagnostic('verification-incomplete', `Delivery still has unverified requirements: ${checked.data.unverified.join('; ')}`))
   if (requireVisualComparison && !checked.data.visualComparisons?.length)
     issues.push(diagnostic('verification-incomplete', 'This editable Scene/UI delivery requires at least one source-to-observation visual comparison.'))
-  for (const comparison of checked.data.visualComparisons?.filter(comparison => comparison.status === 'different') ?? [])
+  for (const comparison of checked.data.visualComparisons?.filter(comparison => comparison.status === 'different' && !comparison.nonBlockingReason) ?? [])
     issues.push(diagnostic('product-failed', `Visual comparison ${comparison.state} reports a difference: ${comparison.differences.join('; ')}`))
   for (const comparison of checked.data.visualComparisons?.filter(comparison => comparison.status === 'unverified') ?? [])
     issues.push(diagnostic('verification-incomplete', `Visual comparison ${comparison.state} is unverified: ${comparison.differences.join('; ')}`))

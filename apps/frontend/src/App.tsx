@@ -18,6 +18,9 @@ import {
   isAuthenticationServiceUnavailable,
 } from './services/apiClient';
 import { authRetryDelay } from './services/authRetry';
+import { isDesktopShell } from './lib/platform';
+import { DesktopLayout } from './components/Desktop/DesktopLayout';
+import { lastDesktopProjectKey, readDesktopPreference, writeDesktopPreference } from './components/Desktop/desktopPreferences';
 import type { StartProjectResult } from './types/project';
 import type { BeeGameBuildBrief } from './services/beeGameAdapter';
 import {
@@ -30,7 +33,7 @@ import { LandingView } from './components/Demiurge/LandingView';
 import type { Language } from './components/Demiurge/AgentsConfig';
 import i18n, { getInitialUiLanguage } from './i18n';
 import { isResourceLibraryRoute } from './components/ResourceLibrary/resourceLibraryRoute';
-import { getProjectRouteId, WORKSPACE_ROUTE_CHANGE_EVENT } from './navigation/workspaceRoute';
+import { getProjectRouteId, openIdeaHomeRoute, openProjectRoute, WORKSPACE_ROUTE_CHANGE_EVENT } from './navigation/workspaceRoute';
 
 const loadDashboardView = () => import('./components/Demiurge/DashboardView');
 
@@ -191,7 +194,16 @@ function App() {
         loadedProtectedDataUserRef.current.loadProjects === loadProjects) return;
     const load = { userId: currentUser.id, loadProjects };
     loadedProtectedDataUserRef.current = load;
-    loadProjects().catch((error) => {
+    const lastProject = isDesktopShell() && !getProjectRouteId() && !isResourceLibraryRoute()
+      ? readDesktopPreference(lastDesktopProjectKey(currentUser.id)) : null;
+    if (lastProject) openProjectRoute(lastProject, { replace: true });
+    loadProjects().then(() => {
+      if (loadedProtectedDataUserRef.current !== load) return;
+      if (lastProject && getProjectRouteId() === lastProject && !useProjectStore.getState().activeProjectId) {
+        writeDesktopPreference(lastDesktopProjectKey(load.userId), null);
+        openIdeaHomeRoute({ replace: true });
+      }
+    }).catch((error) => {
       if (loadedProtectedDataUserRef.current === load) loadedProtectedDataUserRef.current = null;
       console.error('Failed to load authenticated app data:', error);
       showError(error instanceof Error ? error.message : '登录数据加载失败');
@@ -215,27 +227,16 @@ function App() {
     }
   };
 
-  if (authenticationStatus === 'initializing') {
-    if (requestedProjectId && !isResourceRoute && !authenticationInitializationError) {
-      return <WorkspaceLoadingPage />;
-    }
-    return (
-      <WorkspaceLoadingPage
+  const content = authenticationStatus === 'initializing'
+    ? requestedProjectId && !isResourceRoute && !authenticationInitializationError
+      ? <WorkspaceLoadingPage />
+      : <WorkspaceLoadingPage
         title={authenticationInitializationError || '正在恢复登录状态…'}
         description=""
         ariaLabel="Initializing BeeGame"
       />
-    );
-  }
-
-  if (isProjectRouteRestoring) {
-    return <WorkspaceLoadingPage />;
-  }
-
-  return (
-    <ErrorBoundary>
-      {/* If we have an active project ID and valid project, render the Dashboard */}
-      {isDashboardVisible ? (
+    : isProjectRouteRestoring ? <WorkspaceLoadingPage />
+    : isDashboardVisible ? (
         <Suspense fallback={<WorkspaceLoadingPage />}>
           <DashboardView
             projectId={activeProjectId!}
@@ -246,13 +247,18 @@ function App() {
           />
         </Suspense>
       ) : (
-        /* Otherwise, render the Landing View */
         <LandingView
           lang={lang}
           onSetLang={handleSetLang}
           onStart={handleStartProject}
         />
-      )}
+      );
+
+  return (
+    <ErrorBoundary>
+      {isDesktopShell()
+        ? <DesktopLayout lang={lang} workspace={isDashboardVisible}>{content}</DesktopLayout>
+        : content}
     </ErrorBoundary>
   );
 }

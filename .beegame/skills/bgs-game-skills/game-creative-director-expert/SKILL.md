@@ -5,70 +5,10 @@ description: Use for game vision, player fantasy, emotional tone, theme-mechanic
 
 # Game Creative Director
 
-## 0. Overview
+Keep the player promise, mechanics, tone and authorized scope coherent. For a new GDD, decide who the experience is for, what the player repeatedly does and why that is worth doing. Explain the material tradeoffs that distinguish it. Narrative arcs, retention plans and long-term progression are relevant only when the requested game has them.
 
-This Skill keeps the game's player fantasy, mechanics, tone, and scope coherent. It does not require a lengthy vision exercise for a focused change.
+The design handoff is the player promise and its scope priorities. Other disciplines own the rules, space and presentation that realize it; they need no second vision exercise. Read [experience and tradeoff examples](references/emotional-arc-framework.md) for an unresolved promise or pacing choice, not as a required chapter outline.
 
-It ensures that mechanics, art direction, narrative tone,
-and player experience align under a coherent vision.
+For ongoing production, use actual progress, defects and stated time/cost constraints to choose work that tests a consequential uncertainty, restores the promise or releases a dependency. Required visual/interaction outcomes are not optional polish; more elaborate assets and systems are not automatically better. A small runnable example can answer an open question when implementation is authorized, without a mandatory prototype stage.
 
----
-
-## 1. Vision Definition
-
-When establishing a new game vision, consider:
-
-- Core fantasy
-- Target emotional experience
-- Differentiation factor
-- Intended player and play context
-
----
-
-## 2. Emotional Arc Modeling
-
-For a narrative or session-pacing task, outline the relevant parts of:
-
-- Opening experience at the pace appropriate to the game
-- Mid-session tension escalation
-- Climax and payoff moments
-- Long-term identity reinforcement
-
----
-
-## 3. Theme–Mechanic Alignment
-
-For a core mechanic, ask:
-
-- What emotion does this evoke?
-- How does it reinforce the fantasy?
-- Is it serving play, expression, atmosphere, or a deliberate combination?
-
-Keep mechanics that serve the intended play, expression, clarity or atmosphere. Not every useful rule needs a fictional justification, and thematic consistency alone does not make an interaction enjoyable.
-
----
-
-## 4. Symbolic Consistency
-
-- UI, progression, and rewards should support the intended fiction and usability; a clear abstraction is often better than forced diegetic presentation.
-
----
-
-## 5. Practical approach
-
-Identify the player's promise, compare the current experience against it, and adjust only the decisions that materially affect that promise. A simple arcade game can have a strong identity without a narrative arc or retention system.
-
-Use only the relevant steps for the current request; do not require a full
-GDD vision chapter for a focused question or change.
-
-## Production priorities and tradeoffs
-
-Within the authorized task, distinguish required outcomes from optional polish and uncertain experience assumptions. Prioritize work that tests a consequential uncertainty, restores the core player promise or releases a real dependency. A more elaborate asset or system is not automatically a better use of effort; equally, a required visual or interaction treatment is not disposable decoration merely because a cheaper substitute exists.
-
-Use actual progress, defects and stated time/cost constraints to choose the next useful work. If a small runnable example can answer the open question, use it within the existing work rather than expanding documentation or production first. Do not impose a prototype stage on a focused or already-understood task. Repeated failures call for revisiting the cause and approach, not accumulating rules, experiments or polish around the same unresolved problem.
-
-Keep scope decisions and dependencies in the relevant GDD chapters or task records. Explain a material tradeoff to the user when it would remove a required outcome or expand the agreed scope or cost; do not make that choice through an undocumented fallback. Stop optional polishing once the requested outcome is met. Assess experience from relevant runtime observations and actual player evidence where available, not GDD completion or presumed player approval.
-
-## Reference Files
-
-Read [experience and tradeoff examples](references/emotional-arc-framework.md) when establishing the player promise, choosing between competing treatments or mapping session pacing. The examples explain decisions, not required narrative arcs or production stages.
+Keep scope decisions in the owning GDD sections or existing progress record. Removing a required outcome or expanding scope/cost needs the user's decision. Repeated failures call for revisiting the cause and approach, not more rules, experiments or polishing. Assess experience from runtime observations and actual player evidence where available; GDD completion and presumed approval do not establish it.

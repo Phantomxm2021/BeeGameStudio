@@ -5,6 +5,9 @@ import { getBuiltinSkillsDirectory } from '@bee-game-studio/beegame-skills-core/
 import { BgsClient } from './client'
 import { configureBgsSkills } from './skills'
 import { bgsProviderConfig, createBgsRunner } from './runner'
+import { productionAssignmentPrompt } from '../beegame/workflow-v3/production-workflow'
+import { createRun } from '../beegame/workflow-v3/state'
+import { skillEvidence } from '../beegame/workflow-v3/context'
 
 const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
 nativeTest('two accounts discover one shared catalog and only their own imported skills without projection links', async () => {
@@ -75,27 +78,46 @@ nativeTest('both auth modes use BGS image guidance while preserving imported ski
   } finally { await rm(account, { recursive: true, force: true }) }
 }, 15_000)
 
-nativeTest('unknown model receives skill usage guidance while skill bodies remain on demand', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-skill-usage-'), game = join(root, 'game'), catalog = join(root, 'skills')
-  const selected = join(catalog, 'selected-fixture', 'SKILL.md')
-  const unselected = join(catalog, 'unselected-fixture', 'SKILL.md')
+for (const stage of ['design', 'implementation'] as const) {
+nativeTest(`${stage} task loads assigned Skill bodies natively and reads applicable references`, async () => {
+  const root = await mkdtemp('/private/tmp/bgs-skill-sections-'), game = join(root, 'game'), catalog = join(root, 'skills')
+  const creative = join(catalog, 'game-creative-director-expert', 'SKILL.md')
+  const selected = join(catalog, 'game-systems-designer-expert', 'SKILL.md')
+  const unselected = join(catalog, 'game-level-designer-expert', 'SKILL.md')
+  const reference = join(catalog, 'game-systems-designer-expert', 'references', 'detail.md')
+  const executionBody = await readFile(join(getBuiltinSkillsDirectory(), 'game-plan-execution', 'SKILL.md'), 'utf8')
+  await mkdir(join(catalog, 'game-plan-execution'), { recursive: true })
+  await writeFile(join(catalog, 'game-plan-execution', 'SKILL.md'), executionBody)
   await mkdir(game, { recursive: true })
-  await mkdir(join(catalog, 'selected-fixture'), { recursive: true })
-  await mkdir(join(catalog, 'unselected-fixture'), { recursive: true })
-  await writeFile(selected, '---\nname: selected-fixture\ndescription: Selected fixture skill.\n---\nSELECTED_BODY_SECRET\n')
-  await writeFile(unselected, '---\nname: unselected-fixture\ndescription: Unselected fixture skill.\n---\nUNSELECTED_BODY_SECRET\n')
+  await mkdir(join(catalog, 'game-creative-director-expert'), { recursive: true })
+  await writeFile(creative, '---\nname: game-creative-director-expert\ndescription: Synthetic creative fixture.\n---\nASSIGNED_CREATIVE_BODY\n')
+  await mkdir(join(catalog, 'game-systems-designer-expert'), { recursive: true })
+  await mkdir(join(catalog, 'game-level-designer-expert'), { recursive: true })
+  await writeFile(selected, [
+    '---', 'name: game-systems-designer-expert', 'description: Synthetic rule design fixture.', '---', '',
+    '# Systems fixture', '', '## Shared constraints', 'SHARED_CONSTRAINT_BODY', '',
+    '## Rules', 'RULES_SECTION_BODY', '', '## Balance', 'BALANCE_SECTION_BODY', '',
+    '## Unrelated', 'UNRELATED_SECTION_BODY', '',
+  ].join('\n'))
+  await writeFile(unselected, '---\nname: game-level-designer-expert\ndescription: Synthetic spatial fixture.\n---\nUNSELECTED_SKILL_BODY\n')
 
-  const inputs: any[] = []
+  await mkdir(join(catalog, 'game-systems-designer-expert', 'references'))
+  await writeFile(reference, 'REFERENCE_SECTION_BODY\nLATER_REFERENCE_SECTION\n')
+  const inputs: any[] = [], events: any[] = []
+  // Scripted local responses test native read/request boundaries, not a model's
+  // judgment of reference applicability or design quality. No real provider is reachable.
+  const commands = stage === 'design' ? [`cat '${selected}'`, `sed -n '1p' '${reference}'`] : []
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     if (new URL(request.url).pathname !== '/v1/responses') return new Response('Unexpected fixture route', { status: 404 })
     const body = await request.json() as any
     inputs.push(body)
-    const output = inputs.length === 1 ? [{
-      id: 'read-item', call_id: 'read-call', type: 'function_call', name: 'exec_command', status: 'completed',
-      arguments: JSON.stringify({ cmd: 'cat ' + selected }),
-    }] : [{ id: 'msg_' + inputs.length, type: 'message', role: 'assistant', status: 'completed',
+    const index = inputs.length - 1, command = commands[index]
+    const output = command ? [{
+      id: 'read-item-' + index, call_id: 'read-call-' + index, type: 'function_call', name: 'exec_command', status: 'completed',
+      arguments: JSON.stringify({ cmd: command }),
+    }] : [{ id: 'msg_' + index, type: 'message', role: 'assistant', status: 'completed',
       content: [{ type: 'output_text', text: 'Fixture answer', annotations: [] }] }]
-    const response = { id: 'resp_' + inputs.length, object: 'response', created_at: 1, model: body.model, status: 'completed',
+    const response = { id: 'resp_' + index, object: 'response', created_at: 1, model: body.model, status: 'completed',
       output, usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } }
     return new Response([
       { type: 'response.created', response: { ...response, status: 'in_progress', output: [] } },
@@ -115,30 +137,57 @@ nativeTest('unknown model receives skill usage guidance while skill bodies remai
   let runtime: Awaited<ReturnType<typeof runner.start>> | undefined
   try {
     runtime = await runner.start({
-      sessionId: 'skill-usage-fixture', cwd: game,
+      sessionId: 'skill-sections-fixture', cwd: game,
       systemContext: 'Current BGS fixture context.', confirmedBriefContext: 'Fixture confirmed brief.',
       env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
         OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-unknown-model' },
       requestPermission: async () => ({ behavior: 'deny' }),
     })
-    await runtime.submit({ prompt: 'Use the selected fixture skill only when needed.', confirmedBriefContext: 'Fixture confirmed brief.',
-      signal: AbortSignal.timeout(15_000), onMessage() {}, requestPermission: async () => ({ behavior: 'deny' }) })
+    const run = createRun({projectId:'synthetic',ownerId:'owner',workspacePath:game,chatSessionId:'chat',requestKey:'start',
+      text:'Synthetic chapter design scope',constraints:{},ids:['goal']})
+    const prompt = productionAssignmentPrompt(run, stage === 'design'
+      ? {stage,discipline:'gameplay',completedDesigns:[],originRequestKey:run.requestKey}
+      : {stage,originRequestKey:run.requestKey})
+    // Native mention selection loads assigned bodies; scripted reads exercise reference evidence.
+    await runtime.submit({ prompt, confirmedBriefContext: 'Fixture confirmed brief.',
+      signal: AbortSignal.timeout(20_000), onMessage(message) {events.push(message)}, requestPermission: async () => ({ behavior: 'deny' }) })
 
-    expect(inputs).toHaveLength(2)
-    expect(inputs[0]!.model).toBe('fixture-unknown-model')
-    expect(inputs[1]!.model).toBe('fixture-unknown-model')
-    const sent = JSON.stringify(inputs[0]!.input)
-    expect(sent).toContain('### How to use skills')
-    expect(sent).toContain('progressive disclosure')
-    expect(sent).toContain('selected-fixture/SKILL.md')
-    expect(sent).toContain('unselected-fixture/SKILL.md')
-    expect(sent).not.toContain('SELECTED_BODY_SECRET')
-    expect(sent).not.toContain('UNSELECTED_BODY_SECRET')
-    const readResult = inputs[1]!.input.find((item: any) => item.type === 'function_call_output' && item.call_id === 'read-call')
-    expect(readResult).toBeDefined()
-    // This output comes from the real native exec_command call above, rather
-    // than from the fixture server, so only the selected Skill body is read.
-    expect(String(readResult.output)).toContain('SELECTED_BODY_SECRET')
-    expect(JSON.stringify(inputs[1]!.input)).not.toContain('UNSELECTED_BODY_SECRET')
+    if (stage === 'implementation') {
+      expect(inputs).toHaveLength(1)
+      const sent = JSON.stringify(inputs[0].input)
+      expect(sent).toContain(JSON.stringify(executionBody.slice(executionBody.indexOf('# Game Plan Execution')).trim()).slice(1, -1))
+      for (const body of ['ASSIGNED_CREATIVE_BODY', 'SHARED_CONSTRAINT_BODY', 'UNSELECTED_SKILL_BODY'])
+        expect(sent).not.toContain(body)
+      expect(events.some(event => event.eventType === 'tool.completed')).toBe(false)
+      return
+    }
+    const evidence=skillEvidence(events.map((payload,id)=>({id,type:payload.eventType,payload}))).filter(link=>link.source==='shell')
+    expect(evidence).toHaveLength(2)
+    expect(evidence[0]).toMatchObject({name:'game-systems-designer-expert',path:selected,source:'shell'})
+    expect(evidence.every(link=>!Object.hasOwn(link,'status'))).toBe(true)
+    for(const link of evidence) {
+      expect(events[link.eventId]).toMatchObject({eventType:'tool.completed',toolUseID:link.toolUseID,exitCode:0})
+    }
+    expect(evidence[1]).toMatchObject({name:'game-systems-designer-expert',path:reference,source:'shell'})
+    expect(inputs).toHaveLength(3)
+    expect(inputs.every(input => input.model === 'fixture-unknown-model')).toBe(true)
+    const sent = inputs.map(input => JSON.stringify(input.input))
+    expect(sent[1]).not.toContain('REFERENCE_SECTION_BODY')
+    expect(sent[2]).toContain('REFERENCE_SECTION_BODY')
+    expect(sent[2]).not.toContain('LATER_REFERENCE_SECTION')
+    expect(sent[0]).toContain('ASSIGNED_CREATIVE_BODY')
+    expect(sent[0]).toContain('### How to use skills')
+    expect(sent[0]).toContain('progressive disclosure')
+    expect(sent[0]).toContain('game-systems-designer-expert/SKILL.md')
+    expect(sent[0]).toContain('game-level-designer-expert/SKILL.md')
+    expect(sent.every(request => !request.includes('UNSELECTED_SKILL_BODY'))).toBe(true)
+    for (const body of ['SHARED_CONSTRAINT_BODY','RULES_SECTION_BODY','BALANCE_SECTION_BODY','UNRELATED_SECTION_BODY']) {
+      expect(sent[0]).toContain(body)
+      expect(sent[1]).toContain(body)
+    }
+    // Results are produced by actual native exec_command file reads above.
+    for (let index=0;index<commands.length;index++)
+      expect(inputs[index+1].input.some((item:any) => item.type==='function_call_output' && item.call_id==='read-call-'+index)).toBe(true)
   } finally { await runtime?.dispose?.(); server.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 60_000)
+}

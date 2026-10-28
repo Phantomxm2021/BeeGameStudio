@@ -488,6 +488,14 @@ export class DashboardRepository {
         })
   }
 
+  /** Host-only credentials for testing an owned saved connection. */
+  async getMcpServerForTest(request: Request, user: BeeGameUserContext, id: string): Promise<McpServerConfig | undefined> {
+    const supabase = this.supabaseForRequest(request)
+    const servers = supabase ? await supabase.runtimeMcpServers(user.id)
+      : exportMcpServersSnapshot({ dataDir: this.options.getUserDataRoot(request) })
+    return servers.find(server => server.id === id)
+  }
+
   async upsertMcpServer(
     request: Request,
     user: BeeGameUserContext,

@@ -757,3 +757,53 @@ for (const oldConverted of [false, true]) test(`replay preserves historical base
     expect(billing.recorded.at(-1)?.turnId).toBe(oldConverted ? newTurn : oldTurn)
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
+
+
+test('chapter context switch sums distinct native usage and resumed chapter counts only its increment', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-chapter-usage-'))
+  const billing = createSessionUsageBillingFixture()
+  const starts: Array<string | undefined> = []
+  let nativeCount = 0, requestCount = 0
+  const runner: BeeGameSessionRunner = { async start(input) {
+    starts.push(input.resumeSessionId)
+    const id = input.resumeSessionId ?? 'chapter-' + ++nativeCount
+    input.onNativeSessionId?.(id)
+    if (input.resumeSessionId) input.onNativeUsage?.(sessionUsage(100), 'bgs:' + id,
+      { replayed: true, nativeTurnId: 'request-1' })
+    return { stop() {}, async submit(turn) {
+      const total = ++requestCount === 1 ? 100 : requestCount === 2 ? 150 : 20
+      input.onNativeUsage?.(sessionUsage(total), 'bgs:' + id, { nativeTurnId: 'request-' + requestCount })
+      await turn.onMessage({ type: 'runtime_event', runtime: 'bgs', eventType: 'assistant.message', text: 'Offline chapter usage' })
+    } }
+  } }
+  const managers: BeeGameSessionManager[] = []
+  let sessionId = ''
+  try {
+    for (const action of ['initial', 'resume', 'next-chapter'] as const) {
+      const manager = new BeeGameSessionManager(runner, root, () => ({}), billing.backend)
+      managers.push(manager)
+      const session = manager.start({ workspacePath: root, userId: 'owner',
+        ...(sessionId ? { transcriptSessionId: sessionId } : {}),
+        ...(action === 'resume' ? { resumeNativeSessionId: 'chapter-1' } : {}),
+        ...(action === 'next-chapter' ? { freshNativeContext: true } : {}),
+      })
+      sessionId = session.id
+      await manager.sendWithDisplay(sessionId, action)
+      await manager.waitForSessionIdle(sessionId)
+      await manager.dispose() // Cold restore exercises the persisted usage and native ID.
+    }
+    const latest = managers.at(-1)!
+    expect(starts).toEqual([undefined, 'chapter-1', undefined])
+    expect(latest.runtimeSnapshot(sessionId)).toMatchObject({ nativeSessionId: 'chapter-2', usage: { total_tokens: 170 } })
+    const transcript = latest.transcriptFacts(sessionId)
+    const turns = transcript.filter(event => event.type === 'turn.started')
+    expect(turns).toHaveLength(3)
+    expect(turns.map(turn => getRuntimeUsageForTurn(transcript, turn.turnId!).total_tokens)).toEqual([100, 50, 20])
+    expect(billing.recorded.at(-1)?.usage.total_tokens).toBe(170)
+    expect(billing.debited.at(-1)?.usage.total_tokens).toBe(170)
+    expect(transcript.filter(event => event.type === 'assistant.message')).toHaveLength(3)
+  } finally {
+    await Promise.all(managers.map(manager => manager.dispose()))
+    await rm(root, { recursive: true, force: true })
+  }
+})

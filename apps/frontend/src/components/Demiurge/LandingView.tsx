@@ -17,6 +17,8 @@ import { ClassicIdeaPromptForm } from './Landing/ClassicIdeaPromptForm';
 import { DotsAvatar } from './Landing/DotsAvatar';
 import { useDailyAvatar } from './Landing/useDailyAvatar';
 import classicStyles from './Landing/ClassicIdeaHome.module.css';
+import { DesktopAccountSlot } from '../Desktop/DesktopLayout';
+import { useDesktopLayout } from '../Desktop/desktopLayoutContext';
 import { IdeaPromptForm, type CreationMode } from './Landing/IdeaPromptForm';
 import { BeeGameLogo } from '../BeeGameLogo';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
@@ -178,6 +180,7 @@ type InputMenuPosition = {
 };
 
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
+  const desktop = useDesktopLayout();
   const reducedMotion = Boolean(useReducedMotion());
   const dailyAvatar = useDailyAvatar();
   const measureIntakePage = useCallback((page: HTMLDivElement | null) => {
@@ -958,11 +961,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     <div
       key="landing"
       lang={lang}
-      className={`absolute inset-0 z-50 flex flex-col overflow-y-auto ${isResourceLibraryOpen ? '' : 'page-enter'} ${landingPage === 'home' ? `${avatarStyles.home} bg-background text-foreground` : 'bg-[#c97843] text-white'} opacity-100 transition-opacity duration-300 dark:bg-black ${isTransitioning ? 'opacity-0' : ''}`}
+      className={`${desktop ? 'desktop-landing' : ''} absolute inset-0 z-50 flex flex-col overflow-y-auto ${isResourceLibraryOpen ? '' : 'page-enter'} ${landingPage === 'home' ? `${avatarStyles.home} bg-background text-foreground` : 'bg-[#c97843] text-white'} opacity-100 transition-opacity duration-300 dark:bg-black ${isTransitioning ? 'opacity-0' : ''}`}
     >
       {landingPage !== 'home' ? <LandingImageBackground /> : null}
-      {landingPage === 'home' ? <IdeaHomeBackdrop /> : null}
-      <header className="absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between px-4 sm:h-20 sm:px-8">
+      {landingPage === 'home' && !desktop ? <IdeaHomeBackdrop /> : null}
+      <header className={`${desktop ? 'desktop-landing-header' : ''} absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between px-4 sm:h-20 sm:px-8`}>
         <div className={`flex items-center gap-2.5 ${landingPage === 'home' ? classicStyles.brand : 'text-white'}`}>
           <BeeGameLogo className={`size-8 ${landingPage === 'home' ? 'brightness-0' : 'drop-shadow-sm'}`} />
           <span className="text-sm font-semibold tracking-[-0.03em] sm:text-lg">Bee Game Studio</span>
@@ -974,7 +977,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             lightModeLabel={t.lightMode}
             className={landingPage === 'home' ? 'text-foreground hover:bg-accent focus-visible:ring-ring' : 'text-white hover:bg-white/15 hover:text-white focus-visible:ring-white/70'}
           />
-          <AccountActionsMenu
+          <DesktopAccountSlot><AccountActionsMenu
             lang={lang}
             isTransitioning={isTransitioning}
             isSettingsOpen={isSettingsOpen}
@@ -983,11 +986,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             isCreditStoreOpen={isCreditStoreOpen}
             isResourceLibraryOpen={isResourceLibraryOpen}
             currentUserId={currentUser?.id}
-            currentUserDisplayName={currentUser?.displayName || currentUser?.email}
+            currentUserDisplayName={currentUser?.displayName}
             currentUserEmail={currentUser?.email}
             currentUserAvatarUrl={currentUser?.avatarUrl}
             className="relative flex items-center gap-2"
             creditBalance={creditBalance?.balanceCredits}
+            desktopSettings={{ currentUser, creditBalance, onSetLang,
+              onUserChanged: async () => { await loadCurrentUser(); } }}
             onOpenLogin={handleOpenLogin}
             onOpenProfile={handleOpenProfile}
             onSignOut={currentUser ? () => void handleSignOut() : undefined}
@@ -1015,7 +1020,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
               setIsSettingsOpen(false);
               setIsHistoryOpen(false);
             }}
-          />
+          /></DesktopAccountSlot>
         </div>
       </header>
 
@@ -1159,7 +1164,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         </Dialog>
       ) : null}
 
-      {landingPage === 'home' ? <main data-testid="idea-home-stage" className={`relative z-10 mx-auto flex min-h-[calc(100dvh-3rem)] w-full flex-none justify-center px-4 pb-8 sm:px-8 ${AVATAR_HOME_ENABLED ? avatarStyles.main : classicStyles.main}`}>
+      {landingPage === 'home' ? <main data-testid="idea-home-stage" className={`${desktop ? 'desktop-idea-stage' : ''} relative z-10 mx-auto flex min-h-[calc(100dvh-3rem)] w-full flex-none justify-center px-4 pb-8 sm:px-8 ${AVATAR_HOME_ENABLED ? avatarStyles.main : classicStyles.main}`}>
         {AVATAR_HOME_ENABLED ? <AvatarDialogue mood={avatarMood} heading={avatarHeading} description={avatarDescription} expanded={showIntakePanels} inputValue={intakePhase === 'configuring_details' && settingsGroup === 2 ? settings?.notes || '' : projectName}
           generatingOptions={intakePhase === 'generating_options'}
           close={intakePhase === 'confirming_brief' ? { label: translate('avatar.closeFlow'), onClick: () => { handleCloseIntake(); setHasChosenMode(false); setIsIdeaFocused(false); } } : undefined}
@@ -1208,9 +1213,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
           {intakePanels}
         </AvatarDialogue> : <div className={classicStyles.stage}>
-          <div className={classicStyles.intro}>
-            <h1>{t.landingTitle}</h1>
-            <p>{t.landingSubtitle}</p>
+          <div className={`${classicStyles.intro} ${desktop ? 'desktop-idea-intro' : ''}`}>
+            <h1>{desktop ? translate('desktop.ideaTitle') : t.landingTitle}</h1>
+            {!desktop ? <p>{t.landingSubtitle}</p> : null}
           </div>
           <div className={classicStyles.promptStage}>
           <AnimatePresence mode={reducedMotion ? 'sync' : 'wait'} initial={false}>
@@ -1262,7 +1267,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           {intakeError && !showIntakePanels ? <p role="alert" className="mt-4 rounded-xl border border-border bg-muted px-4 py-3 text-sm text-foreground">{intakeError}</p> : null}
         </div>}
       </main> : <LandingContentPage page={landingPage} language={lang} onBack={() => navigateLandingPage('home')} />}
-      {landingPage === 'home' ? (
+      {landingPage === 'home' && !desktop ? (
         <footer className="relative z-10 flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-4 text-center text-xs text-muted-foreground">
           <span>© {new Date().getFullYear()} Bee Game Studio</span>
           {isChinaVisitor && icpNumber ? <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">{icpNumber}</a> : null}

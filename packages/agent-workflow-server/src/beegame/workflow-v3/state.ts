@@ -69,7 +69,10 @@ export type CheckResult = { id: string; version: string; status: 'passed' | 'fai
     version: 'v3-editable-build.2'; files: FileVersion[]; excludedReports: string[];
     artifact: FileVersion; dependencySha256?: string; runtime: string; packageComposition?: PackageComposition;
   } }
-export type SkillUse = { name: string; toolUseID?: string; messageId?: string; source?: 'command'; eventId: number; parentToolUseID?: string; status: 'loaded' | 'failed' | 'unverified' }
+// Shell entries only link native command events to catalog files; they have no derived status.
+// Keep the former read-command-completed value readable in saved history, without emitting it.
+export type SkillUse = { name: string; toolUseID?: string; messageId?: string; source?: 'command' | 'shell'; path?: string;
+  eventId: number; parentToolUseID?: string; status?: 'loaded' | 'read-command-completed' | 'failed' | 'unverified' }
 export type Run = {
   protocol: typeof V3_PROTOCOL; id: string; projectId: string; ownerId: string; workspacePath: string; chatSessionId: string;
   // Identifies runs that receive the two-board visual contract; the historical
@@ -117,6 +120,7 @@ export type DesignFileChanges = {
 export type AgentTurn = {
   production?: import('./production-workflow').ProductionAssignment;
   productionHandoff?: import('./production-workflow').ProductionHandoff;
+  designReviews?: import('./design-review').DesignReviewReceipt[];
   attemptId: string; requestKey: string; sessionId: string; workerId: string; fence: number;
   status: 'running' | 'ended' | 'failed' | 'interrupted'; startedAt: string; finishedAt?: string;
   turnId?: string; nativeRuntime?: 'bgs'; nativeSessionId?: string; usage?: unknown; skillUses?: SkillUse[];

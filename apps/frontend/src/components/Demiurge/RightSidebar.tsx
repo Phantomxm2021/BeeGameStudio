@@ -22,6 +22,9 @@ import { buildArtifactViewModel, isProjectDocumentPath, type ArtifactEditorKind 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs';
 
 import { TodoPanel } from './Sidebar/TodoPanel';
+import { ArrowLeft, Files, Images } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { useDesktopLayout } from '../Desktop/desktopLayoutContext';
 import { deriveCurrentProjectTodos } from '../../utils/projectTodos';
 import {
     closeProjectEditorRoute,
@@ -117,7 +120,9 @@ export function RightSidebar({
     currentUserEmail,
     currentUserAvatarUrl,
 }: RightSidebarProps) {
+    const desktop = useDesktopLayout();
     const editorAvailable = projectStatus?.project_id === projectId && projectStatus.scene_ui_editor_available === true;
+    const { t: translateDesktop } = useTranslation('landing');
 
     const [activeTab, setActiveTab] = useState<'chat' | 'todo' | 'artifacts'>('chat');
     const [showAssets, setShowAssets] = useState(false);
@@ -159,6 +164,17 @@ export function RightSidebar({
     const streamingMessageId = useChatStore(state => state.streamingMessageId);
     
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    useEffect(() => {
+        if (!desktop) return;
+        let frame = 0;
+        const focusInput = () => {
+            setActiveTab('chat');
+            cancelAnimationFrame(frame);
+            frame = requestAnimationFrame(() => textareaRef.current?.focus());
+        };
+        window.addEventListener('beegame-focus-chat-input', focusInput);
+        return () => { window.removeEventListener('beegame-focus-chat-input', focusInput); cancelAnimationFrame(frame); };
+    }, [desktop]);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const messagesRef = useRef(messages);
     messagesRef.current = messages;
@@ -678,7 +694,19 @@ export function RightSidebar({
                 className={dockClassName}
             >
                 <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className={panelClassName}>
-                    <div className="flex h-11 items-center border-b border-[var(--border)] px-4">
+                    {desktop ? <div className="desktop-collaboration-header">
+                        {activeTab !== 'chat' ? <button type="button" className="desktop-collaboration-back" onClick={() => setActiveTab('chat')}>
+                            <ArrowLeft aria-hidden="true" />{translateDesktop('desktop.chat')}
+                        </button> : <span>{translateDesktop('desktop.chat')}</span>}
+                        <div className="desktop-collaboration-actions">
+                            <button type="button" className="desktop-icon-button" aria-label={translateDesktop('desktop.files')} title={translateDesktop('desktop.files')}
+                                aria-pressed={activeTab === 'artifacts' && !showAssets}
+                                onClick={() => { setShowAssets(false); setActiveTab('artifacts'); }}><Files aria-hidden="true" /></button>
+                            <button type="button" className="desktop-icon-button" aria-label={translateDesktop('desktop.assets')} title={translateDesktop('desktop.assets')}
+                                aria-pressed={activeTab === 'artifacts' && showAssets}
+                                onClick={() => { setShowAssets(true); setActiveTab('artifacts'); }}><Images aria-hidden="true" /></button>
+                        </div>
+                    </div> : <div className="flex h-11 items-center border-b border-[var(--border)] px-4">
                         <TabsList aria-label={uiText.collabFlow} className="h-full w-full gap-7 border-0">
                             {sidebarTabs.map(tab => (
                                 <TabsTrigger
@@ -696,10 +724,10 @@ export function RightSidebar({
                                 </TabsTrigger>
                             ))}
                         </TabsList>
-                    </div>
+                    </div>}
 
                     {/* Content Area */}
-                    <TabsContent key={projectId} value="chat" keepMounted className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto data-[hidden]:hidden">
+                    <TabsContent key={projectId} value="chat" keepMounted aria-label={desktop ? translateDesktop('desktop.chat') : undefined} className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto data-[hidden]:hidden">
                             <ChatPanel 
                                 messages={messages}
                                 retry={retry}
@@ -744,10 +772,10 @@ export function RightSidebar({
                                 onLoadOlderHistory={handleLoadOlderHistory}
                             />
                     </TabsContent>
-                    <TabsContent value="todo" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+                    {!desktop ? <TabsContent value="todo" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
                             <TodoPanel items={currentTodos} lang={lang} />
-                    </TabsContent>
-                    <TabsContent value="artifacts" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+                    </TabsContent> : null}
+                    <TabsContent value="artifacts" aria-label={desktop ? translateDesktop(showAssets ? 'desktop.assets' : 'desktop.files') : undefined} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
                             <div className="h-full min-h-0">
                                 {showAssets ? (
                                     <AssetsPanel

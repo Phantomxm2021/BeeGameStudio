@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { openCodeGoHeaders } from './requests'
 import { modelRuntimeFetch, MODEL_RESPONSE_TIMEOUTS } from '../beegame/model-runtime-transport'
 import {
@@ -8,8 +9,39 @@ import {
 import { createPinnedRuntimeFetch } from '../beegame/model-runtime-network'
 import { providerConfig } from './config'
 import { requestProvider } from './request'
-import type { ProviderUsage, ProviderToolErrorHandler } from './response-stream'
+import { ProviderSseParser, ProviderSseError, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
 import { safeErrorFacts } from '../security/safe-error-facts'
+import { ProviderHttpError } from './http-error'
+
+// Match the usage fields consumed by native and bgsUsage. Native discards
+// response.failed and content_filter usage, even when the fields are present.
+const tokenCount = z.number().int().nonnegative()
+const nativeUsageReceipt = z.object({
+  type: z.enum(['response.completed', 'response.incomplete']),
+  response: z.object({
+    id: z.string(),
+    incomplete_details: z.object({ reason: z.string().optional() }).nullish(),
+    usage: z.object({
+      input_tokens: tokenCount,
+      output_tokens: tokenCount,
+      total_tokens: tokenCount,
+      input_tokens_details: z.object({
+        cached_tokens: tokenCount,
+        cache_write_tokens: tokenCount.optional(),
+      }).nullish(),
+      output_tokens_details: z.object({ reasoning_tokens: tokenCount }).nullish(),
+    }),
+  }),
+})
+function hasNativeUsageReceipt(event: unknown): boolean {
+  const parsed = nativeUsageReceipt.safeParse(event)
+  if (!parsed.success) return false
+  const { type, response } = parsed.data
+  if (type === 'response.incomplete' && response.incomplete_details?.reason === 'content_filter') return false
+  const { input_tokens, input_tokens_details: details } = response.usage
+  // bgsUsage rejects cache subsets larger than the input count.
+  return (details?.cached_tokens ?? 0) + (details?.cache_write_tokens ?? 0) <= input_tokens
+}
 
 export type ProviderNetworkOptions = {
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
@@ -19,6 +51,7 @@ export async function startProviderBridge(
   env: Record<string, string>,
   options: ProviderNetworkOptions & {
     sessionId?: string
+    modelCatalog?: string
     onUsage(usage: ProviderUsage): void
     onToolError?: ProviderToolErrorHandler
   },
@@ -42,6 +75,7 @@ export async function startProviderBridge(
   )
   const capability = crypto.randomUUID(),
     path = '/' + crypto.randomUUID() + '/v1/responses'
+  const catalogPath = path.slice(0, -'/responses'.length) + '/models'
   const active = new Map<AbortController, Promise<void>>()
   let closing = false,
     closed: Promise<void> | undefined
@@ -56,17 +90,21 @@ export async function startProviderBridge(
       const compact = config.protocol === 'responses' && route === path + '/compact'
       if (
         incoming.headers.has('origin') ||
-        incoming.method !== 'POST' ||
-        (route !== path && !compact) ||
         incoming.headers.get('authorization') !== 'Bearer ' + capability
       )
         return new Response('Not found', { status: 404 })
+      if (incoming.method === 'GET' && route === catalogPath && options.modelCatalog !== undefined)
+        return new Response(options.modelCatalog, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+      if (incoming.method !== 'POST' || (route !== path && !compact))
+        return new Response('Not found', { status: 404 })
       const abort = new AbortController()
+      let settleReceipt: (() => void) | undefined
       let finish!: () => void
       active.set(
         abort,
         new Promise(resolve => {
           finish = () => {
+            settleReceipt?.()
             active.delete(abort)
             resolve()
           }
@@ -100,6 +138,34 @@ export async function startProviderBridge(
               method: 'POST', headers, signal, redirect: 'error', body: JSON.stringify(body),
             })
           : await requestProvider(config, body, requestUpstream, signal, onUsage, options.onToolError)
+        let observeReceipt: ((chunk: Uint8Array) => void) | undefined
+        if (config.protocol === 'responses' && !compact && body.stream === true && response.ok) {
+          let receiptComplete = false
+          const reportMissingReceipt = () => {
+            if (!receiptComplete && !usageReported) onUsage({ input_tokens: 0, output_tokens: 0,
+              cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 0, incomplete: true })
+          }
+          settleReceipt = reportMissingReceipt
+          const parser = new ProviderSseParser()
+          // Inspect synchronously before enqueue: native can cancel as soon as
+          // it receives completion. Keep native totals authoritative, including
+          // retries/children; the bridge reports only missing-receipt evidence.
+          observeReceipt = chunk => {
+            try {
+              for (const event of parser.feed(chunk)) if (hasNativeUsageReceipt(event)) {
+                receiptComplete = true
+                observeReceipt = undefined
+                break
+              }
+            } catch (error) {
+              if (!(error instanceof ProviderSseError)) throw error
+              observeReceipt = undefined
+              // Malformed upstream data stays byte-transparent; record the
+              // missing receipt instead of hiding it or replacing native errors.
+              reportMissingReceipt()
+            }
+          }
+        }
         if (!response.body) {
           finish()
           return response
@@ -116,7 +182,10 @@ export async function startProviderBridge(
                 if (chunk.done) {
                   finish()
                   controller.close()
-                } else controller.enqueue(chunk.value)
+                } else {
+                  observeReceipt?.(chunk.value)
+                  controller.enqueue(chunk.value)
+                }
               } catch {
                 finish()
                 controller.error(Error('Provider stream failed'))
@@ -148,12 +217,17 @@ export async function startProviderBridge(
         const candidate = facts.httpStatus
         const upstreamStatus = typeof candidate === 'number' && Number.isInteger(candidate) &&
           candidate >= 400 && candidate <= 599 ? candidate : undefined
+        const providerError = upstreamStarted && error instanceof ProviderHttpError ? error : undefined
         return Response.json(
           {
             error: {
-              type: upstreamStarted ? 'provider_error' : 'invalid_request_error',
+              type: providerError?.identifiers.type ?? (upstreamStarted ? 'provider_error' : 'invalid_request_error'),
+              code: providerError?.identifiers.code,
+              param: providerError?.identifiers.param,
               message: !upstreamStarted
                 ? 'BGS could not parse or convert the model request for the selected provider protocol'
+                : error instanceof ProviderHttpError
+                ? error.message
                 : upstreamStatus
                 ? `The selected model provider request failed (HTTP ${upstreamStatus})`
                 : 'The selected model provider transport failed' +
@@ -167,6 +241,7 @@ export async function startProviderBridge(
   })
   return {
     protocol: config.protocol,
+    ...(options.modelCatalog !== undefined ? { modelCatalogUrl: server.url.origin + catalogPath } : {}),
     baseUrl:
       server.url.toString().replace(/\/$/, '') +
       path.slice(0, -'/responses'.length),

@@ -7,6 +7,14 @@ import { api } from '../../services/api';
 import { beeGameAdapter } from '../../services/beeGameAdapter';
 import * as apiClient from '../../services/apiClient';
 import { getWaitingPermissionState } from '../../utils/waitingPermission';
+import { useDesktopLayout } from '../Desktop/desktopLayoutContext';
+import i18n from '../../i18n';
+
+vi.mock('../Desktop/desktopLayoutContext', async importOriginal => ({
+    ...await importOriginal<typeof import('../Desktop/desktopLayoutContext')>(),
+    useDesktopLayout: vi.fn(() => null),
+}));
+afterEach(() => { vi.mocked(useDesktopLayout).mockReturnValue(null); });
 
 const showErrorMock = vi.hoisted(() => vi.fn());
 
@@ -64,6 +72,25 @@ function deferred<T>() {
 }
 
 describe('RightSidebar tabs', () => {
+    it('keeps desktop chat, files and assets reachable without task or artifact tabs', async () => {
+        await i18n.changeLanguage('en');
+        vi.mocked(useDesktopLayout).mockReturnValue({ header: null, account: null });
+        render(<RightSidebar projectId="desktop-project" lang="en" progress={0} messages={[]}
+            onSendMessage={vi.fn()} isLoading={false} waitingPermission={getWaitingPermissionState([])} />);
+        expect(screen.queryByRole('tab', { name: /Todo|Artifacts/ })).not.toBeInTheDocument();
+        expect(screen.getByRole('textbox')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Project files' }));
+        await waitFor(() => expect(screen.getByRole('tabpanel', { name: 'Project files' })).toBeVisible());
+        expect(api.getArtifacts).toHaveBeenCalledWith('desktop-project');
+        expect(screen.getByRole('button', { name: 'Project files' })).toHaveAttribute('aria-pressed', 'true');
+        fireEvent.click(screen.getByRole('button', { name: 'Chat', exact: true }));
+        expect(screen.getByRole('textbox')).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: 'Project assets' }));
+        await waitFor(() => expect(api.getProjectAssets).toHaveBeenCalledWith('desktop-project'));
+        expect(screen.getByRole('button', { name: 'Project assets' })).toHaveAttribute('aria-pressed', 'true');
+        act(() => window.dispatchEvent(new Event('beegame-focus-chat-input')));
+        await waitFor(() => expect(screen.getByRole('textbox')).toHaveFocus());
+    });
     it.each([
         'stream disconnected before completion: Provider did not report final token usage',
         'Provider reported invalid token usage',

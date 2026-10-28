@@ -1,6 +1,6 @@
 # Motion implementation comparisons
 
-Use only when choosing a consequential representation or investigating weak/misleading dynamic feedback. These examples are implementation decisions, not required effects or tested solutions for another game. Start from the actual art/feel intent and supported renderer. Reuse the game's existing animation/event facilities.
+Use only when choosing a consequential representation or investigating weak/misleading dynamic feedback. These examples are implementation decisions, not required effects or tested solutions for another game. Start from the actual art/feel intent and supported renderer. Reuse the game's existing animation/event facilities. For 2D characters and monsters, these transforms supplement the required sprite-frame actions; they do not replace changing poses with a moving still image.
 
 ## Facing, motion and contact
 

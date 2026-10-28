@@ -3,12 +3,18 @@ import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+// Offline runtime metadata export uses the same configured executable as stdio.
+if (process.argv.slice(-3).join(' ') === 'debug models --bundled') {
+  process.stdout.write(JSON.stringify({models:[{slug:'fixture-known-model',display_name:'Fixture',context_window:272000}]}))
+  process.exit(0)
+}
 const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n')
 const threadId = '019a0000-0000-7000-8000-000000000001'
 let skillRoots: string[] = []
 const serverResponses: any[] = []
 let turn = 0
 let resumed = false
+let startedThreads = 0
 let injectedItems: any[] = []
 let nativeGoal: any = process.env.BGS_FIXTURE_SAVED_GOAL ? JSON.parse(process.env.BGS_FIXTURE_SAVED_GOAL) : undefined
 let nativeGoalRunning = false
@@ -118,7 +124,7 @@ createInterface({ input: process.stdin }).on('line', async line => {
   else if (request.method === 'initialize') reply({ userAgent: 'fixture/0.163.0' })
   else if (request.method === 'thread/start' || request.method === 'thread/resume') {
     resumed = request.method === 'thread/resume'
-    const resolvedThreadId = p.threadId ?? threadId
+    const resolvedThreadId = p.threadId ?? (++startedThreads === 1 ? threadId : 'review-thread-' + startedThreads)
     reply({ thread: { id: resolvedThreadId } })
     if (request.method === 'thread/resume' && nativeGoal?.status === 'active') void runNativeGoal()
     // A real cold paginated resume can replay the last persisted cumulative
@@ -169,8 +175,9 @@ createInterface({ input: process.stdin }).on('line', async line => {
   else if (request.method === 'turn/start') {
     const turnId = 'turn-' + ++turn
     reply({ turn: { id: turnId, status: 'inProgress' } })
-    const event = (method: string, params: any) => send({ method, params: { threadId, turnId, ...params } })
+    const event = (method: string, params: any) => send({ method, params: { threadId: p.threadId, turnId, ...params } })
     event('turn/started', { turn: { id: turnId, status: 'inProgress' } })
+    if (process.env.BGS_FIXTURE_DESIGN_REVIEW === 'manual') return
     const prompt = p.input?.findLast((i: any) => i.type === 'text')?.text ?? ''
     await new Promise(resolve => setTimeout(resolve, 5))
     if (prompt?.startsWith('$')) { event('item/completed',{item:{id:'skill-answer',type:'agentMessage',text:p.input.some((i:any)=>i.type==='skill')?'Native skill selected':'Skill input missing'}}) }
@@ -242,6 +249,10 @@ createInterface({ input: process.stdin }).on('line', async line => {
       const outcome = prompt.slice('reused-child:'.length)
       reusedChild(event, outcome)
       if (outcome === 'cancel') return
+    } else if (prompt.startsWith('rg-receipt:')) {
+      const receipt = JSON.parse(prompt.slice('rg-receipt:'.length))
+      event('item/started', { item: { ...receipt, id: 'rg-1', type: 'commandExecution', status: 'inProgress', exitCode: undefined } })
+      event('item/completed', { item: { ...receipt, id: 'rg-1', type: 'commandExecution' } })
     } else if (prompt === 'unfinished-child') {
       event('item/completed', { item: { id: 'spawn', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'], agentsStates: { child: { status: 'running' } }, status: 'completed' } })
     } else {

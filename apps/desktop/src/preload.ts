@@ -17,6 +17,18 @@ function validateExternalUrl(value: string): string {
 
 const bridge = {
   isDesktop: true as const,
+  platform: process.platform,
+  onCommand: (handler: (command: 'new-project' | 'toggle-sidebar' | 'focus-input') => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, command: string) => {
+      if (command === 'new-project' || command === 'toggle-sidebar' || command === 'focus-input') handler(command)
+    }
+    ipcRenderer.on('desktop-command', listener)
+    void ipcRenderer.invoke('desktop-commands-ready').catch((error: unknown) => {
+      console.error('Unable to register desktop commands.', error)
+    })
+    return () => ipcRenderer.removeListener('desktop-command', listener)
+  },
+  setTheme: (isDark: boolean) => ipcRenderer.invoke('set-theme', isDark) as Promise<void>,
   openExternal: (url: string) =>
     ipcRenderer.invoke(
       'open-external',

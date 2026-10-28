@@ -20,6 +20,8 @@ test('HTTP MCP pins DNS, preserves native protocol sessions, blocks redirects an
   let initialize = 0, redirected = 0
   const trap = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { redirected++; return new Response('unexpected') } })
   const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    expect(request.headers.get('authorization')).toBe('Bearer fixture-secret')
+    expect(request.headers.get('x-api-key')).toBe('fixture-key')
     if (request.method === 'GET') return new Response(null, { status: 405 })
     if (request.method === 'DELETE') return new Response(null, { status: 204 })
     const body = await request.json() as any
@@ -37,7 +39,7 @@ test('HTTP MCP pins DNS, preserves native protocol sessions, blocks redirects an
       ? { tools: [{ name: 'offline_probe', inputSchema: { type: 'object' } }] }
       : { content: [{ type: 'text', text: 'offline success' }] } })
   } })
-  const relay = await startNativeMcpHttp({ fixture: `http://synthetic-mcp.invalid:${upstream.port}/mcp` }, {
+  const relay = await startNativeMcpHttp({ fixture: { url: `http://synthetic-mcp.invalid:${upstream.port}/mcp`, headers: [{ key: 'Authorization', value: 'Bearer fixture-secret' }, { key: 'X-API-Key', value: 'fixture-key' }] } }, {
     outboundTargetPolicyOptions: { allowedHosts: ['model.example'], allowHttp: true, allowTrustedDevelopmentProxy: true },
     resolveOutboundTarget: async (value, policy) => {
       expect(policy).toMatchObject({ allowedHosts: [], allowHttp: false, allowTrustedDevelopmentProxy: false })
@@ -45,6 +47,8 @@ test('HTTP MCP pins DNS, preserves native protocol sessions, blocks redirects an
         lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }
     },
   })
+  expect(JSON.stringify(relay.config)).not.toContain('fixture-secret')
+  expect(JSON.stringify(relay.config)).not.toContain('fixture-key')
   const config = relay.config.fixture!, client = new Client({ name: 'offline-client', version: '1' })
   const send = (body: unknown, extraHeaders: Record<string, string> = {}) => fetch(config.url, {
     method: 'POST', headers: { ...config.http_headers, 'content-type': 'application/json', ...extraHeaders }, body: JSON.stringify(body),
@@ -59,7 +63,7 @@ test('HTTP MCP pins DNS, preserves native protocol sessions, blocks redirects an
     expect(initialize).toBe(1)
     expect((await send({ redirect: true })).status).toBe(502)
     expect(redirected).toBe(0)
-    const auth = await send({ auth: true })
+    const auth = await send({ auth: true }, { authorization: 'Bearer caller-must-not-override' })
     expect(auth.status).toBe(502)
     expect(auth.headers.has('www-authenticate')).toBe(false)
     await client.close()

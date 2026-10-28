@@ -57,3 +57,21 @@ describe('personal image connection', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
+
+
+it('keeps desktop edits local, reports failure in place and allows cancellation', async () => {
+  vi.mocked(savePersonalImageConnection).mockRejectedValueOnce(new Error('offline'));
+  render(<PersonalImageConnectionPanel desktop language="zh" />);
+  const source = screen.getByLabelText('生图连接方式');
+  await waitFor(() => expect(source).toBeEnabled());
+  await userEvent.selectOptions(source, 'byok');
+  await userEvent.type(screen.getByLabelText('API Key'), 'desktop-fixture-key');
+  expect(savePersonalImageConnection).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: '保存连接' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('保存失败');
+  expect(screen.getByLabelText('API Key')).toHaveValue('desktop-fixture-key');
+  expect(showError).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(source).toHaveValue('platform');
+  expect(screen.queryByRole('button', { name: '保存连接' })).not.toBeInTheDocument();
+});

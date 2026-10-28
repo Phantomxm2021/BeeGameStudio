@@ -1,5 +1,6 @@
 import { isWebReactTarget } from './beegame/workflow-v3/web-project-start'
 import { registerPortalSsoRoutes } from './auth/portal-sso-routes'
+import { normalizeMcpHeaders } from './mcp-http-headers'
 import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
 import { readPublicationControls, PUBLIC_DESCRIPTION_SOURCE_INVALID, publicationDescriptionFromBrief, PUBLIC_DESCRIPTION_BRIEF_MISSING, PUBLIC_DESCRIPTION_TOO_LONG } from './beegame/publication-description'
 import { UsageOutboxPersistenceError } from './beegame/session-usage-outbox'
@@ -1698,9 +1699,15 @@ export function createAgentWorkflowApp(
   })
 
   app.post('/api/mcp-servers/test', async c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'mcp.manage')
     if (forbidden) return c.json(forbidden, 403)
-    const body = await readJson(c.req.raw)
+    let body = await readJson(c.req.raw)
+    if (typeof body.id === 'string') {
+      const saved = await dashboardRepository.getMcpServerForTest(c.req.raw, user, body.id)
+      if (!saved) return c.json({ error: 'MCP server not found' }, 404)
+      body = saved as unknown as JsonObject
+    }
     // A dashboard stdio test starts a process on the host, unlike owner-scoped
     // configuration storage and sandboxed project execution.
     if (typeof body.transport !== 'string' || body.transport === 'stdio') {
@@ -6936,6 +6943,8 @@ async function validateMcpServerBody(
   } else if (!(await hasPermittedOutboundUrl(body.url))) {
     return 'Outbound URL is not permitted'
   }
+  try { normalizeMcpHeaders(body.headers) }
+  catch { return 'Invalid MCP headers: use unique header names and single-line values; protocol headers are reserved' }
   if (body.env !== undefined && !Array.isArray(body.env)) {
     return 'Invalid MCP env'
   }
@@ -6977,6 +6986,7 @@ function toOutboundTargetError(
 
 function toMcpServerInput(body: JsonObject) {
   return {
+    ...(body.headers !== undefined ? { headers: (body.headers as Array<{ key: string; value?: string; clearSecret?: boolean }>).map(({ key, value, clearSecret }) => ({ key, value, clearSecret })) } : {}),
     ...(typeof body.id === 'string' ? { id: body.id } : {}),
     name: String(body.name),
     enabled: body.enabled !== false,

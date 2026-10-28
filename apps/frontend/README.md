@@ -65,6 +65,25 @@ The frontend CI workflow runs these checks and bundles the shared UI inspector.
 
 ## Code ownership
 
+### Desktop presentation
+
+`App.tsx` selects `DesktopLayout` only when the trusted Electron preload exposes
+`beeGameDesktop.isDesktop`. Browser URLs and query parameters do not enable it.
+The desktop layout owns project navigation and window chrome. React portals move
+the existing workspace header and account controls into its slots, preserving
+their existing permissions, billing, preview and publication handlers.
+
+The desktop idea home uses the existing `ClassicIdeaPromptForm`; intake, login,
+attachments and billing confirmation still follow the shared flow. The chat
+composer is unchanged. Desktop collaboration exposes files and assets through
+contextual controls instead of the web task/artifact tabs. Web presentation is
+unchanged. Shared feature code should use the desktop layout context for
+presentation; platform detection belongs at the application entry.
+
+Desktop packaging includes this frontend's built assets. The Electron shell serves
+them locally and connects to the existing BGS runtime on port 62174; generation
+still requires that runtime. Optional hosted mode keeps its trusted HTTPS origin.
+
 - `App.tsx` and page components compose views and handle navigation.
 - `hooks/` owns React state and interactions with services; for example, skill settings load only while their section is open.
 - `services/` owns API transport and conversion of server data.

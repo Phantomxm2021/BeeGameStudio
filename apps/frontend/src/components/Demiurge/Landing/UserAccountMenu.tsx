@@ -14,6 +14,8 @@ export interface UserAccountMenuItem {
 interface UserAccountMenuProps {
     ariaLabel: string;
     className?: string;
+    triggerLabel?: string;
+    menuSide?: 'top' | 'bottom';
     isTransitioning?: boolean;
     isActive?: boolean;
     currentUserId?: string;
@@ -31,6 +33,8 @@ interface UserAccountMenuProps {
 export function UserAccountMenu({
     ariaLabel,
     className = '',
+    triggerLabel,
+    menuSide = 'bottom',
     isTransitioning = false,
     isActive = false,
     currentUserId,
@@ -60,19 +64,20 @@ export function UserAccountMenu({
     return (
         <div className={`${className} transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`.trim()}>
             {currentUserId ? (
-                <MorphPopover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
+                <MorphPopover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen} className={triggerLabel ? 'desktop-account-popover' : undefined}>
                     <MorphPopoverTrigger>
                         <ProfileAvatarButton
                             type="button"
-                            aria-label={ariaLabel}
+                            aria-label={triggerLabel ? `${triggerLabel} · ${ariaLabel}` : ariaLabel}
+                            label={triggerLabel}
                             avatarUrl={currentUserAvatarUrl}
                             userLabel={userLabel}
                             anonymous={false}
-                            className={isActive || isUserMenuOpen ? 'ring-2 ring-ring' : ''}
+                            className={`${isActive || isUserMenuOpen ? 'ring-2 ring-ring' : ''} ${triggerLabel ? 'desktop-account-trigger' : ''}`}
                         />
                     </MorphPopoverTrigger>
-                    <MorphPopoverContent side="bottom" align="end" sideOffset={10} radius={12} className="z-[140] w-64 overflow-hidden rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-lg">
-                        <div role="menu" aria-label={ariaLabel} data-testid="beegame-user-settings-menu" className="border-border bg-popover">
+                    <MorphPopoverContent side={menuSide} align="end" sideOffset={10} radius={12} className="z-[140] w-64 overflow-hidden rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+                        <div role="menu" aria-label={triggerLabel ? `${triggerLabel} · ${ariaLabel}` : ariaLabel} data-testid="beegame-user-settings-menu" className="border-border bg-popover">
                     <div className="px-3 py-3">
                         <div className="truncate text-base font-semibold text-foreground">{userLabel}</div>
                         {currentUserEmail ? (
@@ -115,12 +120,13 @@ export function UserAccountMenu({
             ) : (
                 <ProfileAvatarButton
                     type="button"
-                    aria-label={ariaLabel}
+                    aria-label={triggerLabel ? `${triggerLabel} · ${ariaLabel}` : ariaLabel}
+                    label={triggerLabel}
                     avatarUrl={currentUserAvatarUrl}
                     userLabel={userLabel}
                     anonymous
                     onClick={onOpenLogin}
-                    className={isActive ? 'ring-2 ring-ring' : ''}
+                    className={`${isActive ? 'ring-2 ring-ring' : ''} ${triggerLabel ? 'desktop-account-trigger' : ''}`}
                 />
             )}
         </div>

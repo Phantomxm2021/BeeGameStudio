@@ -43,3 +43,21 @@ it('allows clearing a saved effort after its model stops advertising it', async 
   fireEvent.click(screen.getByRole('button', { name: 'Save reasoning settings' }));
   await waitFor(() => expect(api.saveBgsSettings).toHaveBeenCalledWith('owner-connection', null));
 });
+
+
+it('saves a desktop effort selection in place and restores the previous value on failure', async () => {
+  vi.mocked(api.saveBgsSettings).mockRejectedValueOnce(new Error('offline'));
+  render(<BgsSettingsPanel desktop language="en" />);
+  const select = screen.getByLabelText('Reasoning effort');
+  await waitFor(() => expect(select).toBeEnabled());
+  fireEvent.change(select, { target: { value: 'high' } });
+  await waitFor(() => expect(api.saveBgsSettings).toHaveBeenCalledWith('owner-connection', 'high'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Save failed');
+  expect(select).toHaveValue('');
+  vi.mocked(api.saveBgsSettings).mockResolvedValueOnce({ ...settings, effort: 'high' });
+  fireEvent.change(select, { target: { value: 'high' } });
+  await waitFor(() => expect(select).toBeEnabled());
+  expect(select).toHaveValue('high');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});

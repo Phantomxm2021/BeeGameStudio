@@ -395,14 +395,17 @@ function eventToProjectEventMessagesBase(
         return eventToProjectEventMessagesBase(projectId, { ...event, type: 'tool.progress',
           payload: { ...event.payload, type: 'tool.progress', output: '' } }, workspacePath, userDisplayText, now)
       }
+      const noMatch = finishedTool === 'Shell' && event.type === 'tool.completed' && event.payload?.is_error !== true &&
+        event.payload?.exitCode === 1 && event.payload?.searchOutcome === 'no-match'
       const finishedInfo = getToolDisplayInfo(
         finishedTool,
         event.type === 'tool.failed' || event.payload?.is_error === true ||
-          (Number.isInteger(event.payload?.exitCode) && event.payload?.exitCode !== 0) ? 'failed' : 'completed',
+          (Number.isInteger(event.payload?.exitCode) && event.payload?.exitCode !== 0 && !noMatch) ? 'failed' : 'completed',
         finishedInput,
         workspacePath,
         output,
       )
+      if (noMatch) finishedInfo.detail = [finishedInfo.detail, 'No search results (rg exit 1)'].filter(Boolean).join(' · ')
       const finishedArtifactPath = getArtifactPath(finishedTool, finishedInput)
       return [
         {

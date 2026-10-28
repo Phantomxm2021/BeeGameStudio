@@ -97,3 +97,33 @@ describe('resource inspection', () => {
     })).resolves.toEqual(expect.objectContaining({ inspectionStatus: 'complete', processor: 'isolated-test', meshCount: 2 }))
   })
 })
+
+
+// Header/chunk fixtures exercise metadata boundaries; they do not claim pixel decoding.
+function pngMetadata(color:number, chunks:Array<[string,Uint8Array]>) {
+  const header=new Uint8Array(13),view=new DataView(header.buffer)
+  view.setUint32(0,8);view.setUint32(4,8);header[8]=8;header[9]=color
+  const parts=[new Uint8Array([137,80,78,71,13,10,26,10]),...([['IHDR',header],...chunks] as Array<[string,Uint8Array]>).map(([name,data])=>{
+    const chunk=new Uint8Array(12+data.length);new DataView(chunk.buffer).setUint32(0,data.length)
+    chunk.set(new TextEncoder().encode(name),4);chunk.set(data,8);return chunk
+  })]
+  const result=new Uint8Array(parts.reduce((n,part)=>n+part.length,0));let offset=0
+  for(const part of parts){result.set(part,offset);offset+=part.length}return result
+}
+test('PNG metadata distinguishes alpha channels, transparency chunks, absence and incomplete evidence',()=>{
+  const end:Array<[string,Uint8Array]>=[['IDAT',new Uint8Array([0])],['IEND',new Uint8Array()]]
+  for(const color of [0,2,3,4,6]) {
+    const palette:Array<[string,Uint8Array]>=color===3?[['PLTE',new Uint8Array(6)]]:[]
+    const bytes=pngMetadata(color,[...palette,...end])
+    expect(inspectResourceBytes('image.png',bytes).hasAlpha).toBe(color===4||color===6)
+    expect(inspectResourceBytes('image.png',bytes.slice(0,-1))).not.toHaveProperty('hasAlpha')
+    if([0,2,3].includes(color)) {
+      const transparent=pngMetadata(color,[...palette,['tRNS',new Uint8Array(color===2?6:2)],...end])
+      expect(inspectResourceBytes('image.png',transparent).hasAlpha).toBe(true)
+    }
+  }
+  const invalid=pngMetadata(6,[['tRNS',new Uint8Array(1)],...end])
+  expect(inspectResourceBytes('image.png',invalid)).not.toHaveProperty('hasAlpha')
+  const overflow=pngMetadata(2,end);new DataView(overflow.buffer).setUint32(33,0xffffffff)
+  expect(inspectResourceBytes('image.png',overflow)).not.toHaveProperty('hasAlpha')
+})

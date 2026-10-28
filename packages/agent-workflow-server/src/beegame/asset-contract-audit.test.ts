@@ -383,7 +383,8 @@ test('atlas sprite compatibility retains metadata, hash and additional-capabilit
     value.requirements[0]!.acquisition_profile.capabilities = ['alpha']
     value.resources[0]!.capabilities = ['alpha']
   })
-  expect(auditAssetContract(alpha).requirements[0]!.structure!.status).toBe('unverified')
+  expect(auditAssetContract(alpha).requirements[0]!.structure!.status).toBe('passed')
+  expect(auditAssetContract(alpha).resources[0]!.fileEvidence.find(file=>file.path.endsWith('.png'))!.facts.hasAlpha).toBe(true)
   const reverse = await spriteAtlasFixture(undefined, value => {
     value.requirements[0]!.acquisition_profile.asset_kinds = ['sprite-atlas']
     value.resources[0]!.asset_kind = 'sprite'
@@ -654,3 +655,41 @@ describe('resource contract boundaries', () => {
   })
 
 })
+
+
+test.each(['rgba', 'palette', 'opaque', 'unknown-capability'] as const)('PNG alpha obligation uses inspected bytes: %s', async kind => {
+  const value=manifest(), resource=value.resources[0]!
+  value.project_target!.asset_format_capabilities=['png']
+  value.requirements[0]!.acquisition_profile.asset_kinds=['sprite']
+  value.requirements[0]!.acquisition_profile.capabilities=kind==='unknown-capability'?['alpha','frame-sequence']:['alpha']
+  resource.asset_kind='sprite';resource.capabilities=[...(value.requirements[0]!.acquisition_profile.capabilities??[])]
+  resource.root_path='assets/runtime/model.png';resource.file_paths=[resource.root_path]
+  const workspace=await writeFixture(value)
+  const pixels=sharp({create:{width:8,height:8,channels:4,background:'#fff0'}})
+  const bytes=await (kind==='opaque'?pixels.removeAlpha():pixels).png({palette:kind==='palette'}).toBuffer()
+  await writeFile(join(workspace,resource.root_path),bytes)
+  const result=auditAssetContract(workspace)
+  expect(result.requirements[0]!.structure!.status).toBe(kind==='opaque'?'failed':kind==='unknown-capability'?'unverified':'passed')
+  expect(result.resources[0]!.fileEvidence[0]!.facts.hasAlpha).toBe(kind!=='opaque')
+  if(kind==='opaque')expect(result.issues.join(' ')).toContain('required alpha capability is absent')
+})
+
+test.each(['audio-clip','music','ambience','voice','loop','unsupported','broken-member'] as const)(
+  'PCM16 structural evidence does not imply audio quality: %s', async kind => {
+    const value=manifest(),resource=value.resources[0]!
+    const assetKind=kind==='music'||kind==='ambience'||kind==='voice'?kind:'audio-clip'
+    value.project_target!.asset_format_capabilities=['wav']
+    value.requirements[0]!.acquisition_profile.asset_kinds=[assetKind]
+    value.requirements[0]!.acquisition_profile.capabilities=kind==='loop'?['loop']:[]
+    resource.asset_kind=assetKind;resource.capabilities=[...(value.requirements[0]!.acquisition_profile.capabilities??[])]
+    resource.root_path='assets/runtime/tone.wav';resource.file_paths=[resource.root_path]
+    if(kind==='broken-member')resource.file_paths.push('assets/runtime/member.wav')
+    const workspace=await writeFixture(value),bytes=audioProbeWav(false)
+    if(kind==='unsupported')bytes.writeUInt16LE(3,20)
+    await writeFile(join(workspace,resource.root_path),bytes)
+    if(kind==='broken-member')await writeFile(join(workspace,'assets/runtime/member.wav'),'Not encoded WAV')
+    const result=auditAssetContract(workspace)
+    expect(result.requirements[0]!.structure!.status).toBe(['loop','unsupported','broken-member'].includes(kind)?'unverified':'passed')
+    if(kind==='loop')expect(result.requirements[0]!.structure!.observations.join(' ')).toContain('unverified capabilities/components [loop]')
+    if(kind!=='unsupported')expect(result.resources[0]!.fileEvidence[0]!.facts.encoding).toBe('PCM16')
+  })

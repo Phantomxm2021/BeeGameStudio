@@ -1,9 +1,15 @@
+vi.mock('../../services/bgsSettingsApi', () => ({
+  getBgsSettings: vi.fn().mockResolvedValue({ model: 'test-model', connectionKey: 'mock-connection', efforts: ['medium', 'high'], effort: 'medium' }),
+  saveBgsSettings: vi.fn(),
+}));
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { LandingView } from './LandingView';
 import { ToastProvider } from '../../contexts/ToastContext';
 import { resourceLibraryApi } from '../../services/resourceLibraryApi';
+import { DesktopLayout } from '../Desktop/DesktopLayout';
 
 // Workflow tests use the accessible reduced-motion path; the animated reveal is
 // verified separately with a controlled frame clock in AvatarDialogue.test.tsx.
@@ -631,6 +637,96 @@ beforeEach(() => {
 });
 
 describe('LandingView bootstrap submission', () => {
+  it('uses the nickname and avatar to open a unified desktop settings page without losing the idea draft', async () => {
+    mockCurrentUser = { id: 'alice', displayName: 'Alice', email: 'alice@example.test',
+      avatarUrl: 'https://cdn.example.test/avatar.png', role: 'owner', permissions: ['project.create'] };
+    const external = vi.fn().mockResolvedValue(undefined);
+    window.beeGameDesktop = { isDesktop: true, platform: 'darwin', openExternal: external, onOAuthCallback: () => () => {} };
+    try {
+      await act(async () => {
+        render(<ToastProvider><DesktopLayout lang="zh" workspace={false}>
+          <LandingView lang="zh" onSetLang={vi.fn()} onStart={vi.fn()} />
+        </DesktopLayout></ToastProvider>);
+      });
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, { target: { value: '保留创意输入' } });
+      expect(screen.queryByText('账户与设置')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('Alice'));
+      fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
+      const page = await screen.findByRole('region', { name: '系统设置' });
+      expect(await within(page).findByRole('heading', { name: '个人主页' })).toBeVisible();
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(input.closest('.desktop-workbench')).toHaveAttribute('inert');
+      expect(screen.getByRole('navigation', { name: '项目' })).toHaveAttribute('inert');
+      expect(getStripeCreditPacks).not.toHaveBeenCalled();
+      updateSupabaseAvatarUrl.mockRejectedValueOnce(new Error('Avatar save failed'));
+      fireEvent.change(within(page).getByLabelText('上传头像'), { target: { files: [new File(['fixture'], 'avatar.png', { type: 'image/png' })] } });
+      const saveAvatar = await within(page).findByRole('button', { name: '保存头像' });
+      await waitFor(() => expect(saveAvatar).toBeEnabled());
+      fireEvent.click(saveAvatar);
+      expect(await within(page).findByRole('status')).toHaveTextContent('Avatar save failed');
+      expect(page).toBeVisible();
+      updateSupabaseAvatarUrl.mockResolvedValueOnce(undefined);
+      fireEvent.click(saveAvatar);
+      await waitFor(() => expect(updateSupabaseAvatarUrl).toHaveBeenCalledTimes(2));
+      expect(page).toBeVisible();
+      fireEvent.click(within(page).getByRole('button', { name: '通用' }));
+      expect(await within(page).findByLabelText('推理强度')).toBeVisible();
+      fireEvent.click(within(page).getByRole('button', { name: 'Credit 商店' }));
+      const buy = await within(page).findByRole('button', { name: '购买' });
+      fireEvent.click(buy);
+      await waitFor(() => expect(external).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_beegame_store'));
+      expect(buy).toBeEnabled();
+      fireEvent.click(within(page).getByRole('button', { name: '关闭设置' }));
+      expect(page).not.toBeVisible();
+      expect(input).toHaveValue('保留创意输入');
+      expect(input.closest('.desktop-workbench')).not.toHaveAttribute('inert');
+      expect(screen.getByRole('navigation', { name: '项目' })).toBeVisible();
+      const avatar = screen.getByRole('button', { name: /Alice.*用户菜单/ }).querySelector('.desktop-account-avatar')!;
+      fireEvent.click(avatar);
+      expect(await screen.findByRole('menuitem', { name: '个人主页' })).toBeVisible();
+      expect(generateIntakeOptions).not.toHaveBeenCalled();
+    } finally { delete window.beeGameDesktop; }
+  });
+
+  it('opens project history directly from the desktop sidebar and preserves the idea draft', async () => {
+    mockProjects = [{ id: 'project-1', name: 'Existing Project', created_at: '2026-04-20T00:00:00.000Z' }];
+    await act(async () => {
+      render(<ToastProvider><DesktopLayout lang="zh" workspace={false}>
+        <LandingView lang="zh" onSetLang={vi.fn()} onStart={vi.fn()} />
+      </DesktopLayout></ToastProvider>);
+    });
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '保留我的创意草稿' } });
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: '历史项目' }));
+    const history = await screen.findByRole('dialog', { name: '历史项目' });
+    expect(within(history).getByText('Existing Project')).toBeInTheDocument();
+    fireEvent.click(within(history).getByRole('button', { name: '关闭' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '历史项目' })).not.toBeInTheDocument());
+    expect(input).toHaveValue('保留我的创意草稿');
+    expect(generateIntakeOptions).not.toHaveBeenCalled();
+  });
+
+  it('uses the shared capsule and billing confirmation inside the desktop home', async () => {
+    const onStart = vi.fn();
+    let container!: HTMLElement;
+    await act(async () => {
+      ({ container } = render(<ToastProvider><DesktopLayout lang="zh" workspace={false}>
+        <LandingView lang="zh" onSetLang={vi.fn()} onStart={onStart} />
+      </DesktopLayout></ToastProvider>));
+    });
+    expect(screen.getByRole('heading', { name: '你想做什么游戏？' })).toBeInTheDocument();
+    expect(container.querySelector('.desktop-account-slot')).toContainElement(screen.getByRole('button', { name: /用户菜单/ }));
+    const input = screen.getByRole('textbox');
+    expect(screen.getByTestId('idea-prompt-surface')).toContainElement(input);
+    fireEvent.change(input, { target: { value: '森林探索游戏' } });
+    fireEvent.focus(input);
+    fireEvent.click(screen.getByTestId('idea-prompt-send'));
+    expect(await screen.findByRole('group', { name: '实时 Credit 扣除提示' })).toBeInTheDocument();
+    expect(onStart).not.toHaveBeenCalled();
+    expect(generateIntakeOptions).not.toHaveBeenCalled();
+  });
+
   it('replays the home fade after resource navigation without remounting the idea draft', async () => {
     const listPacks = vi.spyOn(resourceLibraryApi, 'listPacks').mockResolvedValue([]);
     const originalUrl = window.location.href;

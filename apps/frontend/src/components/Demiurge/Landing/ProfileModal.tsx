@@ -1,7 +1,7 @@
 import { AnimatedNumber } from '@/components/beui/motion/animated-number';
 import { type ChangeEvent, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Camera, X } from 'lucide-react';
+import { Camera, ChevronRight, X } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import {
   clearSupabaseSession,
@@ -27,23 +27,30 @@ type ProfileCreditBalance = Pick<BeeGameCreditBalance, 'balanceCredits' | 'consu
 
 interface ProfileModalProps {
   isOpen: boolean;
+  presentation?: 'dialog' | 'desktop';
   lang: Language;
   currentUser: ProfileModalUser | null | undefined;
   creditBalance: ProfileCreditBalance | null;
   onClose: () => void;
+  onOpenCreditStore?: () => void;
   onUserChanged: () => void | Promise<void>;
 }
 
 export function ProfileModal({
   isOpen,
+  presentation = 'dialog',
+  lang,
   currentUser,
   creditBalance,
   onClose,
   onUserChanged,
+  onOpenCreditStore,
 }: ProfileModalProps) {
+  const desktop = presentation === 'desktop';
   const { showError } = useToastContext();
   const { t: translate } = useTranslation();
   const profileText = getProfileText(translate);
+  const reportError = (message: string) => { if (desktop) setProfileNotice(message); else showError(message); };
   const [avatarDraft, setAvatarDraft] = useState('');
   const [avatarDraftFailed, setAvatarDraftFailed] = useState(false);
   const [profileNotice, setProfileNotice] = useState('');
@@ -53,8 +60,8 @@ export function ProfileModal({
     if (!isOpen || !currentUser) return;
     // Rehydrate editable fields whenever a profile session opens.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setProfileNotice('');
     setAvatarDraft(currentUser.avatarUrl || '');
+    setProfileNotice('');
     setAvatarDraftFailed(false);
   }, [currentUser, isOpen]);
 
@@ -67,21 +74,21 @@ export function ProfileModal({
     setAvatarDraftFailed(false);
     setProfileNotice('');
     if (!file.type.startsWith('image/')) {
-      showError(translate('intake.errors.profileImageRequired'));
+      reportError(translate('intake.errors.profileImageRequired'));
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      showError(translate('intake.errors.profileImageTooLarge'));
+      reportError(translate('intake.errors.profileImageTooLarge'));
       return;
     }
     setIsSavingProfile(true);
     void uploadSupabaseAvatarImage(file)
       .then(url => {
         setAvatarDraft(url);
-        setProfileNotice(translate('intake.errors.profileAvatarSelected'));
+        if (!desktop) setProfileNotice(translate('intake.errors.profileAvatarSelected'));
       })
       .catch(error => {
-        showError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUploadFailed'));
+        reportError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUploadFailed'));
       })
       .finally(() => setIsSavingProfile(false));
   };
@@ -91,7 +98,7 @@ export function ProfileModal({
     const nextAvatar = avatarDraft.trim();
     const currentAvatar = currentUser.avatarUrl || '';
     if (!nextAvatar || nextAvatar === currentAvatar) {
-      onClose();
+      if (!desktop) onClose();
       return;
     }
     setProfileNotice('');
@@ -99,9 +106,9 @@ export function ProfileModal({
     try {
       await updateSupabaseAvatarUrl(nextAvatar);
       await onUserChanged();
-      onClose();
+      if (!desktop) onClose();
     } catch (error) {
-      showError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUpdateFailed'));
+      reportError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUpdateFailed'));
     } finally {
       setIsSavingProfile(false);
     }
@@ -117,26 +124,38 @@ export function ProfileModal({
       onClose();
       await onUserChanged();
     } catch (error) {
-      showError(error instanceof Error ? error.message : profileText.deleteFailed);
+      reportError(error instanceof Error ? error.message : profileText.deleteFailed);
     }
   };
 
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md p-6">
+  if (desktop) return <section className="desktop-profile-content">
+    <div className="desktop-profile-identity">
+      <span className="desktop-profile-avatar">{avatarDraft && !avatarDraftFailed
+        ? <img src={avatarDraft} alt="" referrerPolicy="no-referrer" onError={() => setAvatarDraftFailed(true)} />
+        : getDisplayInitial(currentUser.displayName || currentUser.email || currentUser.id)}</span>
+      <span className="desktop-profile-name">{currentUser.displayName || profileText.displayNameFallback}</span>
+      <label className="desktop-settings-button desktop-avatar-picker">{lang.startsWith('zh') ? '更换头像…' : 'Change avatar…'}
+        <input type="file" accept="image/*" aria-label={translate('intake.profile.uploadAvatar')} disabled={isSavingProfile} onChange={handleAvatarFileChange} className="sr-only" />
+      </label>
+    </div>
+    {avatarDraft !== (currentUser.avatarUrl || '') ? <div className="desktop-local-actions">
+      <button type="button" className="desktop-text-button" disabled={isSavingProfile} onClick={() => { setAvatarDraft(currentUser.avatarUrl || ''); setAvatarDraftFailed(false); setProfileNotice(''); }}>{lang.startsWith('zh') ? '取消' : 'Cancel'}</button>
+      <button type="button" className="desktop-settings-button desktop-primary" disabled={isSavingProfile} onClick={() => void handleFinishProfile()}>{isSavingProfile ? profileText.saving : lang.startsWith('zh') ? '保存头像' : 'Save avatar'}</button>
+    </div> : null}
+    <div className="desktop-settings-group-label">{translate('common:account')}</div>
+    <div className="desktop-setting-row"><span>{lang.startsWith('zh') ? '电子邮箱' : 'Email'}</span><span className="desktop-setting-value">{currentUser.email || profileText.emailFallback}</span></div>
+    <div className="desktop-setting-row"><span>{profileText.balance}</span><button type="button" className="desktop-value-link" onClick={onOpenCreditStore}>{creditBalance ? <AnimatedNumber>{creditBalance.balanceCredits}</AnimatedNumber> : '—'}<ChevronRight aria-hidden="true" /></button></div>
+    <div className="desktop-account-danger"><button type="button" className="desktop-text-button desktop-danger" disabled={isSavingProfile} onClick={() => void handleDeleteAccount()}>{profileText.deleteAccount}</button></div>
+    {profileNotice ? <p role="status" className="desktop-inline-feedback">{profileNotice}</p> : null}
+  </section>;
+
+  const content = <>
           <div className="flex items-start justify-between gap-4">
             <div>
               <DialogTitle className="type-title-3 text-foreground">{translate('intake.profile.title')}</DialogTitle>
               <DialogDescription className="type-callout mt-3 text-foreground">{translate('intake.profile.description')}</DialogDescription>
             </div>
-            <button
-              type="button"
-              aria-label={translate('intake.profile.close')}
-              onClick={onClose}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full grid place-items-center border border-border bg-background"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <button type="button" aria-label={translate('intake.profile.close')} onClick={onClose} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full grid place-items-center border border-border bg-background"><X className="h-5 w-5" /></button>
           </div>
 
           <div className="mt-8 flex flex-col items-center text-center">
@@ -211,7 +230,10 @@ export function ProfileModal({
               {isSavingProfile ? profileText.saving : profileText.finish}
             </Button>
           </div>
-      </DialogContent>
+  </>;
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md p-6">{content}</DialogContent>
     </Dialog>
   );
 }
@@ -253,3 +275,7 @@ const getDisplayInitial = (value: string): string => {
   const first = Array.from(value.trim() || 'U')[0] || 'U';
   return /^[a-z]$/i.test(first) ? first.toUpperCase() : first;
 };
+
+export function DesktopProfileSettings(props: Omit<ProfileModalProps, 'presentation'>) {
+  return <ProfileModal {...props} presentation="desktop" />;
+}

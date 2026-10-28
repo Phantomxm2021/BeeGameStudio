@@ -218,7 +218,15 @@ export function createMeasuredPreview(input: {
       }
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return failure(405, 'Static Preview is read-only')
       try {
-        const run = await validate(entry)
+        // Active-writer candidates bind authority to the opened writer, not a Run
+        // revision. One live check after the file read also catches changes during it.
+        const deferState = entry.kind === 'candidate' && Boolean(entry.writer) && request.method !== 'OPTIONS'
+        if (deferState) {
+          const capability = input.capabilities.resolveRoute(entry.token)
+          if (capability?.sessionId !== entry.identity || capability.userId !== entry.ownerId)
+            throw new WorkflowError('preview-revoked', 'Preview capability is no longer valid')
+        }
+        const run = deferState ? undefined : await validate(entry)
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers })
         let path: string
         try { path = decodeURIComponent(url.pathname).slice(1) || 'index.html' } catch { return failure(400, 'Invalid file path') }
@@ -230,11 +238,11 @@ export function createMeasuredPreview(input: {
         if (await realpath(file) !== file) throw new WorkflowError('preview-stale', 'Preview file became an alias')
         const bytes = await readFile(file)
         if (digest(bytes) !== expected) throw new WorkflowError('preview-stale', 'Preview file changed')
-        const after = await readState(entry.projectId, entry.ownerId)
-        if (!after || after.id !== run.id || after.workspacePath !== run.workspacePath ||
+        const after = deferState ? await validate(entry) : await readState(entry.projectId, entry.ownerId)
+        if (!after || after.id !== entry.view.runId || after.workspacePath !== entry.workspace ||
             after.projectId !== entry.projectId || after.ownerId !== entry.ownerId ||
             (entry.kind==='candidate' && entry.writer ? !writerMatches(after,entry.writer) :
-            after.version !== run.version || after.writer || input.isBusy(after)) ||
+            after.version !== run?.version || after.writer || input.isBusy(after)) ||
             byHost.get(url.hostname) !== entry || !input.capabilities.resolveRoute(entry.token))
           throw new WorkflowError('preview-stale', 'Workflow changed during file read')
         return new Response(request.method === 'HEAD' ? null : bytes, { headers: {

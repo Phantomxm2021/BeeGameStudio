@@ -367,3 +367,39 @@ it.each([true, false])('restores or reactivates a Go Responses connection withou
   expect(screen.getByLabelText('Model')).toHaveValue('new-responses-model');
   expect(screen.getByLabelText('OpenCode Go API Key')).toHaveAttribute('placeholder', 'Saved; leave blank to keep');
 });
+
+
+it('opens desktop authorization through the existing external-browser bridge', async () => {
+  const external = vi.fn().mockResolvedValue(undefined);
+  window.beeGameDesktop = { isDesktop: true, platform: 'darwin', openExternal: external, onOAuthCallback: () => () => {} };
+  vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'desktop-login', method: 'chatgpt-subscription', url: 'https://auth.openai.com/device', userCode: 'TEST-CODE' } as api.ModelLogin);
+  const { unmount } = render(<ModelConnectionsPanel desktop language="en" />);
+  try {
+    await waitForCatalog();
+    await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'chatgpt-subscription');
+    await userEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }));
+    await waitFor(() => expect(external).toHaveBeenCalledWith('https://auth.openai.com/device'));
+    expect(await screen.findByText('TEST-CODE')).toBeVisible();
+    unmount();
+    expect(api.cancelModelLogin).toHaveBeenCalledWith('desktop-login');
+  } finally { unmount(); delete window.beeGameDesktop; }
+});
+
+
+it('cancels desktop authorization when settings close while the browser is opening', async () => {
+  let finishOpening!: () => void;
+  const external = vi.fn(() => new Promise<void>(resolve => { finishOpening = resolve; }));
+  window.beeGameDesktop = { isDesktop: true, platform: 'darwin', openExternal: external, onOAuthCallback: () => () => {} };
+  vi.mocked(api.startModelLogin).mockResolvedValue({ id: 'opening-login', method: 'chatgpt-subscription', url: 'https://auth.openai.com/device' });
+  const { unmount } = render(<ModelConnectionsPanel desktop language="en" />);
+  try {
+    await waitForCatalog();
+    await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'chatgpt-subscription');
+    await userEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }));
+    await waitFor(() => expect(external).toHaveBeenCalled());
+    unmount();
+    expect(api.cancelModelLogin).toHaveBeenCalledWith('opening-login');
+    await act(async () => finishOpening());
+    expect(api.readModelLogin).not.toHaveBeenCalled();
+  } finally { unmount(); delete window.beeGameDesktop; }
+});

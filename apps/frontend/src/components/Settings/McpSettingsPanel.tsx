@@ -1,9 +1,7 @@
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
 import { FolderOpen, MoreHorizontal, Network, Trash2 } from 'lucide-react';
 import { Switch } from '../ui/switch';
 import { ProjectSelect } from '../beui/project-select';
-import { Button } from '../beui/project-button';
 import {
   type ActiveDiscoveredMcpServer,
   type DiscoveredMcpServer,
@@ -12,7 +10,7 @@ import {
   type McpServerScope,
   type McpServerTransport,
 } from '../../services/mcpServersApi';
-import { isMcpFormSaveable, toPopoverAnchorRect, type McpServerForm, type PopoverAnchorRect } from './McpSettingsPanel.types';
+import type { McpServerForm } from './McpSettingsPanel.types';
 import { parseMcpAddCommand } from './mcpAddCommand';
 
 export type McpSettingsCopy = {
@@ -38,6 +36,8 @@ export type McpSettingsCopy = {
     env: string;
     argsHint: string;
     envHint: string;
+    headers: string;
+    headersHint: string;
     stdio: string;
     sse: string;
     http: string;
@@ -93,15 +93,8 @@ export function McpSettingsPanel({
   activeDiscovered,
   healthById,
   testingServerId,
-  status,
   isSaving,
   onEdit,
-  activeEditServerId,
-  activeEditAnchorRect,
-  form,
-  onFormChange,
-  onCloseForm,
-  onSaveForm,
   onTest,
   onDelete,
   onImport,
@@ -113,15 +106,8 @@ export function McpSettingsPanel({
   activeDiscovered: ActiveDiscoveredMcpServer[];
   healthById: Record<string, McpServerTestResult>;
   testingServerId: string;
-  status: string;
   isSaving: boolean;
-  onEdit: (server: McpServerConfig, rect: PopoverAnchorRect) => void;
-  activeEditServerId: string;
-  activeEditAnchorRect: PopoverAnchorRect | null;
-  form: McpServerForm;
-  onFormChange: (form: McpServerForm) => void;
-  onCloseForm: () => void;
-  onSaveForm: () => void;
+  onEdit: (server: McpServerConfig) => void;
   onTest: (server: McpServerConfig) => void;
   onDelete: (id: string) => void;
   onImport: (server: DiscoveredMcpServer) => void;
@@ -181,12 +167,9 @@ export function McpSettingsPanel({
                       <button
                         type="button"
                         role="menuitem"
-                        onClick={event => {
-                          const anchor = Array.from(document.querySelectorAll('[data-mcp-row-action]')).find(
-                            element => element.getAttribute('data-mcp-row-action') === server.id,
-                          );
+                        onClick={() => {
                           setActiveServerMenuId('');
-                          onEdit(server, toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()));
+                          onEdit(server);
                         }}
                         className="type-button flex h-9 w-full items-center gap-3 rounded-lg px-3 text-left text-foreground transition-colors hover:bg-accent"
                       >
@@ -210,19 +193,7 @@ export function McpSettingsPanel({
                     </div>
                   </>
                 ) : null}
-                {activeEditServerId === server.id ? (
-                  <McpServerFormPopover
-                    mode="edit"
-                    copy={copy}
-                    form={form}
-                    status={status}
-                    isSaving={isSaving}
-                    anchorRect={activeEditAnchorRect}
-                    onChange={onFormChange}
-                    onClose={onCloseForm}
-                    onSave={onSaveForm}
-                  />
-                ) : null}
+
               </div>
             </li>
           ))}
@@ -295,71 +266,33 @@ export function McpSettingsPanel({
   );
 }
 
-export function McpServerFormPopover({
-  mode,
-  copy,
-  form,
-  status,
-  isSaving,
-  anchorRect,
-  onChange,
-  onClose,
-  onSave,
+export function McpServerEditor({
+  mode, copy, form, status, isSaving, onChange, commandText, onCommandChange,
 }: {
   mode: 'create' | 'command' | 'edit';
   copy: McpSettingsCopy;
   form: McpServerForm;
   status: string;
   isSaving: boolean;
-  anchorRect: PopoverAnchorRect | null;
   onChange: (form: McpServerForm) => void;
-  onClose: () => void;
-  onSave: (form: McpServerForm) => void;
+  commandText: string;
+  onCommandChange: (value: string) => void;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [addCommand, setAddCommand] = useState('');
-  const [commandError, setCommandError] = useState<'format' | 'url' | null>(null);
   const update = (patch: Partial<McpServerForm>) => onChange({ ...form, ...patch });
-  const parsedCommand = parseMcpAddCommand(addCommand);
-  const save = () => {
-    if (mode !== 'command') {
-      onSave(form);
-      return;
-    }
-    if ('error' in parsedCommand) {
-      setCommandError(parsedCommand.error);
-      return;
-    }
-    setCommandError(null);
-    onSave({ ...form, name: parsedCommand.name, transport: 'http', url: parsedCommand.url, command: '', argsText: '', envText: '' });
-  };
-  const saveDisabled = isSaving || (mode === 'command' ? !addCommand.trim() : !isMcpFormSaveable(form));
-  if (!anchorRect) return null;
-
-  const placement = getPopoverPlacement(anchorRect);
-  return createPortal(
-    <div className="fixed inset-0 z-[350]" onMouseDown={onClose}>
-      <div
-        className="fixed z-[360]"
-        style={{ left: placement.left, top: placement.top }}
-        onMouseDown={event => event.stopPropagation()}
-        onClick={event => event.stopPropagation()}
-      >
-        <div
-          className="absolute -top-2 h-4 w-4 rotate-45 border-l border-t border-border bg-background/95"
-          style={{ left: placement.arrowLeft }}
-        />
-        <div className="bg-background relative flex max-h-[min(480px,calc(100vh-8rem))] w-[min(360px,calc(100vw-3rem))] flex-col overflow-hidden rounded-lg border border-border shadow-lg ">
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2 [scrollbar-gutter:stable]">
-            <div className="relative z-10 divide-y divide-border">
+  const parsedCommand = parseMcpAddCommand(commandText);
+  const commandError = commandText.trim() && 'error' in parsedCommand ? parsedCommand.error : null;
+  return (
+    <fieldset disabled={isSaving} data-testid="mcp-server-editor" className="m-0 w-full min-w-0 border-0 p-0">
+      <div className="divide-y divide-border">
               {mode === 'command' ? (
                 <div className="grid gap-3 py-3">
                   <label className="grid gap-2">
                     <span className="type-caption-1 text-muted-foreground">{copy.form.pasteCommand}</span>
                     <textarea
                       aria-label={copy.form.pasteCommand}
-                      value={addCommand}
-                      onChange={event => { setAddCommand(event.target.value); setCommandError(null); }}
+                      value={commandText}
+                      onChange={event => onCommandChange(event.target.value)}
                       placeholder="bgs mcp add my-server --url https://example.com/mcp"
                       rows={4}
                       spellCheck={false}
@@ -473,16 +406,17 @@ export function McpServerFormPopover({
                         </label>
 
                         <label className="grid gap-2 py-3">
-                          <span className="type-caption-1 text-muted-foreground">{copy.form.env}</span>
+                          <span className="type-caption-1 text-muted-foreground">{form.transport === 'http' ? copy.form.headers : copy.form.env}</span>
                           <div className="space-y-1">
                             <textarea
-                              aria-label={copy.form.env}
-                              value={form.envText}
-                              onChange={event => update({ envText: event.target.value })}
+                              aria-label={form.transport === 'http' ? copy.form.headers : copy.form.env}
+                              value={form.transport === 'http' ? form.headersText : form.envText}
+                              onChange={event => update(form.transport === 'http' ? { headersText: event.target.value } : { envText: event.target.value })}
+                              placeholder={form.transport === 'http' ? 'Authorization=Bearer your-api-key' : undefined}
                               rows={3}
                               className="type-code w-full resize-none rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
                             />
-                            <div className="type-footnote text-muted-foreground">{copy.form.envHint}</div>
+                            <div className="type-footnote text-muted-foreground">{form.transport === 'http' ? copy.form.headersHint : copy.form.envHint}</div>
                           </div>
                         </label>
                       </div>
@@ -490,46 +424,8 @@ export function McpServerFormPopover({
                   </div>
                 </>
               )}
-            </div>
-            {status ? <div className="type-footnote py-2 text-foreground">{status}</div> : null}
-          </div>
-
-          {mode !== 'edit' ? (
-            <footer className="relative z-10 flex shrink-0 items-center justify-end gap-2 border-t border-border bg-muted/30 px-4 py-3">
-              <Button type="button" variant="secondary" onClick={onClose}>
-                {copy.form.cancel}
-              </Button>
-              <Button
-                type="button"
-                className="rounded-full"
-                onClick={save}
-                disabled={saveDisabled}
-              >
-                {isSaving ? copy.form.saving : copy.form.save}
-              </Button>
-            </footer>
-          ) : null}
-        </div>
       </div>
-    </div>,
-    document.body,
+      {status ? <p role="status" className="type-footnote py-2 text-foreground">{status}</p> : null}
+    </fieldset>
   );
-}
-
-function getPopoverPlacement(anchorRect: PopoverAnchorRect): {
-  left: number;
-  top: number;
-  arrowLeft: number;
-} {
-  const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
-  const popoverWidth = Math.min(360, Math.max(280, viewportWidth - 32));
-  const margin = 16;
-  const preferredLeft = anchorRect.right - popoverWidth;
-  const left = Math.min(Math.max(margin, preferredLeft), Math.max(margin, viewportWidth - popoverWidth - margin));
-  const anchorCenter = anchorRect.left + anchorRect.width / 2;
-  return {
-    left,
-    top: anchorRect.bottom + 12,
-    arrowLeft: Math.min(Math.max(18, anchorCenter - left - 8), popoverWidth - 34),
-  };
 }

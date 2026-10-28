@@ -275,3 +275,30 @@ describe('standalone chat projection', () => {
     turnCompletedAt: 5000, toolStatus: 'failed', completionReason: type === 'turn.failed' ? 'failed' : 'stopped',
   });
 });
+
+
+it('shows a workflow stop reason in live Chat and restored history while keeping cleanup quiet',()=>{
+  const reason='任务已停止，尚未完成：当前阶段未提供有效交接；没有自动重试。'
+  const messages=[
+    event({id:1,type:'session.stopped',payload:{type:'session.stopped',reason:'agent_goal_settled'}}),
+    event({id:2,type:'system.status',text:reason,payload:{type:'system.status',subtype:'delivery_error',category:'workflow-blocked'}}),
+    event({id:3,type:'system.status',text:'Private receipt',payload:{type:'system.status',subtype:'host_evidence'}}),
+  ].flatMap(e=>projectEventMessages('project-a',e))
+  expect(messages).toHaveLength(1)
+  expect(messages[0]).toMatchObject({type:'context_update',task_kind:'delivery_error',content:reason})
+  expect(projectHistoryMessages(messages,new Map())).toEqual([expect.objectContaining({taskKind:'delivery_error',content:reason})])
+})
+
+
+it('keeps confirmed rg no-results neutral in live and restored Chat without hiding errors', () => {
+  for (const [type,exitCode,is_error,searchOutcome,expected] of [
+    ['tool.completed',1,false,'no-match','completed'], ['tool.completed',1,false,undefined,'failed'],
+    ['tool.failed',1,true,'no-match','failed'], ['tool.completed',2,false,'no-match','failed'],
+  ] as const) {
+    const [live]=projectEventMessages('project-a',event({type,payload:{toolName:'Shell',toolUseID:'rg',
+      input:{command:'rg absent docs'},output:'',exitCode,is_error,searchOutcome}}))
+    expect(live).toMatchObject({tool_status:expected,tool_exit_code:exitCode,tool_output:''})
+    expect(live.tool_detail?.includes('No search results')).toBe(expected==='completed')
+    expect(projectHistoryMessages([live],new Map())[0]).toMatchObject({toolStatus:expected,toolExitCode:exitCode,toolOutput:''})
+  }
+})

@@ -24,7 +24,7 @@ test('Responses pins DNS, preserves native search and compaction, and rejects re
     calls.push({ path: new URL(request.url).pathname, authorization: request.headers.get('authorization'),
       beta: request.headers.get('openai-beta'), body })
     if (body.redirect) return new Response(null, { status: 307, headers: { location: trap.url.toString() } })
-    const content = 'data: {"type":"response.completed","response":{"usage":{"input_tokens":7,"output_tokens":2}}}\n\n'
+    const content = 'data: {"type":"response.completed","response":{"id":"fixture-response","usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}}\n\n'
     return new Response(body.compressed ? Bun.gzipSync(content) : content,
       { headers: { 'content-type': 'text/event-stream', ...(body.compressed ? { 'content-encoding': 'gzip' } : {}) } })
   } })
@@ -46,7 +46,7 @@ test('Responses pins DNS, preserves native search and compaction, and rejects re
     expect(lookups).toBeGreaterThan(0)
     expect((await send({ input: [] }, '/compact')).status).toBe(200)
     expect(calls[1]?.path).toBe('/custom/v1/responses/compact')
-    const compressed = await send({ compressed: true })
+    const compressed = await send({ compressed: true, stream: true })
     expect(await compressed.text()).toContain('response.completed')
     expect(compressed.headers.has('content-encoding')).toBe(false)
     // Successful native Responses usage stays in native notifications.

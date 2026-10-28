@@ -165,3 +165,48 @@ test.each([receiptPath,stdout,stderr])('an evidence alias still checks the actua
   await saveReceipt({...await receipt(),exitCode:1})
   expect((await inspect())!.status).toBe('blocked')
 })
+
+
+test.each(['valid', 'failed', 'stale', 'changed-copy', 'missing-original', 'aliased-original'] as const)(
+  'copied Preview receipts retain original validation: %s', async kind => {
+    const copy = 'reports/observation.json'
+    await saveReceipt({ ...await receipt(), ...(kind === 'failed' ? {exitCode:1} : {}) })
+    await writeFile(join(root, copy), await readFile(join(root, receiptPath)))
+    await saveReport(copy)
+    if (kind === 'stale') await writeFile(join(root, 'game.js'), 'Changed after observation')
+    if (kind === 'changed-copy') {
+      const changed = JSON.parse(await readFile(join(root, copy), 'utf8'))
+      changed.summary = 'Changed copy'
+      await writeFile(join(root, copy), JSON.stringify(changed))
+    }
+    if (kind === 'missing-original' || kind === 'aliased-original') await rm(join(root, receiptPath))
+    if (kind === 'aliased-original') await symlink(join(root, copy), join(root, receiptPath))
+    const result = (await inspect())!
+    expect(result.status).toBe(kind === 'valid' ? 'passed' : 'blocked')
+    if (kind === 'valid') {
+      expect(result.evidence.map(file=>file.path)).toEqual(expect.arrayContaining([copy, receiptPath, stdout, stderr]))
+      await writeFile(join(root, stderr), 'Changed retained log')
+      expect(await versionsMatch(root, result.evidence)).toBe(false)
+    }
+    if (kind === 'failed') expect(result.summary).toContain('execution did not succeed')
+    if (kind === 'stale') expect(result.summary).toContain('Tested inputs changed')
+    if (kind === 'changed-copy') expect(result.summary).toContain('differs from its original')
+    if (kind === 'aliased-original') expect(result.summary).toContain('alias')
+  })
+
+test('copied failed history stays retainable; subjective follow-up does not waive required checks', async () => {
+  await saveReceipt(await receipt())
+  const history = 'reports/history.json'
+  await writeFile(join(root, history), JSON.stringify({reportPath:'.beegame/tmp/preview-test-missing/execution.json',exitCode:1}))
+  await saveReport(receiptPath, [history])
+  const report = JSON.parse(await readFile(join(root, DESIGN_ACCEPTANCE_PATH), 'utf8'))
+  report.verification.outsideScope = ['Subjective enjoyment feedback follows implementation handoff']
+  await writeFile(join(root, DESIGN_ACCEPTANCE_PATH), JSON.stringify(report))
+  expect((await inspect())!.status).toBe('passed')
+  for (const field of ['knownIssues', 'unverified']) {
+    const changed = structuredClone(report)
+    changed.verification[field] = ['Required behavior is unresolved']
+    await writeFile(join(root, DESIGN_ACCEPTANCE_PATH), JSON.stringify(changed))
+    expect((await inspect())!.status).toBe('blocked')
+  }
+})

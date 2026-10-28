@@ -3,6 +3,7 @@ import { nativeRequest, openCodeGoHeaders } from './requests'
 import { responseEvents, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
 import { UnknownProviderToolError, type Json } from './messages'
 import { safeErrorFacts } from '../security/safe-error-facts'
+import { providerHttpError } from './http-error'
 
 /** One provider call, with no automatic retry or fallback credential. */
 export async function requestProvider(
@@ -34,13 +35,7 @@ export async function requestProvider(
     headers: native.headers,
     body: JSON.stringify(native.body),
   })
-  if (!upstream.ok) {
-    await upstream.body?.cancel()
-    throw Object.assign(
-      Error('Model provider request failed (' + upstream.status + ')'),
-      { status: upstream.status },
-    )
-  }
+  if (!upstream.ok) throw await providerHttpError(upstream, signal)
   const events = responseEvents(
     { ...config, model: body.model ?? config.model },
     upstream,

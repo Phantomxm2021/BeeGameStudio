@@ -84,7 +84,7 @@ export const ImageGenerationSettingsPanel = forwardRef<ImageSettingsHandle, {
       <Row label="Provider"><ProjectSelect ariaLabel="Provider" value={selected ?? ''} onValueChange={value => void switchProvider(value)} options={providers} className="w-full" triggerClassName={inputClass} /></Row>
       {!config || !draft ? <p role="status" className="py-3 text-sm text-muted-foreground">{zh ? '加载中…' : 'Loading…'}</p> : <>
         {subscription && <Row label={zh ? '平台订阅账户' : 'Platform subscription account'}>
-          <p className="text-sm">{config.subscriptionConnected ? (zh ? '当前管理员的 ChatGPT 账户已连接' : 'Your ChatGPT account is connected') : (zh ? '请先在平台模型中授权 ChatGPT 账户' : 'Connect your ChatGPT account in Platform models first')}</p>
+          <p className="text-sm">{config.subscriptionConnected ? (zh ? '当前管理员的 ChatGPT 账户已连接' : 'Your ChatGPT account is connected') : (zh ? '请在平台模型配置的 Provider 中选择 ChatGPT subscription 并登录授权' : 'In Platform model configuration, select ChatGPT subscription under Provider and sign in')}</p>
           {onOpenModelConnections && <button type="button" className="text-sm underline" onClick={onOpenModelConnections}>{zh ? '前往平台模型' : 'Open Platform models'}</button>}
           <p className="text-xs text-muted-foreground">{zh ? '保存后，使用平台生图的用户共同消耗当前管理员的订阅额度，并按下方固定 Credits 售价付费。真实生图及上游是否允许共享尚未验证；不保证每日张数，额度不足不自动重试或切换付费 API。' : 'Saving shares your subscription quota with platform image users, billed at the fixed Credit prices below. Real generation and upstream permission for sharing remain unverified. No daily image allowance is promised, and failures never retry or fall back to a paid API.'}</p>
         </Row>}

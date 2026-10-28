@@ -133,6 +133,16 @@ test('delivery rejects declared visual differences while request reports may ret
     expect(different).toMatchObject({ status: 'blocked', diagnostic: { category: 'product-failed' } })
     expect(different?.summary).toContain('Primary button is narrower')
 
+    const variation = { ...matched, status:'different', differences:['Decorative texture differs from the reference'],
+      nonBlockingReason:'The confirmed requirements specify readable controls and palette; this decorative texture is not fixed.' }
+    const limited = { ...base, verification:{...base.verification,visualComparisons:[variation],
+      coverageLimitations:['Static resource checker does not inspect runtime mixing'],
+      outsideScope:['Subjective enjoyment feedback follows implementation handoff']} }
+    expect(await save(limited)).toMatchObject({status:'passed',verification:{visualComparisons:[variation],
+      coverageLimitations:limited.verification.coverageLimitations,outsideScope:limited.verification.outsideScope}})
+    for (const unresolved of [{knownIssues:['Required audio transition is broken']},{unverified:['Required audio transition has not been observed']}])
+      expect((await save({...limited,verification:{...limited.verification,...unresolved}}))?.status).toBe('blocked')
+
     const unverified = await save({ ...base, verification: { ...base.verification, visualComparisons: [{ ...matched,
       observationPaths: [], status: 'unverified', differences: ['No target-runtime view was captured'] }] } })
     expect(unverified).toMatchObject({ status: 'blocked', diagnostic: { category: 'verification-incomplete' } })
@@ -217,6 +227,8 @@ test('visual comparison statuses reject contradictory declarations as invalid re
     const invalidDeclarations = [
       { ...matched, observationPaths: [] },
       { ...matched, differences: ['Unexpected spacing'] },
+      { ...matched, nonBlockingReason: 'No actual difference' },
+      { ...matched, observationPaths: [], status: 'unverified', differences: ['No observation'], nonBlockingReason: 'Cannot waive missing observation' },
       { ...matched, observationPaths: [], status: 'different', differences: ['No observation'] },
       { ...matched, status: 'different', differences: [] },
       { ...matched, observationPaths: [], status: 'unverified', differences: [] },

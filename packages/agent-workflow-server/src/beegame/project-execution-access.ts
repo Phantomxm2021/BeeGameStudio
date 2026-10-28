@@ -51,6 +51,7 @@ export async function projectExecutionAccess(input: {
   workspacePath: string
   sessionId: string
   environment: Record<string, string>
+  readOnly?: boolean
   scopedTools?: readonly string[]
   toolResultsDirectory?: string
 }) {
@@ -77,11 +78,16 @@ export async function projectExecutionAccess(input: {
   const previewClientPath = await realpath(fileURLToPath(previewClient))
   const temporary = nativeSessionTemporaryPath(root, input.sessionId)
   const nativeOutput = nativeSessionOutputPath(root, input.sessionId, await realpath(tmpdir()))
-  await mkdir(nativeOutput, { mode: 0o700 }).catch(error => {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-  })
-  if (await realpath(nativeOutput) !== nativeOutput || !(await stat(nativeOutput)).isDirectory())
-    throw new Error('Native output directory must not resolve through a link')
+  // Package caches contain source/tests. Keep them outside the game tree so
+  // ordinary project scans do not treat cached dependencies as game sources.
+  const cache = resolve(nativeOutput, 'cache')
+  for (const path of [nativeOutput, cache]) {
+    await mkdir(path, { mode: 0o700 }).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    })
+    if (await realpath(path) !== path || !(await stat(path)).isDirectory())
+      throw new Error('Native runtime directory must not resolve through a link')
+  }
   const previewCapability = projectPreviewCapabilityPath(root, input.sessionId)
   const measurementCapability = projectPreviewCapabilityPath(root, input.sessionId, 'measurement')
   const assetCapability = projectPreviewCapabilityPath(root, input.sessionId, 'assets')
@@ -99,10 +105,11 @@ export async function projectExecutionAccess(input: {
     GIT_TEMPLATE_DIR: templates,
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_CONFIG_NOSYSTEM: '1',
-    XDG_CACHE_HOME: resolve(temporary, 'cache'),
+    XDG_CACHE_HOME: resolve(cache, 'xdg'),
+    BUN_INSTALL_CACHE_DIR: resolve(cache, 'bun'),
     XDG_CONFIG_HOME: resolve(temporary, 'config'),
-    NPM_CONFIG_CACHE: resolve(temporary, 'npm-cache'),
-    npm_config_cache: resolve(temporary, 'npm-cache'),
+    NPM_CONFIG_CACHE: resolve(cache, 'npm'),
+    npm_config_cache: resolve(cache, 'npm'),
     NPM_CONFIG_USERCONFIG: '/dev/null',
     npm_config_userconfig: '/dev/null',
     PLAYWRIGHT_BROWSERS_PATH: resolve(temporary, 'browsers'),
@@ -146,8 +153,9 @@ export async function projectExecutionAccess(input: {
     }
   }
   const protectedPaths = ['AGENTS.md', ...PROJECT_DESIGN_PATHS].map(path => resolve(root, path))
-  const filesystem: Record<string, string> = { ':root': 'deny', ':minimal': 'read', ':slash_tmp': 'deny', [root]: 'write', [nativeOutput]: 'write' }
+  const filesystem: Record<string, string> = { ':root': 'deny', ':minimal': 'read', ':slash_tmp': 'deny', [root]: input.readOnly ? 'read' : 'write', [cache]: 'write' }
   for (const path of [...readPaths, ...toolReadPaths]) filesystem[path] = 'read'
+  if (input.readOnly) filesystem[temporary] = 'write'
   for (const path of protectedPaths) filesystem[path] = 'read'
   // Keep credentials/configuration and BGS control data outside model writes.
   for (const name of ['.git', '.bgs', '.agents', '.aws']) filesystem[resolve(root, name)] = 'read'

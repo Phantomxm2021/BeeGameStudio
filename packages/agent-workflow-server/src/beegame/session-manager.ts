@@ -266,6 +266,7 @@ export type BeeGameRuntimeSnapshot = {
   turnDiagnostics?: {
     turnId: string
     agentCalls: number
+    /** Legacy Skill-tool call count only; not Shell reads or native invocation telemetry. */
     skillCalls: number
     taskOutputCalls: number
     failedToolCalls: number
@@ -308,6 +309,19 @@ export type BeeGameNativeGoalInput =
 /** Current host turn capability; never serialized into model input or snapshots. */
 export type BeeGameHostToolCapability = (value: unknown, signal?: AbortSignal) => Promise<unknown>
 export type BeeGameTurnTools = {
+  /** Host-validated final JSON; schema is model guidance, not an API output constraint. */
+  finalOutput?: {
+    /** Native/Shell project writes remain denied; the host may authorize one document below. */
+    readOnly?: boolean
+    writeDocument?: { path: string; authorize(): Promise<void> }
+    designReview?: {
+      candidate(value: unknown): Promise<{ source: { path: string; sha256: string }; summary: string;
+        reviewResponses?: import('./workflow-v3/design-review').DesignReviewDisposition[] }>
+      record(receipt: import('./workflow-v3/design-review').DesignReviewReceipt): Promise<void>
+    }
+    schema: Record<string, unknown>
+    accept(value: unknown): Promise<string>
+  }
   workflow?: BeeGameHostToolCapability
   measurement?: BeeGameHostToolCapability
   finishDelivery?: BeeGameHostToolCapability
@@ -391,7 +405,7 @@ export type BeeGameSessionRuntime = {
   submit(input: BeeGameSessionSubmitInput): Promise<void>
   stop(): void
   /** Host-authorized final delivery; ordinary native Goal endings keep their final response. */
-  completeGoal?(): Promise<void>
+  completeGoal?(status?: 'complete' | 'blocked'): Promise<void>
   dispose?(): void | Promise<void>
 }
 
@@ -1069,13 +1083,21 @@ export class BeeGameSessionManager {
   }
 
   /** A host handoff failure is not a failed Agent answer or a completed delivery. */
-  recordDeliveryError(sessionId: string, detail: string, category?: 'report-invalid' | 'verification-incomplete' | 'product-failed'): void {
+  recordDeliveryError(sessionId: string, detail: string, category?: 'report-invalid' | 'verification-incomplete' | 'product-failed' | 'workflow-blocked'): void {
     const record = this.sessions.get(sessionId)
     if (!record) return
     const labels = {
       'report-invalid': ['验收报告无效：', 'Invalid acceptance report: '],
       'verification-incomplete': ['验收验证不足：', 'Acceptance verification incomplete: '],
       'product-failed': ['游戏验收未通过：', 'Game acceptance failed: '],
+      'workflow-blocked': ['任务已停止，尚未完成：', 'Task stopped before completion: '],
+    }
+    if (category === 'workflow-blocked') {
+      detail = projectRuntimeDisplayReason(detail)?.detail ?? ''
+      if (record.language === 'zh') detail = detail
+        .replace('BGS final result is missing or invalid; no stage was advanced.', '当前阶段未提供有效交接，未进入下一阶段；已保存产物保留，没有自动重试。')
+        .replace('Current production assignment ended without its source-bound workflow handoff; no automatic continuation.', '当前阶段缺少有效交接，未进入下一阶段；已保存产物保留，没有自动重试。')
+        .replace('Production blocked: ', '当前阶段受阻：')
     }
     const prefix = category ? labels[category][record.language === 'zh' ? 0 : 1]
       : record.language === 'zh' ? '交付未能继续：' : 'Delivery could not continue: '
@@ -1137,6 +1159,10 @@ export class BeeGameSessionManager {
     display?: {
       displayText?: string
       displayKind?: string
+      /** Host workflow work retains turn evidence without inventing user input. */
+      messageOrigin?: 'user' | 'workflow'
+      /** A settled production handoff continues work; it is not a user resume. */
+      resumeReason?: 'production-handoff'
       taskType?: string
       authToken?: string
       getValidAuthToken?: SessionRecord['getValidAuthToken']
@@ -1201,7 +1227,11 @@ export class BeeGameSessionManager {
       }
       if (record.resumeEventPending) {
         record.resumeEventPending = false
-        this.append(
+        if (display?.resumeReason === 'production-handoff') {
+          // The index must still follow the restored transcript without a
+          // user-facing resume event for an internal stage transition.
+          updateProjectTranscriptIndex(record)
+        } else this.append(
           record,
           'session.resumed',
           `Resumed BeeGame session in ${record.session.cwd}`,
@@ -1227,8 +1257,11 @@ export class BeeGameSessionManager {
       display?.onTurnAccepted?.(nextTurnId)
       turnAccepted = true
       record.abortController = new AbortController()
-      this.append(record, 'turn.started', text)
-      this.append(record, 'user.message', text, {
+      this.append(record, 'turn.started', text, display?.messageOrigin === 'workflow' ? {
+        type: 'turn.started', messageOrigin: 'workflow',
+        ...(display.confirmedBriefContext ? { confirmedBriefContext: display.confirmedBriefContext } : {}),
+      } : undefined)
+      if (display?.messageOrigin !== 'workflow') this.append(record, 'user.message', text, {
         type: 'user.message',
         ...(preparedPrompt.attachments.length ? { attachments: preparedPrompt.attachments } : {}),
         ...(display?.displayText ? { displayText: display.displayText } : {}),
@@ -1263,7 +1296,7 @@ export class BeeGameSessionManager {
         },
         display?.nativeGoal,
         display?.nativeRecovery,
-        { workflow: context?.workflow, measurement: context?.measurement, finishDelivery: context?.finishDelivery },
+        { workflow: context?.workflow, measurement: context?.measurement, finishDelivery: context?.finishDelivery, finalOutput: context?.finalOutput },
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
       })
@@ -1292,7 +1325,7 @@ export class BeeGameSessionManager {
   }
 
   async completeNativeGoal(sessionId:string,turnId:string,submission:{attemptId:string;requirementsRevision:string;
-    reportPath:string;reportSha256:string;measurementId?:string;sourceSha256:string;summary:string}):Promise<void> {
+    reportPath:string;reportSha256:string;measurementId?:string;sourceSha256:string;summary:string;status:'passed'|'failed'|'blocked'}):Promise<void> {
     const record=this.sessions.get(sessionId)
     if(!record || record.currentTurnId!==turnId || record.executionIdentity?.attemptId!==submission.attemptId ||
         record.session.status!=='running' || record.session.turnStatus!=='running' || record.abortController?.signal.aborted)
@@ -1304,7 +1337,7 @@ export class BeeGameSessionManager {
     // is evidence of submission, never a claim that cleanup already succeeded.
     this.append(record,'system.status','Delivery submitted by the execution agent: '+submission.summary,
       {type:'system.status',subtype:'delivery_submission',...submission,quality:'unverified',deliveryEligible:false},turnId)
-    await record.runner.completeGoal()
+    await record.runner.completeGoal(submission.status==='passed'?'complete':'blocked')
   }
 
   stop(sessionId: string, reason = 'user_stop'): BeeGameSession {
@@ -2569,13 +2602,14 @@ export function recoverConfirmedBriefContext(
 ): string | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event?.type !== 'user.message' || !isRuntimeRecord(event.payload))
+    if (!event || !isRuntimeRecord(event.payload)) continue
+    if (event.type !== 'user.message' && !(event.type === 'turn.started' && event.payload.messageOrigin === 'workflow'))
       continue
-    // Canonical context is also attached to V3 goal/change messages. The
-    // display label only governs the legacy text-marker fallback below.
+    // Internal production turns retain requirements in their start receipt,
+    // without inventing user input. Keep legacy message recovery too.
     const context = event.payload.confirmedBriefContext
     if (typeof context === 'string' && context.trim()) return context.trim()
-    if (event.payload.displayKind !== 'confirmed_brief') continue
+    if (event.type !== 'user.message' || event.payload.displayKind !== 'confirmed_brief') continue
     const marker = '\nConfirmed brief:\n'
     const markerIndex = event.text.lastIndexOf(marker)
     if (markerIndex >= 0) {

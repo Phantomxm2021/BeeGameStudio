@@ -1,5 +1,21 @@
 {
   "landing": {
+    "desktop": {
+      "toggleNavigation": "展开或收起项目导航",
+      "closeNavigation": "关闭项目导航",
+      "newProject": "新建项目",
+      "projects": "项目",
+      "loadingProjects": "正在加载项目",
+      "moreProjects": "更多项目",
+      "account": "账户与设置",
+      "ideaTitle": "你想做什么游戏？",
+      "chat": "对话",
+      "files": "项目文件",
+      "assets": "项目资源",
+      "resizePanels": "调整预览与聊天宽度",
+      "resizePanelsHint": "拖动调整宽度，双击重置",
+      "loadProjectsFailed": "加载更多项目失败，请重试。"
+    },
     "avatar": {
       "conversation": "创作伙伴的对话",
       "companion": "你的游戏创作伙伴",
@@ -614,6 +630,8 @@
         "env": "环境变量",
         "argsHint": "每行一个参数",
         "envHint": "每行一个 KEY=value；已保存的密钥留空会继续保留",
+        "headers": "请求头",
+        "headersHint": "每行一个名称=值，例如 Authorization=Bearer 密钥。密钥加密保存；值留空保留已存密钥，删除整行移除。",
         "stdio": "stdio",
         "sse": "不支持旧版 SSE，请改用 Streamable HTTP 端点。",
         "http": "HTTP",

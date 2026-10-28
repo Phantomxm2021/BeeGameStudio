@@ -13,6 +13,16 @@ export type ProviderConfig = {
   sessionId?: string
   auth: 'bearer' | 'api-key'
 }
+
+// This exact route/model accepted low and high, including tool-history replay,
+// in the bounded 2026-10-28 probe. Do not infer capabilities for other routes,
+// models or effort values from their protocol or name.
+export function providerReasoningEfforts(config: Pick<ProviderConfig, 'protocol' | 'baseUrl' | 'model'>): string[] {
+  return config.protocol === 'chat-completions' &&
+    config.baseUrl === 'https://opencode.ai/zen/go/v1' && config.model === 'deepseek-v4.1-flash'
+    ? ['low', 'high'] : []
+}
+
 export function providerConfig(
   env: Record<string, string>,
   selectedType?: RuntimeModelConfig['modelType'],

@@ -2,11 +2,12 @@ import { expect, test, spyOn } from 'bun:test'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
-import { createBgsRunner, bgsUsage, bgsProviderConfig, editProtectedFileText, bgsApplicationContext } from './runner'
+import { createBgsRunner, nativeRgNoMatch, nativeSkillReadTargets, bgsUsage, bgsProviderConfig, editProtectedFileText, bgsApplicationContext } from './runner'
 import { BeeGameSessionManager, getLatestRuntimeUsage, type BeeGameEvent, type DashboardPermissionRequest } from '../beegame/session-manager'
 import { appendChatTranscript } from '../beegame/project-records'
 import * as browserCleanup from '../beegame/native-test-browser-cleanup'
 import type { BgsClient } from './client'
+import { assertDesignReviewReady, type DesignReviewReceipt, type DesignReviewDisposition } from '../beegame/workflow-v3/design-review'
 
 const resolveOutboundTarget: typeof import('@bee-game-studio/security-core').resolveApprovedOutboundTarget = async (value) => ({ url: new URL(value), addresses: ['93.184.216.34'],
   lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) })
@@ -20,19 +21,45 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
   }
 }
 
+async function waitUntilAsync(predicate: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw Error('Fixture condition did not become true')
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
 test('application context preserves complete UTF-8 values within native field limits and ordering', () => {
   expect(bgsApplicationContext('fixture')).toEqual({})
   for (const value of ['', 'a'.repeat(3999), 'a'.repeat(4000), 'a'.repeat(4001),
     'a'.repeat(3999) + '中🎮' + 'b'.repeat(4000),
     ('编辑器契约 🎮\n' + '中'.repeat(1800) + '\r\n').repeat(12)]) {
     const entries = Object.entries(bgsApplicationContext('fixture', value)).sort(([a], [b]) => a.localeCompare(b))
-    expect(entries.map(([, part]) => part.value).join('')).toBe(value)
+    const data = entries.filter(([key]) => key !== 'fixture')
+    expect(data.map(([, part]) => part.value).join('')).toBe(value)
+    expect(entries.find(([key]) => key === 'fixture')?.[1].value).toStartWith('Current part count: '+data.length+'.')
     for (const [, part] of entries) {
       expect(Buffer.byteLength(part.value)).toBeLessThanOrEqual(4000)
       expect(part.kind).toBe('application')
     }
   }
-  expect(bgsApplicationContext('fixture', 'short')).toEqual({ fixture: { value: 'short', kind: 'application' } })
+  expect(bgsApplicationContext('fixture', 'short').fixture_part_000001?.value).toBe('short')
+})
+
+test('growing context reuses unchanged parts across count and digit boundaries', () => {
+  for (const count of [1, 2, 9, 10]) {
+    const value = Array.from({length: count}, (_, index) => String.fromCharCode(65 + index).repeat(4000)).join('')
+    const before = bgsApplicationContext('fixture', value)
+    const after = bgsApplicationContext('fixture', value + 'new-tail')
+    for (const [key, part] of Object.entries(before).filter(([key]) => key !== 'fixture'))
+      expect(after[key]).toEqual(part)
+    const changed = Object.entries(after).filter(([key, part]) => part.value !== before[key]?.value)
+    expect(changed.filter(([key]) => key !== 'fixture').map(([, part]) => part.value)).toEqual(['new-tail'])
+  }
+  const line = 'a'.repeat(2000) + '\n' + 'b'.repeat(1999)
+  const before = bgsApplicationContext('fixture', line)
+  const after = bgsApplicationContext('fixture', line + 'tail')
+  expect(after.fixture_part_000001).toEqual(before.fixture_part_000001)
 })
 
 test('game Agent startup rejects a missing or empty catalog before starting native processes', async () => {
@@ -54,13 +81,14 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
   nativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput, nativeRecovery = false,
   permissionHandler?: (request: DashboardPermissionRequest) => Promise<import('../beegame/session-manager').DashboardPermissionDecision>,
   workflow?: import('../beegame/session-manager').BeeGameHostToolCapability,
-  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'measurement'|'finishDelivery'> = {}) {
+  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'measurement'|'finishDelivery'|'finalOutput'> = {}) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
   const childPidFile = join(root, 'owned-child.pid')
+  const confirmedBriefContext = hostTools.finalOutput?.designReview ? 'Synthetic confirmed PC requirements' : undefined
   await mkdir(join(workspace, 'docs'), { recursive: true })
   const events: Record<string, any>[] = [], usage: BeeGameEvent[] = [], questions: unknown[] = []
   let sessionId = ''
-  const runtime = await createBgsRunner({ command, resolveOutboundTarget: network }).start({ sessionId: 'fixture', cwd: workspace,
+  const runtime = await createBgsRunner({ command, resolveOutboundTarget: network }).start({ sessionId: 'fixture', cwd: workspace, confirmedBriefContext, ...hostTools,
     env: { BEEGAME_CONFIG_DIR: join(root, 'config'), OPENAI_API_KEY: 'fixture-only', BGS_FIXTURE_RPC_TRACE: join(root, 'rpc.jsonl'),
       ...(env.BGS_FIXTURE_NATIVE_GOAL_FINALIZE === '1' ? { BGS_FIXTURE_NATIVE_GOAL_CHILD_PID_FILE: childPidFile } : {}), ...env },
     ...(resumeSessionId ? { resumeSessionId } : {}),
@@ -80,7 +108,7 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
     },
   })
   const submit = (prompt: Parameters<typeof runtime.submit>[0]['prompt'], signal = new AbortController().signal,
-    submitNativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput) => runtime.submit({ prompt, signal, ...hostTools,
+    submitNativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput) => runtime.submit({ prompt, signal, confirmedBriefContext, ...hostTools,
     ...(submitNativeGoal ? { nativeGoal: submitNativeGoal } : {}),
     onMessage: message => { events.push(message) }, requestPermission: async () => ({ behavior: 'deny' }) })
   return { root, workspace, childPidFile, runtime, events, usage, questions, sessionId, submit,
@@ -938,26 +966,26 @@ test('native workflow uses the live parent callback and rejects cancelled, stale
 })
 
 
-test.each(['valid', 'command', 'dynamic', 'child'])(
+test.each(['valid', 'blocked', 'command', 'dynamic', 'child'])(
   'native terminal delivery closes only its own submission and rejects other work: %s', async mode => {
     let f!: Awaited<ReturnType<typeof fixture>>
     let calls = 0
-    f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_FINISH: mode },
+    f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_FINISH: mode==='blocked'?'valid':mode },
       resolveOutboundTarget, undefined, { mode: 'start', objective: 'Deliver the fixture' }, false, undefined, undefined,
       { measurement: async () => ({}), finishDelivery: async (value, signal) => {
         expect(value).toEqual({ requirementsRevision: 'fixture-revision' })
         expect(signal?.aborted).toBe(false)
         calls++
-        await f.runtime.completeGoal!()
+        await f.runtime.completeGoal!(mode==='blocked'?'blocked':'complete')
         return { submitted: true }
       } })
     const abort = new AbortController()
     const submitted = f.submit('Submit the saved report', abort.signal).catch(error => error)
     try {
-      if (mode === 'valid') {
+      if (mode === 'valid' || mode === 'blocked') {
         expect(await submitted).toBeUndefined()
         expect(f.events.some(event => event.eventType === 'assistant.message')).toBe(false)
-        expect(f.events.findLast(event => event.subtype === 'native_goal')?.nativeGoal.status).toBe('complete')
+        expect(f.events.findLast(event => event.subtype === 'native_goal')?.nativeGoal.status).toBe(mode==='blocked'?'blocked':'complete')
         expect(f.events.some(event => event.eventType === 'tool.completed' && event.toolUseID === 'native-finish')).toBe(false)
       } else {
         await waitUntil(() => f.events.some(event => event.eventType === 'assistant.message'))
@@ -966,7 +994,7 @@ test.each(['valid', 'command', 'dynamic', 'child'])(
       const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
       const names = rpc.find(call => call.method === 'thread/start').params.dynamicTools.map((tool: any) => tool.name)
       expect(names).toContain('BgsMeasurement'); expect(names).toContain('BgsFinishDelivery')
-      expect(rpc.filter(call => call.method === 'thread/goal/set' && call.params.status === 'complete')).toHaveLength(mode === 'valid' ? 1 : 0)
+      expect(rpc.filter(call => call.method === 'thread/goal/set' && call.params.status === (mode==='blocked'?'blocked':'complete'))).toHaveLength(mode === 'valid' || mode==='blocked' ? 1 : 0)
       expect(rpc.some(call => call.method === 'turn/start')).toBe(false)
       expect(calls).toBe(1)
     } finally { abort.abort(); await submitted; await f.close() }
@@ -1017,7 +1045,7 @@ test('native terminal delivery crosses SessionManager submission persistence and
         // this fixture exercises persistence, native shutdown and settlement.
         await manager.completeNativeGoal(session.id,turnId,{attemptId:'fixture-attempt',
           requirementsRevision:(value as any).requirementsRevision,reportPath:'.beegame/delivery/acceptance.json',
-          reportSha256:'a'.repeat(64),sourceSha256:'b'.repeat(64),summary:'Synthetic validated submission'})
+          reportSha256:'a'.repeat(64),sourceSha256:'b'.repeat(64),status:'passed',summary:'Synthetic validated submission'})
         return {}
       },close:async()=>{closed++}}),
     })
@@ -1031,3 +1059,393 @@ test('native terminal delivery crosses SessionManager submission persistence and
     expect(manager.get(session.id)?.turnStatus).toBe('idle')
   } finally {await manager.dispose();await rm(root,{recursive:true,force:true})}
 }, 10000)
+
+
+test('native Skill read targets use catalog identity and structured read actions, never path mentions',()=>{
+  const skills=[{name:'registered-name',path:'/catalog/folder/SKILL.md',enabled:true},
+    {name:'disabled',path:'/catalog/disabled/SKILL.md',enabled:false}]
+  const body={type:'read',path:'/catalog/folder/SKILL.md'},reference={type:'read',path:'/catalog/folder/references/production.md'}
+  expect(nativeSkillReadTargets([body,body,reference],skills)).toEqual([
+    {name:'registered-name',path:body.path},{name:'registered-name',path:reference.path}])
+  expect(nativeSkillReadTargets([{type:'search',path:body.path},{type:'unknown',command:'cat '+body.path},
+    {type:'read',path:'/catalog/other/SKILL.md'},{type:'read',path:'/catalog/disabled/SKILL.md'},
+    {type:'read',path:'/catalog/folder/references/../../other/SKILL.md'},
+    {type:'read',path:'relative/SKILL.md'},null],skills)).toEqual([])
+  expect(nativeSkillReadTargets(undefined,skills)).toEqual([])
+})
+
+test('legacy Skill-tool count excludes Shell read evidence, including after transcript recovery',async()=>{
+  const root=await mkdtemp('/private/tmp/bgs-skill-read-count-'),workspace=join(root,'game')
+  await mkdir(workspace)
+  const reads=[{name:'one',path:'/catalog/one/SKILL.md'},{name:'two',path:'/catalog/two/references/method.md'}]
+  const manager=new BeeGameSessionManager({async start(){return {stop(){},async submit(input){
+    for(const [eventType,payload] of [
+      ['tool.started',{toolName:'Shell',toolUseID:'read',skillReads:reads}],
+      ['tool.completed',{toolName:'Shell',toolUseID:'read',skillReads:reads,exitCode:0}],
+      ['tool.completed',{toolName:'Shell',toolUseID:'read',skillReads:reads,exitCode:0}],
+      ['tool.started',{toolName:'Shell',toolUseID:'failed-read',skillReads:reads}],
+      ['tool.failed',{toolName:'Shell',toolUseID:'failed-read',skillReads:reads,exitCode:1}],
+      ['tool.started',{toolName:'Skill',toolUseID:'native-skill',input:{skill:'three'}}],
+      ['tool.completed',{toolName:'Skill',toolUseID:'native-skill'}],
+      ['tool.completed',{toolName:'Shell',toolUseID:'unknown',input:{command:'echo SKILL.md'},exitCode:0}],
+    ] as const)await input.onMessage({type:'runtime_event',eventType,...payload})
+  }}}},root)
+  let recovered:BeeGameSessionManager|undefined
+  try {
+    const session=manager.start({workspacePath:workspace,userId:'owner',projectId:'project'})
+    await manager.sendWithDisplay(session.id,'Synthetic access telemetry')
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id).turnDiagnostics?.skillCalls).toBe(1)
+    expect(manager.transcriptFacts(session.id).filter(event=>event.payload?.toolName==='Shell'&&event.payload?.skillReads).length).toBeGreaterThan(0)
+    await manager.dispose()
+    recovered=new BeeGameSessionManager({async start(){throw Error('Recovery must be read-only')}},root)
+    expect(recovered.runtimeSnapshot(session.id,workspace).turnDiagnostics?.skillCalls).toBe(1)
+  }finally{await manager.dispose();await recovered?.dispose();await rm(root,{recursive:true,force:true})}
+})
+
+
+for(const result of ['ready','malformed','missing','rejected'] as const)test('native final output '+result+' is handled once without a new turn',async()=>{
+  const accepted:unknown[]=[]
+  const contract={schema:{type:'object',properties:{summary:{type:'string'}},required:['summary'],additionalProperties:false},
+    accept:async(value:unknown)=>{accepted.push(value);if(result==='rejected')throw Error('Source changed');return 'Chapter handed off'}}
+  const f=await fixture('allow',{},resolveOutboundTarget,undefined,undefined,false,undefined,undefined,{finalOutput:contract})
+  const client=(f.runtime as unknown as {client:BgsClient}).client
+  const submitted=f.submit('hang').then(()=>null,error=>error as Error)
+  try {
+    await waitUntil(()=>(f.runtime as unknown as {active?:{turnId?:string}}).active?.turnId==='turn-1')
+    const emit=(...events:unknown[])=>client.request('fixture/events',{events})
+    const item=(text:string,phase:string='final_answer')=>({method:'item/completed',params:{threadId:f.sessionId,turnId:'turn-1',item:{id:'final',type:'agentMessage',text,phase}}})
+    if(result!=='missing') {
+      const text=result==='malformed'?'I am done':JSON.stringify({summary:'Source pointers'})
+      await emit({method:'item/agentMessage/delta',params:{threadId:f.sessionId,turnId:'turn-1',itemId:'final',delta:text}},item(text))
+    }
+    await emit({method:'turn/completed',params:{threadId:f.sessionId,turnId:'turn-1',turn:{id:'turn-1',status:'completed'}}})
+    const error=await submitted
+    if(result==='ready')expect(error).toBeNull()
+    else expect(error?.message).toContain(result==='rejected'?'Source changed':'final result is missing or invalid')
+    expect(accepted).toHaveLength(['ready','rejected'].includes(result)?1:0)
+    expect(f.events.filter(e=>e.eventType.startsWith('assistant.')).map(e=>e.text)).toEqual(result==='ready'?['Chapter handed off']:[])
+    const trace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+    const starts=trace.filter(item=>item.method==='turn/start')
+    expect(starts).toHaveLength(1)
+    expect(starts[0].params).not.toHaveProperty('outputSchema')
+    expect(starts[0].params.additionalContext).toBeUndefined()
+    const instructions=trace.find(item=>item.method==='thread/start').params.developerInstructions
+    expect(instructions.split(JSON.stringify(contract.schema))).toHaveLength(2)
+  }finally{await f.close()}
+})
+
+
+test('rg no-result classification requires a literal whole command and an ordinary empty exit 1', () => {
+  const receipt = {type:'commandExecution',status:'failed',exitCode:1,aggregatedOutput:''}
+  for (const command of ["rg -n 'absent|other' docs", '/usr/bin/rg absent docs', `/bin/zsh -lc 'rg -n "absent|other" docs'`, `rg 'a;b' docs`])
+    expect(nativeRgNoMatch({...receipt,command}),command).toBe(true)
+  for (const command of ["cd missing && rg absent docs", "rg absent docs | head", "rg absent docs || true", 'rg absent docs; false',
+    'rg absent docs > result.txt', 'rg "$QUERY" docs', 'rg $(cat query) docs', 'rg `cat query` docs', "rg 'unterminated", 'rg absent docs\nfalse',
+    '/bin/zsh -lc \'cd missing && rg absent docs\'', 'echo rg absent', 'rg absent *.md'])
+    expect(nativeRgNoMatch({...receipt,command,commandActions:[{type:'search',command:'rg absent docs'}]}),command).toBe(false)
+  for (const change of [{exitCode:0},{exitCode:2},{exitCode:null},{status:'declined'},{status:'inProgress'},
+    {aggregatedOutput:'Timed out'},{error:'cancelled'},{type:'mcpToolCall'}])
+    expect(nativeRgNoMatch({...receipt,command:'rg absent docs',...change})).toBe(false)
+})
+
+test('rg receipts keep raw exit codes and distinguish no results from actual command errors', async () => {
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  try {
+    for (const [command,exitCode,output,noMatch] of [
+      ['rg present docs',0,'present',false], ['rg absent docs',1,'',true],
+      ["/bin/zsh -lc 'rg absent docs'",1,'',true], ['rg [ docs',2,'regex error',false],
+      ['cd missing && rg absent docs',1,'',false], ['rg absent docs | head',1,'',false],
+    ] as const) {
+      const f = await fixture()
+      try {
+        await f.submit('rg-receipt:'+JSON.stringify({command,exitCode,aggregatedOutput:output,status:exitCode?'failed':'completed'}))
+        const receipt=f.events.find(e=>e.eventType==='tool.completed'||e.eventType==='tool.failed')
+        expect(receipt).toMatchObject({exitCode,is_error:exitCode!==0&&!noMatch,output,eventType:exitCode!==0&&!noMatch?'tool.failed':'tool.completed'})
+        expect(receipt?.searchOutcome).toBe(noMatch?'no-match':undefined)
+      } finally { await f.close() }
+    }
+  } finally { cleanup.mockRestore() }
+},30_000)
+
+test('provider catalog uses the native provider endpoint without file overrides or subscription changes',()=>{
+  const url='http://127.0.0.1:1234/private/v1/models'
+  const config=bgsProviderConfig({BEEGAME_MODEL:'fixture'}, {modelCatalogUrl:url}) as any
+  expect(config.model_providers.bgs.model_catalog_url).toBe(url)
+  expect(config.model_catalog_json).toBeUndefined()
+  expect(config.model_context_window).toBeUndefined()
+  expect(config.model_auto_compact_token_limit).toBeUndefined()
+  expect(bgsProviderConfig({OPENAI_AUTH_MODE:'chatgpt'}, {modelCatalogUrl:url}).model_providers).toBeUndefined()
+})
+
+
+test.each(['write-design','edit-design:{"old_string":"Existing","new_string":"Changed"}'])(
+  'document task stays read-only when host omits writeDocument: %s',async prompt=>{
+    const f=await fixture('allow',{},resolveOutboundTarget,undefined,undefined,false,undefined,undefined,
+      {finalOutput:{readOnly:true,schema:{type:'object'},accept:async()=>{throw Error('Must not accept tool result as a document')}}})
+    try {
+      await writeFile(join(f.workspace,'docs/GDD.md'),'Existing')
+      await expect(f.submit(prompt)).rejects.toThrow('final result is missing or invalid')
+      expect(await readFile(join(f.workspace,'docs/GDD.md'),'utf8')).toBe('Existing')
+      expect(f.questions).toHaveLength(0)
+      const trace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+      const start=trace.find(item=>item.method==='thread/start')
+      expect(start.params.developerInstructions).toContain('Project files are read-only for this document task')
+      // Persist the regular dynamic tool catalog so a later authorized turn can use it;
+      // the current contract, rather than thread history, decides write authority.
+      expect(start.params.dynamicTools.map((tool:any)=>tool.name)).toContain('WriteProjectFile')
+    }finally{await f.close()}
+  })
+
+
+test('document write capability authorizes only the current parent turn after permission recheck', async () => {
+  const order: string[] = []
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget, undefined, undefined, false,
+    request => {
+      order.push('permission:' + (request.phase ?? 'initial'))
+      return Promise.resolve({ behavior: 'allow', source: 'policy' })
+    }, undefined, {
+      finalOutput: {
+        readOnly: true,
+        writeDocument: { path: 'docs/GDD.md', authorize: async () => { order.push('authorize') } },
+        schema: { type: 'object' },
+        accept: async () => 'unused',
+      },
+    })
+  const client = (f.runtime as unknown as { client: BgsClient }).client
+  const abort = new AbortController()
+  const submitted = f.submit('hang', abort.signal).catch(error => error)
+  const write = (id: string, threadId = f.sessionId, turnId = 'turn-1', filePath = 'docs/GDD.md') => ({
+    id, method: 'item/tool/call', params: { threadId, turnId, callId: id, tool: 'WriteProjectFile',
+      arguments: { file_path: filePath, content: 'working GDD' } },
+  })
+  const edit = (id: string, threadId = f.sessionId, turnId = 'turn-1', filePath = 'docs/GDD.md') => ({
+    id, method: 'item/tool/call', params: { threadId, turnId, callId: id, tool: 'EditProjectFile',
+      arguments: { file_path: filePath, old_string: 'working GDD', new_string: 'edited GDD' } },
+  })
+  const emit = (...events: unknown[]) => client.request('fixture/events', { events })
+  const responses = async () => (await client.request('fixture/responses', {})).responses as Array<any>
+  try {
+    await waitUntil(() => (f.runtime as unknown as { active?: { turnId?: string } }).active?.turnId === 'turn-1')
+    await emit(write('parent-write'))
+    await waitUntilAsync(async () => (await responses()).some(response => response.id === 'parent-write'))
+    expect((await responses()).find(response => response.id === 'parent-write')?.result?.success).toBe(true)
+    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize'])
+    expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('working GDD')
+
+    await emit(edit('parent-edit'))
+    await waitUntilAsync(async () => (await responses()).some(response => response.id === 'parent-edit'))
+    expect((await responses()).find(response => response.id === 'parent-edit')?.result?.success).toBe(true)
+    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize',
+      'permission:initial', 'permission:recheck', 'authorize'])
+    expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('edited GDD')
+
+    await emit(write('stale-parent', f.sessionId, 'stale-turn'))
+    await waitUntilAsync(async () => (await responses()).some(response => response.id === 'stale-parent'))
+    expect((await responses()).find(response => response.id === 'stale-parent')?.error).toBeDefined()
+
+    await emit(write('wrong-path', f.sessionId, 'turn-1', 'docs/other.md'))
+    await waitUntilAsync(async () => (await responses()).some(response => response.id === 'wrong-path'))
+    expect((await responses()).find(response => response.id === 'wrong-path')?.result?.success).toBe(false)
+    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize',
+      'permission:initial', 'permission:recheck', 'authorize'])
+    expect(await Bun.file(join(f.workspace, 'docs/other.md')).exists()).toBe(false)
+
+    for (const [id, filePath] of [['other-protected', 'AGENTS.md'], ['ordinary', 'src/other.js']] as const) {
+      await emit(write(id, f.sessionId, 'turn-1', filePath))
+      await waitUntilAsync(async () => (await responses()).some(response => response.id === id))
+      expect((await responses()).find(response => response.id === id)?.result?.success).toBe(false)
+    }
+    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize',
+      'permission:initial', 'permission:recheck', 'authorize'])
+
+    await emit({ method: 'item/completed', params: { threadId: f.sessionId, turnId: 'turn-1', item: {
+      id: 'spawn-child', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'],
+      agentsStates: { child: { status: 'running' } }, status: 'completed',
+    } } }, write('child-write', 'child', 'child-1'))
+    await waitUntilAsync(async () => (await responses()).some(response => response.id === 'child-write'))
+    expect((await responses()).find(response => response.id === 'child-write')?.result?.success).toBe(false)
+    expect(order).toEqual(['permission:initial', 'permission:recheck', 'authorize',
+      'permission:initial', 'permission:recheck', 'authorize'])
+    expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('edited GDD')
+  } finally {
+    abort.abort()
+    await submitted
+    await f.close()
+  }
+}, 10_000)
+
+
+test.each(['request', 'task', 'revoked'] as const)('document authorization blocks a %s cancellation during its final wait', async cancellation => {
+  let entered = false
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget, undefined, undefined, false,
+    () => Promise.resolve({ behavior: 'allow', source: 'policy' }), undefined, {
+      finalOutput: {
+        readOnly: true,
+        writeDocument: { path: 'docs/GDD.md', authorize: async () => { entered = true; await gate; if (cancellation === 'revoked') throw Error('Writer changed or paused') } },
+        schema: { type: 'object' },
+        accept: async () => 'unused',
+      },
+    })
+  const client = (f.runtime as unknown as { client: BgsClient }).client
+  const abort = new AbortController()
+  const submitted = f.submit('hang', abort.signal).catch(error => error)
+  const emit = (...events: unknown[]) => client.request('fixture/events', { events })
+  try {
+    await writeFile(join(f.workspace, 'docs/GDD.md'), 'original')
+    await waitUntil(() => (f.runtime as unknown as { active?: { turnId?: string } }).active?.turnId === 'turn-1')
+    await emit({ id: 'cancelled-write', method: 'item/tool/call', params: { threadId: f.sessionId, turnId: 'turn-1',
+      callId: 'cancelled-write', tool: 'WriteProjectFile', arguments: { file_path: 'docs/GDD.md', content: 'must not save' } } })
+    await waitUntil(() => entered)
+    if (cancellation === 'request')
+      await emit({ method: 'serverRequest/resolved', params: { threadId: f.sessionId, requestId: 'cancelled-write' } })
+    else if (cancellation === 'task') abort.abort()
+    release()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).toBe('original')
+    abort.abort()
+    const result = await submitted
+    expect(result).toBeInstanceOf(Error)
+  } finally {
+    release()
+    abort.abort()
+    await submitted
+    await f.close()
+  }
+}, 10_000)
+
+for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect', 'missing-response', 'missing-resolution', 'advisory-label', 'invalid', 'failed', 'source-changed', 'cancel', 'blocked'] as const)
+  test('independent GDD review: ' + outcome, async () => {
+    const receipts: DesignReviewReceipt[] = [], accepted: unknown[] = []
+    const needsRevision = ['revise', 'rejected', 'unresolved', 'new-defect', 'missing-response', 'missing-resolution'].includes(outcome)
+    let sourceHash = 'candidate-1'
+    const source = () => ({ path: 'docs/GDD.md', sha256: sourceHash })
+    const contract = { readOnly: true, schema: { type: 'object' },
+      designReview: {
+        candidate: async (value: unknown) => {
+          const result = value as { status: string; summary: string; reviewResponses?: DesignReviewDisposition[] }
+          if (result.status !== 'ready') throw Error('Draft blocked')
+          return { source: source(), summary: result.summary, reviewResponses: result.reviewResponses }
+        },
+        record: async (receipt: DesignReviewReceipt) => { receipts.push(receipt) },
+      },
+      accept: async (value: unknown) => { assertDesignReviewReady(source(), receipts); accepted.push(value); return 'GDD handed off' },
+    }
+    const f = await fixture('allow', { BGS_FIXTURE_DESIGN_REVIEW: 'manual', BEEGAME_MODEL: 'chosen-model' },
+      resolveOutboundTarget, undefined, undefined, false, undefined, undefined, { finalOutput: contract })
+    const client = (f.runtime as unknown as { client: BgsClient }).client
+    const trace = async () => (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    const emit = (...events: unknown[]) => client.request('fixture/events', { events })
+    const finish = (threadId: string, turnId: string, text: string, status = 'completed') => emit(
+      { method: 'item/completed', params: { threadId, turnId, item: { type: 'agentMessage', id: turnId + '-final', text, phase: 'final_answer' } } },
+      { method: 'thread/tokenUsage/updated', params: { threadId, turnId, tokenUsage: { total: { inputTokens: 100, cachedInputTokens: 20, outputTokens: 30 } } } },
+      { method: 'turn/completed', params: { threadId, turnId, turn: { id: turnId, status } } },
+    )
+    const finding = { location: 'GDD §Rules', issue: 'Contradictory transition',
+      evidence: 'The same event has two mutually exclusive results.', impact: 'The implementation must invent a rule.' }
+    const disposition = { finding: 1, status: outcome === 'rejected' ? 'rejected' as const : 'corrected' as const,
+      evidence: 'Saved Rules defines the event condition and outcome; the original condition excludes the reported counterexample.' }
+    const report = (hasFindings = false, followup = false) => JSON.stringify({
+      summary: hasFindings ? 'Transition needs resolution' : 'No material issue found; runtime remains unverified',
+      findings: hasFindings ? [finding] : outcome === 'advisory-label' ? [{ ...finding, severity: 'advisory' }] : [],
+      ...(followup && outcome !== 'missing-resolution' ? { resolutions: [{ ...disposition,
+        status: outcome === 'unresolved' ? 'unresolved' : disposition.status }] } : {}),
+    })
+    const controller = new AbortController()
+    try {
+      const submitted = f.submit('Author-only history marker', controller.signal).then(() => null, error => error as Error)
+      await waitUntilAsync(async () => (await trace()).some(row => row.method === 'turn/start'))
+      await finish(f.sessionId, 'turn-1', JSON.stringify({ status: outcome === 'blocked' ? 'blocked' : 'ready', summary: 'Author-only summary marker' }))
+      if (outcome === 'blocked') {
+        expect((await submitted)?.message).toContain('Draft blocked')
+        expect((await trace()).filter(row => row.method === 'thread/start')).toHaveLength(1)
+        expect(receipts).toHaveLength(0)
+        return
+      }
+      await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 2)
+      const starts = (await trace()).filter(row => row.method === 'thread/start')
+      expect(starts).toHaveLength(2)
+      const reviewer = starts[1].params
+      expect(reviewer.model).toBe('chosen-model')
+      expect(reviewer.permissions).toBe(starts[0].params.permissions)
+      expect(reviewer.dynamicTools).toEqual([])
+      expect(reviewer.config['features.multi_agent']).toBe(false)
+      expect(reviewer.config['features.multi_agent_v2']).toBe(false)
+      expect(reviewer.config['features.goals']).toBe(false)
+      expect(reviewer.developerInstructions).not.toContain('Author-only')
+      expect(reviewer.developerInstructions).not.toContain('Return only the required status and summary')
+      const initialReview = (await trace()).filter(row => row.method === 'turn/start')[1].params
+      expect(initialReview.threadId).toBe('review-thread-2')
+      expect(initialReview.parentTurnId).toBe('turn-1')
+      expect(initialReview.input[0].text).toContain('Synthetic confirmed PC requirements')
+      expect(initialReview.input[0].text).toContain('candidate-1')
+      expect(initialReview.input[0].text).not.toContain('Author-only')
+      expect(initialReview).not.toHaveProperty('outputSchema')
+      if (outcome === 'cancel') {
+        controller.abort()
+        expect((await submitted)?.message).toContain('interrupted')
+        expect(accepted).toHaveLength(0)
+        expect(receipts).toHaveLength(0)
+        return
+      }
+      if (outcome === 'pass') {
+        await emit({ id: 'late-author-write', method: 'item/tool/call', params: { threadId: f.sessionId, turnId: 'turn-1',
+          callId: 'late-author-write', tool: 'WriteProjectFile', arguments: { file_path: 'docs/GDD.md', content: 'Late author write during review' } } })
+        await waitUntilAsync(async () => (await client.request('fixture/responses', {})).responses.some((r: any) => r.id === 'late-author-write'))
+        expect((await client.request('fixture/responses', {})).responses.find((r: any) => r.id === 'late-author-write').error.code).toBe(-32603)
+        await emit({ id: 'review-write', method: 'item/tool/call', params: { threadId: 'review-thread-2', turnId: 'turn-2',
+          callId: 'review-write', tool: 'WriteProjectFile', arguments: { file_path: 'docs/GDD.md', content: 'Forbidden reviewer change' } } })
+        await waitUntilAsync(async () => (await client.request('fixture/responses', {})).responses.some((r: any) => r.id === 'review-write'))
+        const denied = (await client.request('fixture/responses', {})).responses.find((r: any) => r.id === 'review-write')
+        expect(denied.result.success).toBe(false)
+      }
+      if (outcome === 'source-changed') sourceHash = 'external-change'
+      await finish('review-thread-2', 'turn-2', outcome === 'invalid' ? 'not a report' : report(needsRevision), outcome === 'failed' ? 'failed' : 'completed')
+      if (needsRevision) {
+        await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 3)
+        expect(receipts).toHaveLength(1)
+        expect(accepted).toHaveLength(0)
+        if (outcome !== 'rejected') sourceHash = 'candidate-2'
+        await finish(f.sessionId, 'turn-3', JSON.stringify({ status: 'ready', summary: 'AUTHOR_BLANKET_SUMMARY_NOT_EVIDENCE',
+          ...(outcome !== 'missing-response' ? { reviewResponses: [disposition] } : {}) }))
+        if (outcome === 'missing-response') {
+          expect((await submitted)?.message).toContain('exactly one evidence-backed disposition')
+          expect(receipts).toHaveLength(1)
+          expect(accepted).toHaveLength(0)
+          expect((await trace()).filter(row => row.method === 'turn/start')).toHaveLength(3)
+          return
+        }
+        await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 4)
+        const followup = (await trace()).filter(row => row.method === 'turn/start')[3].params
+        expect(followup.threadId).toBe('review-thread-2')
+        expect(followup.input[0].text).toContain('Targeted follow-up only')
+        expect(followup.input[0].text).toContain(sourceHash)
+        expect(followup.input[0].text).toContain(disposition.evidence)
+        expect(followup.input[0].text).not.toContain('AUTHOR_BLANKET_SUMMARY_NOT_EVIDENCE')
+        await emit({ method: 'item/completed', params: { threadId: 'review-thread-2', turnId: 'turn-2',
+          item: { type: 'agentMessage', id: 'stale-review', text: 'stale malformed report', phase: 'final_answer' } } })
+        await finish('review-thread-2', 'turn-4', report(outcome === 'unresolved' || outcome === 'new-defect', true))
+      }
+      const error = await submitted
+      if (outcome === 'pass' || outcome === 'revise' || outcome === 'rejected') {
+        expect(error).toBeNull()
+        expect(accepted).toHaveLength(1)
+        expect(receipts.at(-1)?.source.sha256).toBe(sourceHash)
+        expect(receipts.at(-1)?.nativeThreadId).toBe('review-thread-2')
+        expect(receipts.at(-1)?.nativeTurnId).toBe(outcome === 'pass' ? 'turn-2' : 'turn-4')
+        if (needsRevision) expect(receipts.at(-1)?.authorResponses).toEqual([disposition])
+        expect(f.events.filter(e => e.eventType === 'assistant.message').map(e => e.text).join('')).toContain('GDD handed off')
+      } else {
+        expect(error?.message).toContain({ unresolved: 'still has unresolved', 'new-defect': 'still has unresolved', 'missing-resolution': 'exactly one evidence-backed disposition', 'missing-response': 'exactly one evidence-backed disposition', 'advisory-label': 'invalid report', invalid: 'invalid JSON', failed: 'review failed', 'source-changed': 'changed during' }[outcome])
+        expect(accepted).toHaveLength(0)
+      }
+      const rounds = needsRevision ? 2 : 1
+      expect(receipts).toHaveLength(['invalid', 'failed', 'source-changed', 'advisory-label'].includes(outcome) ? 0 : outcome === 'missing-resolution' ? 1 : rounds)
+      const calls = await trace()
+      expect(calls.filter(row => row.method === 'thread/start')).toHaveLength(2)
+      expect(calls.filter(row => row.method === 'turn/start')).toHaveLength(rounds * 2)
+      expect(calls.some(row => row.method === 'thread/goal/set')).toBe(false)
+    } finally { controller.abort(); await f.close() }
+  })

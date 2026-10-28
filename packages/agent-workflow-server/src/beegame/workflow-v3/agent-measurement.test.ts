@@ -7,7 +7,7 @@ import {createRequire} from 'node:module'
 import {Hono} from 'hono'
 import {createRun,digest,type AgentTurn,type SkillUse} from './state'
 import {createLocalWorkflowStore,previewRunState} from './store'
-import {createAgentMeasurement,measurementSummary,measurementRequest} from './agent-measurement'
+import {agentSkillFacts,createAgentMeasurement,measurementSummary,measurementRequest} from './agent-measurement'
 import {openAgentTools} from './agent-tools'
 import {selectAgentMeasuredBuild,exportAgentMeasuredBuild,inspectAgentMeasurementInputs,discussionMessagesSinceMeasurement} from './measured-build'
 import {buildEditableProject} from './editable-project'
@@ -289,8 +289,9 @@ test.each(['shape','json','evidence','missing'] as const)('invalid attached acce
   } finally {await tools?.close();await f.close()}
 },30000)
 
-test.each(['failed','timeout','source','run','requirements'] as const)(
-  'unsupported acceptance PASS (%s) is rejected consistently by handoff and measurement without building',async kind=>{
+test.each(['failed','timeout','source','run','requirements','copied-failed','copied-source'] as const)(
+  'unsupported acceptance PASS (%s) is rejected consistently by handoff and measurement without building',async variant=>{
+  const copied=variant.startsWith('copied-'),kind=variant.replace('copied-','')
   const f=await fixture("throw Error('BUILD MUST NOT RUN')")
   let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
   try {
@@ -312,17 +313,22 @@ test.each(['failed','timeout','source','run','requirements'] as const)(
     const receipt={script:'test.mjs',status:'exited',exitCode:0,signal:null,
       startedAt:'2026-10-20T00:00:00Z',finishedAt:'2026-10-20T00:00:01Z',inputIdentity:'unchanged-at-boundaries',
       before:boundary,after:structuredClone(boundary),reportPath:receiptPath,stdoutPath:dir+'/stdout.txt',stderrPath:dir+'/stderr.txt'}
+    const support=copied?'reports/copied-execution.json':receiptPath
     const report={scope:'delivery',status:'passed',summary:'Synthetic declared PASS',environment:'Offline fixture',
-      evidencePaths:[receiptPath],artifactPaths:['src/index.html'],verification:{
+      evidencePaths:[support],artifactPaths:['src/index.html'],verification:{
         target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],
         designRevision:checkDesignHandoff(f.workspace,PROJECT_DOCUMENTS).revision,
-        requirementChecks:designRequirementChecksFixture(f.workspace,[receiptPath]),
+        requirementChecks:designRequirementChecksFixture(f.workspace,[support]),
         contentChecks:[{kind:'ui-layout',document:'content/ui/menu.json',nodeId:'play',property:'layout'},
           {kind:'scene-layout',document:'content/scenes/level.json',nodeId:'board',property:'transform'}]
           .map(check=>({...check,change:'Synthetic change',expected:'Synthetic expected',observed:'Synthetic outcome',
-            status:'passed',evidencePaths:[receiptPath]}))}}
+            status:'passed',evidencePaths:[support]}))}}
     const save=async()=>{
       await writeFile(join(f.workspace,receiptPath),JSON.stringify(receipt))
+      if(copied) {
+        await mkdir(join(f.workspace,'reports'),{recursive:true})
+        await writeFile(join(f.workspace,support),JSON.stringify(receipt))
+      }
       await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(report))
     }
     const command=async(entry:string,...args:string[])=>{
@@ -335,6 +341,15 @@ test.each(['failed','timeout','source','run','requirements'] as const)(
     }
     await save()
     expect(await command('handoff.mjs','--design','acceptance')).toMatchObject({code:0,result:{valid:true,quality:'unverified'}})
+    if(copied) {
+      let submitted=0
+      const delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async()=>{submitted++}})
+      try {
+        await delivery.finish({requirementsRevision:f.run.requirements.revision})
+        expect(submitted).toBe(1)
+        expect(await delivery.verifyDelivery()).toMatchObject({status:'passed'})
+      } finally {await delivery.close()}
+    }
     if(kind==='failed')receipt.exitCode=1
     if(kind==='timeout')receipt.status='timed-out'
     if(kind==='source')await writeFile(join(f.workspace,'src/index.html'),'Changed source')
@@ -346,6 +361,11 @@ test.each(['failed','timeout','source','run','requirements'] as const)(
     const checked=await command('handoff.mjs','--design','acceptance')
     expect(checked).toMatchObject({code:1,result:{valid:false,declaredStatus:'passed',status:'blocked',quality:'unverified'}})
     if(kind==='run'||kind==='requirements')expect(checked.result.summary).toContain('Run or requirements identity changed')
+    if(copied) {
+      const delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async()=>{throw Error('INVALID DELIVERY MUST NOT SUBMIT')}})
+      try {await expect(delivery.finish({requirementsRevision:f.run.requirements.revision})).rejects.toThrow(checked.result.summary)}
+      finally {await delivery.close()}
+    }
     const handoff=await f.measurement.handoff()
     expect(handoff.acceptance.summary).toBe(checked.result.summary)
     const measured=await command('measure.mjs','--request','reject-pass','--artifact','dist','--report',DESIGN_ACCEPTANCE_PATH)
@@ -1067,11 +1087,12 @@ test('inspection separates the active user task and live Skill facts from a hist
     expect((await active.inspect(record.id,true)).task).toEqual(handoff.task)
     expect(inspected.attemptId).toBe(original.attemptId)
     expect(inspected.measurementTask).toMatchObject({attemptId:original.attemptId,status:'failed',requestKey:original.requestKey})
-    expect(inspected.skills).toMatchObject({currentTurnUses:[],currentTurnEvidence:'live-native-load-events',
+    expect(inspected.skills).toMatchObject({currentTurnUses:[],currentTurnEvidence:'live-skill-access-events',
       recordedMainLoads:[{name:'old-general-method'}],application:'unverified'})
     liveUses=[{name:'domain-method',toolUseID:'child-skill',eventId:2,parentToolUseID:'delegated',status:'unverified'}]
     expect((await active.inspect(record.id)).skills.currentTurnUses[0]?.status).toBe('unverified')
-    liveUses=[{...liveUses[0]!,eventId:3,status:'loaded'}]
+    liveUses=[{name:'domain-method',toolUseID:'child-skill',parentToolUseID:'delegated',eventId:3,source:'shell',path:'/catalog/domain-method/SKILL.md'}]
+    expect((await active.inspect(record.id)).skills.evidenceLimit).toContain('Shell entries link catalog files to command events')
     tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:active})
     const command=Bun.spawn([process.execPath,join(f.workspace,tools.directory,'measure.mjs'),'--inspect',record.id],{cwd:f.workspace,
       env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'chat','measurement')},stdout:'pipe',stderr:'pipe'})
@@ -1079,6 +1100,7 @@ test('inspection separates the active user task and live Skill facts from a hist
     expect(await command.exited).toBe(0)
     expect(result.task.text).toBe(message.text)
     expect(result.skills.currentTurnUses).toEqual(liveUses)
+    expect(result.skills.nativeInvocations).toBe('not-exposed-by-app-server')
     expect(result.skills.application).toBe('unverified')
     expect(result.checkScope.unmeasuredConsumptionChecks).toHaveLength(5)
     expect(result.quality).toBe('unverified');expect(result.deliveryEligible).toBe(false)
@@ -1101,7 +1123,7 @@ test('inspection separates the active user task and live Skill facts from a hist
       const historical=await response.json()
       expect(historical.task).toEqual(result.task)
       expect(historical.measurementTask).toEqual(result.measurementTask)
-      expect(historical.skills).toMatchObject({currentTurnUses:liveUses,currentTurnEvidence:'saved-native-load-events',application:'unverified'})
+      expect(historical.skills).toMatchObject({currentTurnUses:liveUses,currentTurnEvidence:'saved-skill-access-events',application:'unverified'})
       expect(historical.quality).toBe('unverified');expect(historical.deliveryEligible).toBe(false)
       expect(await f.current()).toEqual(ended)
     }finally{await sessions.dispose()}
@@ -1204,7 +1226,7 @@ test('task context exposes current comparison before optional tool parsing; does
     expect(context.measurement,JSON.stringify(record.checks)).toMatchObject({id:record.id,requestKey:record.requestKey,freshness:{current:true,changes:{requirements:false,sources:[],reports:[]}}})
     expect(context).toMatchObject({quality:'unverified',reportSemantics:'not-verified',deliveryEligible:false})
     expect(context.project).toMatchObject({testFiles:[],codeFiles:['src/index.html'],commands:{build:'bun build.mjs'}})
-    expect(context.skills).toEqual({recordedMainLoads:[],contextPresence:'unverified',application:'unverified',currentTurnUses:[],currentTurnEvidence:'not-recorded-yet'})
+    expect(context.skills).toMatchObject({recordedMainLoads:[],contextPresence:'unverified',application:'unverified',currentTurnUses:[],currentTurnEvidence:'not-recorded-yet'})
     expect(context.checkScope.runtimeSmoke).toBe('initial static-browser load only')
     const handoff=await f.measurement.handoff()
     const inspected=await f.measurement.inspect(record.id)
@@ -2123,7 +2145,7 @@ test('delivery finish accepts the current measured report without another measur
     expect(second).toEqual(first)
     expect(first).toMatchObject({measurementId:measured.id,reportPath:DESIGN_ACCEPTANCE_PATH,
       quality:'unverified',deliveryEligible:false})
-    expect(await delivery.verifyDelivery()).toBe(true)
+    expect(await delivery.verifyDelivery()).toMatchObject({status:'passed'})
     expect(callbacks).toBe(1)
     expect((await f.current()).agentTurns![0]!.measurements).toHaveLength(1)
   } finally {await tools?.close();await delivery?.close();await f.close()}
@@ -2240,3 +2262,65 @@ test('native request cancellation drains its build without revoking the turn or 
     await expect(f.measurement.finish({ requirementsRevision: f.run.requirements.revision }, AbortSignal.abort())).rejects.toThrow()
   } finally { await f.close() }
 }, 10000)
+
+
+test('Skill facts distinguish read links, unavailable native invocation telemetry and application without rewriting history',()=>{
+  const run=createRun({projectId:'skill-facts',ownerId:'owner',workspacePath:'/unused',chatSessionId:'chat',requestKey:'goal',text:'Goal',constraints:{},ids:['goal']})
+  const turn:AgentTurn={attemptId:'current',requestKey:'goal',sessionId:'chat',workerId:'worker',fence:1,status:'ended',startedAt:'past',
+    skillUses:[{name:'method',toolUseID:'read',eventId:9,source:'shell',path:'/catalog/method/SKILL.md',status:'read-command-completed'},
+      {name:'legacy-loader',toolUseID:'skill',eventId:10,status:'loaded'}]}
+  run.agentTurns=[turn]
+  const before=structuredClone(run),facts=agentSkillFacts(run,turn)
+  expect(facts.currentTurnUses).toEqual([
+    {name:'method',toolUseID:'read',eventId:9,source:'shell',path:'/catalog/method/SKILL.md'},
+    {name:'legacy-loader',toolUseID:'skill',eventId:10,status:'loaded'}])
+  expect(facts.nativeInvocations).toBe('not-exposed-by-app-server')
+  expect(facts.application).toBe('unverified')
+  expect(agentSkillFacts(run,turn,[]).nativeInvocations).toBe('not-exposed-by-app-server')
+  expect(run).toEqual(before)
+})
+
+
+test.each(['blocked','failed'] as const)('explicit %s submission ends without a build and retains its failure across both tool entries',async status=>{
+  const f=await fixture()
+  let delivery:ReturnType<typeof createAgentMeasurement>|undefined,tools:Awaited<ReturnType<typeof openAgentTools>>|undefined,callbacks=0
+  try {
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    const report={scope:'delivery',status,summary:'External target is unavailable; required runtime observation needs target access.',
+      environment:'Offline fixture',evidencePaths:[],verification:{target:'deployment',knownIssues:['Required feature unfinished'],
+        unverified:['Required target observation'],coverageLimitations:['Target device unavailable']}}
+    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(report))
+    delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async submission=>{
+      callbacks++;expect(submission.status).toBe(status);expect(submission.measurementId).toBeUndefined()
+    }})
+    tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:delivery})
+    const submission={requirementsRevision:f.run.requirements.revision}
+    const first=await tools.finishDelivery!(submission)
+    const capability=JSON.parse(await readFile(projectPreviewCapabilityPath(f.workspace,'chat','measurement'),'utf8'))
+    const second=await fetch(capability.apiUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({finish:submission})})
+    expect(second.ok).toBe(true);expect(await second.json()).toEqual(first)
+    expect(callbacks).toBe(1)
+    expect(await delivery.verifyDelivery()).toMatchObject({status,summary:report.summary})
+    expect((await f.current()).agentTurns![0]!.measurements).toBeUndefined()
+    expect((await inspectDesignAcceptance(f.workspace)).valid).toBe(false)
+    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({...report,summary:'Changed while closing'}))
+    await expect(delivery.verifyDelivery()).rejects.toThrow('changed while')
+  }finally{await tools?.close();await delivery?.close();await f.close()}
+})
+
+test.each(['invalid','request','rejected-pass','stale-requirements'] as const)('terminal report does not accept %s as an explicit stop',async kind=>{
+  const f=await fixture()
+  let delivery:ReturnType<typeof createAgentMeasurement>|undefined,callbacks=0
+  try {
+    await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
+    const report={scope:kind==='request'?'request':'delivery',status:kind==='rejected-pass'?'passed':'blocked',
+      summary:'Required observation is unavailable',environment:'Offline fixture',evidencePaths:kind==='invalid'?['missing.txt']:[],
+      verification:{target:'deployment',knownIssues:[],unverified:['Required observation']}}
+    await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify(report))
+    delivery=createAgentMeasurement({run:f.run,turn:f.turn,store:f.store,onDeliverySubmitted:async()=>{callbacks++}})
+    await expect(delivery.finish({requirementsRevision:kind==='stale-requirements'?'stale':f.run.requirements.revision})).rejects.toThrow()
+    expect(callbacks).toBe(0)
+    expect(await delivery.verifyDelivery()).toBeUndefined()
+    expect((await f.current()).agentTurns![0]!.measurements).toBeUndefined()
+  }finally{await delivery?.close();await f.close()}
+})

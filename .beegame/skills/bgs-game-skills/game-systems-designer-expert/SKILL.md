@@ -5,73 +5,15 @@ description: Use for gameplay rules, core loops, progression, economy structure,
 
 # Game Systems Designer
 
-## Player-facing rules
+Define the repeatable player action: goal, legal actions, constraints, shared state and resulting feedback. Explain what changes on repetition, such as a choice, skill expression or discovery. Add progression, an economy or retention structure only when the requested game needs it; a resource counter alone does not require those systems.
 
-Make the repeatable player action clear, coherent and worth doing. Start with the goal, legal actions, constraints, information and resulting feedback, not scalability or a catalogue of progression systems. Explain what changes on repetition: a new situation, a choice, skill expression, discovery or creative expression. A reward counter alone does not establish that value.
+For a GDD handoff, settle the rules and state transitions needed to implement that loop, including consequential simultaneous outcomes, interruption and recovery. Keep each rule in one owning section of `docs/GDD.md`. Initial numeric choices may remain adjustable; their feasibility belongs to balance, space to levels and feedback treatment to art/UI/audio. Required outcomes remain visible even when later content is planned.
 
-Before settling an unfamiliar mechanic or a consequential design assumption, identify what the brief and existing research leave unresolved. Use available web search and read relevant public sources to answer that question; distinguish observed examples from your proposed adaptation. Keep useful conclusions, source links and the decisions they inform in the relevant chapters of `docs/GDD.md`. Reuse current, relevant research across chapters; search again for a new gap or outdated information, stopping when there is enough evidence for the decision. This adds no search quota, research document or approval stage. Public examples do not override confirmed requirements or establish that the proposed game is enjoyable.
+For an unfamiliar mechanic or consequential unresolved assumption, reuse current research or consult relevant public sources. Record the conclusion, source and adaptation with the decision. Stop when that question is answered; examples do not override requirements or prove that the proposed game is enjoyable.
 
----
+Read the reference that answers the open question:
+- [Core loops](references/core-loop-contract.md): player actions, consequences and the player promise.
+- [Parameter boundaries](references/parameter-boundary-model.md): consequential relationships and limits.
+- [State boundaries](references/state-machine-rules-boundary.md): transitions, simultaneous outcomes and recovery.
 
-## 1. Core Loop Architecture
-
-Identify the loops that actually exist, including games without progression:
-
-- Primary loop
-- Secondary loop
-- Meta progression loop
-
-Check whether the loops support the intended player experience; not every game needs a secondary or meta loop.
-
-For a new core loop or a consequential mechanic change, read [core-loop examples](references/core-loop-contract.md). Compare an actual player situation, available actions and consequences before adding another system. Treat interesting play as a hypothesis to check in a small playable interaction when available, not a conclusion from a complete rules document.
-
----
-
-## 2. Economy Modeling
-
-For each currency that exists, consider:
-
-- Source
-- Sink
-- Rate of generation
-- Inflation control
-
-Only introduce a sink when the resource model and player experience call for one. A renewable resource is not automatically an economy defect.
-
----
-
-## 3. Progression Design
-
-For progression that spans multiple stages, consider the shape that fits the game:
-
-- Early acceleration
-- Mid-game plateau
-- Late mastery expression
-
-Avoid difficulty cliffs.
-
----
-
-## 4. Retention Structure
-
-Only for a live game with retention goals, consider:
-
-- Early return motivation
-- Mid-term reason to return
-- Long-term goal
-
----
-
-## 5. Practical approach
-
-Map player-observable rules with legal actions, state transitions and shared resources. Resolve boundaries that change the result, such as simultaneous events, repeated actions, interruption/recovery and numeric interactions, before dependent implementation; cover the boundaries the game actually has. Record these decisions in the systems chapter of `docs/GDD.md` and test the smallest interaction that could contradict them when implementation is in scope. Use a resource stress test or scaling analysis only when the project actually has those systems.
-
-Use only the relevant sections for the current request; do not invent an
-economy, meta-progression, or retention plan for a game that has none.
-
-## Reference Files
-
-Read the reference needed for the current design decision:
-- `references/core-loop-contract.md` for a new loop and player promise alignment.
-- `references/parameter-boundary-model.md` for consequential parameter relationships and limits.
-- `references/state-machine-rules-boundary.md` for transitions, simultaneous outcomes and recovery.
+When implementation or tuning is assigned, test the smallest interaction that could contradict the affected rule. Use runtime observations for experience claims; a complete rules document does not prove interesting play.

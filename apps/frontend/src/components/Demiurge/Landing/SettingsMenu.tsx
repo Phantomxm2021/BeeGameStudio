@@ -1,11 +1,14 @@
 import {resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { EASE_OUT } from '../../beui/registry/lib/ease';
 import { ModelConnectionsPanel, type ModelConnectionsHandle, type ModelConnectionsSaveState } from '../../Settings/ModelConnectionsPanel';
 import { BgsSettingsPanel, type BgsSettingsHandle, type BgsSettingsSaveState } from '../../Settings/BgsSettingsPanel';
 import { PersonalImageConnectionPanel, type PersonalImageConnectionHandle, type PersonalImageConnectionSaveState } from '../../Settings/PersonalImageConnectionPanel';
 import {
+  ArrowLeft,
+  UserCircle,
+  ShoppingCart,
   BookOpenText,
   Cpu,
   FolderOpen,
@@ -96,22 +99,26 @@ import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../../be
 import { CloseIconButton } from '../../ui/CloseIconButton';
 import { Tabs, TabsList, TabsTrigger } from '../../beui/motion/tabs';
 import { ProjectSelect } from '../../beui/project-select';
+import { useDesktopLayout } from '../../Desktop/desktopLayoutContext';
 import { UsageBillingPanel, type BillingPackFormState, type BillingSettingsCopy } from '../../Settings/BillingSettingsPanel';
 import { ProjectLifecyclePanel, type ProjectLifecycleSettingsCopy } from '../../Settings/ProjectLifecycleSettingsPanel';
 import { RuntimeSettingsPanel, type RuntimeCapabilityCopy } from '../../Settings/RuntimeSettingsPanel';
 import {
-  McpServerFormPopover,
+  McpServerEditor,
   McpSettingsPanel,
   type McpSettingsCopy,
 } from '../../Settings/McpSettingsPanel';
+import { parseMcpAddCommand } from '../../Settings/mcpAddCommand';
 import {
   isMcpFormSaveable,
-  toPopoverAnchorRect,
   type McpServerForm,
-  type PopoverAnchorRect,
 } from '../../Settings/McpSettingsPanel.types';
 interface SettingsMenuProps {
   isOpen: boolean;
+  embedded?: boolean;
+  section?: SettingsSection;
+  onSectionChange?: (section: SettingsSection) => void;
+  accountSections?: { profile: ReactNode; credits: ReactNode };
   lang: Language;
   onClose: () => void;
   onSetLang: (lang: Language) => void;
@@ -126,16 +133,17 @@ interface SettingsMenuProps {
   canManageCredits?: boolean;
 }
 
-type SettingsSection = 'personal' | 'connections' | 'image-connection' | 'skills' | 'mcp' | 'platform';
+export type SettingsSection = 'profile' | 'credit-store' | 'personal' | 'connections' | 'image-connection' | 'skills' | 'mcp' | 'platform';
 type SettingsTab = 'general' | 'runtime' | 'skills' | 'model' | 'image' | 'invitations' | 'projects' | 'credit';
-type McpFormAnchor =
-  | { kind: 'new' | 'command'; rect: PopoverAnchorRect }
-  | { kind: 'edit'; serverId: string; rect: PopoverAnchorRect }
-  | null;
+type McpPage = 'new' | 'command' | 'edit' | null;
 
 
 export function SettingsMenu({
   isOpen,
+  embedded = false,
+  section,
+  onSectionChange,
+  accountSections,
   lang,
   onClose,
   onSetLang,
@@ -149,6 +157,7 @@ export function SettingsMenu({
   canManageLifecycle,
   canManageCredits,
 }: SettingsMenuProps) {
+  const desktop = useDesktopLayout();
   const { i18n } = useTranslation('settings');
   const fixedSettingsTranslation = i18n.getFixedT(normalizeI18nLanguage(lang), 'settings');
   const translateSettings = (key: string, options?: Record<string, unknown>): string =>
@@ -202,7 +211,8 @@ export function SettingsMenu({
   const [isDefault, setIsDefault] = useState(true);
   const [published, setPublished] = useState(true);
   const [authMethods, setAuthMethods] = useState<ModelAuthMethod[]>(['platform']);
-  const goProfileId = getOpenCodeGoProfileId(baseUrl, apiProtocol);
+  const isChatgptSubscription = provider === 'openai-compatible' && authMethods.includes('chatgpt-subscription');
+  const goProfileId = isChatgptSubscription ? undefined : getOpenCodeGoProfileId(baseUrl, apiProtocol);
   const goProfile = goProfileId ? OPENCODE_GO_PROFILES[goProfileId] : undefined;
   const [goModelsReady, setGoModelsReady] = useState(false);
   const goModelsComplete = !goProfile || goModelsReady;
@@ -226,7 +236,8 @@ export function SettingsMenu({
   const [isSavingRuntimeSettings, setIsSavingRuntimeSettings] = useState(false);
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
   const [mcpForm, setMcpForm] = useState<McpServerForm>(() => createEmptyMcpForm());
-  const [mcpFormAnchor, setMcpFormAnchor] = useState<McpFormAnchor>(null);
+  const [mcpPage, setMcpPage] = useState<McpPage>(null);
+  const [mcpCommand, setMcpCommand] = useState('');
   const [isMcpActionMenuOpen, setIsMcpActionMenuOpen] = useState(false);
   const [mcpStatus, setMcpStatus] = useState('');
   const [isSavingMcp, setIsSavingMcp] = useState(false);
@@ -236,7 +247,13 @@ export function SettingsMenu({
   const [testingMcpServerId, setTestingMcpServerId] = useState('');
   const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-  const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
+  const [internalSection, setInternalSection] = useState<SettingsSection>(section ?? 'personal');
+  if (section && section !== internalSection) setInternalSection(section);
+  const activeSection = section ?? internalSection;
+  const setActiveSection = useCallback((value: SettingsSection) => {
+    setInternalSection(value);
+    onSectionChange?.(value);
+  }, [onSectionChange]);
   const {
     userSkills, loading: skillsLoading, isSavingUserSkill, handleImportUserSkill, handleToggleUserSkill, handleDeleteUserSkill,
   } = useUserSkillsSettings({ isOpen, allowed: effectiveCanManageSkills, selected: activeSection === 'skills',
@@ -261,7 +278,6 @@ export function SettingsMenu({
   const [billingEvents, setBillingEvents] = useState<BeeGameBillingEvent[]>([]);
   const [billingPackForm, setBillingPackForm] = useState(createEmptyBillingPackForm());
   const [isSavingBillingPack, setIsSavingBillingPack] = useState(false);
-  const mcpAutoSaveTimerRef = useRef<number | null>(null);
 
   const modelsLoading = useSettingsSectionLoad({
     isOpen, allowed: effectiveCanManageModelConfig,
@@ -361,7 +377,7 @@ export function SettingsMenu({
           if (!isCurrent()) return;
           setMcpServers(servers);
           setMcpForm(createEmptyMcpForm());
-          setMcpFormAnchor(null);
+          setMcpPage(null);
           setIsMcpActionMenuOpen(false);
           setDiscoveredMcpServers([]);
           setMcpStatus('');
@@ -436,13 +452,12 @@ export function SettingsMenu({
     : activeTab === 'credit' ? creditsLoading : false;
 
   useEffect(() => {
-    return () => {
-      if (mcpAutoSaveTimerRef.current !== null) {
-        window.clearTimeout(mcpAutoSaveTimerRef.current);
-        mcpAutoSaveTimerRef.current = null;
-      }
-    };
-  }, [isOpen, effectiveCanManageMcp, currentUser?.id]);
+    if (!isOpen || activeSection !== 'mcp') {
+      setMcpPage(null);
+      setMcpCommand('');
+      setMcpForm(createEmptyMcpForm());
+    }
+  }, [isOpen, activeSection]);
 
   const openModelConfig = (action: NonNullable<typeof modelAction>, config?: ModelConfig) => {
     setSelectedModelConfigId(config?.id ?? ''); setName(config?.name ?? ''); setProvider(config?.provider ?? 'openai-compatible');setApiProtocol(config ? config.apiProtocol ?? resolveModelApiProtocol(config.provider) : 'responses');
@@ -475,9 +490,9 @@ export function SettingsMenu({
     setIsSaving(true);
     try {
       const payload = {
-        name: name.trim() || (goProfile ? 'OpenCode Go' : 'BeeGame LLM'),
+        name: name.trim() || (isChatgptSubscription ? 'ChatGPT subscription' : goProfile ? 'OpenCode Go' : 'BeeGame LLM'),
         published,
-        authMethods,
+        authMethods: isChatgptSubscription ? ['chatgpt-subscription'] as ModelAuthMethod[] : authMethods,
         provider,
         apiProtocol,
         baseUrl: baseUrl.trim(),
@@ -634,43 +649,21 @@ export function SettingsMenu({
     }
   };
 
-  const handleSaveMcpServer = async (
-    formOverride: McpServerForm = mcpForm,
-    options: { closeAfterSave?: boolean; testAfterSave?: boolean } = {},
-  ) => {
-    const closeAfterSave = options.closeAfterSave !== false;
-    const testAfterSave = options.testAfterSave !== false;
+  const handleSaveMcpServer = async (form: McpServerForm) => {
     setMcpStatus('');
     setIsSavingMcp(true);
     try {
-      const payload = mcpFormToInput(formOverride);
-      const saved = formOverride.id ? await updateMcpServer(formOverride.id, payload) : await createMcpServer(payload);
+      const payload = mcpFormToInput(form);
+      const saved = form.id ? await updateMcpServer(form.id, payload) : await createMcpServer(payload);
       setMcpServers(current => [saved, ...current.filter(server => server.id !== saved.id)]);
-      if (closeAfterSave) {
-        setMcpForm(mcpServerToForm(saved));
-        setMcpFormAnchor(null);
-      }
-      if (testAfterSave) void handleTestMcpServer(saved);
-      return true;
+      setMcpForm(mcpServerToForm(saved));
+      setMcpPage(null);
+      void handleTestMcpServer(saved);
     } catch (error) {
       showError(error instanceof Error ? error.message : 'MCP server save failed');
-      return false;
     } finally {
       setIsSavingMcp(false);
     }
-  };
-
-  const handleEditMcpFormChange = (nextForm: McpServerForm) => {
-    setMcpForm(nextForm);
-    if (mcpAutoSaveTimerRef.current !== null) window.clearTimeout(mcpAutoSaveTimerRef.current);
-    if (!isMcpFormSaveable(nextForm)) {
-      mcpAutoSaveTimerRef.current = null;
-      return;
-    }
-    mcpAutoSaveTimerRef.current = window.setTimeout(() => {
-      mcpAutoSaveTimerRef.current = null;
-      void handleSaveMcpServer(nextForm, { closeAfterSave: false, testAfterSave: false });
-    }, 450);
   };
 
   const handleDeleteMcpServer = async (id: string) => {
@@ -681,7 +674,7 @@ export function SettingsMenu({
       setMcpServers(current => {
         const next = current.filter(server => server.id !== id);
         setMcpForm(createEmptyMcpForm());
-        setMcpFormAnchor(null);
+        setMcpPage(null);
         return next;
       });
       setMcpHealthById(current => {
@@ -793,17 +786,23 @@ export function SettingsMenu({
 
   const savedPrefix = `${text.savedPrefix}${text.savedPrefixSeparator}`;
   const capabilityCopy = settingsObject<RuntimeCapabilityCopy>('runtimeCapabilities');
-  const mcpCopy = settingsObject<McpSettingsCopy>('mcp');
+  const mcpLabels = settingsObject<McpSettingsCopy>('mcp');
+  const mcpCopy = { ...mcpLabels, form: { ...mcpLabels.form,
+    headers: translateSettings('mcp.form.headers'),
+    headersHint: translateSettings('mcp.form.headersHint'),
+  } };
   const sectionTabs = useMemo(
     () => [
+      ...(accountSections ? [{ id: 'profile' as const, label: t.profile, icon: UserCircle }] : []),
       { id: 'personal' as const, label: text.settingsGeneral, icon: Globe },
       ...(currentUser ? [{ id: 'connections' as const, label: lang.startsWith('zh') ? '模型连接' : 'Model connections', icon: KeyRound }] : []),
       ...(currentUser ? [{ id: 'image-connection' as const, label: lang.startsWith('zh') ? 'AI 生图' : 'AI Images', icon: Image }] : []),
       ...(effectiveCanManageSkills ? [{ id: 'skills' as const, label: userSkillsCopy.tab, icon: BookOpenText }] : []),
       ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
+      ...(accountSections ? [{ id: 'credit-store' as const, label: t.creditStore, icon: ShoppingCart }] : []),
       ...(hasPlatformSettings ? [{ id: 'platform' as const, label: adminCopy.platform, icon: ShieldCheck }] : []),
     ],
-    [adminCopy.platform, currentUser, lang, effectiveCanManageSkills, effectiveCanManageMcp, hasPlatformSettings, mcpCopy.title, text.settingsGeneral, userSkillsCopy.tab],
+    [accountSections, t.profile, t.creditStore, adminCopy.platform, currentUser, lang, effectiveCanManageSkills, effectiveCanManageMcp, hasPlatformSettings, mcpCopy.title, text.settingsGeneral, userSkillsCopy.tab],
   );
   const platformTabs = useMemo(() => {
     return [
@@ -836,6 +835,7 @@ export function SettingsMenu({
     text.settingsModel,
   ]);
   const activeTabLabel =
+    activeSection === 'profile' ? t.profile : activeSection === 'credit-store' ? t.creditStore :
     activeSection === 'connections' ? (lang.startsWith('zh') ? '模型连接' : 'Model connections') : activeSection === 'personal'
       ? text.settingsGeneral
       : activeSection === 'image-connection'
@@ -843,7 +843,7 @@ export function SettingsMenu({
       : activeSection === 'skills'
         ? userSkillsCopy.title
         : activeSection === 'mcp'
-          ? mcpCopy.title
+          ? mcpPage === 'edit' ? mcpForm.name : mcpPage === 'new' ? mcpCopy.newServer : mcpPage === 'command' ? mcpCopy.newServerCommand : mcpCopy.title
         : activeTab === 'image'
           ? (lang.startsWith('zh') ? '生图服务' : 'Image service')
         : activeTab === 'general'
@@ -860,6 +860,7 @@ export function SettingsMenu({
                       ? billingCopy.title
                       : text.settingsModel;
   const isSavingCurrentTab =
+    activeSection === 'mcp' ? isSavingMcp :
     activeTab === 'image' ? imageSettingsState.busy :
     activeSection === 'platform' && activeTab === 'general'
       ? false
@@ -876,6 +877,7 @@ export function SettingsMenu({
                   : isSaving;
   const hasGeneralSaveAction = false;
   const isSaveDisabled =
+    activeSection === 'mcp' ? isSavingMcp || !mcpPage || (mcpPage === 'command' ? 'error' in parseMcpAddCommand(mcpCommand) : !isMcpFormSaveable(mcpForm)) :
     activeTab === 'image' ? imageSettingsState.busy || !imageSettingsState.canSave :
     activeSection === 'platform' && activeTab === 'general'
       ? !hasGeneralSaveAction || isSavingCurrentTab
@@ -892,6 +894,15 @@ export function SettingsMenu({
                   : isSavingCurrentTab || !authMethods.length || !model.trim() || !goModelsComplete || (!selectedModelConfigId && authMethods.includes('platform') && !apiKey.trim());
 
   const handleSaveSettings = async () => {
+    if (activeSection === 'mcp') {
+      if (isSaveDisabled) return;
+      if (mcpPage === 'command') {
+        const parsed = parseMcpAddCommand(mcpCommand);
+        if ('error' in parsed) return;
+        await handleSaveMcpServer({ ...mcpForm, name: parsed.name, transport: 'http', url: parsed.url, command: '', argsText: '', envText: '', headersText: '' });
+      } else await handleSaveMcpServer(mcpForm);
+      return;
+    }
     if (activeSection !== 'platform') return;
     if (activeTab === 'model') {
       const saved = await handleSaveModelConfig();
@@ -900,16 +911,16 @@ export function SettingsMenu({
     }
     if (activeTab === 'runtime') {
       const saved = await handleSaveRuntimeSettings();
-      if (saved) onClose();
+      if (saved && !embedded) onClose();
       return;
     }
     if (activeTab === 'invitations') {
       const saved = await handleSaveInvitationSettings();
-      if (saved) onClose();
+      if (saved && !embedded) onClose();
       return;
     }
     if (activeTab === 'image') {
-      if (await imageSettingsRef.current?.save()) onClose();
+      if (await imageSettingsRef.current?.save() && !embedded) onClose();
       return;
     }
     if (activeTab === 'skills') return;
@@ -973,7 +984,7 @@ export function SettingsMenu({
     if (activeSection === 'platform' && !platformTabs.some(tab => tab.id === activeTab)) {
       setActiveTab(platformTabs[0]?.id ?? 'general');
     }
-  }, [activeSection, activeTab, effectiveCanManageSkills, effectiveCanManageMcp, hasPlatformSettings, platformTabs]);
+  }, [activeSection, activeTab, effectiveCanManageSkills, effectiveCanManageMcp, hasPlatformSettings, platformTabs, setActiveSection]);
 
   const modelConfigEditor = (
     <>
@@ -981,6 +992,11 @@ export function SettingsMenu({
         language={lang}
         onGoModelsReady={setGoModelsReady}
         enableOpenCodeGo
+        chatgptSubscription={isChatgptSubscription}
+        onSelectChatgptSubscription={() => {
+          setProvider('openai-compatible'); setApiProtocol('responses'); setAuthMethods(['chatgpt-subscription']);
+          setBaseUrl(''); setApiKey(''); setApiKeyPreview(''); setModel('');
+        }}
         labels={{
           provider: text.provider,
           protocol: lang.startsWith('zh') ? '协议' : 'Protocol',
@@ -996,7 +1012,7 @@ export function SettingsMenu({
         model={model}
         apiKeyPreview={apiKeyPreview}
         savedPrefix={savedPrefix}
-        onProviderChange={value => { setProvider(value); setAuthMethods(current => current.filter(method => method === 'platform' || method === 'byok')); }}
+        onProviderChange={value => { setProvider(value); setAuthMethods(current => { const methods = current.filter(method => method === 'platform' || method === 'byok'); return methods.length ? methods : ['platform']; }); }}
         onBaseUrlChange={setBaseUrl}
         onApiKeyChange={setApiKey}
         onModelChange={setModel}
@@ -1005,6 +1021,11 @@ export function SettingsMenu({
           if (!isSaveDisabled) void handleSaveSettings();
         }}
       />
+      {currentUser?.role === 'owner' && isChatgptSubscription && <section aria-label={lang.startsWith('zh') ? '管理员 ChatGPT 订阅' : 'Administrator ChatGPT subscription'} className="border-b border-border py-3">
+        <h3 className="text-sm font-medium">{lang.startsWith('zh') ? '管理员 ChatGPT 订阅' : 'Administrator ChatGPT subscription'}</h3>
+        <p className="mt-2 text-xs text-muted-foreground">{lang.startsWith('zh') ? '与模型连接、生图服务共用同一份账户授权，无需重复登录。登录仅授权；模型及生图的启用、默认选择与计费仍分别配置。' : 'Shares the same account authorization with Model connections and Image service; no second sign-in is needed. Signing in does not change model or image activation, defaults, or billing settings.'}</p>
+        <ModelConnectionsPanel key={currentUser.id} language={lang} chatgptAuthorizationOnly />
+      </section>}
       <div className="space-y-1 border-t border-border pt-4">
         <div className="flex min-h-11 items-center justify-between gap-4 text-sm">
           <span>{lang.startsWith('zh') ? '向普通用户发布' : 'Publish to users'}</span>
@@ -1014,16 +1035,16 @@ export function SettingsMenu({
           <span>{lang.startsWith('zh') ? '平台默认模型' : 'Platform default model'}</span>
           <Switch checked={isDefault} onCheckedChange={setIsDefault} ariaLabel={lang.startsWith('zh') ? '平台默认模型' : 'Platform default model'} size="sm" />
         </div>
-        <fieldset className="border-t border-border pt-3">
+        {!isChatgptSubscription && <fieldset className="border-t border-border pt-3">
           <legend className="text-sm text-muted-foreground">{lang.startsWith('zh') ? '允许的接入方式' : 'Allowed authentication methods'}</legend>
-          {(['platform', 'byok', ...(goProfile ? [] : provider === 'openai-compatible' ? ['chatgpt-subscription'] : [])] as ModelAuthMethod[]).map(method => {
-            const label = method === 'platform' ? (lang.startsWith('zh') ? '平台凭据' : 'Platform credentials') : method === 'byok' ? 'BYOK' : 'ChatGPT subscription';
+          {(['platform', 'byok'] as ModelAuthMethod[]).map(method => {
+            const label = method === 'platform' ? (lang.startsWith('zh') ? '平台凭据' : 'Platform credentials') : 'BYOK';
             return <div key={method} className="flex min-h-11 items-center justify-between gap-4 text-sm">
               <span>{label}</span>
               <Switch checked={authMethods.includes(method)} onCheckedChange={checked => setAuthMethods(current => checked ? [...current, method] : current.filter(item => item !== method))} ariaLabel={label} size="sm" />
             </div>;
           })}
-        </fieldset>
+        </fieldset>}
       </div>
       <div className="mt-5 flex justify-end gap-3">
         <button type="button" disabled={isSaving} onClick={closeModelConfig} className="rounded-lg px-3 py-2 text-sm text-muted-foreground disabled:opacity-50">{lang.startsWith('zh') ? '取消' : 'Cancel'}</button>
@@ -1052,68 +1073,14 @@ export function SettingsMenu({
     </div>
   ) : null;
 
-  return (
-    <Dialog open={isOpen} onOpenChange={open => { if (!open && !modelAction && !activeModelPopoverId) onClose(); }}>
-      <DialogContent
-        aria-label={t.settings}
-        className="h-[min(680px,calc(100dvh-1rem))] w-[min(820px,calc(100vw-1rem))] max-w-none overflow-hidden p-0 text-foreground sm:h-[min(620px,calc(100dvh-2rem))] sm:w-[min(820px,calc(100vw-2rem))]"
-      >
-        <div
-          onClick={event => event.stopPropagation()}
-          data-testid="settings-modal-shell"
-          className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground sm:flex-row"
-        >
-          <aside
-            data-testid="settings-modal-sidebar"
-            className="flex h-auto w-full shrink-0 flex-col border-b border-border bg-muted/30 p-2 sm:h-full sm:w-44 sm:border-b-0 sm:border-r sm:p-3"
-          >
-            <div className="mb-2 flex items-center justify-between sm:mb-4">
-              <CloseIconButton label={text.closeSettings} onClick={onClose} />
-            </div>
-            <Tabs value={activeSection} onValueChange={value => { setActiveSection(value as typeof activeSection); setActiveTab('general'); }}>
-            <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={t.systemSettings}>
-              {sectionTabs.map(tab => {
-                const Icon = tab.icon;
-                return (
-                  <TabsTrigger
-                    key={tab.id}
-                    value={tab.id}
-                    className="flex h-9 min-w-max items-center justify-start gap-2 rounded-lg px-3 text-left text-sm data-[active]:bg-accent sm:w-full"
-                  >
-                    <Icon className="h-4 w-4" />
-                    {tab.label}
-                  </TabsTrigger>
-                );
-              })}
-            </TabsList>
-            </Tabs>
-            {activeSection === 'platform' ? (
-                <div className="mt-2 border-t border-border pt-2 sm:mt-4 sm:pt-3">
-                <div className="type-caption-1 mb-2 px-3 text-muted-foreground">{adminCopy.platform}</div>
-                <Tabs value={activeTab} onValueChange={value => setActiveTab(value as typeof activeTab)}>
-                <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={adminCopy.platform}>
-                  {platformTabs.map(tab => {
-                    const Icon = tab.icon;
-                    return (
-                      <TabsTrigger
-                        key={tab.id}
-                        value={tab.id}
-                        className="flex h-9 min-w-max items-center justify-start gap-2 rounded-lg px-3 text-left text-sm data-[active]:bg-accent sm:w-full"
-                      >
-                        <Icon className="h-4 w-4" />
-                        {tab.label}
-                      </TabsTrigger>
-                    );
-                  })}
-                </TabsList>
-                </Tabs>
-              </div>
-            ) : null}
-          </aside>
-
-          <main data-testid="settings-modal-content" className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <fieldset disabled={isLoadingCurrentSection} aria-busy={isLoadingCurrentSection} className="contents">
+  const sectionHeader = (
             <header className={`shrink-0 px-6 ${activeSection === 'mcp' ? 'pb-5 pt-6' : 'pb-3 pt-5'}`}>
+              {activeSection === 'mcp' && mcpPage ? <button type="button" disabled={isSavingMcp}
+                aria-label={lang.startsWith('zh') ? '返回 MCP 列表' : 'Back to MCP list'}
+                onClick={() => { setMcpPage(null); setMcpForm(createEmptyMcpForm()); setMcpCommand(''); setMcpStatus(''); }}
+                className="mb-3 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">
+                <ArrowLeft className="size-4" aria-hidden="true" />MCP
+              </button> : null}
               <div className="flex items-end justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-xs text-muted-foreground">
@@ -1137,7 +1104,7 @@ export function SettingsMenu({
                     </MorphPopoverContent>
                   </MorphPopover>
                 ) : null}
-                {activeSection === 'mcp' && effectiveCanManageMcp ? (
+                {activeSection === 'mcp' && effectiveCanManageMcp && !mcpPage ? (
                   <div className="relative">
                     <button
                       type="button"
@@ -1146,7 +1113,7 @@ export function SettingsMenu({
                       aria-expanded={isMcpActionMenuOpen}
                       onClick={event => {
                         if (!isMcpActionMenuOpen) {
-                          setMcpFormAnchor(null);
+                          setMcpPage(null);
                         }
                         setIsMcpActionMenuOpen(current => !current);
                         event.currentTarget.dataset.anchor = 'mcp-actions';
@@ -1181,15 +1148,12 @@ export function SettingsMenu({
                             key={kind}
                             type="button"
                             role="menuitem"
-                            onClick={event => {
-                              const anchor = document.querySelector('[data-anchor="mcp-actions"]');
+                            onClick={() => {
                               setMcpForm(createEmptyMcpForm());
+                              setMcpCommand('');
                               setMcpStatus('');
                               setIsMcpActionMenuOpen(false);
-                              setMcpFormAnchor({
-                                kind,
-                                rect: toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()),
-                              });
+                              setMcpPage(kind);
                             }}
                             className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-foreground transition-colors hover:bg-accent"
                           >
@@ -1199,23 +1163,7 @@ export function SettingsMenu({
                         </div>
                       </>
                     ) : null}
-                    {mcpFormAnchor?.kind === 'new' || mcpFormAnchor?.kind === 'command' ? (
-                      <McpServerFormPopover
-                        key={mcpFormAnchor.kind}
-                        mode={mcpFormAnchor.kind === 'command' ? 'command' : 'create'}
-                        copy={mcpCopy}
-                        form={mcpForm}
-                        status={mcpStatus}
-                        isSaving={isSavingMcp}
-                        anchorRect={mcpFormAnchor.rect}
-                        onChange={setMcpForm}
-                        onClose={() => {
-                          setMcpFormAnchor(null);
-                          setMcpStatus('');
-                        }}
-                        onSave={nextForm => void handleSaveMcpServer(nextForm, { closeAfterSave: true })}
-                      />
-                    ) : null}
+
                   </div>
                 ) : null}
                 {activeSection === 'skills' && effectiveCanManageSkills ? (
@@ -1242,19 +1190,43 @@ export function SettingsMenu({
                 ) : null}
               </div>
             </header>
-
-            {activeSection !== 'mcp' ? <div className="mx-6 h-px shrink-0 bg-border" /> : null}
-
+  );
+  const saveAction = (<>
+{(activeSection === 'mcp' && mcpPage && effectiveCanManageMcp || activeSection === 'personal' && currentUser || activeSection === 'image-connection' || activeSection === 'connections' && modelConnectionSaveState.visible || activeSection === 'platform' &&
+            activeTab !== 'model' &&
+            activeTab !== 'projects' &&
+            activeTab !== 'credit' &&
+            (activeTab !== 'general' || hasGeneralSaveAction)) ? (
+              <div className="flex shrink-0 items-center justify-end border-t border-border bg-muted/30 px-6 py-4">
+                <button
+                  type="button"
+                  aria-label={text.saveSettings}
+                  onClick={activeSection === 'personal' ? () => void bgsSettingsRef.current?.save() : activeSection === 'image-connection' ? () => void imageConnectionRef.current?.save() : activeSection === 'connections' ? () => modelConnectionsRef.current?.saveByok() : handleSaveSettings}
+                  disabled={activeSection === 'personal' ? bgsSettingsSaveState.disabled : activeSection === 'image-connection' ? imageConnectionSaveState.disabled : activeSection === 'connections' ? modelConnectionSaveState.disabled : isSaveDisabled}
+                  className="rounded-full border border-transparent bg-primary text-primary-foreground inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {activeSection === 'personal' ? bgsSettingsSaveState.busy ? text.saving : text.saveSettings : activeSection === 'image-connection' ? imageConnectionSaveState.busy ? text.saving : text.saveSettings : activeSection === 'connections' ? modelConnectionSaveState.busy ? text.saving : text.saveSettings : isSavingCurrentTab ? text.saving : text.saveSettings}
+                </button>
+              </div>
+            ) : null}
+  </>);
+  const sectionBody = (
             <motion.div
-              key={`${activeSection}-${activeTab}`}
+              key={`${activeSection}-${activeTab}-${mcpPage ?? 'list'}`}
               data-testid="settings-modal-scroll-area"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.16, ease: EASE_OUT }}
-              className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 ${activeSection === 'mcp' || activeSection === 'connections' || activeSection === 'skills' ? 'flex flex-col' : ''}`}
+              className={embedded ? `desktop-settings-body ${activeSection === 'mcp' && mcpPage ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain' : ''}` : `min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 ${activeSection === 'mcp' || activeSection === 'connections' || activeSection === 'skills' ? 'flex flex-col' : ''}`}
             >
+              {activeSection === 'profile' ? accountSections?.profile : null}
+              {activeSection === 'credit-store' ? accountSections?.credits : null}
               {activeSection === 'personal' && activeTab === 'general' ? (
-                <div className="divide-y divide-border">
+                embedded ? <section className="desktop-general-settings">
+                  <div className="desktop-settings-group-label">{lang.startsWith('zh') ? '界面' : 'Interface'}</div>
+                  <div className="desktop-setting-row"><label htmlFor="desktop-language">{t.language}</label><select id="desktop-language" value={lang} onChange={event => onSetLang(event.target.value as Language)}>{LANGUAGE_OPTIONS.map(option => <option key={option.code} value={option.code}>{option.label}</option>)}</select></div>
+                  <div className="desktop-setting-row"><span>{t.theme}</span><div className="desktop-appearance" role="group" aria-label={t.theme}>{(['system','light','dark'] as const).map(value => <button key={value} type="button" aria-pressed={(desktop?.appearance ?? (isDark ? 'dark' : 'light')) === value} onClick={() => desktop?.setAppearance?.(value)}>{value === 'system' ? (lang.startsWith('zh') ? '跟随系统' : 'System') : value === 'dark' ? t.darkMode : t.lightMode}</button>)}</div></div>
+                </section> : <div className="divide-y divide-border">
                   <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                     <span className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <Globe className="h-4 w-4 text-muted-foreground" />
@@ -1272,9 +1244,9 @@ export function SettingsMenu({
                 </div>
               ) : null}
 
-              {activeSection === 'personal' && currentUser ? <BgsSettingsPanel key={currentUser.id} ref={bgsSettingsRef} language={lang} onSaveStateChange={setBgsSettingsSaveState} /> : null}
-              {activeSection === 'connections' && currentUser ? <ModelConnectionsPanel key={currentUser.id} ref={modelConnectionsRef} language={lang} onSaveStateChange={setModelConnectionSaveState} /> : null}
-              {activeSection === 'image-connection' && currentUser ? <PersonalImageConnectionPanel key={currentUser.id} ref={imageConnectionRef} language={lang} onSaveStateChange={setImageConnectionSaveState} /> : null}
+              {activeSection === 'personal' && currentUser ? <BgsSettingsPanel key={currentUser.id} ref={bgsSettingsRef} language={lang} desktop={embedded} onSaveStateChange={setBgsSettingsSaveState} /> : null}
+              {activeSection === 'connections' && currentUser ? <ModelConnectionsPanel key={currentUser.id} ref={modelConnectionsRef} language={lang} desktop={embedded} onSaveStateChange={setModelConnectionSaveState} /> : null}
+              {activeSection === 'image-connection' && currentUser ? <PersonalImageConnectionPanel key={currentUser.id} ref={imageConnectionRef} language={lang} desktop={embedded} onSaveStateChange={setImageConnectionSaveState} /> : null}
 
               {activeSection === 'platform' && activeTab === 'general' ? (
                 <div className="divide-y divide-border">
@@ -1355,15 +1327,10 @@ export function SettingsMenu({
 
               {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
                 <>
-                {currentUser?.role === 'owner' && <section aria-label={lang.startsWith('zh') ? '管理员 ChatGPT 订阅' : 'Administrator ChatGPT subscription'} className="border-b border-border py-3">
-                  <h3 className="text-sm font-medium">{lang.startsWith('zh') ? '管理员 ChatGPT 订阅' : 'Administrator ChatGPT subscription'}</h3>
-                  <p className="mt-2 text-xs text-muted-foreground">{lang.startsWith('zh') ? '与模型连接、生图服务共用同一份账户授权，无需重复登录。登录仅授权；模型及生图的启用、默认选择与计费仍分别配置。' : 'Shares the same account authorization with Model connections and Image service; no second sign-in is needed. Signing in does not change model or image activation, defaults, or billing settings.'}</p>
-                  <ModelConnectionsPanel key={currentUser.id} language={lang} chatgptAuthorizationOnly />
-                </section>}
                 {modelsLoading ? <p role="status" className="py-5 text-sm text-muted-foreground">{lang.startsWith('zh') ? '加载中…' : 'Loading…'}</p> : !existingConfigs.length && !status ? <p className="py-5 text-sm text-muted-foreground">{lang.startsWith('zh') ? '暂无模型配置，点击右上角 + 添加。' : 'No model configurations. Use + to add one.'}</p> : null}
                 <ul aria-label={lang.startsWith('zh') ? '模型配置列表' : 'Model configurations'} className="divide-y divide-border">
                   {existingConfigs.map(config => <li key={config.id} className="flex min-h-16 items-center gap-3 py-3">
-                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium" title={config.name}>{config.name}</p><p className="mt-1 truncate text-xs text-muted-foreground">{config.provider}{config.isDefault ? (lang.startsWith('zh') ? ' · 默认' : ' · Default') : ''}{config.published === false ? (lang.startsWith('zh') ? ' · 未发布' : ' · Unpublished') : ''}</p></div>
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium" title={config.name}>{config.name}</p><p className="mt-1 truncate text-xs text-muted-foreground">{config.provider === 'openai-compatible' && config.authMethods?.includes('chatgpt-subscription') ? 'ChatGPT subscription' : config.provider}{config.isDefault ? (lang.startsWith('zh') ? ' · 默认' : ' · Default') : ''}{config.published === false ? (lang.startsWith('zh') ? ' · 未发布' : ' · Unpublished') : ''}</p></div>
                     <MorphPopover
                       open={activeModelPopoverId === config.id}
                       onOpenChange={open => {
@@ -1395,36 +1362,18 @@ export function SettingsMenu({
               ) : null}
 
               {activeSection === 'mcp' && effectiveCanManageMcp ? (
-                <McpSettingsPanel
-                  copy={mcpCopy}
-                  servers={mcpServers}
-                  status={mcpStatus}
-                  isSaving={isSavingMcp}
-                  discovered={discoveredMcpServers}
-                  activeDiscovered={activeMcpServers}
-                  healthById={mcpHealthById}
-                  testingServerId={testingMcpServerId}
-                  onEdit={(server, rect) => {
-                    setMcpForm(mcpServerToForm(server));
-                    setMcpStatus('');
-                    setMcpFormAnchor({ kind: 'edit', serverId: server.id, rect });
+                mcpPage ? <McpServerEditor
+                  key={mcpPage}
+                  mode={mcpPage === 'new' ? 'create' : mcpPage}
+                  copy={mcpCopy} form={mcpForm} status={mcpStatus} isSaving={isSavingMcp}
+                  onChange={setMcpForm} commandText={mcpCommand} onCommandChange={setMcpCommand}
+                /> : <McpSettingsPanel
+                  copy={mcpCopy} servers={mcpServers} isSaving={isSavingMcp}
+                  discovered={discoveredMcpServers} activeDiscovered={activeMcpServers}
+                  healthById={mcpHealthById} testingServerId={testingMcpServerId}
+                  onEdit={server => {
+                    setMcpForm(mcpServerToForm(server)); setMcpStatus(''); setMcpPage('edit');
                   }}
-                  activeEditServerId={mcpFormAnchor?.kind === 'edit' ? mcpFormAnchor.serverId : ''}
-                  activeEditAnchorRect={mcpFormAnchor?.kind === 'edit' ? mcpFormAnchor.rect : null}
-                  form={mcpForm}
-                  onFormChange={handleEditMcpFormChange}
-                  onCloseForm={() => {
-                    if (mcpAutoSaveTimerRef.current !== null) {
-                      window.clearTimeout(mcpAutoSaveTimerRef.current);
-                      mcpAutoSaveTimerRef.current = null;
-                    }
-                    if (isMcpFormSaveable(mcpForm)) {
-                      void handleSaveMcpServer(mcpForm, { closeAfterSave: false, testAfterSave: false });
-                    }
-                    setMcpFormAnchor(null);
-                    setMcpStatus('');
-                  }}
-                  onSaveForm={() => void handleSaveMcpServer(mcpForm, { closeAfterSave: true })}
                   onTest={server => void handleTestMcpServer(server)}
                   onDelete={id => void handleDeleteMcpServer(id)}
                   onImport={server => void handleImportDiscoveredMcpServer(server)}
@@ -1433,6 +1382,7 @@ export function SettingsMenu({
               ) : null}
               {activeSection === 'skills' && effectiveCanManageSkills ? (
                 <UserSkillsSettingsPanel
+                  desktop={embedded}
                   copy={userSkillsCopy}
                   skills={userSkills}
                   isSaving={isSavingUserSkill}
@@ -1441,27 +1391,115 @@ export function SettingsMenu({
                   onDelete={skill => void handleDeleteUserSkill(skill)}
                 />
               ) : null}
-            </motion.div>
-            {(activeSection === 'personal' && currentUser || activeSection === 'image-connection' || activeSection === 'connections' && modelConnectionSaveState.visible || activeSection === 'platform' &&
+              {embedded ? <>{(activeSection === 'platform' &&
             activeTab !== 'model' &&
             activeTab !== 'projects' &&
             activeTab !== 'credit' &&
             (activeTab !== 'general' || hasGeneralSaveAction)) ? (
-              <div className="flex items-center justify-end border-t border-border bg-muted/30 px-6 py-4">
+              <div className="desktop-local-actions">
                 <button
                   type="button"
                   aria-label={text.saveSettings}
-                  onClick={activeSection === 'personal' ? () => void bgsSettingsRef.current?.save() : activeSection === 'image-connection' ? () => void imageConnectionRef.current?.save() : activeSection === 'connections' ? () => modelConnectionsRef.current?.saveByok() : handleSaveSettings}
-                  disabled={activeSection === 'personal' ? bgsSettingsSaveState.disabled : activeSection === 'image-connection' ? imageConnectionSaveState.disabled : activeSection === 'connections' ? modelConnectionSaveState.disabled : isSaveDisabled}
-                  className="rounded-full border border-transparent bg-primary text-primary-foreground inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={handleSaveSettings}
+                  disabled={isSaveDisabled}
+                  className="desktop-settings-button desktop-primary"
                 >
-                  {activeSection === 'personal' ? bgsSettingsSaveState.busy ? text.saving : text.saveSettings : activeSection === 'image-connection' ? imageConnectionSaveState.busy ? text.saving : text.saveSettings : activeSection === 'connections' ? modelConnectionSaveState.busy ? text.saving : text.saveSettings : isSavingCurrentTab ? text.saving : text.saveSettings}
+                  {isSavingCurrentTab ? text.saving : text.saveSettings}
                 </button>
               </div>
+            ) : null}</> : null}
+            </motion.div>
+  );
+
+  const content = (
+        <div
+          onClick={event => event.stopPropagation()}
+          data-testid="settings-modal-shell"
+          className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground sm:flex-row"
+        >
+          <aside
+            data-testid="settings-modal-sidebar"
+            className="flex h-auto w-full shrink-0 flex-col border-b border-border bg-muted/30 p-2 sm:h-full sm:w-44 sm:border-b-0 sm:border-r sm:p-3"
+          >
+            <div className="mb-2 flex items-center justify-between sm:mb-4">
+              {embedded ? <button type="button" onClick={onClose} aria-label={text.closeSettings} className="desktop-settings-back">
+                <ArrowLeft aria-hidden="true" /><span>{t.settings}</span>
+              </button> : <CloseIconButton label={text.closeSettings} onClick={onClose} />}
+            </div>
+            <Tabs value={activeSection} onValueChange={value => { setActiveSection(value as typeof activeSection); setActiveTab('general'); }}>
+            <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={t.systemSettings}>
+              {sectionTabs.map(tab => {
+                const Icon = tab.icon;
+                return (
+                  <TabsTrigger
+                    key={tab.id}
+                    value={tab.id}
+                    className="flex h-9 min-w-max items-center justify-start gap-2 rounded-lg px-3 text-left text-sm data-[active]:bg-accent sm:w-full"
+                  >
+                    <Icon className="h-4 w-4" />
+                    {tab.label}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+            </Tabs>
+            {activeSection === 'platform' ? (
+                <div className="mt-2 border-t border-border pt-2 sm:mt-4 sm:pt-3">
+                <div className="type-caption-1 mb-2 px-3 text-muted-foreground">{adminCopy.platform}</div>
+                <Tabs value={activeTab} onValueChange={value => setActiveTab(value as typeof activeTab)}>
+                <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={adminCopy.platform}>
+                  {platformTabs.map(tab => {
+                    const Icon = tab.icon;
+                    return (
+                      <TabsTrigger
+                        key={tab.id}
+                        value={tab.id}
+                        className="flex h-9 min-w-max items-center justify-start gap-2 rounded-lg px-3 text-left text-sm data-[active]:bg-accent sm:w-full"
+                      >
+                        <Icon className="h-4 w-4" />
+                        {tab.label}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+                </Tabs>
+              </div>
             ) : null}
+          </aside>
+
+          <main data-testid="settings-modal-content" className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <fieldset disabled={isLoadingCurrentSection} aria-busy={isLoadingCurrentSection} className="contents">
+            {sectionHeader}
+
+            {activeSection !== 'mcp' ? <div className="mx-6 h-px shrink-0 bg-border" /> : null}
+
+            {sectionBody}
+            {saveAction}
             </fieldset>
           </main>
         </div>
+  );
+  if (embedded) return <div className="desktop-settings-content" hidden={!isOpen}>
+    <aside className="desktop-settings-navigation" aria-label={t.systemSettings}>
+      <button type="button" className="desktop-settings-back" aria-label={text.closeSettings} onClick={onClose}><ArrowLeft aria-hidden="true" /><span>{t.settings}</span></button>
+      <nav>{[...sectionTabs.filter(tab => tab.id !== 'profile' && tab.id !== 'credit-store'), ...sectionTabs.filter(tab => tab.id === 'profile' || tab.id === 'credit-store')].map(tab => {
+        const Icon = tab.icon;
+        return <button key={tab.id} type="button" className={`desktop-settings-nav-item${tab.id === 'profile' ? ' desktop-account-category' : ''}`} aria-current={activeSection === tab.id ? 'page' : undefined} onClick={() => { setActiveSection(tab.id as SettingsSection); setActiveTab('general'); }}><Icon aria-hidden="true" /><span>{tab.label}</span></button>;
+      })}</nav>
+      {activeSection === 'platform' ? <nav className="desktop-platform-navigation" aria-label={adminCopy.platform}>{platformTabs.map(tab => { const Icon = tab.icon; return <button key={tab.id} type="button" className="desktop-settings-nav-item" aria-current={activeTab === tab.id ? 'page' : undefined} onClick={() => setActiveTab(tab.id as SettingsTab)}><Icon aria-hidden="true" /><span>{tab.label}</span></button>; })}</nav> : null}
+    </aside>
+    <main className="desktop-settings-main" style={activeSection === 'mcp' && mcpPage ? { display: 'flex', flexDirection: 'column', overflow: 'hidden' } : undefined}>
+      <fieldset disabled={isLoadingCurrentSection} aria-busy={isLoadingCurrentSection} className="desktop-settings-fieldset"
+        style={activeSection === 'mcp' && mcpPage ? { display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0, paddingBottom: 0 } : undefined}>
+        {sectionHeader}{isOpen ? sectionBody : null}{activeSection === 'mcp' ? saveAction : null}
+      </fieldset>
+    </main>
+  </div>;
+  return (
+    <Dialog open={isOpen} onOpenChange={open => { if (!open && !modelAction && !activeModelPopoverId) onClose(); }}>
+      <DialogContent aria-label={t.settings}
+        className="h-[min(680px,calc(100dvh-1rem))] w-[min(820px,calc(100vw-1rem))] max-w-none overflow-hidden p-0 text-foreground sm:h-[min(620px,calc(100dvh-2rem))] sm:w-[min(820px,calc(100vw-2rem))]">
+        {content}
       </DialogContent>
     </Dialog>
   );
@@ -1645,6 +1683,7 @@ function createEmptyMcpForm(): McpServerForm {
     url: '',
     cwd: '',
     envText: '',
+    headersText: '',
     autoStart: true,
   };
 }
@@ -1671,6 +1710,7 @@ function mcpServerToForm(server: McpServerConfig): McpServerForm {
     url: server.url || '',
     cwd: server.cwd || '',
     envText: (server.env || []).map(item => `${item.key}=${item.value || ''}`).join('\n'),
+    headersText: (server.headers || []).map(item => `${item.key}=`).join('\n'),
     autoStart: server.autoStart !== false,
   };
 }
@@ -1692,7 +1732,11 @@ function mcpFormToInput(form: McpServerForm): McpServerInput {
         }
       : { url: form.url.trim() }),
     ...(form.cwd.trim() ? { cwd: form.cwd.trim() } : {}),
-    env: form.envText
+    ...(form.transport === 'http' ? { headers: form.headersText.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+      const [key, ...rest] = line.split('=');
+      return { key: key.trim(), value: rest.join('=').trim() };
+    }) } : {}),
+    env: (form.transport === 'stdio' ? form.envText : '')
       .split('\n')
       .map(line => line.trim())
       .filter(Boolean)
@@ -1722,6 +1766,7 @@ function mcpServerToInput(server: McpServerConfig): McpServerInput {
     ...(server.url ? { url: server.url } : {}),
     ...(server.cwd ? { cwd: server.cwd } : {}),
     ...(server.env ? { env: server.env } : {}),
+    ...(server.headers ? { headers: server.headers } : {}),
     autoStart: server.autoStart,
   };
 }
@@ -1737,6 +1782,7 @@ function discoveredMcpServerToInput(server: DiscoveredMcpServer | ActiveDiscover
     ...(server.url ? { url: server.url } : {}),
     ...(server.cwd ? { cwd: server.cwd } : {}),
     ...(server.env ? { env: server.env } : {}),
+    ...(server.headers ? { headers: server.headers } : {}),
     autoStart: server.autoStart,
   };
 }

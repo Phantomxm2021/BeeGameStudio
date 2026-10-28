@@ -1,4 +1,4 @@
-import { startNativeMcpHttp, type McpHttpNetworkOptions } from './native-mcp-http'
+import { startNativeMcpHttp, type McpHttpNetworkOptions, type McpHttpServer } from './native-mcp-http'
 import { realpath } from 'node:fs/promises'
 import type { McpServerConfig } from '../mcp-servers-store'
 import { sharedContentChecker } from './content-checker-runtime'
@@ -17,7 +17,7 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
   if (!raw && !uiLayoutConstraints) return { config: {} as Record<string, unknown>, context: '', close: async () => {} }
   const servers: McpServerConfig[] = raw ? JSON.parse(raw) : []
   if (!Array.isArray(servers)) throw Error('Invalid BGS runtime MCP configuration')
-  const root = await realpath(workspace), mcpServers: Record<string,unknown> = {}, unavailable: string[] = [], httpServers: Record<string,string> = {}
+  const root = await realpath(workspace), mcpServers: Record<string,unknown> = {}, unavailable: string[] = [], httpServers: Record<string,McpHttpServer> = {}
   for (const server of servers) {
     if (!server.enabled || server.autoStart !== true) continue
     if (!/^[A-Za-z0-9_-]+$/.test(server.id)) throw Error('Invalid BGS runtime MCP server identity')
@@ -38,7 +38,7 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
       const url = new URL(server.url)
       if (!['http:','https:'].includes(url.protocol) || url.username || url.password) { skip('unsupported URL'); continue }
       if (server.env?.some(item => item.value !== undefined)) { skip('remote environment variables are not HTTP headers'); continue }
-      httpServers[key] = server.url
+      httpServers[key] = { url: server.url, headers: server.headers }
     } else { skip(server.transport === 'sse' ? 'legacy SSE is unsupported; use a Streamable HTTP endpoint' : 'unsupported transport') }
   }
   if (uiLayoutConstraints) {

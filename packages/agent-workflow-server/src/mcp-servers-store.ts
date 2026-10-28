@@ -1,3 +1,4 @@
+import { normalizeMcpHeaders } from './mcp-http-headers'
 import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
 import {
   existsSync,
@@ -43,6 +44,7 @@ export type McpServerConfig = {
   url?: string
   cwd?: string
   env?: McpServerEnvVar[]
+  headers?: McpServerEnvVar[]
   autoStart?: boolean
 }
 
@@ -174,7 +176,10 @@ function loadMcpServers(options: McpServersStoreOptions): McpServerConfig[] {
         ? item
         : { ...item, value: decryptSecret(item.value, `mcp-server:env:${item.key}`) }
     })
-    return normalizeMcpServerInput({ ...server, env }, server)
+    const headers = (server.headers ?? []).map(item => ({ ...item,
+      ...(item.value !== undefined ? { value: decryptSecret(item.value, `mcp-server:header:${item.key}`) } : {}),
+    }))
+    return normalizeMcpServerInput({ ...server, env, headers }, server)
   }).filter(server => server.name)
   if (legacySecretCount > 0) {
     saveMcpServers(servers, options)
@@ -200,6 +205,9 @@ function saveMcpServers(
     version: 1,
     servers: servers.map(server => ({
       ...server,
+      headers: (server.headers ?? []).map(item => ({ ...item,
+        ...(item.value !== undefined ? { value: encryptSecret(item.value, `mcp-server:header:${item.key}`) } : {}),
+      })),
       env: (server.env ?? []).map(item => ({
         ...item,
         ...(item.value !== undefined
@@ -234,6 +242,7 @@ function normalizeMcpServerInput(
     scope,
     cwd: trimString(input.cwd) || undefined,
     env,
+    headers: normalizeMcpHeaders(input.headers, existing?.headers),
     autoStart: typeof input.autoStart === 'boolean'
       ? input.autoStart
       : existing?.autoStart ?? true,
@@ -332,6 +341,7 @@ function toMcpServerInputFromUnknown(
       : { url }),
     ...(trimString(value.cwd) ? { cwd: trimString(value.cwd) } : {}),
     env: normalizeEnvFromUnknown(value.env),
+    headers: normalizeMcpHeaders(normalizeEnvFromUnknown(value.headers ?? value.http_headers)),
     autoStart: value.autoStart !== false,
   }
 }
@@ -374,6 +384,7 @@ function toPublicMcpServerInput(config: McpServerConfig): McpServerInput {
     ...(config.args?.length ? { args: config.args } : {}),
     ...(config.url ? { url: config.url } : {}),
     ...(config.cwd ? { cwd: config.cwd } : {}),
+    headers: (config.headers ?? []).map(item => ({ key: item.key, ...(item.value ? { valuePreview: '••••' } : {}) })),
     env: (config.env ?? []).map(item => ({
       key: item.key,
       valuePreview: previewSecret(item.value),
@@ -424,6 +435,7 @@ function normalizeArgs(args: unknown): string[] {
 function toPublicMcpServerConfig(config: McpServerConfig): McpServerConfig {
   return {
     ...config,
+    headers: (config.headers ?? []).map(item => ({ key: item.key, ...(item.value ? { valuePreview: '••••' } : {}) })),
     env: (config.env ?? []).map(item => ({
       key: item.key,
       valuePreview: previewSecret(item.value),

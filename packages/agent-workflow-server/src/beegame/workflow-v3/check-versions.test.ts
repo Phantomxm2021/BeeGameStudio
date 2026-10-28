@@ -27,7 +27,10 @@ test('every declared checker has one current driver identity; unknown/obsolete v
   // packaging/probing. Old receipts did not apply the same evidence contract.
   for (const [id, version] of [['content-resources','v3-content.4'], ['delivery-package','v3-static-artifact.3'],
     ['pixel-data-consumption','v3-canvas-image-consumption.6'], ['font-data-consumption','v3-dom-font-consumption.4'],
-    ['audio-data-consumption','v3-html-audio-consumption.6']])
+    ['audio-data-consumption','v3-html-audio-consumption.6'],
+    ['content-resources','v3-content.5'], ['delivery-package','v3-static-artifact.4'],
+    ['pixel-data-consumption','v3-canvas-image-consumption.7'], ['font-data-consumption','v3-dom-font-consumption.5'],
+    ['audio-data-consumption','v3-html-audio-consumption.7']])
     expect(await checkIsCurrent('/path-not-accessed-for-empty-input', {id:id!,version:version!,
       status:'passed',inputs:[],observation:'Old resource validation',createdAt:'earlier'})).toBe(false)
 })
