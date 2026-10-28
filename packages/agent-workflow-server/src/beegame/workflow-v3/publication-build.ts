@@ -4,7 +4,6 @@ import { WorkflowError, type Run } from './state'
 import { buildEditableProject, projectFiles, projectDependencies, sameFiles, AGENT_EVIDENCE_DIRECTORY } from './editable-project'
 import { measurementRequest, registeredContentChecks } from './agent-measurement'
 import { runArtifactCheck } from './runtime-checks'
-import { requiresBgsEditableContent } from './web-project-start'
 import type { PreparedPublication } from '../deployment-manager'
 
 /** Read-only eligibility: old measurement verdicts do not gate a fresh build. */
@@ -39,7 +38,7 @@ export async function rebuildPublication(run: Run, plan: { runtimeArtifact: stri
       throw new WorkflowError('publication-source-changed', 'Project sources or dependencies changed during publication; publish the current version again')
   }
   await validate()
-  const content = await registeredContentChecks(run.workspacePath, run.requirements.constraints, requiresBgsEditableContent(run))
+  const content = await registeredContentChecks(run.workspacePath, run.requirements.constraints, false)
   const failedContent = content.filter(check => check.status === 'failed' || check.status === 'execution-error' ||
     check.id === 'content-structure' && check.status === 'unverified')
   if (failedContent.length) throw new Error('Publication content check failed: ' +

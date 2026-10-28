@@ -14,7 +14,7 @@ import { BeeGameSessionManager } from '../session-manager'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { createAgentWorkflowApp } from '../../app'
 
-async function fixture() {
+async function fixture(constraints:Record<string,unknown>={}, creation?:Run['creation']) {
   const root = await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-change-'))), data = join(root,'.beegame/store')
   for (const dir of ['content/ui','content/scenes','src']) await mkdir(join(root,dir),{recursive:true})
   await writeFile(join(root,'package.json'),JSON.stringify({scripts:{build:'bun run build.mjs'}}))
@@ -26,7 +26,8 @@ async function fixture() {
     assetManifestRevision:'b'.repeat(64),entryScene:'level',sceneModel:'game-object-v2',files:['ui/menu.json','scenes/level.json'],documents:[
       {path:'ui/menu.json',id:'menu',kind:'ui-screen',loadPhase:'startup'},{path:'scenes/level.json',id:'level',kind:'scene-2d',loadPhase:'startup'}]}))
   await writeFile(join(root,'notes.json'),'{}')
-  let run = createRun({projectId:'p',ownerId:'owner',workspacePath:root,chatSessionId:'chat',requestKey:'run',text:'Fixture requirements',constraints:{},ids:['req.play']})
+  let run = createRun({projectId:'p',ownerId:'owner',workspacePath:root,chatSessionId:'chat',requestKey:'run',text:'Fixture requirements',constraints,ids:['req.play']})
+  run.creation=creation
   run.agentTurns=[]
   const store = createLocalWorkflowStore(data)
   await store.commit('p','owner',0,run,'run.created')
@@ -216,6 +217,7 @@ test('actual app routes expose authorized editor saves while retired requirement
     const created=await app.request('/api/projects',{method:'POST',...json({id:'p',name:'Synthetic',root_path:f.root,created_at:Date.now()})})
     expect(created.status).toBe(200)
     const view=await app.request('/api/projects/p/game-content');expect(view.status).toBe(200)
+    expect((await (await app.request('/api/projects/p/runtime-state')).json()).scene_ui_editor_available).toBe(true)
     const snapshot=await view.json();expect(snapshot.readOnly).toBe(false);expect(snapshot.editing.paths).toContain('ui/menu.json')
     const value=await editValue(f),saved=await app.request('/api/projects/p/game-content/document',{method:'PUT',...json({...value,requestKey:'formal-ui-save'})})
     expect(saved.status).toBe(200);expect((await saved.json()).unmeasured).toBe(true);await f.current()
@@ -227,4 +229,30 @@ test('actual app routes expose authorized editor saves while retired requirement
     expect((await app.request('/api/projects/p/workflow-v3/requirements',{method:'POST',...json(changeValue(f.run))})).status).toBe(404)
     expect(f.starts).toBe(0)
   }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.dispose()}
+})
+
+test('Web/React disables editor read capability and direct saves without reserving a writer or changing sources',async()=>{
+  const f=await fixture({platform:'Web',engine:'React'},{initialDelivery:'design-led-first-version',editableContent:true}),cleanups:Array<()=>Promise<void>|void>=[]
+  const app=createAgentWorkflowApp({defaultWorkspacePath:f.root,dashboardDataRoot:join(f.root,'.beegame/dashboard'),
+    currentUser:{id:'owner',role:'owner'},sessionRunner:{async start(){throw Error('No model permitted')}},
+    workflowV3Store:f.store,registerCleanup:fn=>cleanups.push(fn)})
+  const json=(value:unknown)=>({headers:{'content-type':'application/json'},body:JSON.stringify(value)})
+  try {
+    const created=await app.request('/api/projects',{method:'POST',...json({id:'p',name:'Synthetic',root_path:f.root,created_at:Date.now()})})
+    expect(created.status).toBe(200)
+    const before=await readFile(join(f.root,'content/ui/menu.json'))
+    const snapshot=await (await app.request('/api/projects/p/game-content')).json()
+    expect(snapshot.readOnly).toBe(true)
+    expect(snapshot.editing).toBeUndefined()
+    const state=await (await app.request('/api/projects/p/runtime-state')).json()
+    expect(state.scene_ui_editor_available).toBe(false)
+    const response=await app.request('/api/projects/p/game-content/document',{method:'PUT',...json({...await editValue(f),requestKey:'forbidden-save'})})
+    expect(response.status).toBe(409)
+    expect((await response.json()).code).toBe('editor-unavailable')
+    expect(await readFile(join(f.root,'content/ui/menu.json'))).toEqual(before)
+    const current=await f.current()
+    expect(current.writer).toBeUndefined()
+    expect(current.sourceEdits).toBeUndefined()
+    expect(f.starts).toBe(0)
+  } finally { for(const cleanup of cleanups.reverse())await cleanup(); await f.dispose() }
 })

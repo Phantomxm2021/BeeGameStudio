@@ -43,7 +43,7 @@ test('Agent-authored Web project chooses public helpers and consumes its registe
     expect(await Bun.file(join(workspace,'package.json')).exists()).toBe(false)
     expect(await Bun.file(join(workspace,'content/index.json')).exists()).toBe(false)
     tools=await openAgentTools({workspacePath:workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement,
-      requireEditableContent:run.creation?.editableContent})
+      requireVisualComparison:true})
     const command=async(entry:string,...args:string[])=>{
       const child=Bun.spawn([process.execPath,join(workspace,tools!.directory,entry),...args],{cwd:workspace,
         env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(workspace,'chat','measurement')},

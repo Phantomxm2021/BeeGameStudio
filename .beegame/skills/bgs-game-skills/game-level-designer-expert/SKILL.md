@@ -14,9 +14,9 @@ Design spatial flow, tension and learning from the actual player abilities and r
 
 For new work, record spatial requirements in prose/sketches, collaborate on actual visual designs, inspect selected pictures, retain their paths in existing implementation progress and author scenes in the chosen engine’s format from those designs. Use actual resources for bindings; preserve authored identities, logical sizes, collision geometry, Camera and resource bindings in the same source. Resource binding must preserve logical geometry or identify an owner revision.
 
-Use actual UI play-area allocation, including host offset, for camera framing. Before allocation exists, state space/visibility needs as provisional. Linked BGS Scene/UI uses game-view and layoutCamera, with requiredVisibleNodeIds when applicable; reconcile world scale and overlays without another region-size or camera-offset table. Different screen arrangements must preserve gameplay rules and scale.
+Use actual UI play-area allocation, including host offset, for camera framing. Before allocation exists, state space/visibility needs as provisional. Different screen arrangements must preserve gameplay rules and scale.
 
-BGS Scene uses objects/components and parent-local transforms; screen UI uses a separate element tree/layout. When authoring or diagnosing saved Scene data, read [saved Scene layout checks](references/saved-scene-layouts.md) for coordinates, rendering limits and native checks; plain spatial prose does not need implementation details.
+Only when maintaining existing BGS Scene JSON with host-exposed diagnostics, read [saved Scene layout checks](references/saved-scene-layouts.md). Otherwise use the selected runtime’s scene and camera facilities; plain spatial prose does not need implementation details.
 
 Use a small calculation only for a consequential reachability/rule question, not a parallel game or universal simulator. Keep design reasons and useful results, not calculation transcripts. Distinguish geometric distance, traversable distance and playtime assumptions. Verify affected traversal/encounters in the actual game when runtime verification is in scope; label unavailable observations and untested game feel.
 

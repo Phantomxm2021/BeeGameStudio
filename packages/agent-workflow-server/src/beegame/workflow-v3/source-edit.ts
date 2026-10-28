@@ -1,3 +1,4 @@
+import { isWebReactTarget } from './web-project-start'
 import { mkdir, readFile, realpath, writeFile, rename, unlink, lstat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -14,6 +15,8 @@ export const editVersionSchema = z.object({ version: z.number().int().positive()
 export const editSchema = z.object({ path: z.string().min(1), expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
   document: z.unknown(), workflow: editVersionSchema, requestKey: z.string().min(1).optional() }).strict()
 export async function prepareSourceEdit(run: Run, value: unknown) {
+  if (isWebReactTarget(run.requirements.constraints))
+    throw new WorkflowError('editor-unavailable', 'Scene/UI editing is not available for Web/React projects', 409)
   const body = editSchema.parse(value)
   if (body.workflow.version !== run.version || body.workflow.planRevision !== run.planRevision || body.workflow.requirementsRevision !== run.requirements.revision)
     throw new WorkflowError('revision-conflict', 'Run/requirements changed since this editor loaded. Reload current sources; saving cannot authorize a stale requirement version')

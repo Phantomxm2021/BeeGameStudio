@@ -1,3 +1,4 @@
+import { isWebReactTarget } from './beegame/workflow-v3/web-project-start'
 import { registerPortalSsoRoutes } from './auth/portal-sso-routes'
 import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
 import { readPublicationControls, PUBLIC_DESCRIPTION_SOURCE_INVALID, publicationDescriptionFromBrief, PUBLIC_DESCRIPTION_BRIEF_MISSING, PUBLIC_DESCRIPTION_TOO_LONG } from './beegame/publication-description'
@@ -2625,6 +2626,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       const run = await v3Store?.read(projectId, user.id)
+      state.scene_ui_editor_available = Boolean(run) && !isWebReactTarget(run?.requirements.constraints)
       // Native events still describe the interrupted turn while the accepted
       // writer rebuilds its session/tools. Do not report that live work as idle.
       if (run && run.workspacePath === project.root_path && !run.paused && v3Routes.hasLiveAgentWriter(run) &&

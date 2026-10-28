@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, realpath, symlink } from 'node
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
-import { observeProjectCreation, requiresBgsEditableContent } from './web-project-start'
+import { observeProjectCreation, requiresWebVisualComparison } from './web-project-start'
 import { webStarterFiles, writeWebContentFixture } from '../fixtures/web-content-fixture'
 import { registeredContentChecks, activeUserTask } from './agent-measurement'
 import { createRun, type AgentTurn } from './state'
@@ -27,7 +27,7 @@ async function fixture(legacy = true) {
 test('creation facts cover blank creative and blueprint intake; source/import/unknown are not silently migrated',async()=>{
   const f=await fixture(false)
   try {
-    expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true})
+    expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:false})
     for(const path of ['.beegame','.beegame-attachments','transcripts','logs'])await mkdir(join(f.root,path))
     await writeFile(join(f.root,'.gitignore'),'# Git configuration is not game source\nnode_modules/\n')
     await writeFile(join(f.root,'logs/index.json'),'{}')
@@ -56,14 +56,36 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
   }finally{await f.close()}
 })
 
-test.each(['React','Unity','Godot','Unreal'])('Editor contract follows the engine, including historical Web flags: %s',async engine=>{
+test.each(['React','Unity','Godot','Unreal'])('Visual comparison follows the target while editor requirements stay removed: %s',async engine=>{
   const f=await fixture(false)
   try {
     const settings={...brief.settings,engine}
     const creation=await observeProjectCreation(f.root,{...brief,settings})
-    expect(creation).toEqual({initialDelivery:'design-led-first-version',editableContent:engine==='React'})
+    expect(creation).toEqual({initialDelivery:'design-led-first-version',editableContent:false})
     const run={...f.run,requirements:{...f.run.requirements,constraints:settings},creation:{...creation!,editableContent:true}}
-    expect(requiresBgsEditableContent(run)).toBe(engine==='React')
+    expect(requiresWebVisualComparison(run)).toBe(engine==='React')
+  }finally{await f.close()}
+})
+
+test.each([
+  {settings:{platform:'Web',engine:'React'},expected:true},
+  {settings:{platform:'Mobile',engine:'React'},expected:false},
+  {settings:{platform:'PC',engine:'Godot'},expected:false},
+  {settings:{platform:'Web',engine:'Unity'},expected:false},
+  {settings:{platform:'Web',engine:'React',bgsVisualEditing:false},expected:true},
+  {settings:{platform:'Web',engine:'custom-engine'},expected:false},
+  {settings:{engine:'React'},expected:false},
+  {settings:{},expected:false},
+])('visual comparison is independent of the retired editor flag: %j',async ({settings,expected})=>{
+  const f=await fixture(false)
+  try {
+    const run={...f.run,requirements:{...f.run.requirements,constraints:settings}}
+    expect(requiresWebVisualComparison(run)).toBe(expected)
+    const checks=await registeredContentChecks(f.root,settings)
+    expect(checks).toEqual([])
+    expect((await observeProjectCreation(f.root,{...brief,settings}))?.editableContent).toBe(false)
+    expect(requiresWebVisualComparison({...run,creation:undefined})).toBe(false)
+    expect(requiresWebVisualComparison({...run,creation:{...run.creation!,editableContent:false}})).toBe(expected)
   }finally{await f.close()}
 })
 
@@ -219,4 +241,42 @@ test.each(['procedural','resources','pure-ui'])('test-authored Web content consu
     expect(errors).toEqual([])
     expect(await page.locator('[role=alert]').count()).toBe(0)
   }finally{await browser?.close();server?.stop(true);await f.close()}
+},30000)
+
+test('source-only React UI builds and responds in a browser without BGS Scene/UI documents',async()=>{
+  const f=await fixture(false)
+  const require=createRequire(new URL('../../../../../apps/frontend/package.json',import.meta.url))
+  let browser:any,server:ReturnType<typeof Bun.serve>|undefined
+  try {
+    await mkdir(join(f.root,'node_modules'))
+    for(const name of ['react','react-dom'])
+      await symlink(dirname(require.resolve(name+'/package.json')),join(f.root,'node_modules',name))
+    await writeFile(join(f.root,'game.js'),`import React,{useState} from 'react';
+import {createRoot} from 'react-dom/client';
+function Game(){const [count,setCount]=useState(0);return React.createElement('button',{
+onClick:()=>setCount(count+1),style:{transform:'translateX('+count*20+'px)',transition:'transform 100ms linear'}},'Score '+count)}
+createRoot(document.getElementById('root')).render(React.createElement(Game));`)
+    const build=await Bun.build({entrypoints:[join(f.root,'game.js')],outdir:join(f.root,'dist'),target:'browser'})
+    expect(build.success).toBe(true)
+    await writeFile(join(f.root,'dist/index.html'),'<html><body><div id="root"></div><script type="module" src="./game.js"></script></body></html>')
+    expect(await Bun.file(join(f.root,'content/index.json')).exists()).toBe(false)
+    expect(await registeredContentChecks(f.root,brief.settings)).toEqual([])
+    server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
+      const path=new URL(request.url).pathname
+      if(path==='/favicon.ico')return new Response(null,{status:204})
+      return new Response(Bun.file(join(f.root,'dist',path==='/'?'index.html':path.slice(1))))
+    }})
+    const {chromium}=await import(sharedPlaywright().moduleUrl)
+    browser=await chromium.launch({headless:true,executablePath:process.env.BGS_LAYOUT_BROWSER_EXECUTABLE??chromium.executablePath()})
+    const page=await browser.newPage(),errors:string[]=[]
+    page.on('pageerror',(e:Error)=>errors.push(e.message))
+    await page.goto('http://127.0.0.1:'+server.port)
+    const button=page.getByRole('button',{name:'Score 0'})
+    await button.click()
+    await page.waitForFunction(()=>document.querySelector('button')?.textContent==='Score 1' &&
+      getComputedStyle(document.querySelector('button')!).transform==='matrix(1, 0, 0, 1, 20, 0)')
+    expect(errors).toEqual([])
+    expect(f.run.creation?.editableContent).toBe(false)
+    expect(requiresWebVisualComparison(f.run)).toBe(true)
+  } finally { await browser?.close();server?.stop(true);await f.close() }
 },30000)

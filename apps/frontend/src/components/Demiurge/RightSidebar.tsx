@@ -1,5 +1,5 @@
 import { AnimatedNumber } from '@/components/beui/motion/animated-number';
-import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload } from '../../services/api';
@@ -20,8 +20,7 @@ import { AssetsPanel } from './Sidebar/AssetsPanel';
 import { ArtifactPreviewModal } from './Sidebar/ArtifactPreviewModal';
 import { buildArtifactViewModel, isProjectDocumentPath, type ArtifactEditorKind } from './Sidebar/artifactViewModel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs';
-import { SceneEditorOverlay } from '../Workspace/SceneEditorOverlay';
-import { UiEditorOverlay } from '../Workspace/UiEditorOverlay';
+
 import { TodoPanel } from './Sidebar/TodoPanel';
 import { deriveCurrentProjectTodos } from '../../utils/projectTodos';
 import {
@@ -43,6 +42,9 @@ const dedupeAttachments = (attachments: ChatAttachmentPayload[]): ChatAttachment
     }
     return uniqueAttachments;
 };
+
+const SceneEditorOverlay = lazy(() => import('../Workspace/SceneEditorOverlay').then(module => ({ default: module.SceneEditorOverlay })));
+const UiEditorOverlay = lazy(() => import('../Workspace/UiEditorOverlay').then(module => ({ default: module.UiEditorOverlay })));
 
 interface RightSidebarProps {
     projectId: string;
@@ -115,6 +117,7 @@ export function RightSidebar({
     currentUserEmail,
     currentUserAvatarUrl,
 }: RightSidebarProps) {
+    const editorAvailable = projectStatus?.project_id === projectId && projectStatus.scene_ui_editor_available === true;
 
     const [activeTab, setActiveTab] = useState<'chat' | 'todo' | 'artifacts'>('chat');
     const [showAssets, setShowAssets] = useState(false);
@@ -181,8 +184,8 @@ export function RightSidebar({
     useEffect(() => {
         const syncEditorRoute = () => {
             const editor = getProjectEditorRoute(projectId);
-            setIsSceneEditorOpen(editor === 'scene');
-            setIsUiEditorOpen(editor === 'ui');
+            setIsSceneEditorOpen(editorAvailable && editor === 'scene');
+            setIsUiEditorOpen(editorAvailable && editor === 'ui');
             setEditorFilePath(getProjectEditorFileRoute(projectId));
         };
         syncEditorRoute();
@@ -192,7 +195,7 @@ export function RightSidebar({
             window.removeEventListener('popstate', syncEditorRoute);
             window.removeEventListener(WORKSPACE_ROUTE_CHANGE_EVENT, syncEditorRoute);
         };
-    }, [projectId]);
+    }, [projectId, editorAvailable]);
 
     useEffect(() => {
         activeProjectRef.current = projectId;
@@ -485,6 +488,7 @@ export function RightSidebar({
     };
 
     const loadEditorFiles = async () => {
+        if (!editorAvailable) return;
         editorFilesAbortRef.current?.abort();
         const controller = new AbortController();
         editorFilesAbortRef.current = controller;
@@ -519,7 +523,7 @@ export function RightSidebar({
     };
 
     const handleOpenEditor = (kind: ArtifactEditorKind, path: string) => {
-        openProjectEditorFileRoute(projectId, kind, path);
+        if (editorAvailable) openProjectEditorFileRoute(projectId, kind, path);
     };
 
     const handleUploadAsset = async (file: File | readonly File[]) => {
@@ -686,7 +690,7 @@ export function RightSidebar({
                                     {tabLabel(tab)}
                                     {tab === 'artifacts' ? (
                                         <span className="type-caption-2 ml-2 rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-[var(--text-muted)]">
-                                            <AnimatedNumber>{artifactView.displayCount}</AnimatedNumber>
+                                            <AnimatedNumber>{editorAvailable ? artifactView.displayCount : artifactView.displayCount - 2}</AnimatedNumber>
                                         </span>
                                     ) : null}
                                 </TabsTrigger>
@@ -763,11 +767,11 @@ export function RightSidebar({
                                         onPreview={handlePreviewArtifact}
                                         onDownload={handleDownloadArtifact}
                                         canExportProject={canExportProject}
-                                        onOpenEditor={handleOpenEditor}
+                                        onOpenEditor={editorAvailable ? handleOpenEditor : undefined}
                                         editorFiles={editorFiles}
                                         isEditorFilesLoading={isEditorFilesLoading}
                                         editorFilesError={editorFilesError}
-                                        onLoadEditorFiles={() => { void loadEditorFiles(); }}
+                                        onLoadEditorFiles={editorAvailable ? () => { void loadEditorFiles(); } : undefined}
                                         error={artifactsError ? (uiText.artifactLoadFailed || 'Failed to load deliverables. Please try again.') : null}
                                         lang={lang}
                                         onOpenAssets={() => setShowAssets(true)}
@@ -786,20 +790,22 @@ export function RightSidebar({
                 isLoading={isPreviewLoading}
                 lang={lang}
             />
-            {isSceneEditorOpen ? (
-                <SceneEditorOverlay
-                    projectId={projectId}
-                    initialDocumentPath={editorFilePath}
-                    onClose={() => closeProjectEditorRoute(projectId)}
-                />
-            ) : null}
-            {isUiEditorOpen ? (
-                <UiEditorOverlay
-                    projectId={projectId}
-                    initialDocumentPath={editorFilePath}
-                    onClose={() => closeProjectEditorRoute(projectId)}
-                />
-            ) : null}
+            <Suspense fallback={null}>
+                {editorAvailable && isSceneEditorOpen ? (
+                    <SceneEditorOverlay
+                        projectId={projectId}
+                        initialDocumentPath={editorFilePath}
+                        onClose={() => closeProjectEditorRoute(projectId)}
+                    />
+                ) : null}
+                {editorAvailable && isUiEditorOpen ? (
+                    <UiEditorOverlay
+                        projectId={projectId}
+                        initialDocumentPath={editorFilePath}
+                        onClose={() => closeProjectEditorRoute(projectId)}
+                    />
+                ) : null}
+            </Suspense>
         </>
     );
 }

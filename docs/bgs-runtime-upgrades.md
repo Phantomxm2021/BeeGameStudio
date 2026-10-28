@@ -39,6 +39,16 @@ BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导
 
 明确保留的例外：真实外部 URL、模型 ID、服务端协议头及认证/额度标识；`bgs app` 所连接的官方桌面应用的签名、安装器和 URL scheme（该命令仍明确标为 upstream Codex Desktop）；第三方插件包中的 `.codex-plugin` 清单格式；LICENSE、NOTICE、来源说明；读取旧会话的兼容标识和迁移别名。安装根已属于 BGS，第三方包格式不会被擅自改写。Git 历史和 Git 自身的旧子模块元数据不做字符串改写。
 
+## Web/React 与 Scene/UI 编辑器解耦
+
+Web/React 项目使用项目自身的 UI、场景代码和数据。初始设计、后续修改和恢复均不再要求创建 BGS Scene/UI JSON 或 `content/index.json`；历史 `creation.editableContent` 只作为保留的创建记录，不能恢复编辑要求。视觉对照要求独立于编辑能力，不能由旧 `bgsVisualEditing:false` 关闭。
+
+宿主根据 Run 中已确认的平台和引擎提供 `scene_ui_editor_available`。Web/React 的产物列表仅保留文档和资源入口，旧编辑器链接不加载编辑器，后端直接保存也返回 `editor-unavailable`。其他目标沿用现有编辑行为。
+
+Web/React 的原生工具不再暴露 `CheckSceneLayouts` / `CheckUiLayouts`，新项目不再生成绑定工具或默认内容运行库；设计读取、资源检查、验证读取、预览和媒体工具保留。已有注册内容仍能获得其运行库，显式注册的数据、资源及设计引用继续接受完整性检查。缺少编辑器索引本身不阻塞测量或发布；实际构建、运行验证、视觉对照和交付证据不因此免除。
+
+共享 `scene-editor` 包还包含资源、字体、布局及历史运行时消费者，其他目标也仍使用编辑器，因此不整体删除该包，不迁移或改写已生成项目。本次不引入 Phaser、Three.js、新编辑器或额外模型回合；离线回归不代表真实生成质量、tokens 或耗时已经改善。
+
 ## Workflow 的原生 Goal 生命周期
 
 项目初次接单及明确的 work/change/continue 使用 Codex 原生 Goal。一次授权任务只占用一次 BGS 执行身份和 writer；原生 Goal 自行决定工作顺序、跨 turn 继续及结束。BGS 不按文档派发回合，也不增加自动 turn pump。设计来源统一为 `docs/GDD.md`，使用已有或一份精简进度记录保存当前工作、未解决依赖和实际验证；Skills 按相关章节和实际依赖提供专业方法。

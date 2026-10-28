@@ -35,7 +35,7 @@ import {CHECK_VERSIONS} from './check-versions'
 const JSZip=createRequire(import.meta.resolve('exceljs'))('jszip')
 const builder="import{cp,mkdir}from'node:fs/promises';await mkdir('dist',{recursive:true});await cp('src/index.html','dist/index.html');"
 async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditable=false,
-  initialDelivery:'playable-slice'|'design-led-first-version'='playable-slice') {
+  initialDelivery:'playable-slice'|'design-led-first-version'='playable-slice', constraints:Record<string,unknown>={}) {
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-agent-measure-'))),workspace=join(root,'project')
   await mkdir(join(workspace,'src'),{recursive:true})
   await writeFile(join(workspace,'package.json'),JSON.stringify({scripts:{build:'bun build.mjs'}}))
@@ -43,7 +43,7 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditab
   await writeFile(join(workspace,'src/index.html'),'<html><body><h1>Actual fixture</h1><button>Play</button></body></html>')
   await writeFile(join(workspace,'README.md'),'Merged eight-domain fixture; semantics not verified')
   const store=createLocalWorkflowStore(join(root,'host'))
-  const run=createRun({projectId:'measure',ownerId:'owner',workspacePath:workspace,chatSessionId:'chat',requestKey:'goal',text:'Fixture',constraints:{},ids:['goal']})
+  const run=createRun({projectId:'measure',ownerId:'owner',workspacePath:workspace,chatSessionId:'chat',requestKey:'goal',text:'Fixture',constraints,ids:['goal']})
   if(requireEditable || initialDelivery==='design-led-first-version')run.creation={initialDelivery,editableContent:requireEditable}
   const turn:AgentTurn={attemptId:crypto.randomUUID(),requestKey:'goal',sessionId:'chat',workerId:'worker',fence:1,status:'running',startedAt:new Date().toISOString(),requirementsRevision:run.requirements.revision}
   run.agentTurns=[...previousTurns,turn];run.fence=1;run.writer={attemptId:turn.attemptId,workerId:turn.workerId,fence:turn.fence}
@@ -465,29 +465,30 @@ test.each(['blocked','failed'] as const)('existing handoff exposes %s acceptance
   } finally { await tools?.close();await f.close() }
 },30000)
 
-test('required editable content cannot be omitted behind a successful build; diagnostic preview remains available',async()=>{
-  const f=await fixture(builder,[],true)
+test('Web/React source-only builds remain measurable despite historical editable flags',async()=>{
+  const f=await fixture(builder,[],true,'playable-slice',{platform:'Web',engine:'React'})
   try {
     const record=await f.measurement.measure(request)
     expect(record.checks.find(c=>c.id==='build')?.status).toBe('passed')
     expect(record.checks.find(c=>c.id==='runtime-smoke')?.status).toBe('passed')
-    expect(record.checks.find(c=>c.id==='content-structure')).toMatchObject({status:'failed',
-      observation:'Required editable Scene/UI content is missing: content/index.json.'})
+    expect(record.checks.find(c=>c.id==='content-structure')).toBeUndefined()
     const run=await f.settle()
-    await expect(selectAgentMeasuredBuild(run,record.id,false,'delivery')).rejects.toThrow('content/index.json')
+    await expect(selectAgentMeasuredBuild(run,record.id,false,'delivery')).resolves.toBeDefined()
     await expect(selectAgentMeasuredBuild(run,record.id,false,'preview')).resolves.toBeDefined()
   }finally{await f.close()}
 },30000)
 
-test('required editable delivery rejects a PASS without visual comparison before build, handoff and finish',async()=>{
-  const f=await fixture("throw Error('BUILD MUST NOT RUN')",[],true)
+test.each([true,false])('Web/React delivery still requires visual comparison with legacy content=%s',async legacy=>{
+  const f=await fixture("throw Error('BUILD MUST NOT RUN')",[],legacy,'design-led-first-version',{platform:'Web',engine:'React'})
   let delivery:ReturnType<typeof createAgentMeasurement>|undefined,callbacks=0
   try {
+    if (legacy) {
     await mkdir(join(f.workspace,'content/ui'),{recursive:true})
     await writeFile(join(f.workspace,'content/ui/menu.json'),JSON.stringify(uiLayoutFixture()))
     await writeFile(join(f.workspace,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',
       dimension:'2d',documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'menu',sceneModel:'game-object-v2',
       files:['ui/menu.json'],documents:[{id:'menu',path:'ui/menu.json',kind:'ui-screen',loadPhase:'startup'}]}))
+    }
     await mkdir(join(f.workspace,'.beegame/delivery'),{recursive:true})
     await mkdir(join(f.workspace,'dist'),{recursive:true})
     await writeFile(join(f.workspace,'dist/index.html'),await readFile(join(f.workspace,'src/index.html')))
@@ -496,7 +497,7 @@ test('required editable delivery rejects a PASS without visual comparison before
       status:'passed',evidencePaths:['README.md']}
     await writeFile(join(f.workspace,DESIGN_ACCEPTANCE_PATH),JSON.stringify({scope:'delivery',status:'passed',
       summary:'Synthetic editable delivery',environment:'Target runtime',evidencePaths:['README.md'],artifactPaths:['dist'],
-      verification:{target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],contentChecks:[contentCheck]}}))
+      verification:{target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],...(legacy ? {contentChecks:[contentCheck]} : {})}}))
 
     const handoff=await f.measurement.handoff()
     expect(handoff.acceptance).toMatchObject({valid:false,status:'blocked',diagnostic:{category:'verification-incomplete'}})

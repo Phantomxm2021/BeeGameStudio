@@ -576,7 +576,7 @@ describe('RightSidebar tabs', () => {
             { path: 'ui/app-flow.json', revision: 'e', id: 'ui.flow', kind: 'ui-flow' },
         ] });
         const before = window.location.href;
-        render(<RightSidebar projectId="proj_1" lang="en" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
+        render(<RightSidebar projectId="proj_1" projectStatus={{project_id:"proj_1",scene_ui_editor_available:true}} lang="en" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
             waitingPermission={{kind:'none',isBlockingChat:false,isWaitingStatus:false,message:'',placeholder:'Type...'}} />);
         await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         expect(beeGameAdapter.getProjectGameContentFileList).not.toHaveBeenCalled();
@@ -597,7 +597,7 @@ describe('RightSidebar tabs', () => {
         vi.mocked(beeGameAdapter.getProjectGameContentFileList).mockRejectedValueOnce(
             new Error('Saved content changed while loading'),
         );
-        render(<RightSidebar projectId="proj_1" lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
+        render(<RightSidebar projectId="proj_1" projectStatus={{project_id:"proj_1",scene_ui_editor_available:true}} lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
             waitingPermission={getWaitingPermissionState([])} />);
         fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         fireEvent.click(screen.getByRole('button', { name: 'UI', exact: true }));
@@ -610,7 +610,7 @@ describe('RightSidebar tabs', () => {
             { path: 'ui/menu.json', revision: 'b', id: 'menu', kind: 'ui-screen' },
             { path: 'ui/hud.json', revision: 'c', id: 'hud', kind: 'ui-hud', error: 'data.nodes.5.responsive.compact.layout: Unrecognized key: "gap"' },
         ] });
-        render(<RightSidebar projectId="proj_1" lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
+        render(<RightSidebar projectId="proj_1" projectStatus={{project_id:"proj_1",scene_ui_editor_available:true}} lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
             waitingPermission={getWaitingPermissionState([])} />);
         fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         fireEvent.click(screen.getByRole('button', { name: 'UI', exact: true }));
@@ -634,7 +634,7 @@ describe('RightSidebar tabs', () => {
                 { path: 'ui/menu.json', revision: 'a', id: 'menu', kind: 'ui-screen' },
                 { path: 'ui/broken.json', revision: 'b', id: 'broken', kind: 'ui', error: 'Invalid JSON' },
             ] });
-        render(<RightSidebar projectId="proj_1" lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
+        render(<RightSidebar projectId="proj_1" projectStatus={{project_id:"proj_1",scene_ui_editor_available:true}} lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
             waitingPermission={getWaitingPermissionState([])} />);
         fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         fireEvent.click(screen.getByRole('button', { name: 'UI', exact: true }));
@@ -676,8 +676,8 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        // The four visible categories do not count historical workflow tasks.
-        expect(screen.getByRole('tab', { name: /^Artifacts/ })).toHaveTextContent('4');
+        // Only documents and assets remain when editing is unavailable.
+        expect(screen.getByRole('tab', { name: /^Artifacts/ })).toHaveTextContent('2');
     });
 
     it('refreshes artifacts when a dynamically named project document event arrives', async () => {
@@ -1564,5 +1564,23 @@ describe('RightSidebar tabs', () => {
 
         await waitFor(() => expect(screen.queryByText('Game BGM')).not.toBeInTheDocument());
         expect(api.getProjectAssets).toHaveBeenCalledWith('proj_2');
+    });
+});
+
+describe('Web/React editor removal',()=>{
+    it.each(['scene','ui'])('ignores a direct %s editor URL and retains document/resource access',async editor=>{
+        window.history.replaceState({},'',`/?project=web-native&editor=${editor}`);
+        render(<RightSidebar projectId="web-native" lang="en" messages={[]} progress={0} onSendMessage={vi.fn()}
+            projectStatus={{project_id:'web-native',scene_ui_editor_available:false}}
+            waitingPermission={getWaitingPermissionState([])} />);
+        fireEvent.click(screen.getByRole('tab',{name:/^Artifacts/}));
+        expect(screen.queryByRole('button',{name:'Scene',exact:true})).not.toBeInTheDocument();
+        expect(screen.queryByRole('button',{name:'UI',exact:true})).not.toBeInTheDocument();
+        expect(screen.getByRole('button',{name:'Project documents'})).toBeInTheDocument();
+        expect(screen.getByRole('button',{name:'Assets',exact:true})).toBeInTheDocument();
+        expect(screen.queryByRole('dialog',{name:/Editor/})).not.toBeInTheDocument();
+        expect(beeGameAdapter.getProjectGameContentFileList).not.toHaveBeenCalled();
+        expect(beeGameAdapter.getProjectGameContent).not.toHaveBeenCalled();
+        window.history.replaceState({},'','/');
     });
 });

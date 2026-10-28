@@ -1,3 +1,4 @@
+import { isWebReactTarget } from './web-project-start'
 import type { Hono } from 'hono'
 import { realpath } from 'node:fs/promises'
 import { z } from 'zod/v4'
@@ -459,7 +460,7 @@ export function registerV3Routes(app: Hono, input: {
     const writerActive = Boolean(ctx.run.writer || after.writer || input.sessions.hasActiveProjectTurn(user.id, projectId, ctx.workspace))
     const editablePaths = snapshot.state === 'draft' && snapshot.index && !snapshot.indexIssues.length && !ctx.run.paused ? snapshot.documents.filter(d =>
       !('error' in d && d.error) && ['scene-2d','scene-3d','ui-screen','ui-hud','ui-flow'].includes('kind' in d ? d.kind! : d.document!.kind)).map(d => d.path) : []
-    const canEdit = !writerActive && !workflowChanged && hasBeeGamePermission(user, 'project.create') &&
+    const canEdit = !isWebReactTarget(ctx.run.requirements.constraints) && !writerActive && !workflowChanged && hasBeeGamePermission(user, 'project.create') &&
       hasBeeGamePermission(user, 'agent.send_message') && editablePaths.length > 0
     return { ...snapshot, readOnly: !canEdit, ...(canEdit ? { editing: { version: ctx.run.version, planRevision: ctx.run.planRevision,
       requirementsRevision: ctx.run.requirements.revision, paths: editablePaths } } : {}),

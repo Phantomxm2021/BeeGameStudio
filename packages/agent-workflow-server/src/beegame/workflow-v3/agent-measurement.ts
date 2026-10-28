@@ -17,7 +17,7 @@ import { projectNavigationSnapshot } from './project-guide'
 import { priorMainSkillLoads } from './context'
 import { artifactDigest, inspectDesignAcceptance } from '../runtime-acceptance'
 import { snapshotDesignRevisionFiles, designRevisionFileDigest, designInputRevision, DESIGN_ACCEPTANCE_PATH, readDesignImplementationChecklist, readDesignAcceptanceRequirements } from '../design-handoff'
-import { requiresBgsEditableContent } from './web-project-start'
+import { requiresWebVisualComparison } from './web-project-start'
 import { validateFontProbeInputs } from './font-consumption'
 
 export const AGENT_CONSUMPTION_CHECKS = ['ui-data-consumption','scene-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'] as const
@@ -211,9 +211,9 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
           throw new WorkflowError('report-alias','Execution receipt must not resolve through an alias')
       record.reports=await Promise.all(request.reportPaths.map(path=>readVersion(root,path)))
       if (request.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
-        const acceptance = await inspectDesignAcceptance(root,run.creation?.initialDelivery === 'design-led-first-version',requiresBgsEditableContent(run),
+        const acceptance = await inspectDesignAcceptance(root,run.creation?.initialDelivery === 'design-led-first-version',false,
           {runId:run.id,requirementsRevision:run.requirements.revision},
-        {requireVisualComparison:requiresBgsEditableContent(run)})
+        {requireVisualComparison:requiresWebVisualComparison(run)})
         // Reject unsupported PASS claims before building as well as malformed
         // reports. Honest blocked/failed reports remain diagnostic inputs.
         if (acceptance.diagnostic && (acceptance.diagnostic.category === 'report-invalid' ||
@@ -235,7 +235,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       const build=await buildEditableProject(root,{editableProject:true,runtimeArtifact:request.runtimeArtifact,
         writablePaths:[request.runtimeArtifact+'/**']},[requirements,...record.reports],[AGENT_EVIDENCE_DIRECTORY],signal)
       record.checks.push(build)
-      record.checks.push(...await registeredContentChecks(root,run.requirements.constraints,requiresBgsEditableContent(run)))
+      record.checks.push(...await registeredContentChecks(root,run.requirements.constraints,false))
       if(build.status==='passed' && build.projectBuild) {
         record.checks.push(await runArtifactCheck(root,'runtime-smoke',{runtimeArtifact:request.runtimeArtifact,expectedOutputs:[]},
           [requirements,...record.reports],run.requirements.constraints,signal))
@@ -271,9 +271,9 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     if(input.turn.message?.intent==='discuss')
       throw new WorkflowError('delivery-scope','Discussion does not submit an implementation delivery')
     const root=run.workspacePath
-    const acceptance=await inspectDesignAcceptance(root,run.creation?.initialDelivery==='design-led-first-version',requiresBgsEditableContent(run),
+    const acceptance=await inspectDesignAcceptance(root,run.creation?.initialDelivery==='design-led-first-version',false,
       {runId:run.id,requirementsRevision:run.requirements.revision},
-        {requireVisualComparison:requiresBgsEditableContent(run)})
+        {requireVisualComparison:requiresWebVisualComparison(run)})
     if(!acceptance.valid)
       throw new WorkflowError('delivery-unverified',acceptance.summary)
     const records=run.agentTurns!.flatMap(turn=>turn.measurements??[])
@@ -402,9 +402,9 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       // place of the newest pending or failed record.
       const measurement=latest ? {freshness:await inspectAgentMeasurementInputs(run,latest.record),
         attemptId:latest.attemptId,...measurementSummary(latest.record,details)} : null
-      const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',requiresBgsEditableContent(run),
+      const acceptance = await inspectDesignAcceptance(run.workspacePath,run.creation?.initialDelivery === 'design-led-first-version',false,
         {runId:run.id,requirementsRevision:run.requirements.revision},
-        {requireVisualComparison:requiresBgsEditableContent(run)})
+        {requireVisualComparison:requiresWebVisualComparison(run)})
       return {
         ...(input.executionContext?.()?{executionContext:input.executionContext!()}:{}),
         designFileChanges:designFileChanges(),

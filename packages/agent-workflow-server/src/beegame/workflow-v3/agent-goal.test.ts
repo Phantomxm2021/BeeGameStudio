@@ -223,7 +223,7 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
-    expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:true})
+    expect(run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:false})
     const initialMessage = f.sessions.transcript(run.chatSessionId).find(event => event.type === 'user.message')!
     expect(initialMessage, run.blockedReason).toBeDefined()
     expect(initialMessage.payload?.displayText).toBe('Production: design / gameplay')
@@ -237,6 +237,7 @@ for (const creationMode of ['creative', 'blueprint']) test(`blank confirmed Web 
     expect(run.productionWorkflow).toBe(1)
     expect(f.starts[0].systemContext).toContain('design records live under docs/')
     expect(f.starts[0].systemContext).toContain('Bgs loads applicable AGENTS.md instructions natively')
+    expect(f.starts[0].systemContext).toContain('BGS Scene/UI editing is not part of this target')
     const guide=await readFile(join(f.root,'AGENTS.md'),'utf8')
     expect(guide).not.toContain('Built-in Skill index')
     expect(guide).not.toContain('Collection navigator:')
@@ -849,8 +850,9 @@ test.each([1, undefined] as const)('first-version deliverables do not become a f
   expect(first).not.toContain('Draft technical/resource plans first')
   expect(followup).not.toContain('eight documents')
   expect(followup).not.toContain('New design-led first-version deliverables')
-  expect(followup).toContain('content/scenes/*.json')
-  expect(followup).toContain('actual runtime')
+  expect(followup).not.toContain('content/scenes/*.json')
+  expect(followup).toContain('BGS Scene/UI editing is not part of this target')
+  expect(followup).toContain('verify actual rendering, input, motion')
   expect(followup).not.toContain(PROJECT_WORKING_CONVENTIONS)
   expect(followup).not.toContain('Before creating or changing visual implementation')
   expect(agentProfessionalContextForRun({...run,creation:undefined})).not.toContain('eight documents')
@@ -1448,16 +1450,18 @@ test('new and resumed goals retain requested scope while Agent selects Skills; f
     expect(agentMessagePrompt({intent,text:'继续处理'} as any)).not.toContain('/bgs-builtins:')
 })
 
-test('editable content describes data consumed by the confirmed engine, not an alternative game scaffold', () => {
-  const run={creation:{initialDelivery:'design-led-first-version',editableContent:true}} as Run
-  const context=agentProfessionalContextForRun(run)
-  expect(context).toContain('editable data consumed by the confirmed engine')
-  expect(context).toContain('optional browser consumer supports a subset')
-  expect(context).toContain('UI-only games without a world scene need no empty Scene')
-  expect(context).toContain('Canvas rendering or a single screen does not imply UI-only')
-  expect(context).toContain('Dynamic simulation state and game logic belong in code')
-  expect(agentProfessionalContextForRun({...run,creation:{...run.creation!,editableContent:false}}))
-    .not.toContain('editable data consumed by the confirmed engine')
+test('Web/React uses native code on initial and resumed work regardless of historical editor flags', () => {
+  const run=createRun({projectId:'sample',ownerId:'owner',workspacePath:'/unused',chatSessionId:'chat',
+    requestKey:'start',text:'Confirmed Web project',constraints:{platform:'Web',engine:'React'},ids:['goal']})
+  for (const editableContent of [true,false]) for (const followup of [true,false]) {
+    run.creation={initialDelivery:'design-led-first-version',editableContent}
+    const context=agentProfessionalContextForRun(run,followup)
+    expect(context).toContain('implement UI and scenes in project-native code and data')
+    expect(context).toContain('Preserve existing runtime dependencies')
+    expect(context).toContain('verify actual rendering, input, motion')
+    expect(context).not.toContain('BGS Editor reads')
+    expect(context).not.toContain('This project requires BGS visual editing')
+  }
 })
 
 

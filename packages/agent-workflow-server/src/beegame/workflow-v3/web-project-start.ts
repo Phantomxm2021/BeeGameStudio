@@ -27,13 +27,16 @@ export async function observeProjectCreation(root: string, brief: {
 }): Promise<Run['creation']> {
   if (brief.build_source != null || !['creative', 'blueprint'].includes(String(brief.creation_mode)) ||
       (await sourcePaths(await realpath(root))).length) return undefined
-  const settings = brief.settings
-  const editableContent = settings.platform === 'Web' && settings.engine === 'React' && settings.bgsVisualEditing !== false
-  return {initialDelivery:'design-led-first-version',editableContent}
+  return {initialDelivery:'design-led-first-version',editableContent:false}
 }
 
-/** Old creation records enabled Web JSON for every Web export, including native
- * engines. Those engines retain their own editable source format. */
-export function requiresBgsEditableContent(run: Pick<Run, 'creation'> & Partial<Pick<Run, 'requirements'>>): boolean {
-  return Boolean(run.creation?.editableContent) && !['Unity', 'Godot', 'Unreal'].includes(String(run.requirements?.constraints.engine))
+/** Web/React uses project-native UI and scene code, not the BGS editor contract. */
+export function isWebReactTarget(settings: { platform?: unknown; engine?: unknown } | undefined): boolean {
+  return settings?.platform === 'Web' && settings.engine === 'React'
+}
+
+/** Visual evidence belongs to delivery quality, independently of editor support. */
+export function requiresWebVisualComparison(run: Pick<Run, 'creation'> & Partial<Pick<Run, 'requirements'>>): boolean {
+  return isWebReactTarget(run.requirements?.constraints) &&
+    (run.creation?.initialDelivery === 'design-led-first-version' || run.creation?.editableContent === true)
 }

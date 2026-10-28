@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { prepareNativeMcpConfig, NATIVE_MCP_CONFIG_ENV, NATIVE_READ_TOOLS } from './native-mcp-config'
 import { uiLayoutFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
+import type { LayoutConstraints } from './ui-layout-audit'
 import { runGameContentCommand } from './game-content-validation-cli'
 import { BeeGameSessionManager, type BeeGameSessionRunnerStartInput } from './session-manager'
 
@@ -19,8 +20,8 @@ function fixture() {
   return { root, save }
 }
 const conditions = { platform: 'Web', inputs: ['Touch'], orientation: 'Landscape', dimension: '2D' }
-async function connect(root: string) {
-  const prepared = await prepareNativeMcpConfig({}, root, conditions)
+async function connect(root: string, constraints: LayoutConstraints = conditions) {
+  const prepared = await prepareNativeMcpConfig({}, root, constraints)
   const servers = prepared.config.mcp_servers as Record<string, ConstructorParameters<typeof StdioClientTransport>[0]>
   expect(Object.keys(servers)).toEqual(['bgs-ui-layout'])
   const client = new Client({ name: 'offline-layout-test', version: '1' })
@@ -320,3 +321,16 @@ test('tool rejects command/size/workspace overrides, preserves missing-input err
     expect(text(absent)).toContain('unavailable')
   } finally { await access.close() }
 }, 20_000)
+
+
+test('Web/React MCP removes saved-layout tools while keeping design, resources and verification reads', async () => {
+  const {root}=fixture()
+  const access=await connect(root,{...conditions,engine:'React'})
+  try {
+    const names=(await access.client.listTools()).tools.map(tool=>tool.name).sort()
+    expect(names).toEqual(NATIVE_READ_TOOLS.filter(name=>!['CheckUiLayouts','CheckSceneLayouts'].includes(name)).sort())
+    const resources=await access.client.callTool({name:'CheckResourcesAndBindings',arguments:{}})
+    expect(resources.content).toBeDefined()
+    expect((await access.client.callTool({name:'CheckUiLayouts',arguments:{}})).isError).toBe(true)
+  } finally { await access.close() }
+},20_000)

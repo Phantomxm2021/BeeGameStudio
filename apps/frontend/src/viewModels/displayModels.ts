@@ -68,6 +68,7 @@ export interface PermissionDisplayModel {
 }
 
 export interface ProjectRuntimeDisplayModel {
+  scene_ui_editor_available?: boolean
   project_id: string
   phase?: string
   delivery_phase?: string
@@ -230,6 +231,7 @@ export const toProjectRuntimeDisplayModel = (
   if (!payload) return null
   return {
     project_id: trimString(payload.project_id),
+    scene_ui_editor_available: payload.scene_ui_editor_available,
     phase: trimString(payload.phase) || undefined,
     delivery_phase: trimString(payload.delivery_phase) || undefined,
     active_subagents: Array.isArray(payload.active_subagents)

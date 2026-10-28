@@ -1,5 +1,7 @@
 # Saved BGS Scene layout diagnostics
 
+This reference is for existing BGS Scene JSON and the corresponding tools exposed by the host. New Web/React UI and scenes use project-native code and runtime inspection.
+
 World-space Canvas/Image/Text can represent Scene labels/meters. Preserve BGS units, top-left 2D coordinates and radians. Scene layer priority precedes node.zIndex, then source order. Check runtime capabilities before equating static layout with render support.
 
 For saved BGS Scenes, use `mcp__bgs-ui-layout__CheckSceneLayouts {}` for all saved Scene structure and static 2D Camera-reference checks. `{"detailsFor":"content/scenes/level.json"}` adds the selected source's parent/local/world/projected coordinates, Camera and unit context without narrowing checks. Use BGS file-editing tools to adjust the intended transforms, cells or Camera in the same source and recheck; no automatic Scene rearrangement is provided. Actual UI game-view framing uses CheckUiLayouts through the saved layoutCamera link. Missing bounds and 3D/XR geometry remain explicitly unverified. No Shell loops, report-file writes or JSON extraction are needed for these native calls.

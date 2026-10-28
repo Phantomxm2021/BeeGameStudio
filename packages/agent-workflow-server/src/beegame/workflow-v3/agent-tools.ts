@@ -1,3 +1,4 @@
+import { isWebReactTarget } from './web-project-start'
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
@@ -23,7 +24,7 @@ export type AgentPreviewAccess = ReturnType<typeof openPreviewTestAccess>
 export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
 
 /** Same design indexes and writer lifetime; no new workflow state or copied plan. */
-export function openDesignActions(root: string, requireEditableContent = false) {
+export function openDesignActions(root: string, requireVisualComparison = false) {
   let before = snapshotDesignDocuments(root, PROJECT_DOCUMENTS)
   return async (action: string, documents: string[] = [], executionIdentity?: {runId:string;requirementsRevision:string}, details = false) => {
     const selected = documents.map(name => name.startsWith('docs/') ? name.slice(5) : name)
@@ -52,9 +53,9 @@ export function openDesignActions(root: string, requireEditableContent = false) 
         evidencePaths: [], artifactPaths: [],
         verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [],
           unverified: ['Replace this example with actual coverage and missing observations.'],
-          requirementChecks: [], contentChecks: [], visualComparisons: [] },
+          requirementChecks: [], ...(existsSync(resolve(root, 'content/index.json')) ? { contentChecks: [] } : {}), visualComparisons: [] },
       },
-      acceptanceInstruction: DESIGN_RUNTIME_REPORT_INSTRUCTION + ' Save .beegame/delivery/acceptance.json using the field types in acceptanceExample; it is an incomplete shape example, not evidence or a passed report. Allowed status values are "passed"|"failed"|"blocked". A design-bound delivery PASS requires verification.designRevision (64 lowercase hexadecimal characters), not a top-level designRevision. Use the designRevision from an existing implementation handoff, or read the current revision with --design baseline (read-only). Record the version actually verified; a changed revision requires revalidating affected evidence, not just replacing the hash. The blocked/failed report may omit verification.designRevision, as this example does. Filling it does not resolve knownIssues or unverified items. Source hashes are needed only for existing indexed checks. Do not invent hashes or create indexes. Record real differences from selected designs and missing observations honestly. --design acceptance reads this same validator; it never executes or retries tests. Include finalized reports with --report .beegame/delivery/acceptance.json in the original measurement request. An existing measurement is immutable; --report does not attach to it. Inspect retained evidence without rebuilding. ' + CONTENT_RUNTIME_REPORT_INSTRUCTION,
+      acceptanceInstruction: DESIGN_RUNTIME_REPORT_INSTRUCTION + ' Save .beegame/delivery/acceptance.json using the field types in acceptanceExample; it is an incomplete shape example, not evidence or a passed report. Allowed status values are "passed"|"failed"|"blocked". A design-bound delivery PASS requires verification.designRevision (64 lowercase hexadecimal characters), not a top-level designRevision. Use the designRevision from an existing implementation handoff, or read the current revision with --design baseline (read-only). Record the version actually verified; a changed revision requires revalidating affected evidence, not just replacing the hash. The blocked/failed report may omit verification.designRevision, as this example does. Filling it does not resolve knownIssues or unverified items. Source hashes are needed only for existing indexed checks. Do not invent hashes or create indexes. Record real differences from selected designs and missing observations honestly. --design acceptance reads this same validator; it never executes or retries tests. Include finalized reports with --report .beegame/delivery/acceptance.json in the original measurement request. An existing measurement is immutable; --report does not attach to it. Inspect retained evidence without rebuilding. ' + (existsSync(resolve(root, 'content/index.json')) ? CONTENT_RUNTIME_REPORT_INSTRUCTION : ''),
     }
     if (action === 'finalize') {
       const names = PROJECT_DOCUMENTS.filter(name => selected.length ? selected.includes(name) :
@@ -82,8 +83,8 @@ export function openDesignActions(root: string, requireEditableContent = false) 
     }
     if (action === 'implementation') return { valid: true, ...readDesignImplementationChecklist(root),
       requirements:readDesignAcceptanceRequirements(root) }
-    if (action === 'acceptance') return inspectDesignAcceptance(root,true,requireEditableContent,executionIdentity,
-      {requireVisualComparison:requireEditableContent})
+    if (action === 'acceptance') return inspectDesignAcceptance(root,true,false,executionIdentity,
+      {requireVisualComparison})
     throw Error('Unknown design action; use --design help')
   }
 }
@@ -93,7 +94,7 @@ export function openDesignActions(root: string, requireEditableContent = false) 
 export async function openAgentTools(input: {
   workspacePath: string
   constraints?: LayoutConstraints
-  requireEditableContent?: boolean
+  requireVisualComparison?: boolean
   libraryBaseUrl?: string
   getAuthToken: () => string | undefined | Promise<string | undefined>
   sessionId?: string
@@ -103,7 +104,7 @@ export async function openAgentTools(input: {
   openImage?: () => AgentImageAccess | Promise<AgentImageAccess>
 }) {
   const root = await realpath(input.workspacePath)
-  const design = openDesignActions(root, input.requireEditableContent)
+  const design = openDesignActions(root, input.requireVisualComparison)
   // Check each parent before creating a child; a project symlink must not
   // redirect host-written adapters outside the authorized workspace.
   let parent = root
@@ -330,27 +331,32 @@ export async function openAgentTools(input: {
       ...(input.sessionId ? { sessionId: input.sessionId } : assets),
       mediaCommand: 'bun ' + JSON.stringify(entry('media.mjs')),
     })
-    const { platform, inputs, orientation, dimension } = input.constraints ?? {}
+    const { platform, engine, inputs, orientation, dimension } = input.constraints ?? {}
+    const editorContent = !isWebReactTarget({platform, engine})
     const contentEntry = CURRENT_CONTENT_CHECKER_ENTRY.replace("{ profile: 'current' }",
       JSON.stringify({ profile: 'current', confirmed: { platform, inputs, orientation, dimension } }))
     for (const [name, source] of [['check-content.mjs', contentEntry],
-      ['bind-content.mjs',CONTENT_BINDING_ENTRY],
+      ...(editorContent ? [['bind-content.mjs',CONTENT_BINDING_ENTRY] as const] : []),
       ['media.mjs', MEDIA_PRODUCTION_ENTRY], ['resources.mjs', RESOURCE_PRODUCTION_ENTRY]] as const)
       await writeFile(resolve(directory, name), source, { flag: 'wx', mode: 0o600 })
     // Optional existing geometry/paint implementation, not generated game code.
     // The bundle stays out of model context; the Agent chooses whether to use it.
-    for (const [name, body] of Object.entries(await contentConsumerDistribution()))
-      await writeFile(resolve(directory, name), body, { flag: 'wx', mode: 0o600 })
-    await writeFile(resolve(directory, 'registered-runtime-files.mjs'), await registeredRuntimeFilesSource(), { flag: 'wx', mode: 0o600 })
-    await writeFile(resolve(directory, 'consumer.mjs'),
-      contentConsumerCommand(root, entry('content-consumer.mjs')), { flag: 'wx', mode: 0o600 })
+    // Existing registered projects may still import the portable runtime.
+    if (editorContent || existsSync(resolve(root, 'content/index.json'))) {
+      for (const [name, body] of Object.entries(await contentConsumerDistribution()))
+        await writeFile(resolve(directory, name), body, { flag: 'wx', mode: 0o600 })
+      await writeFile(resolve(directory, 'registered-runtime-files.mjs'), await registeredRuntimeFilesSource(), { flag: 'wx', mode: 0o600 })
+      await writeFile(resolve(directory, 'consumer.mjs'),
+        contentConsumerCommand(root, entry('content-consumer.mjs')), { flag: 'wx', mode: 0o600 })
+    }
     return {
       directory: relative(root, directory),
-      uiLayoutConstraints: { platform, inputs, orientation, dimension },
+      uiLayoutConstraints: { platform, engine, inputs, orientation, dimension },
       // Keep the locator outside compactable message history. Capabilities
       // still expire normally; this is only the current turn's tool location.
       systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
-        'Read contracts as needed: bun check-content.mjs --format uiLayoutContract (layout; --format lists sections); bun resources.mjs --contract registration (resource fields); bun consumer.mjs --api (optional runtime). --help: bun assets.mjs, bun bind-content.mjs, bun media.mjs'+
+        (editorContent ? 'Optional saved-content contracts: bun check-content.mjs --format uiLayoutContract; bun consumer.mjs --api; bun bind-content.mjs --help. ' : '') +
+        'Read contracts as needed: bun resources.mjs --contract registration (resource fields). --help: bun assets.mjs, bun media.mjs'+
         (input.measurement ? '; node measure.mjs, node handoff.mjs' : '')+(input.workflow ? '; node workflow.mjs' : '')+(preview ? '; node preview.mjs' : '')+
         '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
         (input.workflow ? 'Use BgsWorkflow for status/advance/implement when exposed; otherwise use workflow.mjs for the saved native session. ' : '')+

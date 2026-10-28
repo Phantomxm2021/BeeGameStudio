@@ -100,6 +100,13 @@ test('acceptance help exposes the runtime verification field contract and entry 
   try {
     const help = await openDesignActions(root)('acceptance-help') as any
     expect(help.acceptanceExample.verification).toMatchObject({ target: 'deployment', observation: 'target-runtime' })
+    expect(help.acceptanceExample.verification).not.toHaveProperty('contentChecks')
+    expect(help.acceptanceInstruction).not.toContain('document:"content/<registered file>"')
+    await mkdir(join(root,'content'))
+    await writeFile(join(root,'content/index.json'),'{}')
+    const legacy = await openDesignActions(root)('acceptance-help') as any
+    expect(legacy.acceptanceExample.verification.contentChecks).toEqual([])
+    expect(legacy.acceptanceInstruction).toContain('document:"content/<registered file>"')
     expect(help.acceptanceInstruction).toContain('verification.target must be "deployment"')
     expect(help.acceptanceInstruction).toContain('verification.observation must be "target-runtime"')
     expect(help.acceptanceInstruction).toContain('verification.observation allows "target-runtime"|"simulation"')
@@ -1179,4 +1186,27 @@ test('native measurement and HTTP share dispatch, and terminal delivery does not
     expect(calls.filter(call => (call as any[])[0] === 'finish')).toHaveLength(1)
     await expect(tools.measurement!(body)).rejects.toThrow('unavailable')
   } finally { await tools?.close(); await rm(root, {recursive:true,force:true}) }
+})
+
+test.each([false,true])('Web/React tools omit editing adapters and preserve legacy runtime imports: %s', async legacy => {
+  const root = await realpath(await mkdtemp(join(tmpdir(),'bgs-web-native-tools-')))
+  if (legacy) {
+    await mkdir(join(root,'content'))
+    await writeFile(join(root,'content/index.json'),'{}')
+  }
+  const constraints = { platform:'Web', engine:'React' }
+  const tools = await openAgentTools({workspacePath:root,constraints,getAuthToken:()=>undefined})
+  try {
+    expect(tools.uiLayoutConstraints).toMatchObject(constraints)
+    expect(tools.systemContext).not.toContain('bind-content.mjs')
+    expect(tools.systemContext).not.toContain('uiLayoutContract')
+    expect(tools.systemContext).toContain('resources.mjs')
+    await expect(access(join(root,tools.directory,'bind-content.mjs'))).rejects.toThrow()
+    for (const name of ['consumer.mjs','content-consumer.mjs','registered-runtime-files.mjs']) {
+      const exists = await Bun.file(join(root,tools.directory,name)).exists()
+      expect(exists).toBe(legacy)
+    }
+    for (const name of ['resources.mjs','media.mjs','check-content.mjs'])
+      expect(await Bun.file(join(root,tools.directory,name)).exists()).toBe(true)
+  } finally { await tools.close(); await rm(root,{recursive:true,force:true}) }
 })

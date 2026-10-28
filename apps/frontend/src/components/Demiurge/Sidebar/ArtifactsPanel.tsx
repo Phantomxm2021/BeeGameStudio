@@ -60,7 +60,7 @@ export const ArtifactsPanel = memo(({
         {error ? <p role="alert" className="mb-4 type-caption-1 text-[var(--destructive)]">{error}</p> : null}
         {!page ? <>
             <section aria-label={text.artifacts || 'Artifacts'} className={listClass}>
-                {(['scene', 'ui', 'documents', 'assets'] as const).map(category => {
+                {(['scene', 'ui', 'documents', 'assets'] as const).filter(category => onOpenEditor || category === 'documents' || category === 'assets').map(category => {
                     const Icon = category === 'scene' ? Box : category === 'ui' ? LayoutPanelTop : category === 'documents' ? FileText : FolderOpen;
                     return <button key={category} type="button" className={rowClass} onClick={() => category === 'assets' ? onOpenAssets?.() : openCategory(category)}>
                         <Icon className="size-4 shrink-0 text-[var(--text-secondary)]" aria-hidden="true" />

@@ -20,7 +20,7 @@ await initializeUiLayout()
 export const isViewportPair = (size: unknown): size is [number, number] => Array.isArray(size) &&
   size.length === 2 && size.every(value => typeof value === 'number' && Number.isFinite(value) && value > 0)
 
-export type LayoutConstraints = { platform?: unknown; inputs?: unknown; orientation?: unknown; dimension?: unknown }
+export type LayoutConstraints = { platform?: unknown; engine?: unknown; inputs?: unknown; orientation?: unknown; dimension?: unknown }
 
 /** Linking the Scene preserves camera identity and required geometry in one source. */
 export function layoutCameraSource(nodeId: string, source: unknown, workspacePath?: string): NonNullable<UiLayoutInspectionOptions['camera']> {

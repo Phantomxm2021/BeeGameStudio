@@ -41,6 +41,7 @@ export interface StopTaskResponse {
 }
 
 export interface ProjectBaselineStatusPayload {
+  scene_ui_editor_available?: boolean
   execution_time?: { elapsed_ms: number; running: boolean } | null
   project_id: string
   phase: string
@@ -420,6 +421,7 @@ export const normalizeProjectBaselineStatusPayload = (
     }
   }
   return {
+    scene_ui_editor_available: normalizedPayload.scene_ui_editor_available,
     project_id: String(normalizedPayload.project_id ?? '').trim(),
     execution_time: normalizedPayload.execution_time &&
       Number.isFinite(normalizedPayload.execution_time.elapsed_ms) && normalizedPayload.execution_time.elapsed_ms >= 0 &&

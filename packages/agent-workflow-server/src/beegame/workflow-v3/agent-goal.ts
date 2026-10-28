@@ -10,7 +10,7 @@ import { createAgentMeasurement, AGENT_CONSUMPTION_CHECKS } from './agent-measur
 import { blockingRegisteredContentChecks, inspectAgentMeasurementInputs } from './measured-build'
 import { readProjectGuide, projectGuideContext } from './project-guide'
 import { saveHostExitReceipt, type HostExitReceipts, type HostExitFacts } from './host-exit-receipt'
-import { requiresBgsEditableContent } from './web-project-start'
+import { requiresWebVisualComparison, isWebReactTarget } from './web-project-start'
 import { inspectDesignAcceptance } from '../runtime-acceptance'
 import { DESIGN_ACCEPTANCE_PATH } from '../design-handoff'
 
@@ -43,8 +43,9 @@ export const agentMessageSchema = z.object({
   {message:'Focused execution requires work, change or continuation'})
 
 // Business data, authorization and shared coordination; specialist methods stay in Skills.
+const enginePlatformContext = 'Preserve the user-selected engine and platform in bgsConfirmedBrief.settings. Choose architecture, entry points, source organization, build and verification methods in the technical sections of docs/GDD.md.'
+const savedContentContext = 'Consume applicable editable content in the actual runtime, without a second hardcoded layout. BGS Editor reads BGS Scene/UI JSON; Unity/Godot/Unreal retain native data and have no BGS native-editing adapter. Report an unmet BGS Editor requirement instead of switching engines or duplicating native content into Web JSON. Maintain resources and bindings together.'
 const professionalContextParagraphs = [
-  'Preserve the user-selected engine and platform in bgsConfirmedBrief.settings. Choose architecture, entry points, source organization, build and verification methods in the technical sections of docs/GDD.md. Consume applicable editable content in the actual runtime, without a second hardcoded layout. BGS Editor reads BGS Scene/UI JSON; Unity/Godot/Unreal retain native data and have no BGS native-editing adapter. Report an unmet BGS Editor requirement instead of switching engines or duplicating native content into Web JSON. Maintain resources and bindings together.',
   'For implementation and delivery, complete and check the confirmed behavior: build/load, resources, rules, controls and their required visible/audible presentation, including state transitions and recovery. Confirmed visual/audio requirements remain implementation responsibilities. Missing behavior is unfinished; behavior without runtime observation remains unverified. User playtesting judges how clear, satisfying or enjoyable the result is; pending subjective feedback alone does not keep implementation running. Hand off implemented scope, actual observations and unresolved issues. Full-game bot navigation and route optimization are not default deliverables. Honor explicitly requested playtests and performance investigations without claiming unverified outcomes.',
   'Honor explicit resource sources and usage rights, and reuse suitable user-provided assets. Default sourcing order: built-in resource library, then suitable public resources, then an available AI production method appropriate to the required asset type. Move on when earlier sources do not yield a usable match; unavailable access is not an empty search result. Obtain the actual read-only quote before authorized generation; respect exclusions and the project budget, including model work. Only disclosed charges are authorized; no redundant per-image approval, unknown paid replay or automatic paid retry. Failed sourcing or AI generation does not authorize automatic procedural replacement of required art; that needs a concrete blocker and user authorization. Simple controls, geometric effects and an explicitly chosen procedural aesthetic may use code directly. Placeholders cannot replace final art. A temporary stop creates no permanent asset prohibition.',
   'Keep editable sources separate from publication output and retain required licenses.',
@@ -53,13 +54,14 @@ const professionalContextParagraphs = [
 // Native child tools provide execution; this assigns responsibility, not locks.
 const limitedParallelWorkContext = 'BGS limited parallel work: use native child agents for substantial independent work whose inputs are ready and whose output avoids serial delay; keep coupled decisions and the current critical path with the parent. Usually use one child, at most two concurrently; small tasks and tool batches stay local. Do not require delegation or a review for every task. Prefer spawn_agent with fork_context:false for self-contained work. Pass the current authorized goal/stage, relevant constraints and budget, exact source/image paths and headings, established interfaces, current partial work, allowed write files (or read-only), current tool entries and the expected result. Children read the original sources and pictures; do not copy full history, GDDs, Skills or logs, lower the model to save tokens, or assume a summary covers the design. Give each concurrently edited file one writer. The parent owns shared GDD/progress records, shared interfaces, Manifest/index, dependency configuration and application wiring; delegate disjoint modules/resources or read-only findings once dependencies are settled. Children report needed shared changes to the parent, preserve others’ edits, and return changed/output paths, actual checks and unresolved issues; they do not spawn further agents, advance production or finish the project. Record ownership in the existing task record when one is already needed, not a new registry. The parent continues independent work, waits for all children and their tools to stop, inspects partial work after failure/interruption, and integrates actual files before affected verification. Reassign only after the prior writer stops; reuse an existing child for follow-up or release it through native tools before replacement when capacity is occupied. Do not blindly repeat failed or paid work. Validate integrated outputs within the current assignment: design/resource-only work checks its actual deliverables and source agreement without adding game implementation or runtime playtests. For work affecting runtime implementation, preserve selected visual designs, animation timing/lifecycle and gameplay rules; verify affected interfaces and the resulting combined scene/UI, normal-speed motion and ordinary-input player loop in the target runtime. Missing observations remain unverified; child completion and module tests are not full delivery. Only the parent submits the existing workflow handoff or validated delivery after integration; no extra approval stage.'
 const firstVersionDeliveryContext = 'Deliver the confirmed scope using the design dependencies and professional methods in the project guide; design records live under docs/.'
-const editableWebDeliveryContext = 'This project requires BGS visual editing: content/scenes/*.json and content/ui/*.json are editable data consumed by the confirmed engine, not a separate engine or required game scaffold. Register Scene/UI documents in content/index.json and resources in assets/asset-manifest.json. Scene data holds editable world layout and object/resource bindings; UI-only games without a world scene need no empty Scene. Canvas rendering or a single screen does not imply UI-only. Dynamic simulation state and game logic belong in code. The optional browser consumer supports a subset of this data; project code implements the remaining behavior.'
+const webReactRuntimeContext = 'For Web/React, implement UI and scenes in project-native code and data. BGS Scene/UI editing is not part of this target: do not create proprietary Scene/UI documents or a content/index.json merely for BGS editing. For new projects, prefer Phaser for real-time 2D worlds, Three.js with React Three Fiber for actual 3D, and React alone for UI-led games. Choose from the confirmed gameplay needs and explicit user preferences, not dimension labels alone; record the choice in the GDD technical section. Preserve existing runtime dependencies when modifying a project. Keep resources registered in assets/asset-manifest.json and verify actual rendering, input, motion and selected visual designs in the running game.'
 // Native execution reads production guidance from the saved project guide once.
 export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation' | 'requirements'>>, followup = false) => [
+  enginePlatformContext,
+  isWebReactTarget(run.requirements?.constraints) ? webReactRuntimeContext : savedContentContext,
   ...professionalContextParagraphs,
   limitedParallelWorkContext,
   ...(!followup && run.creation?.initialDelivery === 'design-led-first-version' ? [firstVersionDeliveryContext] : []),
-  ...(requiresBgsEditableContent(run) ? [editableWebDeliveryContext] : []),
 ].join('\n')
 export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run['sourceEdits']> = []): string {
   return [...(edits.length ? ['User-authorized source saves since the preceding native turn:\n'+
@@ -200,9 +202,9 @@ export async function agentTurnHandoffReason(run: Run, turn: AgentTurn) {
   const record=run.agentTurns?.flatMap(t=>t.measurements??[]).at(-1)
   let acceptanceNote = ''
   if (record?.reportPaths.includes(DESIGN_ACCEPTANCE_PATH)) {
-    const acceptance = await inspectDesignAcceptance(run.workspacePath,true,requiresBgsEditableContent(run),
+    const acceptance = await inspectDesignAcceptance(run.workspacePath,true,false,
       {runId:run.id,requirementsRevision:run.requirements.revision},
-        {requireVisualComparison:requiresBgsEditableContent(run)})
+        {requireVisualComparison:requiresWebVisualComparison(run)})
     const verification = acceptance.verification
     const counts = (checks: {status:string}[] | undefined) => checks?.length
       ? ['passed','failed','unverified'].map(status => status + '=' + checks.filter(check=>check.status===status).length).join(', ')
@@ -409,7 +411,7 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
             user_messages:pendingChanges.filter(item=>item.intent==='message').map(({requestKey,text})=>({requestKey,text})),
           }):''
           tools=await openAgentTools({ workspacePath:run.workspacePath, constraints:run.requirements.constraints,
-            requireEditableContent:requiresBgsEditableContent(run),
+            requireVisualComparison:requiresWebVisualComparison(run),
             sessionId:session.id,openPreview:options.openPreview ? async ()=>preview=await options.openPreview!() : undefined,
             libraryBaseUrl:input.resourceLibraryBaseUrl,
             getAuthToken:()=>options.getValidAuthToken?.() ?? options.authToken, measurement,
