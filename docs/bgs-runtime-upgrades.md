@@ -7,11 +7,11 @@ BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导
 - 主仓库子模块：`vendor/bgs`；Rust 工作区：`vendor/bgs/bgs-rs`。
 - Fork：`https://github.com/Phantomxm2021/codex.git`。这是现有真实仓库地址，保留作为来源，不虚构新地址。
 - 官方上游：`https://github.com/openai/codex.git`。
-- `bgs/source-0.164.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新及锁文件版本修正。
-- `bgs/0.164.0`：从源码维护分支生成的完整 BGS 命名发行分支。主仓库 gitlink 固定发行提交。Rust 工具链由源码固定为 `1.99.1`。
+- `bgs/source-0.166.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新、锁文件版本修正、可信应用上下文持久化去重和未知/BYOK 模型 Skill 指引补丁。
+- `bgs/0.166.0`：从源码维护分支生成的完整 BGS 命名发行分支。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
 - 完整改名规则在 `scripts/brand-bgs.py`。默认只报告，`--apply` 才写入。只遍历 Git 源码，不遍历用户运行数据。`--host` 仅为本次宿主代码的一次性迁移用途；不要对后续 BGS 宿主源码重复执行，因为兼容读取代码有意保留旧名称。
 
-后续更新在源码维护分支合并上游，再重新生成发行分支，避免对数千个改名文件逐一解决合并冲突。新增上游名称和外部协议仍需要审查；脚本不能保证未来升级无需调整。
+后续更新在源码维护分支合并上游，再重新生成发行分支，避免对数千个改名文件逐一解决合并冲突。新增上游名称和外部协议仍需要审查；脚本不能保证未来升级无需调整。升级前还需核对仅在发行分支上的非品牌补丁，并将仍需保留的改动同步到源码维护分支，避免重新生成时丢失。
 
 ## 运行位置
 
@@ -101,7 +101,7 @@ bun run bgs:build
 bun run bgs:check
 bun run bgs:verify
 python3 scripts/test_brand_bgs.py
-python3 scripts/verify-bgs-source.py bgs/source-0.164.0
+python3 scripts/verify-bgs-source.py bgs/source-0.166.0
 bun run typecheck
 bun test scripts/migrate-bgs-home.test.ts
 BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
@@ -110,6 +110,17 @@ BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
 首次准备依赖可执行 `cargo fetch --locked --manifest-path vendor/bgs/bgs-rs/Cargo.toml`。正常构建使用离线锁定依赖；本地测试使用脚本化 Responses 服务，不向真实模型提交任务。macOS 权限测试需要可运行 Seatbelt 的宿主环境。
 
 产物是 `dist/bgs-runtime/bgs`、`build.json`、LICENSE、NOTICE 和修改说明。构建信息记录源码 SHA、上游 tag、dirty 状态及平台架构。发布构建 `bun run bgs:build --release` 拒绝未提交的源码。缺少品牌二进制时不回退到官方 npm 包。
+
+## 0.166.0 本地验证与切换（2026-10-30）
+
+- 基于官方 `rust-v0.166.0`，源码维护提交 `555f92bdc`，品牌发行提交 `416ac2b4e`。保留原有品牌、自更新禁用和可信应用上下文来源／恢复去重补丁；将此前仅在发行分支上的未知/BYOK 模型 Skill 指引同步回维护分支。
+- 适配上游新增的不可信上下文工具输出表示，继续仅依据持久化的可信来源标记恢复应用上下文，不把用户或客户端伪造的 developer 文本视为可信输入。四个新增内部包的锁版本由 `0.0.0` 同步到工作区 `0.166.0`，未改变外部依赖版本。
+- 沿用上游 Rust `1.95.0` 完成离线锁定构建。macOS arm64 运行包为 `bgs 0.166.0`，构建来源 `dirty: false`。维护分支重新生成的 9,733 个文件零差异；现有品牌检查 4 项、目录迁移 2 项、可信来源／冷恢复去重 Rust 检查 3 项以及宿主类型检查通过。
+- 现有 BGS／供应商接入检查为 293 项通过、1 项跳过、9 项失败。通过路径包括 Goal 创建／续作／暂停、冷恢复、压缩、Skills 读取与拒绝、权限、模型目录、用量和 outbox。9 项失败均已用升级前保留的 `0.164.0` 包定向复现；源码核对发现夹具／断言没有跟上当前准备阶段 JSON、运行上下文框架、推理事件、累计供应商用量与原生 baseline、默认流重试等契约。原有未通过项保留，未把旧包行为当作正确性标准，也未修改宿主行为迁就断言。
+- 2026-10-30 09:41–09:42（Asia/Shanghai）确认后端空闲、writer 与待结算用量均为 0，且无默认运行包的 app-server 进程后，按既有构建脚本原子替换默认运行包。版本／帮助、默认和显式 BGS_HOME、命令补全、本地插件安装／卸载及安全更新入口检查通过。切换后 runtime、billing、skills、resources 的 health 均为 200，runtime-status 仍为 idle；未重启服务或停止原有预览。
+- 本轮没有新增测试环境、测试代码或模式，没有修改前端或测试项目产物，没有真实模型调用。Linux／Windows 与真实供应商运行未验证。源码维护与发行分支已发布到现有 Fork；主仓库通过本次 Git 提交固定发行引用，遵守先发布子模块分支再提交主仓库的顺序。
+
+备份、构建日志、原有失败分析与切换前后状态保存在 `claude-code-main/backups/bgs-upgrade-0.166.0-20261030/`；其中 `validation-analysis.json` 记录未通过项，`runtime-0.164.0/` 保留切换前完整运行包。
 
 ## 0.164.0 本地验证（2026-10-23）
 
@@ -141,10 +152,12 @@ bun scripts/migrate-bgs-home.ts --from /OWNER/.runtime/app/codex --to /OWNER/.ru
 
 ## 同步官方版本
 
-保持工作树干净，在同一个子模块中使用两条分支。以下 NEW_VERSION 是选定的官方版本：
+保持工作树干净，在同一个子模块中使用两条分支。部分克隆若在合并时缺少上游对象，先用 `git -C vendor/bgs fetch --refetch --no-filter upstream tag rust-vNEW_VERSION` 补齐所选版本，再继续合并；不要用覆盖文件绕过缺失对象。
+
+以下 NEW_VERSION 是选定的官方版本：
 
 ```sh
-git -C vendor/bgs switch bgs/source-0.164.0
+git -C vendor/bgs switch bgs/source-0.166.0
 git -C vendor/bgs switch -c bgs/source-NEW_VERSION
 git -C vendor/bgs fetch upstream tag rust-vNEW_VERSION
 git -C vendor/bgs merge --no-ff rust-vNEW_VERSION
@@ -300,7 +313,7 @@ ChatGPT 重复接入本轮只分析，未修改调用路径。它不会自动把
 
 BGS 从当前 CLI 的 `debug models --bundled` 读取完整内置目录，通过现有 provider bridge 的鉴权 GET 地址交给 `model_providers.bgs.model_catalog_url`。目录和推理请求复用监听器、会话 capability 与清理流程；目录请求不访问供应商、不产生模型用量。ChatGPT 订阅入口不注入此目录。
 
-内置条目保持原样。未收录的当前模型使用 BGS 包内的 `fallback-model.json`，它镜像当前 0.164.0 的未知模型默认描述，不代表已验证的供应商能力；上下文仍为 272000、有效比例 95%。升级 CLI 时用本地 native catalog 回归核对默认描述、Skill 指引、工具和提示词。不使用 `model_catalog_json`，也不在 BGS 中裁剪原生提示词。
+内置条目保持原样。未收录的当前模型使用 BGS 包内的 `fallback-model.json`，它镜像当前 0.166.0 的未知模型默认描述，不代表已验证的供应商能力；上下文仍为 272000、有效比例 95%。升级 CLI 时用本地 native catalog 回归核对默认描述、Skill 指引、工具和提示词。不使用 `model_catalog_json`，也不在 BGS 中裁剪原生提示词。
 
 
 ## 2026-10-27：验收结果与执行停止分离

@@ -8,7 +8,7 @@ Requirements: Bun 1.3+, Node.js/npm, Rust (version pinned by the source), and an
 
 The coding runtime is maintained in `vendor/bgs` from
 `Phantomxm2021/codex`. The current upstream baseline is
-`rust-v0.164.0`; the BGS branch is `bgs/0.164.0`. Internal protocol names remain
+`rust-v0.166.0`; the BGS branch is `bgs/0.166.0`. Internal protocol names remain
 compatible, while product entry points use BGS branding.
 
 ```sh

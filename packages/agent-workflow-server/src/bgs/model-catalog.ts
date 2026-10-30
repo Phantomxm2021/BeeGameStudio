@@ -7,7 +7,7 @@ import fallbackModel from './fallback-model.json'
 const execute = promisify(execFile)
 
 /** Preserve the running CLI's bundled entries and its current unknown-model
- * defaults. The packaged fallback mirrors 0.164.0; the native regression checks
+ * defaults. The packaged fallback mirrors 0.166.0; the native regression checks
  * prompt/tool/capacity compatibility on upgrades. No provider discovery or LLM. */
 export async function loadBgsModelCatalog(input: {
   cwd: string; env: Record<string, string>; command?: readonly string[]
