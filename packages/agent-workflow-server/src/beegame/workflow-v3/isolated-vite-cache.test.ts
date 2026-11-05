@@ -116,17 +116,17 @@ for (const preexistingCache of [false, true] as const) {
         }
         await writeFile(join(root, 'package.json'), JSON.stringify({
           name: 'bgs-isolated-vite-fixture', private: true, type: 'module',
-          scripts: { build: 'vite build' }, devDependencies: { vite: viteVersion },
+          scripts: { build: preexistingCache ? 'node --version && vite build' : 'vite build' }, devDependencies: { vite: viteVersion },
         }))
         await writeFile(join(root, 'package-lock.json'), JSON.stringify({ name: 'bgs-isolated-vite-fixture', lockfileVersion: 3, requires: true, packages: {} }))
         await mkdir(join(root, 'src'), { recursive: true })
         await writeFile(join(root, 'index.html'), '<!doctype html><html><body><main id="app"></main><script type="module" src="/src/main.js"></script></body></html>')
-        await writeFile(join(root, 'src/main.js'), `document.querySelector('#app').textContent = __BGS_ISOLATED_VITE_CONFIG_MARKER__\n`)
+        await writeFile(join(root, 'src/style.css'), 'body { background: #234; color: white; }')
+        await writeFile(join(root, 'src/main.js'), `import './style.css'; document.querySelector('#app').textContent = __BGS_ISOLATED_VITE_CONFIG_MARKER__\n`)
         await writeFile(join(root, 'vite.config.ts'), `import { defineConfig } from 'vite'
 import { readdirSync } from 'node:fs'
 if (!readdirSync('node_modules/.vite-temp').some(name => name.includes('vite.config'))) throw new Error('Vite config was not loaded from .vite-temp')
 export default defineConfig({
-  base: './',
   define: { __BGS_ISOLATED_VITE_CONFIG_MARKER__: ${JSON.stringify(JSON.stringify(marker))} },
   build: { outDir: 'dist' },
 })
@@ -140,6 +140,12 @@ export default defineConfig({
         const published=join(root,'.publication-fixture')
         const result = await rebuildPublication(run,{runtimeArtifact:'dist'},published,async()=>{})
         expect(result.artifact.path).toBe('dist')
+        const html = await readFile(join(published, 'dist/index.html'), 'utf8')
+        expect(html).toMatch(/src="\.\/assets\/[^"]+\.js"/)
+        expect(html).toMatch(/href="\.\/assets\/[^"]+\.css"/)
+        expect(html).not.toContain('src="/assets/')
+        const smoke = JSON.parse(result.buildLog).checks.find((check: {id:string}) => check.id === 'runtime-smoke')
+        expect(JSON.parse(smoke.observation)).toMatchObject({environment:{embedding:'standalone',storage:'deployment-native'},errors:[],missingFiles:[]})
         expect(await projectFiles(root, 'dist', [])).toEqual(sourceBefore)
         expect(await projectDependencies(root)).toBe(dependencyBefore)
         expect(await cacheState(cache)).toEqual(cacheBefore)

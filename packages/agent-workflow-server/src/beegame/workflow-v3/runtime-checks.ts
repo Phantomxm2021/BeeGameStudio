@@ -37,7 +37,7 @@ export async function staticArtifactFiles(root: string, folder: string): Promise
 
 export const STATIC_ARTIFACT_CHECK_VERSION = CHECK_VERSIONS['runtime-smoke']
 export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'delivery-package', task: Pick<TaskSpec, 'runtimeArtifact'|'expectedOutputs'>,
-  inputs: FileVersion[], constraints: Record<string, unknown>, signal?: AbortSignal): Promise<CheckResult> {
+  inputs: FileVersion[], constraints: Record<string, unknown>, signal?: AbortSignal, entryUrl?: string): Promise<CheckResult> {
   const result: CheckResult = { id, version: CHECK_VERSIONS[id], inputs: [...inputs], status: 'unverified',
     observation: 'Declare runtimeArtifact for a static web build with index.html. Server/native/XR runtimes are not supported by this driver.',
     createdAt: new Date().toISOString() }
@@ -102,7 +102,7 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
       }
       result.status = 'passed'; result.observation = 'Host checked actual static package registry, structure, resource closure and identical packaged source bytes. Not runtime data consumption or game delivery acceptance.'
     } else {
-      await observeStaticBuild(root, artifact, paths, result, signal, undefined, hasTouch)
+      await observeStaticBuild(root, artifact, paths, result, signal, entryUrl, hasTouch)
     }
     if (result.status === 'passed' && (!await versionsMatch(root, result.inputs) ||
         await artifactDigest(root, artifact, true) !== result.artifacts[0]!.sha256)) {

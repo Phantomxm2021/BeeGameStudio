@@ -7,7 +7,7 @@ import { copyBuildDependencies, prepareBuildCaches, AGENT_SOURCE_EXCLUSIONS } fr
 import { commandCheck, isProjectSourcePath } from './checks'
 import { artifactDigest } from '../runtime-acceptance'
 import { runArtifactCheck, staticArtifactFiles } from './runtime-checks'
-import type { PreparedPublication } from '../deployment-manager'
+import { publicationBuildArgs, type PreparedPublication } from '../deployment-manager'
 
 /** Read-only eligibility: old measurement verdicts do not gate a fresh build. */
 export async function publicationBuildPlan(run: Run): Promise<{ runtimeArtifact: string }> {
@@ -37,7 +37,8 @@ export async function rebuildPublication(run: Run, plan: { runtimeArtifact: stri
       filter:path=>path===source || isProjectSourcePath(relative(source,path).split('\\').join('/'),artifact,AGENT_SOURCE_EXCLUSIONS)})
     const dependencies=await copyBuildDependencies(source,temporary)
     if(dependencies)await prepareBuildCaches(temporary)
-    const observed=await commandCheck(temporary,'build',undefined,dependencies)
+    const manifest=JSON.parse(await readFile(join(temporary,'package.json'),'utf8')) as {scripts?:{build?:string}}
+    const observed=await commandCheck(temporary,'build',undefined,dependencies,publicationBuildArgs(manifest.scripts?.build))
     const observation='Host executed the project build in a private sandboxed copy; exit '+observed.code+'\n'+observed.log
     if(observed.code!==0)throw new Error('Publication build failed: '+observation)
     const files=await staticArtifactFiles(temporary,artifact)
@@ -54,7 +55,7 @@ export async function rebuildPublication(run: Run, plan: { runtimeArtifact: stri
         throw new WorkflowError('publication-artifact-changed','Built publication artifact changed; publish the current version again')
     }
     await validate()
-    const smoke=await runArtifactCheck(directory,'runtime-smoke',{runtimeArtifact:artifact,expectedOutputs:[]},[],run.requirements.constraints)
+    const smoke=await runArtifactCheck(directory,'runtime-smoke',{runtimeArtifact:artifact,expectedOutputs:[]},[],run.requirements.constraints,undefined,'http://bgs-runtime.invalid/deployments/publication/files/index.html')
     if(smoke.status!=='passed')throw new Error('Publication page check failed: '+smoke.observation)
     await validate()
     return {artifact:proof,validate,buildLog:JSON.stringify({protocol:run.protocol,runId:run.id,

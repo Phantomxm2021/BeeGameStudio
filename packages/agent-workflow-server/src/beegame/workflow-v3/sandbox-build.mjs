@@ -7,6 +7,8 @@ import {bgsCommand,toml} from '../../bgs/client.ts';
 const root=await realpath(process.cwd());
 if(process.argv[2]!=='build')throw Error('Only the project build script is supported');
 if(!['darwin','linux','win32'].includes(process.platform))throw Error('Sandboxed build is unavailable on this host');
+const argumentSeparator=process.argv.indexOf('--',3);
+const scriptArgs=argumentSeparator<0?[]:process.argv.slice(argumentSeparator+1);
 const dependencies=await realpath(join(root,'node_modules')).catch(e=>{if(e.code==='ENOENT')return undefined;throw e});
 // Only the source-copy caller opts in, after creating canonical cache directories.
 const caches=process.argv[3]==='--isolated-build-caches'?['.vite-temp','.tmp'].map(name=>join(root,'node_modules',name)):[];
@@ -20,7 +22,7 @@ try{
   if(dependencies)filesystem[dependencies]='read';
   for(const cache of caches)filesystem[cache]='write';
   const profile={filesystem,network:{enabled:false}};
-  const command=bgsCommand().concat('sandbox','-C',root,'-P','bgs-build','-c','permissions.bgs-build='+toml(profile),'--','npm','--prefix',root,'run','build');
+  const command=bgsCommand().concat('sandbox','-C',root,'-P','bgs-build','-c','permissions.bgs-build='+toml(profile),'--','npm','--prefix',root,'run','build',...(scriptArgs.length?['--',...scriptArgs]:[]));
   const child=spawn(command[0],command.slice(1),{cwd:root,env:{PATH:process.env.PATH,TMPDIR:home,TMPPREFIX:join(home,'zsh'),PWD:root,HOME:home,BGS_HOME:home,NPM_CONFIG_USERCONFIG:'/dev/null',NPM_CONFIG_CACHE:join(home,'npm-cache')},stdio:'inherit'});
   process.exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',code=>resolve(code??1))});
 }finally{await rm(home,{recursive:true,force:true})}

@@ -939,7 +939,12 @@ function hasBuildScript(manifest: PackageManifest): boolean {
 function buildRunCommand(workspacePath: string, script: string, scriptCommand?: string): string[] {
   const manager = detectPackageManager(workspacePath)
   const command = manager === 'npm' ? ['npm', 'run', script] : [manager, 'run', script]
-  return isViteBuildScript(scriptCommand) ? [...command, '--', '--base=./'] : command
+  const args = publicationBuildArgs(scriptCommand)
+  return args.length ? [...command, '--', ...args] : command
+}
+
+export function publicationBuildArgs(scriptCommand?: string): string[] {
+  return isViteBuildScript(scriptCommand) ? ['--base=./'] : []
 }
 
 function isViteBuildScript(scriptCommand?: string): boolean {
