@@ -31,8 +31,7 @@ describe('BeeGame skills store', () => {
       .map(entry => entry.name).sort()
     expect(names).toEqual([
       'beegame-interaction-contracts',
-      'bgs-imagegen',
-      'evidence-before-completion',
+      'bgs-3d-asset',
       'game-art-director-expert',
       'game-audio-designer',
       'game-balance-designer-expert',
@@ -40,17 +39,17 @@ describe('BeeGame skills store', () => {
       'game-creative-director-expert',
       'game-design-check',
       'game-feel-designer',
-      'game-implementation-planning',
       'game-level-designer-expert',
-      'game-plan-execution',
       'game-playtest-performance',
       'game-systems-designer-expert',
       'game-technical-artist',
       'game-ui-ux-designer',
       'gameplay-programmer',
-      'root-cause-debugging',
+      'git-workflow',
+      'phaser4-gamedev',
       'spatial-computing-game-expert',
       'spatial-computing-ux-designer-expert',
+      'threejs-gamedev',
     ])
   })
 
@@ -315,3 +314,43 @@ function createSkillZip(files: Record<string, string>): Uint8Array {
     Object.entries(files).map(([path, content]) => [path, strToU8(content)]),
   ))
 }
+
+
+test('3D helpers distinguish metadata from validation and protect source paths', async () => {
+  const root = join(getBuiltinSkillsDirectory(), 'bgs-3d-asset', 'scripts')
+  const metadata = join(root, 'validate_glb.py')
+  const processor = join(root, 'process_asset.py')
+  const code = `import json, runpy, struct, sys
+from types import SimpleNamespace
+inspect = runpy.run_path(sys.argv[1])['inspect_glb']
+def glb(obj):
+    body = json.dumps(obj).encode()
+    body += b' ' * (-len(body) % 4)
+    return SimpleNamespace(read_bytes=lambda: struct.pack('<4sIII4s', b'glTF', 2, 20 + len(body), len(body), b'JSON') + body)
+def model(mode, index=0):
+    return {'asset':{'version':'2.0'}, 'accessors':[{'count':12}], 'meshes':[{'primitives':[{'attributes':{'POSITION':0},'indices':index,'mode':mode}]}]}
+for mode, expected in [(4,4),(5,10),(6,10)]:
+    report = inspect(glb(model(mode)), 5)
+    assert report['triangles'] == expected
+    assert report['budget_met'] == (expected <= 5)
+    assert report['structural_validation'] == 'not_run' and 'passed' not in report
+# Declared counts are not proof that the absent buffers contain real geometry.
+assert inspect(glb(model(4)))['structural_validation'] == 'not_run'
+assert inspect(glb(model(4,-1)))['triangles'] is None
+assert inspect(glb({'meshes':[{'primitives':[]}]}))['errors']
+assert inspect(SimpleNamespace(read_bytes=lambda: b'bad'))['errors']
+print('metadata boundaries verified')`
+  const inspected = Bun.spawnSync(['python3', '-c', code, metadata])
+  expect(inspected.exitCode).toBe(0)
+  expect(inspected.stdout.toString()).toContain('metadata boundaries verified')
+  for (const file of [metadata, processor]) {
+    const original = await Bun.file(file).text()
+    const args = file === processor
+      ? ['--', '--input', file, '--output', file + '.output.glb', '--report', file, '--triangles', '1']
+      : [file, '--json', file]
+    const rejected = Bun.spawnSync(['python3', file, ...args])
+    expect(rejected.exitCode).not.toBe(0)
+    expect(rejected.stderr.toString()).toContain('paths must differ')
+    expect(await Bun.file(file).text()).toBe(original)
+  }
+})

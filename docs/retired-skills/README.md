@@ -1,8 +1,7 @@
 # Removed built-in Skills
 
 These Skills were removed from the active catalog. No copies are shipped with
-BeeGameStudio clients. The original historical source remains in the older
-worktree from which the catalog was imported.
+BeeGameStudio clients. Historical sources remain in version control and prior audit snapshots.
 
 | Skill | Why retired |
 | --- | --- |
@@ -13,3 +12,8 @@ worktree from which the catalog was imported.
 | `beegame-game-delivery` | Duplicates delivery-state responsibilities and broadly matches nearly every game task. |
 | `beegame-game-acceptance` | Duplicates the task's verification requirements rather than adding domain expertise. |
 | `react-best-practices` | Generic, opinionated framework rules; use current project conventions and framework documentation instead. |
+| `game-plan-execution` | Duplicates native execution and specialist checks; no separate execution/planning Skill is required. |
+| `evidence-before-completion` | Duplicates claim/evidence guidance across execution and inspection; no separate evidence wrapper is required. |
+| `bgs-imagegen` | Duplicates and modifies the system `imagegen` Skill while mixing platform API, handoff and resource-registration responsibilities. Use the unchanged system Skill and current tool contracts. |
+| `game-implementation-planning` | Duplicates native task organization and adds planning/evidence duties. Runtime dependency guidance remains under gameplay programming; the planning Skill and generic evidence reference are removed. |
+| `root-cause-debugging` | Repeats native coding-agent diagnosis and regression responsibilities; use the relevant engine/resource methods for a specific failure rather than another generic execution Skill. |

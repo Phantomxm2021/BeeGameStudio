@@ -17,4 +17,4 @@ For a new spatial interaction or a consequential platform assumption, read the a
 
 For a focused fix, inspect the affected interaction only. Do not add a fixed safety radius or rewrite the game around an arbitrary embodiment rule.
 
-The essential interaction principles are covered above. Read only the relevant optional reference: `references/spatial-rule-architecture.md` for spatial rules, `references/spatial-session-pacing.md` for active-session pacing, or `references/physical-safety-framework.md` for physical risk.
+For a current question, use [platform and spatial rules](references/spatial-rule-architecture.md), [active-session pacing](references/spatial-session-pacing.md), or [physical risk](references/physical-safety-framework.md) as applicable.

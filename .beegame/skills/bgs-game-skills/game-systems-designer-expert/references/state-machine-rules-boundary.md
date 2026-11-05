@@ -12,7 +12,7 @@ Use this reference to describe gameplay-state outcomes and distinguish game rule
 
 ## Review Questions
 
-- Are failure paths explicit enough to prevent an implementation agent from inventing fallback behavior?
+- Do failure and recovery decisions determine the player's outcome, with ordinary platform and engine handling left to implementation?
 - Is gameplay-outcome precedence distinct from runtime execution order?
 - Are gameplay transitions clear without confusing them with interface states?
 - Does recovery behavior preserve the declared MVP scope?

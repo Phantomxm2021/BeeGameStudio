@@ -1,19 +1,12 @@
 # Core Loop Contract
 
-## Purpose
+Use this reference for an unresolved relationship between a player's action, its governing rule and the resulting situation. Explain the conditions, information and consequences needed to resolve that question, referring to existing definitions rather than restating them. Keep gameplay-defining quantities with their rule; implementation tuning follows actual runtime data.
 
-Use this reference to make the core gameplay loop explicit without binding to a specific engine or genre.
-
-## Useful details for a full system specification
-
-- Player promise: one sentence that states the repeatable value the player receives.
-- Primary loop: goal, action, feedback, reward, failure state, and retry path.
-- For a system being implemented: intent, governing gameplay rule, information the player needs and a way to observe whether it works. Identify unresolved dependencies rather than filling them with unsupported defaults. Use a table only when it makes several systems easier to compare.
-- Scope boundary: identify what is in the first playable loop and what is intentionally excluded.
+Choose a representation that makes the relationship clear: prose for a simple rule, a table for alternatives or resource flows, or a small diagram for spatial dependencies and state transitions. Label what a connection means; an example route is not a forced sequence, and a dependency is not a chronological step.
 
 ## Why repeat the action?
 
-Follow a concrete situation through action, constraint, outcome and the next situation. Identify what the player can learn, choose or express on repetition. Do not require strategic choices in a reflex game or uncertainty in a deliberately predictable puzzle.
+When the open question concerns the value of repeating an action, a short walkthrough can connect the starting state and available information to a legal action, resulting state, feedback and next situation. Derive it from the owning definitions; it must not invent a convenient resource conversion, timing window or outcome. Use it to explain what the player can learn, choose or express on repetition, not as a second rule set. Do not require strategic choices in a reflex game or uncertainty in a deliberately predictable puzzle.
 
 | Loop | Weak description | Inspectable repeatable value |
 |---|---|---|
@@ -25,9 +18,4 @@ Test the described interaction rather than adding progression to compensate for 
 
 Keep rules and feedback connected: the attempt, legal execution and confirmed outcome can differ. The [Godot platformer example](https://github.com/godotengine/godot-demo-projects/blob/master/2d/platformer/player/player.gd) distinguishes jump eligibility and resulting movement/sound. Learn the connection between rule and feedback, not its double-jump feature or tuning values. A runnable example or model can establish execution, not enjoyment.
 
-## Review Questions
-
-- Can the responsible designers develop the core loop without inventing its goals, actions or gameplay outcomes?
-- Are consequential unresolved decisions explicit rather than hidden in assumed defaults?
-- Does every system serve the player promise?
-- Are acceptance scenarios observable without reading hidden process notes?
+For examples of relationship-focused documentation, see [Stone Librande’s SimCity one-page designs](https://www.stonetronix.com/gdc-2013/) and [Ron Gilbert’s puzzle dependency charts](https://www.grumpygamer.com/puzzle_dependency_charts/). Borrow a representation only when it answers the current design question; neither requires a fixed page count, diagram for every system or a new document.

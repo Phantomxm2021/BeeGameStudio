@@ -72,7 +72,7 @@ Game Feel、技术美术、交互契约、试玩和完成证据按当前任务�
 
 ## 引擎与运行环境
 
-[professional context](../packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts) 保留用户选择的引擎和平台。React/Web 的 BGS 编辑需求与 Unity/Godot/Unreal 原生数据分开；BGS 目前没有这些原生引擎的编辑适配器。Canvas2D consumer 是可选的内容消费者，不能推定所有动画/物理/交互已经实现。
+[professional context](../packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts) 保留用户选择的引擎和平台。用户侧保留 React、Unity、Godot、Unreal；新建 Web/React 项目由 agent 根据 2D/3D 选择 Phaser/Three.js，不增加用户选项。已有 Web/Phaser、Web/Three.js 项目保留已保存的目标。所有目标使用所选引擎原生场景、UI、代码和资源；BGS Scene/UI 编辑契约及默认适配器已全局退出，历史数据读取不恢复编辑能力。Canvas2D consumer 是可选的内容消费者，不能推定所有动画/物理/交互已经实现。
 
 方法先依当前任务选中，再使用该引擎、锁定版本和已有项目设施。Pixi、Phaser、Three、Unity 或 Godot 的 API 不互换；专业参考不能授权换引擎、安装服务或生成第二份 Web 内容。本轮验证了跨引擎约束的传递，没有实际编译 Unity/Godot/Unreal、验证 XR 设备或安装它们。
 

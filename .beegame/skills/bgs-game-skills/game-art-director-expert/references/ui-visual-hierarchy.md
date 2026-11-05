@@ -1,39 +1,55 @@
 # Screen Composition Studies
 
-Use this reference when establishing or substantially revising a screen/scene composition. A narrow text, binding or input fix does not require a reference search or visual sample. The examples illustrate decisions, not required layouts, extra game features or an aesthetic scoring system.
+Use when translating a broad style into a concrete appearance, choosing a composition, or diagnosing a visible loss of treatment. A narrow text, binding or input fix can use the established project design without external research. Read the applicable example and picture, not every style at task startup.
 
-## Learn from a relevant reference
+## Read the relevant picture
 
-Prefer a small set of actual screenshots, scenes or assets comparable in player action, camera/view, information density and target device. If reference access is unavailable, describe the provisional decision and its uncertainty rather than pretending to have inspected a game.
+A style name leaves appearance choices open. Compare actual pictures by the player situation, viewing distance, subject proportions, contour, material, typography and distribution of emphasis. Identify the relationship useful to this game and what does not fit. Once the project has a selected design, use it for production and runtime comparison; these examples help explain a choice rather than replace that target.
 
-For the part being designed, explain what earns attention first, what makes the primary action readable, and how the game imagery and UI share space. Extract useful relationships: subject prominence, value contrast, typography, silhouette, material and resource families. State what is unsuitable for this game. A name such as "premium", "cozy" or "like game X" is not that analysis. Use the reference for the applicable part, not as a reason to import unrelated controls or gameplay.
+The official image links below are visual references, not bundled runtime assets or permission to copy artwork, fonts or branding. View the relevant image when using its analysis; reading its title or this prose is not image inspection. If access is unavailable, retain the uncertainty instead of claiming a visual comparison. The observations are BGS's interpretation, not measured player results or universal style definitions.
 
-Useful open-source examples, each with a different lesson:
+## Finished-game references
 
-- [Mindustry's menu](https://github.com/Anuken/Mindustry/blob/master/core/src/mindustry/ui/fragments/MenuFragment.java) places controls over its [game-world menu renderer](https://github.com/Anuken/Mindustry/blob/master/core/src/mindustry/graphics/MenuRenderer.java). This illustrates world/UI continuity, not a universal demand for a moving background or its exact menu arrangement.
-- [Unciv's skin documentation](https://github.com/yairm210/Unciv/blob/master/docs/Modders/Creating-a-UI-skin.md) connects reusable shapes, nine-patch images and tint to specific UI elements. This illustrates a concrete visual family instead of independently styling each button; check current capabilities before adopting its implementation details.
-- [Veloren's model guide](https://book.veloren.net/contributors/artists/voxel-models.html) points contributors to actual assets/reference models and explains scale. This illustrates how a usable sample and proportional context communicate more than style adjectives; its voxel proportions are not rules for other games.
+### Mini Metro: abstraction that carries information
 
-These are methodological inferences from the cited projects, not proof that copying them improves taste. Inspect the relevant visuals when using them as visual references. Source and asset licenses are separate: studying composition is not permission to copy images, fonts or branding into a deliverable.
+[Official game page and screenshot gallery](https://dinopoloclub.com/games/mini-metro/).
 
-## Three contrasting composition examples
+![Mini Metro official gameplay screenshot: colored routes, outlined stations and waiting passenger symbols](https://dinopoloclub.com/wp-content/uploads/2019/09/screenshot-2.jpg)
 
-![Original schematic composition comparisons](composition-studies.png)
+The route colors, dark station outlines and smaller passenger symbols have different jobs and remain distinguishable against the pale map. Repeated line widths, bends and symbol proportions make a coherent graphic family. The water occupies substantial space without competing with those signals. Its geometric abstraction serves a route-planning task; matching its few colors without preserving route continuity and symbol hierarchy would miss the design. The image does not establish its renderer or prescribe a map layout, small HUD or geometric subjects for another game.
 
-View the PNG when using these comparisons; the [editable SVG](composition-studies.svg) is its original source. The diagrams are simplified explanations, not screenshots, final artwork or validated runtime layouts. "After" serves the stated purpose; it is not universally better than the other arrangement.
+### Alto's Adventure: restrained shapes with depth and atmosphere
 
-| Example and purpose | Weak choice for that purpose | More deliberate choice | What must survive in layout/resources |
-|---|---|---|---|
-| Puzzle completion: let the player appreciate the board they completed | A generic statistics card covers the board, leaving the actual achievement unseen | Keep the finished board prominent; attach a concise outcome and next action in quiet space | Board visibility and relative size, clear next action, and a completion treatment on the board itself |
-| Precision platformer: read landing space while moving | A large central status panel competes with the trajectory and landing target | Keep necessary status compact near a suitable edge and preserve the relevant world view | Landing/trajectory visibility during play, legible cues at target size, and motion that does not mask hazards |
-| Route-planning game: compare routes and inspect a selected stop | Equally emphasized cards compete with a small map and make the route hard to follow | Give the route map sufficient space; place contextual detail where it supports the selected stop | Continuous readable route, distinct selection, useful detail, and clear confirmation without covering needed map information |
+[Official game page and screenshot gallery](https://altosadventure.com/).
 
-Different requirements can justify a large card, prominent HUD or smaller map. Choose from the actual player task, not a ban on those components. Use shape/value/spacing before adding texture and glow; decoration should reinforce the intended subject, not make every region equally loud.
+![Alto's Adventure official Dawn gameplay screenshot: a dark slope and rider against layered warm mountain ranges](https://altosadventure.com/resources/screenshots/2_Dawn.png)
+
+The dawn picture uses related warm colors but separates near terrain, distant mountains and sky by value and atmospheric layering. Slope silhouettes, clustered trees, light and haze retain a sense of place despite reduced detail. The rider is small relative to the landscape in this particular view; that proportion serves this composition and is not a default actor size. Flattening all depth ranges into one fill could retain the palette while losing the intended spatial reading. A still cannot establish movement readability or responsiveness.
+
+These two pictures support different uses of visual restraint. Neither makes a style name equivalent to pure fills, absent texture, a fixed palette size, a particular layout or a production technique. [NN/G's minimalism study](https://www.nngroup.com/articles/characteristics-minimalism/) distinguishes minimalist content/layout strategy from flat graphic treatment and cautions against copying superficial traits; its website findings are not game-art specifications.
+
+## Visual contrasts and degradation
+
+[Riot's Clarity in League](https://www.leagueoflegends.com/en-us/news/dev/clarity-in-league/) includes a real development comparison for Shan Hai Scrolls Jhin. The developers identify borders that faded while the ability opened and explain the change to keep them visible.
+
+![Riot's official Jhin development comparison: ability-border visibility during the opening sequence](https://cmsassets.rgpub.io/sanity/images/dsfx7636/news_live/e3172fe43009612f374c9bc5b0f1040835983c70-1280x720.jpg)
+
+The useful contrast is a local relationship between a boundary, its background and the moment it must be read. The screenshots differ in framing and timing, so they do not establish that an entire composition is better, or that brighter effects are universally preferable. The developer's temporal claim needs the accompanying explanation; a still alone cannot verify it. This is a development defect/correction, not two interchangeable style options.
+
+Use such comparisons to describe what was lost, rather than answer only whether a picture has the same theme or palette:
+
+| Relationship under discussion | A concrete loss to look for in the project's actual pictures | What remains a choice |
+|---|---|---|
+| Subject identity and proportion | A recognizable silhouette or opening becomes a generic shape; its apparent mass changes relative to its neighbors | Abstraction and reduced ornament can work when they retain the chosen subject treatment |
+| Depth and material | Layers merge, overlap no longer explains containment/contact, or characteristic edges and surface cues disappear | Flatness, texture and lighting are project choices; extra detail is not automatically an improvement |
+| World/UI hierarchy | A focal subject shrinks behind a panel, or typography, borders and decoration compete equally | A large panel or prominent HUD may be right for a different player situation |
+
+The table describes possible losses, not altered versions of the reference games or observed defects in them. For an established project, compare the corresponding selected picture and actual resource/runtime state at the intended display size. An authorized adaptation may preserve the relationship; a lost relationship remains an implementation problem even when the style label still fits.
+
+The existing [schematic PNG](composition-studies.png) and [editable SVG](composition-studies.svg) explain layout alternatives only. They are not finished-game references, material targets or validated runtime layouts. Source-study examples such as [video-to-game's visual guide](https://github.com/Phantomxm2021/video-to-game/blob/d1a24fd8a47576ec4b3c36388b30deda0631def9/skills/video-to-game/references/look-and-post.md) can help interpret palette and scenery relationships; their workflow and engine choices are not requirements for this game.
 
 ## Carry the decision into a usable sample
 
-Record the chosen focal subject, relative prominence, action placement and quiet regions in the existing art/UI design source. Do not add a separate report or duplicate per-viewport coordinate tables. Use actual scene/UI geometry for an existing render; for an image model, provide both layout and art direction and label which governs positions versus appearance. Distinguish inspiration from an agreed composition. A generated image can suggest treatment and reveal a composition weakness, but cannot certify exact rectangles, fonts or interaction.
+Record only the adopted appearance relationships and consequential unresolved choices in the existing GDD art/UI source, with the applicable reference. Give image production the chosen direction and player situation; let genuinely open details develop. Choose production methods from the required appearance and independently controlled behavior, not the style label. A reference or schematic does not establish runtime asset format, exact geometry or interaction.
 
-Inspect the smallest complete composition that answers the uncertainty, using existing assets or explicitly provisional critical samples. Check the same player-facing state at the intended size: did the focal subject shrink or disappear, did a panel cover necessary world information, or did the main action lose emphasis? Correct only the affected source when the evidence supports it, then inspect the changed view when available. Do not freeze an unsatisfactory first layout merely because geometry checks pass, or automatically regenerate all screens/resources.
-
-Before propagating a visual treatment, make its resource family concrete where needed: representative shape/material, real font or explicit candidate, meaningful control/object states, and the intended scale/crop or stretch behavior. Pending assets remain pending. A wireframe checks hierarchy; a polished reference is not proof of its implementation; a still image cannot validate motion, focus or input. Missing observations stay unverified, and this method does not authorize paid generation, an extra reviewer or a fixed approval stage.
+Inspect the smallest complete composition that answers the current question, using established resources or explicitly provisional critical samples. Compare the actual subject, prominence, material and world/UI relationships before expanding a family. Correct the affected source when the observation supports it. A selected picture is not proof of its implementation, and a still does not validate motion, focus or input. Use the existing production and runtime work; this reference adds no paid generation, approval or review stage.

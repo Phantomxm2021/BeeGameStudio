@@ -13,4 +13,4 @@ Use for a concrete execution/timing/collision question or when implementing, deb
 
 ## Runtime verification
 
-Check affected behavior from initial, requested, constrained and resulting states. Use focused rule tests and target-runtime observations; timing/contact risks need representative elapsed-time, update-rate and interruption/boundary cases, not a full simulator. Distinguish driver failures from game defects. Builds and successful scripted routes do not establish subjective game feel.
+Use focused rule checks for calculations and the simulation's owning clock for quantitative motion. Driver wall time includes scheduling, pauses and frame-step limits. For player-input, flow, presentation and recovery checks in the running game, use the [runtime verification method](../SKILL.md#runtime-verification). Builds and isolated rule checks establish their tested properties; subjective game feel needs player observation.

@@ -1,6 +1,6 @@
 # Scaling Curves
 
-Use a curve to explain a specific player-facing progression, not because a genre supposedly requires one.
+Use this reference for an assigned quantitative design or tuning question. A progression direction can remain qualitative when it determines the intended challenge; choose a curve when its values or relationship are needed for the current decision.
 
 ## Select the cause before the curve
 
@@ -31,4 +31,4 @@ When a real defeat-time question needs a script, use the game's existing confirm
 | Piecewise | Different behavior at meaningful thresholds | Visible discontinuities or awkward tuning |
 | Saturating `a*x/(x+k)` | Diminishing returns | Effective cap arriving too early |
 
-For the affected system, record the input range, units, expected player experience, and representative early/middle/late values. Check multiplier order and plausible extremes. A curve can be mathematically stable yet feel wrong; compare against play or telemetry before changing it. No universal growth multiple or fixed curve type is a pass/fail rule.
+When resolving a quantitative question, record the values, units and range needed to support that decision. Check relevant thresholds, multiplier order or boundaries when they could change the conclusion. Early/middle/late examples are useful when comparing a progression curve, rather than required outputs for every difficulty direction. A curve can be mathematically stable yet feel wrong; compare against play or telemetry before changing it. No universal growth multiple or fixed curve type is a pass/fail rule.

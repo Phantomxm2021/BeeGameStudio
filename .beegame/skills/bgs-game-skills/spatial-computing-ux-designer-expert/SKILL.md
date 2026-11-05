@@ -17,4 +17,4 @@ For a new spatial composition or substantive input change, choose the applicable
 
 For a focused interface problem, fix its placement or interaction without redesigning gameplay. Coordinate with the spatial game designer for locomotion and safety rules.
 
-The essential input and anchoring principles are covered above. Read only the relevant optional reference: `references/depth-layering-framework.md` for depth hierarchy, `references/gesture-ergonomics-model.md` for direct input comfort, or `references/spatial-cognitive-load-system.md` for attention management.
+For a current question, use [depth hierarchy](references/depth-layering-framework.md), [direct-input comfort](references/gesture-ergonomics-model.md), or [attention management](references/spatial-cognitive-load-system.md) as applicable.

@@ -1,42 +1,52 @@
 # BGS Game Development Skill Collection
 
-One shared collection, registered through native `skills/extraRoots/set`.
-The existing immediate subdirectories remain independently discoverable Skills;
-groups below are navigation, not directories, stages or assignments. Use native
-Skill metadata to select a method and invoke its installed name, such as
-`$game-ui-ux-designer`, or read its `SKILL.md`. Do not read the entire collection for each task.
+The immediate subdirectories are independent Skills discovered through native
+`skills/extraRoots/set`. Choose from native metadata or use this optional map;
+there is no requirement to read this index or the whole collection first.
+Names and installed paths are stable. The rows below are alternatives by
+question, not stages or a required sequence.
 
-## Choose by the actual task
+## Find the current question
 
-| Group | Question being answered | Independent entry points |
+| Current question | Start with | Detail only when needed |
 |---|---|---|
-| Game design | What experience is promised, what does the player do, how is space/challenge arranged, and which numbers support it? | [Creative direction](game-creative-director-expert/SKILL.md), [systems](game-systems-designer-expert/SKILL.md), [levels](game-level-designer-expert/SKILL.md), [balance](game-balance-designer-expert/SKILL.md) |
-| Audiovisual and player experience | How should the game look, sound, respond and present information? Which spatial interactions are appropriate when XR is in scope? | [Art](game-art-director-expert/SKILL.md), [UI/UX](game-ui-ux-designer/SKILL.md), [audio](game-audio-designer/SKILL.md), [game feel](game-feel-designer/SKILL.md), [XR gameplay](spatial-computing-game-expert/SKILL.md), [XR interface](spatial-computing-ux-designer-expert/SKILL.md) |
-| Engineering and resources | Which resource representations support the designed behavior, and how do rules, input, assets and dynamic visuals work in the selected runtime? | [Gameplay programming](gameplay-programmer/SKILL.md), [technical art](game-technical-artist/SKILL.md), [resource planning and content pipeline](game-content-pipeline-engineer/SKILL.md), [image generation and editing](bgs-imagegen/SKILL.md), [interaction contracts](beegame-interaction-contracts/SKILL.md) |
-| Planning and execution | How is this implementation decomposed or resumed without redoing completed work? | [Implementation planning](game-implementation-planning/SKILL.md), [plan execution](game-plan-execution/SKILL.md) |
-| Inspection and diagnosis | Is the design usable, what supports a completion claim, what happens in play, or where does a defect first arise? | [Design check](game-design-check/SKILL.md), [completion evidence](evidence-before-completion/SKILL.md), [playtest/performance](game-playtest-performance/SKILL.md), [root-cause debugging](root-cause-debugging/SKILL.md) |
+| What experience, theme/mechanic relationship or scope tradeoff should this game promise? | [Creative direction](game-creative-director-expert/SKILL.md) | Cross-domain appeal and scope decisions |
+| What actions are legal, how do states change, and what ends play? | [Systems design](game-systems-designer-expert/SKILL.md) | Rules, transitions, progression/economy meaning |
+| Does a route, encounter or teaching sequence work? | [Level design](game-level-designer-expert/SKILL.md) | Traversal, placement and challenge progression |
+| Which numerical relationship or diagnosed balance issue needs tuning? | [Balance](game-balance-designer-expert/SKILL.md) | Quantities derived from existing rules |
+| Which composition, visual language or subject treatment fits the agreed game? | [Art direction](game-art-director-expert/SKILL.md) | [Finished-picture comparisons](game-art-director-expert/references/ui-visual-hierarchy.md#finished-game-references) |
+| How should players find information and use a menu, HUD or control? | [UI/UX](game-ui-ux-designer/SKILL.md) | Interface behavior, hierarchy, layout and copy |
+| Which resource source/representation fits, or why does an imported part look wrong? | [Content pipeline](game-content-pipeline-engineer/SKILL.md) | [Artwork production](game-content-pipeline-engineer/references/artwork-production.md), [assembly examples](game-content-pipeline-engineer/references/runtime-assembly-examples.md) |
+| Generate/acquire a 3D model or prepare a generated static prop? | [3D assets](bgs-3d-asset/SKILL.md) | Provider access, model preparation and actual target-runtime import |
+| Create or edit an image through an authorized generation source? | System `imagegen` Skill | Original system guidance; execution follows the available tool's contract |
+| How should an action respond, stop, build anticipation or communicate impact? | [Game feel](game-feel-designer/SKILL.md) | Response and coordinated feedback decisions |
+| How do the chosen action poses, VFX, shader or camera treatment actually run? | [Technical art](game-technical-artist/SKILL.md) | [Sprite sequences](game-technical-artist/references/ai-sprite-animation.md), rigs and effect lifetime |
+| How should music/sound communicate the event, or why does its mix/trigger fail? | [Audio](game-audio-designer/SKILL.md) | Composition, production and audible event integration |
+| How do devices and camera orientation map to the intended player action? | [Interaction](beegame-interaction-contracts/SKILL.md) | Screen inputs or XR locomotion |
+| Why do movement, contact, scoring, clocks or gameplay state execute incorrectly? | [Gameplay programming](gameplay-programmer/SKILL.md) | [React/Phaser hosting](gameplay-programmer/references/react-host-integration.md) when applicable |
+| How does a selected Phaser 4 API implement this behavior? | [Phaser 4](phaser4-gamedev/SKILL.md) | A current Phaser 3 project is not an automatic migration |
+| How does the selected Three.js renderer or R3F API implement this behavior? | [Three.js](threejs-gamedev/SKILL.md) | Topic sections distinguish WebGL, WebGPU/TSL and R3F |
+| What body/room/tracking constraints shape XR gameplay? | [Spatial gameplay](spatial-computing-game-expert/SKILL.md) | The actual device and interaction model |
+| Where should spatial UI sit, and how do gaze/gesture/focus work? | [Spatial UI](spatial-computing-ux-designer-expert/SKILL.md) | Depth, anchoring and ergonomic readability |
+| Is there a source-provable gap or contradiction in the assigned design? | [Design check](game-design-check/SKILL.md) | Assigned decisions, not a second GDD template |
+| What does the actual game do, and where is its measured performance cost? | [Playtest/performance](game-playtest-performance/SKILL.md) | [Visual comparison](game-playtest-performance/references/play-capture.md#visual-comparison); real-player studies only in scope |
+| Which Git operation is needed for the requested repository change? | [Git workflow](git-workflow/SKILL.md) | No automatic branch, commit or push requirement |
 
-Select only methods needed for the actual question and its consequential
-dependencies. For example, shaping a movement response differs from coding its
-collision behavior; choosing a visual language differs from implementing its
-shader; authoring UI differs from checking whether a supplied design is usable.
-One task may need both, but invoking a checking Skill does not replace the
-specialist's design method. Reuse methods already loaded in the working context.
-No group requires every member or defines a fixed workflow.
+Design methods decide the intended result; production methods realize its parts;
+engine references explain the selected runtime. A concrete task may need more
+than one, without requiring every specialist in that group. Follow a specific
+reference/section when it answers the current question, reusing retained method
+content rather than reopening its parent Skill.
 
-## Shared material, separate purposes
+## Shared methods
 
-- Image generation uses [BGS ImageGen](bgs-imagegen/SKILL.md), adapted from the pinned native ImageGen skill. Both native ChatGPT images and the user/platform API path share its prompt guidance. API parameters, pricing and recovery stay in the existing `assets.mjs` help and host implementation.
-- Art and UI use one [composition study](game-art-director-expert/references/ui-visual-hierarchy.md), not separately maintained examples.
-- UI layout fields, projection and calculator usage live in [layout calculation](game-ui-ux-designer/references/layout-calculation.md). The [design check](game-design-check/references/saved-content-checks.md) adds inspection questions rather than another layout contract.
-- XR platform/source selection lives in [official spatial guidance](spatial-computing-game-expert/references/spatial-rule-architecture.md); spatial UX and interaction references use that same source.
-- Design inspection finds missing/conflicting decisions; completion evidence bounds a claim; playtesting observes the actual runtime. They are not a mandatory three-pass chain.
+- Art and UI share the [visual comparison studies](game-art-director-expert/references/ui-visual-hierarchy.md). They do not each maintain a style catalog.
+- Source choice and fallback conditions live in [artwork production](game-content-pipeline-engineer/references/artwork-production.md); image prompting/editing uses the original system `imagegen` Skill and execution follows the current tool's contract.
+- Motion/audio recordings and visual comparison use [player-path observation](game-playtest-performance/references/play-capture.md). They do not create another review task.
+- XR methods share [platform/source guidance](spatial-computing-game-expert/references/spatial-rule-architecture.md); each reads only the applicable platform.
 
-The current Agent assignment supplies ownership, scope and authorization;
-Skills supply methods and evidence requirements; BGS owns the user-facing
-completion format. Do not copy Skill bodies into project guides or load
-them all as one prompt. This navigator itself is a reference, not guaranteed
-automatic discovery or proof that a method was applied correctly.
+This map does not inject Skill bodies, assign stages or prove that a method was
+used. Current task authorization and native discovery remain unchanged.
 
 ## Packaging and compatibility
 

@@ -1,22 +1,22 @@
 ---
 name: beegame-interaction-contracts
-description: Use for player controls, camera-relative movement, input mapping, touch, gamepad, or XR interaction across game perspectives. 中文：角色移动、镜头控制、手柄、触控、空间交互。
+description: "Choose or fix how keyboard, pointer, touch, gamepad or XR input maps to player actions and camera-relative movement. Use for control semantics and feasibility; collision and rule execution belong to gameplay programming. 中文：设备到动作映射、镜头相对控制与输入可行性。"
 ---
 
 # BeeGame Interaction Contracts
 
-Use the relevant guidance when implementing or modifying player interaction. BeeGame is a general game studio, so choose an interaction profile from product intent, not from platform keywords alone. This reference does not impose a delivery phase or a fixed report format.
+Use the relevant guidance for control implementation, diagnosis or a concrete input-feasibility question. Choose an interaction profile from product intent, not platform keywords alone. Resolve only the assigned question; this reference does not authorize implementation in a design-only task or impose a delivery phase/report format.
 
 ## Choosing the relevant interaction model
 
 1. Identify the interaction profile from the game spec:
    - `dimension`, `cameraPerspective`, `movementModel`, `inputScheme`, `primaryInteraction`, `targetDevice`, `xrMode`, or equivalent structured fields.
-   - If fields are missing, infer from mechanics and camera behavior, then state the inferred profile in the implementation notes.
+   - If fields are missing, infer from mechanics and camera behavior, then state the inferred profile with the affected design or implementation decision.
 2. Read only the reference that matches the task:
-   - Screen, keyboard, mouse, gamepad, touch, first-person, third-person, top-down, side-scroller, vehicle, or flight: read `references/screen-controls.md`.
-   - VR, AR, MR, spatial computing, head/controller/hand input, teleport, snap turn, room-scale, anchors: read `references/xr-locomotion.md`.
-   - For playability acceptance, read `references/interaction-acceptance.md`.
-3. Implement the intended control semantics using the project's chosen engine or framework, then check the affected input path in play.
+   - Screen, keyboard, mouse, gamepad, touch, first-person, third-person, top-down, side-scroller, vehicle, or flight: use [screen controls](references/screen-controls.md).
+   - VR, AR, MR, spatial computing, head/controller/hand input, teleport, snap turn, room-scale, anchors: use [XR locomotion](references/xr-locomotion.md).
+   - For an assigned control-path check, use [interaction observation](references/interaction-acceptance.md).
+3. For a feasibility question, explain the relevant mapping constraint and evidence limits. When implementation is authorized, implement the intended semantics in the chosen engine/framework and check the affected input path in play.
 
 ## Universal Contract
 
@@ -26,7 +26,7 @@ Use the relevant guidance when implementing or modifying player interaction. Bee
 - Do not use prompt text keyword matching as logic. Use structured metadata, gameplay intent, or explicit control configuration.
 - Keep view orientation, player/body orientation, and movement direction as separate concepts when the profile needs them.
 - For horizontal ground movement, remove vertical pitch/roll from the movement vector unless the profile explicitly supports flight or six-degree freedom motion.
-- Define only the actions this game actually offers; verify the player's primary action, recovery path, and applicable pause/accessibility controls.
+- Define only the actions this game actually offers; when runtime verification is assigned, check the player's primary action, recovery path, and applicable pause/accessibility controls.
 
 ## Profile Selection
 

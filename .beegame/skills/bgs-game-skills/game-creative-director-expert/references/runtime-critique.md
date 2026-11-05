@@ -1,0 +1,16 @@
+# Runtime creative diagnosis
+
+For an assigned runtime critique, begin with a relevant observed player passage: the opening goal and action, its consequence, and enough repetition or change to judge the question. The first 30–60 seconds can expose a confused opening; an eight-second round does not need artificial waiting to reach that duration. Describe the actual controls, information and consequence. A distinctive picture does not establish a distinctive action, and a complete loop does not prove its intended emotion.
+
+| Complaint | Competing causes to distinguish before prescribing polish | Existing owner |
+| --- | --- | --- |
+| The action feels empty | Does the rule offer the intended choice/skill/expression, or is a valid consequence hidden by weak/mistimed feedback? Is repetition intentionally calm? | Systems/Balance for the decision; Feel for its perceptible response |
+| The player cannot read the situation | Is the target outside the view, occluded, covered, visually anonymous, or not yet understandable from the supplied information? | Art's [playable-view diagnosis](../../game-art-director-expert/references/camera-framing.md), Level or UI according to the cause |
+| Impact or reward feels incomplete | Follow the actual accepted action through contact/outcome, visible response and audible cue. Missing event consumption, cancelled effects and masking need different fixes. | Programming for the state path; Feel/Audio for the affected response |
+| The sequence feels monotonous or overbearing | Are information/choices unchanged, is recovery mostly waiting, or do repeated cues crowd out the important event? Novel assets or larger effects do not resolve every cause. | Creative prioritizes the tradeoff; Systems/Level/Balance or Audio/UI/Feel repairs the responsible relationship |
+
+Select the consequential supported problem, its player impact and the smallest authorized change that could improve it. Separate a confirmed defect or design mismatch from a plausible experience hypothesis and personal preference. Do not remove a required outcome, add progression or rewrite the chosen design to excuse an implementation defect. A sound/camera/control failure can masquerade as a design failure; diagnose that path before expanding scope.
+
+Reuse the existing Playtest [experience-validation record and repair/retest method](../../game-playtest-performance/references/experience-validation.md), with an actual version, passage/step and observation that could refute the proposed cause. Route only the necessary specialist work within the authorized task; this does not require another Agent, report, review round or restart of earlier production. A successful build, passed functional route or author-declared delivery is not a creative-quality verdict. Missing runtime or player evidence remains missing, rather than a score or simulated reaction.
+
+Source study: [game-design-reality-check](https://github.com/qiuaoru-coder/game-design-agent-skills/blob/29e8c759ca26c6bd4f337744b647dc728bf322b6/game-design-reality-check/SKILL.md) separates coherent claims from evidence and proposes a cheap discriminating observation. BGS reuses its existing owner/evidence structure; no GMT map, verdict taxonomy or evidence-ledger schema is imported. The comparative complaints above are original diagnostic examples, not measured player results.
