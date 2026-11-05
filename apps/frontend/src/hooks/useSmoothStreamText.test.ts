@@ -35,7 +35,7 @@ it('renders restored complete messages without replaying them', () => {
   expect(frames.size).toBe(0);
 });
 
-it('reveals current snapshots smoothly, then catches up to the final text', () => {
+it('reveals streaming snapshots smoothly and shows the final text immediately', () => {
   const { result, rerender } = renderHook(({ text, streaming }) => useSmoothStreamText(text, streaming), {
     initialProps: { text: 'Hello', streaming: true },
   });
@@ -48,7 +48,6 @@ it('reveals current snapshots smoothly, then catches up to the final text', () =
   advanceFrame();
   expect(result.current.length).toBeGreaterThanOrEqual(beforeFinal);
   rerender({ text: 'Hello world!', streaming: false });
-  for (let index = 0; index < 30 && frames.size; index += 1) advanceFrame();
   expect(result.current).toBe('Hello world!');
   expect(frames.size).toBe(0);
 });

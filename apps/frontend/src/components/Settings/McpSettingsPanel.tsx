@@ -306,8 +306,15 @@ export function McpServerEditor({
                     <dl className="grid gap-1 border-t border-border pt-3 text-sm">
                       <dt className="text-muted-foreground">{copy.form.name}</dt>
                       <dd className="break-all text-foreground">{parsedCommand.name}</dd>
-                      <dt className="mt-2 text-muted-foreground">{copy.form.url}</dt>
-                      <dd className="break-all text-foreground">{parsedCommand.url}</dd>
+                      {'url' in parsedCommand ? <>
+                        <dt className="mt-2 text-muted-foreground">{copy.form.url}</dt>
+                        <dd className="break-all text-foreground">{parsedCommand.url}</dd>
+                      </> : <>
+                        <dt className="mt-2 text-muted-foreground">{copy.form.command}</dt>
+                        <dd className="break-all text-foreground">{parsedCommand.command}</dd>
+                        <dt className="mt-2 text-muted-foreground">{copy.form.args}</dt>
+                        <dd className="break-all whitespace-pre-wrap text-foreground">{parsedCommand.args.map(arg => JSON.stringify(arg)).join('\n')}</dd>
+                      </>}
                     </dl>
                   ) : null}
                 </div>

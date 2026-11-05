@@ -403,3 +403,52 @@ it('cancels desktop authorization when settings close while the browser is openi
     expect(api.readModelLogin).not.toHaveBeenCalled();
   } finally { unmount(); delete window.beeGameDesktop; }
 });
+
+
+it('saves a corrected same-origin Responses base URL with the existing key and explains the URL format', async () => {
+  const saved = catalog();
+  saved[1] = { ...saved[1], connection: connection('byok', { hasKey: true, isPreferred: true,
+    baseUrl: 'https://api.openai.com/v1/responses', apiProtocol: 'responses', model: 'fixture-model' }) };
+  const corrected = saved.map(item => item.id === 'personal-byok'
+    ? { ...item, connection: { ...item.connection, baseUrl: 'https://api.openai.com/v1' } } : item);
+  vi.mocked(api.listModelCatalog).mockResolvedValueOnce(saved).mockResolvedValue(corrected);
+  render(<ModelConnectionsPanel language="zh" desktop />);
+  const url = await screen.findByLabelText('接口 URL');
+  expect(screen.getByText(/系统自动追加 \/responses/)).toHaveTextContent('https://api.openai.com/v1');
+  expect(screen.getByRole('button', { name: '保存连接' })).toBeEnabled();
+  await userEvent.clear(url);
+  await userEvent.type(url, 'https://api.openai.com/v1');
+  expect(screen.getByRole('button', { name: '保存连接' })).toBeEnabled();
+  expect(screen.getByLabelText('API Key')).toHaveValue('');
+  expect(screen.getByText('API Key 已保存，留空保留；填写新值可替换。')).toBeInTheDocument();
+  expect(api.saveModelConnection).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: '保存连接' }));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', '', true,
+    { provider: 'openai-compatible', apiProtocol: 'responses', baseUrl: 'https://api.openai.com/v1', model: 'fixture-model' }));
+  expect(screen.getByLabelText('API Key')).toHaveValue('');
+  await waitFor(() => expect(screen.getByText('API Key 已保存，留空保留；填写新值可替换。')).toBeInTheDocument());
+  expect(screen.getByRole('button', { name: '保存连接' })).toBeEnabled();
+});
+
+it('keeps model and protocol edits saveable with the stored key and updates the URL guidance', async () => {
+  const saved = catalog();
+  saved[1] = { ...saved[1], connection: connection('byok', { hasKey: true, isPreferred: true,
+    baseUrl: 'https://api.openai.com/v1', apiProtocol: 'responses', model: 'fixture-model' }) };
+  vi.mocked(api.listModelCatalog).mockResolvedValue(saved);
+  const saveState = vi.fn();
+  render(<ModelConnectionsPanel language="en" desktop onSaveStateChange={saveState} />);
+  await screen.findByLabelText('Base URL');
+  await userEvent.clear(screen.getByLabelText('Model'));
+  expect(screen.getByRole('button', { name: 'Save connection' })).toBeDisabled();
+  await userEvent.type(screen.getByLabelText('Model'), 'another-model');
+  expect(screen.getByRole('button', { name: 'Save connection' })).toBeEnabled();
+  expect(screen.getByText(/An API key is saved/)).toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByLabelText('API Protocol'), 'chat-completions');
+  expect(screen.getByText(/is added automatically/)).toHaveTextContent('/chat/completions');
+  expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: false, busy: false });
+  await userEvent.clear(screen.getByLabelText('Base URL'));
+  await userEvent.type(screen.getByLabelText('Base URL'), 'https://another.example/v1');
+  expect(screen.getByRole('button', { name: 'Save connection' })).toBeDisabled();
+  expect(screen.getByText(/The provider or API server has changed/)).toBeInTheDocument();
+  expect(screen.getByLabelText('API Key')).toHaveValue('');
+});

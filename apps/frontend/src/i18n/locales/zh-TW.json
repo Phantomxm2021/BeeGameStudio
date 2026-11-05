@@ -94,7 +94,7 @@
       },
       "fields": {
         "platform": "平台",
-        "engine": "引擎",
+        "engine": "執行技術",
         "dimension": "表現形式",
         "genre": "遊戲類型",
         "style": "風格",
@@ -266,6 +266,7 @@
         }
       },
       "options": {
+        "Auto": "自動",
         "Mobile": "行動端",
         "Desktop": "桌面端",
         "Console": "主機",
@@ -289,7 +290,8 @@
         "Touch": "觸控",
         "Voice": "語音",
         "Hand tracking": "手追",
-        "Hand tracking XR": "手勢追蹤 XR"
+        "Hand tracking XR": "手勢追蹤 XR",
+        "React": "React（自訂 Web）"
       },
       "realtimeBillingNotice": "本次生成将按实际 Token 使用实时扣除 Credit，不会预扣；生成失败不会产生扣费。",
       "realtimeBillingTitle": "实时 Credit 扣除提示",
@@ -538,8 +540,8 @@
       "noServers": "尚未新增 MCP Server",
       "form": {
         "pasteCommand": "貼上新增命令",
-        "pasteCommandHint": "支援 bgs mcp add 名稱 --url 位址，也相容 codex 格式。檢查解析結果後儲存。",
-        "commandFormatError": "請使用 bgs mcp add 名稱 --url 位址（也相容 codex），暫不支援其他參數或 Shell 表達式。",
+        "pasteCommandHint": "支援 bgs/codex mcp add 名稱 --url 位址，或 名稱 [--] 命令 參數…。檢查解析結果後儲存。",
+        "commandFormatError": "請使用 bgs/codex mcp add 名稱 --url 位址，或 名稱 [--] 命令 參數…。暫不支援其他新增選項或 Shell 表達式。",
         "commandUrlError": "請輸入完整的 HTTP 或 HTTPS 位址，不支援位址中的使用者名稱和密碼。",
         "name": "名稱",
         "enabled": "啟用",
@@ -866,7 +868,6 @@
       "deploymentUrlPending": "待發布後顯示",
       "deploymentAutofill": "一鍵填寫",
     "deploymentAutofilling": "填寫中…",
-    "deploymentAutofillHint": "使用已確認的 brief 填寫簡介和玩法，從 GDD 補充具體操作，並擷取目前建置的初始畫面。不呼叫模型；填寫後可修改，不會自動發布。",
     "deploymentProgress": "發布進度",
     "deploymentPrepare": "建置並檢查",
     "deploymentUploading": "正在上傳 · {percent}%",
@@ -902,6 +903,10 @@
       "deploymentShareFailed": "複製失敗，請重試。",
       "deploymentSucceeded": "發布成功",
       "deploymentFailed": "發布失敗",
+      "deploymentBackToEditor": "返回編輯",
+      "deploymentEditorTitle": "部署{projectName}",
+      "deploymentCoverCandidates": "候選封面",
+      "deploymentCoverCandidate": "封面 {number}",
       "deploymentLatest": "最新版本",
       "deploymentVersions": "歷史版本",
       "deploymentNotPublished": "尚未發布",

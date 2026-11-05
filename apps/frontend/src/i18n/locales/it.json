@@ -323,8 +323,8 @@
       "noServers": "No MCP servers yet",
       "form": {
         "pasteCommand": "Paste add command",
-        "pasteCommandHint": "Supports bgs mcp add name --url address and the codex equivalent. Review the parsed details and save.",
-        "commandFormatError": "Use bgs mcp add name --url address (codex is also accepted). Other options and shell expressions are not supported yet.",
+        "pasteCommandHint": "Supports bgs/codex mcp add name --url address, or name [--] command args. Review the parsed details and save.",
+        "commandFormatError": "Use bgs/codex mcp add name --url address, or name [--] command args. Other add options and shell expressions are not supported yet.",
         "commandUrlError": "Enter a complete HTTP or HTTPS URL without a username or password.",
         "name": "Name",
         "enabled": "Enabled",
@@ -441,7 +441,7 @@
       },
       "fields": {
         "platform": "Piattaforma",
-        "engine": "Motore di gioco",
+        "engine": "Tecnologia",
         "dimension": "Presentazione",
         "genre": "Genere",
         "style": "Stile visivo",
@@ -617,6 +617,7 @@
         }
       },
       "options": {
+        "Auto": "Automatico",
         "Mobile": "Dispositivo mobile",
         "Desktop": "Computer",
         "Console": "Console",
@@ -640,7 +641,8 @@
         "Touch": "Touch",
         "Voice": "Voce",
         "Hand tracking": "Tracciamento delle mani",
-        "Hand tracking XR": "Tracciamento delle mani in XR"
+        "Hand tracking XR": "Tracciamento delle mani in XR",
+        "React": "React (Web personalizzato)"
       },
       "realtimeBillingNotice": "I Credit sono calcolati sui token effettivamente usati. Non vengono scalati in anticipo e, se la generazione fallisce, non viene addebitato nulla.",
       "realtimeBillingTitle": "Addebito dei Credit in base all’uso",
@@ -722,6 +724,10 @@
       "deploymentPublishing": "Publishing",
       "deploymentSucceeded": "Published",
       "deploymentFailed": "Deployment failed",
+      "deploymentBackToEditor": "Torna all’editor",
+      "deploymentEditorTitle": "Pubblica {projectName}",
+      "deploymentCoverCandidates": "Copertine disponibili",
+      "deploymentCoverCandidate": "Copertina {number}",
       "deploymentFailureLog": "Failure log",
       "version": "Version",
       "rollback": "Rollback"

@@ -24,7 +24,7 @@ export const ToolActivityRow = memo(function ToolActivityRow({ id, name, input, 
     const Icon = kind === 'image' ? ImageIcon : kind === 'read' ? FileText
         : kind === 'write' || kind === 'edit' ? Pencil : kind === 'search' ? Search
         : kind === 'bash' ? SquareTerminal : Wrench;
-    const [open, setOpen] = useState(state === 'running' || state === 'failed');
+    const [open, setOpen] = useState(state === 'running');
     const [previewCharacters, setPreviewCharacters] = useState(OUTPUT_PREVIEW_CHARACTERS);
     const truncated = output.length > previewCharacters;
     const visibleOutput = useMemo(() => {
@@ -40,7 +40,7 @@ export const ToolActivityRow = memo(function ToolActivityRow({ id, name, input, 
             kind={kind === 'bash' ? 'terminal' : 'custom'} icon={<Icon className="size-3.5" />}
             status={state === 'running' ? 'running' : state === 'completed' ? 'success' : state === 'failed' ? 'error' : 'cancelled'}
             statusLabel={labels[state]} open={open} onOpenChange={setOpen}
-            collapseOnComplete={state === 'completed'}
+            collapseOnComplete={state === 'completed' || state === 'failed'}
             meta={duration ? <span className="tabular-nums">{duration}</span> : undefined}
             onCopy={output ? copyOutput : undefined}
             copyLabels={lang === 'zh' ? { copy: '复制结果', copied: '已复制', failed: '复制失败' } : undefined}>

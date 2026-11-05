@@ -26,8 +26,13 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
             if (entry.kind === 'message') return null;
             const state = entry.status === 'running' ? (running ? 'running' : 'incomplete')
                 : entry.status === 'cancelled' ? 'stopped' : entry.status;
+            let input: unknown = { command: entry.command, file_path: entry.filePath };
+            if (entry.input) {
+                try { input = JSON.parse(entry.input); }
+                catch { /* Older activity snapshots can contain plain-text input. */ }
+            }
             return <ToolActivityRow key={entry.id} id={entry.id} name={entry.toolName}
-                input={{ command: entry.command, file_path: entry.filePath }} output={entry.output} state={state} lang={lang}
+                input={input} output={entry.output} state={state} lang={lang}
                 duration={entry.elapsedTimeSeconds === undefined ? undefined : `${entry.elapsedTimeSeconds}s`} />;
         })}
     </div>;

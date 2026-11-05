@@ -123,7 +123,7 @@ const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings 
     normalizeEngine(option.recommendedEngine),
     CONFIGURED_PRODUCTION_SETTING_OPTIONS.engines,
   ),
-  visualStyle: pickConfiguredProductionValue(option.recommendedStyle, CONFIGURED_PRODUCTION_SETTING_OPTIONS.styles),
+  visualStyle: '',
   dimension: pickConfiguredProductionValue(
     option.recommendedDimension,
     CONFIGURED_PRODUCTION_SETTING_OPTIONS.dimensions,
@@ -132,8 +132,7 @@ const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings 
   inputs: (option.recommendedInputs || [])
     .map(input => pickConfiguredProductionValue(input, CONFIGURED_PRODUCTION_SETTING_OPTIONS.inputs))
     .filter(Boolean),
-  scope: option.scope || 'Prototype',
-  orientation: 'Landscape',
+  orientation: 'Auto',
   notes: '',
   resourceLibraryUsage: 'optional',
 });
@@ -149,7 +148,7 @@ function hasRequiredProductionSettings(settings: BeeGameIntakeSettings): boolean
     settings.platform.trim() &&
       settings.engine?.trim() &&
       settings.dimension.trim() &&
-      (['VR', 'AR'].includes(settings.dimension) || ['Landscape', 'Portrait'].includes(settings.orientation || '')) &&
+      (['VR', 'AR'].includes(settings.dimension) || ['Auto', 'Landscape', 'Portrait'].includes(settings.orientation || '')) &&
       settings.genre.trim() &&
       settings.visualStyle.trim() &&
       settings.inputs.length > 0 &&
@@ -164,8 +163,8 @@ function blueprintOption(idea: string): BeeGameIntakeOption {
     whyFitsIdea: '', playablePrototype: '', validationTarget: '', coreMechanic: '',
     firstBuild: '', validationGoal: '', risk: '', fit: '', firstPlayableValidation: '',
     riskComplexity: '', recommendedPlatform: '', recommendedEngine: '',
-    recommendedDimension: '', recommendedGenre: '', recommendedStyle: '',
-    recommendedInputs: [], scope: '',
+    recommendedDimension: '', recommendedGenre: '',
+    recommendedInputs: [],
   };
 }
 
@@ -230,7 +229,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     restoredIntakeFlow?.selectedOption || null,
   );
   const [settingsGroup, setSettingsGroup] = useState(0);
-  const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings ? { ...restoredIntakeFlow.settings, orientation: restoredIntakeFlow.settings.orientation || 'Landscape' } : null);
+  const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings ? { ...restoredIntakeFlow.settings, orientation: restoredIntakeFlow.settings.orientation || 'Auto' } : null);
   const [intakeError, setIntakeError] = useState('');
   const [isIdeaFocused, setIsIdeaFocused] = useState(false);
   const [attachmentBuildAttachments, setAttachmentBuildAttachments] = useState<ChatAttachmentPayload[]>([]);
@@ -519,7 +518,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
   const openBlueprintSettings = (idea: string) => {
     const option = blueprintOption(idea);
-    const nextSettings = { ...settingsFromOption(option), scope: idea };
+    const nextSettings = settingsFromOption(option);
     setSelectedOption(option);
     setSettings(nextSettings);
     setIntakeOptions([]);
@@ -849,14 +848,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setIntakePhase('configuring_details');
       return;
     }
+    const option = { ...selectedOption };
+    delete option.scope;
+    delete option.recommendedStyle;
     const brief: BeeGameBuildBrief = {
       creationMode,
       attachments: attachmentBuildAttachments,
       idea: projectName.trim(),
-      option: selectedOption,
+      option,
       settings: {
-        ...settings,
+        platform: settings.platform,
         engine: normalizeEngine(settings.engine),
+        visualStyle: settings.visualStyle,
+        dimension: settings.dimension,
+        orientation: settings.orientation,
+        genre: settings.genre,
+        inputs: settings.inputs,
+        notes: settings.notes,
         resourceLibraryUsage: settings.resourceLibraryUsage,
       },
       title: selectedOption.title,

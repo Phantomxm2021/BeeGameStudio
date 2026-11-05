@@ -2,24 +2,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { WorkspaceDeploymentDialog } from './WorkspaceDeploymentDialog';
 import { api } from '../../services/api';
+import { loadPublicationCoverCandidates } from './publicationCoverCandidates';
 import zh from '../../i18n/locales/zh.json';
 const { showError } = vi.hoisted(() => ({ showError: vi.fn() }));
 vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showError }) }));
 
 vi.mock('../../services/api', () => ({ api: { getDeploymentReadiness: vi.fn(), generatePublicationDescription: vi.fn(), capturePublicationCover: vi.fn() } }));
+vi.mock('./publicationCoverCandidates', async importOriginal => ({ ...await importOriginal<typeof import('./publicationCoverCandidates')>(), loadPublicationCoverCandidates: vi.fn() }));
 const labels = zh.beegame.livePreview;
 const props = { projectId: 'project', projectName: '磁轨调度', isOpen: true, deployments: [], labels,
   onClose: vi.fn(), onDeploy: vi.fn(), isDeploying: false, canDeploy: true };
 
 describe('publishing confirmation', () => {
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.getDeploymentReadiness).mockResolvedValue({ allowed: true, issues: [], destination: 'remote' }); });
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(loadPublicationCoverCandidates).mockResolvedValue([]); vi.mocked(api.getDeploymentReadiness).mockResolvedValue({ allowed: true, issues: [], destination: 'remote' }); });
   it('shows the reviewed public title instead of the internal project name', async () => {
     const live = { id: 'version-1', sessionId: 'session', workspacePath: '/test', status: 'succeeded' as const,
       url: 'https://game.example/', createdAt: '', updatedAt: '', publicDescription: '# 《星港夜航》\n\n## 操作\nE：补给' };
     render(<WorkspaceDeploymentDialog {...props} deployments={[live]} />);
-    expect(await screen.findByText('星港夜航已发布')).toBeTruthy();
-    expect(screen.queryByText('磁轨调度已发布')).toBeNull();
+    expect(await screen.findByRole('heading', { name: '部署星港夜航' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '部署磁轨调度' })).toBeNull();
     expect(screen.getByRole('textbox', { name: labels.deploymentDescription })).toHaveValue(live.publicDescription);
     expect(api.generatePublicationDescription).not.toHaveBeenCalled();
   });
@@ -27,7 +29,7 @@ describe('publishing confirmation', () => {
     render(<WorkspaceDeploymentDialog {...props} />);
     const publish = await screen.findByRole('button', { name: labels.deploymentPublishAction });
     await waitFor(() => expect(publish).toBeEnabled());
-    expect(screen.getByText('磁轨调度')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '部署磁轨调度' })).toBeTruthy();
     expect(screen.queryByText(labels.deploymentReadyDescription)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
     expect(props.onDeploy).not.toHaveBeenCalled();
@@ -39,6 +41,7 @@ describe('publishing confirmation', () => {
     render(<WorkspaceDeploymentDialog {...props} />);
     await waitFor(() => expect(showError).toHaveBeenCalledWith(labels.deploymentVerificationScope + '\nWorkspace changed after acceptance'));
     expect(screen.queryByText('Workspace changed after acceptance')).toBeNull();
+    expect(screen.queryByText(labels.deploymentBlocked)).toBeNull();
     expect(screen.queryByRole('button', { name: labels.deploymentRecheck })).toBeNull();
     expect(screen.getByRole('button', { name: labels.deploymentPublishAction })).toBeDisabled();
     expect(props.onDeploy).not.toHaveBeenCalled();
@@ -67,7 +70,7 @@ describe('publishing confirmation', () => {
     const { rerender } = render(<WorkspaceDeploymentDialog {...props} onDeploy={onDeploy} deployments={[]} />);
     expect(await screen.findByText('What was tested?')).toBeTruthy();
     rerender(<WorkspaceDeploymentDialog {...props} onDeploy={onDeploy} deployments={[live]} />);
-    expect(screen.getByText('磁轨调度已发布')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '部署磁轨调度' })).toBeTruthy();
     expect(screen.queryByText('What was tested?')).toBeNull();
     expect(screen.queryByRole('checkbox', { name: labels.deploymentDiscussionConfirm })).toBeNull();
     const republish = screen.getByRole('button', { name: labels.deploymentPublishUpdate });
@@ -116,14 +119,23 @@ describe('publishing confirmation', () => {
     expect(update).toBeDisabled();
     expect(props.onDeploy).not.toHaveBeenCalled();
   });
-  it('keeps a failed request visible in the dialog as well as the global toast', async () => {
+  it('shows a rejected request as a separate result and retains the draft when returning', async () => {
     render(<WorkspaceDeploymentDialog {...props} onDeploy={vi.fn().mockRejectedValue(new Error('Upload rejected'))} />);
+    const editor = screen.getByRole('textbox', { name: labels.deploymentDescription });
+    fireEvent.change(editor, { target: { value: 'Keep my publication draft' } });
     const publish = screen.getByRole('button', { name: labels.deploymentPublishAction });
     await waitFor(() => expect(publish).toBeEnabled());
     fireEvent.click(publish);
-    await waitFor(() => expect(showError).toHaveBeenCalledWith('Upload rejected'));
+    expect(await screen.findByRole('heading', { name: labels.deploymentFailed })).toBeTruthy();
     expect(screen.getByRole('alert')).toHaveTextContent('Upload rejected');
-    expect(screen.getByRole('button', { name: labels.deploymentPublishAction })).toBeEnabled();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: labels.deploymentAutofill })).toBeNull();
+    expect(screen.getByRole('dialog').className).toContain('max-w-[408px]');
+    expect(showError).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: labels.deploymentBackToEditor }));
+    expect(await screen.findByRole('textbox', { name: labels.deploymentDescription })).toHaveValue('Keep my publication draft');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('dialog').className).toContain('max-w-[960px]');
   });
   it('scrolls long deployment errors inside the content instead of stretching the dialog', async () => {
     const longError = 'Upload rejected: ' + 'A'.repeat(1000);
@@ -136,7 +148,8 @@ describe('publishing confirmation', () => {
     expect(alert.className).toContain('max-h-32');
     expect(alert.className).toContain('overflow-y-auto');
     expect(screen.getByRole('dialog').className).toContain('max-h-[calc(100dvh-32px)]');
-    expect(publish).toBeVisible();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: labels.deploymentBackToEditor })).toBeVisible());
   });
   it('can close the progress dialog without canceling the publication', async () => {
     render(<WorkspaceDeploymentDialog {...props} isDeploying deployments={[{ id: 'version', sessionId: 'session', workspacePath: '/test',
@@ -152,7 +165,7 @@ describe('publishing confirmation', () => {
   });
   it('uses the center morph modal dismissal without submitting a deployment', async () => {
     render(<WorkspaceDeploymentDialog {...props} />);
-    expect(await screen.findByRole('dialog', { name: labels.deploy })).toBeTruthy();
+    expect(await screen.findByRole('dialog', { name: '部署磁轨调度' })).toBeTruthy();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(props.onClose).toHaveBeenCalledOnce();
     expect(props.onDeploy).not.toHaveBeenCalled();
@@ -180,8 +193,8 @@ describe('publishing confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: labels.deploymentVersions }));
     fireEvent.click(await screen.findByRole('button', { name: labels.rollback }));
     await waitFor(() => expect(onRollback).toHaveBeenCalledExactlyOnceWith('previous'));
-    await waitFor(() => expect(showError).toHaveBeenCalledWith('Rollback rejected'));
-    expect(screen.getByRole('heading', { name: labels.deploymentVersions })).toBeTruthy();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Rollback rejected');
+    expect(screen.getByRole('heading', { name: labels.deploymentFailed })).toBeTruthy();
     expect(screen.queryByRole('progressbar')).toBeNull();
   });
   it('shows a history empty state before the first publication', async () => {
@@ -196,7 +209,7 @@ describe('publishing confirmation', () => {
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     render(<WorkspaceDeploymentDialog {...props} deployments={[{ id: 'version', sessionId: 'session', workspacePath: '/test',
       status: 'succeeded', portalPublishedAt: '2026-10-24T00:00:00Z', url: 'https://game.example/deployments/version/files/index.html', createdAt: '', updatedAt: '' }]} />);
-    expect(screen.getByText('磁轨调度已发布')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '部署磁轨调度' })).toBeTruthy();
     expect(screen.getByRole('button', { name: labels.deploymentVersions })).toBeEnabled();
     expect(screen.queryByRole('button', { name: labels.deploymentLinkActions })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: labels.deploymentShare }));
@@ -294,6 +307,7 @@ describe('publishing confirmation', () => {
       url: 'https://game.example/', publicCoverUrl: 'https://game.example/cover.webp', createdAt: '', updatedAt: '' };
     render(<WorkspaceDeploymentDialog {...props} onDeploy={onDeploy} deployments={[existing]} />);
     const file = new File(['image-fixture'], 'cover.png', { type: 'image/png' });
+    await waitFor(() => expect(screen.getByRole('button', { name: labels.deploymentPublishUpdate })).toBeEnabled());
     fireEvent.change(screen.getByLabelText(labels.deploymentCoverUpload, { selector: 'input' }), { target: { files: [file] } });
     if (valid) {
       await waitFor(() => expect(screen.getByAltText(labels.deploymentCover)).toHaveAttribute('src', `data:image/${format};base64,${encoded}`));
@@ -316,12 +330,15 @@ describe('publishing confirmation', () => {
   it('fills both fields from the current project without publishing and allows later editing', async () => {
     const picture = { mediaType: 'image/webp' as const, filename: 'game-preview.webp', data: 'fixture' };
     vi.mocked(api.generatePublicationDescription).mockResolvedValue({ description: 'Project-derived introduction' });
-    vi.mocked(api.capturePublicationCover).mockResolvedValue(picture);
+    vi.mocked(loadPublicationCoverCandidates).mockResolvedValue([picture]);
     render(<WorkspaceDeploymentDialog {...props} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: labels.deploymentAutofill })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: labels.deploymentAutofill }));
     await waitFor(() => expect(screen.getByRole('textbox', { name: labels.deploymentDescription })).toHaveValue('Project-derived introduction'));
     expect(api.generatePublicationDescription).toHaveBeenCalledExactlyOnceWith('project');
-    expect(api.capturePublicationCover).toHaveBeenCalledExactlyOnceWith('project');
+    expect(loadPublicationCoverCandidates).toHaveBeenCalledTimes(1);
+    expect(loadPublicationCoverCandidates).toHaveBeenCalledWith('project', expect.any(Object), expect.any(AbortSignal));
+    expect(api.capturePublicationCover).not.toHaveBeenCalled();
     expect(screen.getByAltText(labels.deploymentCover)).toHaveAttribute('src', 'data:image/webp;base64,fixture');
     expect(props.onDeploy).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole('textbox', { name: labels.deploymentDescription }), { target: { value: 'Creator revision' } });
@@ -331,14 +348,48 @@ describe('publishing confirmation', () => {
     }));
   });
 
+  it('does not reload cover images when polling supplies a new labels object', async () => {
+    const { rerender } = render(<WorkspaceDeploymentDialog {...props} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: labels.deploymentPublishAction })).toBeEnabled());
+    expect(loadPublicationCoverCandidates).toHaveBeenCalledTimes(1);
+    rerender(<WorkspaceDeploymentDialog {...props} labels={{ ...labels }} />);
+    expect(loadPublicationCoverCandidates).toHaveBeenCalledTimes(1);
+  });
+  it('shows the real number of distinct candidates instead of repeating a static view', async () => {
+    vi.mocked(loadPublicationCoverCandidates).mockResolvedValue([{ mediaType: 'image/webp', filename: 'game-preview-1.webp', data: 'frame' }]);
+    render(<WorkspaceDeploymentDialog {...props} />);
+    expect(await screen.findAllByRole('radio')).toHaveLength(1);
+    expect(screen.queryByText('game-preview-1.webp')).not.toBeInTheDocument();
+  });
+  it('offers three existing project images and publishes only the selected cover', async () => {
+    const candidates = [1, 2, 3].map(n => ({ mediaType: 'image/webp' as const, filename: `project-${n}.webp`, data: `image-${n}` }));
+    vi.mocked(loadPublicationCoverCandidates).mockResolvedValue(candidates);
+    const onDeploy = vi.fn().mockRejectedValue(new Error('Upload rejected'));
+    render(<WorkspaceDeploymentDialog {...props} onDeploy={onDeploy} />);
+    expect(await screen.findAllByRole('radio')).toHaveLength(3);
+    expect(screen.getByRole('radio', { name: '封面 1' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: '封面 3' }));
+    expect(screen.getByAltText(labels.deploymentCover)).toHaveAttribute('src', 'data:image/webp;base64,image-3');
+    const publish = screen.getByRole('button', { name: labels.deploymentPublishAction });
+    await waitFor(() => expect(publish).toBeEnabled());
+    fireEvent.click(publish);
+    await waitFor(() => expect(onDeploy).toHaveBeenCalledExactlyOnceWith({ publicationCover: candidates[2] }));
+    expect(await screen.findByRole('heading', { name: labels.deploymentFailed })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: labels.deploymentBackToEditor }));
+    expect(await screen.findByRole('radio', { name: '封面 3' })).toBeChecked();
+    expect(api.capturePublicationCover).not.toHaveBeenCalled();
+  });
   it('retains the existing cover when capture fails but keeps a successful description draft', async () => {
     vi.mocked(api.generatePublicationDescription).mockResolvedValue({ description: 'Saved project description' });
-    vi.mocked(api.capturePublicationCover).mockRejectedValue(new Error('Current build unavailable'));
+    vi.mocked(loadPublicationCoverCandidates).mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('Current build unavailable'));
     render(<WorkspaceDeploymentDialog {...props} deployments={[{ id: 'old', sessionId: 'session', workspacePath: '/test',
       status: 'succeeded', url: 'https://game.example/', publicCoverUrl: 'https://game.example/cover.webp', createdAt: '', updatedAt: '' }]} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: labels.deploymentAutofill })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: labels.deploymentAutofill }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Current build unavailable');
-    expect(screen.getByRole('textbox', { name: labels.deploymentDescription })).toHaveValue('Saved project description');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: labels.deploymentBackToEditor }));
+    expect(await screen.findByRole('textbox', { name: labels.deploymentDescription })).toHaveValue('Saved project description');
     expect(screen.getByAltText(labels.deploymentCover)).toHaveAttribute('src', 'https://game.example/cover.webp');
     expect(props.onDeploy).not.toHaveBeenCalled();
   });
@@ -346,8 +397,9 @@ describe('publishing confirmation', () => {
   it('disables editing and publication while filling and ignores results after the dialog closes', async () => {
     let finish!: (value: { description: string }) => void;
     vi.mocked(api.generatePublicationDescription).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
-    vi.mocked(api.capturePublicationCover).mockResolvedValue({ mediaType: 'image/webp', filename: 'capture.webp', data: 'fixture' });
+    vi.mocked(loadPublicationCoverCandidates).mockResolvedValueOnce([]).mockResolvedValueOnce([{ mediaType: 'image/webp', filename: 'capture.webp', data: 'fixture' }]).mockResolvedValue([]);
     const { rerender } = render(<WorkspaceDeploymentDialog {...props} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: labels.deploymentAutofill })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: labels.deploymentAutofill }));
     expect(screen.getByRole('button', { name: labels.deploymentAutofilling })).toBeDisabled();
     expect(screen.getByRole('textbox', { name: labels.deploymentDescription })).toBeDisabled();
@@ -406,8 +458,25 @@ describe('publishing confirmation', () => {
     expect(screen.queryByText('版本 1 已上线。')).toBeNull();
     reject(new Error('Publication rejected'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Publication rejected');
-    expect(await screen.findByRole('textbox', { name: labels.deploymentDescription })).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.queryByRole('heading', { name: labels.deploymentCompleteTitle })).toBeNull();
+  });
+  it('shows failed server records once per result while retaining edited values', async () => {
+    const record = { id: 'failed-1', sessionId: 'session', workspacePath: '/test', status: 'failed' as const,
+      buildLog: 'Editable project sources must not contain aliases: tmp/browser', createdAt: '', updatedAt: '' };
+    const { rerender } = render(<WorkspaceDeploymentDialog {...props} deployments={[record]} />);
+    expect(await screen.findByRole('dialog', { name: labels.deploymentFailed })).toBeTruthy();
+    expect(screen.getByRole('alert')).toHaveTextContent(record.buildLog);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: labels.deploymentBackToEditor }));
+    const editor = await screen.findByRole('textbox', { name: labels.deploymentDescription });
+    fireEvent.change(editor, { target: { value: 'My revised introduction' } });
+    rerender(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record }]} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveValue('My revised introduction');
+    rerender(<WorkspaceDeploymentDialog {...props} deployments={[{ ...record, id: 'failed-2' }, record]} />);
+    expect(await screen.findByRole('heading', { name: labels.deploymentFailed })).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
   });
   it('shows the new completion even if the response skips queued and publishing snapshots', async () => {
     const previous = { id: 'old', sessionId: 'session', workspacePath: '/test', status: 'succeeded' as const,

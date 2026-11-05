@@ -3,7 +3,7 @@ import { readSubagentActivity } from '@bee-game-studio/agent-workflow/subagent-a
 import { normalizeChatAttachments } from './chatAttachments'
 import { settleChatActivity } from '../utils/chatActivity'
 import {
-  getPayloadString, getPayloadBoolean, getPayloadRecord, getThinkingDisplayId,
+  getPayloadString, getPayloadBoolean, getPayloadRecord, getToolDisplayInput, getThinkingDisplayId,
   getBeeGameAssistantMessageId, getAssistantContentBlocks, type BeeGameEvent,
 } from './beeGameEvent'
 import { encodeArtifactId, getArtifactPath, toWorkspaceRelativePath } from './beeGameArtifactPaths'
@@ -60,7 +60,9 @@ function eventToProjectEventMessagesBase(
       } as ProjectEventMessage] : []
     }
     case 'user.message':
-      if (getPayloadString(event, 'displayKind') === 'delivery_continue') return []
+      if (getPayloadString(event, 'displayKind') === 'delivery_continue' ||
+        (getPayloadString(event, 'displayKind') === 'workflow_v3_continue' &&
+          getPayloadString(event, 'displayText') === '恢复原生执行' && !event.text)) return []
       return [
         baseMessage(
           'agent_message',
@@ -79,6 +81,10 @@ function eventToProjectEventMessagesBase(
           turnId: event.turnId,
           turn_id: event.turnId,
           status: 'running',
+          task_kind: 'session_lifecycle',
+          content: 'running',
+          message_id: `beegame-turn-start-${event.sessionId}-${event.turnId}`,
+          timestamp: Date.parse(event.createdAt) || now(),
         } as ProjectEventMessage,
       ]
     case 'system.status': {
@@ -93,6 +99,18 @@ function eventToProjectEventMessagesBase(
         return [{ type: 'context_update', task_id: taskId, project_id: projectId,
           sender: 'system', message_id: `beegame-delivery-error-${event.sessionId}-${event.id}`,
           content: event.text, task_kind: 'delivery_error', timestamp: Date.parse(event.createdAt) || now(),
+        }]
+      }
+      if (subtype === 'runtime_notice' || event.payload?.willRetry === true) {
+        return [{ type: 'context_update', task_id: taskId, project_id: projectId,
+          sender: 'system', message_id: `beegame-runtime-notice-${event.sessionId}-${event.id}`,
+          content: event.text, task_kind: 'runtime_notice', timestamp: Date.parse(event.createdAt) || now(),
+        }]
+      }
+      if (subtype === 'design_revision') {
+        return [{ type: 'context_update', task_id: taskId, project_id: projectId,
+          sender: 'system', message_id: `beegame-design-revision-${event.sessionId}-${event.id}`,
+          content: event.text, task_kind: 'design_revision', timestamp: Date.parse(event.createdAt) || now(),
         }]
       }
       if (subtype === 'delivery_phase') {
@@ -288,7 +306,7 @@ function eventToProjectEventMessagesBase(
         : []
     }
     case 'tool.started': {
-      const startedInput = getPayloadRecord(event, 'input')
+      const startedInput = getToolDisplayInput(event)
       const startedTool = getPayloadString(event, 'toolName') || event.text
       const startedInfo = getToolDisplayInfo(
         startedTool,
@@ -328,7 +346,7 @@ function eventToProjectEventMessagesBase(
       ]
     }
     case 'tool.progress': {
-      const progressInput = getPayloadRecord(event, 'input')
+      const progressInput = getToolDisplayInput(event)
       const progressTool = getPayloadString(event, 'toolName') || event.text
       const output = getToolOutput(event)
       const progressInfo = getToolDisplayInfo(
@@ -372,7 +390,7 @@ function eventToProjectEventMessagesBase(
     }
     case 'tool.completed':
     case 'tool.failed': {
-      const finishedInput = getPayloadRecord(event, 'input')
+      const finishedInput = getToolDisplayInput(event)
       const finishedTool = getPayloadString(event, 'toolName') || event.text
       const backgroundResult = getPayloadRecord(event, 'nativeBackgroundTaskResult')
       const backgroundToolUseID = typeof backgroundResult.toolUseID === 'string' ? backgroundResult.toolUseID : ''
@@ -901,6 +919,10 @@ export function projectHistoryMessages(
     if (message.type === 'think_start') {
       if (message.message_id) {
         thinkingStartedAtByMessage.set(message.message_id, message.timestamp || 0)
+        // Keep the running indicator across refresh even without a public summary.
+        const placeholder: ProjectEventMessage = { ...message, type: 'thought', content: '', task_kind: 'assistant_thinking' }
+        thoughtMessages.set(message.message_id, placeholder)
+        return [placeholder]
       }
       return []
     }
@@ -932,7 +954,9 @@ export function projectHistoryMessages(
     thoughtMessages.set(message.message_id, message)
     return [message]
   })
-  let history = messages.map(message => ({
+  // Empty reasoning is a transient activity indicator, not a fabricated summary.
+  let history = messages.filter(message => message.type !== 'thought' || message.content ||
+    !endedThoughts.has(message.message_id || '')).map(message => ({
     id:
       message.message_id || `${message.type}-${message.task_id}-${now()}`,
     message_id: message.message_id,

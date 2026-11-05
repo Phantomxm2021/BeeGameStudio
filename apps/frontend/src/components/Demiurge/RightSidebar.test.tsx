@@ -1611,3 +1611,23 @@ describe('Web/React editor removal',()=>{
         window.history.replaceState({},'','/');
     });
 });
+
+
+it('forwards native MCP approval arguments and the explicit persistence choice through the existing permission callback', async () => {
+    await i18n.changeLanguage('en');
+    const onResolveToolPermission = vi.fn().mockResolvedValue(undefined);
+    render(<RightSidebar projectId="mcp-project" lang="en" progress={0} messages={[]} isLoading={false}
+        waitingPermission={getWaitingPermissionState()} onSendMessage={vi.fn()} onResolveToolPermission={onResolveToolPermission}
+        pendingPermissions={[{ gate_id: 'native-mcp-approval', type: 'BEEGAME_PERMISSION',
+            permission_tool_name: 'McpElicitation', artifact: { input: {
+                mode: 'form', serverName: 'fixture-blender', message: 'Allow Blender?',
+                requestedSchema: { type: 'object', properties: {} },
+                _meta: { bgs_approval_kind: 'mcp_tool_call', persist: 'session',
+                    tool_params: { code: 'print("noop")' } },
+            } } }]} />);
+    expect(screen.getByLabelText('Tool arguments')).toHaveTextContent('noop');
+    fireEvent.change(screen.getByLabelText('Approval scope'), { target: { value: 'session' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onResolveToolPermission).toHaveBeenCalledWith({ gate_id: 'native-mcp-approval' }, 'allow', 'once',
+        { content: '{}', persist: 'session' });
+});

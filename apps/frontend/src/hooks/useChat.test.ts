@@ -773,6 +773,26 @@ describe('useChat clarification gate handling', () => {
     expect(chatStoreState.setCurrentSender).toHaveBeenLastCalledWith(null);
   });
 
+  it('retains the authoritative turn start for the timer without adding visible progress text', async () => {
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+    const startedAt = Date.now() - 10000;
+    const [status] = projectEventMessages('proj_1', {
+      id: 1, type: 'turn.started', sessionId: 'clock-session', turnId: 'clock-turn', text: '',
+      createdAt: new Date(startedAt).toISOString(),
+    });
+    act(() => latestWebSocketOptions.onMessage?.(status));
+    expect(result.current.isLoading).toBe(true);
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      taskKind: 'session_lifecycle', type: 'system_status', content: 'running',
+      taskId: 'clock-session', turnId: 'clock-turn', timestamp: startedAt,
+    }));
+    act(() => latestWebSocketOptions.onMessage?.({
+      type: 'status', task_id: 'clock-session', turnId: 'clock-turn', status: 'idle', timestamp: startedAt + 7000,
+    }));
+    expect(chatStoreState.settleActivity).toHaveBeenCalledWith('clock-session', 'clock-turn', 'incomplete', startedAt + 7000, startedAt + 7000);
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it('keeps the composer locked across intermediate assistant messages and transport reconnects', async () => {
     projectStoreState.projectStatus = {
       project_id: 'proj_1',

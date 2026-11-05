@@ -84,7 +84,17 @@ function shellSummary(command: string, zh: boolean): string {
 export function toolActivitySummary(name: string, input: unknown, detail: string, zh: boolean): string {
     const kind = activityToolKind(name);
     const data = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+    if (kind === 'bash' && Array.isArray(data.skillReads)) {
+        const names = [...new Set(data.skillReads.flatMap((read: unknown) => {
+            if (!read || typeof read !== 'object') return [];
+            const name = (read as Record<string, unknown>).name;
+            return typeof name === 'string' && name.trim() ? [name.trim()] : [];
+        }))];
+        if (names.length) return `${zh ? '读取 Skill' : 'Read Skill'} · ${names.join(', ')}`;
+    }
     if (typeof data.description === 'string' && data.description.trim()) return data.description.trim().split('\n')[0];
+    // Subagent details contain the internal prompt, not a public activity label.
+    if (kind === 'subagent') return zh ? '正在执行子任务' : 'Running subtask';
     if (kind === 'bash') {
         const command = typeof data.command === 'string' ? data.command : detail.replace(/^Command:\s*/, '');
         return command ? shellSummary(command, zh) : name;

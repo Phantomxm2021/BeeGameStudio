@@ -1213,7 +1213,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('button', { name: '保存设置' })).toBeDisabled();
         fireEvent.change(screen.getByLabelText('粘贴添加命令'), { target: { value: `${executable} mcp add other --url https://example.test/mcp --unknown value` } });
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-        expect(screen.getByRole('alert')).toHaveTextContent('暂不支持其他参数');
+        expect(screen.getByRole('alert')).toHaveTextContent('暂不支持其他添加选项');
         expect(createMcpServer).not.toHaveBeenCalled();
         expect(testMcpServer).not.toHaveBeenCalled();
 
@@ -1221,6 +1221,24 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
         expect(screen.getByText('remote', { exact: true })).toBeInTheDocument();
         expect(screen.getByText(saved.url, { exact: true })).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+        const { id: _id, ...input } = saved;
+        await waitFor(() => expect(createMcpServer).toHaveBeenCalledWith(input));
+        await waitFor(() => expect(testMcpServer).toHaveBeenCalledWith(saved));
+    });
+
+    it.each(['bgs', 'codex'])('saves pasted %s stdio as command and exact argv', async executable => {
+        const args = ['@playwright/mcp@latest', '--label', ' two words ', ''];
+        const saved = { id: 'mcp_playwright', name: 'playwright', enabled: true, transport: 'stdio', scope: 'beegame', command: 'npx', args, env: [], autoStart: true };
+        createMcpServer.mockResolvedValue(saved);
+        renderSettings();
+        await openMcpSettings();
+        await openMcpActionsMenu();
+        await userEvent.click(screen.getByRole('menuitem', { name: '新增 MCP（命令）' }));
+        fireEvent.change(screen.getByLabelText('粘贴添加命令'), { target: { value: `${executable} mcp add playwright npx "@playwright/mcp@latest" --label " two words " ""` } });
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByText('playwright', { exact: true })).toBeInTheDocument();
+        expect(screen.getByText('npx', { exact: true })).toBeInTheDocument();
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
         const { id: _id, ...input } = saved;
         await waitFor(() => expect(createMcpServer).toHaveBeenCalledWith(input));

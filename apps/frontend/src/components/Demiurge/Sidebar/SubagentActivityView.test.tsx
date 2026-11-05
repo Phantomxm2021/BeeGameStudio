@@ -53,7 +53,8 @@ describe('subagent activity presentation', () => {
         expect(container).not.toHaveTextContent('raw-flag');
         expect(container).not.toHaveTextContent('raw-failure-output');
         expect(container.querySelector('[data-tool-id="bash"]')).toHaveAccessibleDescription('失败');
-        expect(container.querySelector('button, pre, details')).toBeNull();
+        expect(container.querySelector('pre, details')).toBeNull();
+        for (const button of screen.getAllByRole('button')) expect(button).toHaveAttribute('aria-expanded', 'false');
     });
 
     it('keeps partial history marked without exposing truncated tool output', () => {

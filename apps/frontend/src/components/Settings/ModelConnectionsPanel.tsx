@@ -1,4 +1,4 @@
-import {defaultModelApiProtocol,resolveModelApiProtocol,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
+import {defaultModelApiProtocol,resolveModelApiProtocol,sameModelEndpointOrigin,type ModelApiProtocol} from '@bee-game-studio/agent-workflow/model-protocol';
 import {OpenCodeGoPanel} from './OpenCodeGoPanel';
 import { isDesktopShell, openExternal } from '../../lib/platform';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
@@ -43,8 +43,24 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
   const subscriptionMethod: ModelAuthMethod = 'chatgpt-subscription';
   const subscription = models.find(item => item.id === subscriptionId);
   const connected = mode === 'chatgpt-subscription' && subscription?.connection.chatgptConnected;
-  const keyRequired = !byok?.connection.hasKey || provider !== byok.provider || baseUrl.trim().replace(/\/$/, '') !== (byok.connection.baseUrl ?? '').replace(/\/$/, '');
+  const keyRequired = !byok?.connection.hasKey || provider !== byok.provider ||
+    !sameModelEndpointOrigin(byok.connection.baseUrl ?? byok.baseUrl, baseUrl.trim());
   const byokComplete = !!baseUrl.trim() && !!model.trim() && (!keyRequired || !!key.trim());
+  const requestPath = apiProtocol === 'responses' ? '/responses' : '/chat/completions';
+  const baseUrlHelp = provider === 'openai-compatible' || provider === 'grok'
+    ? copy(`填写基础 URL，例如 ${provider === 'grok' ? 'https://api.x.ai/v1' : 'https://api.openai.com/v1'}。系统自动追加 ${requestPath}，请勿在 URL 末尾重复填写。`,
+      `Enter a base URL, e.g. ${provider === 'grok' ? 'https://api.x.ai/v1' : 'https://api.openai.com/v1'}. ${requestPath} is added automatically; do not include it at the end.`)
+    : provider === 'anthropic-compatible'
+      ? copy('填写 API 基础 URL，例如 https://api.anthropic.com，不要包含 /messages。',
+        'Enter an API base URL, e.g. https://api.anthropic.com, without /messages.')
+      : copy('填写 API 基础 URL，例如 https://generativelanguage.googleapis.com/v1beta，不要包含 /models/ 后的具体接口。',
+        'Enter an API base URL, e.g. https://generativelanguage.googleapis.com/v1beta, without the /models/ request path.');
+  const apiKeyHelp = keyRequired
+    ? byok?.connection.hasKey
+      ? copy('服务商或 API 服务器已更改，请重新输入 API Key 后保存；已保存的密钥不会自动发送到其他服务器。',
+        'The provider or API server has changed. Re-enter the API key to save; the saved key is not automatically sent to another server.')
+      : copy('请填写 API Key 后保存。', 'Enter an API key to save.')
+    : copy('API Key 已保存，留空保留；填写新值可替换。', 'An API key is saved. Leave blank to keep it, or enter a new one to replace it.');
 
   const refresh = async () => {
     const result = await listModelCatalog();
@@ -168,7 +184,7 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     {!chatgptAuthorizationOnly && <div className={desktop ? 'desktop-connection-mode desktop-setting-row' : ''}>{desktop ? <span>{copy('连接方式', 'Connection type')}</span> : null}<ProjectSelect ariaLabel={copy('连接方式', 'Connection type')} value={mode} disabled={busy || !!login} triggerClassName="h-10" onValueChange={value => switchMode(value as Mode)} options={[{ value: 'official', label: 'Bee Game Studio LLM' }, { value: 'byok', label: 'BYOK' },{value:'opencode-go',label:'OpenCode Go'}, { value: 'chatgpt-subscription', label: 'ChatGPT account with subscription' }]} /></div>}
     {mode==='opencode-go' && <OpenCodeGoPanel ref={goRef} desktop={desktop} language={language} config={models.find(item=>item.id===OPENCODE_GO_ID)} busy={busy} setBusy={setBusy} refresh={refresh} onSaveStateChange={reportSaveState}/>}
     {mode === 'byok' && <div className="space-y-3">
-      <ModelConfigPanel labels={{ provider: copy('服务商', 'Provider'), baseUrl: copy('接口 URL', 'Base URL'), apiKey: 'API Key', model: copy('模型', 'Model') }} provider={provider} apiProtocol={apiProtocol} onApiProtocolChange={setApiProtocol} baseUrl={baseUrl} apiKey={key} model={model} apiKeyPreview={byok?.connection.hasKey && !keyRequired ? '••••' : ''} savedPrefix={copy('已保存：', 'Saved: ')} onProviderChange={setProvider} onBaseUrlChange={setBaseUrl} onApiKeyChange={setKey} onModelChange={setModel} onSubmit={event => { event.preventDefault(); if (byokComplete && !busy) saveByok(); }} />
+      <ModelConfigPanel labels={{ provider: copy('服务商', 'Provider'), baseUrl: copy('接口 URL', 'Base URL'), baseUrlHelp, apiKey: 'API Key', apiKeyHelp, model: copy('模型', 'Model') }} provider={provider} apiProtocol={apiProtocol} onApiProtocolChange={setApiProtocol} baseUrl={baseUrl} apiKey={key} model={model} apiKeyPreview={byok?.connection.hasKey && !keyRequired ? '••••' : ''} savedPrefix={copy('已保存：', 'Saved: ')} onProviderChange={setProvider} onBaseUrlChange={setBaseUrl} onApiKeyChange={setKey} onModelChange={setModel} onSubmit={event => { event.preventDefault(); if (byokComplete && !busy) saveByok(); }} />
     </div>}
     {(mode === 'chatgpt-subscription') && <div className={`flex items-center justify-center${chatgptAuthorizationOnly || desktop ? '' : ' min-h-48 flex-1'}`}>
       {!connected && !login && <div className="flex w-full max-w-sm flex-col items-center gap-4 text-center">

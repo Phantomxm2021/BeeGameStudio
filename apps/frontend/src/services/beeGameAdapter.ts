@@ -1,6 +1,7 @@
 import {
   getPayloadString,
   getPayloadRecord,
+  getToolDisplayInput,
   getBeeGameAssistantMessageId,
   getThinkingDisplayId,
   getAssistantPayloadMessageId,
@@ -316,9 +317,10 @@ export type BeeGameIntakeOption = {
   recommendedEngine?: string
   recommendedDimension: string
   recommendedGenre: string
-  recommendedStyle: string
   recommendedInputs: string[]
-  scope: string
+  // Historical intake fields are retained for stored options, not selection.
+  recommendedStyle?: string
+  scope?: string
 }
 
 export type BeeGameClarificationOption = {
@@ -349,10 +351,11 @@ export type BeeGameIntakeSettings = {
   engine?: string
   visualStyle: string
   dimension: string
-  orientation?: 'Landscape' | 'Portrait' | ''
+  orientation?: 'Auto' | 'Landscape' | 'Portrait' | ''
   genre: string
   inputs: string[]
-  scope: string
+  // Older pending briefs may contain this automatically generated field.
+  scope?: string
   notes?: string
   resourceLibraryUsage: 'optional' | 'preferred' | 'required'
 }
@@ -1044,6 +1047,10 @@ export const beeGameAdapter = {
     }
   },
 
+  async capturePublicationCovers(projectId: string): Promise<{ covers: NonNullable<import('./api').BeeGameDeploymentRequest['publicationCover']>[] }> {
+    return postJson(`/api/projects/${encodeURIComponent(projectId)}/publication-cover`, { count: 3 })
+  },
+
   async capturePublicationCover(projectId: string): Promise<NonNullable<import('./api').BeeGameDeploymentRequest['publicationCover']>> {
     return postJson(`/api/projects/${encodeURIComponent(projectId)}/publication-cover`, {})
   },
@@ -1719,6 +1726,20 @@ function routeSubagentToolEvents(
   const mergeActivity = (previous: SubagentActivitySnapshot, next?: SubagentActivitySnapshot) => mergeSubagentActivity(previous, next)!
   return events.flatMap<BeeGameEvent>(event => {
     let parent = getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')
+    if (event.type === 'system.status' && parent && typeof event.payload?.childStatus === 'string') {
+      // Native child lifecycle updates the invocation card, not a new child row.
+      const invocation = owners.get(`${event.sessionId}:${parent}`)?.event
+      const status = event.payload.childStatus
+      const running = ['running', 'pendingInit'].includes(status)
+      const type = running ? 'tool.progress' : status === 'completed' ? 'tool.completed' : 'tool.failed'
+      const ancestor = invocation && (getPayloadString(invocation, 'parentToolUseID') || getPayloadString(invocation, 'parent_tool_use_id'))
+      event = { ...event, type, payload: { ...invocation?.payload, type,
+        toolName: 'Agent', toolUseID: parent, nativeBackgroundTask: false, is_error: type === 'tool.failed',
+        parentToolUseID: ancestor || undefined, parent_tool_use_id: undefined,
+        output: running ? '' : event.text,
+      } }
+      parent = ancestor || ''
+    }
     const sourceOwner = parent
     const toolName = getPayloadString(event, 'toolName') || getPayloadString(event, 'tool_name')
     const lifecycle = event.type === 'system.status' &&
@@ -1760,7 +1781,7 @@ function routeSubagentToolEvents(
     // Provider message IDs are only unique inside their original worker.
     // Scope both live messages and that worker's transcript snapshots equally.
     const scopedMessageId = (id: string, worker = sourceOwner) => worker && worker !== parent ? `${worker}:${id}` : id
-    const input = getPayloadRecord(event, 'input')
+    const input = getToolDisplayInput(event)
     const id = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id')
     const priorTool = previous?.activity.entries.find(item => item.id === id && item.kind === 'tool')
     const output = getPayloadString(event, 'output')
@@ -2123,8 +2144,6 @@ function normalizeIntakeOption(
       option.recommendedDimension || rawOption.recommended_dimension || '',
     recommendedGenre:
       option.recommendedGenre || rawOption.recommended_genre || '',
-    recommendedStyle:
-      option.recommendedStyle || rawOption.recommended_style || '',
     recommendedInputs,
   }
 }

@@ -323,8 +323,8 @@
       "noServers": "No MCP servers yet",
       "form": {
         "pasteCommand": "Paste add command",
-        "pasteCommandHint": "Supports bgs mcp add name --url address and the codex equivalent. Review the parsed details and save.",
-        "commandFormatError": "Use bgs mcp add name --url address (codex is also accepted). Other options and shell expressions are not supported yet.",
+        "pasteCommandHint": "Supports bgs/codex mcp add name --url address, or name [--] command args. Review the parsed details and save.",
+        "commandFormatError": "Use bgs/codex mcp add name --url address, or name [--] command args. Other add options and shell expressions are not supported yet.",
         "commandUrlError": "Enter a complete HTTP or HTTPS URL without a username or password.",
         "name": "Name",
         "enabled": "Enabled",
@@ -441,7 +441,7 @@
       },
       "fields": {
         "platform": "플랫폼",
-        "engine": "게임 엔진",
+        "engine": "실행 기술",
         "dimension": "표현 방식",
         "genre": "장르",
         "style": "비주얼 스타일",
@@ -617,6 +617,7 @@
         }
       },
       "options": {
+        "Auto": "자동",
         "Mobile": "모바일",
         "Desktop": "데스크톱",
         "Console": "콘솔",
@@ -640,7 +641,8 @@
         "Touch": "터치",
         "Voice": "음성",
         "Hand tracking": "손 추적",
-        "Hand tracking XR": "XR 손 추적"
+        "Hand tracking XR": "XR 손 추적",
+        "React": "React (사용자 정의 Web)"
       },
       "realtimeBillingNotice": "이번 생성은 실제 사용한 토큰에 따라 Credit이 청구됩니다. 미리 차감하지 않으며 생성에 실패하면 청구하지 않습니다.",
       "realtimeBillingTitle": "Credit 사용량 정산",
@@ -722,6 +724,10 @@
       "deploymentPublishing": "Publishing",
       "deploymentSucceeded": "Published",
       "deploymentFailed": "Deployment failed",
+      "deploymentBackToEditor": "편집으로 돌아가기",
+      "deploymentEditorTitle": "{projectName} 배포",
+      "deploymentCoverCandidates": "표지 후보",
+      "deploymentCoverCandidate": "표지 {number}",
       "deploymentFailureLog": "Failure log",
       "version": "Version",
       "rollback": "Rollback"

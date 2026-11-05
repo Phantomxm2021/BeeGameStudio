@@ -517,6 +517,14 @@ export const useChat = ({
               message.status === 'stopped' ? 'stopped' : message.status === 'failed' ? 'failed' : 'incomplete',
               completedAt, completedAt)
           }
+          if (message.task_kind === 'session_lifecycle') {
+            if (!message.message_id || message.timestamp === undefined)
+              throw new Error('Turn lifecycle event is missing its identity or start time')
+            addMessage({ id: message.message_id, messageId: message.message_id, taskId: message.task_id,
+              turnId: message.turnId || message.turn_id, sender: 'system', content: 'running',
+              type: 'system_status', taskKind: 'session_lifecycle', timestamp: message.timestamp,
+            })
+          }
           // Task status update
           // Requirements: 6.2
           if (

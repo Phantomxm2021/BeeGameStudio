@@ -298,7 +298,7 @@ const confirmIntakeCreditQuote = async () => {
   fireEvent.click(within(dialog).getByRole('button', { name: '继续生成' }));
 };
 
-const settingGroup = (label: string) => ['平台', '引擎', '表现形式', '屏幕方向'].includes(label) ? 0 : label === '补充说明' ? 2 : 1;
+const settingGroup = (label: string) => ['平台', '运行技术', '表现形式', '屏幕方向'].includes(label) ? 0 : label === '补充说明' ? 2 : 1;
 const goToSettingsGroup = async (target: number) => {
   const panel = screen.queryByTestId('intake-settings');
   if (!panel) return;
@@ -323,7 +323,7 @@ const selectSetting = async (label: string, option: string) => {
   fireEvent.click(within(listbox).getByRole('option', { name: option, exact: true }));
 };
 
-const selectScreenOrientation = (label: '横屏' | '竖屏') => selectSetting('屏幕方向', label);
+const selectScreenOrientation = (label: '自动' | '横屏' | '竖屏') => selectSetting('屏幕方向', label);
 
 const submitIdeaAndConfirmIntake = async (idea: string) => {
   const textbox = await submitIdea(idea);
@@ -998,26 +998,43 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.getByRole('textbox')).toHaveValue('');
   });
 
-  it('restores selected intake settings after a page refresh', async () => {
-    const { unmount } = await renderLanding();
+  it('restores user-selected style but excludes legacy hidden scope from a refreshed build', async () => {
+    const onStart = vi.fn().mockResolvedValue({ status: 'started', projectId: 'proj_1' });
+    const { unmount } = await renderLanding({ onStart });
 
     await submitIdeaAndConfirmIntake('Cached settings idea');
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
     fireEvent.click(screen.getByRole('button', { name: '下一步' }));
-    await selectSetting('引擎', 'Godot');
+    await selectSetting('运行技术', 'Godot');
+    await selectSetting('风格', 'Hand-drawn');
     await goToSettingsGroup(2);
     fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), {
       target: { value: 'Keep the selected settings.' },
     });
+    const cached = JSON.parse(sessionStorage.getItem('beegame.pendingIntakeFlow.v1')!);
+    cached.settings.scope = 'Legacy geometry-only scope';
+    sessionStorage.setItem('beegame.pendingIntakeFlow.v1', JSON.stringify(cached));
     unmount();
-    await renderLanding();
+    await renderLanding({ onStart });
 
     expect(await screen.findByRole('region', { name: 'LLM Mode A' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '引擎', exact: true })).toHaveTextContent('Godot');
+    expect(screen.getByRole('button', { name: '运行技术', exact: true })).toHaveTextContent('Godot');
     await goToSettingsGroup(2);
     expect(screen.getByRole('textbox', { name: '补充说明' })).toHaveValue('Keep the selected settings.');
     expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
     expect(runIdeaIntake).toHaveBeenCalledTimes(1);
+    await goToSettingsGroup(1);
+    expect(screen.getByRole('button', { name: '风格', exact: true })).toHaveTextContent('Hand-drawn');
+    await confirmBrief();
+    fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
+    await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
+    const brief = onStart.mock.calls[0][2];
+    expect(brief.idea).toBe('Cached settings idea');
+    expect(brief.settings.visualStyle).toBe('Hand-drawn');
+    expect(brief.settings.notes).toBe('Keep the selected settings.');
+    expect(brief.settings).not.toHaveProperty('scope');
+    expect(brief.option).not.toHaveProperty('scope');
+    expect(brief.option).not.toHaveProperty('recommendedStyle');
   });
 
   it('blueprint opens settings directly and restores them without generating three options', async () => {
@@ -1057,6 +1074,7 @@ describe('LandingView bootstrap submission', () => {
     }));
     expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
     await selectScreenOrientation('横屏');
+    await selectSetting('风格', 'Hand-drawn');
     await confirmBrief();
     fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
     await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
@@ -1071,7 +1089,7 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
     fireEvent.click(screen.getByRole('button', { name: '蓝图模式' }));
     await submitIdea('My blueprint draft');
-    expect(screen.getByRole('button', { name: '屏幕方向' })).toHaveTextContent('横屏');
+    expect(screen.getByRole('button', { name: '屏幕方向' })).toHaveTextContent('自动');
     await goToSettingsGroup(1);
     expect(screen.getByRole('button', { name: '资源库使用方式' })).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '补充说明' })).not.toBeInTheDocument();
@@ -1090,6 +1108,7 @@ describe('LandingView bootstrap submission', () => {
     await submitIdeaAndConfirmIntake('Example game idea');
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
     fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    await selectSetting('风格', '像素');
     await confirmBrief();
     expect(screen.getByRole('button', { name: '开始构建' }).querySelector('svg.lucide-sparkles')).not.toBeNull();
     const close = screen.getByRole('button', { name: '关闭创作流程' });
@@ -1129,7 +1148,7 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
     fireEvent.click(await screen.findByRole('button', { name: '蓝图模式' }));
     await submitIdea('按蓝图制作');
-    for (const [label, value] of [['平台', 'Web'], ['引擎', 'React'], ['表现形式', '2D'], ['游戏类型', '解谜'], ['风格', '像素']]) {
+    for (const [label, value] of [['平台', 'Web'], ['运行技术', 'React（自定义 Web）'], ['表现形式', '2D'], ['游戏类型', '解谜'], ['风格', '像素']]) {
       await selectSetting(label, value);
     }
     await goToSettingsGroup(1);
@@ -1172,7 +1191,7 @@ describe('LandingView bootstrap submission', () => {
     await submitIdeaAndConfirmIntake('Cached brief idea');
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
     fireEvent.click(screen.getByRole('button', { name: '下一步' }));
-    for (const [label, value] of [['平台', 'Web'], ['引擎', 'Godot'], ['表现形式', '3D'], ['游戏类型', '解谜'], ['风格', '卡通']]) {
+    for (const [label, value] of [['平台', 'Web'], ['运行技术', 'Godot'], ['表现形式', '3D'], ['游戏类型', '解谜'], ['风格', '卡通']]) {
       await selectSetting(label, value);
     }
     await goToSettingsGroup(1);
@@ -1882,7 +1901,7 @@ describe('LandingView bootstrap submission', () => {
 
     for (const [label, choices, invalid] of [
       ['平台', ['Web', 'PC'], 'Experimental Arcade Cabinet'],
-      ['引擎', ['React', 'Unity', 'Godot', 'Unreal'], 'Custom Engine From Prompt'],
+      ['运行技术', ['React（自定义 Web）', 'Unity', 'Godot', 'Unreal'], 'Custom Engine From Prompt'],
       ['表现形式', ['2D'], 'Holographic 4D'],
       ['游戏类型', ['街机'], 'Generated Genre'],
       ['风格', ['像素'], 'Generated Style'],
@@ -1904,7 +1923,7 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.getByText('请选择制作设置。')).toBeInTheDocument();
   });
 
-  it('uses configured production setting choices and preselects valid LLM recommendations', async () => {
+  it('preselects runtime metadata but requires style selection in the existing settings', async () => {
     runIdeaIntake.mockResolvedValueOnce({
       maturity: 'concrete',
       needsClarification: false,
@@ -1933,7 +1952,7 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一步' }));
     expect(await screen.findByRole('region', { name: 'LLM Mode A' })).toBeInTheDocument();
 
-    for (const [label, value] of [['平台', 'PC'], ['引擎', 'Unity'], ['表现形式', '3D'], ['游戏类型', 'Racing'], ['风格', '写实']]) {
+    for (const [label, value] of [['平台', 'PC'], ['运行技术', 'Unity'], ['表现形式', '3D'], ['游戏类型', 'Racing']]) {
       await goToSettingsGroup(settingGroup(label));
       expect(screen.getByRole('button', { name: label, exact: true })).toHaveTextContent(value);
       const listbox = await openSettingOptions(label);
@@ -1942,28 +1961,61 @@ describe('LandingView bootstrap submission', () => {
     }
     await goToSettingsGroup(1);
     expect(screen.getByRole('button', { name: '键鼠 / 手柄 / 手追' })).toBeInTheDocument();
-    const engines = await openSettingOptions('引擎');
-    expect(within(engines).getAllByRole('option').map(option => option.textContent)).toEqual(['React', 'Unity', 'Godot', 'Unreal']);
-    fireEvent.click(screen.getByRole('button', { name: '引擎', exact: true }));
+    const engines = await openSettingOptions('运行技术');
+    expect(within(engines).getAllByRole('option').map(option => option.textContent)).toEqual(['React（自定义 Web）', 'Unity', 'Godot', 'Unreal']);
+    fireEvent.click(screen.getByRole('button', { name: '运行技术', exact: true }));
+    await goToSettingsGroup(1);
+    expect(screen.getByRole('button', { name: '风格', exact: true })).not.toHaveTextContent('写实');
+    const styles = await openSettingOptions('风格');
+    expect(within(styles).queryByRole('option', { selected: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '风格', exact: true }));
+    await confirmBrief();
+    expect(screen.queryByTestId('confirmed-brief')).not.toBeInTheDocument();
+    expect(screen.getByText('请选择制作设置。')).toBeInTheDocument();
+    await selectSetting('风格', 'Hand-drawn');
     await goToSettingsGroup(1);
     fireEvent.click(screen.getByRole('button', { name: '键鼠 / 手柄 / 手追' }));
     expect(
       within(screen.getByRole('listbox', { name: '输入方式' })).getByRole('option', { name: '手追' }),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '键鼠 / 手柄 / 手追' }));
+    await confirmBrief();
+    expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('Hand-drawn');
   });
 
-  it('defaults orientation to landscape and allows an explicit portrait choice', async () => {
+  it('defaults orientation to automatic and preserves an explicit portrait choice', async () => {
     await renderLanding();
     await submitIdeaAndConfirmIntake('Touch game');
     fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
     fireEvent.click(screen.getByRole('button', { name: '下一步' }));
     const orientation = screen.getByRole('button', { name: '屏幕方向', exact: true });
-    expect(orientation).toHaveTextContent('横屏');
-    expect(orientation).not.toHaveTextContent('竖屏');
+    expect(orientation).toHaveTextContent('自动');
     await selectScreenOrientation('竖屏');
+    await selectScreenOrientation('自动');
+    expect(orientation).toHaveTextContent('自动');
+    await selectScreenOrientation('竖屏');
+    await selectSetting('风格', '像素');
     await confirmBrief();
     expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('竖屏');
     expect(screen.getByTestId('confirmed-brief')).toHaveTextContent('Touch');
+  });
+
+  it.each([['自动','Auto'],['横屏','Landscape'],['竖屏','Portrait']] as const)('restores selected %s orientation and sends it unchanged in the confirmed brief', async (label,value) => {
+    const onStart=vi.fn().mockResolvedValue({status:'started',projectId:'orientation-project'});
+    const view=await renderLanding({onStart});
+    await submitIdeaAndConfirmIntake('Responsive game');
+    fireEvent.click(await screen.findByRole('button',{name:/LLM Mode A/}));
+    fireEvent.click(screen.getByRole('button',{name:'下一步'}));
+    await selectScreenOrientation(label);
+    await selectSetting('风格','像素');
+    expect(JSON.parse(sessionStorage.getItem('beegame.pendingIntakeFlow.v1')!).settings.orientation).toBe(value);
+    view.unmount();await renderLanding({onStart});
+    expect(await screen.findByRole('button',{name:'屏幕方向',exact:true})).toHaveTextContent(label);
+    await confirmBrief();
+    expect(screen.getByTestId('confirmed-brief')).toHaveTextContent(label);
+    fireEvent.click(screen.getByRole('button',{name:'开始构建'}));
+    await waitFor(()=>expect(onStart).toHaveBeenCalledOnce());
+    expect(onStart.mock.calls[0][2].settings.orientation).toBe(value);
   });
 
   it('confirms an intake brief before starting the BeeGame session', async () => {
@@ -1982,9 +2034,9 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.queryByRole('button', { name: '范围', exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText('Auto')).not.toBeInTheDocument();
 
-    const engineListbox = await openSettingOptions('引擎');
+    const engineListbox = await openSettingOptions('运行技术');
     const engineValues = within(engineListbox).getAllByRole('option').map(option => option.textContent);
-    expect(engineValues).toEqual(['React', 'Unity', 'Godot', 'Unreal']);
+    expect(engineValues).toEqual(['React（自定义 Web）', 'Unity', 'Godot', 'Unreal']);
     fireEvent.click(within(engineListbox).getByRole('option', { name: 'Godot', exact: true }));
     for (const [label, value] of [['平台', 'Web'], ['表现形式', '3D'], ['游戏类型', '解谜'], ['风格', '卡通']]) {
       await selectSetting(label, value);

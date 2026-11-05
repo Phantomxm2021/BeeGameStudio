@@ -323,8 +323,8 @@
       "noServers": "No MCP servers yet",
       "form": {
         "pasteCommand": "Paste add command",
-        "pasteCommandHint": "Supports bgs mcp add name --url address and the codex equivalent. Review the parsed details and save.",
-        "commandFormatError": "Use bgs mcp add name --url address (codex is also accepted). Other options and shell expressions are not supported yet.",
+        "pasteCommandHint": "Supports bgs/codex mcp add name --url address, or name [--] command args. Review the parsed details and save.",
+        "commandFormatError": "Use bgs/codex mcp add name --url address, or name [--] command args. Other add options and shell expressions are not supported yet.",
         "commandUrlError": "Enter a complete HTTP or HTTPS URL without a username or password.",
         "name": "Name",
         "enabled": "Enabled",
@@ -441,7 +441,7 @@
       },
       "fields": {
         "platform": "対応プラットフォーム",
-        "engine": "ゲームエンジン",
+        "engine": "実行技術",
         "dimension": "表現形式",
         "genre": "ジャンル",
         "style": "ビジュアルスタイル",
@@ -617,6 +617,7 @@
         }
       },
       "options": {
+        "Auto": "自動",
         "Mobile": "モバイル",
         "Desktop": "パソコン",
         "Console": "家庭用ゲーム機",
@@ -640,7 +641,8 @@
         "Touch": "タッチ操作",
         "Voice": "音声操作",
         "Hand tracking": "ハンドトラッキング",
-        "Hand tracking XR": "XR ハンドトラッキング"
+        "Hand tracking XR": "XR ハンドトラッキング",
+        "React": "React（カスタム Web）"
       },
       "realtimeBillingNotice": "今回の生成では、実際に使用したトークン数に応じて Credit を精算します。事前の引き落としはなく、生成に失敗した場合は請求されません。",
       "realtimeBillingTitle": "Credit の従量課金",
@@ -722,6 +724,10 @@
       "deploymentPublishing": "Publishing",
       "deploymentSucceeded": "Published",
       "deploymentFailed": "Deployment failed",
+      "deploymentBackToEditor": "編集に戻る",
+      "deploymentEditorTitle": "{projectName}を公開",
+      "deploymentCoverCandidates": "カバー候補",
+      "deploymentCoverCandidate": "カバー {number}",
       "deploymentFailureLog": "Failure log",
       "version": "Version",
       "rollback": "Rollback"

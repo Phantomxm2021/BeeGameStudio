@@ -22,17 +22,35 @@ it('copies the displayed result, preserves source data and renders markup as lit
 it('reports clipboard failures without claiming that output was copied', async () => {
     vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });
     render(<ToolActivityRow id="copy-failure" name="Shell" state="failed" output="Permission denied" lang="en" />);
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button'));
     fireEvent.click(screen.getByRole('button', { name: 'Copy result' }));
     expect(await screen.findByRole('status')).toHaveTextContent('Copy failed');
     expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
 });
 
-it('keeps partial output accessible when a running tool fails or stops', () => {
+it('collapses a running tool on failure and preserves manual control as results update', () => {
     const { rerender } = render(<ToolActivityRow id="partial" name="Shell" state="running" output="partial result" lang="en" />);
-    for (const state of ['failed', 'stopped', 'incomplete'] as const) {
+    expect(screen.getByRole('log')).toHaveTextContent('partial result');
+    rerender(<ToolActivityRow id="partial" name="Shell" state="failed" output="Permission denied" lang="en" />);
+    expect(screen.getByRole('button')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    expect(screen.getByRole('group')).toHaveAccessibleDescription('Failed');
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByRole('log')).toHaveTextContent('Permission denied');
+    rerender(<ToolActivityRow id="partial" name="Shell" state="failed" output="Permission denied: details" lang="en" />);
+    expect(screen.getByRole('log')).toHaveTextContent('Permission denied: details');
+    fireEvent.click(screen.getByRole('button', { expanded: true }));
+    rerender(<ToolActivityRow id="partial" name="Shell" state="failed" output="Permission denied: final details" lang="en" />);
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+});
+
+it('keeps partial output accessible when a running tool stops', () => {
+    const { rerender } = render(<ToolActivityRow id="partial" name="Shell" state="running" output="partial result" lang="en" />);
+    for (const state of ['stopped', 'incomplete'] as const) {
         rerender(<ToolActivityRow id="partial" name="Shell" state={state} output="partial result" lang="en" />);
         expect(screen.getByRole('log')).toHaveTextContent('partial result');
-        expect(screen.getByRole('group')).toHaveAccessibleDescription({ failed: 'Failed', stopped: 'Stopped', incomplete: 'Incomplete' }[state]);
+        expect(screen.getByRole('group')).toHaveAccessibleDescription({ stopped: 'Stopped', incomplete: 'Incomplete' }[state]);
     }
 });
 

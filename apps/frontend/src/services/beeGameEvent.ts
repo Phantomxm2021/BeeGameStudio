@@ -126,6 +126,19 @@ export function getPayloadBoolean(event: BeeGameEvent, field: string): boolean {
   return event.payload?.[field] === true
 }
 
+// Add presentation metadata without changing the recorded tool arguments.
+export function getToolDisplayInput(event: BeeGameEvent): Record<string, unknown> {
+  const input = getPayloadRecord(event, 'input')
+  const tool = getPayloadString(event, 'toolName').toLowerCase()
+  if (['agent', 'task', 'subagent'].includes(tool) &&
+      !(typeof input.description === 'string' && input.description.trim()) &&
+      event.text.trim() && event.text.trim().toLowerCase() !== tool) {
+    return { ...input, description: event.text.trim() }
+  }
+  return event.payload?.toolName === 'Shell' && Array.isArray(event.payload.skillReads)
+    ? { ...input, skillReads: event.payload.skillReads } : input
+}
+
 export function getPayloadRecord(
   event: BeeGameEvent,
   field: string,

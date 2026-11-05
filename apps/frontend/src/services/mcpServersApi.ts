@@ -72,7 +72,8 @@ export const discoverActiveMcpServers = (): Promise<ActiveDiscoveredMcpServer[]>
 
 export const testMcpServer = (input: McpServerInput): Promise<McpServerTestResult> => (
   // The caller reports both protocol failures and request errors in one toast.
-  apiClient.post('/api/mcp-servers/test', input, { headers: { 'Hide-Error-Toast': 'true' } })
+  // Allow the server's 60-second stdio initialization budget plus response/cleanup time.
+  apiClient.post('/api/mcp-servers/test', input, { timeout: 70_000, headers: { 'Hide-Error-Toast': 'true' } })
 );
 
 export const createMcpServer = (input: McpServerInput): Promise<McpServerConfig> => (

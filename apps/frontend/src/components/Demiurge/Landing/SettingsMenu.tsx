@@ -649,12 +649,11 @@ export function SettingsMenu({
     }
   };
 
-  const handleSaveMcpServer = async (form: McpServerForm) => {
+  const handleSaveMcpServer = async (payload: McpServerInput) => {
     setMcpStatus('');
     setIsSavingMcp(true);
     try {
-      const payload = mcpFormToInput(form);
-      const saved = form.id ? await updateMcpServer(form.id, payload) : await createMcpServer(payload);
+      const saved = payload.id ? await updateMcpServer(payload.id, payload) : await createMcpServer(payload);
       setMcpServers(current => [saved, ...current.filter(server => server.id !== saved.id)]);
       setMcpForm(mcpServerToForm(saved));
       setMcpPage(null);
@@ -899,8 +898,11 @@ export function SettingsMenu({
       if (mcpPage === 'command') {
         const parsed = parseMcpAddCommand(mcpCommand);
         if ('error' in parsed) return;
-        await handleSaveMcpServer({ ...mcpForm, name: parsed.name, transport: 'http', url: parsed.url, command: '', argsText: '', envText: '', headersText: '' });
-      } else await handleSaveMcpServer(mcpForm);
+        await handleSaveMcpServer({
+          ...mcpFormToInput({ ...mcpForm, name: parsed.name, transport: 'url' in parsed ? 'http' : 'stdio', envText: '', headersText: '' }),
+          ...('url' in parsed ? { url: parsed.url } : { command: parsed.command, args: parsed.args }),
+        });
+      } else await handleSaveMcpServer(mcpFormToInput(mcpForm));
       return;
     }
     if (activeSection !== 'platform') return;

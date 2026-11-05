@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 /** Smooth a live text snapshot for presentation; the source text remains unchanged. */
 export function useSmoothStreamText(text: string, streaming: boolean): string {
-  const wasStreaming = useRef(streaming);
   const target = useRef(text);
-  const active = useRef(streaming);
   const shown = useRef(streaming ? 0 : text.length);
   const frame = useRef<number | null>(null);
   const lastPaint = useRef<number | null>(null);
@@ -12,10 +10,8 @@ export function useSmoothStreamText(text: string, streaming: boolean): string {
 
   useEffect(() => {
     target.current = text;
-    active.current = streaming;
-    if (streaming) wasStreaming.current = true;
 
-    if (!wasStreaming.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!streaming || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       frame.current = null;
       shown.current = text.length;
@@ -35,7 +31,7 @@ export function useSmoothStreamText(text: string, streaming: boolean): string {
       if (elapsed >= 28) {
         lastPaint.current = now;
         const remaining = target.current.length - shown.current;
-        const rate = active.current ? Math.max(140, remaining * 1.5) : Math.max(280, remaining * 4);
+        const rate = Math.max(140, remaining * 1.5);
         shown.current = Math.min(target.current.length, shown.current + Math.max(1, Math.ceil(rate * elapsed / 1000)));
         setVisibleLength(shown.current);
       }

@@ -12,17 +12,9 @@ import pt from './locales/pt.json'
 import zh from './locales/zh.json'
 import zhTW from './locales/zh-TW.json'
 
-export const supportedI18nLanguages = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'de', 'es', 'it', 'pt'] as const
-
-export function getInitialUiLanguage(): (typeof supportedI18nLanguages)[number] {
-  if (typeof window === 'undefined') return 'zh'
-  try {
-    const saved = window.localStorage.getItem('i18nextLng')
-    return supportedI18nLanguages.find(language => language === saved) ?? 'zh'
-  } catch {
-    return 'zh'
-  }
-}
+import { readUiLanguage, writeUiLanguage, subscribeUiLanguage, supportedI18nLanguages } from './languagePreference'
+export { supportedI18nLanguages } from './languagePreference'
+export const getInitialUiLanguage = readUiLanguage
 
 const resources = {
   en,
@@ -55,3 +47,12 @@ void i18n
   })
 
 export default i18n
+
+if (typeof window !== 'undefined') {
+  writeUiLanguage(i18n.language)
+  i18n.on('languageChanged', writeUiLanguage)
+  subscribeUiLanguage(() => {
+    const language = readUiLanguage()
+    if (language !== i18n.language) void i18n.changeLanguage(language)
+  })
+}

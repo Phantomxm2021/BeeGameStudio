@@ -16,14 +16,13 @@ import {
     MessageGroup,
 } from '../../beui/registry/components/agents/message';
 import { AgentActivity, type AgentActivityItem } from '../../beui/registry/components/agents/agent-activity';
-import { ReasoningText } from '../../beui/registry/components/agents/loading-states/reasoning-text';
 import { StreamingResponse } from '../../beui/registry/components/agents/streaming-response';
 import { Drawer } from '../../beui/registry/components/motion/drawer';
 import { AnimatedBadge, type AnimatedBadgeStatus } from '../../beui/registry/components/motion/animated-badge';
 import { Loader } from '../../beui/registry/components/motion/loader';
 import { filterPathsForDisplay } from '../../../utils/chatPathDisplay';
 import { redactImageConfigurationForDisplay } from '../../../utils/imageConfigurationDisplay';
-import { activityToolKind, type ActivityToolKind } from '../../../utils/toolActivitySummary';
+import { activityToolKind, toolActivitySummary, type ActivityToolKind } from '../../../utils/toolActivitySummary';
 import { useSmoothStreamText } from '../../../hooks/useSmoothStreamText';
 import { ArtifactCard } from './ArtifactCard';
 import { ChatAttachmentView } from './ChatAttachmentView';
@@ -126,6 +125,8 @@ const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
         message.taskKind === 'context_compaction' || raw.task_kind === 'context_compaction' ||
         message.taskKind === 'delivery_phase' || raw.task_kind === 'delivery_phase' ||
         message.taskKind === 'delivery_error' || raw.task_kind === 'delivery_error' ||
+        message.taskKind === 'design_revision' || raw.task_kind === 'design_revision' ||
+        message.taskKind === 'runtime_notice' || raw.task_kind === 'runtime_notice' ||
         message.taskKind === 'session_lifecycle' || raw.task_kind === 'session_lifecycle';
 };
 
@@ -182,6 +183,7 @@ type AgentResponseTurn = {
     kind: 'response';
     id: string;
     turnId?: string;
+    startedAt?: number;
     parts: ResponsePart[];
 };
 
@@ -389,12 +391,15 @@ const responseTimeLabel = (entry: AgentResponseTurn, lang: Language): string | u
 
 const feedEntryTimestamp = (entry: FeedEntry): number => {
     if (entry.kind === 'user' || entry.kind === 'context') return messageTimestamp(entry.message);
-    return Math.min(...entry.parts.map((part) => part.timestamp));
+    return entry.startedAt ?? Math.min(...entry.parts.map((part) => part.timestamp));
 };
 
 const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     const entries: FeedEntry[] = [];
     const toolParts = new Map<string, ToolPartReference>();
+    const starts = new Map(messages.filter(message => message.taskKind === 'session_lifecycle' && message.content === 'running' &&
+        Boolean(message.turnId || message.turn_id))
+        .map(message => [message.turnId || message.turn_id, message]));
     let activeTurn: AgentResponseTurn | null = null;
 
     const ensureTurn = (id: string, turnId?: string, reuseAnonymousActivity = false): AgentResponseTurn => {
@@ -405,14 +410,15 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
             const lastPart = activeTurn.parts.at(-1);
             if (lastPart?.kind === 'thinking' || lastPart?.kind === 'tool') return activeTurn;
         }
-        activeTurn = { kind: 'response', id, turnId, parts: [] };
+        activeTurn = { kind: 'response', id, turnId, startedAt: starts.get(turnId)?.timestamp, parts: [] };
         entries.push(activeTurn);
         return activeTurn;
     };
 
     for (const message of messages) {
-        // Older local Chat snapshots can still contain projected host receipts.
-        if (message.taskKind === 'host_evidence' || (message as ChatDisplayMessage & { task_kind?: string }).task_kind === 'host_evidence') continue;
+        // Lifecycle receipts anchor time without adding visible chat messages.
+        if ((message.taskKind === 'session_lifecycle' && message.content === 'running') || message.taskKind === 'host_evidence' ||
+            (message as ChatDisplayMessage & { task_kind?: string }).task_kind === 'host_evidence') continue;
         if (message.type === 'error') {
             entries.push({ kind: 'context', message });
             activeTurn = null;
@@ -450,6 +456,15 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
         }
 
         if (isContextUpdateMessage(message)) {
+            const previous = entries.at(-1);
+            // The host can repeat a native failure as its workflow-stop reason.
+            // Keep the retryable error card; unrelated handoff failures stay visible.
+            if (message.taskKind === 'delivery_error' && message.taskId && previous?.kind === 'context' &&
+                previous.message.type === 'error' && previous.message.taskId === message.taskId &&
+                (!(message.turnId || message.turn_id) ||
+                    (message.turnId || message.turn_id) === (previous.message.turnId || previous.message.turn_id)) &&
+                [`任务已停止，尚未完成：${previous.message.content}`,
+                    `Task stopped before completion: ${previous.message.content}`].includes(message.content)) continue;
             entries.push({ kind: 'context', message });
             activeTurn = null;
             continue;
@@ -470,6 +485,12 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
         }
     }
 
+    const last = entries.at(-1);
+    if (last?.kind === 'user') {
+        const turnId = last.message.turnId || last.message.turn_id;
+        const start = starts.get(turnId);
+        if (start && !start.turnCompletedAt) ensureTurn(start.id, turnId);
+    }
     // Parts already arrive in the runtime event order. Do not sort by a
     // display timestamp: replayed events can legitimately carry an older
     // timestamp while still appearing later in the response stream.
@@ -642,8 +663,9 @@ export const BeeGameCollaborationFeed = memo(({
                                     className="w-full"
                                     contentClassName="text-[var(--text-primary)]"
                                 >
-                                    {activity.length > 0 && <ActivityTimeline
+                                    {(activity.length > 0 || working) && <ActivityTimeline
                                         parts={activity}
+                                        turnStartedAt={entry.startedAt}
                                         working={working}
                                         hasFinalResponse={final.length > 0}
                                         completedAt={completedAt}
@@ -662,7 +684,7 @@ export const BeeGameCollaborationFeed = memo(({
                     )}
                 </Fragment>;
             })}
-            {isLoading && !isCompacting && !hasStreamingMessage && activeResponseIndex < 0 ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><ReasoningText phrases={[text.waitingForModelResponse || text.aiProcessing || '']} variant="scramble" /></MessageContent></Message> : null}
+            {isLoading && !isCompacting && !hasStreamingMessage && activeResponseIndex < 0 ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><Loader variant="dither" size={14} label={text.waitingForModelResponse || text.aiProcessing || ''} className="text-[var(--text-muted)]" /></MessageContent></Message> : null}
         </MessageGroup>
         <Drawer
             open={Boolean(detail)}
@@ -680,6 +702,20 @@ export const BeeGameCollaborationFeed = memo(({
         </Drawer>
         </>
     );
+}, (before, after) => {
+    const { messages: previous, ...previousProps } = before;
+    const { messages: next, ...nextProps } = after;
+    if (Object.keys({ ...previousProps, ...nextProps }).some(key =>
+        !Object.is(previousProps[key as keyof typeof previousProps], nextProps[key as keyof typeof nextProps]))) return false;
+    return previous.length === next.length && previous.every((message, index) => {
+        const current = next[index];
+        if (message === current) return true;
+        if (message.type !== 'thought' || current.type !== 'thought') return false;
+        // Top-level thought prose is not rendered here. Lifecycle, timing and
+        // every other field still invalidate the feed; raw store data is intact.
+        return Object.keys({ ...message, ...current }).every(key => key === 'content' || key === 'thought' ||
+            Object.is(message[key as keyof ChatDisplayMessage], current[key as keyof ChatDisplayMessage]));
+    });
 });
 
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
@@ -734,8 +770,9 @@ function ActivityHeading({ working, startedAt, endedAt, lang, label }: {
     return <AnimatedNumber>{duration ? `${label} · ${duration}` : label}</AnimatedNumber>;
 }
 
-function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang, streamingMessageId, onOpenSubagent, onPreviewArtifact }: {
+function ActivityTimeline({ parts, turnStartedAt, working, hasFinalResponse, completedAt, lang, streamingMessageId, onOpenSubagent, onPreviewArtifact }: {
     parts: ResponsePart[];
+    turnStartedAt?: number;
     working: boolean;
     hasFinalResponse: boolean;
     completedAt?: number;
@@ -749,13 +786,20 @@ function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang,
     // Completed-only legacy tools have no known start, so omit their timer.
     const first = parts[0];
     const last = parts.at(-1);
-    const startedAt = first?.kind === 'tool' ? first.tool.startedAt : first?.timestamp;
+    const startedAt = turnStartedAt ?? (first?.kind === 'tool' ? first.tool.startedAt : first?.timestamp);
     const endedAt = completedAt ?? (last?.kind === 'tool'
         ? last.tool.status !== 'running' && !last.tool.completionReason ? last.tool.timestamp : undefined
         : last?.kind === 'thinking' && last.durationMs !== undefined ? last.timestamp + last.durationMs : undefined);
-    const heading = <ActivityHeading working={working} startedAt={startedAt} endedAt={endedAt} lang={lang} label={text.details} />;
+    const heading = <span className="inline-flex items-center gap-2">
+        {working && <span data-testid="beegame-run-loading" aria-hidden="true" className="inline-flex shrink-0">
+            <Loader variant="dither" size={14} label="" className="text-current" />
+        </span>}
+        <ActivityHeading working={working} startedAt={startedAt} endedAt={endedAt} lang={lang} label={text.details} />
+    </span>;
     const latestProgress = [...parts].reverse().find((part): part is Extract<ResponsePart, { kind: 'agent' }> =>
         part.kind === 'agent' && !part.message.requiresUserAction && messagePresentation(part.message) !== 'artifact');
+    const activeTool = working ? [...parts].reverse().find((part): part is Extract<ResponsePart, {kind:'tool'}> =>
+        part.kind === 'tool' && part.tool.status === 'running' && !part.tool.completionReason) : undefined;
     // Show the latest progress until a final reply arrives; keep artifacts and
     // requests accessible. Execution details contain tool records only.
     const visibleParts = parts.filter(part => part.kind === 'agent' && (
@@ -765,11 +809,10 @@ function ActivityTimeline({ parts, working, hasFinalResponse, completedAt, lang,
     const hasDetails = parts.some(part => part.kind === 'tool');
     return <>
         <ResponseParts parts={visibleParts} lang={lang} streamingMessageId={streamingMessageId} onPreviewArtifact={onPreviewArtifact} />
-        {working && <div role="status" data-testid="beegame-work-status"
-            className="my-3 flex items-center gap-2 text-sm text-[var(--text-muted)]">
-            <LoaderCircle aria-hidden="true" className="size-3.5 shrink-0 motion-safe:animate-spin" />
-            {text.working}
+        {activeTool && <div role="status" className="py-1 text-sm text-[var(--text-muted)]">
+            {toolActivitySummary(activeTool.tool.name, activeTool.tool.input, activeTool.tool.detail, lang === 'zh')}
         </div>}
+        {working && !hasDetails && <div className="py-1 text-sm text-[var(--text-muted)]">{heading}</div>}
         {hasDetails && <AgentActivity
         items={parts.flatMap((part, index): AgentActivityItem[] => {
             if (part.kind !== 'tool') return [];
@@ -1105,7 +1148,7 @@ const deliveryPhaseLabels: Record<string, Record<string, string>> = {
 
 function ContextUpdateSeparator({ message, text, lang }: { message: ChatDisplayMessage; text: BeeGameText; lang: Language }) {
     const labels = deliveryPhaseLabels[lang] || deliveryPhaseLabels.en;
-    const label = message.taskKind === 'delivery_error' ? displayText(message.content)
+    const label = ['delivery_error', 'design_revision', 'runtime_notice'].includes(message.taskKind ?? '') ? displayText(message.content)
         : message.taskKind === 'delivery_phase' ? labels[message.content] || message.content
         : message.taskKind === 'session_lifecycle'
             ? message.content === 'stopped' ? lang === 'zh' ? '任务已停止' : lang === 'zh-TW' ? '任務已停止' : lang === 'ja' ? 'タスク停止' : lang === 'ko' ? '작업 중지' : 'Task stopped'

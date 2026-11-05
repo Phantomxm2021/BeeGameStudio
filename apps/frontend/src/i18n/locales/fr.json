@@ -323,8 +323,8 @@
       "noServers": "No MCP servers yet",
       "form": {
         "pasteCommand": "Paste add command",
-        "pasteCommandHint": "Supports bgs mcp add name --url address and the codex equivalent. Review the parsed details and save.",
-        "commandFormatError": "Use bgs mcp add name --url address (codex is also accepted). Other options and shell expressions are not supported yet.",
+        "pasteCommandHint": "Supports bgs/codex mcp add name --url address, or name [--] command args. Review the parsed details and save.",
+        "commandFormatError": "Use bgs/codex mcp add name --url address, or name [--] command args. Other add options and shell expressions are not supported yet.",
         "commandUrlError": "Enter a complete HTTP or HTTPS URL without a username or password.",
         "name": "Name",
         "enabled": "Enabled",
@@ -441,7 +441,7 @@
       },
       "fields": {
         "platform": "Plateforme",
-        "engine": "Moteur de jeu",
+        "engine": "Technologie",
         "dimension": "Présentation",
         "genre": "Genre",
         "style": "Style visuel",
@@ -617,6 +617,7 @@
         }
       },
       "options": {
+        "Auto": "Automatique",
         "Mobile": "Mobile",
         "Desktop": "Ordinateur",
         "Console": "Console",
@@ -640,7 +641,8 @@
         "Touch": "Tactile",
         "Voice": "Voix",
         "Hand tracking": "Suivi des mains",
-        "Hand tracking XR": "Suivi des mains en XR"
+        "Hand tracking XR": "Suivi des mains en XR",
+        "React": "React (Web personnalisé)"
       },
       "realtimeBillingNotice": "Les crédits sont calculés selon les tokens réellement utilisés. Rien n’est prélevé à l’avance et une génération échouée n’est pas facturée.",
       "realtimeBillingTitle": "Facturation des crédits à l’usage",
@@ -722,6 +724,10 @@
       "deploymentPublishing": "Publishing",
       "deploymentSucceeded": "Published",
       "deploymentFailed": "Deployment failed",
+      "deploymentBackToEditor": "Retour à l’édition",
+      "deploymentEditorTitle": "Déployer {projectName}",
+      "deploymentCoverCandidates": "Couvertures proposées",
+      "deploymentCoverCandidate": "Couverture {number}",
       "deploymentFailureLog": "Failure log",
       "version": "Version",
       "rollback": "Rollback"

@@ -39,3 +39,13 @@ describe('tool activity summaries', () => {
         expect(toolActivitySummary('Shell', {}, 'Command: /bin/zsh -lc "bun run build"', false)).toBe('Run script · build');
     });
 });
+
+
+it.each(['Agent', 'Task', 'Subagent'])('does not use internal %s details as the current activity', name => {
+    const prompt = 'Initial review of the supplied saved GDD under the review contract.';
+    const input = { prompt, path: 'private-data.md' };
+    expect(toolActivitySummary(name, input, `Prompt: ${prompt}`, true)).toBe('正在执行子任务');
+    expect(toolActivitySummary(name, input, `Type: reviewer · Prompt: ${prompt}`, false)).toBe('Running subtask');
+    expect(toolActivitySummary(name, { ...input, description: 'Review GDD\nInternal context' }, `Prompt: ${prompt}`, false)).toBe('Review GDD');
+    expect(input.prompt).toBe(prompt);
+});

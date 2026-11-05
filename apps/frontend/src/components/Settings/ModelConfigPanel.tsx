@@ -9,7 +9,9 @@ export type ModelConfigPanelLabels = {
   provider: string;
   protocol?: string;
   baseUrl: string;
+  baseUrlHelp?: string;
   apiKey: string;
+  apiKeyHelp?: string;
   model: string;
 };
 
@@ -85,8 +87,18 @@ export function ModelConfigPanel({
         <span className="text-sm font-medium text-foreground">{labels.protocol ?? 'Protocol'}</span>
         <ProjectSelect ariaLabel={labels.protocol ?? 'Protocol'} value={goProfileId!} onValueChange={value => selectGoProtocol(value as OpenCodeGoProfileId)} options={Object.entries(OPENCODE_GO_PROFILES).map(([value, profile]) => ({ value, label: profile.label }))} className="w-full" triggerClassName={inputClass} />
       </label>}
-      {!chatgptSubscription && <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center"><span className="text-sm font-medium text-foreground">{labels.baseUrl}</span><input aria-label={labels.baseUrl} value={baseUrl} readOnly={!!goProfile} onChange={event => onBaseUrlChange(event.target.value)} placeholder="https://api.example.com/v1" className={inputClass} /></label>}
-      {!chatgptSubscription && <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center"><span className="text-sm font-medium text-foreground">{labels.apiKey}</span><input aria-label={labels.apiKey} type="password" autoComplete="new-password" value={apiKey} onChange={event => onApiKeyChange(event.target.value)} placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'} className={inputClass} /></label>}
+      {!chatgptSubscription && <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
+        <span className="text-sm font-medium text-foreground">{labels.baseUrl}</span>
+        <div className="space-y-2"><input aria-label={labels.baseUrl} value={baseUrl} readOnly={!!goProfile} onChange={event => onBaseUrlChange(event.target.value)} placeholder="https://api.example.com/v1" className={inputClass} />
+          {labels.baseUrlHelp && <p className="text-xs text-muted-foreground">{labels.baseUrlHelp}</p>}
+        </div>
+      </label>}
+      {!chatgptSubscription && <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
+        <span className="text-sm font-medium text-foreground">{labels.apiKey}</span>
+        <div className="space-y-2"><input aria-label={labels.apiKey} type="password" autoComplete="new-password" value={apiKey} onChange={event => onApiKeyChange(event.target.value)} placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'} className={inputClass} />
+          {labels.apiKeyHelp && <p aria-live="polite" className="text-xs text-muted-foreground">{labels.apiKeyHelp}</p>}
+        </div>
+      </label>}
       <label className="grid gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
         <span className="text-sm font-medium text-foreground sm:mt-2.5">{labels.model}</span>
         <div className="grid gap-2">
