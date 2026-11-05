@@ -1,0 +1,50 @@
+/* Font families and tracking follow the live beegame.studio typography. */
+:root {
+  --font-text: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "SF Pro Display", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --text-tracking: -.022em;
+  --display-tracking-lg: -.009em;
+  --display-tracking-md: -.005em;
+  --type-body-size: 17px;
+  --type-body-leading: 25px;
+  --type-ui-size: 14px;
+  --type-ui-leading: 19px;
+  --type-caption-size: 12px;
+  --type-caption-leading: 16px;
+  --type-title-size: 24px;
+  --type-title-leading: 28px;
+  --type-h3-size: 32px;
+  --type-h3-leading: 36px;
+  --type-h2-size: 40px;
+  --type-h2-leading: 44px;
+  --type-section-size: 56px;
+  --type-section-leading: 60px;
+}
+html:lang(zh) {
+  --font-text: "SF Pro SC", "SF Pro Text", "SF Pro Icons", "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "SF Pro SC", "SF Pro Display", "SF Pro Icons", "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --text-tracking: normal;
+  --display-tracking-lg: normal;
+  --display-tracking-md: normal;
+  line-break: strict;
+  word-break: normal;
+}
+html:lang(ja) {
+  --font-text: "SF Pro JP", "SF Pro Text", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "SF Pro JP", "SF Pro Display", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --text-tracking: normal;
+  --display-tracking-lg: normal;
+  --display-tracking-md: normal;
+  line-break: strict;
+}
+html:lang(ko) {
+  --font-text: "SF Pro KR", "SF Pro Text", "SF Pro Icons", "Apple Gothic", "HY Gulim", MalgunGothic, "HY Dotum", "Lexi Gulim", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "SF Pro KR", "SF Pro Display", "SF Pro Icons", "Apple Gothic", "HY Gulim", MalgunGothic, "HY Dotum", "Lexi Gulim", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --text-tracking: normal;
+  --display-tracking-lg: normal;
+  --display-tracking-md: normal;
+  word-break: keep-all;
+}
+@media (max-width: 734px) {
+  :root { --type-section-size: 32px; --type-section-leading: 36px; }
+}

@@ -85,7 +85,7 @@ export function BeePlayAdminPanel({ language }: { language: string }) {
     setError('');
     setSaved(false);
     try {
-      await saveBeePlayRecommendations(featured.map((g) => g.project_id));
+      await saveBeePlayRecommendations(featured.map(game => ({ project_id: game.project_id, featured_caption: game.featured_caption || '' })));
       setDirty(false);
       setSaved(true);
     } catch {
@@ -191,6 +191,12 @@ export function BeePlayAdminPanel({ language }: { language: string }) {
                 >
                   {t('移除', 'Remove')}
                 </Button>
+                <label className="w-full text-sm">
+                  <span className="mb-2 block text-muted-foreground">{t('Banner 文案（可选）', 'Banner text (optional)')}</span>
+                  <textarea aria-label={t('Banner 文案：', 'Banner text: ') + game.title} value={game.featured_caption || ''} maxLength={240} rows={2} disabled={saving}
+                    className={inputClass + ' w-full resize-y'}
+                    onChange={event => edit(featured.map(item => item.project_id === game.project_id ? { ...item, featured_caption: event.target.value } : item))} />
+                </label>
               </li>
             ))}
           </ol>

@@ -28,6 +28,7 @@ type GameRow = {
   updated_at: string
   play_count?: number
   public_description?: string
+  featured_caption: string
   public_cover_url?: string | null
 }
 const ID = /^[A-Za-z0-9_-]{1,128}$/
@@ -35,7 +36,7 @@ const GAME_PATH = /^\/g\/([A-Za-z0-9_-]{1,128})\/?$/
 const DEPLOYMENT_PATH =
   /^\/deployments\/([A-Za-z0-9_-]{1,128})\/files\/index\.html$/
 const SELECT =
-  'project_id,owner_id,deployment_id,title,author_name,game_url,published_at,updated_at,public_cover_url,public_description,play_count'
+  'project_id,owner_id,deployment_id,title,author_name,game_url,published_at,updated_at,public_cover_url,public_description,play_count,featured_caption'
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -110,6 +111,7 @@ const metadata = (row: GameRow) => ({
   gameUrl: row.game_url,
   publishedAt: row.published_at,
   updatedAt: row.updated_at,
+  featuredCaption: row.featured_caption,
   ...(typeof row.public_description === 'string' ? { description: row.public_description } : {}),
   ...(publicCover(row.public_cover_url, row.game_url) ? { coverUrl: publicCover(row.public_cover_url, row.game_url) } : {}),
 })
@@ -168,7 +170,8 @@ export async function fetchDeploymentMetadata(
         url: string
         portal_published_at: string
         public_description?: string
-        public_cover_url?: string | null
+        featured_caption: string
+  public_cover_url?: string | null
       }>
     )[0]
     if (
@@ -325,6 +328,8 @@ export async function handleGamePortalRequest(
     } catch { return json({ error: 'unavailable' }, 503) }
   }
   if (path === '/api/games') {
+    const query = (url.searchParams.get('q') || '').trim()
+    if (query.length > 120) return json({ error: 'bad_request' }, 400)
     const author = url.searchParams.get('author'),
       rawPage = url.searchParams.get('page') || '0'
     if ((author && !ID.test(author)) || !/^\d{1,5}$/.test(rawPage))
@@ -336,6 +341,11 @@ export async function handleGamePortalRequest(
       offset: String(Number(rawPage) * 24),
     })
     if (author) params.set('owner_id', `eq.${author}`)
+    if (query) {
+      // Quote PostgREST values; escape LIKE wildcards so search text stays literal.
+      const pattern = JSON.stringify(`%${query.replace(/[\\%_*]/g, character => `\\${character}`)}%`)
+      params.set('or', `(${['title', 'author_name', 'public_description'].map(column => `${column}.ilike.${pattern}`).join(',')})`)
+    }
     try {
       return json({ games: (await rows(env, params, fetchImpl)).map(metadata) })
     } catch {

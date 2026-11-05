@@ -1,8 +1,8 @@
 export type PublicationSection = { kind: 'controls' | 'introduction' | 'gameplay'; heading: string; text: string };
 const headings = {
-  controls: ['操作', '操作说明', '操作說明', '操作指南', 'controls'],
-  introduction: ['游戏介绍', '遊戲介紹', '游戏简介', '遊戲簡介', '简介', '簡介', 'introduction', 'about'],
-  gameplay: ['玩法', '游戏玩法', '遊戲玩法', '怎么玩', '怎麼玩', '如何游玩', 'how to play', 'gameplay', '你的目标', '你的目標', '游戏目标', '遊戲目標', 'goals'],
+  controls: ['操作', '操作说明', '操作說明', '操作指南', '操作方案', '控制方案', 'controls', '操作方法', '조작', 'commandes', 'steuerung', 'controles', 'comandi'],
+  introduction: ['游戏介绍', '遊戲介紹', '游戏简介', '遊戲簡介', '简介', '簡介', 'introduction', 'about', 'ゲーム紹介', '게임 소개', 'présentation', 'einführung', 'introducción', 'introduzione', 'introdução'],
+  gameplay: ['玩法', '游戏玩法', '遊戲玩法', '怎么玩', '怎麼玩', '如何游玩', 'how to play', 'gameplay', '你的目标', '你的目標', '游戏目标', '遊戲目標', 'goals', '遊び方', '플레이 방법', 'comment jouer', 'spielablauf', 'cómo jugar', 'come giocare', 'como jogar'],
 } as const;
 const sectionKind = (heading: string) => (Object.keys(headings) as PublicationSection['kind'][])
   .find(kind => (headings[kind] as readonly string[]).includes(heading.toLowerCase()));

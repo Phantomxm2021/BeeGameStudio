@@ -3,6 +3,7 @@
 @import "../../frontend/node_modules/tailwindcss/theme.css" layer(theme);
 @import "../../frontend/node_modules/tailwindcss/utilities.css" layer(utilities);
 @import "../../frontend/src/styles/tokens.css";
+@import "./typography.css";
 @import "../../frontend/src/styles/publication-markdown.css";
 @config "../../frontend/tailwind.config.js";
 @source "../../frontend/src/components/Demiurge/ProfileAvatarButton.tsx";

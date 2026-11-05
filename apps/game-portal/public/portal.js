@@ -1,7 +1,14 @@
+import { playerPageWidth } from '../src/player-layout'
+import i18n, { t } from '../src/player-i18n'
 import { trackPortalEvent, observeBanner } from './analytics'
 import { portalTitle, portalDescription } from '../src/seo'
 import { renderPublicationDescription } from '../../frontend/src/entrypoints/portalDescription'
 const $ = id => document.getElementById(id)
+function setTranslatedText(id, key) {
+  const node = $(id)
+  node.dataset.i18n = key
+  node.textContent = t(key)
+}
 const projectId = /^\/g\/([A-Za-z0-9_-]{1,128})\/?$/.exec(
   location.pathname,
 )?.[1]
@@ -10,6 +17,7 @@ const deploymentId =
     location.pathname,
   )?.[1]
 const isGame = Boolean(projectId || deploymentId)
+document.body.classList.toggle('play-page', isGame)
 $('catalogue').hidden = isGame
 $('game-page').hidden = !isGame
 function setPageLoading(loading) {
@@ -19,8 +27,11 @@ function setPageLoading(loading) {
   document.querySelector('.site-header').inert = loading
 }
 const author = new URLSearchParams(location.search).get('author')
+const catalogueQuery = new URLSearchParams(location.search).get('q')?.trim().slice(0, 120) || ''
+$('search-games').value = catalogueQuery
+$('clear-search').hidden = !catalogueQuery
 $('home-title').hidden = Boolean(author)
-$('catalogue-heading').hidden = !author
+$('catalogue-heading').hidden = !author && !catalogueQuery
 const monogram = title => [...title].slice(0, 2).join('')
 const hueFor = id =>
   ([...id].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) % 360, 0) *
@@ -65,11 +76,22 @@ let featureLastTime = 0
 const featureHoldDuration = 6150
 const featureSlideDuration = 1000
 function updateCarousel() {
-  for (const [index, dot] of [...featureDots.children].entries())
-    dot.setAttribute('aria-current', String(index === featureIndex))
+  const slides = [...featureTrack.children]
+  const position = slides.length > 1 ? featureTrack.scrollLeft / (slides[0].getBoundingClientRect().width + 20) : 0
+  const current = Math.max(0, Math.min(slides.length - 1, Math.round(position)))
+  for (const [index, dot] of [...featureDots.children].entries()) {
+    dot.style.setProperty('--feature-distance', String(index - position))
+    dot.setAttribute('aria-selected', String(index === current))
+    dot.tabIndex = index === current ? 0 : -1
+    dot.setAttribute('aria-label', t('viewFeatured', { title: dot.dataset.title }))
+    slides[index].style.setProperty('--feature-distance', String(index - position))
+    slides[index].setAttribute('aria-hidden', String(index !== current))
+    slides[index].querySelector('a').tabIndex = index === current ? 0 : -1
+    slides[index].querySelector('a').setAttribute('aria-label', t('playFeatured', { title: dot.dataset.title }))
+  }
   featureDots.style.setProperty('--feature-progress', String(featureElapsed / featureHoldDuration))
   featurePlayback.dataset.state = featureEnded ? 'ended' : featurePaused ? 'paused' : 'playing'
-  featurePlayback.setAttribute('aria-label', featureEnded ? '重新播放' : featurePaused ? '开始自动播放' : '暂停自动播放')
+  featurePlayback.setAttribute('aria-label', t(featureEnded ? 'featureReplay' : featurePaused ? 'featurePlay' : 'featurePause'))
 }
 function featureOffset(index) {
   const slide = featureTrack.children[index]
@@ -139,8 +161,11 @@ featurePlayback.addEventListener('click', () => {
   updateCarousel()
   scheduleFeatureFrame()
 })
-for (const event of ['pointerdown', 'wheel', 'focusin'])
+for (const event of ['pointerdown', 'focusin'])
   featureTrack.addEventListener(event, pauseFeatureInteraction, { passive: true })
+featureTrack.addEventListener('wheel', event => {
+  if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.shiftKey) pauseFeatureInteraction()
+}, { passive: true })
 featureTrack.addEventListener('scroll', () => {
   if (featureTransition || !featureTrack.children.length) return
   const nearest = [...featureTrack.children].reduce((best, _, index) =>
@@ -149,8 +174,8 @@ featureTrack.addEventListener('scroll', () => {
     featureIndex = nearest
     featureElapsed = 0
     featureEnded = false
-    updateCarousel()
   }
+  updateCarousel()
 }, { passive: true })
 featureTrack.addEventListener('keydown', event => {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -162,21 +187,84 @@ new ResizeObserver(() => {
     featureTransition = undefined
     featureTrack.classList.remove('is-moving')
     featureTrack.scrollLeft = featureOffset(featureIndex)
+    updateCarousel()
+    updateFeatureVisibility()
   }
 }).observe(featureTrack)
-new IntersectionObserver(([entry]) => {
-  featureVisible = entry.isIntersecting
+// The reference uses these spring responses and stagger times for its two control bubbles.
+// Sample the bounded entrance into native animations; no extra persistent frame loop.
+function playFeatureControlsIntro() {
+  if (reducedMotion.matches) return
+  const controls = $('featured').querySelector('.carousel-controls')
+  const dots = $('featured').querySelector('.feature-dots-shell')
+  const width = dots.getBoundingClientRect().width
+  function spring(from, to, time, delay, frequency, ratio) {
+    const elapsed = Math.max(0, time - delay)
+    const envelope = Math.exp(-frequency * ratio * elapsed)
+    const damped = frequency * Math.sqrt(1 - ratio * ratio)
+    const response = ratio === 1 ? (1 + frequency * elapsed) * envelope
+      : envelope * (Math.cos(damped * elapsed) + frequency * ratio / damped * Math.sin(damped * elapsed))
+    return to + (from - to) * response
+  }
+  function animate(element, sample, final) {
+    const frames = Array.from({ length: 121 }, (_, index) => index === 120 ? final : sample(index / 60))
+    const animation = element.animate(frames, { duration: 2000, fill: 'both' })
+    animation.onfinish = () => animation.cancel()
+  }
+  animate(controls, time => ({ transform: `translateY(${spring(180, 0, time, .03, 10, .4)}px)` }), { transform: 'none' })
+  animate(controls.querySelector('.carousel-seed'), time => ({
+    width: `${spring(30, 56, time, .05, 10, .4)}px`, height: `${spring(80, 56, time, .15, 10, .4)}px`,
+    transform: `translateX(${spring(-15, -28, time, .05, 10, .4)}px) scale(${spring(1.3, .8, time, .02, 2 * Math.PI / .5, 1)})`,
+    opacity: time >= .02 && time < .52 ? 1 : 0,
+  }), { opacity: 0 })
+  animate(dots, time => ({ transform: `translateX(${spring(36, 0, time, .5, 10, 1)}px)` }), { transform: 'none' })
+  animate(dots.querySelector('.carousel-backdrop'), time => ({
+    width: `${spring(40, width, time, .5, 10, .5)}px`, height: `${spring(36, 56, time, .7, 10, .5)}px`,
+    transform: `translate(-50%,-50%) scale(${spring(1.3, 1, time, .3, 2 * Math.PI / .3, 1)})`,
+    '--carousel-alpha': spring(0, 1, time, 1, 10, 1),
+  }), { width: '100%', height: '56px', transform: 'translate(-50%,-50%)', '--carousel-alpha': 1 })
+  animate(featurePlayback, time => ({ transform: `translateX(${spring(-width / 2 - 8, 0, time, .54, 10, 1)}px)` }), { transform: 'none' })
+  animate(featurePlayback.querySelector('.carousel-backdrop'), time => ({
+    width: `${spring(80, 56, time, .7, 10, .5)}px`, height: `${spring(36, 56, time, .7, 10, .5)}px`,
+    transform: `translate(-50%,-50%) scale(${spring(0, 1, time, .54, 2 * Math.PI / .65, 1)})`,
+    '--carousel-alpha': spring(0, 1, time, 1, 10, 1),
+  }), { width: '100%', height: '56px', transform: 'translate(-50%,-50%)', '--carousel-alpha': 1 })
+  animate(featureDots, time => ({ '--feature-intro': spring(0, 1, time, .74, Math.sqrt(200), 20 / (2 * Math.sqrt(200))) }), { '--feature-intro': 1 })
+  for (const [index, dot] of [...featureDots.children].entries())
+    animate(dot.querySelector('.feature-dot-track'), time => ({ transform: `translateX(${spring(36, 0, time, .74 + .02 * index, Math.sqrt(200), 20 / (2 * Math.sqrt(200)))}px)` }), { transform: 'none' })
+}
+function updateFeatureVisibility() {
+  const rect = featureTrack.getBoundingClientRect()
+  featureVisible = !$('featured').hidden && rect.top <= innerHeight - rect.height * .6 && $('featured').getBoundingClientRect().bottom >= innerHeight * .75
   if (featureVisible) {
-    $('featured').classList.add('has-entered')
+    if (!$('featured').classList.contains('controls-ready') && featureTrack.children.length > 1) {
+      $('featured').classList.add('controls-ready')
+      playFeatureControlsIntro()
+    }
     scheduleFeatureFrame()
   } else suspendFeature()
+}
+new IntersectionObserver(([entry]) => {
+  if (entry.isIntersecting) $('featured').classList.add('has-entered')
+  updateFeatureVisibility()
 }, { threshold: .15 }).observe(featureTrack)
+window.addEventListener('scroll', updateFeatureVisibility, { passive: true })
+window.addEventListener('resize', updateFeatureVisibility)
+featureDots.addEventListener('keydown', event => {
+  const direction = { ArrowLeft: -1, ArrowRight: 1 }[event.key]
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? featureDots.children.length - 1 : direction ? featureIndex + direction : -1
+  if (next < 0 || next >= featureDots.children.length) return
+  event.preventDefault()
+  scrollFeature(next, true)
+  featureDots.children[next].focus({ preventScroll: true })
+})
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) suspendFeature()
   else scheduleFeatureFrame()
 })
 reducedMotion.addEventListener('change', () => {
   if (reducedMotion.matches) {
+    for (const animation of $('featured').getAnimations({ subtree: true })) animation.finish()
     pauseFeatureInteraction()
     if (featureTrack.children.length) featureTrack.scrollLeft = featureOffset(featureIndex)
   }
@@ -184,26 +272,39 @@ reducedMotion.addEventListener('change', () => {
 function paintFeatures(games) {
   for (const [index, item] of games.slice(0, 5).entries()) {
     const fragment = $('feature-card').content.cloneNode(true)
-    fragment.querySelector('.feature-slide').setAttribute('aria-label', `${index + 1} / ${Math.min(games.length, 5)}：${item.title}`)
     const slide = fragment.querySelector('.feature-slide')
+    slide.id = `featured-game-${index}`
+    slide.style.setProperty('--feature-index', String(index))
+    slide.setAttribute('aria-labelledby', `featured-tab-${index}`)
     observeBanner(slide, item.projectId)
     const link = fragment.querySelector('.feature-link')
-    link.addEventListener('click', () => { void trackPortalEvent('banner_click', item.projectId) })
+    link.addEventListener('click', event => {
+      if (index !== featureIndex || featureTransition) { event.preventDefault(); scrollFeature(index, true); return }
+      void trackPortalEvent('banner_click', item.projectId)
+    })
     link.href = `/g/${encodeURIComponent(item.projectId)}`
-    link.setAttribute('aria-label', `游玩 ${item.title}（在新标签页打开）`)
     fragment.querySelector('.feature-cover').src = coverFor(item)
+    const caption = fragment.querySelector('.feature-caption')
+    caption.textContent = item.featuredCaption || ''
+    caption.hidden = !caption.textContent
+    link.classList.toggle('has-caption', !caption.hidden)
     featureTrack.append(fragment)
     const dot = document.createElement('button')
     dot.type = 'button'
-    dot.setAttribute('aria-label', `查看 ${item.title}`)
+    dot.id = `featured-tab-${index}`
+    dot.dataset.title = item.title
+    dot.setAttribute('role', 'tab')
+    dot.setAttribute('aria-controls', slide.id)
+    dot.style.setProperty('--feature-index', String(index))
     dot.innerHTML = '<span class="feature-dot-track"><span class="feature-dot-fill"></span></span>'
     dot.addEventListener('click', () => scrollFeature(index, true))
     featureDots.append(dot)
   }
   $('featured').hidden = games.length === 0
-  $('featured').querySelector('.carousel-controls').hidden = games.length < 2
+  $('featured').querySelector('.carousel-shell').hidden = games.length < 2
+  $('featured').classList.toggle('is-single', games.length === 1)
   updateCarousel()
-  scheduleFeatureFrame()
+  updateFeatureVisibility()
 }
 let catalogueAuthor
 const accountListeners = new Set()
@@ -223,28 +324,28 @@ async function readJson(path) {
   if (!response.ok)
     throw Error(
       response.status === 404
-        ? '游戏尚未发布到 Portal。'
-        : '暂时无法连接，请稍后重试。',
+        ? t('unavailable')
+        : t('failed'),
     )
   return response.json()
 }
 function authorUrl(id) {
   return `/?author=${encodeURIComponent(id)}`
 }
+function updateCatalogueHeading() {
+  if (catalogueQuery) $('catalogue-title').textContent = `${t('searchResults')} · ${catalogueQuery}`
+  else if (author) $('catalogue-title').textContent = user?.id === author ? t('releases')
+    : catalogueAuthor ? t('authorGames', { name: catalogueAuthor }) : t('creatorGames')
+}
 function paintAccount() {
   for (const listener of accountListeners) listener(user || null)
-  if (!isGame && author) {
-    const own = user?.id === author
-    if (own) $('catalogue-title').textContent = '我的发布'
-    else if (catalogueAuthor)
-      $('catalogue-title').textContent = `${catalogueAuthor} 的游戏`
-  }
+  updateCatalogueHeading()
 }
 async function initializeAuth() {
   try {
     const config = await readJson('/api/config')
     if (!config.supabaseUrl || !config.supabaseAnonKey) {
-      accountError = '登录暂未开放'
+      accountError = t('accountUnavailable')
       return
     }
     globalThis.BEEGAME_PORTAL_ENV = {
@@ -263,7 +364,7 @@ async function initializeAuth() {
         location.replace(returnTo)
     }
   } catch {
-    accountError = '无法连接账号服务，请稍后重试。'
+    accountError = t('accountFailed')
   }
 }
 export function getPortalAccountUser() {
@@ -285,7 +386,7 @@ export async function signOutPortalAccount() {
     await auth?.clearSupabaseSession()
     user = null
     paintAccount()
-  } catch { window.alert('退出登录失败，请重试。') }
+  } catch { window.alert(t('logoutFailed')) }
 }
 $('close-login').addEventListener('click', () => $('login-dialog').close())
 $('login-form').addEventListener('submit', async event => {
@@ -302,7 +403,7 @@ $('login-form').addEventListener('submit', async event => {
     paintAccount()
     $('login-dialog').close()
   } catch (error) {
-    $('login-error').textContent = error.message || '登录失败，请重试。'
+    $('login-error').textContent = error.message || t('loginFailed')
   } finally {
     $('submit-login').disabled = false
   }
@@ -317,7 +418,7 @@ for (const button of document.querySelectorAll('[data-oauth]'))
     try {
       await auth.signInWithSupabaseOAuth(button.dataset.oauth)
     } catch (error) {
-      $('login-error').textContent = error.message || '登录失败，请重试。'
+      $('login-error').textContent = error.message || t('loginFailed')
     }
   })
 const catalogueEnd = $('catalogue-end')
@@ -336,13 +437,14 @@ async function loadCatalogue() {
   catalogueObserver.unobserve(catalogueEnd)
   catalogueEnd.hidden = true
   $('load-more').hidden = initialLoad
-  $('load-more').textContent = '正在加载…'
+  setTranslatedText('load-more', 'loading')
   $('load-more').disabled = true
   const params = new URLSearchParams({ page: String(page) })
   if (author) params.set('author', author)
+  if (catalogueQuery) params.set('q', catalogueQuery)
   try {
     const { games } = await readJson(`/api/games?${params}`)
-    if (page === 0 && !author) {
+    if (page === 0 && !author && !catalogueQuery) {
       // Recommendations are optional; their failure must not hide the catalogue.
       void readJson('/api/featured').then(featured => paintFeatures(featured.games)).catch(() => { $('featured').hidden = true })
     }
@@ -351,7 +453,9 @@ async function loadCatalogue() {
       card.querySelector('.card-play').href =
         `/g/${encodeURIComponent(item.projectId)}`
       card.querySelector('h3').textContent = item.title
-      card.querySelector('.play-count').textContent = `${Number(item.playCount || 0).toLocaleString()} 次游玩`
+      const plays = card.querySelector('.play-count')
+      plays.dataset.playCount = String(item.playCount || 0)
+      plays.textContent = playCount(plays.dataset.playCount)
       card.querySelector('.card-image').src = coverFor(item)
       if (item.coverUrl) card.querySelector('.card-art').classList.add('has-cover')
       card
@@ -361,21 +465,18 @@ async function loadCatalogue() {
     }
     if (author && page === 0 && games.length) {
       catalogueAuthor = games[0].authorName
-      $('catalogue-title').textContent =
-        user?.id === author ? '我的发布' : `${catalogueAuthor} 的游戏`
+      updateCatalogueHeading()
     }
     $('catalogue-status').hidden = $('game-grid').children.length > 0
-    $('catalogue-status').textContent = author
-      ? '这里还没有公开发布的游戏。'
-      : '好游戏正在路上。创作者发布后，就会出现在这里。'
+    setTranslatedText('catalogue-status', catalogueQuery ? 'noResults' : author ? 'empty' : 'catalogueEmpty')
     catalogueEnd.hidden = games.length < 24
     $('load-more').hidden = true
     page++
   } catch (error) {
     $('catalogue-status').hidden = false
-    $('catalogue-status').textContent = error.message
+    setTranslatedText('catalogue-status', error.message === t('unavailable') ? 'unavailable' : 'failed')
     $('load-more').hidden = false
-    $('load-more').textContent = '重试'
+    setTranslatedText('load-more', 'retry')
   } finally {
     catalogueLoading = false
     if (initialLoad) setPageLoading(false)
@@ -386,28 +487,41 @@ async function loadCatalogue() {
 $('load-more').addEventListener('click', () => {
   void loadCatalogue()
 })
-function showError(message) {
-  clearTimeout(loadTimer)
-  $('load-state').textContent = message
+function showLoadState(key) {
+  const loading = key === 'connecting'
+  const title = loading ? key : key === 'slow' ? 'slowTitle' : 'failedTitle'
+  $('load-state').dataset.state = loading ? 'loading' : key === 'slow' ? 'slow' : 'error'
+  $('load-state').setAttribute('role', loading ? 'status' : 'alert')
+  $('load-title').dataset.i18n = title
+  $('load-title').textContent = t(title)
+  $('load-message').hidden = loading
+  if (loading) {
+    delete $('load-message').dataset.i18n
+    $('load-message').textContent = ''
+  } else {
+    const message = key === 'failed' ? 'loadFailedHint' : key
+    $('load-message').dataset.i18n = message
+    $('load-message').textContent = t(message)
+  }
+  $('load-retry').hidden = loading
   $('load-state').hidden = false
-  $('load-state').setAttribute('role', 'alert')
+}
+function showError(key) {
+  clearTimeout(loadTimer)
+  showLoadState(key)
 }
 function loadFrame() {
   if (!game) return
   clearTimeout(loadTimer)
-  $('load-state').textContent = '正在连接游戏…'
-  $('load-state').hidden = false
-  $('load-state').setAttribute('role', 'status')
+  showLoadState('connecting')
   $('audio-button').hidden = true
   $('audio-button').setAttribute('aria-pressed', 'false')
   $('game-frame').src = game.gameUrl
-  loadTimer = setTimeout(
-    () => showError('连接时间较长，请尝试重新加载。'),
-    15000,
-  )
+  loadTimer = setTimeout(() => showError('slow'), 15000)
 }
 async function loadGame() {
   setPageLoading(true)
+  showLoadState('connecting')
   try {
     game = await readJson(
       deploymentId
@@ -427,14 +541,18 @@ async function loadGame() {
       gameOrigin === location.origin ||
       (gameUrl.protocol !== 'https:' && !localGame)
     )
-      throw Error('游戏地址无效。')
+      throw Error(t('invalid'))
     $('game-title').textContent = game.title
-    $('game-play-count').textContent = `${Number(game.playCount || 0).toLocaleString()} 次游玩`
+    $('game-play-count').textContent = playCount(game.playCount || 0)
     void trackPortalEvent('visit', game.projectId)
     $('game-frame').title = game.title
     document.title = portalTitle(game.title)
-    $('game-author').textContent = `由 ${game.authorName} 创作`
+    $('game-author').textContent = t('author', { name: game.authorName })
     $('game-author').href = authorUrl(game.authorId)
+    $('author-avatar').href = authorUrl(game.authorId)
+    $('author-avatar').textContent = [...game.authorName].slice(0, 1).join('').toUpperCase()
+    updateGameLanguage()
+    void loadRelatedGames()
     const description = typeof game.description === 'string' ? game.description.trim() : ''
     renderPublicationDescription(description, game.title)
     $('game-description').hidden = !description
@@ -442,54 +560,20 @@ async function loadGame() {
     $('retry-button').disabled = false
     loadFrame()
   } catch (error) {
-    showError(error.message)
+    game = undefined
+    gameOrigin = ''
+    const key = ['invalid', 'unavailable'].find(key => t(key) === error.message) || 'failed'
+    showError(key)
     $('retry-button').disabled = false
   } finally {
     setPageLoading(false)
   }
 }
-const playerMenu = $('player-menu')
-const playerMenuButton = $('player-menu-button')
-function closePlayerMenu() {
-  playerMenu.open = false
-  if (playerMenu.querySelector('.player-actions').contains(document.activeElement))
-    playerMenuButton.focus({ preventScroll: true })
-}
-playerMenu.addEventListener('pointerenter', event => {
-  if (event.pointerType === 'mouse') playerMenu.open = true
-})
-playerMenu.addEventListener('pointerleave', event => {
-  if (event.pointerType === 'mouse') closePlayerMenu()
-})
-playerMenuButton.addEventListener('click', event => {
-  // Hover has already opened it; mouse clicks should not immediately collapse it.
-  // Touch and keyboard retain the native disclosure toggle.
-  if (event.pointerType === 'mouse') {
-    event.preventDefault()
-    playerMenu.open = true
-  }
-})
-playerMenu.addEventListener('click', event => {
-  if (event.target.closest('.player-actions button')) closePlayerMenu()
-})
-playerMenu.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && playerMenu.open) {
-    event.preventDefault()
-    event.stopPropagation()
-    closePlayerMenu()
-    playerMenuButton.focus({ preventScroll: true })
-  }
-})
-playerMenu.addEventListener('focusout', event => {
-  if (!playerMenu.contains(event.relatedTarget)) playerMenu.open = false
-})
-document.addEventListener('pointerdown', event => {
-  if (!playerMenu.contains(event.target)) playerMenu.open = false
-})
-window.addEventListener('blur', closePlayerMenu)
-$('retry-button').addEventListener('click', () => {
+function retryGame() {
   game ? loadFrame() : void loadGame()
-})
+}
+$('retry-button').addEventListener('click', retryGame)
+$('load-retry').addEventListener('click', retryGame)
 $('game-frame').addEventListener('load', () => {
   if (!gameOrigin) return
   // A cross-origin iframe load event is not proof that a game is playable.
@@ -498,7 +582,7 @@ $('game-frame').addEventListener('load', () => {
   $('load-state').hidden = true
 })
 $('game-frame').addEventListener('error', () =>
-  showError('游戏页面连接失败，请尝试重新加载。'),
+  showError('failed'),
 )
 function updateFullscreen() {
   const active =
@@ -507,9 +591,10 @@ function updateFullscreen() {
   $('fullscreen-button').setAttribute('aria-pressed', String(active))
   $('fullscreen-button').setAttribute(
     'aria-label',
-    active ? '退出全屏' : '全屏',
+    active ? t('exitFullscreen') : t('fullscreen'),
   )
 }
+$('exit-fullscreen').addEventListener('click', () => $('fullscreen-button').click())
 $('fullscreen-button').addEventListener('click', async () => {
   const player = $('player')
   if (document.fullscreenElement === player)
@@ -536,8 +621,10 @@ window.addEventListener('message', event => {
   const expected = /^\/deployments\/([^/]+)\/files\/index\.html$/.exec(new URL(game.gameUrl).pathname)?.[1]
   if (!expected || event.data.deploymentId !== expected) return
   void trackPortalEvent('play', game.projectId).then(result => {
-    if (result && Number.isSafeInteger(result.playCount) && result.playCount >= 0)
-      $('game-play-count').textContent = `${result.playCount.toLocaleString()} 次游玩`
+    if (result && Number.isSafeInteger(result.playCount) && result.playCount >= 0) {
+      game.playCount = result.playCount
+      $('game-play-count').textContent = playCount(result.playCount)
+    }
   })
 })
 window.addEventListener('message', event => {
@@ -561,14 +648,14 @@ $('audio-button').addEventListener('click', () => {
     gameOrigin,
   )
   $('audio-button').setAttribute('aria-pressed', String(muted))
-  $('audio-button').setAttribute('aria-label', muted ? '开启声音' : '静音')
+  $('audio-button').setAttribute('aria-label', muted ? t('unmute') : t('mute'))
 })
 let shareTimer
 $('close-share').addEventListener('click', () => {
   clearTimeout(shareTimer)
   $('share-status').textContent = ''
   $('share-url').hidden = true
-  playerMenuButton.focus()
+  $('share-button').focus()
 })
 $('share-button').addEventListener('click', async () => {
   if (!game) return
@@ -583,7 +670,7 @@ $('share-button').addEventListener('click', async () => {
     if (navigator.share) await navigator.share({ title: portalTitle(game.title), text: portalDescription(game), url })
     else {
       await navigator.clipboard.writeText(url)
-      $('share-status').textContent = '游戏链接已复制。'
+      $('share-status').textContent = t('copied')
       shareTimer = setTimeout(() => {
         $('share-status').textContent = ''
       }, 3500)
@@ -593,9 +680,205 @@ $('share-button').addEventListener('click', async () => {
     $('share-url').hidden = false
     $('share-url').value = url
     $('share-url').select()
-    $('share-status').textContent = '请选择并复制这个固定链接。'
+    $('share-status').textContent = t('copyLink')
   }
 })
+function playCount(count) { return t(Number(count) === 1 && i18n.language === 'en' ? 'playOne' : 'plays', { count: Number(count).toLocaleString(i18n.language) }) }
+function updateGameLanguage() {
+  if (!game) return
+  $('game-play-count').textContent = playCount(game.playCount || 0)
+  $('game-author').textContent = game.authorName
+  const published = new Date(game.publishedAt)
+  $('game-published').textContent = Number.isNaN(published.getTime()) ? '' : published.toLocaleDateString(i18n.language, { year: 'numeric', month: 'long', day: 'numeric' })
+  if (!Number.isNaN(published.getTime())) $('game-published').dateTime = published.toISOString()
+}
+let relatedGames = []
+async function loadRelatedGames() {
+  setTranslatedText('related-status', 'loading')
+  $('related-retry').hidden = true
+  try {
+    const response = await readJson('/api/games?page=0')
+    relatedGames = response.games.filter(item => item.projectId !== game.projectId)
+    paintRelatedGames()
+  } catch {
+    setTranslatedText('related-status', 'failed')
+    $('related-retry').hidden = false
+  }
+}
+function paintRelatedGames() {
+  $('related-games').replaceChildren()
+  for (const item of relatedGames) {
+    const link = document.createElement('a')
+    link.className = 'related-game'
+    link.href = `/g/${encodeURIComponent(item.projectId)}`
+    const image = document.createElement('img')
+    image.src = coverFor(item)
+    image.alt = ''
+    image.loading = 'lazy'
+    const copy = document.createElement('div')
+    const title = document.createElement('h3')
+    title.textContent = item.title
+    const author = document.createElement('p')
+    author.textContent = item.authorName
+    const plays = document.createElement('p')
+    plays.dataset.playCount = String(item.playCount || 0)
+    plays.textContent = playCount(plays.dataset.playCount)
+    copy.append(title, author, plays)
+    link.append(image, copy)
+    $('related-games').append(link)
+  }
+  if ($('related-games').children.length) {
+    delete $('related-status').dataset.i18n
+    $('related-status').textContent = ''
+  } else setTranslatedText('related-status', 'empty')
+}
+$('related-retry').addEventListener('click', () => void loadRelatedGames())
+function updateTheater() {
+  const active = document.body.classList.contains('theater-mode')
+  $('theater-button').setAttribute('aria-pressed', String(active))
+  $('theater-button').setAttribute('aria-label', t(active ? 'defaultView' : 'theater'))
+  const width = document.querySelector('.site-content').clientWidth
+  document.documentElement.style.setProperty('--play-page-width', `${playerPageWidth(width, innerHeight, active)}px`)
+}
+$('theater-button').addEventListener('click', () => {
+  document.body.classList.toggle('theater-mode')
+  updateTheater()
+})
+window.addEventListener('resize', updateTheater)
+new ResizeObserver(updateTheater).observe(document.querySelector('.site-content'))
+const searchInput = $('search-games')
+let searchTimer, searchController, searchMatches = [], searchActive = -1
+let searchState = 'searchPrompt'
+function closeSearch() {
+  clearTimeout(searchTimer)
+  searchController?.abort()
+  $('search-panel').hidden = true
+  searchInput.setAttribute('aria-expanded', 'false')
+  searchInput.removeAttribute('aria-activedescendant')
+  searchActive = -1
+}
+function paintSearch() {
+  $('search-results').replaceChildren()
+  $('search-status').textContent = searchState ? t(searchState) : ''
+  $('search-retry').hidden = searchState !== 'searchFailed'
+  const query = searchInput.value.trim()
+  $('search-all').hidden = !query || searchState === 'loading' || searchState === 'searchFailed'
+  $('search-all').href = `/?q=${encodeURIComponent(query)}`
+  for (const [index, item] of searchMatches.entries()) {
+    const link = document.createElement('a')
+    link.className = 'search-result'
+    link.id = `search-result-${index}`
+    link.href = `/g/${encodeURIComponent(item.projectId)}`
+    link.setAttribute('role', 'option')
+    link.setAttribute('aria-selected', String(index === searchActive))
+    link.tabIndex = -1
+    const copy = document.createElement('span')
+    copy.className = 'search-result-copy'
+    const title = document.createElement('strong')
+    title.textContent = item.title
+    const author = document.createElement('small')
+    author.textContent = item.authorName
+    copy.append(title, author)
+    link.append(copy)
+    link.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>')
+    $('search-results').append(link)
+  }
+}
+function openSearch() {
+  $('search-panel').hidden = false
+  searchInput.setAttribute('aria-expanded', 'true')
+  paintSearch()
+}
+async function runSearch() {
+  clearTimeout(searchTimer)
+  searchController?.abort()
+  const query = searchInput.value.trim()
+  searchMatches = []
+  searchActive = -1
+  searchInput.removeAttribute('aria-activedescendant')
+  searchState = query ? 'loading' : 'searchPrompt'
+  $('clear-search').hidden = !searchInput.value
+  openSearch()
+  if (!query) return
+  const controller = new AbortController()
+  searchController = controller
+  try {
+    const response = await fetch(`/api/games?${new URLSearchParams({ q: query })}`, { signal: controller.signal })
+    if (!response.ok) throw Error('Search unavailable')
+    const data = await response.json()
+    if (controller.signal.aborted) return
+    searchMatches = data.games.slice(0, 8)
+    searchState = searchMatches.length ? '' : 'noResults'
+  } catch (error) {
+    if (controller.signal.aborted) return
+    searchState = 'searchFailed'
+  }
+  paintSearch()
+}
+function scheduleSearch(event) {
+  clearTimeout(searchTimer)
+  searchController?.abort()
+  searchMatches = []
+  searchActive = -1
+  searchInput.removeAttribute('aria-activedescendant')
+  $('clear-search').hidden = !searchInput.value
+  searchState = searchInput.value.trim() ? 'loading' : 'searchPrompt'
+  openSearch()
+  if (!event.isComposing) searchTimer = setTimeout(() => void runSearch(), 250)
+}
+searchInput.addEventListener('input', scheduleSearch)
+searchInput.addEventListener('compositionend', scheduleSearch)
+searchInput.addEventListener('focus', () => void runSearch())
+searchInput.addEventListener('keydown', event => {
+  if (event.isComposing) return
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSearch(); return }
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && searchMatches.length) {
+    event.preventDefault()
+    searchActive = (searchActive + (event.key === 'ArrowDown' ? 1 : -1) + searchMatches.length) % searchMatches.length
+    openSearch()
+    searchInput.setAttribute('aria-activedescendant', `search-result-${searchActive}`)
+    $(`search-result-${searchActive}`).scrollIntoView({ block: 'nearest' })
+  }
+})
+$('clear-search').addEventListener('click', () => {
+  searchInput.value = ''
+  searchInput.focus()
+  void runSearch()
+})
+$('search-retry').addEventListener('click', () => void runSearch())
+$('game-search').addEventListener('submit', event => {
+  event.preventDefault()
+  if (searchActive >= 0) location.assign(`/g/${encodeURIComponent(searchMatches[searchActive].projectId)}`)
+  else if (searchInput.value.trim()) location.assign(`/?q=${encodeURIComponent(searchInput.value.trim())}`)
+})
+document.addEventListener('pointerdown', event => { if (!$('game-search').contains(event.target)) closeSearch() })
+$('game-search').addEventListener('focusout', event => { if (!$('game-search').contains(event.relatedTarget)) closeSearch() })
+document.addEventListener('keydown', event => {
+  if (event.target.closest('input, textarea, select, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return
+  if (event.key === '/') { event.preventDefault(); $('search-games').focus() }
+  if (isGame && event.key.toLowerCase() === 't') { event.preventDefault(); $('theater-button').click() }
+  if (event.key === 'Escape') closeSearch()
+})
+const languageNames = { en: 'English', zh: '简体中文', 'zh-TW': '繁體中文', ja: '日本語', ko: '한국어', fr: 'Français', de: 'Deutsch', es: 'Español', it: 'Italiano', pt: 'Português' }
+for (const [value, label] of Object.entries(languageNames)) $('portal-language').add(new Option(label, value))
+$('portal-language').addEventListener('change', () => void i18n.changeLanguage($('portal-language').value))
+function updateLanguage() {
+  document.documentElement.lang = i18n.language
+  $('portal-language').value = i18n.language
+  for (const node of document.querySelectorAll('[data-i18n]')) node.textContent = t(node.dataset.i18n)
+  for (const attribute of ['aria-label', 'placeholder', 'aria-roledescription']) for (const node of document.querySelectorAll(`[data-i18n-${attribute}]`)) node.setAttribute(attribute, t(node.getAttribute(`data-i18n-${attribute}`)))
+  for (const node of document.querySelectorAll('[data-play-count]')) node.textContent = playCount(node.dataset.playCount)
+  updateGameLanguage()
+  updateCarousel()
+  updateFullscreen()
+  updateTheater()
+  $('audio-button').setAttribute('aria-label', t($('audio-button').getAttribute('aria-pressed') === 'true' ? 'unmute' : 'mute'))
+  if (!$('search-panel').hidden) paintSearch()
+  updateCatalogueHeading()
+  if (!isGame) document.title = `${t('homeTitle')} | Bee Game Studio（BGS）`
+}
+i18n.on('languageChanged', updateLanguage)
+updateLanguage()
 void initializeAuth()
 if (isGame) void loadGame()
 else void loadCatalogue()

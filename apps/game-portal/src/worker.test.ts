@@ -160,6 +160,12 @@ describe('public Portal projection', () => {
       ).toBe(400)
     }
   })
+  test('returns editor-authored banner copy as plain public metadata, with no title fallback', async () => {
+    const withCaption = await (await fetchGameMetadata('project_1', env, mockFetch({ featured_caption: '<b>Play</b>\nNow' }))).json();
+    expect(withCaption.featuredCaption).toBe('<b>Play</b>\nNow');
+    const empty = await (await fetchGameMetadata('project_1', env, mockFetch({ featured_caption: '' }))).json();
+    expect(empty.featuredCaption).toBe('');
+  });
   test('renders escaped per-game share metadata and canonical stable URL on the server', async () => {
     const response = await handleGamePortalRequest(
       new Request('https://play.test/g/project_1?tracking=1'),
@@ -391,3 +397,29 @@ describe('independent BeePlay administration', () => {
     }
   })
 })
+
+
+describe('public catalogue search', () => {
+  test('searches the public projection across stored names, confirmed copy and creators, with pagination', async () => {
+    const query = 'a,b)';
+    const response = await handleGamePortalRequest(new Request(`https://play.test/api/games?${new URLSearchParams({ q: query, page: '1' })}`), env, async input => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe('/rest/v1/beegame_portal_games');
+      expect(url.searchParams.get('or')).toBe('(title.ilike."%a,b)%",author_name.ilike."%a,b)%",public_description.ilike."%a,b)%")');
+      expect(url.searchParams.get('offset')).toBe('24');
+      return Response.json([{ ...row, public_description: '# Public name' }]);
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json() as any).games[0].title).toBe('Public name');
+  });
+  test('rejects overlong search before querying the database and preserves real search failures', async () => {
+    let requests = 0;
+    const fetchImpl = async () => { requests++; return new Response('Unavailable', { status: 503 }); };
+    const overlong = await handleGamePortalRequest(new Request(`https://play.test/api/games?q=${'a'.repeat(121)}`), env, fetchImpl);
+    expect(overlong.status).toBe(400);
+    expect(requests).toBe(0);
+    const failed = await handleGamePortalRequest(new Request('https://play.test/api/games?q=game'), env, fetchImpl);
+    expect(failed.status).toBe(503);
+    expect(requests).toBe(1);
+  });
+});

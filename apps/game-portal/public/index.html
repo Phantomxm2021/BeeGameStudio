@@ -8,72 +8,76 @@
     <link rel="icon" href="/assets/bgs_logo.svg" type="image/svg+xml" />
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/account.css" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css" /><link rel="stylesheet" href="/play.css" />
     <script defer src="/theme-controls.js"></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">跳至内容</a>
+    <a class="skip-link" href="#main" data-i18n="skip">跳至内容</a>
     <header class="site-header" inert>
-      <a class="brand" href="/" aria-label="Bee Play 首页"><img class="brand-mark" src="/assets/bgs_logo.svg" alt="" width="32" height="32" /><span>Bee Play</span></a>
-      <div class="portal-account-toolbar"><span data-theme-toggle></span><div id="account-avatar"></div></div>
+      <a class="brand" href="/" aria-label="Bee Play 首页" data-i18n-aria-label="brandHome"><img class="brand-mark" src="/assets/bgs_logo.svg" alt="" width="32" height="32" /><span>Bee Play</span></a>
+      <form id="game-search" role="search"><svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="search-games" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-results" placeholder="搜索游戏" data-i18n-placeholder="search" aria-label="搜索游戏" data-i18n-aria-label="search" autocomplete="off" maxlength="120"><button id="clear-search" type="button" class="search-clear" aria-label="清空搜索" data-i18n-aria-label="clearSearch" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button><kbd aria-hidden="true">/</kbd><div id="search-panel" hidden><p id="search-status" role="status" aria-live="polite"></p><div id="search-results" role="listbox" aria-label="搜索结果" data-i18n-aria-label="searchResults"></div><button id="search-retry" class="search-retry" type="button" data-i18n="retry" hidden>重试</button><a id="search-all" href="/" hidden data-i18n="allResults">查看所有结果</a><p class="search-hint" data-i18n="searchKeys">↑ ↓ 选择 · Enter 打开 · Esc 关闭</p></div></form><div class="portal-account-toolbar"><select id="portal-language" aria-label="语言" data-i18n-aria-label="language"></select><span data-theme-toggle></span><div id="account-avatar"></div></div>
     </header>
     <div class="site-content">
     <main class="page is-loading" id="main" aria-busy="true">
       <div id="page-loading" class="page-loading" role="status">
         <img class="brand-mark" src="/assets/bgs_logo.svg" alt="" width="48" height="48" />
-        <div class="page-loading-caption"><span class="page-loading-spinner" aria-hidden="true"></span><span>正在加载…</span></div>
+        <div class="page-loading-caption"><span class="page-loading-spinner" aria-hidden="true"></span><span data-i18n="loading">正在加载…</span></div>
       </div>
       <noscript><style>.page-loading { display: none; }</style><p>请启用 JavaScript 以加载和游玩游戏。</p></noscript>
       <section id="catalogue" hidden>
-        <h1 id="home-title" class="visually-hidden">Bee Play · 在线玩创作者游戏</h1>
-        <div id="catalogue-heading" class="catalogue-heading" hidden><h1 id="catalogue-title">创作者的游戏</h1></div>
-        <section id="featured" class="featured" aria-label="推荐游戏" aria-roledescription="轮播" hidden>
-          <div id="feature-track" class="feature-track" tabindex="0" aria-label="新近发布，左右滑动浏览"></div>
-          <div class="carousel-controls">
-            <button id="feature-playback" class="carousel-playback" type="button" aria-label="暂停自动播放">
+        <h1 id="home-title" class="visually-hidden" data-i18n="homeTitle">Bee Play · 在线玩创作者游戏</h1>
+        <div id="catalogue-heading" class="catalogue-heading" hidden><h1 id="catalogue-title" data-i18n="creatorGames">创作者的游戏</h1></div>
+        <section id="featured" class="featured" aria-label="推荐游戏" data-i18n-aria-label="featured" aria-roledescription="轮播" data-i18n-aria-roledescription="carousel" hidden>
+          <div class="carousel-shell"><div class="carousel-controls">
+            <span class="carousel-seed" aria-hidden="true"></span><div class="feature-dots-shell"><span class="carousel-backdrop" aria-hidden="true"></span><div id="feature-dots" class="feature-dots" role="tablist" aria-label="推荐游戏" data-i18n-aria-label="featured"></div></div>
+            <button id="feature-playback" class="carousel-playback" type="button" aria-label="暂停自动播放"><span class="carousel-backdrop" aria-hidden="true"></span><span class="carousel-symbols" aria-hidden="true">
               <svg class="carousel-pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>
               <svg class="carousel-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg>
               <svg class="carousel-replay-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6"/></svg>
-            </button>
-            <div id="feature-dots" class="feature-dots" aria-label="选择游戏"></div>
-          </div>
+            </span></button>
+          </div></div>
+          <div id="feature-track" class="feature-track" tabindex="0" aria-label="推荐游戏" data-i18n-aria-label="featured"></div>
         </section>
-        <div class="section-heading" id="all-releases"><h2>所有游戏</h2></div>
-        <p id="catalogue-status" class="empty-state" role="status">正在载入游戏…</p>
+        <div class="section-heading" id="all-releases"><h2 data-i18n="browse">所有游戏</h2></div>
+        <p id="catalogue-status" class="empty-state" role="status" data-i18n="loading">正在载入游戏…</p>
         <div id="game-grid" class="game-grid"></div>
         <div id="catalogue-end" style="height: 1px" aria-hidden="true" hidden></div>
-        <button id="load-more" class="share-button load-more" type="button" hidden>重试</button>
+        <button id="load-more" class="share-button load-more" type="button" hidden data-i18n="retry">重试</button>
       </section>
       <section id="game-page" hidden>
-        <section class="player" id="player" aria-label="游戏画面">
-          <div class="player-surface">
+        <section class="player" id="player" aria-label="游戏画面" data-i18n-aria-label="game">
+          <div class="player-surface"><button id="exit-fullscreen" class="control-button" type="button" aria-label="退出全屏" data-i18n-aria-label="exitFullscreen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
             <iframe id="game-frame" title="游戏" allow="autoplay; fullscreen; gamepad" allowfullscreen referrerpolicy="origin" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms"></iframe>
-            <div id="load-state" class="load-state" role="status" aria-live="polite">正在连接游戏…</div>
-            <details id="player-menu" class="player-controls">
-              <summary id="player-menu-button" class="control-button" aria-label="游戏菜单"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></summary>
-              <div class="player-actions" aria-label="游戏画面控制">
-              <button id="retry-button" class="control-button" type="button" aria-label="重新加载" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19.5 12a7.5 7.5 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
-              <button id="audio-button" class="control-button" type="button" aria-label="静音" aria-pressed="false" hidden>
+            <div id="load-state" data-state="loading" class="load-state" role="status" aria-live="polite">
+              <div class="load-state-content">
+                <div class="load-avatar" aria-hidden="true"><canvas id="load-avatar"></canvas></div>
+                <p id="load-title" class="load-title" data-i18n="connecting">正在加载游戏…</p>
+                <p id="load-message" class="load-message" hidden></p>
+                <button id="load-retry" class="load-retry" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19.5 12a7.5 7.5 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg><span data-i18n="reload">重新加载</span></button>
+              </div>
+            </div>
+
+          </div>
+          <div class="share-feedback"><button id="close-share" class="dialog-close" type="button" aria-label="关闭分享提示" data-i18n-aria-label="close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button><p id="share-status" role="status" aria-live="polite"></p><input id="share-url" class="share-url" aria-label="游戏分享链接" data-i18n-aria-label="share" readonly hidden></div>
+        </section>
+        <div class="game-copy"><div class="game-heading"><h1 id="game-title">游戏</h1><div class="game-toolbar"><div class="creator"><a id="author-avatar" class="author-avatar" tabindex="-1" aria-hidden="true"></a><a id="game-author" class="author-link"></a></div><div class="game-actions"><button id="theater-button" class="control-button" type="button" aria-label="剧场模式 (T)" data-i18n-aria-label="theater" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path class="default-view-indicator" d="M15 6v12"/></svg></button>              <button id="fullscreen-button" class="control-button" type="button" aria-label="全屏" data-i18n-aria-label="fullscreen" aria-pressed="false">
+                <svg class="expand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg>
+                <svg class="shrink-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h4V4m12 4h-4V4M4 16h4v4m12-4h-4v4"/></svg>
+              </button>              <button id="retry-button" class="control-button" type="button" aria-label="重新加载" data-i18n-aria-label="reload" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19.5 12a7.5 7.5 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
+              <button id="audio-button" class="control-button" type="button" aria-label="静音" data-i18n-aria-label="mute" aria-pressed="false" hidden>
                 <svg class="audio-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5ZM15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <svg class="audio-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5ZM16 9l5 6m0-6-5 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
-              <button id="share-button" class="control-button" type="button" aria-label="分享游戏" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M7 10H5a1 1 0 0 0-1 1v9h16v-9a1 1 0 0 0-1-1h-2"/></svg></button>
-              <button id="fullscreen-button" class="control-button" type="button" aria-label="全屏" aria-pressed="false">
-                <svg class="expand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg>
-                <svg class="shrink-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h4V4m12 4h-4V4M4 16h4v4m12-4h-4v4"/></svg>
-              </button>
-              </div>
-            </details>
-          </div>
-          <div class="share-feedback"><button id="close-share" class="dialog-close" type="button" aria-label="关闭分享提示"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button><p id="share-status" role="status" aria-live="polite"></p><input id="share-url" class="share-url" aria-label="游戏分享链接" readonly hidden></div>
-        </section>
-        <div class="game-heading"><div class="game-heading-copy"><h1 id="game-title">游戏</h1><a id="game-author" class="author-link"></a><p id="game-play-count" class="play-count"></p></div></div>
-        <div id="game-description" class="game-description" hidden><div id="game-description-text"></div></div>
+              <button id="share-button" class="control-button" type="button" aria-label="分享" data-i18n-aria-label="share" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M7 10H5a1 1 0 0 0-1 1v9h16v-9a1 1 0 0 0-1-1h-2"/></svg></button>
+
+</div></div></div>
+        <div class="game-information"><div class="game-metadata"><time id="game-published"></time><span id="game-play-count" class="play-count"></span></div><div id="game-description" class="game-description" hidden><div id="game-description-text"></div></div><a class="made-with" href="https://beegame.studio/">Made with <img class="brand-mark" src="/assets/bgs_logo.svg" alt="" width="16" height="16"> Bee Game Studio</a></div>
+        </div><aside id="more-games" aria-label="更多游戏" data-i18n-aria-label="more"><div id="related-games"></div><p id="related-status" role="status"></p><button id="related-retry" class="share-button" type="button" hidden data-i18n="retry">重试</button><a class="browse-games" href="/" data-i18n="browse">浏览所有游戏</a></aside>
       </section>
     </main>
     </div>
-    <dialog id="login-dialog" aria-labelledby="login-title"><form id="login-form"><button id="close-login" class="dialog-close" type="button" aria-label="关闭登录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button><img class="brand-mark" src="/assets/bgs_logo.svg" alt="" width="32" height="32" /><h2 id="login-title">登录 Bee Play</h2><label for="email">邮箱</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required><button id="submit-login" class="primary-button" type="submit">登录</button><p id="login-error" class="form-error" role="alert"></p><div class="oauth-buttons"><button class="share-button" type="button" data-oauth="github">使用 GitHub</button><button class="share-button" type="button" data-oauth="discord">使用 Discord</button></div></form></dialog>
+    <dialog id="login-dialog" aria-labelledby="login-title"><form id="login-form"><button id="close-login" class="dialog-close" type="button" aria-label="关闭登录" data-i18n-aria-label="close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button><img class="brand-mark" src="/assets/bgs_logo.svg" alt="" width="32" height="32" /><h2 id="login-title" data-i18n="login">登录 Bee Play</h2><label for="email" data-i18n="email">邮箱</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password" data-i18n="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required><button id="submit-login" class="primary-button" type="submit" data-i18n="signIn">登录</button><p id="login-error" class="form-error" role="alert"></p><div class="oauth-buttons"><button class="share-button" type="button" data-oauth="github" data-i18n="oauthGithub">使用 GitHub</button><button class="share-button" type="button" data-oauth="discord" data-i18n="oauthDiscord">使用 Discord</button></div></form></dialog>
     <template id="game-card"><article class="game-card"><a class="card-play" target="_blank" rel="noopener"><div class="card-art"><img class="card-image" alt="" width="1200" height="900" loading="lazy" decoding="async"></div><h3></h3><p class="play-count"></p></a></article></template>
-    <template id="feature-card"><article class="feature-slide" aria-roledescription="幻灯片"><a class="feature-link" target="_blank" rel="noopener"><img class="feature-cover" alt="" width="1600" height="900" decoding="async"></a></article></template>
+    <template id="feature-card"><article class="feature-slide" role="tabpanel" tabindex="-1"><a class="feature-link" target="_blank" rel="noopener"><img class="feature-cover" alt="" width="1600" height="900" decoding="async"><p class="feature-caption" hidden></p></a></article></template>
   </body>
 </html>

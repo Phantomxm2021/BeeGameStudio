@@ -56,3 +56,37 @@ describe("delivery source verification", () => {
     expect(body).not.toBe(sourceHtml);
   });
 });
+
+
+describe("retained publication authorization", () => {
+  test("migration accepts the two owned manifest scopes without dropping public-file checks", async () => {
+    const sql = await Bun.file(new URL("../../../supabase/migrations/20261103010000_retained_publication_delivery_authorization.sql", import.meta.url)).text();
+    expect(sql).toContain("manifest.owner_user_id = deployment.owner_id");
+    expect(sql).toContain("manifest.project_id = deployment.project_id");
+    expect(sql).toContain("manifest.scope_type = 'project'");
+    expect(sql).toContain("manifest.scope_id = deployment.project_id");
+    expect(sql).toContain("deployment.portal_published_at is not null");
+    expect(sql).toContain("manifest.project_id is null");
+    expect(sql).toContain("manifest.deployment_id = deployment.id");
+    expect(sql).toContain("manifest.scope_type = 'deployment'");
+    expect(sql).toContain("manifest.scope_id = deployment.id");
+    for (const check of ["deployment.status = 'succeeded'", "deployment.url <> ''", "deployment.artifact_path is not null", "manifest.provider = 'r2'", "manifest.bucket_role = 'delivery'", "manifest.object_kind = 'deployment_manifest'", "manifest.status = 'ready'", "manifest.visibility = 'public'", "manifest.deleted_at is null", "manifest.metadata ->> 'deployment_id' = deployment.id"])
+      expect(sql).toContain(check);
+    expect(sql).not.toMatch(/\b(grant|revoke|delete|update)\s/i);
+  });
+
+  test.each([false, "rpc-error"])("still refuses unauthorized or unavailable release: %s", async verdict => {
+    let reads = 0;
+    const delivery = createDeliveryWorker({ fetchImpl: (async (_input, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ p_deployment_id: deploymentId });
+      return verdict === "rpc-error" ? new Response("Unavailable", { status: 503 }) : Response.json(false);
+    }) as typeof fetch });
+    const { env } = worker();
+    const result = await delivery.fetch(new Request(`https://games.test/deployments/${deploymentId}/files/index.html`), {
+      ...env,
+      DELIVERY_BUCKET: { get: async () => { reads++; return null; } },
+    });
+    expect(result.status).toBe(404);
+    expect(reads).toBe(0);
+  });
+});

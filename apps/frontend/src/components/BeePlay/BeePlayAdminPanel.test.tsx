@@ -43,7 +43,7 @@ describe('BeePlay management', () => {
       expect(getBeePlayOverview).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'Two' }))
     );
     await user.click(screen.getByRole('button', { name: '保存推荐' }));
-    await waitFor(() => expect(saveBeePlayRecommendations).toHaveBeenCalledWith(['2', '1']));
+    await waitFor(() => expect(saveBeePlayRecommendations).toHaveBeenCalledWith([{ project_id: '2', featured_caption: '' }, { project_id: '1', featured_caption: '' }]));
     expect(await screen.findByText('推荐已保存')).toBeInTheDocument();
   });
   it('keeps the unsaved list after a failed save and supports clearing all recommendations', async () => {
@@ -56,6 +56,16 @@ describe('BeePlay management', () => {
     expect(screen.getByRole('button', { name: '保存推荐' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: '保存推荐' }));
     await waitFor(() => expect(saveBeePlayRecommendations).toHaveBeenLastCalledWith([]));
+  });
+  it('keeps optional banner text empty by default and saves text with the selected game', async () => {
+    const user = userEvent.setup();
+    render(<BeePlayAdminPanel language="zh" />);
+    const caption = await screen.findByRole('textbox', { name: 'Banner 文案：One' });
+    expect(caption).toHaveValue('');
+    await user.type(caption, 'First line{Enter}Second line');
+    expect(saveBeePlayRecommendations).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '保存推荐' }));
+    await waitFor(() => expect(saveBeePlayRecommendations).toHaveBeenCalledWith([{ project_id: '1', featured_caption: 'First line\nSecond line' }]));
   });
   it('shows real aggregate data and requests per-game detail', async () => {
     const user = userEvent.setup();

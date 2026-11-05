@@ -14,7 +14,7 @@ export type BeePlayGame = BeePlayMetrics & {
   author_name: string;
   play_count: number;
 };
-export type BeePlayRecommendation = Pick<BeePlayGame, 'project_id' | 'title' | 'public_description'>;
+export type BeePlayRecommendation = Pick<BeePlayGame, 'project_id' | 'title' | 'public_description'> & { featured_caption?: string };
 export type BeePlayOverview = {
   games: BeePlayGame[];
   totalGames: number;
@@ -38,8 +38,8 @@ export async function getBeePlayOverview(params: {
     featured: overview.featured.map(game => ({ ...game, title: publicationTitle(game.public_description, game.title) })),
   };
 }
-export async function saveBeePlayRecommendations(projectIds: string[]) {
-  return portalRpc<{ projectIds: string[] }>('beegame_admin_portal_featured', { p_project_ids: projectIds });
+export async function saveBeePlayRecommendations(recommendations: Pick<BeePlayRecommendation, 'project_id' | 'featured_caption'>[]) {
+  return portalRpc<{ projectIds: string[] }>('beegame_admin_portal_featured', { p_recommendations: recommendations.map(game => ({ project_id: game.project_id, featured_caption: game.featured_caption || '' })) });
 }
 
 export async function loadPortalAuth(): Promise<typeof import('./auth')> {
