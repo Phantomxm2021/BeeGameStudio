@@ -35,63 +35,42 @@ BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导
 
 未知模型使用本地 fallback 提示词时启用原生 Skill 使用说明，包括最小适用集合、渐进披露和必要引用的读取。目录只提供发现信息，Skill 正文仍由 Agent 按需读取；不为 BYOK 型号另写专业流程，也不修改已知模型的模板配置。`skills.native.test.ts` 使用真实 BGS 二进制和本机 Responses 替身，检查实际请求中的说明、正文未预加载，以及所选正文经原生工具读取后进入下一次请求。
 
-非 ChatGPT 游戏会话通过原生 `skills.config` 按路径停用 `$BGS_HOME/skills/.system/imagegen/SKILL.md`：当前 BGS provider 不具备原生图像工具的认证条件，shell 也不持有该 Skill 的 CLI fallback 所需 API key。该覆盖只作用于本次运行器进程，不修改系统 Skill 缓存或用户配置，保留用户导入的同名 Skill；ChatGPT 会话沿用原生可用性规则。BGS 自有资源生成入口保持原有行为。
+系统 `imagegen/SKILL.md` 保留原文并参与原生发现，用户显式停用设置仍生效。原生 `image_gen` 继续遵守 CLI 的连接能力与认证条件；允许使用已配置生图服务的当前任务，通过既有资源命令的 MCP 入口获得 `generate_image`，复用报价、计费、参考图、文件保存与恢复。它不冒充原生工具，不改写系统 Skill，也不要求 Shell 持有供应商 API key。
 
 明确保留的例外：真实外部 URL、模型 ID、服务端协议头及认证/额度标识；`bgs app` 所连接的官方桌面应用的签名、安装器和 URL scheme（该命令仍明确标为 upstream Codex Desktop）；第三方插件包中的 `.codex-plugin` 清单格式；LICENSE、NOTICE、来源说明；读取旧会话的兼容标识和迁移别名。安装根已属于 BGS，第三方包格式不会被擅自改写。Git 历史和 Git 自身的旧子模块元数据不做字符串改写。
 
-## Web/React 与 Scene/UI 编辑器解耦
+## Scene/UI 编辑契约退出所有平台
 
-Web/React 项目使用项目自身的 UI、场景代码和数据。初始设计、后续修改和恢复均不再要求创建 BGS Scene/UI JSON 或 `content/index.json`；历史 `creation.editableContent` 只作为保留的创建记录，不能恢复编辑要求。视觉对照要求独立于编辑能力，不能由旧 `bgsVisualEditing:false` 关闭。
+所有目标使用所选引擎或框架的原生场景、UI、代码与资源。普通任务、设计任务及恢复上下文不再注入 BGS 编辑器要求，也不默认提供内容检查、绑定、消费者安装适配器或 MCP 布局编辑诊断。React 项目的 Phaser/Three.js 库选择仍仅由确认的 2D/3D 决定。
 
-宿主根据 Run 中已确认的平台和引擎提供 `scene_ui_editor_available`。Web/React 的产物列表仅保留文档和资源入口，旧编辑器链接不加载编辑器，后端直接保存也返回 `editor-unavailable`。其他目标沿用现有编辑行为。
+宿主对所有平台声明 `scene_ui_editor_available:false`；历史内容读取始终只读，直接保存入口返回 `editor-unavailable`，不申请 writer。历史编辑记录、退出证明和恢复清理能力保留，不重放旧保存。
 
-Web/React 的原生工具不再暴露 `CheckSceneLayouts` / `CheckUiLayouts`，新项目不再生成绑定工具或默认内容运行库；设计读取、资源检查、验证读取、预览和媒体工具保留。已有注册内容仍能获得其运行库，显式注册的数据、资源及设计引用继续接受完整性检查。缺少编辑器索引本身不阻塞测量或发布；实际构建、运行验证、视觉对照和交付证据不因此免除。
+`CheckResourcesAndBindings {}` 独立核验 Manifest 需求与真实资源。旧内容格式只有被显式请求检查或报告明确声明对应检查时才参与历史数据核验；GDD 中的路径、目录或 `content/index.json` 的存在本身不会启用旧合同。实际构建、运行、资源、设计版本与视觉交付校验继续保留，共享资源／字体／媒体实现和历史运行库不整体删除。
 
-共享 `scene-editor` 包还包含资源、字体、布局及历史运行时消费者，其他目标也仍使用编辑器，因此不整体删除该包，不迁移或改写已生成项目。本次不引入 Phaser、Three.js、新编辑器或额外模型回合；离线回归不代表真实生成质量、tokens 或耗时已经改善。
+测量、执行回执、交付及重新发布构建统一使用既有排除清单，将 `reports/` 和 `docs/TASKS.md` 作为非运行输入；它们不进入实际构建副本。旧构建仍按原回执保存的清单核验，显式引用的证据仍独立校验哈希；源码、测试、资源与需求变化继续使相应证据失效。
 
-## Workflow 的原生 Goal 生命周期
+## Workflow 执行与历史 Goal 生命周期
 
-项目初次接单及明确的 work/change/continue 使用 Codex 原生 Goal。一次授权任务只占用一次 BGS 执行身份和 writer；原生 Goal 自行决定工作顺序、跨 turn 继续及结束。BGS 不按文档派发回合，也不增加自动 turn pump。设计来源统一为 `docs/GDD.md`，使用已有或一份精简进度记录保存当前工作、未解决依赖和实际验证；Skills 按相关章节和实际依赖提供专业方法。
+新建完整游戏直接进入普通原生实现任务。Agent 在同一任务内按实际需要设计、选图、生产资源、实现和验证；独立 GDD、视觉复核和全量资源阶段不是前置条件。单独的文档、视觉或资源委托按其授权范围执行；历史已保存的待办交接仍按现有分派恢复，不重写已有项目。
 
-- 新任务创建 Goal；同一任务继续保留原 thread、Goal 和累计用量。显式换上下文时只保留剩余 Goal 预算。普通 message/discuss 仍按用户原文执行一次，不自动唤醒旧 Goal。
-- 暂停时保留原生暂停响应中结算后的 Goal 用量，保证会话统计准确。离线真实二进制测试覆盖工具运行中暂停后的最终用量进入 BGS 会话记录。仅当原生 Goal 原已明确设置预算时，focused 继续保留其剩余额度与记账约束；没有预算的任务不受此限制。
-- 冷恢复先暂停持久化的 active Goal，再加载 thread、注入当前运行上下文和用户消息，最后激活，避免旧目标抢先运行。新任务复用 thread 时清除旧 Goal 后创建，避免沿用上一任务的计数。
-- Goal 的终态通知可能早于当前原生 turn 的最后输出；BGS 等待该 turn 结束才结算，不按统一 token 阈值强制终止当前执行。暂停／退出仍等待进程及工具清理，不凭 Goal 状态提前释放 writer。原生 turn 身份用于工具授权，BGS 外层执行身份跨原生回合保持不变。
-- `complete` 表示原生任务结束，不能作为游戏品质或交付验收证明；`deliveryEligible` 和实际验证证据保持独立。预算耗尽、阻塞、取消及失败不自动重派。
+普通任务结束以原生回合完成和进程清理为准，不要求 `measure.mjs`、Preview 测试回执、固定验收报告或显式提交。Agent 的结束说明保留实际结果、已做检查及未解决或未验证部分；执行完成不表示宿主已判定游戏品质合格。用户预览和发布使用各自现有入口及校验，历史测量、报告和发布记录仍可读取。
 
-BGS 初次接单和后续实现任务的 Goal 明确以已确认行为、必要技术检查和交给用户试玩为结束边界，保留完整需求并复用未变化行为的有效证据。技术检查是否充分仍由 Agent 根据要求判断；BGS 不把最后一个检查通过自动等同于任务完成，也不要求 Agent 代替用户判断乐趣。
+发布在一次性私有副本中复用现有离线构建沙箱；安装依赖只读，构建缓存限于副本。普通发布不要求可编辑源码导出、完整 Manifest 或作者验收报告，不因未使用的浏览器工具链接、缓存或纯 workflow 元数据变化失败。构建真正读取的项目文件仍保留，最终静态产物拒绝符号链接／越界并执行页面加载检查。上传期间校验冻结产物，以及 owner、当前任务修改轮次、需求版本和活跃 writer；历史源码导出与测量校验不变。
 
-BGS 不为游戏任务自动设置 token 上限，也不为历史无上限任务追加限制。任务体量由已确认需求决定；用量继续用于统计与计费，不能作为任务完成的替代标准。成本优化集中于复用有效证据、正确刷新预览以及及时交给用户试玩，不按固定 tokens 截断合理工作。原生 Goal 的显式预算能力保留，只有原已明确配置的预算才继续沿用。
+- 新任务和普通消息不自动创建或唤醒 Goal；同任务恢复沿用原 thread，不重放原任务。
+- 历史 Goal 冷恢复先暂停持久化的 active Goal，再加载 thread、注入当前运行上下文并激活。保留原目标、累计用量，以及原已明确配置的剩余预算；不向历史无预算任务补设上限。
+- Goal 终态通知可能早于当前原生 turn 的最后输出；BGS 等待回合结束及进程、工具清理后结算。清理失败不提前释放 writer，取消、失败和阻塞不自动重派。
+- 用量用于统计和计费；`complete` 是执行状态，不能代替实际画面、玩法和用户体验证据。
 
-Preview 的 `--help` 和 `--client` 共用当前工具约定。BGS 托管 Vite 在 macOS Seatbelt 内使用 Vite 内置 polling watcher，使修改过的源码和导入内容在新页面请求时更新；普通运行沿用 Vite 默认监听。真实沙箱离线复现中，默认监听返回旧模块，直接运行与 polling 对照均能更新；`hmr:false` 本身不会禁用模块失效，根因是沙箱内目录监听不可用。服务器常驻代码或配置变更仍使用已有 `/preview/restart`；production 只服务已有构建，不自动重建。此修复增加仅托管开发预览期间的文件轮询，不修改 native CLI 权限或游戏源码。
-
-生成的截图/观察文件仍放在既有 `reports/` 证据目录或捕获工具输出目录，测试脚本与输入夹具属于源码。没有扩大指纹排除范围或自动重试。失败后的必要定向复测和已确认分辨率/状态覆盖继续保留。
-
-正式实现交付可通过当前 `measure.mjs --finish --requirements <revision> [--measurement <id>]` 提交既有 `.beegame/delivery/acceptance.json`。读取 handoff/inspect、保存报告或某个检查通过都不会自动结束。提交必须匹配当前需求和 writer；报告声明须有效，当前版本的最新测量须绑定报告、产物及有效输入，已知失败不能被跳过。初次 build brief 及其显式 interrupted continuation 必须走这条经当前输入验证的 `--finish` 链；后续泛化的 design/work 不从历史创建模式推断 delivery scope。没有静态 Web 测量时，可以使用报告实际引用、已由既有校验器验证的成功 Preview 执行回执；任意日志和当前文件哈希不能冒充执行证据。普通公开源码身份扫描不要求 Node 包配置，`package.json` 前提仍只由实际 Web 构建入口检查，不要求更换引擎。
-
-显式提交保留作者说明与证据指纹，通过现有原生 `thread/goal/set` API 记录真实 complete，再关闭当前执行及所属进程，无需额外模型总结。BGS 保留 writer 直到清理确认，并复查提交时的来源、报告和产物；清理失败、用户暂停或结束过程中输入改变不会结算为成功。自然调用 `update_goal(complete)` 的现有路径仍等待最后输出。提交只表示代理声明完成且现有证据校验通过，`quality: unverified`、`deliveryEligible: false` 保持独立；缺失的语义覆盖和实际体验不会由宿主推断成通过。
-
-Preview 的 `--request <stable-id> --run <script> [args...]` 复用现有测量工具的请求幂等约定：请求身份限定在当前 run/attempt，记录脚本、完整 argv、超时与已有来源/工具身份。同一请求只预约并执行一次，重复读取已保存回执；相同 key 携带改变的输入报冲突，失败、中断或未完成记录不自动重放。预约以一次性独占创建保存，并发失败方不会启动第二个检查。新 attempt、新检查或明确重新采样可使用新请求；旧的无 key `--run` 保持每次实际执行。返回 `reused` 是历史观察，不是重新验证浏览器当前状态，也不证明稳定性。
-
-验证边界：这些改动不检测任意 Shell 命令，也不保证代理主动提交交付。无 key、新 key 或新的检查仍可能重复；重复调用即使复用回执，模型调用本身的 tokens 也不会因此消失。没有正式提交时，原有无预算、单次 native turn 三次相同成功检查仍 active 的反例继续成立，不用 token/次数/时间阈值替代完成依据。离线真实链使用 shipped BGS binary、真实 Node 适配器、同一请求两次检查及显式提交，验证一次实际检查、一次脚本化 Responses 请求、无额外总结请求、完整需求保留和 writer/进程清理；不评价真实模型质量或实际节省比例。
-
-离线回归位于 `src/bgs/goals.native.test.ts`、`goal-runtime.native.test.ts`、`runner.test.ts` 和 `src/beegame/workflow-v3/agent-goal.test.ts`（相对 `packages/agent-workflow-server`）。原生测试只连接本机脚本化 Responses 服务；验证生命周期、上下文、跨回合权限与用量；包含真实 BGS executor → SessionManager → 原生 Goal 的无预算创建、完成和暂停记账。不评价真实模型产物质量或实际节省比例。CLI、前端和压缩实现不在此改造范围内。
+BGS 托管 Vite 在 macOS Seatbelt 内使用 Vite 内置 polling watcher，使编辑后的源码和导入内容在新页面请求时更新；其他环境沿用 Vite 默认监听。服务器常驻代码或配置变更仍使用已有 `/preview/restart`；production 只服务已有构建，不自动重建。该兼容仅覆盖 BGS 托管开发预览，不会改写 Agent 自启服务器配置或扩大原生权限。
 
 ## 单 GDD 设计来源
 
-BGS 的设计来源统一为 `docs/GDD.md`。写作按当前章节展开：读取对应专业 Skill 及当前决定需要的引用，把规则与边界、空间/交互、视听表现、资源表示和技术接口写到足以指导当前部分制作，再推进其他章节。章节顺序由实际依赖决定，已在上下文中的指导继续复用，不因完整游戏任务而预读全部生产 Skills，也不预设八份文件或固定大阶段。同一事实在所属章节定义，其他章节引用；未生产输入保留计划状态，实际输入变化时修订相关设计。
+项目需要保存设计时，现有 GDD 来源为 `docs/GDD.md`；内容、结构和深度由当前任务决定。完整游戏不必先生成 GDD。明确的 GDD 委托继续使用现有只读审核与返修；审核复核只接收当前正文、有效需求、待解决问题和作者回应，不继承前轮审核推理历史。
 
-选定的设计图为资源和 Scene/UI 制作提供主体、构图、比例及状态差异。资源章将当前画面的必要表现转成可独立控制的资源或已选程序化表示，UI 使用这些输入制作，并在现有运行时检查中对照相同状态的设计图。完整参考板不是运行时 UI，沿用配色或通过 JSON/几何检查也不证明还原了设计。此约束不新增审批阶段、机器索引或固定资产制作方式。
+选定图片的实际路径和哈希通过现有选图／交接记录保留，不要求回写 GDD，也不把参考图登记成运行资源。实际资源沿用 Manifest 的文件、来源和依赖记录。已有 GDD 和选图用于实现；只有真实设计矛盾或用户授权变更才修订设计，不能靠回写设计接受实现偏差。
 
-当前设计问题和实现结果使用已有计划/进度记录表达，记录所属章节、未决依赖及剩余完整目标。先完成影响下一步的推导、计算和落盘，再开始依赖它的生产；不新增章节状态机、逐章审批或独立任务库。授权设计工作中，选定图片、资源表示和文字决定在所属 GDD 章节收敛；纯参考图任务仍保留原设计，图片瑕疵不授权修改确认需求。截断的来源和观察结果应读取已保存内容补全，不能把片段当作全部输入，也不为找遗漏文本盲目重跑。
-
-现有交付报告支持 `verification.visualComparisons`（request/非编辑内容可选，editable Scene/UI delivery PASS 必需）：每条记录 `state`、`sourcePath`、`observationPaths`、`status`（`matched`/`different`/`unverified`）和 `differences`。源设计与观察必须分别引用现有 `evidencePaths` 中的不同文件，复用原证据路径、哈希与测量绑定。`matched` 要有观察且无声明差异；`different` 要有观察和差异；`unverified` 可无观察但须写明缺口。delivery 的 PASS 不能带有已声明的差异或未验证项，request 报告可保留局部未完成结果。未要求视觉交付的读取仍兼容缺省此字段的旧报告，缺省不等于视觉已验证。宿主只结构校验文件路径及扩展名、状态、差异声明和证据绑定，不判断画面语义或像素级一致；完整行为与视觉覆盖仍需实际观察。
-
-离线原生链回归复用真实 CLI、Preview 回执与显式交付入口：分别提交含视觉差异和缺少观察的合成报告，确认均被拒绝；再确认无差异记录经过 CLI 保留且 `quality` 仍为 `unverified`，交付结束后不追加 Responses 请求。该夹具验证字段传递和交付判定，不验证真实模型能按章节推导或还原画面，也不修改测试项目产物。
-
-共享文档身份、审查反馈、交接、实现读取、UI/Scene 来源、计算溯源、权限保护和发布简介均使用 GDD。删除八文档写作顺序、兄弟文档齐备判断及技术文档收口分支。普通 GDD 不需要机器索引；已有可选索引的完整性检查继续保留。Manifest、实际 Scene/UI 内容与进度记录仍承担各自职责。
-
-此改造不自动转换或删除已有项目文档，不重写已有项目 `AGENTS.md`。历史项目继续使用前需要通过正常授权的项目流程确认其当前 GDD，不能将系统代码改动视为已迁移历史产物。离线契约和集成检查用于验证系统链路，不能替代真实设计质量、资产听感或游戏试玩验证。
+普通 GDD 不需要机器索引；已有版本、可选索引和历史交接仍按原格式读取并校验。系统更新不覆盖已有项目文档或 `AGENTS.md`，也不把代码检查、模型声明或单次测试通过当作真实游戏验收。
 
 ## 本地构建和验证
 
@@ -313,14 +292,14 @@ ChatGPT 重复接入本轮只分析，未修改调用路径。它不会自动把
 
 BGS 从当前 CLI 的 `debug models --bundled` 读取完整内置目录，通过现有 provider bridge 的鉴权 GET 地址交给 `model_providers.bgs.model_catalog_url`。目录和推理请求复用监听器、会话 capability 与清理流程；目录请求不访问供应商、不产生模型用量。ChatGPT 订阅入口不注入此目录。
 
-内置条目保持原样。未收录的当前模型使用 BGS 包内的 `fallback-model.json`，它镜像当前 0.166.0 的未知模型默认描述，不代表已验证的供应商能力；上下文仍为 272000、有效比例 95%。升级 CLI 时用本地 native catalog 回归核对默认描述、Skill 指引、工具和提示词。不使用 `model_catalog_json`，也不在 BGS 中裁剪原生提示词。
+只透传当前选定模型的真实内置条目，不改写元数据或提示词。未收录模型返回空目录，明确选定的模型 ID 仍传给原生线程，由当前 CLI 自行解析未知模型默认描述；BGS 不保存基础提示词副本，也不把默认容量或能力伪装成已核实的目录条目。原生审批找不到专用审核模型时仍按原有规则使用父模型。升级 CLI 时用本地 native catalog 回归核对默认描述、Skill 指引、工具、审批与冷恢复。不使用 `model_catalog_json`，不裁剪原生提示词或图片历史，也不改写自动压缩阈值。
 
 
 ## 2026-10-27：验收结果与执行停止分离
 
 `BgsFinishDelivery` 与兼容的 `measure.mjs --finish` 共用现有报告读取及提交路径。有效 `passed` 报告继续要求当前需求、构建／运行证据、资源与可编辑内容检查及清理后的来源一致性；被校验拒绝的 PASS 不能自动转换成停止请求。显式 delivery 范围的 `blocked`／`failed` 报告可以提交并将原生 Goal 设为 `blocked`，无需为了说明阻塞再构建或制造成功证据。报告须保留阻塞原因、剩余范围及所需外部行动；宿主仍等待所有任务和工具清理、核对提交字节，释放 writer 后保留 blocked 原因，不自动重派、不标记完成。无效报告、错误需求版本、取消请求、未退出的子任务仍拒绝提交。
 
-报告的 `knownIssues` 与 `unverified` 继续阻断 PASS。`coverageLimitations` 保存工具覆盖边界；若边界导致必需观察缺失，缺失项仍须保留在 `unverified`。既有 `outsideScope` 保存范围外工作和交付后的主观试玩问题。视觉 `different` 默认仍阻断；仅在已有实际观察且不违反确认需求时可附 `nonBlockingReason`，保留差异及范围依据。这个字段不抵消其他缺陷、缺失证据或失败检查，也不代表宿主认证了语义判断；错误分类仍是代理判断风险。
+报告的 `knownIssues` 与 `unverified` 继续阻断 PASS。`coverageLimitations` 保存工具覆盖边界；若边界导致必需观察缺失，缺失项仍须保留在 `unverified`。既有 `outsideScope` 保存范围外工作和交付后的主观试玩问题。视觉 `different` 一律阻断交付 PASS；历史 `nonBlockingReason` 只保留原文，不再具有自行豁免效力。比较目标是选定设计与用户明确授权的变更，不是逐像素一致；保留设计意图的真实文字和响应式适配可以判为 matched，未解决偏差不能靠改标签或回写 GDD 消除。同主题、信息齐备或回写 GDD 不足以解释构图退化、形体失真与空间关系错误；这些属于待修复实现问题，不能归为个人偏好。已有视觉交接的图片路径与哈希同时用于测量预检、只读验收和终端提交；GDD 当前版本只证明证据新鲜度，不批准更换选定图片。用户明确的文字变更沿用现有需求授权；仅在授权替换选定图片时，沿用原视觉交接保存新来源，不要求为文字变更重新生图。未记录视觉交接的历史项目不凭当前文件补造来源。宿主仍不认证 matched 的语义判断；漏报或错误分类仍是代理判断风险。
 
 实现目标、生产任务、项目指南和执行 Skill 使用相同结束边界：按确认范围实现，复用未变化输入的有效证据，在已有进度记录保存完成项和证据路径，只重验受影响行为与集成。没有新增阶段、审查调用、重试或自动 token 上限。验证使用离线合成输入；未以现有生成项目的通过或改写证明修复。
 
@@ -370,17 +349,19 @@ BGS 从当前 CLI 的 `debug models --bundled` 读取完整内置目录，通过
 
 作者完成候选 GDD 后提交原有 ready/blocked 小结果。ready 现在是申请审计，不再直接交接：宿主等作者原生回合结束后，在同一个 app-server 内启动独立 thread，传入当前已确认需求和宿主计算的文件路径、哈希。独立 thread 不继承作者历史、推导、摘要或作者的专业 Skill 正文，沿用用户选定模型及推理设置、原生基础上下文和项目只读沙箱。禁用 MCP、网页搜索、Goal 和多 agent 工具，不注册项目写入工具；审计指令限制为需求、GDD 及只读计算。审计期间拒绝旧作者回合的迟到写入。原生基础上下文及项目读取权限仍存在，不将指令层的阅读范围描述成逐文件读取隔离。
 
-审计聚焦已确认要求、关键规则和推导、实现必需的设计前提，不要求提前完成后续视觉、资源、实现职责。2026-10-28 实测后取消报告中的 blocking/advisory 二选一：正式 findings 只列必须处理的实质缺陷，每项都阻止交接；措辞和可选改进不进入报告。审计给出定义、反例和影响，不代写替换正文或推荐答案。数值反例需要来源、作用对象和条件，不能以模型判断充当证明。
+生成职责按完整决策归属：影响行为的数值、单位、条件和例外关系保留在同一所属定义中；数值设计计算和调整该定义，技术设计引用它并补充实现决策。其他章节只补充自身决策，示例是派生用途，不另立规则。八项设计职责保留，不要求八套独立正文；使用现有单个 Markdown GDD、保存和原子编辑工具，不新增参数文件、规则 ID 或依赖图。
 
-有发现时回到原作者一次。作者保留现有 WriteProjectFile/EditProjectFile 工作文档能力，核实定义、计算适用关系，集中修改受影响内容；最终小结果只增加 reviewResponses，按初审发现的 1-based 序号逐项给出 corrected/rejected/unresolved 和证据。接受和驳回均需要依据，笼统的“全部核验”不再足够。宿主检查对应关系完整、没有重复或未知序号；作者仍有 unresolved 时直接保留草稿，不浪费一次复核。其余情况复用同一个审计 thread，传逐项依据而非作者总括摘要，核对当前文档与受影响关系。复核逐项返回 resolutions，必须覆盖所有原发现；原发现可以被证据推翻，不能靠下一份报告中消失就视为解决。修订引入的实质缺陷也列入 findings。初审发现只使用原数组序号，不引入跨任务问题跟踪器。
+审计聚焦已确认要求、关键规则和推导、实现必需的设计前提，不要求提前完成后续视觉、资源、实现职责。在同一次完整阅读及定向核查中，将定义、用途和推导一起检查，先确认输入关系一致，再执行能够检验关键结论的最小计算。定义导向不同行为时报告冲突，仅暂停依赖该输入的计算，继续其他独立检查；示例结果相同不能消除规则冲突。2026-10-28 实测后取消报告中的 blocking/advisory 二选一：正式 findings 只列必须处理的实质缺陷，每项都阻止交接；措辞和可选改进不进入报告。审计给出定义、反例和影响，不代写替换正文或推荐答案。数值反例需要来源、作用对象和条件，不能以模型判断充当证明。
 
-宿主将报告、原生 thread/turn ID、起止时间、文档哈希、作者摘要及逐项响应保存在当前 agent turn 的 designReviews，通过既有 Agent 工具事件展示活动。最终交接要求来源匹配、原发现有完整处置与复核记录、没有遗留发现或 unresolved。限制仍为一次完整审计、一次集中修订、至多一次定向复核；报告无效、版本变化、失败或取消时保留草稿，不自动重试。历史收据不改写或补跑；新契约用于新执行的设计任务及未完成设计的恢复，普通后续编辑入口保持不变。
+有发现时回到原作者，在同一个设计任务内继续定向修订。作者保留现有 WriteProjectFile/EditProjectFile 工作文档能力，计算前核对受影响的所属定义及用途，在定义源头修正并同步依赖引用和结论，使用原有原子工具集中修改；最终小结果只增加 reviewResponses，按当前修订清单的 1-based 序号逐项给出 corrected/rejected/unresolved 和证据。接受和驳回均需要依据，笼统的“全部核验”不再足够。宿主检查对应关系完整、没有重复或未知序号；作者明确返回 blocked 才按缺少输入或决策保留草稿；ready 中的逐项 unresolved 仍交独立复核，避免把作者的不确定直接当成阻塞。复用同一个审计 thread，传逐项依据而非作者总括摘要，沿用先核对定义再计算的方法，核对当前文档与受影响关系。复核逐项返回 resolutions，必须覆盖当前清单；原发现可以被证据推翻，不能靠下一份报告中消失就视为解决。复核 findings 只列新增实质缺陷，原问题是否解决由 resolutions 表达；宿主将 unresolved 与新增 findings 合为下一份清单并重新编号，不引入跨任务问题跟踪器。
 
-方案审计撤回了“一次性最终返回全文、宿主保存正文及批量补丁”的提案。该方式会丢失完整响应前的草稿保存机会，放大输出中断后的恢复成本，且不能约束一次模型响应内部的重复推理。继续保留边写边存、原子编辑、暂停后的草稿及原生会话恢复；最终结果不接收 document 正文。成本约束通过收窄工作职责实现：写作时就检查所属决策并保存必要推导，完整候选稿就绪即交审计，避免再逐章自审；修订仅处理列出的缺陷及依赖关系，使用已有批量编辑，不增加硬性写入次数、工具调用配额或强制终止机制。重复工作的实际减少尚未验证，不将这些指令当作确定性预算保证。
+宿主将报告、原生 thread/turn ID、起止时间、文档哈希、作者摘要及逐项响应保存在当前 agent turn 的 designReviews，通过既有 Agent 工具事件展示活动。最终交接要求来源匹配、原发现有完整处置与复核记录、没有遗留发现或复核 unresolved。不再限制一次修订：首次完整审查后复用同一作者和审查线程做定向修订／复核。以历次最少待解决数量为进展基线，连续两次复核未改善基线才阻塞；允许修好旧问题后出现新问题并继续，数量来回波动不能重置基线。文件哈希变化、措辞变化或作者自称修正不计作进展。此规则是有限成本边界，不是语义进展证明；报告无效、版本变化、失败或取消时保留草稿，不自动重试。历史收据不改写或补跑；新契约用于新执行的设计任务及未完成设计的恢复，普通后续编辑入口保持不变。
+
+方案审计撤回了“一次性最终返回全文、宿主保存正文及批量补丁”的提案。该方式会丢失完整响应前的草稿保存机会，放大输出中断后的恢复成本，且不能约束一次模型响应内部的重复推理。继续保留边写边存、原子编辑、暂停后的草稿及原生会话恢复；最终结果不接收 document 正文。2026-10-29 澄清作者自查责任：在当前任务内核对已确认需求（含平台和引擎）、关键定义及用途、推导所依据的证据，修正实际缺陷并保存后再返回 ready；独立审查不能替代作者自查。保存必要推导，结论不超出证据，未验证项明确标注；复用有效证据，编辑后检查受影响的定义和用途。职责与必要检查完成后交审，不因可选扩写或措辞润色继续延长任务。独立审查后的修订仍围绕发现及依赖关系，使用已有批量编辑；不新增阶段、检查报告、调用配额或强制终止机制。是否减少重复工作、改善设计质量尚未验证，不将这些指令当作语义正确性或预算保证。
 
 本地验证使用合成临时项目、模拟 app-server 及真实原生 app-server 连接本地假 Responses/Chat Completions 服务。核查实质缺陷不能按 advisory 放行、逐项响应与复核不能缺项、误报可被有证据地驳回、修订新缺陷不能放行、上下文隔离、只读权限、回合身份、用量，以及暂停／失败后保留草稿并恢复。未调用付费模型、改动真实测试项目、前端或原生 CLI，也未重启现有服务；运行后端需按空闲检查规则重启后加载。沿用现有用量统计，不新增账本或预算框架。
 
-宿主只保证报告契约、执行与版本事实，无法程序化证明自然语言证据、缺陷范围或处置结论正确。模型仍可能漏检、给出虚假依据或错误宣称已修正；删除严重度开关和补齐逐项响应不能消除这些语义风险。本地模拟不证明真实发现能力、误报率、修订质量或 tokens／耗时收益，后续需另行授权的有限真实验证。
+宿主只保证报告契约、执行与版本事实，无法程序化证明自然语言证据、缺陷范围或处置结论正确。`nonBlockingReason` 的作者豁免已取消，历史声明保留；这关闭已声明偏差的放行路径，但不能防止作者漏报或错误标为 matched。本轮没有增加关键词过滤、额外审核或像素一致门禁，实际语义判断可靠性仍未解决。模型仍可能重复定义、漏读用途、漏检、给出虚假依据或错误宣称已修正；收缩生成职责和调整计算顺序旨在减少冲突机会与无效复算，实际效果尚未验证；删除严重度开关和补齐逐项响应也不能消除这些语义风险。2026-10-28 的本次调整替换现有契约，没有增加报告字段或引用解析器；初始任务、未完成设计的恢复、独立初审与同线程复核沿用共享契约。正在运行的进程及已有原生历史不会因源码修改自动刷新，真实测试项目及其历史产物不改写。本地模拟不证明真实发现能力、误报率、修订质量或 tokens／耗时收益，后续需另行授权的有限真实验证。
 
 
 ## Host execution boundaries (2026-10-28)
@@ -389,6 +370,101 @@ BGS supplies authorized scope, confirmed target, current capabilities and delive
 
 The project guide now owns durable source/evidence conventions; current final-result and delivery operations stay in task and tool contracts. Shared parallel guidance retains write ownership and cleanup boundaries without prescribing a detailed delegation procedure. Resource sourcing and visual production follow explicit user preferences, rights, selected designs and budget; no universal library/public/AI sequence, image-generation-only board or blanket procedural-art ban is imposed. Inspectable visual designs, required artwork and actual runtime evidence remain required where applicable.
 
-Independent GDD review remains read-only and source-bound, with at most one author revision and one targeted follow-up. Unsupported findings can be rejected with evidence and independently checked without changing the document. Unresolved findings still block handoff; the final error now includes the findings, reviewer resolutions and author responses for a concrete decision, rather than only a summary. No automatic override, extra reviewer or retry is added. Structural validation cannot prove semantic correctness; this change does not claim to eliminate model mistakes.
+Independent GDD review remains read-only and source-bound. Unsupported findings can be rejected with evidence and independently checked without changing the document. Remaining and new findings return to the same author while the outstanding count improves; two consecutive rechecks without improving the best count end as a preparation blocker. Detailed findings, resolutions and author responses stay in designReviews and native history, not in a runtime-error message. Structural validation cannot prove semantic correctness or detect a false claim of resolution.
 
 Existing project AGENTS.md files and generated artifacts are not rewritten. The shorter guide applies to new initialization; existing native histories may retain prior guidance. No service restart or paid run is part of this adjustment. Offline and scripted native tests validate contracts and loading behavior, not live quality, latency or monetary savings.
+
+
+### GDD revision continuation and context cost (2026-10-28)
+
+Expected preparation blockers (explicitly declared missing input or decision, or repeated lack of net review progress) use ProductionBlockedError. Session execution ends with turn.completed / production_blocked; the workflow remains blocked, preserves its draft and reason, and releases the writer after cleanup. Invalid reports, source races, provider failures and cancellations retain their failure/interruption paths. No stage advances with outstanding findings; no new model call is scheduled after blocking.
+
+Reasoning settings retain their original behavior for all stages. The proposed GDD-only low default was removed at the user's request; explicit settings and provider defaults are not changed to reduce tokens. Existing evidence showed 6,913,220 tokens including 6,397,312 cached inputs, with 32 model requests after the first full save. These historical counts do not measure savings from source changes.
+
+The review assignment carries the saved source path and SHA-256, not the GDD body. The unbounded full-text injection was removed after review: a body added once is replayed as native conversation history on later requests, and the first request had no document-size/context boundary. Complete-source transfer tests with synthetic usage do not prove context affordability. Native loopback reproduction confirmed the original large source remained in every inspected review request even after the saved file had become short. The tool.started event also retained that full prompt; the source-pointer prompt avoids this extra event copy.
+
+Review continues through existing read-only tools and their output limit, with the complete candidate read in bounded ranges and affected definitions revisited as needed. This does not certify that a live model will avoid redundant reads. The reviewer still disables its unused native Skills catalog; the author catalog and reasoning settings remain unchanged. No new cache, tokenizer estimate, pagination tool, forced compaction or provider-history stripping was added.
+
+The additional EditProjectFile self-check sentences were removed. They changed prompt wording only; no evidence established that missing tool wording caused the observed repeated self-checks or that the addition reduced calls. The original atomic edit contract remains. Repeated author self-review remains unresolved: observed post-save work mixes real corrections and wording/formatting passes. Do not claim it has been fixed, remove necessary verification, or add another checklist/quota without a demonstrated cause.
+
+Regression coverage includes second/new-defect revisions, three improving revisions, count oscillation, retained unresolved findings, current-list coverage, expected blockers versus failures, and local native Responses/Chat Completions continuations. Real model quality, false findings, actual token savings and long-run latency remain unverified. This change does not restart services or alter historical test projects.
+
+
+Local context-cost review validation checks that large GDD content stays out of initial and follow-up user prompts and Agent event inputs; bounded file reads still work; source version checks, reviewer isolation, unchanged reasoning settings and multi-round revision behavior remain intact. Earlier full-source transfer assertions were replaced rather than used as a cost acceptance criterion. No service restart, paid rerun or generated-project edit was performed.
+
+
+## 模型请求耗时诊断
+
+现有 provider bridge 为每个已鉴权推理请求输出单行 `[model-request]` JSON，覆盖原生 Responses（含 compact）及 Chat Completions、Anthropic、Gemini 转换入口。`requestId` 关联 received、upstream-started、upstream-headers、finished；可选 `sessionHash` 是 BGS sessionId 的 SHA-256，便于与已知会话对应而不输出原始身份。目录读取和鉴权拒绝不生成推理记录。
+
+`startedAt` 是桥接处理器接纳请求的 UTC 时间，时间偏移均以该时刻的单调时钟计为毫秒：`bodyParsedMs` 包含接收请求体和 JSON 解析，`upstreamStartMs - bodyParsedMs` 包含准备、协议转换和序列化，`upstreamHeadersMs - upstreamStartMs` 包含上游请求传输、网络和服务端等待。`requestBytes` 为实际交给传输层的 JSON UTF-8 字节数，排除 HTTP 头、压缩和网络封装；只计数一次，不另存正文或再次序列化。Native 发起到桥接处理器接纳之间的耗时不在此计时范围。响应头前等待不能直接解释为模型推理、排队或上传耗时，仍需结合上游证据。
+
+finished 保留最终 elapsedMs、已有阶段字段、取消信号和结束原因（body-ended、body-error、cancelled、request-error、no-body），在同一请求清理路径上只记录一次；未到达的阶段不填零。body-ended 仅表示桥接输出流读至 EOF，可能包含 HTTP 错误或协议内 response.failed，不代表模型任务成功、用量完整或内容验收。关闭桥接与取消沿用原有行为，不新增重试、后台任务或模型调用。记录固定字段，不输出模型名、URL、凭据、原始响应头、错误正文、提示词、图片或推理内容；HTTP 错误的脱敏字段见下节。ChatGPT 订阅直连不经过该桥接层，因此不在覆盖范围。
+
+本地脚本化供应商测试核对 Unicode 请求的实际字节数、延迟响应头与未结束流的分界、原生透传及协议转换、HTTP/解析失败和取消的记录与清理。该诊断补丁补足归因证据，不声称已经降低真实 tokens 或耗时；生产证据需在加载补丁后的正常获授权运行中取得。
+
+
+## 模型 HTTP 错误诊断（2026-10-29）
+
+HTTP 失败现在在同一条 `[model-request]` finished 记录内增加 `error`：覆盖 Chat Completions、Anthropic、Gemini 转换入口及原生 Responses（含 compact）。本轮补足实际 429 路径丢失错误原因的诊断缺口，不修改重试次数、恢复策略或模型选择。
+
+保留的信息有明确来源：
+
+- `type/code/param`：从嵌套 `error` 或 OpenCode 顶层错误对象读取已知协议标识，包括 GoUsageLimitError、insufficient_quota、rate_limit_exceeded、invalid_request_error。未知值不复制。
+- `messageCode/messageReason`：只从已知错误前缀提取允许列表中的代码或固定原因标签，如 weekly_usage_limit、output_token_rate_limit、endpoint_unavailable。它们是供应商文字证据，不是自动决策，也不确定限制属于用户账户还是供应商账户。完整 message、其中的 URL、账户和请求内容不会记录。
+- `error.requestId`：仅接受 x-request-id / request-id 或正文 request_id 的 UUID、req_ 格式关联 ID；外层 requestId 仍是 BGS 本次桥接 ID。
+- `retryAfter`：Retry-After 中的整数秒数或规范 HTTP 日期。`rateLimits` 仅接受 x-ratelimit 的 requests/tokens limit、remaining 数值及受限 reset 时间格式。其他响应头、Cookie、凭据不记录。
+- `bodyStatus`：parsed、empty、invalid、too-large、incomplete，说明是否取得可解析的完整错误对象。parsed 不等于已经知道原因；只有 429 或 inference_failed 时，仍不能判断额度、速率或容量限制。
+
+转换入口保留原有 16 KiB 读取上限和 2 秒诊断期限；即使正文损坏、超大或中断，安全响应头仍可记录。原生 Responses 仅在既有输出流中观察最多 16 KiB，不克隆响应或新增等待，原始字节、响应头和原生错误处理保持原样；这里的脱敏约束针对新增宿主日志，不声称改写了原生执行器自己的日志。此节只覆盖 HTTP 失败，不扩展 HTTP 200 内的 SSE 错误处理，也不覆盖 ChatGPT 订阅直连。
+
+本地验证：71 项协议／安全／桥接回归及 4 项原生执行器接本地模拟供应商的回归通过；核对错误原因、日志脱敏、读取中断与上限、Responses 透传以及每次失败仅有一个上游请求。没有真实模型调用、重跑项目、修改项目产物或重启运行中的服务。未保留的历史错误正文无法由该修改补回；新字段需在加载本版代码后的请求中产生。
+
+
+## 启动前失败后的新请求（2026-10-28）
+
+宿主接单并记录 turn.started/user.message 后，Git 或运行配置检查仍可能在进入原生 runner 前失败。SessionManager 在进入 runner 前通知该次原始调用方；executor 只在未越过这个边界且自有能力清理完成后记录 notStarted。宿主 turnId 不再被误当作原生已经执行的证明；无原生用量和不可改写的退出事实约束保留。进入 runner 后的错误不能被归类为未启动，缺少 ID 或零用量也不是判据。
+
+未启动请求之后的新消息不重放旧请求。存在原生基线时校验并继续该基线；明确 focused 的新工作只要求上次工作已结束且确认退出，不要求一个旧原生 ID。若此前明确选择 focused、执行失败且尚未绑定原生 ID，下一条普通用户消息保留这个尚未完成的上下文选择；显式 resume 不被覆盖。既有失败记录不补造 notStarted，也不改写会话 ID。跨项目历史、旧会话基线丢失、活跃 writer、清理失败、过期授权和重复请求的保护继续生效。
+
+针对首次启动、已有会话、focused 和旧版缺少 notStarted 的失败记录做隔离回归；模拟 Git 故障修复后，普通 Chat 新消息可以执行，失败历史不变、重复请求不重复执行。云端迁移暂缓；工作流存储位置、前端和 CLI 未改。
+
+
+## 游戏视觉方法与实现边界（2026-10-28）
+
+共享项目指导、美术/UI/资源 Skills 和 GDD 职责描述现在要求从玩家活动、感知、输入及美术方向推导画面，说明初始布局和资源表示法的依据，区分作者提案与确认要求。UI 可以支持世界，也可以承担主要玩法；不规定场景占比、面板数量或按类型套用布局。
+
+视觉方法以具体游戏局面中的构图、造型、字体、图标、材质与关键状态为对象，复用适合的设计或实际创作。原有将 HTML/CSS 并列为常规视觉起点的引导已替换；代码或目标引擎原型用于当前授权范围内明确的输入、时序、镜头或空间问题。美术完成度、交互证据与运行验证分别判断。已有 HTML 观察入口、参数、诊断和 quality: unverified 语义保留，工具帮助只解释如何观察已有设计/原型。Web/React 运行时指引明确以实现授权为前提，不决定美术风格。
+
+普通消息、阶段任务和 focused 执行继续走原有原生项目指导/Skill 目录及工具上下文链，不新增提示注入层、审美审查 Agent、自动评分或付费重试。项目指导模板只用于新建文件，已有 AGENTS.md 和 GDD 不自动覆盖；旧会话已经读入的内容也不会被文件修改追溯替换。更新后的服务上下文和重新读取的 Skill 才能提供新指引。此修改不改变平台/引擎选择、交付 schema、前端或测试项目产物，也没有重启服务或发起真实模型任务。
+
+验证使用现有本地回归、原生 CLI 的模拟 Responses 服务、临时合成项目与浏览器。它们能验证指导传递和接口行为，不能证明真实生成的审美、玩法或成本已改善；仍需后续独立授权的实际观察。
+
+
+## GDD 改进提议审计后的收窄（2026-10-29）
+
+本地 GDD 的定义冲突、情境与规则脱节、估算越界支持改进质量，但不能证明专业章节组织就是根因，也不能由混合流程版本、完成状态和后续修订的样本计算当前系统缺陷率。公共设计资料用于选择合适的方法，不构成固定目录、篇幅、配图或原型阶段的依据。
+
+本次替换既有指导中的三处表述：设计任务要求说明体验、范围和代表性局面，阅读次序与深度由当前游戏和任务决定；任务和共享项目指南一致限定延后细节的边界，当前定义或判断约定行为所必需的细节不能仅按专业或阶段推迟；数值 Skill 允许限定或移除无依据的结论，同时保留其背后的要求与证据缺口。作者自查、完整规则、按需图表、已有独立审查和交接校验继续沿用，不增加提示层、流程、字段、固定检查表或付费实验。
+
+主任务指导覆盖新设计与未完成设计的恢复；共享项目指南模板只影响新建指南，不覆盖已有项目文件，数值 Skill 在后续实际读取时生效。验收关注确认需求、同一情境下行为是否一致、例子与结论的依据、下游是否需猜测关键决定，并结合实际耗时和用量；篇幅、目录、单元测试或模型审查通过均不单独证明改进有效。修改只澄清方法及边界，真实生成质量和成本效果仍未验证。
+
+
+## 已完成准备任务后的当前契约刷新（2026-10-29）
+
+实际项目中，普通后续消息已进入新回合，确认需求快照也包含用户明确进入下一项工作的请求，宿主没有重新绑定 GDD finalOutput。新回合的文件权限已恢复到普通任务范围，但原生历史保留了准备任务的开发者指令；此前刷新仅包含 systemContext，遗漏了独立于该字段的文件写入说明，也没有明确清除准备任务的 JSON 返回要求。模型因此仍返回旧状态对象，并援引初始的单次任务范围拒绝后续显式授权。单独“继续”不足以推断扩展范围；明确的新工作请求应按当前授权处理。
+
+适配层将任务范围解释、文件写入说明、当前工具/任务上下文和最终结果要求统一放进已有 bgsRuntime 分片。新建会话基线、普通恢复和 Goal 恢复注入复用同一构造函数；普通后续任务明确无准备任务 JSON 契约，准备任务保留自己的 schema。确认简报是用户要求及后续请求的记录，较晚的显式请求可以改变当前工作范围，原任务停止点不永久禁止新任务；无关要求及固定平台/引擎约束仍保留。沿用现有历史、权限与交接机制，不清空会话、不自动推进阶段、不修改项目状态或重发失败请求。
+
+原生回归改为同时核查实际供应商输入中的当前契约、同一会话恢复及真实文件权限，避免只用假模型预设的普通答案证明切换成功。补丁前 Responses 和 Chat Completions 两项均因当前契约缺少写入说明失败；补丁后两项通过，并验证新任务可写普通文件而 Shell 仍不能越过宿主改写 GDD。另有232项已有 runner/workflow 本地回归通过。测试使用临时合成项目、本地原生运行时和脚本化 localhost 假模型，无付费调用；真实项目后续生成行为尚未重跑验证。
+
+
+## 生产任务绑定与阶段会话（2026-10-29）
+
+两条实际失败路径分别是：普通视觉请求经 implement 入口被宿主直接派发为实现；后续普通 message 没有 production，却复用了已进入实现的原生会话并直接写工程。仅调整交接函数无法覆盖第二条路径。
+
+对于 intake 已标识的新建生产项目，宿主根据已结束、已清理的 GDD／视觉／资源来源交接决定下一阶段。visual、resources、implement 入口表达本次请求终点，缺少的准备阶段先执行；视觉交接进入资源，资源交接进入实现。请求只到视觉或资源时在该阶段停止。已有／导入项目的局部实现不强套新建顺序。终点仍依赖 Agent 正确表达用户授权，宿主不通过关键词猜测自然语言意图。
+
+后续普通消息在启动运行器前关联现有生产任务及有效阶段，通过现有宿主事实传递，不再以 message 类型清空阶段。普通消息保留用户原文，不附加生产指令、不自动启动 Goal，也不强制提交准备任务 JSON；没有来源交接就没有阶段推进。原生恢复保留其原始回合类型。正式生产入口、阶段或任务改变时使用现有新上下文能力；同任务同阶段的续接保留原生会话。跨阶段保留原始需求和已完成阶段的实际文件指针，不携带助手对执行范围的概括。旧的越阶段记录仅用于诊断，新回合绑定缺失阶段并保守停在该阶段，不重写历史或自动重跑。
+
+复用现有 production、交接、CAS、暂停、清理和来源哈希机制，只有任务终点增加可选 stopAfter 字段；未增加分类／复核模型、通用提示词、Shell 权限规则、前端入口或项目专用逻辑。已有工具说明同步 action 合约。验证覆盖原生与脚本入口、零阶段工具调用的普通续作、旧实现会话隔离、同阶段中断恢复、普通问答以及交接受阻／变化／暂停；使用临时合成项目和本地假运行器，真实模型行为与内容质量未作复测。阶段绑定和来源交接不等于对模型所有文件操作的强制类型检查。
