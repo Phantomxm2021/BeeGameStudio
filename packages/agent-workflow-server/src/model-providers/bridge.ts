@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { createHash } from 'node:crypto'
 import { openCodeGoHeaders } from './requests'
 import { modelRuntimeFetch, MODEL_RESPONSE_TIMEOUTS } from '../beegame/model-runtime-transport'
 import {
@@ -9,39 +9,10 @@ import {
 import { createPinnedRuntimeFetch } from '../beegame/model-runtime-network'
 import { providerConfig } from './config'
 import { requestProvider } from './request'
-import { ProviderSseParser, ProviderSseError, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
+import { providerOutputBudget } from './output-budget'
+import { checkedLocalCompaction, nativeResponses, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
 import { safeErrorFacts } from '../security/safe-error-facts'
-import { ProviderHttpError } from './http-error'
-
-// Match the usage fields consumed by native and bgsUsage. Native discards
-// response.failed and content_filter usage, even when the fields are present.
-const tokenCount = z.number().int().nonnegative()
-const nativeUsageReceipt = z.object({
-  type: z.enum(['response.completed', 'response.incomplete']),
-  response: z.object({
-    id: z.string(),
-    incomplete_details: z.object({ reason: z.string().optional() }).nullish(),
-    usage: z.object({
-      input_tokens: tokenCount,
-      output_tokens: tokenCount,
-      total_tokens: tokenCount,
-      input_tokens_details: z.object({
-        cached_tokens: tokenCount,
-        cache_write_tokens: tokenCount.optional(),
-      }).nullish(),
-      output_tokens_details: z.object({ reasoning_tokens: tokenCount }).nullish(),
-    }),
-  }),
-})
-function hasNativeUsageReceipt(event: unknown): boolean {
-  const parsed = nativeUsageReceipt.safeParse(event)
-  if (!parsed.success) return false
-  const { type, response } = parsed.data
-  if (type === 'response.incomplete' && response.incomplete_details?.reason === 'content_filter') return false
-  const { input_tokens, input_tokens_details: details } = response.usage
-  // bgsUsage rejects cache subsets larger than the input count.
-  return (details?.cached_tokens ?? 0) + (details?.cache_write_tokens ?? 0) <= input_tokens
-}
+import { observeProviderHttpError, ProviderHttpError } from './http-error'
 
 export type ProviderNetworkOptions = {
   outboundTargetPolicyOptions?: OutboundTargetPolicyOptions
@@ -58,7 +29,9 @@ export async function startProviderBridge(
 ) {
   const config = { ...providerConfig(env), sessionId: options.sessionId }
   const policy = options.outboundTargetPolicyOptions ?? {
-    allowedHosts: (process.env.BEEGAME_OUTBOUND_ALLOWED_HOSTS ?? '')
+    allowTrustedDevelopmentProxy: process.env.NODE_ENV !== 'production' &&
+      process.env.BEEGAME_ALLOW_TRUSTED_DEVELOPMENT_OUTBOUND_PROXY === '1',
+    trustedDevelopmentProxyHosts: (process.env.BEEGAME_TRUSTED_DEVELOPMENT_PROXY_HOSTS ?? '')
       .split(',')
       .map(host => host.trim())
       .filter(Boolean),
@@ -73,9 +46,13 @@ export async function startProviderBridge(
     { provider: target },
     { tls: getTLSFetchOptions().tls },
   )
+  const metadataAbort = new AbortController()
+  const budgetFor = providerOutputBudget(config, request, metadataAbort.signal)
   const capability = crypto.randomUUID(),
     path = '/' + crypto.randomUUID() + '/v1/responses'
   const catalogPath = path.slice(0, -'/responses'.length) + '/models'
+  const sessionHash = options.sessionId === undefined ? undefined
+    : createHash('sha256').update(options.sessionId).digest('hex')
   const active = new Map<AbortController, Promise<void>>()
   let closing = false,
     closed: Promise<void> | undefined
@@ -83,7 +60,7 @@ export async function startProviderBridge(
     hostname: '127.0.0.1',
     port: 0,
     idleTimeout: 0,
-    maxRequestBodySize: 64 * 1024 * 1024,
+    // Use Bun's finite default: retained inline-image history can exceed 64 MiB.
     async fetch(incoming) {
       if (closing) return new Response('Closed', { status: 410 })
       const route = new URL(incoming.url).pathname
@@ -98,14 +75,28 @@ export async function startProviderBridge(
       if (incoming.method !== 'POST' || (route !== path && !compact))
         return new Response('Not found', { status: 404 })
       const abort = new AbortController()
-      let settleReceipt: (() => void) | undefined
-      let finish!: () => void
+      const started = performance.now(), startedAt = new Date().toISOString(), requestId = crypto.randomUUID()
+      let localCompaction = isLocalCompaction(incoming.headers.get('x-codex-turn-metadata'))
+      const timing: { bodyParsedMs?: number; upstreamStartMs?: number; upstreamHeadersMs?: number;
+        requestBytes?: number; httpStatus?: number; sentMaxOutputTokens?: number;
+        outputBudgetSource?: string; outputBudgetUnavailable?: string; budgetLookupMs?: number } = {}
+      const elapsed = () => Math.round(performance.now() - started)
+      let httpError: Readonly<ReturnType<typeof observeProviderHttpError>['details']> | undefined
+      let errorBody: ReturnType<typeof observeProviderHttpError> | undefined
+      // Fixed metadata and allowlisted HTTP facts only; never raw headers or payloads.
+      const trace = (event: string, details: Record<string, string | boolean> = {}) =>
+        console.info('[model-request] ' + JSON.stringify({ event, requestId, sessionHash,
+          protocol: config.protocol, operation: compact ? 'compact' : localCompaction ? 'local-compaction' : 'responses', startedAt,
+          ...timing, elapsedMs: elapsed(), ...details, ...(event === 'finished' && httpError ? { error: httpError } : {}) }))
+      trace('received')
+      let finish!: (end: 'body-ended' | 'body-error' | 'cancelled' | 'request-error' | 'no-body') => void
       active.set(
         abort,
         new Promise(resolve => {
-          finish = () => {
-            settleReceipt?.()
-            active.delete(abort)
+          finish = end => {
+            errorBody?.finish(end === 'body-ended' || end === 'no-body')
+            // EOF, cancellation and shutdown can converge on the same request.
+            if (active.delete(abort)) trace('finished', { end, aborted: abort.signal.aborted || incoming.signal.aborted })
             resolve()
           }
         }),
@@ -118,9 +109,11 @@ export async function startProviderBridge(
       }
       try {
         const body = await incoming.json()
+        timing.bodyParsedMs = elapsed()
+        localCompaction ||= isLocalCompaction(body.client_metadata?.['x-codex-turn-metadata'])
         const signal = AbortSignal.any([incoming.signal, abort.signal])
-        // Responses stays native (search, usage events and compaction included).
-        // Only its transport changes: DNS pinning and redirect policy are host-owned.
+        // Responses retains native inputs and opaque model data. The shared
+        // boundary normalizes empty tool explanations and records usage.
         const headers = new Headers(incoming.headers)
         for (const name of ['host', 'authorization', 'content-length', 'connection', 'cookie',
           'transfer-encoding', 'keep-alive', 'proxy-authorization', 'te', 'trailer', 'upgrade']) headers.delete(name)
@@ -129,45 +122,58 @@ export async function startProviderBridge(
           for (const [name, value] of Object.entries(openCodeGoHeaders(config))) headers.set(name, value)
         // Identify the real network boundary; conversion errors are local,
         // even when their exception has no recognizable code or HTTP status.
-        const requestUpstream = ((input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUpstream = (async (input: RequestInfo | URL, init?: RequestInit) => {
+          // All bridge routes dispatch serialized JSON; count UTF-8 bytes once,
+          // without serializing again or retaining another copy of the history.
+          if (typeof init?.body !== 'string') throw Error('Provider bridge requires serialized JSON')
+          timing.requestBytes = Buffer.byteLength(init.body, 'utf8')
+          timing.upstreamStartMs = elapsed()
           upstreamStarted = true
-          return request(input, { ...init, ...MODEL_RESPONSE_TIMEOUTS } as RequestInit)
+          trace('upstream-started')
+          const response = await request(input, { ...init, ...MODEL_RESPONSE_TIMEOUTS } as RequestInit)
+          timing.upstreamHeadersMs = elapsed()
+          timing.httpStatus = response.status
+          trace('upstream-headers')
+          return response
         }) as typeof fetch
-        const response = config.protocol === 'responses'
+        const outputBudget = async (fallback?: unknown) => {
+          if (compact || localCompaction) return undefined
+          if (body.max_output_tokens != null) {
+            timing.outputBudgetSource = 'request'
+            if (Number.isSafeInteger(body.max_output_tokens) && body.max_output_tokens > 0)
+              timing.sentMaxOutputTokens = body.max_output_tokens
+            return undefined
+          }
+          const model = body.model ?? config.model
+          const lookupStarted = elapsed()
+          const budget = typeof model === 'string' && model
+            ? await budgetFor(model) : { tokens: undefined, unavailable: 'model_not_selected' }
+          timing.budgetLookupMs = elapsed() - lookupStarted
+          timing.outputBudgetSource = budget.tokens === undefined ? 'provider-default' : 'provider-model'
+          timing.outputBudgetUnavailable = budget.unavailable
+          const sent = budget.tokens ?? fallback
+          if (typeof sent === 'number' && Number.isSafeInteger(sent) && sent > 0) timing.sentMaxOutputTokens = sent
+          return budget.tokens
+        }
+        if (config.protocol === 'responses' && !compact) {
+          const tokens = await outputBudget()
+          if (tokens !== undefined) body.max_output_tokens = tokens
+        }
+        let response = config.protocol === 'responses'
           ? await requestUpstream(config.baseUrl + '/responses' + (compact ? '/compact' : ''), {
               method: 'POST', headers, signal, redirect: 'error', body: JSON.stringify(body),
             })
-          : await requestProvider(config, body, requestUpstream, signal, onUsage, options.onToolError)
-        let observeReceipt: ((chunk: Uint8Array) => void) | undefined
-        if (config.protocol === 'responses' && !compact && body.stream === true && response.ok) {
-          let receiptComplete = false
-          const reportMissingReceipt = () => {
-            if (!receiptComplete && !usageReported) onUsage({ input_tokens: 0, output_tokens: 0,
-              cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 0, incomplete: true })
-          }
-          settleReceipt = reportMissingReceipt
-          const parser = new ProviderSseParser()
-          // Inspect synchronously before enqueue: native can cancel as soon as
-          // it receives completion. Keep native totals authoritative, including
-          // retries/children; the bridge reports only missing-receipt evidence.
-          observeReceipt = chunk => {
-            try {
-              for (const event of parser.feed(chunk)) if (hasNativeUsageReceipt(event)) {
-                receiptComplete = true
-                observeReceipt = undefined
-                break
-              }
-            } catch (error) {
-              if (!(error instanceof ProviderSseError)) throw error
-              observeReceipt = undefined
-              // Malformed upstream data stays byte-transparent; record the
-              // missing receipt instead of hiding it or replacing native errors.
-              reportMissingReceipt()
-            }
-          }
+          : await requestProvider(config, body, requestUpstream, signal, onUsage, options.onToolError, outputBudget)
+        // Observe native HTTP failures without changing bytes, headers or retry semantics.
+        if (config.protocol === 'responses' && !response.ok) {
+          errorBody = observeProviderHttpError(response)
+          httpError = errorBody.details
         }
+        if (config.protocol === 'responses')
+          response = await nativeResponses(response, body, onUsage)
+        if (localCompaction) response = await checkedLocalCompaction(response, body.stream === true)
         if (!response.body) {
-          finish()
+          finish('no-body')
           return response
         }
         const reader = response.body.getReader()
@@ -180,14 +186,14 @@ export async function startProviderBridge(
               try {
                 const chunk = await reader.read()
                 if (chunk.done) {
-                  finish()
+                  finish('body-ended')
                   controller.close()
                 } else {
-                  observeReceipt?.(chunk.value)
+                  errorBody?.append(chunk.value)
                   controller.enqueue(chunk.value)
                 }
               } catch {
-                finish()
+                finish('body-error')
                 controller.error(Error('Provider stream failed'))
               }
             },
@@ -196,15 +202,16 @@ export async function startProviderBridge(
               try {
                 await reader.cancel()
               } finally {
-                finish()
+                finish('cancelled')
               }
             },
           }),
           { status: response.status, headers: responseHeaders },
         )
       } catch (error) {
+        if (error instanceof ProviderHttpError) httpError = error.diagnostics
         abort.abort()
-        finish()
+        finish('request-error')
         // A request may have reached the supplier without returning headers or
         // a final receipt. Preserve known totals; zero here is only a delta.
         // Conversion failures before dispatch and already reported streams
@@ -249,6 +256,7 @@ export async function startProviderBridge(
     close() {
       return (closed ??= (async () => {
         closing = true
+        metadataAbort.abort()
         const pending = [...active.values()]
         for (const abort of active.keys()) abort.abort()
         server.stop(true)
@@ -257,4 +265,10 @@ export async function startProviderBridge(
       })())
     },
   }
+}
+
+/** This optional native metadata is classification evidence, not prompt text. */
+function isLocalCompaction(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  try { return JSON.parse(value)?.request_kind === 'compaction' } catch { return false }
 }

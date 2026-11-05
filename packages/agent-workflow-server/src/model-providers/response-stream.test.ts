@@ -1,12 +1,96 @@
 import { expect, test } from 'bun:test'
 import { nativeRequest } from './requests'
 import { requestProvider } from './request'
-import { parseSse, responseEvents } from './response-stream'
+import { checkedLocalCompaction, parseSse, responseEvents } from './response-stream'
 import type { ProviderConfig } from './config'
 
 const config: ProviderConfig = { protocol: 'chat-completions', baseUrl: 'https://fixture.invalid/v1',
   model: 'fixture', apiKey: 'synthetic', auth: 'bearer' }
 const sse = (chunks: unknown[]) => new Response(chunks.map(chunk => 'data: ' + JSON.stringify(chunk) + '\n\n').join(''))
+
+test.each([false, true])('local compaction validates the replacement before forwarding it (stream=%s)', async streaming => {
+  const message = (text: string) => ({ type: 'message', role: 'assistant',
+    content: [{ type: 'output_text', text }] })
+  for (const output of [[], [message('  ')], [message('<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="exec_command">')],
+    [{ type: 'function_call', name: 'exec_command', arguments: '{}' }]]) {
+    const receipt = { id: 'compact', status: 'completed', output, usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } }
+    const response = await checkedLocalCompaction(streaming
+      ? sse([{ type: 'response.output_text.delta', delta: 'Do not install this partial text' },
+        { type: 'response.completed', response: receipt }]) : Response.json(receipt), streaming)
+    const value = streaming ? (await Array.fromAsync(parseSse(response))).at(-1)!.response : await response.json()
+    expect(value).toMatchObject({ status: 'incomplete', output: [],
+      incomplete_details: { reason: 'invalid_compaction_summary' }, usage: receipt.usage })
+  }
+  const receipt = { id: 'valid', status: 'completed', output: [message('Artwork integrated. Earlier log contained <｜｜DSML｜｜ calls>; no regeneration remains.') ] }
+  const events = [{ type: 'response.created', response: { id: 'valid' } }, { type: 'response.completed', response: receipt }]
+  const accepted = await checkedLocalCompaction(streaming ? sse(events) : Response.json(receipt), streaming)
+  if (streaming) expect(await Array.fromAsync(parseSse(accepted))).toEqual(events)
+  else expect(await accepted.json()).toEqual(receipt)
+})
+
+test('local compaction keeps item-only summaries and existing failures, but rejects missing terminal events', async () => {
+  const item = { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Saved progress.' }] }
+  const events = [{ type: 'response.output_item.done', item }, { type: 'response.completed', response: { id: 'done', output: [] } }]
+  expect(await Array.fromAsync(parseSse(await checkedLocalCompaction(sse(events), true)))).toEqual(events)
+  for (const type of ['response.incomplete', 'response.failed']) {
+    const failure = [{ type, response: { id: 'upstream', status: type.slice(9), incomplete_details: { reason: 'max_output_tokens' } } }]
+    expect(await Array.fromAsync(parseSse(await checkedLocalCompaction(sse(failure), true)))).toEqual(failure)
+  }
+  for (const source of [sse([{ type: 'response.created', response: { id: 'unfinished' } }]), new Response('data: {broken\n\n')]) {
+    expect((await Array.fromAsync(parseSse(await checkedLocalCompaction(source, true)))).at(-1)).toMatchObject(
+      { type: 'response.incomplete', response: { incomplete_details: { reason: 'invalid_compaction_summary' } } },
+    )
+  }
+})
+
+test('cancelling local compaction cancels its pending upstream read', async () => {
+  let cancelled = false
+  const upstream = new Response(new ReadableStream<Uint8Array>({ cancel() { cancelled = true } }))
+  const guarded = await checkedLocalCompaction(upstream, true)
+  await guarded.body!.cancel()
+  expect(cancelled).toBe(true)
+})
+
+test('local compaction forwards real activity before completion without releasing unvalidated text', async () => {
+  let upstream!: ReadableStreamDefaultController<Uint8Array>
+  const source = new Response(new ReadableStream<Uint8Array>({ start(controller) { upstream = controller } }))
+  const reader = (await checkedLocalCompaction(source, true)).body!.getReader()
+  const send = (event: unknown) => upstream.enqueue(new TextEncoder().encode('data: ' + JSON.stringify(event) + '\n\n'))
+  const next = () => Promise.race([reader.read(), Bun.sleep(300).then(() => { throw Error('Compaction activity was withheld') })])
+  try {
+    send({ type: 'response.created', response: { id: 'compacting', status: 'in_progress', output: [] } })
+    expect(new TextDecoder().decode((await next()).value)).toContain('response.created')
+    for (const type of ['response.in_progress', 'response.reasoning_text.delta', 'response.output_text.delta']) {
+      send({ type, delta: 'PRIVATE_UNVALIDATED_TEXT', response: { id: 'compacting', status: 'in_progress', output: [] } })
+      const chunk = new TextDecoder().decode((await next()).value)
+      expect(chunk).toContain('response.in_progress')
+      expect(chunk).not.toContain('PRIVATE_UNVALIDATED_TEXT')
+    }
+    send({ type: 'response.completed', response: { id: 'compacting', status: 'completed', output: [] } })
+    expect(new TextDecoder().decode((await next()).value)).toContain('invalid_compaction_summary')
+    expect((await reader.read()).done).toBe(true)
+  } finally { await reader.cancel() }
+})
+
+test.each(['chat-completions', 'anthropic-messages', 'gemini'] as const)('%s local summaries use the same validation after protocol conversion', async protocol => {
+  for (const text of ['Saved progress; continue remaining work.', '<｜｜DSML｜｜ calls>unparsed command']) {
+    let calls = 0
+    const values = protocol === 'chat-completions'
+      ? [{ choices: [{ delta: { content: text }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } }]
+      : protocol === 'anthropic-messages'
+        ? [{ type: 'message_start', message: { id: 'fixture', usage: { input_tokens: 10, output_tokens: 0 } } },
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } }, { type: 'message_stop' }]
+        : [{ candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP' }],
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, totalTokenCount: 12 } }]
+    const converted = await requestProvider({ ...config, protocol }, { input: 'Offline', stream: false },
+      (async () => { calls++; return sse(values) }) as unknown as typeof fetch, AbortSignal.timeout(2000))
+    const result = await (await checkedLocalCompaction(converted, false)).json()
+    expect(result.status).toBe(text.startsWith('<') ? 'incomplete' : 'completed')
+    expect(calls).toBe(1)
+  }
+})
 
 test.each([
   ['chat-completions', [{ choices: [{ delta: { reasoning_content: 'PRIVATE_REASONING' } }] }]],
@@ -190,4 +274,51 @@ test.each([
   for await (const event of responseEvents({ ...config, protocol }, sse(chunks), [])) events.push(event)
   expect(events.at(-1)).toMatchObject({ type: 'response.incomplete',
     response: { status: 'incomplete', incomplete_details: { reason } } })
+})
+
+
+test.each(['heartbeat', 'split-event', 'empty-chunk'] as const)(
+  'native Responses keeps reading after a non-emitting chunk: %s', async first => {
+    const encoder = new TextEncoder(), receipts: unknown[] = []
+    const created = 'data: ' + JSON.stringify({ type: 'response.created', response: { id: 'native-fixture' } }) + '\n\n'
+    const completed = 'data: ' + JSON.stringify({ type: 'response.completed', response: { id: 'native-fixture',
+      usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } }) + '\n\ndata: [DONE]\n\n'
+    const chunks = first === 'heartbeat' ? [': keepalive\n\n', created, completed]
+      : first === 'split-event' ? ['da', created.slice(2, -1), created.slice(-1), completed]
+      : ['', created, completed]
+    const response = await requestProvider({ ...config, protocol: 'responses' }, {
+      stream: true, tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object' } }],
+    }, (async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+        controller.close()
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch,
+      AbortSignal.timeout(2000), usage => receipts.push(usage))
+    const reader = response.body!.getReader()
+    try {
+      const observed = await Promise.race([
+        reader.read(), Bun.sleep(300).then(() => { throw Error('Responses forwarding stopped after a non-emitting chunk') }),
+      ])
+      expect(new TextDecoder().decode(observed.value)).toContain('response.created')
+      let remaining = ''
+      while (true) {
+        const next = await reader.read()
+        if (next.done) break
+        remaining += new TextDecoder().decode(next.value)
+      }
+      expect(remaining).toContain('response.completed')
+      expect(remaining).toContain('[DONE]')
+      expect(receipts).toEqual([{ input_tokens: 10, output_tokens: 2, cache_read_tokens: 0,
+        cache_creation_tokens: 0, total_tokens: 12 }])
+    } finally { await reader.cancel(); reader.releaseLock() }
+  })
+
+test.each([false,true])('bodyless successful compaction rejects the summary in a readable protocol envelope (stream=%s)',async streaming=>{
+  for(const status of [204,205]) {
+    const response=await checkedLocalCompaction(new Response(null,{status}),streaming)
+    expect(response.status).toBe(200)
+    const value=streaming ? (await Array.fromAsync(parseSse(response))).at(-1)!.response : await response.json()
+    expect(value).toMatchObject({status:'incomplete',output:[],incomplete_details:{reason:'invalid_compaction_summary'}})
+  }
 })

@@ -39,3 +39,16 @@ export function defaultModelApiProtocol(provider: ModelProviderKind): ModelApiPr
     ? 'responses'
     : resolveModelApiProtocol(provider)
 }
+
+
+/** A URL path edit stays on the same credential recipient. Incomplete settings
+ * input cannot qualify for reuse; undefined URLs retain legacy default binding. */
+export function sameModelEndpointOrigin(previous: string | undefined, next: string | undefined): boolean {
+  if (previous === undefined || next === undefined) return previous === next
+  try {
+    const before = new URL(previous), after = new URL(next)
+    return before.protocol === 'https:' && after.protocol === 'https:' && before.origin === after.origin
+  } catch {
+    return false
+  }
+}

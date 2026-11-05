@@ -18,6 +18,7 @@ nativeTest.each([220_000, 250_000])('converted history uses provider context usa
   const prompts: number[] = [], events: any[] = []
   let failure: unknown, observedPrompt = 0, observedOutput = 0
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     try {
       if (new URL(request.url).pathname !== '/v1/chat/completions') throw Error('Unexpected local fixture route')
       const body = await request.json() as any
@@ -67,7 +68,10 @@ nativeTest.each([220_000, 250_000])('converted history uses provider context usa
           BEEGAME_API_PROTOCOL: 'chat-completions', OPENAI_API_KEY: 'fixture-only',
           OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-unknown-model' },
         onNativeSessionId: id => { nativeSessionId = id },
-        onNativeUsage: usage => { turnPrompt = usage.prompt_tokens; turnOutput = usage.completion_tokens },
+        onNativeUsage: (usage, _epoch, accounting) => {
+          if (accounting?.baselineOnly) return
+          turnPrompt = usage.prompt_tokens; turnOutput = usage.completion_tokens
+        },
         requestPermission: async () => ({ behavior: 'deny' }),
       })
       await runtime.submit({ prompt: resume ? 'Continue the synthetic fixture.' : 'Start the synthetic fixture.',

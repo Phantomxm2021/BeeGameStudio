@@ -5,6 +5,7 @@ import { toolAlias, mapTools, opaqueReasoning, conversation, UNKNOWN_TOOL_FEEDBA
 import type { ProviderConfig } from './config'
 import { startProviderBridge } from './bridge'
 import { providerConfig } from './config'
+import { providerOutputBudget } from './output-budget'
 import { parseSse } from './response-stream'
 
 const mockFetch = (respond: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch =>
@@ -503,7 +504,8 @@ test('the local bridge rejects browsers and missing credentials, and cancellatio
   const upstream = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    fetch() {
+    fetch(request) {
+      if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
       return new Response(
         new ReadableStream({
           start(controller) {
@@ -676,4 +678,67 @@ test('Go Responses sends native input and events unchanged with stable session h
   for (let i = 0; i < 2; i++) expect(await (await requestProvider(config, body, request, signal())).text()).toBe(wire)
   await expect(requestProvider({ ...config, sessionId: undefined }, body, request, signal())).rejects.toThrow('stable model session')
   expect(calls).toBe(2)
+})
+
+
+test('empty provider tool names stay rejected and resume with valid replay identities', async () => {
+  const raw = {
+    role: 'assistant', content: null, reasoning_content: 'synthetic-private-reasoning',
+    tool_calls: [
+      { id: 'bad', type: 'function', function: { name: '', arguments: '{}' } },
+      { id: 'good', type: 'function', function: { name: 'probe', arguments: '{"value":1}' } },
+    ],
+  }
+  const tools = [{ type: 'function', name: 'probe', parameters: { type: 'object' } }]
+  const response = await (await requestProvider(base, { tools, input: 'Synthetic' },
+    mockFetch(async () => sse([{
+      choices: [{ delta: { ...raw, tool_calls: raw.tool_calls.map((call, index) => ({ ...call, index })) }, finish_reason: 'tool_calls' }],
+    }])), signal())).json() as any
+  const rejected = response.output.find((item: any) => item.call_id === 'bad')
+  expect(rejected).toMatchObject({ namespace: 'bgs_provider_errors', name: 'unknown_tool' })
+  expect(JSON.parse(rejected.arguments).error).toContain('length=0;')
+  expect(response.output.find((item: any) => item.call_id === 'good')).toMatchObject({ name: 'probe' })
+  // A stopped session reloads these same native items plus opaque provider data.
+  const input = JSON.parse(JSON.stringify([
+    ...response.output,
+    { type: 'function_call_output', call_id: 'bad', output: 'unsupported call: bgs_provider_errorsunknown_tool' },
+    { type: 'function_call_output', call_id: 'good', output: 'actual result' },
+  ]))
+  const stored = JSON.stringify(input)
+  const resumed = nativeRequest(base, { tools, input })
+  if (!('messages' in resumed.body)) throw Error('Expected chat messages')
+  const identity = toolAlias('unknown_tool', 'bgs_provider_errors')
+  expect(identity).toMatch(/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/)
+  expect(resumed.body.messages).toEqual([
+    { ...raw, tool_calls: [{ ...raw.tool_calls[0], function: { name: identity, arguments: '{}' } }, raw.tool_calls[1]] },
+    { role: 'tool', tool_call_id: 'bad', content: UNKNOWN_TOOL_FEEDBACK },
+    { role: 'tool', tool_call_id: 'good', content: 'actual result' },
+  ])
+  expect(JSON.stringify(input)).toBe(stored)
+  expect(resumed.tools.some(tool => tool.alias === identity)).toBe(false)
+  // Even if the model emits the replay marker, exact tool validation rejects it.
+  const repeated = await (await requestProvider(base, { tools, input }, mockFetch(async () => sse([{
+    choices: [{ delta: { tool_calls: [{ index: 0, id: 'again', function: { name: identity, arguments: '{}' } }] }, finish_reason: 'tool_calls' }],
+  }])), signal())).json() as any
+  expect(repeated.output.find((item: any) => item.call_id === 'again')).toMatchObject({ namespace: 'bgs_provider_errors', name: 'unknown_tool' })
+})
+
+
+test.each(['responses', 'chat-completions', 'anthropic-messages'] as const)('Go %s reads advertised limits from its own directory without binding a model', async protocol => {
+  const config = { ...base, protocol, baseUrl: 'https://opencode.ai/zen/go' + (protocol === 'anthropic-messages' ? '' : '/v1'),
+    sessionId: 'budget-fixture-session' }
+  let calls = 0
+  const budget = providerOutputBudget(config, mockFetch(async (input, init) => {
+    calls++
+    expect(String(input)).toBe('https://opencode.ai/zen/go/v1/models')
+    const headers = new Headers(init?.headers)
+    expect(headers.get('x-opencode-session')).toBe('budget-fixture-session')
+    expect(headers.get('user-agent')).toBe('bee-game-studio/2.8.4')
+    expect(headers.get('authorization')).toBe('Bearer synthetic-secret')
+    return Response.json({ data: [{ id: 'fixture-a', limit: { output: 13579 } }, { id: 'fixture-b', limit: { output: 24680 } }] })
+  }), signal())
+  expect(await budget('fixture-a')).toEqual({ tokens: 13579 })
+  expect(await budget('fixture-b')).toEqual({ tokens: 24680 })
+  expect(await budget('fixture-not-listed')).toEqual({ unavailable: 'model_not_listed' })
+  expect(calls).toBe(1)
 })

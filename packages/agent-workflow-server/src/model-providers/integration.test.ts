@@ -34,6 +34,7 @@ for (const protocol of [
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
+          if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
           try {
             const body = (await request.json()) as Json
             bodies.push(body)

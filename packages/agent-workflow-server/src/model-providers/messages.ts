@@ -79,6 +79,27 @@ export function toolAlias(name: string, namespace?: string) {
   const hash = createHash('sha256').update(JSON.stringify([owner, name])).digest('hex').slice(0, 32)
   return `${readable}_${hash}`
 }
+export function normalizeNativeToolArguments(name: string, namespace: string | undefined, args: string): string {
+  // Providers sometimes emit an empty permission explanation without a
+  // permission request. Remove only that meaningless field before native
+  // validation; preserve opaque provider history and all real permissions.
+  if (name === 'exec_command' &&
+      (namespace === undefined || namespace === 'functions')) {
+    try {
+      const parsed = JSON.parse(args)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+          parsed.justification === '' &&
+          !Object.prototype.hasOwnProperty.call(parsed, 'sandbox_permissions')) {
+        const { justification: _omitted, ...normalized } = parsed
+        args = JSON.stringify(normalized)
+      }
+    } catch {
+      // Keep malformed arguments unchanged for the existing native validation
+      // path; this adapter must not turn a tool-call parse error into a retry.
+    }
+  }
+  return args
+}
 export function responseToolCall(
   tool: MappedTool,
   id: string,
@@ -98,24 +119,7 @@ export function responseToolCall(
       status: 'completed',
     }
   }
-  // Providers sometimes emit an empty permission explanation without a
-  // permission request. Remove only that meaningless field before native
-  // validation; preserve opaque provider history and all real permissions.
-  if (tool.name === 'exec_command' &&
-      (tool.namespace === undefined || tool.namespace === 'functions')) {
-    try {
-      const parsed = JSON.parse(args)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
-          parsed.justification === '' &&
-          !Object.prototype.hasOwnProperty.call(parsed, 'sandbox_permissions')) {
-        const { justification: _omitted, ...normalized } = parsed
-        args = JSON.stringify(normalized)
-      }
-    } catch {
-      // Keep malformed arguments unchanged for the existing native validation
-      // path; this adapter must not turn a tool-call parse error into a retry.
-    }
-  }
+  args = normalizeNativeToolArguments(tool.name, tool.namespace, args)
   // Native tool handlers validate arguments and return errors to the model.
   // Rejecting ordinary JSON here would abort the entire response instead.
   return {
@@ -140,7 +144,8 @@ export function nativeCall(item: Json) {
 }
 
 // Provider signatures/reasoning remain opaque private thread data. They are
-// returned verbatim on the next request, never fabricated or shown as a tool.
+// preserved on the next request; rejected empty tool names use the existing
+// rejection identity when replayed. Signatures/reasoning are never rewritten.
 const OPAQUE_PREFIX = 'bgs-provider-v1:'
 export function opaqueReasoning(protocol: ModelApiProtocol, raw: Json): Json {
   return {
@@ -196,10 +201,17 @@ export function conversation(
     const raw = pending
       .filter(item => item.type === 'reasoning')
       .map(item => rawReasoning(item, protocol))
-      .filter(Boolean)
+      .filter((item): item is Json => item !== undefined)
     if (raw.length)
-      for (const item of raw)
+      for (const item of raw) {
+        // Persisted provider history can contain an already-rejected empty name.
+        // Replay the reserved rejection identity, never infer an executable tool.
+        if (protocol === 'chat-completions' && item.tool_calls)
+          for (const call of item.tool_calls)
+            if (rejectedCalls.has(call.id) && call.function.name === '')
+              call.function.name = toolAlias('unknown_tool', 'bgs_provider_errors')
         messages.push({ role: 'assistant', content: [], raw: item })
+      }
     else {
       const content: Json[] = []
       for (const item of pending) {

@@ -20,10 +20,13 @@ test('Responses pins DNS, preserves native search and compaction, and rejects re
   const receipts: ProviderUsage[] = []
   const trap = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { redirected++; return new Response('unexpected') } })
   const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 });
     const body = await request.json() as any
     calls.push({ path: new URL(request.url).pathname, authorization: request.headers.get('authorization'),
       beta: request.headers.get('openai-beta'), body })
     if (body.redirect) return new Response(null, { status: 307, headers: { location: trap.url.toString() } })
+    if (new URL(request.url).pathname.endsWith('/compact')) return Response.json({id:'fixture-compaction',object:'response.compaction',
+      output:[],usage:{input_tokens:7,output_tokens:2,total_tokens:9}})
     const content = 'data: {"type":"response.completed","response":{"id":"fixture-response","usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}}\n\n'
     return new Response(body.compressed ? Bun.gzipSync(content) : content,
       { headers: { 'content-type': 'text/event-stream', ...(body.compressed ? { 'content-encoding': 'gzip' } : {}) } })
@@ -49,11 +52,12 @@ test('Responses pins DNS, preserves native search and compaction, and rejects re
     const compressed = await send({ compressed: true, stream: true })
     expect(await compressed.text()).toContain('response.completed')
     expect(compressed.headers.has('content-encoding')).toBe(false)
-    // Successful native Responses usage stays in native notifications.
-    expect(receipts).toHaveLength(0)
+    // The bridge observes terminal usage for Responses, compact JSON and compressed SSE.
+    const successfulUsage={input_tokens:7,output_tokens:2,cache_read_tokens:0,cache_creation_tokens:0,total_tokens:9}
+    expect(receipts).toEqual([successfulUsage,successfulUsage,successfulUsage])
     expect((await send({ redirect: true })).status).toBe(502)
     expect(redirected).toBe(0)
-    expect(receipts).toEqual([{ input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
+    expect(receipts).toEqual([successfulUsage,successfulUsage,successfulUsage,{ input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
       cache_creation_tokens: 0, total_tokens: 0, incomplete: true }])
   } finally { await bridge.close(); upstream.stop(true); trap.stop(true) }
 })

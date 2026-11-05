@@ -1,7 +1,9 @@
+import { z } from 'zod'
 import type { ProviderConfig } from './config'
 import {
   opaqueReasoning,
   responseToolCall,
+  normalizeNativeToolArguments,
   UnknownProviderToolError,
   UNKNOWN_TOOL_FEEDBACK,
   type Json,
@@ -93,6 +95,196 @@ export async function* parseSse(response: Response): AsyncGenerator<Json> {
     await reader.cancel().catch(() => {})
     reader.releaseLock()
   }
+}
+
+/** Local compaction replaces retained history. Do not let an empty response or
+ * the observed unparsed tool-call text become its replacement summary. */
+export async function checkedLocalCompaction(response: Response, streaming: boolean): Promise<Response> {
+  if (!response.ok) return response
+  const valid = (items: Json[]) => {
+    if (!Array.isArray(items) || items.some(item => item?.type === 'function_call')) return false
+    const message = items.findLast(item => item?.type === 'message' && item.role === 'assistant')
+    if (!Array.isArray(message?.content)) return false
+    const text = message.content.filter((part: Json) => part?.type === 'output_text' && typeof part.text === 'string')
+      .map((part: Json) => part.text).join('').trim()
+    return Boolean(text) && !/^<｜｜DSML｜｜\s+(?:calls|invoke)\b/u.test(text)
+  }
+  const incomplete = (value: Json = {}) => ({ ...value,
+    id: value.id ?? 'resp_' + crypto.randomUUID(), object: 'response', status: 'incomplete', output: [],
+    incomplete_details: { reason: 'invalid_compaction_summary' },
+  })
+  const headers = new Headers(response.headers)
+  for (const name of ['content-length', 'content-encoding', 'connection', 'transfer-encoding']) headers.delete(name)
+  // 204/205 cannot carry the rejection event. A missing compaction body is
+  // an invalid summary, so return a normal protocol envelope with that error.
+  const status = [204,205].includes(response.status) ? 200 : response.status
+  headers.set('Content-Type', streaming ? 'text/event-stream' : 'application/json')
+  if (!streaming) {
+    const value = response.body ? await response.json() as Json : incomplete()
+    return Response.json(!['incomplete', 'failed'].includes(value.status) &&
+      !(value.status === 'completed' && valid(value.output ?? [])) ? incomplete(value) : value,
+      { status, headers })
+  }
+  const reader = response.body?.getReader(), parser = new ProviderSseParser()
+  const encode = (event: Json) => new TextEncoder().encode('data: ' + JSON.stringify(event) + '\n\n')
+  let progress: Json = { id: 'resp_' + crypto.randomUUID(), object: 'response', status: 'in_progress', output: [] }
+  let cancelled = false
+  return new Response(new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const events: Json[] = [], items: Json[] = []
+      let terminal: Json | undefined
+      try {
+        try {
+          while (reader && !parser.done && !terminal) {
+            const chunk = await reader.read()
+            for (const event of parser.feed(chunk.value, chunk.done)) {
+              if (event.type === 'response.created' || event.type === 'response.in_progress') {
+                progress = { ...event.response, status: 'in_progress', output: [] }
+                controller.enqueue(encode(event.type === 'response.created' ? event : { type: event.type, response: progress }))
+              } else {
+                events.push(event)
+                // Keep native's idle timer informed by actual upstream activity,
+                // while withholding summary text until its receipt is checked.
+                if (typeof event.type === 'string' && event.type.endsWith('.delta'))
+                  controller.enqueue(encode({ type: 'response.in_progress', response: progress }))
+              }
+              if (event.type === 'response.output_item.done') items.push(event.item)
+              if (['response.completed', 'response.incomplete', 'response.failed'].includes(event.type)) {
+                terminal = event
+                break
+              }
+            }
+          }
+        } catch (error) { if (!(error instanceof ProviderSseError)) throw error }
+        if (cancelled) return
+        if (!terminal || terminal.type === 'response.completed' &&
+            !valid(terminal.response?.output?.length ? terminal.response.output : items)) {
+          events.splice(0, events.length, { type: 'response.incomplete', response: incomplete(terminal?.response) })
+        }
+        controller.enqueue(new TextEncoder().encode(events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('')))
+        controller.close()
+      } catch (error) { if (!cancelled) controller.error(error) }
+      finally { await reader?.cancel().catch(() => {}); reader?.releaseLock() }
+    },
+    async cancel() { cancelled = true; await reader?.cancel() },
+  }), { status, headers })
+}
+
+// Responses receipts use the same per-request accounting as converted protocols.
+// Match the usage fields consumed by native and bgsUsage. Native discards
+// response.failed and content_filter usage, even when the fields are present.
+const tokenCount = z.number().int().nonnegative()
+const nativeUsageReceipt = z.object({
+  type: z.enum(['response.completed', 'response.incomplete']),
+  response: z.object({
+    id: z.string(),
+    incomplete_details: z.object({ reason: z.string().optional() }).nullish(),
+    usage: z.object({
+      input_tokens: tokenCount,
+      output_tokens: tokenCount,
+      total_tokens: tokenCount,
+      input_tokens_details: z.object({
+        cached_tokens: tokenCount,
+        cache_write_tokens: tokenCount.optional(),
+      }).nullish(),
+      output_tokens_details: z.object({ reasoning_tokens: tokenCount }).nullish(),
+    }),
+  }),
+})
+
+function nativeReceiptUsage(event: unknown): ProviderUsage | undefined {
+  const parsed = nativeUsageReceipt.safeParse(event)
+  if (!parsed.success) return undefined
+  const { type, response } = parsed.data
+  if (type === 'response.incomplete' && response.incomplete_details?.reason === 'content_filter') return undefined
+  const usage = response.usage, read = usage.input_tokens_details?.cached_tokens ?? 0,
+    write = usage.input_tokens_details?.cache_write_tokens ?? 0,
+    reasoning = usage.output_tokens_details?.reasoning_tokens
+  if (read + write > usage.input_tokens || reasoning !== undefined && reasoning > usage.output_tokens) return undefined
+  return { input_tokens: usage.input_tokens - read - write, output_tokens: usage.output_tokens,
+    cache_read_tokens: read, cache_creation_tokens: write,
+    total_tokens: usage.input_tokens + usage.output_tokens,
+    ...(reasoning === undefined ? {} : { reasoning_tokens: reasoning }) }
+}
+
+/** Preserve native Responses data; only the known empty exec explanation changes.
+ * Completed receipts are recorded before enqueue; missing or cancelled receipts remain incomplete. */
+export async function nativeResponses(response: Response, request: Json,
+  onUsage?: (usage: ProviderUsage) => void): Promise<Response> {
+  if (!response.ok) return response
+  let reported = false
+  const observe = (event: unknown) => {
+    if (reported) return
+    const usage = nativeReceiptUsage(event)
+    if (usage) { reported = true; onUsage?.(usage) }
+  }
+  const missing = () => {
+    if (!reported) {
+      reported = true
+      onUsage?.({ input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
+        cache_creation_tokens: 0, total_tokens: 0, incomplete: true })
+    }
+  }
+  const normalize = (request.tools ?? []).some((tool: Json) =>
+    tool.type === 'function' && tool.name === 'exec_command' ||
+    tool.type === 'namespace' && tool.name === 'functions' &&
+      tool.tools.some((child: Json) => child.type === 'function' && child.name === 'exec_command'))
+  const item = (value: Json): Json => value?.type === 'function_call' && typeof value.arguments === 'string'
+    ? { ...value, arguments: normalizeNativeToolArguments(value.name, value.namespace, value.arguments) } : value
+  const output = (value: Json): Json => normalize && Array.isArray(value?.output)
+    ? { ...value, output: value.output.map(item) } : value
+  const headers = new Headers(response.headers)
+  for (const name of ['content-length', 'content-encoding', 'connection', 'transfer-encoding']) headers.delete(name)
+  if (!response.body) { missing(); return response }
+  if (request.stream !== true) {
+    try {
+      const value = await response.json() as Json
+      observe({ type: value.object === 'response.compaction' ? 'response.completed' : 'response.' + value.status, response: value })
+      return Response.json(output(value), { status: response.status, headers })
+    } finally { missing() }
+  }
+  const reader = response.body.getReader(), parser = new ProviderSseParser(), encoder = new TextEncoder()
+  const calls = new Map<string, Pick<MappedTool, 'name' | 'namespace'>>()
+  let observing = true, doneSent = false
+  const event = (value: Json): Json => {
+    if (value?.type === 'response.output_item.added' || value?.type === 'response.output_item.done') {
+      if (value.item?.type === 'function_call') calls.set(value.item.id, { name: value.item.name, namespace: value.item.namespace })
+      return { ...value, item: item(value.item) }
+    }
+    if (value?.type === 'response.function_call_arguments.done' && calls.has(value.item_id) && typeof value.arguments === 'string')
+      return { ...value, arguments: normalizeNativeToolArguments(calls.get(value.item_id)!.name, calls.get(value.item_id)!.namespace, value.arguments) }
+    return value?.response ? { ...value, response: output(value.response) } : value
+  }
+  return new Response(new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        // A heartbeat or partial SSE event produces no downstream chunk. Keep
+        // reading within this pull; returning empty can stall a pending read.
+        while (true) {
+          const chunk = await reader.read()
+          if (chunk.done) { missing(); controller.close(); return }
+          let forwarded = ''
+          if (observing) {
+            try {
+              for (const value of parser.feed(chunk.value)) {
+                observe(value)
+                if (normalize) forwarded += 'data: ' + JSON.stringify(event(value)) + '\n\n'
+              }
+              if (normalize && parser.done && !doneSent) { forwarded += 'data: [DONE]\n\n'; doneSent = true }
+            } catch (error) {
+              if (!(error instanceof ProviderSseError) || normalize) throw error
+              // Ordinary Responses stays byte-transparent even for malformed input.
+              observing = false
+              missing()
+            }
+          }
+          if (!normalize) { controller.enqueue(chunk.value); return }
+          if (forwarded) { controller.enqueue(encoder.encode(forwarded)); return }
+        }
+      } catch (error) { missing(); await reader.cancel(error).catch(() => {}); controller.error(error) }
+    },
+    async cancel() { missing(); await reader.cancel() },
+  }), { status: response.status, headers })
 }
 
 type Call = {
@@ -365,6 +557,9 @@ export async function* responseEvents(
       ? 'content_filter'
       : 'provider_stop'
   if (textItem) {
+    // Text accompanying tool calls is progress, not the turn's final answer.
+    // Preserve this distinction for consumers that validate structured finals.
+    textItem.phase = calls.size ? 'commentary' : 'final_answer'
     textItem.status = 'completed'
     yield {
       type: 'response.output_text.done',

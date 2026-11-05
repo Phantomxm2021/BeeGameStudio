@@ -13,6 +13,7 @@ nativeTest('native parallel image and command results form a valid Chat Completi
   await sharp({ create: { width: 2, height: 2, channels: 4, background: '#00ff00' } }).png().toFile(join(game, 'fixture.png'))
   let requests = 0, runtime, fixtureError: unknown
   const supplier = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     try {
       const body = await request.json() as Json
       requests++
@@ -53,7 +54,8 @@ nativeTest('provider HTTP failures retain status without leaking upstream bodies
   const root = await mkdtemp('/private/tmp/bgs-native-provider-http-'), game = join(root, 'game')
   await mkdir(game)
   let requests = 0, runtime
-  const supplier = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+  const supplier = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     requests++
     return new Response('upstream-private-body synthetic-provider-secret', { status: 400 })
   } })
@@ -84,6 +86,7 @@ for (const malformedSuffix of [false, true]) nativeTest('converted provider unkn
   await mkdir(game)
   const bodies: Json[] = [], events: Json[] = []
   const supplier = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     bodies.push(await request.json() as Json)
     const first = bodies.length === 1
     const alias = malformedSuffix ? bodies.at(-1)!.tools.find((tool: Json) => tool.function.parameters?.properties?.cmd)?.function.name : 'unknown_provider_tool'
@@ -118,7 +121,8 @@ nativeTest('official Bgs failure retains partial supplier usage through the runn
   await mkdir(game); await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture', 'SKILL.md'), '---\nname: fixture\ndescription: Offline usage accounting fixture.\n---\nUse only the local fixture response.\n')
   let requests = 0
-  const supplier = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+  const supplier = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     requests++
     // A complete SSE frame with acknowledged input, followed by a truncated response.
     return new Response('data: ' + JSON.stringify({ type: 'message_start',
@@ -163,3 +167,50 @@ nativeTest('official Bgs failure retains partial supplier usage through the runn
     expect(native).not.toContain('stream closed before response.completed')
   } finally { await manager.dispose(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 30_000)
+
+nativeTest('Responses native CLI receives normalized exec arguments and provider receipts exactly once', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-responses-exec-'), game = join(root, 'game')
+  await mkdir(game)
+  let calls = 0, observed = 0, failure: unknown, runtime
+  const events: unknown[] = []
+  const supplier = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET') return new Response(null, { status: 404 })
+    try {
+      const body = await request.json() as any
+      const first = ++calls === 1
+      if (calls > 2) throw Error('Unexpected model retry')
+      if (!first) expect(JSON.stringify(body.input)).toContain('normalization-fixture')
+      const item = first
+        ? { type: 'function_call', id: 'exec', call_id: 'exec-call', name: 'exec_command',
+            arguments: JSON.stringify({ cmd: "printf normalization-fixture", justification: '' }) }
+        : { type: 'message', id: 'answer', role: 'assistant', content: [{ type: 'output_text', text: 'Done', annotations: [] }] }
+      const bodyText = [
+        { type: 'response.output_item.done', item },
+        { type: 'response.completed', response: { id: 'receipt-' + calls, status: 'completed', output: [item],
+          usage: { input_tokens: first ? 100 : 200, output_tokens: 5, total_tokens: first ? 105 : 205,
+            input_tokens_details: { cached_tokens: first ? 20 : 40 } } } },
+      ].map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('')
+      const chunks = [': heartbeat\n\n', bodyText.slice(0, 2), bodyText.slice(2, 5), bodyText.slice(5)]
+      return new Response(new ReadableStream<Uint8Array>({ async pull(controller) {
+        if (!chunks.length) { controller.close(); return }
+        controller.enqueue(new TextEncoder().encode(chunks.shift()!))
+        await Bun.sleep(5)
+      } }), { headers: { 'Content-Type': 'text/event-stream' } })
+    } catch (error) { failure = error; return new Response('Local fixture failed', { status: 500 }) }
+  } })
+  try {
+    runtime = await createBgsRunner({ resolveOutboundTarget: async value => ({ url: new URL(value), addresses: ['127.0.0.1'],
+      lookup: (_h, _o, callback) => callback(null, '127.0.0.1', 4) }) }).start({ sessionId: 'responses-exec', cwd: game,
+      env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_API_PROTOCOL: 'responses',
+        OPENAI_API_KEY: 'fixture', OPENAI_BASE_URL: supplier.url.origin, BEEGAME_MODEL: 'fixture' },
+      onNativeUsage: (usage, _epoch, accounting) => { if (!accounting?.baselineOnly) observed = usage.total_tokens },
+      requestPermission: async () => ({ behavior: 'deny' }) })
+    await runtime.submit({ prompt: 'Local fixture', signal: AbortSignal.timeout(15000), onMessage(message) { events.push(message) },
+      requestPermission: async () => ({ behavior: 'deny' }) })
+    if (failure) throw failure
+    expect(calls).toBe(2)
+    expect(observed).toBe(310)
+    expect(events).toContainEqual(expect.objectContaining({ type: 'runtime_event', eventType: 'tool.started' }))
+    expect(events).toContainEqual(expect.objectContaining({ type: 'runtime_event', eventType: 'assistant.message', text: 'Done' }))
+  } finally { await runtime?.dispose?.(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
+}, 20000)

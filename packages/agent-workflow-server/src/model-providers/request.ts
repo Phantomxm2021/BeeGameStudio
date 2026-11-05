@@ -1,6 +1,6 @@
 import type { ProviderConfig } from './config'
 import { nativeRequest, openCodeGoHeaders } from './requests'
-import { responseEvents, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
+import { responseEvents, nativeResponses, type ProviderUsage, type ProviderToolErrorHandler } from './response-stream'
 import { UnknownProviderToolError, type Json } from './messages'
 import { safeErrorFacts } from '../security/safe-error-facts'
 import { providerHttpError } from './http-error'
@@ -13,9 +13,10 @@ export async function requestProvider(
   signal: AbortSignal,
   onUsage?: (usage: ProviderUsage) => void,
   onToolError?: ProviderToolErrorHandler,
+  outputBudget?: (fallback: unknown) => Promise<number | undefined>,
 ): Promise<Response> {
   if (config.protocol === 'responses')
-    return request(config.baseUrl + '/responses', {
+    return nativeResponses(await request(config.baseUrl + '/responses', {
       method: 'POST',
       redirect: 'error',
       signal,
@@ -25,8 +26,17 @@ export async function requestProvider(
         ...openCodeGoHeaders(config),
       },
       body: JSON.stringify(body),
-    })
+    }), body, onUsage)
   const native = nativeRequest(config, body)
+  // Convert/validate first: a rejected local tool request must not cause any
+  // provider I/O. Budget filling changes only the protocol's token control.
+  if ('generationConfig' in native.body) {
+    const tokens = await outputBudget?.(native.body.generationConfig.maxOutputTokens)
+    if (tokens !== undefined) native.body.generationConfig.maxOutputTokens = tokens
+  } else {
+    const tokens = await outputBudget?.(native.body.max_tokens)
+    if (tokens !== undefined) native.body.max_tokens = tokens
+  }
   const cancellation = new AbortController()
   const upstream = await request(native.url, {
     method: 'POST',

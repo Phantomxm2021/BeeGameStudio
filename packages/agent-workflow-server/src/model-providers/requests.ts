@@ -110,7 +110,7 @@ export function nativeRequest(config: ProviderConfig, body: Json) {
               tool_choice: toolChoice(body, tools, config.protocol),
             }
           : {}),
-        ...(body.max_output_tokens
+        ...(body.max_output_tokens != null
           ? { max_tokens: body.max_output_tokens }
           : {}),
         ...(body.temperature !== undefined
@@ -296,7 +296,7 @@ export function nativeRequest(config: ProviderConfig, body: Json) {
             }
           : {}),
         generationConfig: {
-          ...(body.max_output_tokens
+          ...(body.max_output_tokens != null
             ? { maxOutputTokens: body.max_output_tokens }
             : {}),
           ...(body.temperature !== undefined

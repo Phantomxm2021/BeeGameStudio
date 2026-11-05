@@ -70,16 +70,16 @@ HttpOnly cookie with a client-readable refresh-token cookie.
 
 ## Outbound and upload limits
 
-Outbound requests are restricted by the security-core target policy. Set
-`BEEGAME_OUTBOUND_ALLOWED_HOSTS` to the smallest required host list and leave
-`BEEGAME_ALLOW_INSECURE_OUTBOUND_HTTP=0` in production. HTTPS is the default;
-non-default ports require an explicit `host:port` allowlist entry. Private,
+Outbound requests use the security-core target policy without a deployment domain
+allowlist. Leave `BEEGAME_ALLOW_INSECURE_OUTBOUND_HTTP=0` in production. HTTPS is
+the default and standard ports are 443/80. Local development may explicitly trust
+proxy mappings through `BEEGAME_TRUSTED_DEVELOPMENT_PROXY_HOSTS` together with
+`BEEGAME_ALLOW_TRUSTED_DEVELOPMENT_OUTBOUND_PROXY=1`; this is not a public-domain restriction. Private,
 loopback, link-local, credential-bearing, and otherwise disallowed targets must
 be rejected before connection.
 
 Cloudflare image generation returns a separate image URL. BGS reads and
-downloads it automatically; result CDN hosts do not belong in the static
-model/MCP `BEEGAME_OUTBOUND_ALLOWED_HOSTS` list. This narrow download path uses
+downloads it automatically; result CDN hosts require no domain allowlist. This narrow download path uses
 its own target inspection: HTTPS, permitted ports, public DNS addresses, a
 connection pinned to those addresses, no redirects, and no API credentials.
 It does not inherit custom target approvals or the development proxy exception.

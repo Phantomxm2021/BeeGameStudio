@@ -16,7 +16,9 @@ export type OutboundTargetPolicyOptions = {
   resolve6?: Resolver
   allowHttp?: boolean
   allowedHosts?: Iterable<string>
-  /** Development-only support for an explicitly allowlisted proxy hostname. */
+  /** Hostnames whose synthetic DNS addresses belong to a trusted local proxy. */
+  trustedDevelopmentProxyHosts?: Iterable<string>
+  /** Development-only support for explicitly trusted proxy hostnames. */
   allowTrustedDevelopmentProxy?: boolean
 }
 
@@ -93,7 +95,7 @@ export async function inspectOutboundTarget(
 
   const allowTrustedDevelopmentProxy =
     options.allowTrustedDevelopmentProxy === true &&
-    isExplicitlyAllowedHostname(url, options.allowedHosts) &&
+    isExplicitlyAllowedHostname(url, options.trustedDevelopmentProxyHosts ?? options.allowedHosts) &&
     isIP(hostname) === 0
   if (!addresses.length) {
     return { approved: false, code: 'dns_unresolved', hostname }
