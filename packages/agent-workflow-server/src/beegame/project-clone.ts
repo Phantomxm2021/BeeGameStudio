@@ -16,7 +16,7 @@ type Entry = { path: string; directory: boolean; size: number; mtime: number; ct
 async function inventory(root: string, folder = ''): Promise<Entry[]> {
   const result: Entry[] = []
   for (const name of (await readdir(join(root, folder))).sort()) {
-    if (omit(name)) continue
+    if (omit(name) || folder === 'reports' && name === 'runtime') continue
     const path = folder ? folder + '/' + name : name
     const info = await lstat(join(root, path))
     if (info.isSymbolicLink() || !info.isFile() && !info.isDirectory())

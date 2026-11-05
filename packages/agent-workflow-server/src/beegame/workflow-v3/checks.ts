@@ -12,10 +12,20 @@ const excludedNames = new Set(['node_modules', '.git', '.beegame', '.DS_Store'])
 // It is absent from the measured build copy, not merely ignored after building.
 // Existing receipts retain their own recorded exclusions (often exact files).
 export const AGENT_EVIDENCE_DIRECTORY = 'reports'
+// Use the existing recorded exclusion operands for bookkeeping too. The task
+// record is absent from build copies, so it cannot become an untracked input.
+// Existing builds retain their own exclusions; no old proof is reclassified.
+export const AGENT_SOURCE_EXCLUSIONS = [AGENT_EVIDENCE_DIRECTORY, 'docs/TASKS.md']
 // SessionManager's reserved workspace records live outside .beegame too.
 // Keep other files in logs/ (they may be real game inputs), not a name-only
 // exclusion of every logging directory in the editable project.
 const hostRecord = (path:string) => path==='transcripts' || /^logs\/(index\.json|runtime-diagnostics\.jsonl(?:\.\d+)?)$/.test(path)
+/** Shared copy boundary; only source export also requires every entry to be a regular file. */
+export function isProjectSourcePath(path:string, artifact:string, excludedReports:string[]):boolean {
+  const name=path.split('/').at(-1)!
+  return path!==artifact && !hostRecord(path) && !excludedReports.some(report=>path===report || path.startsWith(report+'/')) &&
+    !excludedNames.has(name) && !(name.startsWith('.') && !safeDots.has(name))
+}
 /** No author-selected file list: enumerate public project inputs for identity or build.
  * Engine/build prerequisites belong to the actual build operation.
  * Private dot files are absent from the build copy, not silently required inputs.
@@ -25,7 +35,7 @@ export async function projectFiles(root: string, artifact: string, excludedRepor
   async function visit(dir: string) {
     for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a,b)=>a.name.localeCompare(b.name))) {
       const target = resolve(dir,entry.name), path = relative(base,target).split('\\').join('/')
-      if (path===artifact || hostRecord(path) || excludedReports.some(report=>path===report || path.startsWith(report+'/')) || excludedNames.has(entry.name) || entry.name.startsWith('.') && !safeDots.has(entry.name)) continue
+      if (!isProjectSourcePath(path,artifact,excludedReports)) continue
       if (entry.name.includes('\\') || entry.isSymbolicLink() || await realpath(target)!==target)
         throw new WorkflowError('project-alias', 'Editable project sources must not contain aliases: '+path)
       if (entry.isDirectory()) await visit(target)
@@ -71,11 +81,11 @@ export async function checkIsCurrent(root: string, check: CheckResult, task?: Pi
   }
   return true
 }
-export async function commandCheck(root: string, script: string, signal?: AbortSignal, allowViteTemp = false): Promise<{ code: number | null; log: string }> {
+export async function commandCheck(root: string, script: string, signal?: AbortSignal, allowBuildCaches = false): Promise<{ code: number | null; log: string }> {
   // Code/build execution is within the user's project authorization. No host keys are inherited.
   return new Promise((resolvePromise, reject) => {
     if (signal?.aborted) { reject(new Error('Check cancelled')); return }
-    const child = spawn(process.execPath, [fileURLToPath(new URL('./sandbox-build.mjs',import.meta.url)),script,...(allowViteTemp?['--isolated-vite-cache']:[])], { cwd: root, env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, BEEGAME_BGS_PATH: process.env.BEEGAME_BGS_PATH },
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./sandbox-build.mjs',import.meta.url)),script,...(allowBuildCaches?['--isolated-build-caches']:[])], { cwd: root, env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, BEEGAME_BGS_PATH: process.env.BEEGAME_BGS_PATH },
       detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
     const abort = () => {
       try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL') }

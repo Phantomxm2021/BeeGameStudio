@@ -8,7 +8,7 @@ import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contr
 import { readBeeGameAssetManifestSync, writeBeeGameAssetManifest } from './asset-contracts'
 import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
-import { CONTENT_CHECKER_ENTRY, CURRENT_CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
+import { CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
 import { readContentView } from './workflow-v3/content-view'
 
 const roots: string[] = []
@@ -178,8 +178,7 @@ test('missing/malformed indexes, malformed registry and an escaped index remain 
 test('published autonomous entry defaults to current package checks and has no legacy help', async () => {
   const { root, index } = await fixture()
   const module = await sharedContentChecker()
-  await writeFile(join(root, 'current.mjs'), CURRENT_CONTENT_CHECKER_ENTRY)
-  expect(CONTENT_CHECKER_ENTRY).toBe(CURRENT_CONTENT_CHECKER_ENTRY)
+  await writeFile(join(root, 'current.mjs'), CONTENT_CHECKER_ENTRY)
   const run = async (entry: string, args: string[] = []) => {
     const child = Bun.spawn([process.execPath, entry, ...args], { cwd: root,
       env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: module.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })

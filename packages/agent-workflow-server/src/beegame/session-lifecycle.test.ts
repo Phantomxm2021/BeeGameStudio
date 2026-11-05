@@ -32,16 +32,19 @@ test('forwards current native host capabilities through preparation and reused s
     const first = async () => ({ turn: 'first' })
     const second = async () => ({ turn: 'second' })
     await manager.sendWithDisplay(session.id, 'First', {
-      prepareTurn: async () => ({ workflow: first, measurement: first, finishDelivery: first, close: async () => { closes.push('first') } }),
+      prepareTurn: async () => ({ workflow: first, imageGenerationEntry:'/first/assets.mjs', close: async () => { closes.push('first') } }),
     })
     await manager.waitForSessionIdle(session.id)
     await manager.sendWithDisplay(session.id, 'Second', {
-      prepareTurn: async () => ({ workflow: second, measurement: second, finishDelivery: second, close: async () => { closes.push('second') } }),
+      prepareTurn: async () => ({ workflow: second, imageGenerationEntry:'/second/assets.mjs', close: async () => { closes.push('second') } }),
     })
     await manager.waitForSessionIdle(session.id)
 
     expect(starts).toHaveLength(1)
     expect(starts[0].workflow).toBe(first)
+    expect(starts[0].imageGenerationEntry).toBe('/first/assets.mjs')
+    expect(submits[0].imageGenerationEntry).toBe('/first/assets.mjs')
+    expect(submits[1].imageGenerationEntry).toBe('/second/assets.mjs')
     expect(submits).toHaveLength(2)
     expect(submits[0].workflow).toBe(first)
     expect(submits[1].workflow).toBe(second)
@@ -50,7 +53,8 @@ test('forwards current native host capabilities through preparation and reused s
     expect(disposals).toBe(0)
 
     const snapshot = JSON.parse(await readFile(join(root, 'snapshots', `${session.id}.json`), 'utf8'))
-    for (const name of ['workflow', 'measurement', 'finishDelivery']) {
+    expect(snapshot).not.toHaveProperty('imageGenerationEntry')
+    for (const name of ['workflow']) {
       expect(starts[0][name]).toBe(first)
       expect(submits[0][name]).toBe(first)
       expect(submits[1][name]).toBe(second)

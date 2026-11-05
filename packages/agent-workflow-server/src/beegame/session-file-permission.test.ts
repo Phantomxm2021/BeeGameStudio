@@ -1,3 +1,4 @@
+import { projectHostDirectory, projectWorkDirectory } from './project-storage-paths'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -34,6 +35,7 @@ test('startup files use ordinary workspace permissions; design and instruction p
     expect(access.protectedPaths).toContain(join(workspace,'AGENTS.md'))
     expect(access.protectedPaths).toContain(join(workspace,'docs/GDD.md'))
     expect(manager.pendingPermissionsForProject('owner','fixture',workspace)).toHaveLength(0)
+    await access.close()
   }finally{await manager.dispose();await rm(root,{recursive:true,force:true})}
 })
 
@@ -184,4 +186,35 @@ test.each(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])('native %s safety prom
     expect(decisions.map(value => value.behavior)).toEqual(['deny', 'deny', 'allow'])
     expect(await Bun.file(join(workspace, '.claude/settings.json')).exists()).toBe(false)
   } finally { await manager.dispose(); await rm(base, { recursive: true, force: true }) }
+})
+
+
+test('native file tools read current adapters and game evidence, but cannot read or write host records', async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'bgs-host-record-boundary-'))), workspace = join(base, 'game')
+  await mkdir(workspace)
+  let sessionId = ''
+  const decisions: DashboardPermissionDecision[] = []
+  const manager = new BeeGameSessionManager({start:async()=>({stop(){},async submit(turn){
+    const work = projectWorkDirectory(workspace, sessionId)
+    for (const [toolName,input] of [
+      ['Read',{file_path:join(work,'adapters/help.mjs')}],
+      ['Grep',{path:work,pattern:'help'}],
+      ['Glob',{path:work,pattern:'*.mjs'}],
+      ['Read',{file_path:join(workspace,'reports/runtime/preview-test-fixture/execution.json')}],
+      ['Read',{file_path:join(projectHostDirectory(workspace),'chat/project-events.jsonl')}],
+      ['Grep',{path:projectHostDirectory(workspace),pattern:'message'}],
+      ['Glob',{path:projectHostDirectory(workspace),pattern:'**/*'}],
+      ['Read',{file_path:join(projectWorkDirectory(workspace,'other-session'),'adapters/help.mjs')}],
+      ['Write',{file_path:join(work,'adapters/help.mjs')}],
+      ['Write',{file_path:join(projectHostDirectory(workspace),'chat/project-events.jsonl')}],
+    ] as const) decisions.push(await turn.requestPermission({toolName,input,toolUseID:crypto.randomUUID(),message:'Local boundary fixture'}))
+    await turn.onMessage({type:'runtime_event',runtime:'bgs',eventType:'assistant.message',text:'Fixture complete'})
+  }})},base)
+  try {
+    sessionId=manager.start({workspacePath:workspace,userId:'owner',projectId:'project'}).id
+    await manager.sendWithDisplay(sessionId,'Offline boundary fixture')
+    await manager.waitForSessionIdle(sessionId)
+    expect(decisions.map(value=>value.behavior)).toEqual([...Array(4).fill('allow'),...Array(6).fill('deny')])
+    expect(manager.pendingPermissionsForProject('owner','project',workspace)).toHaveLength(0)
+  } finally {await manager.dispose();await rm(base,{recursive:true,force:true})}
 })

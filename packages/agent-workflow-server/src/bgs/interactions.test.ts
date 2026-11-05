@@ -117,3 +117,65 @@ test('BGS pending MCP form validates before consuming the gate and resumes after
     expect(manager.transcriptFacts(session.id).some(event => event.type === 'assistant.message' && event.text.includes('"enabled":false'))).toBe(true)
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 }, 15000)
+
+
+test('MCP approval persistence is limited to the original native request', () => {
+  const input = { mode: 'form', requestedSchema: { type: 'object', properties: {} },
+    _meta: { bgs_approval_kind: 'mcp_tool_call', persist: ['session', 'always'] } }
+  expect(elicitationAnswer(input, { content: '{}' })).not.toHaveProperty('approvalPersist')
+  expect(() => elicitationAnswer(input, { content: JSON.stringify({ mcp_tool_call_approval_fake: "Allow and don't ask me again" }) }))
+    .toThrow('does not match')
+  for (const persist of ['session', 'always']) {
+    expect(elicitationAnswer(input, { content: '{}', persist }).approvalPersist).toBe(persist)
+    for (const original of [
+      { ...input, _meta: undefined },
+      { ...input, _meta: { persist: ['session', 'always'] } },
+      { ...input, _meta: { bgs_approval_kind: 'mcp_tool_call' } },
+    ]) expect(() => elicitationAnswer(original, { content: '{}', persist, _meta: input._meta })).toThrow('not offered')
+  }
+  expect(elicitationAnswer({ ...input, _meta: { ...input._meta, persist: 'session' } },
+    { content: '{}', persist: 'session' }).approvalPersist).toBe('session')
+  expect(() => elicitationAnswer({ ...input, _meta: { ...input._meta, persist: 'session' } },
+    { content: '{}', persist: 'always' })).toThrow('not offered')
+  for (const persist of ['all', 'once', true, {}, ['session']])
+    expect(() => elicitationAnswer(input, { content: '{}', persist })).toThrow('not offered')
+})
+
+test('native MCP approval metadata and user choices survive the existing pending gate and RPC response', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-mcp-approval-')
+  try {
+    for (const choice of ['once', 'session', 'always', 'deny', 'unsupported']) {
+      const game = join(root, choice)
+      const manager = new BeeGameSessionManager(createBgsRunner({ command }), join(root, choice + '-data'),
+        () => ({ BEEGAME_CONFIG_DIR: join(root, choice + '-config'), OPENAI_AUTH_MODE: 'chatgpt' }))
+      try {
+        const session = manager.start({ workspacePath: game, userId: 'owner', projectId: choice })
+        await manager.sendWithDisplay(session.id, choice === 'unsupported' ? 'mcp-approval-once' : 'mcp-approval')
+        let gate: any
+        for (let i = 0; i < 200; i++) {
+          gate = manager.pendingPermissionsForProject('owner', choice, game)[0]
+          if (gate) break
+          await Bun.sleep(5)
+        }
+        expect(gate?.input._meta.tool_params).toEqual({ code: 'print("noop")', user_prompt: 'Build a game' })
+        const answers = { content: '{}', ...(['session', 'always'].includes(choice) ? { persist: choice } : {}) }
+        if (choice === 'unsupported') {
+          expect(() => manager.resolvePermission(session.id, gate.toolUseID, {
+            behavior: 'allow', scope: 'session', answers: { content: '{}', persist: 'session' },
+          })).toThrow('not offered')
+          expect(manager.pendingPermissionsForProject('owner', choice, game)).toHaveLength(1)
+        }
+        manager.resolvePermission(session.id, gate.toolUseID, choice === 'deny'
+          ? { behavior: 'deny' } : { behavior: 'allow', scope: 'session', remember: true, answers })
+        await manager.waitForSessionIdle(session.id)
+        const events = manager.transcriptFacts(session.id)
+        const message = events.find(event => event.type === 'assistant.message')
+        expect(JSON.parse(message!.text!)).toEqual(choice === 'deny' ? { action: 'decline', content: null }
+          : { action: 'accept', content: {}, ...(['session', 'always'].includes(choice) ? { _meta: { persist: choice } } : {}) })
+        const resolved = events.find(event => event.type === 'permission.resolved')
+        expect(resolved?.payload).toMatchObject({ scope: choice === 'session' ? 'session' : 'once', remember: choice === 'always' })
+        expect(manager.pendingPermissionsForProject('owner', choice, game)).toHaveLength(0)
+      } finally { await manager.dispose() }
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+}, 15000)

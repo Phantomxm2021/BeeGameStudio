@@ -1,4 +1,5 @@
 import sharp from 'sharp'
+import { COVER_SAMPLE_WIDTH, COVER_SAMPLE_HEIGHT, coverImagesSimilar } from '@bee-game-studio/agent-workflow/cover-similarity'
 import { BeeGameUploadPolicyError, validateBeeGameAttachments } from '../security/upload-policy'
 
 export const PUBLICATION_COVER_PATH = '__bgs_publication/cover.webp'
@@ -27,4 +28,16 @@ export async function preparePublicationCover(value: { mediaType: string; filena
 export function publicationCoverUrl(gameUrl: string): string {
   const url = new URL(PUBLICATION_COVER_PATH, new URL(gameUrl, 'http://bgs-runtime.invalid'))
   return gameUrl.startsWith('/') ? url.pathname : url.href
+}
+
+/** Only meaningfully different frames become separate options. */
+export async function distinctPublicationCovers(images: Buffer[]): Promise<Buffer[]> {
+  const samples: Buffer[] = [], distinct: Buffer[] = []
+  for (const image of images) {
+    const pixels = await sharp(image).resize(COVER_SAMPLE_WIDTH, COVER_SAMPLE_HEIGHT).toColourspace('srgb')
+      .flatten({ background: '#000000' }).ensureAlpha().raw().toBuffer()
+    if (samples.some(sample => coverImagesSimilar(sample, pixels))) continue
+    samples.push(pixels); distinct.push(image)
+  }
+  return distinct
 }

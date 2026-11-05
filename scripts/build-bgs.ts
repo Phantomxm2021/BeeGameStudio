@@ -1,4 +1,5 @@
-import { access, copyFile, mkdir, writeFile, rename } from 'node:fs/promises'
+import { access, copyFile, mkdir, readFile, writeFile, rename } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
@@ -26,11 +27,54 @@ const metadata = {
   platform: process.platform, arch: process.arch,
 }
 if (args.includes('--release') && metadata.dirty) throw Error('Commit the BGS source changes before packaging a release')
+// Match the sandbox-enabled V8 pair pinned by the vendored CI. The default
+// rusty_v8 download location does not publish this required build variant.
+const buildEnv: NodeJS.ProcessEnv = { ...process.env, PATH: dirname(cargo) + delimiter + (process.env.PATH ?? '') }
+if (!buildEnv.RUSTY_V8_ARCHIVE && !buildEnv.RUSTY_V8_SRC_BINDING_PATH && buildEnv.V8_FROM_SOURCE !== '1') {
+  const lock = await readFile(join(source, 'Cargo.lock'), 'utf8')
+  const version = /\[\[package\]\]\s+name = "v8"\s+version = "([^"]+)"/.exec(lock)?.[1]
+  if (!version) throw Error('The locked V8 version is missing')
+  const rustc = Bun.spawn([join(dirname(cargo), process.platform === 'win32' ? 'rustc.exe' : 'rustc'), '-vV'], {
+    cwd: source, stdout: 'pipe', stderr: 'pipe',
+  })
+  const [rustCode, rustVersion] = await Promise.all([rustc.exited, new Response(rustc.stdout).text(), new Response(rustc.stderr).text()])
+  const target = /^host: (.+)$/m.exec(rustVersion)?.[1]
+  if (rustCode !== 0 || !target) throw Error('Could not determine the Rust host target')
+  const checksums = new Map((await readFile(join(source, '..', 'third_party', 'v8', `rusty_v8_${version.replaceAll('.', '_')}.sha256`), 'utf8'))
+    .trim().split(/\r?\n/).map(line => { const [hash, name] = line.trim().split(/\s+/); return [name, hash] }))
+  const cache = join(source, 'target', 'bgs-v8', version)
+  await mkdir(cache, { recursive: true })
+  const names = [target.endsWith('-pc-windows-msvc') ? `rusty_v8_ptrcomp_sandbox_release_${target}.lib.gz`
+    : `librusty_v8_ptrcomp_sandbox_release_${target}.a.gz`, `src_binding_ptrcomp_sandbox_release_${target}.rs`]
+  for (const name of names) {
+    const expected = checksums.get(name)
+    if (!expected) throw Error('No pinned sandboxed V8 artifact for ' + target)
+    const path = join(cache, name)
+    let bytes = await readFile(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error
+      return undefined
+    })
+    if (!bytes) {
+      console.log('Downloading pinned V8 artifact: ' + name)
+      const response = await fetch(`https://github.com/openai/codex/releases/download/rusty-v8-v${version}/${name}`)
+      if (!response.ok) throw Error(`V8 artifact download failed: ${name} (HTTP ${response.status})`)
+      bytes = Buffer.from(await response.arrayBuffer())
+      if (createHash('sha256').update(bytes).digest('hex') !== expected) throw Error('V8 artifact checksum mismatch: ' + name)
+      await writeFile(path + '.new', bytes)
+      await rename(path + '.new', path)
+    } else if (createHash('sha256').update(bytes).digest('hex') !== expected) {
+      throw Error('Cached V8 artifact checksum mismatch: ' + path)
+    }
+  }
+  buildEnv.RUSTY_V8_ARCHIVE = join(cache, names[0])
+  buildEnv.RUSTY_V8_SRC_BINDING_PATH = join(cache, names[1])
+}
 // Dependency resolution stays locked. Workspace-version lock corrections are
 // committed separately in the maintained source branch.
-const child = Bun.spawn([cargo, 'build', '--offline', '--locked', '-p', 'bgs-cli', '--bin', 'bgs', ...args], {
+const child = Bun.spawn([cargo, 'build', '--offline', '--locked',
+  '-p', 'bgs-cli', '--bin', 'bgs', '-p', 'bgs-code-mode-host', '--bin', 'bgs-code-mode-host', ...args], {
   cwd: source,
-  env: { ...process.env, PATH: dirname(cargo) + delimiter + (process.env.PATH ?? '') },
+  env: buildEnv,
   stdout: 'inherit', stderr: 'inherit',
 })
 const code = await child.exited
@@ -49,10 +93,14 @@ for (const name of ['LICENSE', 'NOTICE']) {
 }
 await writeFile(join(destination, 'BGS-NOTICE.txt'),
   'BGS is a PhantomLab distribution based on OpenAI Codex. Product branding and update entry points are modified. See LICENSE and NOTICE for upstream attribution.\n')
-const target = join(destination, process.platform === 'win32' ? 'bgs.exe' : 'bgs')
-// Replace the executable atomically so an already running process keeps its inode.
-await copyFile(binary, target + '.new')
-await rename(target + '.new', target)
+// Publish the companion first, then replace the CLI atomically so existing
+// processes keep their inode and new processes can find their required host.
+for (const name of ['bgs-code-mode-host', 'bgs']) {
+  const executable = process.platform === 'win32' ? name + '.exe' : name
+  const target = join(destination, executable)
+  await copyFile(join(dirname(binary), executable), target + '.new')
+  await rename(target + '.new', target)
+}
 await writeFile(join(destination, 'build.json'), JSON.stringify({ ...metadata, version }, null, 2) + '\n')
-console.log('Built BGS: ' + target)
+console.log('Built BGS runtime: ' + destination)
 console.log(JSON.stringify({ ...metadata, version }))

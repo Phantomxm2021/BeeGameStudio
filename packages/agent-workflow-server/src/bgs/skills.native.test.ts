@@ -1,4 +1,7 @@
+import { openAgentTools } from '../beegame/workflow-v3/agent-tools'
+import { projectWorkRoot } from '../beegame/project-storage-paths'
 import { expect, test } from 'bun:test'
+import sharp from 'sharp'
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getBuiltinSkillsDirectory } from '@bee-game-studio/beegame-skills-core/store'
@@ -26,7 +29,9 @@ nativeTest('two accounts discover one shared catalog and only their own imported
         const result = await client.request('skills/list', { cwds: [account], forceReload: true })
         expect(result.data.flatMap((entry: any) => entry.errors)).toEqual([])
         const skills = result.data.flatMap((entry: any) => entry.skills)
-        expect(skills.filter((s: any) => s.path.startsWith(catalog + '/')).map((s: any) => s.name).sort()).toEqual(names)
+        const shared=skills.filter((s:any)=>s.path.startsWith(catalog+'/'))
+        expect(shared.map((s:any)=>s.name).sort()).toEqual(names)
+        expect(shared.some((s:any)=>['bgs-imagegen','game-implementation-planning','root-cause-debugging'].includes(s.name))).toBe(false)
         expect(skills.some((s: any) => s.name === owner && s.path === join(user, owner, 'SKILL.md'))).toBe(true)
         expect(skills.some((s: any) => s.name === (owner === 'owner-a' ? 'owner-b' : 'owner-a'))).toBe(false)
         expect((await readdir(join(home, 'skills'))).some(name => name.startsWith('bgs-builtin-') || name.startsWith('bgs-user-'))).toBe(false)
@@ -35,7 +40,7 @@ nativeTest('two accounts discover one shared catalog and only their own imported
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 15_000)
 
-nativeTest('both auth modes use BGS image guidance while preserving imported skills and account settings', async () => {
+nativeTest('both auth modes retain original system skills and explicit account settings', async () => {
   const account = await mkdtemp('/private/tmp/bgs-provider-skills-'), home = join(account, 'bgs'), user = join(account, 'skills')
   const catalog = getBuiltinSkillsDirectory()
   const systemImagegen = join(home, 'skills', '.system', 'imagegen', 'SKILL.md')
@@ -59,9 +64,10 @@ nativeTest('both auth modes use BGS image guidance while preserving imported ski
         const result = await client.request('skills/list', { cwds: [account], forceReload: true })
         expect(result.data.flatMap((entry: any) => entry.errors)).toEqual([])
         const skills = result.data.flatMap((entry: any) => entry.skills)
-        expect(skills.find((s: any) => s.path === systemImagegen)?.enabled).toBe(false)
-        expect(skills.find((s: any) => s.path === join(catalog, 'bgs-imagegen', 'SKILL.md')))
-          .toMatchObject({ name: 'bgs-imagegen', enabled: true })
+        for(const name of ['imagegen','openai-docs','review-agent','skill-creator','skill-installer'])
+          expect(skills.find((s: any) => s.path === join(home, 'skills', '.system', name, 'SKILL.md')))
+            .toMatchObject({name,enabled:true})
+        expect(skills.some((s: any) => s.name === 'bgs-imagegen')).toBe(false)
         const features = await client.request('experimentalFeature/list', { limit: 200 })
         expect(features.data.find((feature: any) => feature.name === 'image_generation')?.enabled).toBe(true)
         expect(skills.find((s: any) => s.path === join(user, 'imagegen', 'SKILL.md'))?.enabled).toBe(true)
@@ -74,6 +80,20 @@ nativeTest('both auth modes use BGS image guidance while preserving imported ski
         expect(current).toBe(systemText)
         expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe(configText)
       } finally { await client.close() }
+      const explicitConfig=configText+`\n[[skills.config]]\npath = ${JSON.stringify(systemImagegen)}\nenabled = false\n`
+      await writeFile(join(home,'config.toml'),explicitConfig)
+      const explicit=await BgsClient.connect({cwd:account,env,
+        config:{...bgsProviderConfig(env),cli_auth_credentials_store:'file'}})
+      try {
+        await configureBgsSkills(explicit,home,catalog,user)
+        const result=await explicit.request('skills/list',{cwds:[account],forceReload:true})
+        const skills=result.data.flatMap((entry:any)=>entry.skills)
+        expect(skills.find((s:any)=>s.path===systemImagegen)?.enabled).toBe(false)
+        expect(skills.find((s:any)=>s.path===join(user,'imagegen','SKILL.md'))?.enabled).toBe(true)
+        expect(await readFile(join(home,'config.toml'),'utf8')).toBe(explicitConfig)
+        expect(await readFile(systemImagegen,'utf8')).toBe(systemText)
+      } finally { await explicit.close() }
+      await writeFile(join(home,'config.toml'),configText)
     }
   } finally { await rm(account, { recursive: true, force: true }) }
 }, 15_000)
@@ -85,9 +105,6 @@ nativeTest(`${stage} task loads only selected Skill bodies and references`, asyn
   const selected = join(catalog, 'game-systems-designer-expert', 'SKILL.md')
   const unselected = join(catalog, 'game-level-designer-expert', 'SKILL.md')
   const reference = join(catalog, 'game-systems-designer-expert', 'references', 'detail.md')
-  const executionBody = await readFile(join(getBuiltinSkillsDirectory(), 'game-plan-execution', 'SKILL.md'), 'utf8')
-  await mkdir(join(catalog, 'game-plan-execution'), { recursive: true })
-  await writeFile(join(catalog, 'game-plan-execution', 'SKILL.md'), executionBody)
   await mkdir(game, { recursive: true })
   await mkdir(join(catalog, 'game-creative-director-expert'), { recursive: true })
   await writeFile(creative, '---\nname: game-creative-director-expert\ndescription: Synthetic creative fixture.\n---\nASSIGNED_CREATIVE_BODY\n')
@@ -154,9 +171,11 @@ nativeTest(`${stage} task loads only selected Skill bodies and references`, asyn
 
     if (stage === 'implementation') {
       expect(inputs).toHaveLength(1)
+      expect(inputs[0].tools.some((tool:any)=>tool.type==='namespace'&&tool.name==='image_gen')).toBe(false)
       const sent = JSON.stringify(inputs[0].input)
-      expect(sent).toContain(JSON.stringify(executionBody.slice(executionBody.indexOf('# Game Plan Execution')).trim()).slice(1, -1))
-      for (const body of ['ASSIGNED_CREATIVE_BODY', 'SHARED_CONSTRAINT_BODY', 'UNSELECTED_SKILL_BODY'])
+      expect(sent).toContain('imagegen/SKILL.md')
+      expect(sent).not.toContain('# Game Plan Execution')
+      for (const body of ['ASSIGNED_CREATIVE_BODY', 'SHARED_CONSTRAINT_BODY', 'RULES_SECTION_BODY', 'BALANCE_SECTION_BODY', 'UNRELATED_SECTION_BODY', 'UNSELECTED_SKILL_BODY'])
         expect(sent).not.toContain(body)
       expect(events.some(event => event.eventType === 'tool.completed')).toBe(false)
       return
@@ -191,3 +210,80 @@ nativeTest(`${stage} task loads only selected Skill bodies and references`, asyn
   } finally { await runtime?.dispose?.(); server.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 60_000)
 }
+
+
+nativeTest('custom chat connection calls the configured image MCP before and after cold resume',async()=>{
+  const root=await mkdtemp('/private/tmp/bgs-configured-image-native-'), game=join(root,'game'), privateRoot=join(root,'private')
+  await mkdir(game)
+  const png=await sharp({create:{width:40,height:40,channels:4,background:{r:20,g:30,b:40,alpha:1/255}}}).png().toBuffer()
+  const images:any[]=[],parents:any[]=[],reviews:any[]=[]
+  let round=0,step=0
+  const imageServer=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    if(request.method==='GET')return Response.json({available:true,billingSource:'external'})
+    images.push(await request.json());return new Response(new Uint8Array(png),{headers:{'content-type':'image/png'}})
+  }})
+  const models=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    if(new URL(request.url).pathname!=='/v1/responses')return new Response('No fixture route',{status:404})
+    const body=await request.json() as any
+    if(parents.length+reviews.length>12)return new Response('Fixture request limit',{status:429})
+    let output:any[]
+    if(body.text?.format?.schema?.properties?.outcome){
+      reviews.push(body)
+      output=[{id:'approval-'+reviews.length,type:'message',role:'assistant',status:'completed',content:[{type:'output_text',
+        text:JSON.stringify({outcome:'allow',risk_level:'low',user_authorization:'high',rationale:'Authorized localhost fixture image.'}),annotations:[]}]}]
+    }else{
+      parents.push(body)
+      const match=(t:any)=>t.name==='generate_image'||t.name?.endsWith('__generate_image')
+      const namespace=body.tools?.find((t:any)=>t.type==='namespace'&&t.tools?.some(match))
+      const tool=namespace?.tools.find(match)??body.tools?.find(match)
+      if(!tool)return new Response('Configured image tool was not discovered',{status:400})
+      expect(body.tools.some((t:any)=>t.type==='namespace'&&t.name==='image_gen')).toBe(false)
+      output=step++===0 ? [{id:'image-call-'+round,type:'function_call',call_id:'image-call-'+round,status:'completed',
+        name:tool.name,...(namespace?{namespace:namespace.name}:{}),arguments:JSON.stringify({
+          request:{purpose:'experiment',prompt:'Local fixture image'},outputPath:'assets/image-'+round+'.png'})}]
+        : [{id:'image-done-'+round,type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'Fixture complete.',annotations:[]}]}]
+    }
+    const response={id:'fixture-'+(parents.length+reviews.length),object:'response',created_at:1,model:body.model,status:'completed',
+      output,usage:{input_tokens:10,output_tokens:2,total_tokens:12}}
+    return new Response([{type:'response.created',response:{...response,status:'in_progress',output:[]}},
+      ...output.flatMap((item,output_index)=>[{type:'response.output_item.added',output_index,item:{...item,status:'in_progress'}},
+        {type:'response.output_item.done',output_index,item}]),{type:'response.completed',response}]
+      .map((event,sequence_number)=>'data: '+JSON.stringify({...event,sequence_number})+'\n\n').join(''),{headers:{'content-type':'text/event-stream'}})
+  }})
+  const runner=createBgsRunner({resolveOutboundTarget:async value=>{
+    const url=new URL(value);if(url.origin!==models.url.origin)throw Error('Non-local model request forbidden')
+    return {url,addresses:['127.0.0.1'],lookup:(_host,_options,callback)=>callback(null,'127.0.0.1',4)}
+  }})
+  let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined,runtime:Awaited<ReturnType<typeof runner.start>>|undefined,threadId:string|undefined
+  try {
+    for(round=0;round<2;round++){
+      step=0
+      tools=await openAgentTools({sessionId:'fixture',workspacePath:game,getAuthToken:()=>undefined,
+        openImage:()=>({endpoint:imageServer.url.origin+'/generate',instruction:'Local fixture',close:async()=>{}})})
+      runtime=await runner.start({sessionId:'fixture',cwd:game,imageGenerationEntry:tools.imageGenerationEntry,
+        ...(threadId?{resumeSessionId:threadId}:{}),onNativeSessionId:id=>{threadId=id},
+        env:{BEEGAME_CONFIG_DIR:privateRoot,OPENAI_API_KEY:'fixture-only',OPENAI_BASE_URL:models.url.origin+'/v1',BEEGAME_MODEL:'fixture-image-model'},
+        requestPermission:async()=>({behavior:'allow'})})
+      const events:any[]=[]
+      await runtime.submit({prompt:'Generate the one authorized localhost fixture image.',signal:AbortSignal.timeout(20_000),
+        onMessage:event=>{events.push(event)},requestPermission:async()=>({behavior:'allow'})})
+      expect((await readFile(join(game,'assets/image-'+round+'.png'))).equals(png)).toBe(true)
+      expect(events.some(e=>e.eventType==='tool.completed'&&String(e.toolName).includes('generate_image'))).toBe(true)
+      const receipt=events.find(e=>e.eventType==='tool.completed'&&String(e.toolName).includes('generate_image'))
+      expect(JSON.stringify(receipt.output)).not.toContain('base64')
+      expect(JSON.stringify(receipt.output)).not.toContain('\"data\":')
+      expect(images).toHaveLength(round+1)
+      const input=JSON.stringify(parents.at(-1).input)
+      expect(input).toContain('Transparency viewing preview on a checkerboard')
+      expect(input).toContain('data:image/png;base64,')
+      expect(input).not.toContain('viewing preview unavailable')
+      expect(parents.at(-1).input.some((item:any)=>item.type==='function_call'&&item.name==='view_image')).toBe(false)
+      await runtime.dispose?.();runtime=undefined;await tools.close();tools=undefined
+    }
+    expect(parents).toHaveLength(4)
+    expect(new Set(images.map(x=>x.requestId)).size).toBe(2)
+  }finally{
+    await runtime?.dispose?.();await tools?.close();models.stop(true);imageServer.stop(true)
+    await rm(projectWorkRoot(game),{recursive:true,force:true});await rm(root,{recursive:true,force:true})
+  }
+},60000)

@@ -3,9 +3,6 @@ import { readdirSync, realpathSync, statSync, fstatSync, openSync, readSync, clo
 import { open, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
-// Keep delivery/quality boundaries here; production procedures stay in Skills.
-export const VISUAL_REFERENCE_EXPECTATIONS = 'Resolve consequential conflicts before affected production: missing key states, unreadable layouts, unrecognizable subjects or a wrong visual direction. Minor lettering, grid-count and pixel-size deviations alone do not require regeneration or block reference delivery; retain exact requirements in the GDD and implementation. During a reference-only assignment, keep the existing GDD unchanged unless the user requests a design change. Within an authorized design task, reconcile selected pictures, resource representations and written decisions in their owning GDD chapters before dependent production; image imperfections never authorize changing confirmed requirements. Report image paths and consequential unresolved deviations. Screen boards are not runtime UI; component explanation boards are not usable resources.'
-
 // Durable source ownership and evidence boundaries. Task prompts and tools own
 // current assignments, final-result schemas and delivery operations.
 export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
@@ -14,29 +11,21 @@ export const PROJECT_WORKING_CONVENTIONS = `## Project conventions
 - Architecture decisions belong in their existing design/configuration sources, not this guide. Navigation pointers do not verify behavior.
 
 ## Source ownership
-- docs/GDD.md owns design decisions and their dependencies, with one authoritative definition per decision. Cover applicable gameplay, space, balance, art, UI/UX, audio, resources and technical responsibilities; organize sections around the decisions rather than a mandatory chapter layout. Distinguish requirements, initial choices and playtest hypotheses; leave production-dependent details for their actual inputs. Other sections reference the owning definition.
-- The resource Manifest owns delivered asset paths, metrics, provenance and bindings. Native code/data and configuration own runtime implementation. Use one existing work/progress record where useful, linking to sources rather than copying them.
-- Verification records own observed results and their input versions. Verification applies to its recorded input version; changed inputs require rechecking affected evidence. Neither design intentions, task ticks nor an independent review establish correctness.
+- The confirmed brief and authorized user changes own required scope, including the requested first release. docs/GDD.md supplies design decisions needed for that scope; finalizing or reviewing author proposals does not expand it. Keep author suggestions and open questions distinct from required work. Adjustable starting values and open hypotheses remain provisional, including when repeated under acceptance. Reference requirements and their design decisions rather than repeating them.
+- The resource Manifest records delivered paths, provenance and declared requirements through its existing registration contract. Native resource metadata, code/data and configuration own dimensions, anchors, runtime bindings and tuning, including layout metrics and audio scheduling; user requirements and selected designs constrain those choices. Existing work/progress records link to their sources rather than copying them; docs/TASKS.md and reports/ are bookkeeping excluded from source-copy builds and execution-source identity, not runtime dependencies. GDD changes remain design inputs, not progress updates.
 
 ## Professional methods
-- Select and read applicable Skills from the installed catalog for the current problem and confirmed target. Read the selected Skill's SKILL.md when missing from context, and references for concrete unresolved questions. Reuse current evidence and guidance. Keep necessary calculations and decisions in their owning GDD sections; batch related corrections and recheck affected dependencies.
-- The Agent chooses work organization and production methods within the user's requirements, rights and authorized budget. Follow explicit resource-library preferences. Reuse suitable supplied assets and designs; do not exhaust a fixed list of sources when a suitable method is available. Method failure does not authorize dropping required appearance or behavior, or calling placeholders final.
-
-## Required design dependencies
-- Design-only work establishes the decisions needed by the assignment; do not create runtime scene/UI content here. Missing prerequisite decisions remain explicit gaps. Acquire later details as their production inputs become available.
-- Visual work delivers inspected, displayable designs covering the required screens and states. Choose a suitable medium for the confirmed target, such as supplied pictures, image generation, HTML/CSS or engine rendering; no single production method is mandatory. Prose, palettes and JSON geometry do not replace visual design. ${VISUAL_REFERENCE_EXPECTATIONS}
-- Resource work uses the current GDD and selected designs; acquire, inspect and register assets needed by the current assignment. Check affected consumption in the actual runtime when implementation is in scope. Resource-only work stops at its requested boundary.
-- Scene/UI implementation uses selected designs in the confirmed target's native code/data. Web/React uses project code and its selected game library; BGS editor documents and a content index are not required. Other targets retain their applicable native/editor formats. Use actual asset metrics and existing checks when binding resources. Reconcile contradictory inputs before relying on them; develop and observe a coherent player situation before expanding.
-- A delivery subject to visual comparison requires the existing verification.visualComparisons to cite a displayable source design and an actual image observation. The host checks paths, statuses and evidence binding structurally, not semantic visual fidelity. A reference image is not a runtime asset; a screenshot does not verify motion or interaction.
+- The GDD defines intended behavior, experience, presentation and explicit constraints. Select and read applicable Skills from the installed catalog for concrete implementation decisions. Read the selected Skill's SKILL.md when missing from context, and references for unresolved method questions; reuse guidance retained in context.
+- Select artwork sources and representations during authorized production using the applicable resource method, preserving the selected design and required independently controlled behavior. An Agent-proposed GDD recipe does not override that method or establish a user source requirement. Honor explicit source choices, resource-library preferences, suitable supplied assets/designs and rights. A fallback must preserve the required appearance and behavior; an unmet result remains unfinished.
 
 ## Quality and evidence
-- Verify the requested behavior and presentation against confirmed requirements and selected designs. Build success, valid JSON, Skill invocation and model review are evidence with limited coverage, not certification. Report missing observations and unresolved defects honestly.
-- Reuse valid checks for unchanged inputs. Distinguish technical completion from subjective playtest feedback; explicit playtest requests still need their own evidence. Do not create machine indexes, task graphs, extra audit stages or duplicate records merely for BGS.`
+- Choose verification methods suited to the current assignment and affected behavior. Reuse valid results for unchanged behavior and conditions; an unrelated edit does not require repeating them. Report checks actually performed, remaining defects, unverified behavior and external blockers.
+- Compare actual views with selected designs when assessing visual agreement; a screenshot does not verify motion or interaction. Repair observable departures from the required appearance or usability, including spatial incoherence, distorted artwork and loss of selected visual treatment. Alternative cosmetic preferences within an already satisfied treatment remain follow-up suggestions unless refinement is requested. Explicit playtest requests still need their own evidence.`
 
 // Durable conventions contain no file snapshot that becomes stale as work proceeds.
 export const PROJECT_GUIDE_TEMPLATE = `# Project working conventions
 
-Start from the current user assignment, confirmed requirements and actual saved work. A new project may have no docs/GDD.md yet; within an authorized design task, establish the decisions needed for the current work. For existing work, read the relevant GDD chapters and affected sources. If design availability is unknown, ReadDesignHandoff {} reports it; read:[{document:"GDD.md"}] lists existing headings, and adding sections reads selected prose. Use actual headings, not assumed chapter names. These are available reads, not mandatory startup steps. Determine entry points, commands and whether the project uses Git from the actual project sources/configuration; do not assume a repository or scaffold.
+Start from the current user assignment, confirmed requirements and actual saved work. A new project may have no docs/GDD.md yet; within an authorized design task, establish the decisions needed for the current work. For existing work, read the design definitions relevant to the current assignment and their affected sources through the current task's available file readers. Inspect actual files and headings rather than assuming a chapter layout. Determine entry points, commands and whether the project uses Git from the actual project sources/configuration; do not assume a repository or scaffold.
 
 ${PROJECT_WORKING_CONVENTIONS}
 
@@ -100,23 +89,14 @@ export function projectNavigationSnapshot(workspacePath:string) {
     } finally {if(fd!==undefined)closeSync(fd)}
   }
   const rootFiles=list(''),designFiles=[...rootFiles.filter(p=>p.endsWith('.md')),...list('docs').filter(p=>p.endsWith('.md'))]
-  const codeFiles=list('src'),testFiles=list('tests'),pkg=metadata('package.json'),index=metadata('content/index.json')
+  const codeFiles=list('src'),testFiles=list('tests'),pkg=metadata('package.json')
   const scripts=pkg?.scripts
   if(scripts!==undefined && (!scripts||typeof scripts!=='object'||Array.isArray(scripts)))issues.push('package.json: scripts must be an object')
   const commands=Object.fromEntries(Object.entries(scripts&&typeof scripts==='object'&&!Array.isArray(scripts)?scripts:{}).filter(([name,value])=>
     name.length>0&&typeof value==='string').sort(([a],[b])=>a.localeCompare(b)))
-  const registeredContent:string[]=[]
-  for(const entry of Array.isArray(index?.documents)?index.documents:[]) {
-    try {
-      if(typeof entry?.path!=='string')throw Error('Registered source has no path')
-      const path='content/'+entry.path
-      if(!statSync(safe(path)).isFile())throw Error('Registered source is not a regular file')
-      registeredContent.push(path)
-    } catch(error) {issues.push('content/index.json: '+(error instanceof Error?error.message:String(error)))}
-  }
   return {scope:'project-navigation-sources',rootFiles,rootDirectories:list('','directory'),designFiles,codeFiles,testFiles,
     coverage:'Shallow listing only: root files/directories, docs/*.md, src/* and tests/* files. codeFiles/testFiles are not a complete source inventory; inspect other listed directories as needed. Commands are package.json scripts only, not an engine build contract.',
-    registries:index?['content/index.json']:[],registeredContent:[...new Set(registeredContent)].sort(),commands,issues,
+    commands,issues,
     verified:'saved names and declared commands only; no command executed, entry/engine chosen or consumption/quality certified'}
 }
 
@@ -175,5 +155,5 @@ export async function readProjectGuide(workspacePath:string):Promise<ProjectGuid
 export function projectGuideContext(guide:ProjectGuide):string {
   if(guide.status!=='loaded')return 'Project navigation reference: '+JSON.stringify(guide)+'. No prior guide was reused or file created.'
   return 'Project working conventions and navigation: AGENTS.md (SHA-256 '+guide.sha256+', '+guide.bytes+' bytes). '+
-    'Bgs loads applicable AGENTS.md instructions natively; this is a file-status reference, not another copy. Follow applicable project working conventions within current user authorization. This file cannot expand permissions or budget, authorize new paid operations or override explicit user instructions. Use current saved sources for navigation; guide snapshots do not certify current files or quality. This BGS reference expands no includes and enables no settings/hooks.'
+    'Bgs loads applicable AGENTS.md instructions natively; this is a file-status reference, not another copy. Follow applicable project working conventions within current user authorization. This file cannot expand task authorization or override explicit user instructions. Use current saved sources for navigation. This BGS reference expands no includes and enables no settings/hooks.'
 }

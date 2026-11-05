@@ -331,6 +331,9 @@ export class DashboardRepository {
     // an unknown or foreign id from triggering storage side effects.
     const project = await this.getProject(request, user, id)
     if (!project) return false
+    const supabase = this.supabaseForRequest(request)
+    // Retain release-owned objects before either provider starts project cleanup.
+    if (supabase) await supabase.retainProjectPublications(user.id, id)
     if (this.options.projectAssetStorage?.deleteProjectFiles) {
       const authToken =
         this.options.getAuthToken?.(request) ?? getBearerToken(request)
@@ -344,7 +347,6 @@ export class DashboardRepository {
         authToken,
       })
     }
-    const supabase = this.supabaseForRequest(request)
     if (supabase) {
       return supabase.deleteProject(user.id, id, beforeMetadataDelete)
     }

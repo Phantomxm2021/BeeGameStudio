@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 
-const STORE_DIRECTORY = '.beegame'
+import { projectHostDirectory } from './project-storage-paths'
 const ARTIFACTS_DIRECTORY = 'artifacts'
 const PENDING_DIRECTORY = 'pending'
 const MATERIALIZATION_COMMIT_FILE = 'materialization.json'
@@ -45,7 +45,7 @@ export async function readProjectArtifactPublicationToken(
 ): Promise<string | undefined> {
   const workspace = await findWorkspaceDirectory(workspacePath)
   if (!workspace) return undefined
-  const storePath = await findDirectoryTree(workspace, [STORE_DIRECTORY])
+  const storePath = await findWorkspaceDirectory(projectHostDirectory(workspace))
   if (!storePath) return undefined
   const artifactsPath = await findDirectoryTree(storePath, [ARTIFACTS_DIRECTORY])
   if (!artifactsPath) return undefined

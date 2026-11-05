@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -19,6 +20,7 @@ sandboxTest('pinned Bgs completes a real app-server turn against a local Respons
   const require = createRequire(import.meta.url)
   const mcpCode = `import {McpServer} from ${JSON.stringify(require.resolve('@modelcontextprotocol/sdk/server/mcp.js'))};import {StdioServerTransport} from ${JSON.stringify(require.resolve('@modelcontextprotocol/sdk/server/stdio.js'))};const server=new McpServer({name:'fixture',version:'1'});server.registerTool('fixture_echo',{inputSchema:{}},async()=>({content:[{type:'text',text:process.env.MCP_FIXTURE_TOKEN}]}));await server.connect(new StdioServerTransport());`
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     requests.push(new URL(request.url).pathname)
     if (new URL(request.url).pathname === '/mcp' && request.method === 'GET') return new Response(null,{status:405})
     const body = await request.json() as any
@@ -125,3 +127,80 @@ sandboxTest('catalog-advertised skill paths are readable in the sandbox while cr
     expect(await readFile(credentials,'utf8')).toBe('synthetic-secret')
   } finally {await client?.close();await rm(root,{recursive:true,force:true})}
 },15000)
+
+
+sandboxTest('managed registration writes through the host while native registry edits and replacement stay denied', async () => {
+  const { projectExecutionAccess } = await import('../beegame/project-execution-access')
+  const { openAgentTools } = await import('../beegame/workflow-v3/agent-tools')
+  const sharp = (await import('sharp')).default
+  const root = await mkdtemp('/private/tmp/bgs-registry-boundary-')
+  const game = join(root, 'game'), home = join(root, 'home')
+  await mkdir(join(game, 'assets/runtime'), { recursive: true }); await mkdir(home)
+  await writeFile(join(game, 'assets/runtime/apple.png'), await sharp({ create: {
+    width: 4, height: 4, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 0.5 },
+  } }).png().toBuffer())
+  const requirement = { id: 'apple', name: 'Apple', purpose: 'Local fixture', required: true,
+    acquisition_profile: { dimensions: ['2D'], asset_kinds: ['sprite'], usage_tags: ['prop'], capabilities: ['alpha'], styles: ['Cartoon'] } }
+  const registration = { operation: 'register', projectTarget: { platform: 'web', runtime: 'react',
+    asset_format_capabilities: ['png'], resource_library_usage: 'optional', runtime_asset_root: 'assets/runtime', generated_asset_root: 'assets/generated' },
+    requirements: [requirement], resources: [{ id: 'apple', fulfills: ['apple'], root_path: 'assets/runtime/apple.png',
+      file_paths: ['assets/runtime/apple.png'], provisional: false, reason: 'Local fixture artwork', selection_reason: ['Local fixture'], dimension: '2D', asset_kind: 'sprite' }] }
+  await writeFile(join(game, 'registration.json'), JSON.stringify(registration))
+  let tools: Awaited<ReturnType<typeof openAgentTools>> | undefined
+  let access: Awaited<ReturnType<typeof projectExecutionAccess>> | undefined
+  try {
+    access = await projectExecutionAccess({ workspacePath: game, sessionId: 'fixture', environment: {} })
+    tools = await openAgentTools({ workspacePath: game, sessionId: 'fixture', getAuthToken: () => undefined })
+    const profile = access.config.permissions['bgs-project']
+    const env = { ...access.environment, PATH: process.env.PATH, HOME: home, BGS_HOME: home }
+    const run = async (args: string[], changes = {}) => {
+      const child = Bun.spawn(bgsCommand().concat('sandbox', '-C', game, '-P', 'bgs-test', '-c',
+        'permissions.bgs-test=' + toml(profile), '--', process.execPath, ...args),
+        { cwd: game, env: { ...env, ...changes }, stdout: 'pipe', stderr: 'pipe' })
+      const [code, output, errors] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+      return { code, output, errors }
+    }
+    const cli = resolve(game,tools.directory, 'resources.mjs')
+    expect(await run([cli, 'registration.json'])).toMatchObject({ code: 0, output: expect.stringContaining('"valid":true') })
+    const manifestPath = join(game, 'assets/asset-manifest.json')
+    const manifestBytes = await readFile(manifestPath, 'utf8'), manifest = JSON.parse(manifestBytes)
+    const modulePath = manifest.modules.resources[0], requirementPath = manifest.modules.requirements
+    const moduleBytes = await readFile(join(game, modulePath), 'utf8')
+    const requirementBytes = await readFile(join(game, requirementPath), 'utf8')
+    const attacks = [
+      "fs.writeFileSync('assets/asset-manifest.json','bad')",
+      "fs.unlinkSync('assets/asset-manifest.json')",
+      "fs.renameSync('assets/asset-manifest.json','moved-index.json')",
+      `fs.writeFileSync(${JSON.stringify(modulePath)},'bad')`,
+      `fs.unlinkSync(${JSON.stringify(modulePath)})`,
+      `fs.renameSync(${JSON.stringify(modulePath)},'moved-module.json')`,
+      `fs.writeFileSync(${JSON.stringify(requirementPath)},'bad')`,
+      "fs.writeFileSync('assets/manifest/injected.json','bad')",
+      "fs.renameSync('assets/manifest','moved-manifest')",
+      "fs.rmSync('assets/manifest',{recursive:true,force:true})",
+      "fs.renameSync('assets','moved-assets')",
+    ]
+    const attack = `const fs=require('node:fs');const denied=[];${attacks.map((s,i) => `try{${s}}catch{denied.push(${i})}`).join(';')};fs.writeFileSync('assets/runtime/ordinary.txt','allowed');console.log(JSON.stringify(denied))`
+    const result = await run(['-e', attack])
+    expect(result.code, result.errors).toBe(0)
+    expect(JSON.parse(result.output)).toEqual(attacks.map((_, i) => i))
+    expect(await readFile(manifestPath, 'utf8')).toBe(manifestBytes)
+    expect(await readFile(join(game, modulePath), 'utf8')).toBe(moduleBytes)
+    expect(await readFile(join(game, requirementPath), 'utf8')).toBe(requirementBytes)
+    expect(await readFile(join(game, 'assets/runtime/ordinary.txt'), 'utf8')).toBe('allowed')
+    // Removing the managed capability must not reopen the local registrar's write path.
+    expect((await run([cli, 'registration.json'], { BEEGAME_ASSET_CAPABILITY_FILE: '' })).code).not.toBe(0)
+    await writeFile(join(game, 'changed.json'), JSON.stringify({ ...registration, requirements: [{ ...requirement, required: false }] }))
+    expect(await run([cli, 'changed.json'])).toMatchObject({ code: 1, output: expect.stringContaining('cannot redefine') })
+    expect(await readFile(join(game, requirementPath), 'utf8')).toBe(requirementBytes)
+    expect(await run([cli, 'registration.json'])).toMatchObject({ code: 0, output: expect.stringContaining('"valid":true') })
+    const capability = JSON.parse(await readFile(access.environment.BEEGAME_ASSET_CAPABILITY_FILE, 'utf8'))
+    const response = await fetch(capability.assets.registrationEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ registration: { operation: 'audio', resources: [] } }) })
+    expect(response.status).toBe(409)
+    await writeFile(join(game, 'wrong-workspace.json'), JSON.stringify({ ...capability, workspace: root }))
+    expect((await run([cli, 'registration.json'], { BEEGAME_ASSET_CAPABILITY_FILE: join(game, 'wrong-workspace.json') })).code).toBe(1)
+    await tools.close()
+    expect((await run([cli, 'registration.json'])).code).toBe(1)
+  } finally { await tools?.close(); await access?.close(); await rm(root, { recursive: true, force: true }) }
+}, 30_000)

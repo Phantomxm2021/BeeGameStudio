@@ -1,3 +1,4 @@
+import { projectHostDirectory } from '../beegame/project-storage-paths'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -69,8 +70,8 @@ describe('active BeeGame session artifact reads', () => {
     const beforeSnapshot = await manager.readArtifact(session.id, path)
     expect(beforeSnapshot).toEqual({ path, content: canonical })
 
-    // Synthetic legacy records live only in this temporary workspace.
-    const artifacts = join(workspacePath, '.beegame/artifacts')
+    // Synthetic host records stay outside this temporary game workspace.
+    const artifacts = join(projectHostDirectory(workspacePath), 'artifacts')
     const payload = { version: 1, ownerId: 'owner-1', projectId: 'project_beegame_active',
       publicationId: 'publication-current', documents: [document(path, published)] }
     const snapshotDigest = createHash('sha256').update(JSON.stringify(payload)).digest('hex')
@@ -96,7 +97,7 @@ describe('active BeeGame session artifact reads', () => {
     expect(entries.get(path)).toBe(canonical)
     expect([...entries.keys()].some(entry => entry.startsWith('.beegame/artifacts/'))).toBe(false)
     // Corrupting an unused application snapshot must not break canonical reads.
-    await writeFile(join(workspacePath, '.beegame', 'artifacts', 'current.json'), '{not-json', 'utf8')
+    await writeFile(join(artifacts, 'current.json'), '{not-json', 'utf8')
     expect(await manager.readArtifact(session.id, path)).toEqual({
       path,
       content: canonical,
@@ -112,8 +113,8 @@ describe('active BeeGame session artifact reads', () => {
       content: canonical,
     })
     expect(readStoredZipEntries((await foreignManager.createProjectPackage(foreignSession.id)).data).get(path)).toBe(canonical)
-    await mkdir(join(workspacePath, '.beegame', 'artifacts', 'pending'), { recursive: true })
-    await writeFile(join(workspacePath, '.beegame', 'artifacts', 'pending', 'race.json'), '{}', 'utf8')
+    await mkdir(join(artifacts, 'pending'), { recursive: true })
+    await writeFile(join(artifacts, 'pending', 'race.json'), '{}', 'utf8')
     await expect(manager.readArtifact(session.id, path)).rejects.toThrow(/pending transaction/i)
     await expect(manager.createProjectPackage(session.id)).rejects.toThrow(/pending transaction/i)
     await foreignManager.dispose()

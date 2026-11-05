@@ -46,10 +46,14 @@ export type McpServerConfig = {
   env?: McpServerEnvVar[]
   headers?: McpServerEnvVar[]
   autoStart?: boolean
+  enabledTools?: string[]
+  disabledTools?: string[]
 }
 
-export type McpServerInput = Omit<McpServerConfig, 'id'> & {
+export type McpServerInput = Omit<McpServerConfig, 'id' | 'enabledTools' | 'disabledTools'> & {
   id?: string
+  enabledTools?: string[] | null
+  disabledTools?: string[] | null
 }
 
 export type DiscoveredMcpServer = McpServerInput & {
@@ -243,6 +247,8 @@ function normalizeMcpServerInput(
     cwd: trimString(input.cwd) || undefined,
     env,
     headers: normalizeMcpHeaders(input.headers, existing?.headers),
+    enabledTools: normalizeMcpToolSelection(input.enabledTools, existing?.enabledTools),
+    disabledTools: normalizeMcpToolSelection(input.disabledTools, existing?.disabledTools),
     autoStart: typeof input.autoStart === 'boolean'
       ? input.autoStart
       : existing?.autoStart ?? true,
@@ -343,6 +349,8 @@ function toMcpServerInputFromUnknown(
     env: normalizeEnvFromUnknown(value.env),
     headers: normalizeMcpHeaders(normalizeEnvFromUnknown(value.headers ?? value.http_headers)),
     autoStart: value.autoStart !== false,
+    enabledTools: normalizeMcpToolSelection(value.enabledTools ?? value.enabled_tools),
+    disabledTools: normalizeMcpToolSelection(value.disabledTools ?? value.disabled_tools),
   }
 }
 
@@ -390,6 +398,8 @@ function toPublicMcpServerInput(config: McpServerConfig): McpServerInput {
       valuePreview: previewSecret(item.value),
     })),
     autoStart: config.autoStart,
+    enabledTools: config.enabledTools,
+    disabledTools: config.disabledTools,
   }
 }
 
@@ -399,6 +409,8 @@ function getMcpServerFingerprint(config: McpServerInput): string {
     command: config.command ?? '',
     url: config.url ?? '',
     args: config.args ?? [],
+    enabledTools: config.enabledTools,
+    disabledTools: config.disabledTools,
   })
 }
 
@@ -425,11 +437,18 @@ function normalizeEnv(
     .filter((item): item is McpServerEnvVar => item !== undefined)
 }
 
+// Omission preserves a saved selection; null explicitly restores the server defaults.
+export function normalizeMcpToolSelection(value: unknown, previous?: string[]): string[] | undefined {
+  if (value === undefined) return previous
+  if (value === null) return undefined
+  if (!Array.isArray(value) || value.some(name => typeof name !== 'string' || !name.trim()))
+    throw new Error('MCP tool selection must be an array of nonempty tool names, or null')
+  return value.map(name => name.trim())
+}
+
 function normalizeArgs(args: unknown): string[] {
   if (!Array.isArray(args)) return []
-  return args
-    .map(arg => trimString(arg))
-    .filter(Boolean)
+  return args.filter((arg): arg is string => typeof arg === 'string')
 }
 
 function toPublicMcpServerConfig(config: McpServerConfig): McpServerConfig {

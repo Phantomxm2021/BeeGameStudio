@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import { mkdtemp, chmod, readFile, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import {
   buildBeeGameDevPlan,
   waitForBeeGameDevServices,
@@ -229,4 +232,40 @@ describe('BeeGame local dev launcher helpers', () => {
       },
     })).toThrow('workspace root is server-managed')
   })
+})
+
+
+test('existing runtime preflight rejects a missing, non-executable or broken companion beside the selected CLI', async () => {
+  if (process.platform === 'win32') return // This fixture uses POSIX executable permissions.
+  const root = await mkdtemp(join(tmpdir(), 'bgs-companion-preflight-'))
+  const metadata = JSON.parse(await readFile(new URL('../dist/bgs-runtime/build.json', import.meta.url), 'utf8'))
+  const cli = join(root, 'bgs'), host = join(root, 'bgs-code-mode-host')
+  await writeFile(cli, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo '${metadata.version}'; else echo '~/.bgs/config.toml'; fi
+`, { mode: 0o700 })
+  const check = async () => {
+    const child = Bun.spawn([process.execPath, fileURLToPath(new URL('./check-bgs.ts', import.meta.url))], {
+      env: { ...process.env, BEEGAME_BGS_PATH: cli }, stdout: 'pipe', stderr: 'pipe',
+    })
+    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+    return { code, text: out + err }
+  }
+  try {
+    expect(await check()).toMatchObject({ code: 1, text: expect.stringContaining('code-mode host is missing or not executable') })
+    await writeFile(host, '#!/bin/sh\necho broken\n', { mode: 0o600 })
+    expect((await check()).code).toBe(1)
+    await chmod(host, 0o700)
+    await writeFile(host, '#!/bin/sh\necho wrong-program\n')
+    expect(await check()).toMatchObject({ code: 1, text: expect.stringContaining('code-mode host could not start') })
+    await writeFile(host, '#!/bin/sh\necho "Usage: bgs-code-mode-host [OPTIONS] --listen"\n')
+    expect((await check()).code).toBe(0)
+    // An operator's symlinked CLI must resolve the companion beside its real executable.
+    const { symlink } = await import('node:fs/promises')
+    const alias = join(root, 'alias'); await symlink(cli, alias)
+    const child = Bun.spawn([process.execPath, fileURLToPath(new URL('./check-bgs.ts', import.meta.url))], {
+      env: { ...process.env, BEEGAME_BGS_PATH: alias }, stdout: 'pipe', stderr: 'pipe',
+    })
+    await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+    expect(await child.exited).toBe(0)
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

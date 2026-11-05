@@ -1,3 +1,5 @@
+import { projectChatPath } from '../beegame/project-records'
+import { dirname } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -294,7 +296,7 @@ describe('local data migration', () => {
 async function createLocalDashboardData(): Promise<string> {
   const dataDir = await mkdtemp(join(tmpdir(), 'beegame-migration-'))
   const projectDir = join(dataDir, 'Project One')
-  const transcriptDir = join(projectDir, '.beegame', 'chat')
+  const transcriptDir = dirname(projectChatPath(projectDir))
   mkdirSync(transcriptDir, { recursive: true })
   writeFileSync(
     join(transcriptDir, 'project-events.jsonl'),

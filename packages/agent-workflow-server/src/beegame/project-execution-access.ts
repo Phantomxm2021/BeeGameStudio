@@ -1,13 +1,13 @@
-import { mkdir, realpath, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { nativeSessionTemporaryPath, nativeSessionOutputPath } from './native-runtime-process-path'
-import { sharedPlaywright, preparePreviewRecorder } from './shared-playwright'
-import { sharedSharp, sharedFont } from './shared-sharp'
-import { sharedContentChecker } from './content-checker-runtime'
+import { sharedSharp } from './shared-sharp'
+import { sharedContentChecker, sharedProjectReads } from './content-checker-runtime'
 import { projectPreviewCapabilityPath } from './project-preview-capability'
 import { PROJECT_DESIGN_PATHS } from './design-handoff'
+import { projectHostDirectory, projectWorkDirectory } from './project-storage-paths'
 
 const TOOL_READ_PATHS='BEEGAME_PROJECT_TOOL_READ_PATHS'
 const within=(parent:string,path:string)=>{
@@ -28,13 +28,13 @@ async function hostToolReadPaths(root:string):Promise<string[]> {
   if(!Object.hasOwn(value,root))return []
   const paths=(value as Record<string,unknown>)[root]
   if(!Array.isArray(paths))throw invalid('current workspace entry must be an array')
-  const protectedRoots=[root,await realpath(homedir()),await realpath(tmpdir()),await realpath(process.cwd()),
+  const protectedRoots=[root,projectHostDirectory(root),await realpath(homedir()),await realpath(tmpdir()),await realpath(process.cwd()),
     ...(process.platform==='darwin'?['/Applications']:[])]
   const result:string[]=[]
   for(const path of paths) {
     if(typeof path!=='string' || !isAbsolute(path) || resolve(path)!==path || /[\x00*?\[\]{}]/.test(path))
       throw invalid('tool paths must be literal absolute canonical paths')
-    if(within(root,path) || protectedRoots.some(target=>within(path,target)))
+    if(within(root,path) || within(projectHostDirectory(root),path) || protectedRoots.some(target=>within(path,target)))
       throw invalid('tool path must be external and must not grant a broad host/project directory')
     const canonical=await realpath(path).catch(()=>{throw invalid('configured tool path is unavailable')})
     if(canonical!==path)throw invalid('tool path must not resolve through a link')
@@ -52,8 +52,6 @@ export async function projectExecutionAccess(input: {
   sessionId: string
   environment: Record<string, string>
   readOnly?: boolean
-  scopedTools?: readonly string[]
-  toolResultsDirectory?: string
 }) {
   const root = await realpath(input.workspacePath)
   const toolReadPaths=await hostToolReadPaths(root)
@@ -68,34 +66,29 @@ export async function projectExecutionAccess(input: {
       return undefined
     }
   }
-  const [playwright, sharp, font] = await Promise.all([
-    optional('browser inspection (Playwright)', sharedPlaywright),
-    optional('image processing (Sharp)', sharedSharp),
-    optional('font inspection', sharedFont),
+  const [sharp, checker, projectReads] = await Promise.all([
+    input.readOnly ? undefined : optional('image processing (Sharp)', sharedSharp),
+    input.readOnly ? undefined : optional('resource/media tools', sharedContentChecker),
+    input.readOnly ? undefined : optional('project read tools', sharedProjectReads),
   ])
-  const checker = await sharedContentChecker()
-  const previewClient = new URL('./preview-test-client.mjs', checker.moduleUrl)
-  const previewClientPath = await realpath(fileURLToPath(previewClient))
   const temporary = nativeSessionTemporaryPath(root, input.sessionId)
-  const nativeOutput = nativeSessionOutputPath(root, input.sessionId, await realpath(tmpdir()))
+  const nativeOutput = nativeSessionOutputPath(root, input.sessionId)
   // Package caches contain source/tests. Keep them outside the game tree so
   // ordinary project scans do not treat cached dependencies as game sources.
   const cache = resolve(nativeOutput, 'cache')
-  for (const path of [nativeOutput, cache]) {
-    await mkdir(path, { mode: 0o700 }).catch(error => {
+  const work = projectWorkDirectory(root, input.sessionId)
+  for (const path of [work, nativeOutput, cache]) {
+    await mkdir(path, { recursive: true, mode: 0o700 }).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     })
     if (await realpath(path) !== path || !(await stat(path)).isDirectory())
       throw new Error('Native runtime directory must not resolve through a link')
   }
-  const previewCapability = projectPreviewCapabilityPath(root, input.sessionId)
-  const measurementCapability = projectPreviewCapabilityPath(root, input.sessionId, 'measurement')
-  const assetCapability = projectPreviewCapabilityPath(root, input.sessionId, 'assets')
+  const assetCapability = projectPreviewCapabilityPath(root, input.sessionId)
   const templates = resolve(temporary, 'git-templates')
   await mkdir(templates, { recursive: true, mode: 0o700 })
   if (await realpath(temporary) !== temporary || await realpath(templates) !== templates)
-    throw new Error('Project execution directories must remain inside the workspace')
-  if (playwright) await preparePreviewRecorder(resolve(temporary, 'browsers'))
+    throw new Error('Project execution directories must not resolve through links')
   const environment: Record<string, string> = {
     TMPDIR: temporary,
     // zsh heredocs use TMPPREFIX, independently of TMPDIR's safe location.
@@ -112,23 +105,14 @@ export async function projectExecutionAccess(input: {
     npm_config_cache: resolve(cache, 'npm'),
     NPM_CONFIG_USERCONFIG: '/dev/null',
     npm_config_userconfig: '/dev/null',
-    PLAYWRIGHT_BROWSERS_PATH: resolve(temporary, 'browsers'),
-    // Empty values also override stale inherited module paths.
-    BEEGAME_PLAYWRIGHT_MODULE: playwright?.moduleUrl ?? '',
-    BEEGAME_PREVIEW_TEST_MODULE: previewClient.href,
-    BEEGAME_PREVIEW_CAPABILITY_FILE: previewCapability,
-    BEEGAME_MEASUREMENT_CAPABILITY_FILE: measurementCapability,
-    BEEGAME_ASSET_CAPABILITY_FILE: assetCapability,
-    BEEGAME_CONTENT_CHECKER_MODULE: checker.moduleUrl,
-    BEEGAME_SHARP_MODULE: sharp?.moduleUrl ?? '',
-    BEEGAME_FONT_MODULE: font?.moduleUrl ?? '',
   }
   const readPaths = ['/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/private/etc',
     '/System', '/Library/Apple', '/Library/Developer', '/dev', '/opt/homebrew',
-    // Bun's module resolver needs directory access even for one bundled .mjs.
-    // This private directory contains only the checker, no server/dependencies.
-    await realpath(process.execPath), nativeOutput, previewClientPath, previewCapability, measurementCapability, assetCapability, checker.root,
-    ...(playwright ? [playwright.root] : []), ...(sharp?.roots ?? []), ...(font?.roots ?? [])]
+    await realpath(process.execPath), nativeOutput]
+  // Bun's module resolver needs the private checker directory as well as its file.
+  const runtimeReadPaths = [assetCapability,
+    ...(checker ? [checker.root] : []), ...(projectReads ? [projectReads.root] : []),
+    ...(sharp?.roots ?? [])]
   if (process.platform === 'darwin') {
     const developer = await realpath('/var/select/developer_dir').catch(() => undefined)
     if (developer) {
@@ -138,31 +122,66 @@ export async function projectExecutionAccess(input: {
       environment.PATH = `${developer}/usr/bin:${input.environment.PATH ?? process.env.PATH ?? '/usr/bin:/bin'}`
     }
   }
-  const references: string[] = [nativeOutput]
-  if (input.toolResultsDirectory) {
-    readPaths.push(input.toolResultsDirectory)
-    references.push(input.toolResultsDirectory)
-  }
+  const reviewEnvironment = { ...environment }
+  Object.assign(environment, {
+    // Empty values also override stale inherited module paths.
+    BEEGAME_ASSET_CAPABILITY_FILE: assetCapability,
+    BEEGAME_CONTENT_CHECKER_MODULE: checker?.moduleUrl ?? '',
+    BEEGAME_SHARP_MODULE: sharp?.moduleUrl ?? '',
+  })
   for (const path of [
     input.environment.BEEGAME_CONFIG_DIR && resolve(input.environment.BEEGAME_CONFIG_DIR, 'skills'),
     input.environment.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR,
   ]) {
     if (path) {
       const canonical = await realpath(path).catch(() => undefined)
-      if (canonical) { readPaths.push(canonical); references.push(canonical) }
+      if (canonical) runtimeReadPaths.push(canonical)
+    }
+  }
+  // Host registration owns these canonical files. Keep the directory present so
+  // the native sandbox also denies rename/unlink of its existing parent entry.
+  if (!input.readOnly) {
+    let registryParent = root
+    for (const name of ['assets', 'manifest']) {
+      registryParent = resolve(registryParent, name)
+      await mkdir(registryParent, { mode: 0o700 }).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      })
+      if (await realpath(registryParent) !== registryParent) throw Error('Resource registry must not resolve through a link')
     }
   }
   const protectedPaths = ['AGENTS.md', ...PROJECT_DESIGN_PATHS].map(path => resolve(root, path))
   const filesystem: Record<string, string> = { ':root': 'deny', ':minimal': 'read', ':slash_tmp': 'deny', [root]: input.readOnly ? 'read' : 'write', [cache]: 'write' }
   for (const path of [...readPaths, ...toolReadPaths]) filesystem[path] = 'read'
+  filesystem[projectHostDirectory(root)] = 'deny'
+  filesystem[work] = 'read'
+  filesystem[temporary] = 'write'
+  const reviewFilesystem = { ...filesystem, [root]: 'read', [temporary]: 'write' }
+  for (const path of runtimeReadPaths) filesystem[path] = 'read'
   if (input.readOnly) filesystem[temporary] = 'write'
   for (const path of protectedPaths) filesystem[path] = 'read'
+  for (const path of ['assets/asset-manifest.json', 'assets/manifest']) filesystem[resolve(root, path)] = 'read'
   // Keep credentials/configuration and BGS control data outside model writes.
   for (const name of ['.git', '.bgs', '.agents', '.aws']) filesystem[resolve(root, name)] = 'read'
-  return { root, temporary, nativeOutput, environment, toolReadPaths, protectedPaths, unavailable,
+  // Retain the stable scratch tree for saved work. Unix socket consumers need
+  // a short, private IPC/temp root; granting only this unique directory keeps
+  // other sessions and the host temp root outside both permission profiles.
+  const runtimeTemporary = await realpath(await mkdtemp(resolve(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'bgs-')))
+  const tempEnvironment = { TMPDIR: runtimeTemporary, TEMP: runtimeTemporary, TMP: runtimeTemporary,
+    TMPPREFIX: resolve(runtimeTemporary, 'zsh') }
+  Object.assign(environment, tempEnvironment)
+  Object.assign(reviewEnvironment, tempEnvironment)
+  filesystem[runtimeTemporary] = 'write'
+  reviewFilesystem[runtimeTemporary] = 'write'
+  return { root, temporary: runtimeTemporary, nativeOutput, environment, reviewEnvironment, toolReadPaths, protectedPaths, unavailable,
+    close: () => rm(runtimeTemporary, { recursive: true, force: true }),
+    projectReadToolPath: projectReads?.path,
     config: {
       default_permissions: 'bgs-project',
-      permissions: { 'bgs-project': { filesystem, network: { enabled: true } } },
+      permissions: {
+        'bgs-project': { filesystem, network: { enabled: true } },
+        'bgs-project-review': { filesystem: reviewFilesystem, network: { enabled: false } },
+      },
     },
   }
 }

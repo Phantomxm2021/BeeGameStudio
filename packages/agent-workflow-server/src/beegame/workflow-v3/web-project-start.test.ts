@@ -3,9 +3,11 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, realpath, symlink } from 'node
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
-import { observeProjectCreation, requiresWebVisualComparison } from './web-project-start'
+import { observeProjectCreation } from './web-project-start'
 import { webStarterFiles, writeWebContentFixture } from '../fixtures/web-content-fixture'
-import { registeredContentChecks, activeUserTask } from './agent-measurement'
+import { initialProductionAssignment } from './production-workflow'
+import { activeUserTask } from './agent-measurement'
+import { runContentCheck } from './content-checks'
 import { createRun, type AgentTurn } from './state'
 import { agentGoalPrompt, focusedExecutionFacts } from './agent-goal'
 import { sharedPlaywright } from '../shared-playwright'
@@ -27,7 +29,7 @@ async function fixture(legacy = true) {
 test('creation facts cover blank creative and blueprint intake; source/import/unknown are not silently migrated',async()=>{
   const f=await fixture(false)
   try {
-    expect(f.run.creation).toEqual({initialDelivery:'design-led-first-version',editableContent:false})
+    expect(f.run.creation).toEqual({initialDelivery:'complete-game',editableContent:false})
     for(const path of ['.beegame','.beegame-attachments','transcripts','logs'])await mkdir(join(f.root,path))
     await writeFile(join(f.root,'.gitignore'),'# Git configuration is not game source\nnode_modules/\n')
     await writeFile(join(f.root,'logs/index.json'),'{}')
@@ -38,7 +40,7 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:undefined})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,creation_mode:'unknown'})).toBeUndefined()
     expect(await observeProjectCreation(f.root,{...brief,settings:{...brief.settings,bgsVisualEditing:false}}))
-      .toEqual({initialDelivery:'design-led-first-version',editableContent:false})
+      .toEqual({initialDelivery:'complete-game',editableContent:false})
     expect((await observeProjectCreation(f.root,{...brief,settings:{platform:'Native',engine:'Unity'}}))?.webStarter).toBeUndefined()
     await writeFile(join(f.root,'README.md'),'Existing user source')
     expect(await observeProjectCreation(f.root,brief)).toBeUndefined()
@@ -56,36 +58,13 @@ test('creation facts cover blank creative and blueprint intake; source/import/un
   }finally{await f.close()}
 })
 
-test.each(['React','Unity','Godot','Unreal'])('Visual comparison follows the target while editor requirements stay removed: %s',async engine=>{
+test.each(['React','Phaser','Three.js','Unity','Godot','Unreal'])('new-game creation does not impose browser acceptance: %s',async engine=>{
   const f=await fixture(false)
-  try {
-    const settings={...brief.settings,engine}
-    const creation=await observeProjectCreation(f.root,{...brief,settings})
-    expect(creation).toEqual({initialDelivery:'design-led-first-version',editableContent:false})
-    const run={...f.run,requirements:{...f.run.requirements,constraints:settings},creation:{...creation!,editableContent:true}}
-    expect(requiresWebVisualComparison(run)).toBe(engine==='React')
-  }finally{await f.close()}
-})
-
-test.each([
-  {settings:{platform:'Web',engine:'React'},expected:true},
-  {settings:{platform:'Mobile',engine:'React'},expected:false},
-  {settings:{platform:'PC',engine:'Godot'},expected:false},
-  {settings:{platform:'Web',engine:'Unity'},expected:false},
-  {settings:{platform:'Web',engine:'React',bgsVisualEditing:false},expected:true},
-  {settings:{platform:'Web',engine:'custom-engine'},expected:false},
-  {settings:{engine:'React'},expected:false},
-  {settings:{},expected:false},
-])('visual comparison is independent of the retired editor flag: %j',async ({settings,expected})=>{
-  const f=await fixture(false)
-  try {
-    const run={...f.run,requirements:{...f.run.requirements,constraints:settings}}
-    expect(requiresWebVisualComparison(run)).toBe(expected)
-    const checks=await registeredContentChecks(f.root,settings)
-    expect(checks).toEqual([])
-    expect((await observeProjectCreation(f.root,{...brief,settings}))?.editableContent).toBe(false)
-    expect(requiresWebVisualComparison({...run,creation:undefined})).toBe(false)
-    expect(requiresWebVisualComparison({...run,creation:{...run.creation!,editableContent:false}})).toBe(expected)
+  try{
+    const creation=await observeProjectCreation(f.root,{...brief,settings:{...brief.settings,engine}})
+    expect(creation).toEqual({initialDelivery:'complete-game',editableContent:false})
+    const assignment=initialProductionAssignment({...f.run,productionWorkflow:1,creation})
+    expect(assignment).toEqual({stage:'design',originRequestKey:f.run.requestKey,stopAfter:'implementation'})
   }finally{await f.close()}
 })
 
@@ -104,26 +83,24 @@ test('focused interrupted continuation retains the slice assignment; new user wo
   }finally{await f.close()}
 })
 
-test('existing content check distinguishes required absence, exemption and valid connected starter',async()=>{
+test('explicit legacy document checks validate only the supplied sources',async()=>{
   const f=await fixture()
+  const task={expectedOutputs:['content/ui/hud.json','content/scenes/main.json']}
   try {
-    expect(await registeredContentChecks(f.root,{},false)).toEqual([])
-    expect(await registeredContentChecks(f.root,{},true)).toMatchObject([{id:'content-structure',status:'failed'}])
+    const missing=await runContentCheck(f.root,'content-structure',task,[],{})
+    expect(missing.status).toBe('failed')
     await writeWebContentFixture(f.root)
     for (const orientation of ['Landscape','Portrait'] as const) {
       const files=await webStarterFiles(orientation,'zh')
       for(const path of ['content/index.json','content/ui/hud.json','content/scenes/main.json'] as const)
         await writeFile(join(f.root,path),files[path])
-      const checks=await registeredContentChecks(f.root,{orientation},true)
-      expect(checks.find(c=>c.id==='content-structure')?.status).toBe('passed')
-      expect(checks.find(c=>c.id==='content-layout')?.status).toBe('passed')
+      for(const id of ['content-structure','content-layout'] as const) {
+        const checked=await runContentCheck(f.root,id,task,[],{orientation})
+        expect(checked.status,checked.observation).toBe('passed')
+      }
     }
-    const index=JSON.parse(await readFile(join(f.root,'content/index.json'),'utf8'))
-    index.documents=index.documents.filter((d:any)=>d.kind!=='ui-hud')
-    index.files=index.files.filter((p:string)=>!p.startsWith('ui/'))
-    await writeFile(join(f.root,'content/index.json'),JSON.stringify(index))
-    expect((await registeredContentChecks(f.root,{},true))[0]).toMatchObject({id:'content-structure',status:'failed'})
-    expect((await registeredContentChecks(f.root,{},false)).find(c=>c.id==='content-structure')?.status).toBe('passed')
+    await writeFile(join(f.root,'content/ui/hud.json'),'{invalid')
+    expect((await runContentCheck(f.root,'content-structure',task,[],{})).status).toBe('failed')
   }finally{await f.close()}
 },30000)
 
@@ -185,7 +162,9 @@ test.each(['procedural','resources','pure-ui'])('test-authored Web content consu
     // The resource-loader fixture retains an unrelated example
     // production obligation; it does not establish that asset's delivery.
     if (mode !== 'resources') {
-      const contentChecks = await registeredContentChecks(f.root,{},true)
+      const index=JSON.parse(await readFile(join(f.root,'content/index.json'),'utf8'))
+      const contentChecks = await Promise.all((['content-structure','content-layout','content-resources'] as const)
+        .map(id=>runContentCheck(f.root,id,{expectedOutputs:index.files.map((path:string)=>'content/'+path)},[],{})))
       expect(contentChecks.filter(c=>c.status!=='passed')).toEqual([])
     }
     const build=Bun.spawn([process.execPath,join(dirname(require.resolve('vite/package.json')),'bin/vite.js'),'build'],
@@ -260,7 +239,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Game));`)
     expect(build.success).toBe(true)
     await writeFile(join(f.root,'dist/index.html'),'<html><body><div id="root"></div><script type="module" src="./game.js"></script></body></html>')
     expect(await Bun.file(join(f.root,'content/index.json')).exists()).toBe(false)
-    expect(await registeredContentChecks(f.root,brief.settings)).toEqual([])
+    expect(f.run.creation?.editableContent).toBe(false)
     server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
       const path=new URL(request.url).pathname
       if(path==='/favicon.ico')return new Response(null,{status:204})
@@ -277,6 +256,6 @@ createRoot(document.getElementById('root')).render(React.createElement(Game));`)
       getComputedStyle(document.querySelector('button')!).transform==='matrix(1, 0, 0, 1, 20, 0)')
     expect(errors).toEqual([])
     expect(f.run.creation?.editableContent).toBe(false)
-    expect(requiresWebVisualComparison(f.run)).toBe(true)
+    expect(initialProductionAssignment({...f.run,productionWorkflow:1})).not.toHaveProperty('browserVerification')
   } finally { await browser?.close();server?.stop(true);await f.close() }
 },30000)

@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createUsageRecorder, generateBeeGameModelWithUsage } from '../app'
 import { BeeGameModelRuntimeError } from '../beegame/model-runtime-host'
-import { BeeGameSessionManager, type BeeGameSessionUsageBillingBackend } from '../beegame/session-manager'
+import { BeeGameSessionManager, getLatestRuntimeUsage, getRuntimeUsageForTurn, type BeeGameSessionUsageBillingBackend } from '../beegame/session-manager'
 import { UsageOutboxPersistenceError } from '../beegame/session-usage-outbox'
 import { BeeGameUsageBillingError } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { BEEGAME_MODEL_BILLING_SOURCE } from '../model-billing-source'
@@ -107,6 +107,7 @@ describe('model runtime usage recorder', () => {
     const f = await fixture(true)
     let admissions = 0
     const observed: number[] = []
+    const session=f.manager.start({workspacePath:f.root,userId:'owner'})
     const input = {
       cwd: f.root,
       runtimeEnv: { [BEEGAME_MODEL_BILLING_SOURCE]: source },
@@ -123,14 +124,25 @@ describe('model runtime usage recorder', () => {
       }
       expect(await generateBeeGameModelWithUsage(successHost, input, f.recorder, true, async () => { admissions++ }, value => {
         observed.push(value.total_tokens)
+        f.manager.observeExternalModelUsage(session.id,value,source,input.querySource)
       })).toBe('Personal result')
       const failure = new BeeGameModelRuntimeError('Synthetic personal disconnect', 'model_request', { usage: { ...usage(30), incomplete: true } })
       await expect(generateBeeGameModelWithUsage({ async generate() { throw failure }, async generateWithUsage() { throw failure } }, input, f.recorder, true,
-        async () => { admissions++ }, value => { observed.push(value.total_tokens) })).rejects.toBe(failure)
+        async () => { admissions++ }, value => { observed.push(value.total_tokens);f.manager.observeExternalModelUsage(session.id,value,source,input.querySource) })).rejects.toBe(failure)
       expect(await generateBeeGameModelWithUsage({ async generate() { return 'No receipt' } }, input, f.recorder, true,
         async () => { admissions++ }, value => { observed.push(value.total_tokens) })).toBe('No receipt')
       expect(admissions).toBe(0)
       expect(observed).toEqual([40, 30])
+      expect(f.manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(70)
+      const events=f.manager.transcriptFacts(session.id)
+      expect(getLatestRuntimeUsage(events,true).total_tokens).toBe(0)
+      expect(getLatestRuntimeUsage(JSON.parse(JSON.stringify(events))).total_tokens).toBe(70)
+      const native={id:-1,sessionId:session.id,type:'usage' as const,text:'',createdAt:new Date(),payload:{type:'usage',subtype:'native_accounting',nativeAccountingEpoch:'fixture',billingSource:'platform',usage:{prompt_tokens:100,completion_tokens:0,cache_read_tokens:0,cache_creation_tokens:0,total_tokens:100}}}
+      expect(getLatestRuntimeUsage([native,...events]).total_tokens).toBe(170)
+      expect(getLatestRuntimeUsage([native,...events],true).total_tokens).toBe(100)
+      const turnEvents=[native,...events].map(event=>({...event,turnId:'auxiliary-turn'}))
+      expect(getRuntimeUsageForTurn(turnEvents,'auxiliary-turn').total_tokens).toBe(170)
+      expect(getRuntimeUsageForTurn(turnEvents,'auxiliary-turn',true).total_tokens).toBe(100)
       expect(f.rows.size).toBe(0)
       expect(f.state.charged).toBe(0)
       expect(f.state.settled).toEqual([])
@@ -140,11 +152,14 @@ describe('model runtime usage recorder', () => {
 
   test('explicit platform provenance remains billable', async () => {
     const f = await fixture()
+    const session=f.manager.start({workspacePath:f.root,userId:'owner'})
     try {
       const input = { cwd: f.root, runtimeEnv: { [BEEGAME_MODEL_BILLING_SOURCE]: 'platform' }, systemPrompt: 'Offline', messages: [], querySource: 'platform-auxiliary' }
-      await expect(generateBeeGameModelWithUsage({ async generate() { return 'Unexpected legacy call' }, async generateWithUsage() { return { content: 'Platform result', usage: usage(25) } } }, input, f.recorder, true)).resolves.toBe('Platform result')
+      await expect(generateBeeGameModelWithUsage({ async generate() { return 'Unexpected legacy call' }, async generateWithUsage() { return { content: 'Platform result', usage: usage(25) } } }, input, f.recorder, true, undefined, (usage, querySource)=>f.manager.observeExternalModelUsage(session.id,usage,'platform',querySource))).resolves.toBe('Platform result')
       expect(f.rows.size).toBe(1)
       expect(f.state.charged).toBe(25)
+      expect(f.manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(25)
+      expect(getLatestRuntimeUsage(f.manager.transcriptFacts(session.id),true).total_tokens).toBe(0)
     } finally { await f.close() }
   })
   test('each physical request is charged in full, including equal usage in the same logical job', async () => {

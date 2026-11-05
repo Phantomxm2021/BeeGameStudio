@@ -165,6 +165,12 @@ export class BgsClient {
 
   notify(method: string, params: unknown): void { this.write({ method, params }) }
 
+  /** Drain received events only from outside their ordered handler. */
+  async drainNotifications(): Promise<void> {
+    await this.notifications
+    if (this.exitError) throw this.exitError
+  }
+
   /** Cancel only requests belonging to the native thread/turn that ended. */
   cancelServerRequests(threadId: string, turnId?: string): void {
     for (const [id, request] of this.inboundRequests) {
@@ -246,7 +252,10 @@ export class BgsClient {
     if (message.error) {
       const rpcCode = Number(message.error.code)
       pending.reject(new BgsClientError(`BGS ${pending.method} rejected (code ${rpcCode || 'unknown'})`,
-        this.diagnostic('request', { method: pending.method, ...(Number.isFinite(rpcCode) ? { rpcCode } : {}) })))
+        this.diagnostic('request', { method: pending.method, ...(Number.isFinite(rpcCode) ? { rpcCode } : {}),
+          ...(pending.method === 'thread/resume' && rpcCode === -32600 &&
+            /^no rollout found for thread id [0-9a-f-]{36}$/.test(message.error.message ?? '')
+            ? { code: 'native-history-missing' } : {}) })))
     }
     else pending.resolve(message.result)
   }

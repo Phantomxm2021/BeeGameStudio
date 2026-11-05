@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 import { designSourceLocations } from './design-source-reading'
-import { designSectionHashes, designDocumentSections } from './design-document-sections'
+import { designDocumentSections, renderDesignHeading } from './design-document-sections'
 import { checkCalculationResult } from './balance-calculation.mjs'
 import { readCalculationInputs } from './balance-calculation'
-import { lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { collectContentSourceFiles } from './content-source-files'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fromMarkdown } from 'mdast-util-from-markdown'
@@ -74,13 +74,6 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
     ...(availableRequirements.length ? { availableRequirements } : {}) }
 }
 
-export const DESIGN_INDEX_INSTRUCTION = `Author all design decisions in docs/GDD.md, using clear sections for gameplay, levels, balance, art, UI, audio, resources and implementation guidance as applicable to the current project. Select Skills and organize work to suit the current task; self-check original requirements, contradictions and unresolved decisions. BGS does not require output indexes, task graphs or coverage mappings. Stop at the user's requested scope. Existing indexes remain readable; do not create them merely to satisfy a tool.`
-
-export const DESIGN_HANDOFF_INSTRUCTION = DESIGN_INDEX_INSTRUCTION + `
-Use ReadDesignHandoff to locate saved documents and read selected sections. Explicit --design baseline checks saved source/index integrity, not design quality. Plain documents need no finalize command or version header. Existing versioned indexes can use --design finalize after an authorized revision; this updates metadata, not approval. Read selected reference pictures and reconcile the interfaces and inputs needed for the current part before consuming them. Keep later inputs planned and subsequent production facts in the existing Manifest/content registry and progress; links, task ticks and hashes are not proof of delivery.`
-
-export const DESIGN_IMPLEMENTATION_INSTRUCTION = `Read the saved GDD and its relevant sections; choose Skills and task organization for the work. ReadDesignHandoff locates documents/sections. ReadImplementationTask exposes existing indexed tasks when available, otherwise the GDD source; no index is required. Use --design implementation to read the current design inputs for authorized work. It does not freeze them or grant approval. Update affected records as implementation details develop; verification evidence applies to its recorded version. Consume actual selected designs, resources and Editor data. Resume from saved work and evidence, not task ticks. Compare actual results with the confirmed scope and original designs; report unresolved and unverified outcomes. Reuse the ordinary project task/progress file; do not duplicate design records or create an index or task database to satisfy BGS.`
-
 function hash(body: string | Buffer) { return createHash('sha256').update(body).digest('hex') }
 function readRetained(workspace: string, path: string) {
   if (isAbsolute(path) || path.replaceAll('\\', '/').split('/').includes('..')) throw new Error('Expected a workspace-relative evidence path without traversal')
@@ -117,10 +110,7 @@ function canonicalHeadingPointers<T extends Partial<DesignHandoff>>(handoff: T, 
     // Prefer literal titles so meaningful Markdown characters are not reinterpreted.
     let matches = headings.filter(heading => heading === section)
     if (!matches.length) {
-      const parsed = /[\r\n]/.test(section) ? [] : documentStructure(
-        /^#{1,6}(?:[ \t]|$)/.test(section) ? section : '# ' + section,
-      ).headingNames
-      const rendered = parsed.length === 1 && parsed[0] ? parsed[0] : section
+      const rendered = renderDesignHeading(section)
       matches = headings.filter(heading => heading === rendered)
       if (!matches.length) matches = headings.filter(heading => title(heading) === title(rendered))
     }
@@ -151,7 +141,7 @@ export function designHandoffPath(name: string) {
 export const PROJECT_DESIGN_PATHS = PROJECT_DOCUMENTS.flatMap(name => [`docs/${name}`, designHandoffPath(name)])
 export function designDocumentVersion(body: string): string {
   const versions = [...body.matchAll(/^\s*-\s*(?:Version|版本)\s*[:：]\s*v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?)\s*$/gim)]
-  if (versions.length !== 1) throw new Error('Missing or malformed host version metadata. Save the document/index, then run handoff.mjs --design finalize DOCUMENT.md for this owner; do not add or synchronize version headers manually.')
+  if (versions.length !== 1) throw new Error('Missing or malformed host version metadata. Refresh the document and its existing source/version metadata through the owning file operation.')
   const version = versions[0]![1]!
   if (version.split('.').some(n => !Number.isSafeInteger(Number(n)))) throw new Error('Invalid document version')
   return version
@@ -218,19 +208,6 @@ export function isDesignSceneFile(path: string) {
   return /^content\/scenes\/[A-Za-z0-9_./-]+\.json$/.test(path)
 }
 
-/** The same owner/registry identity check is useful before implementation and
- * at acceptance. Return both owners' issues together, not one repair per run. */
-export function designContentLinkIssues(workspace: string, runtimeUi: Iterable<string>, runtimeScenes: Iterable<string>) {
-  const issues: string[] = []
-  const registeredUi = new Set(runtimeUi), registeredScenes = new Set(runtimeScenes)
-  const declared = designSupportingFiles(workspace, ['GDD.md']).filter(path => isDesignUiFile(path) || isDesignSceneFile(path))
-  // The GDD is the single design owner, while the content registry remains the
-  // runtime source of truth for actual UI and scene files.
-  const unregistered = declared.filter(path => isDesignUiFile(path) ? !registeredUi.has(path) : !registeredScenes.has(path))
-  if (unregistered.length) issues.push('GDD.md links to sources not registered in content/index.json: ' +
-    unregistered.join(', ') + '. Register the actual linked sources; do not replace them with unreviewed copies.')
-  return issues
-}
 function layoutTypography(style: Record<string, unknown> = {}) {
   const fields = Object.fromEntries(Object.entries(style).filter(([key]) =>
     ['fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'align', 'textAlign', 'verticalAlign'].includes(key)))
@@ -289,10 +266,11 @@ function documentHandoff(workspace: string, name: DesignDocument, body: string, 
   if (blocks.length) throw new Error('Move inline bgs-handoff to ' + designHandoffPath(name) + '; preserve prose decisions')
   const sidecar = optionalDesignFile(workspace, designHandoffPath(name))
   if (!sidecar) return { handoff: { version: 2, outputs: [], evidence: [] } as DesignHandoff, headings, sidecar: Buffer.alloc(0), issues: [] as string[] }
-  const documentVersion = designDocumentVersion(body)
   const raw = JSON.parse(sidecar.toString('utf8'))
+  const documentVersion = raw?.documentVersion !== undefined || [...body.matchAll(versionLine)].length
+    ? designDocumentVersion(body) : undefined
   if (raw?.documentVersion !== undefined && raw.documentVersion !== documentVersion)
-    throw new Error(`Handoff documentVersion must match document header ${documentVersion}. Run handoff.mjs --design finalize ${name}; do not synchronize host metadata manually.`)
+    throw new Error(`Handoff documentVersion must match document header ${documentVersion}. Refresh the existing source/version metadata for ${name}.`)
   const issues: string[] = []
   if (diagnostic) {
     // Reuse draft parsing to retain valid tasks when another handoff field is malformed.
@@ -338,7 +316,7 @@ function handoffShapeIssues(name: DesignDocument, raw: unknown, error: z.ZodErro
     const target = `${designHandoffPath(name)} / ${issue.path.join('.') || 'root'}` +
       (typeof item?.id === 'string' ? ` (id: ${JSON.stringify(item.id)})` : '')
     const hint = field === 'implementationItems' && issue.path[2] === 'requirementRefs'
-      ? ' Each task needs at least one real owned-output reference {document,id}. Use handoff.mjs --design draft GDD.md for availableRequirements; do not invent IDs or inspect checker source.' : ''
+      ? ' Each task needs at least one real owned-output reference {document,id}. Read existing GDD requirement definitions; do not invent IDs.' : ''
     return `${name}: ${target}: ${issue.message}${hint}`
   })
 }
@@ -445,9 +423,12 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
       snapshots[name] = hash(bytes)
       const path = designHandoffPath(name)
       const sidecar = optionalDesignFile(root, path)
+      const hasDeclaredVersion = [...bytes.toString('utf8').matchAll(versionLine)].length > 0
       if (sidecar) {
-        try { documentVersions[name] = designDocumentVersion(bytes.toString('utf8')) }
-        catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message.replace('DOCUMENT.md', name) : String(error)}`) }
+        if (hasDeclaredVersion) {
+          try { documentVersions[name] = designDocumentVersion(bytes.toString('utf8')) }
+          catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message.replace('DOCUMENT.md', name) : String(error)}`) }
+        }
         snapshots[name] = hash(JSON.stringify([hash(bytes), hash(sidecar)]))
       }
       const { blocks, headings, headingNames } = documentStructure(bytes.toString('utf8'))
@@ -470,8 +451,10 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
       } catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`) }
       if (!sidecar) continue
       const raw = JSON.parse(sidecar.toString('utf8'))
+      if (!hasDeclaredVersion && raw?.documentVersion !== undefined)
+        issues.push(`${name}: Declared handoff documentVersion requires a matching document header.`)
       if (documentVersions[name] && raw?.documentVersion !== undefined && raw.documentVersion !== documentVersions[name])
-        issues.push(`${name}: Handoff documentVersion must match document header ${documentVersions[name]}. Run handoff.mjs --design finalize ${name}; do not synchronize host metadata manually.`)
+        issues.push(`${name}: Handoff documentVersion must match document header ${documentVersions[name]}. Refresh the existing source/version metadata for ${name}.`)
       const h = canonicalHeadingPointers(diagnosticHandoff(name, raw, issues), headingNames)
       indexes[name] = { handoff: h, headings }
       if (h.outputs) issues.push(...outputIssues(name, h.outputs, headings))
@@ -512,34 +495,17 @@ function withoutVersion(body: string) {
   const valid = /^[ \t]*-[ \t]*(?:Version|版本)[ \t]*[:：][ \t]*v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?)[ \t]*(?:\r?\n|$)/gim
   return [...body.matchAll(valid)].length === 1 ? body.replace(valid, '') : body
 }
-function withVersion(body: string, version: string) {
-  const lines = [...body.matchAll(versionLine)]
-  if (lines.length > 1) throw new Error('Expected at most one document header version before finalization')
-  if (lines.length) {
-    try { if (designDocumentVersion(body) === version) return body } catch { /* Replace malformed host metadata. */ }
-    return body.replace(versionLine, '- Version: v' + version + (lines[0]![0].endsWith('\n') ? '\n' : ''))
-  }
-  const heading = /^#[ \t]+[^\r\n]*(?:\r?\n|$)/m.exec(body)
-  const at = heading ? heading.index + heading[0].length : 0
-  return body.slice(0, at) + (at && !body.slice(0, at).endsWith('\n') ? '\n' : '') + '- Version: v' + version + '\n' + body.slice(at)
-}
 function stable(value: any): any {
   if (Array.isArray(value)) return value.map(stable)
   if (!value || typeof value !== 'object') return value
   return Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])]))
 }
-function materialHandoff(raw: unknown) {
-  const current = raw
-  if (!current || typeof current !== 'object' || Array.isArray(current)) return current
-  const { version: _format, documentVersion: _version, ...index } = current as Record<string, any>
-  if (Array.isArray(index.evidence)) index.evidence = index.evidence.map(evidence => {
-    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return evidence
-    const { sha256: _hash, ...source } = evidence
-    return source
-  })
-  // Omitted and empty evidence both mean no retained evidence references.
-  if (index.evidence === undefined || (Array.isArray(index.evidence) && !index.evidence.length)) delete index.evidence
-  return stable(index)
+function designFilePath(root: string, path: string) {
+  const target = resolve(root, path)
+  // Exact resolution also rejects links to a different in-workspace document.
+  if (realpathSync(target) !== target) throw new Error('Design source must not be a symlink: ' + path)
+  if (!statSync(target).isFile()) throw new Error('Design target must be a regular file: ' + path)
+  return target
 }
 function optionalDesignFile(workspace: string, path: string) {
   // Snapshots must preserve malformed/empty drafts for an authorized repair;
@@ -550,28 +516,6 @@ function optionalDesignFile(workspace: string, path: string) {
   }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
 }
-function materialDocument(workspace: string, name: DesignDocument) {
-  const bytes = optionalDesignFile(workspace, `docs/${name}`)
-  const sidecar = optionalDesignFile(workspace, designHandoffPath(name))
-  let raw: unknown
-  try { raw = sidecar ? JSON.parse(sidecar.toString('utf8')) : undefined }
-  catch { raw = { malformedIndex: hash(sidecar!) } }
-  const evidence: Array<[string, string]> = []
-  const refs = (raw as { evidence?: unknown } | undefined)?.evidence
-  if (Array.isArray(refs)) for (const ref of refs) if (typeof ref?.path === 'string') {
-    try { evidence.push([ref.path, hash(readRetained(workspace, ref.path))]) }
-    catch (error) { evidence.push([ref.path, String(error)]) }
-  }
-  if (bytes) try {
-    for (const file of designSupportingFiles(workspace, [name])) evidence.push([file, designSupportingFileDigest(workspace, file)])
-  } catch (error) { evidence.push(['calculation-reference-error', String(error)]) }
-  let version: string | undefined
-  if (bytes) try { version = designDocumentVersion(bytes.toString('utf8')) } catch { /* Host can add missing metadata. */ }
-  return { version, sections: bytes ? designSectionHashes(bytes.toString('utf8')) : undefined,
-    contentHash: hash(JSON.stringify([bytes ? withoutVersion(bytes.toString('utf8')) : null,
-    materialHandoff(raw), evidence.sort(([a], [b]) => a.localeCompare(b))])) }
-}
-export type DesignDocumentSnapshot = { workspace: string; documents: Partial<Record<DesignDocument, { version?: string; contentHash: string; sections?: Record<string, string> }>> }
 /** Raw bytes for interrupted-write attribution, not normalized design semantics. */
 export function designRevisionFileDigest(workspace: string, path: string): string | null {
   const part = relative(resolve(workspace), resolve(workspace, path))
@@ -621,90 +565,6 @@ export function snapshotDesignRevisionFiles(workspace: string): Record<string, s
 export function designInputRevision(workspace: string): string {
   return hash(JSON.stringify(snapshotDesignRevisionFiles(workspace)))
 }
-/** Capture before a controlled author/revise write; malformed drafts can be repaired. */
-export function snapshotDesignDocuments(workspace: string, documents: readonly DesignDocument[]): DesignDocumentSnapshot {
-  const result: DesignDocumentSnapshot = { workspace: realpathSync(workspace), documents: {} }
-  for (const name of documents) {
-    designHandoffPath(name) // Reject unknown document names.
-    result.documents[name] = materialDocument(workspace, name)
-  }
-  return result
-}
-function nextVersion(version: string) {
-  const parts = version.split('.').map(Number), last = parts.length - 1
-  if (!Number.isSafeInteger(parts[last]! + 1)) throw new Error('Document version exceeds supported range')
-  parts[last] = parts[last]! + 1
-  return parts.join('.')
-}
-function designFilePath(root: string, path: string) {
-  const target = resolve(root, path)
-  // Containment alone permits a GDD symlink to overwrite another in-workspace
-  // document. Exact resolution also rejects symlinked path ancestors.
-  if (realpathSync(target) !== target) throw new Error('Design finalization target must not be a symlink: ' + path)
-  if (!statSync(target).isFile()) throw new Error('Design target must be a regular file: ' + path)
-  return target
-}
-/** Called only at an authorized completed-write boundary, never by read/check APIs.
- * Stages metadata after validating saved decisions/evidence; does not invent proof. */
-export function finalizeDesignDocuments(workspace: string, documents: readonly DesignDocument[], snapshot: DesignDocumentSnapshot,
-  prior?: { changedDocuments: string[]; documentVersions?: Record<string, string> }) {
-  const issues: string[] = [], unsafeIssues: string[] = [], skipped: string[] = [], writes: Array<{ path: string; body: string }> = [], root = realpathSync(workspace)
-  if (snapshot.workspace !== root) {
-    const issue = 'Design finalization snapshot belongs to another workspace'
-    return { issues: [issue], unsafeIssues: [issue], skipped }
-  }
-  for (const name of new Set(documents)) {
-    let safeTargets = false
-    try {
-      const before = snapshot.documents[name]
-      if (!before) throw new Error('Document was not captured in the authorized write scope')
-      const sourcePath = designFilePath(root, `docs/${name}`)
-      if (!optionalDesignFile(root, designHandoffPath(name))) { skipped.push(name); continue }
-      const indexPath = designFilePath(root, designHandoffPath(name))
-      const body = readFileSync(sourcePath, 'utf8'), originalIndex = readFileSync(indexPath, 'utf8')
-      safeTargets = true
-      const { blocks, headings, headingNames } = documentStructure(body)
-      if (blocks.length) throw new Error('Move inline bgs-handoff to ' + designHandoffPath(name) + '; preserve prose decisions')
-      const handoff = canonicalHeadingPointers(parseHandoff(name, JSON.parse(originalIndex)), headingNames)
-      const invalidOutputs = outputIssues(name, handoff.outputs, headings)
-      invalidOutputs.push(...implementationIssues({ [name]: { handoff, headings } }))
-      if (invalidOutputs.length) throw new Error(invalidOutputs.join('; '))
-      const evidenceIds = new Set<string>()
-      handoff.evidence = handoff.evidence.map(evidence => {
-        if (evidenceIds.has(evidence.id)) throw new Error('Duplicate evidence ID ' + evidence.id)
-        evidenceIds.add(evidence.id)
-        if (evidence.section && !headings.has(evidence.section)) throw new Error('Evidence ' + evidence.id + ' references an absent section')
-        return { ...evidence, sha256: evidenceDigest(root, evidence) }
-      })
-      const current = materialDocument(root, name)
-      const originalVersion = prior?.changedDocuments.includes(name) ? prior.documentVersions?.[name] ?? before.version : before.version
-      const changed = prior?.changedDocuments.includes(name) || current.contentHash !== before.contentHash
-      const version = originalVersion ? changed ? nextVersion(originalVersion) : originalVersion : '1.0'
-      handoff.documentVersion = version
-      const finalizedBody = withVersion(body, version), finalizedIndex = JSON.stringify(handoff, null, 2) + '\n'
-      if (body !== finalizedBody) writes.push({ path: sourcePath, body: finalizedBody })
-      // Preserve already finalized bytes, including formatting, on an unchanged call.
-      if (JSON.stringify(stable(JSON.parse(originalIndex))) !== JSON.stringify(stable(handoff)))
-        writes.push({ path: indexPath, body: finalizedIndex })
-    } catch (error) {
-      const issue = `${name}: ${error instanceof Error ? error.message : String(error)}`
-      issues.push(issue)
-      // A missing draft/index is a reproducible design diagnostic. Unsafe
-      // redirects and other I/O failures cannot be delegated as a normal draft.
-      if (!safeTargets && (error as NodeJS.ErrnoException).code !== 'ENOENT') unsafeIssues.push(issue)
-    }
-  }
-  // Stage valid metadata writes after all requested owner checks. Unsafe I/O
-  // still prevents the whole batch from being written.
-  if (!unsafeIssues.length) for (const write of writes) {
-    try { writeFileSync(write.path, write.body) }
-    catch (error) {
-      const issue = `${relative(root, write.path)}: ${error instanceof Error ? error.message : String(error)}`
-      issues.push(issue); unsafeIssues.push(issue); break
-    }
-  }
-  return { issues, unsafeIssues, skipped }
-}
 
 /** Reuse the only output index actually consumed by runtime acceptance. */
 export function readDesignAcceptanceRequirements(workspace: string) {
@@ -728,41 +588,6 @@ export function readDesignAcceptanceRequirements(workspace: string) {
   const issues = implementationIssues(indexes)
   if (issues.length) throw new Error(issues.join('; '))
   return requirements
-}
-
-/** Same reviewed index, deterministically presented to the implementation Agent.
- * No inferred task graph, copied business rules, or author-awarded completion. */
-export function readDesignImplementationChecklist(workspace: string) {
-  const check = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
-  if (!check.valid) throw new Error(check.issues.join('; '))
-  let registry: ReturnType<typeof parseBeeGameContentIndex> | undefined
-  try { registry = parseBeeGameContentIndex(JSON.parse(readRetained(workspace, 'content/index.json').toString('utf8'))) }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  if (registry) {
-    // Legacy registries may omit documents metadata; use the actual saved
-    // documents, as acceptance already does, rather than trusting labels.
-    const sources = registry.files.map(file => ({ path: 'content/' + file,
-      kind: parseBeeGameContentDocument(JSON.parse(readRetained(workspace, 'content/' + file).toString('utf8'))).kind }))
-    const ui = sources.filter(entry => entry.kind.startsWith('ui-')).map(entry => entry.path)
-    const scenes = sources.filter(entry => entry.kind.startsWith('scene-')).map(entry => entry.path)
-    const issues = designContentLinkIssues(workspace, ui, scenes)
-    if (issues.length) throw new Error(issues.join('; '))
-  }
-  const requirements = readDesignAcceptanceRequirements(workspace)
-  const { handoff } = documentHandoff(workspace, 'GDD.md', readRetained(workspace, 'docs/GDD.md').toString('utf8'))
-  return { source: 'docs/GDD.md', designRevision: check.revision,
-    ...(!handoff.implementationItems?.length ? { documents: designSourceLocations(workspace, ['GDD.md']) } : {}),
-    globalSources: PROJECT_DOCUMENTS.map(document => `docs/${document}`),
-    resultPath: DESIGN_ACCEPTANCE_PATH,
-    items: (handoff.implementationItems ?? []).map(item => ({ id: item.id,
-      ...(item.dependsOn !== undefined ? { dependsOn: item.dependsOn } : {}),
-      taskSource: { document: 'docs/GDD.md', section: item.section },
-      requirements: item.requirementRefs.map(ref => {
-        const source = requirements.find(requirement => requirement.document === ref.document && requirement.id === ref.id)!
-        return { document: source.document, id: source.id, sourceSection: source.outputSection, acceptanceSection: source.section, method: source.method }
-      }),
-    })),
-    limitation: 'Saved sources and optional existing task pointers only. An empty task index does not mean work is complete. Plan from the original documents; completeness, implementation and quality remain unverified without actual checks.' }
 }
 /** Current pointers only, not another authority or semantic verdict. This
  * replaces serial metadata reads; the reviewer still reads the saved prose

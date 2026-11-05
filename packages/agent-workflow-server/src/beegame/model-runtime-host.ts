@@ -65,16 +65,26 @@ export type BeeGameModelRuntimeFailureStage =
   | 'model_request'
   | 'model_response'
 
+export type BeeGameModelRuntimeFailureCode = 'request-failed' | 'request-timeout' | 'upstream-http-error' | 'network-error' | 'invalid-json' | 'structured-output-missing' | 'max-output-tokens' | 'content-filter' | 'incomplete-response' | 'worker-exited'
+
 export class BeeGameModelRuntimeError extends Error {
   readonly usage?: BeeGameModelUsage
+  readonly failureCode?: BeeGameModelRuntimeFailureCode
+  readonly diagnosticId?: string
+  readonly httpStatus?: number
+  readonly networkCode?: string
   constructor(
     message: string,
     readonly stage: BeeGameModelRuntimeFailureStage,
-    options?: { cause?: unknown; usage?: BeeGameModelUsage },
+    options?: { cause?: unknown; usage?: BeeGameModelUsage; failureCode?: BeeGameModelRuntimeFailureCode; diagnosticId?: string; httpStatus?: number; networkCode?: string },
   ) {
     super(message, options)
     this.name = 'BeeGameModelRuntimeError'
     this.usage = options?.usage
+    this.failureCode = options?.failureCode
+    this.diagnosticId = options?.diagnosticId
+    this.httpStatus = options?.httpStatus
+    this.networkCode = options?.networkCode
   }
 }
 
@@ -113,6 +123,9 @@ export type ModelRuntimeWorkerResponse =
       usage?: BeeGameModelUsage
       message: string
       stage: BeeGameModelRuntimeFailureStage
+      failureCode: BeeGameModelRuntimeFailureCode
+      httpStatus?: number
+      networkCode?: string
     }
 
 const WORKER_PATH = fileURLToPath(
@@ -227,7 +240,7 @@ async function runWorker(
             ...(message.usage ? { usage: message.usage } : {}),
           })
         } else {
-          reject(new BeeGameModelRuntimeError(message.message, message.stage, { usage: message.usage }))
+          reject(new BeeGameModelRuntimeError(message.message, message.stage, { usage: message.usage, failureCode: message.failureCode, diagnosticId: requestId, httpStatus: message.httpStatus, networkCode: message.networkCode }))
         }
       },
     })
@@ -237,13 +250,13 @@ async function runWorker(
       if (settled) return
       settled = true
       child.kill()
-      reject(new BeeGameModelRuntimeError('Model runtime timed out', 'model_request'))
+      reject(new BeeGameModelRuntimeError('Model runtime timed out', 'model_request', { failureCode: 'request-timeout', diagnosticId: requestId }))
     }, 130_000)
     child.exited.then(code => {
       if (settled) return
       settled = true
       clearTimeout(watchdog)
-      reject(new BeeGameModelRuntimeError(`Model runtime process exited (${code})`, 'model_request'))
+      reject(new BeeGameModelRuntimeError(`Model runtime process exited (${code})`, 'model_request', { failureCode: 'worker-exited', diagnosticId: requestId }))
     })
     child.send({
       type: 'model.generate',

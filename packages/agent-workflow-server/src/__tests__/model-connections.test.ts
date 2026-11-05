@@ -452,3 +452,63 @@ test('new administrator, personal BYOK and Go configurations default to Response
     }
   } finally { cleanups.forEach(cleanup => cleanup()) }
 })
+
+
+test('BYOK save route retains the bound encrypted key for a same-origin URL correction, not another recipient', async () => {
+  const cleanups: Array<() => void> = []
+  const app = createAgentWorkflowApp({ dashboardDataRoot: root, skillsConfig: false, modelConfigStore: false,
+    currentUser: { id: 'owner', role: 'owner' },
+    outboundTargetResolver: async value => ({ url: new URL(value), addresses: ['93.184.216.34'],
+      lookup: (_hostname, _options, callback) => callback(null, '93.184.216.34', 4) }),
+    registerCleanup: cleanup => cleanups.push(cleanup),
+  })
+  const put = (body: Record<string, unknown>) => app.request(`/api/model-connections/${PERSONAL_BYOK_ID}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const base = { method: 'byok', provider: 'openai-compatible', apiProtocol: 'responses',
+    baseUrl: 'https://api.openai.com/v1/responses', model: 'fixture-model', preferred: true }
+  try {
+    expect((await put({ ...base, apiKey: 'existing-fixture-key' })).status).toBe(200)
+    const data = getUserDashboardDataRoot(root, 'owner'), path = join(data, '.runtime/model-connections.json')
+    const before = JSON.parse(readFileSync(path, 'utf8')).connections[PERSONAL_BYOK_ID]
+    const corrected = { ...base, baseUrl: 'https://api.openai.com/v1', apiKey: '' }
+    const response = await put(corrected)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ hasKey: true, baseUrl: corrected.baseUrl })
+    const after = JSON.parse(readFileSync(path, 'utf8')).connections[PERSONAL_BYOK_ID]
+    expect(after.secret).toBe(before.secret)
+    expect(after.endpoint).not.toBe(before.endpoint)
+    expect(resolveModelConnection(data, personalModelConfig(data, 'owner', PERSONAL_BYOK_ID)!, {}))
+      .toMatchObject({ OPENAI_BASE_URL: corrected.baseUrl, OPENAI_API_KEY: 'existing-fixture-key' })
+    const unchanged = readFileSync(path, 'utf8')
+    for (const update of [
+      { baseUrl: 'https://another.example/v1' },
+      { baseUrl: 'https://api.openai.com:8443/v1' },
+      { baseUrl: 'http://api.openai.com/v1' },
+      { provider: 'anthropic-compatible', apiProtocol: 'anthropic-messages' },
+    ]) {
+      expect((await put({ ...corrected, ...update })).status).toBe(400)
+      expect(readFileSync(path, 'utf8')).toBe(unchanged)
+    }
+    expect((await put({ ...corrected, baseUrl: 'https://another.example/v1', apiKey: 'replacement-fixture-key' })).status).toBe(200)
+    expect(readFileSync(path, 'utf8')).not.toContain('replacement-fixture-key')
+  } finally { cleanups.forEach(cleanup => cleanup()) }
+})
+
+test('same-origin BYOK edits preserve legacy provider fields but cannot repair an invalid credential binding', () => {
+  const config = personalModelConfig(root, 'owner', PERSONAL_BYOK_ID)!
+  saveConnection(root, config, 'byok', 'bound-fixture-key', true,
+    { baseUrl: 'https://personal.example/v1/responses', model: 'fixture-model' })
+  const path = join(root, '.runtime/model-connections.json'), state = JSON.parse(readFileSync(path, 'utf8'))
+  delete state.connections[PERSONAL_BYOK_ID].provider
+  writeFileSync(path, JSON.stringify(state))
+  saveConnection(root, config, 'byok', undefined, true, { baseUrl: 'https://personal.example/v1', model: 'fixture-model' })
+  expect(resolveModelConnection(root, personalModelConfig(root, 'owner', PERSONAL_BYOK_ID)!, {}).OPENAI_API_KEY).toBe('bound-fixture-key')
+  const broken = JSON.parse(readFileSync(path, 'utf8'))
+  broken.connections[PERSONAL_BYOK_ID].endpoint = 'invalid-binding'
+  writeFileSync(path, JSON.stringify(broken))
+  const unchanged = readFileSync(path, 'utf8')
+  expect(() => saveConnection(root, config, 'byok', undefined, true,
+    { baseUrl: 'https://personal.example/another/v1', model: 'fixture-model' })).toThrow('API key')
+  expect(readFileSync(path, 'utf8')).toBe(unchanged)
+})

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BGS V3 独立 Debug 验收</title>
+<title>BGS V3 执行与历史记录</title>
 <style>
 body{font:15px system-ui;max-width:1100px;margin:24px auto;padding:0 16px;background:#f6f7fa;color:#20252d}
 section{background:white;border:1px solid #ccd2dd;padding:16px;margin:16px 0;border-radius:8px}
@@ -18,8 +18,8 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <button id="action-confirm-cancel" type="button" autofocus>取消</button>
 <button id="action-confirm-accept" type="button">确认本次操作</button>
 </dialog>
-<h1>BGS V3 独立 Debug 验收</h1>
-<p>不是正式产品界面，不证明游戏品质。没有自动派发／轮询／重试。保存后必须重新构建、测量；历史通过不授予新版本资格。</p>
+<h1>BGS V3 执行与历史记录</h1>
+<p>不是正式产品界面，不证明游戏品质。没有自动派发／轮询／重试。当前任务由 Agent 自主实现和验证；历史记录只说明当时的观察，不能证明当前游戏品质。</p>
 <section>
 <label>项目 ID<input id="project" autocomplete="off"></label>
 <label>认证方式<select id="auth-mode"><option value="bearer">当前页 Access Token</option><option value="session">已有 BGS 登录态（HttpOnly Cookie）</option></select></label>
@@ -29,6 +29,7 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <p>Agent Run 每页100条原生回合摘要，不合并整个 Chat；旧 Task Run 已停用，不能从此页继续执行。长文本截取及 payload 摘要会明确标记；原始证据保留，当前权限与 Question 请用专用入口核对。读取期间仍可暂停，暂停不重发任务。</p>
 <button id="restore-chat">恢复项目所属 Chat（不执行）</button>
 <button id="stop">暂停</button><button id="resume">明确恢复（不派发）</button>
+<button id="continue-production">继续已交接的下一阶段（可能付费）</button>
 <button id="recover-writer">核对证据并收尾中断写者（不重试）</button>
 <pre id="run"></pre>
 </section>
@@ -37,7 +38,7 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <button id="artifact-index">读取已有产物目录</button>
 <label>实际设计或报告路径（也支持合并的 README）<input id="evidence-path" autocomplete="off" placeholder="README.md"></label>
 <button id="read-evidence">读取当前来源与需求版本</button>
-<p>读取保存正文并显示其文本指纹、当前需求和已有执行记录。GDD 已保存或报告中的 PASS 不代表品质通过；下方实际测量可核对报告指纹与构建关联，但不证明报告语义或品质结论。</p>
+<p>读取保存正文并显示其文本指纹、当前需求和已有执行记录。GDD 已保存或报告中的 PASS 不代表品质通过；下方历史测量可核对当时保存的报告指纹与构建关联，但不证明报告语义或品质结论。</p>
 </section>
 <section>
 <h2>Agent 自主接单（无人工 Task 计划）</h2>
@@ -54,7 +55,7 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <label>用户消息<textarea id="message-text" aria-label="同工程用户消息" spellcheck="false"></textarea></label>
 <button id="prepare-message">按当前版本准备本次消息（不执行）</button>
 <button id="submit-message">确认发送同工程消息（可能付费）</button>
-<p>消息草稿绑定当前 Run、Chat 和版本。检查／修复不制造新需求版本；实际保存仍使旧测量过期。明确变更需求才更新需求版本。暂停后先明确恢复，再授权续作；恢复本身不执行。不会重发原始目标、自动重试或生成宿主修复计划。讨论意图不授权修改，但并非文件系统只读隔离。</p>
+<p>消息草稿绑定当前 Run、Chat 和版本。检查／修复不制造新需求版本；实际保存可能使旧记录与当前文件不再一致。明确变更需求才更新需求版本。暂停后先明确恢复，再授权续作；恢复本身不执行。不会重发原始目标、自动重试或生成宿主修复计划。讨论意图不授权修改，但并非文件系统只读隔离。</p>
 </section>
 <section>
 <h2>当前原生 Question</h2>
@@ -70,17 +71,17 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 </section>
 <section>
 <h2>版本绑定的 Scene／UI JSON 修改</h2>
-<p>自主 Run 使用项目编辑权限保存已登记数据，不需要 Task。保存保留原稿，不自动派发或收费；需要后续明确发送修改消息，让 Agent 协调改动并重新构建、测量。</p>
+<p>自主 Run 使用项目编辑权限保存已登记数据，不需要 Task。保存保留原稿，不自动派发或收费；需要后续明确发送修改消息，让 Agent 协调改动并选择适当的验证方式。</p>
 <button id="content">读取现存 JSON</button><label>文档<select id="document"></select></label>
 <textarea id="document-json" aria-label="文档 JSON" spellcheck="false"></textarea>
 <button id="save">保存当前候选（旧资格失效）</button>
 <p>只编辑已经注册、有权所有者的文档。不会生成内容、伪造检查或自动重建。</p>
 </section>
 <section>
-<h2>执行／已测构建</h2>
-<label>自主 Agent 实际测量（非 Task）<select id="measurement"></select></label>
+<h2>历史测量／已测构建</h2>
+<label>已保存的历史测量（只读）<select id="measurement"></select></label>
 <button id="read-measurement">核对测量／报告版本（只读）</button>
-<p>此处的测量预览／下载使用选中测量；普通项目 Preview 不要求 Measure，也不代表交付验证。只有实际调用按需 measure.mjs 后才有测量记录；无记录不会补造 Task 或自动构建。</p>
+<p>此处的测量预览／下载使用选中测量；普通项目 Preview 不要求 Measure，也不代表交付验证。本页只读取已有测量记录，不创建测量；新任务无需这些记录即可结束。无记录不会补造 Task 或自动构建。</p>
 <button id="preview">打开当前已测 Preview</button><button id="close-preview">关闭本页 Preview</button>
 <button id="static">下载已测静态包</button><button id="project-export">下载已测工程</button>
 <iframe id="preview-frame" title="已测构建 Preview" sandbox="allow-scripts" hidden></iframe><div id="downloads"></div>
@@ -91,7 +92,7 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <button id="prepare-observation">从当前 Preview 准备问题草稿</button>
 <textarea id="observation-json" aria-label="Preview 观察 JSON" spellcheck="false"></textarea>
 <button id="observation-message">自主 Run：转入同工程消息草稿（不执行）</button>
-<p>观察草稿绑定实际测量和构建指纹。填写操作步骤、预期与实际表现；它不是已证实缺陷。确认后通过普通聊天交给 Agent，修改后重新构建和测量。</p>
+<p>观察草稿绑定实际测量和构建指纹。填写操作步骤、预期与实际表现；它不是已证实缺陷。确认后通过普通聊天交给 Agent，由 Agent 决定修改及验证方式。</p>
 </section>
 <section><h2>最近响应／失败诊断</h2><p id="status" role="status">未发起请求</p><pre id="result"></pre></section>
 <script src="/debug/workflow-v3/client.js"></script>

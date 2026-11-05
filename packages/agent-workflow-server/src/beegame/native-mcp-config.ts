@@ -1,25 +1,34 @@
 import { startNativeMcpHttp, type McpHttpNetworkOptions, type McpHttpServer } from './native-mcp-http'
-import { realpath } from 'node:fs/promises'
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from '@modelcontextprotocol/sdk/shared/protocol.js'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { McpServerConfig } from '../mcp-servers-store'
-import { sharedContentChecker } from './content-checker-runtime'
+import { sharedProjectReads } from './content-checker-runtime'
 import type { LayoutConstraints } from './ui-layout-audit'
 import { projectPreviewCapabilityPath } from './project-preview-capability'
 
-export const NATIVE_READ_TOOLS = ['CheckUiLayouts', 'CheckSceneLayouts', 'ReadDesignHandoff',
-  'ReadImplementationTask', 'CheckResourcesAndBindings', 'ReadVerificationResults'] as const
+export const NATIVE_READ_TOOLS = ['ReadDesignHandoff',
+  'ReadImplementationTask', 'CheckResourcesAndBindings'] as const
 
 export const NATIVE_MCP_CONFIG_ENV = 'BEEGAME_NATIVE_MCP_SERVERS_JSON'
 
 /** Adapt owner-scoped BGS settings to Bgs MCP configuration. Secrets
  * cross only the private app-server pipe, outside project reads and process arguments. */
-export async function prepareNativeMcpConfig(environment: Record<string,string>, workspace: string, uiLayoutConstraints?: LayoutConstraints, sessionId?: string, networkOptions: McpHttpNetworkOptions = {}) {
+export async function prepareNativeMcpConfig(environment: Record<string,string>, workspace: string, uiLayoutConstraints?: LayoutConstraints, sessionId?: string, networkOptions: McpHttpNetworkOptions = {}, projectReadToolPath?: string | null, imageGenerationEntry?: string) {
   const raw = environment[NATIVE_MCP_CONFIG_ENV]
-  if (!raw && !uiLayoutConstraints) return { config: {} as Record<string, unknown>, context: '', close: async () => {} }
+  if (!raw && !uiLayoutConstraints && !imageGenerationEntry) return { config: {} as Record<string, unknown>, context: '', close: async () => {} }
   const servers: McpServerConfig[] = raw ? JSON.parse(raw) : []
   if (!Array.isArray(servers)) throw Error('Invalid BGS runtime MCP configuration')
   const root = await realpath(workspace), mcpServers: Record<string,unknown> = {}, unavailable: string[] = [], httpServers: Record<string,McpHttpServer> = {}
+  const socketEnvironments: Record<string,string>[] = []
+  // A bound project connection replaces the owner's same-named default for this project.
+  const projectNames = new Set(await Promise.all(servers.filter(server =>
+    server.enabled && server.autoStart === true && server.scope === 'project' && server.cwd && server.name
+  ).map(async server => await realpath(server.cwd!).catch(() => undefined) === root ? server.name : undefined)))
   for (const server of servers) {
     if (!server.enabled || server.autoStart !== true) continue
+    if (server.scope !== 'project' && server.name && projectNames.has(server.name)) continue
     if (!/^[A-Za-z0-9_-]+$/.test(server.id)) throw Error('Invalid BGS runtime MCP server identity')
     const skip = (reason:string) => unavailable.push(server.id + ': ' + reason)
     if (!['beegame','global','project'].includes(server.scope)) { skip('unknown scope'); continue }
@@ -31,8 +40,10 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
     const key = 'bgs-' + server.id
     if (server.transport === 'stdio') {
       if (!server.command?.trim()) { skip('missing command'); continue }
+      const env = Object.fromEntries((server.env ?? []).flatMap(item => item.value === undefined ? [] : [[item.key,item.value]]))
+      if (!Object.hasOwn(env, 'PWTEST_SOCKETS_DIR')) socketEnvironments.push(env)
       mcpServers[key] = { command:server.command, args:server.args ?? [],
-        env:Object.fromEntries((server.env ?? []).filter(item => item.value !== undefined).map(item => [item.key,item.value])) }
+        startup_timeout_sec: DEFAULT_REQUEST_TIMEOUT_MSEC / 1000, env }
     } else if (server.transport === 'http') {
       if (!server.url) { skip('missing URL'); continue }
       const url = new URL(server.url)
@@ -42,15 +53,46 @@ export async function prepareNativeMcpConfig(environment: Record<string,string>,
     } else { skip(server.transport === 'sse' ? 'legacy SSE is unsupported; use a Streamable HTTP endpoint' : 'unsupported transport') }
   }
   if (uiLayoutConstraints) {
-    if (mcpServers['bgs-ui-layout'] || httpServers['bgs-ui-layout']) throw Error('bgs-ui-layout is reserved for the host UI layout tool')
-    const checker = await sharedContentChecker()
-    mcpServers['bgs-ui-layout'] = { command: process.execPath,
-      args: [checker.uiLayoutToolPath, checker.moduleUrl, root, JSON.stringify(uiLayoutConstraints),
-        ...(sessionId ? [projectPreviewCapabilityPath(root, sessionId, 'measurement'), sessionId] : [])] }
+    if (mcpServers['bgs-ui-layout'] || httpServers['bgs-ui-layout']) throw Error('bgs-ui-layout is reserved for the host project read tools')
+    let path = projectReadToolPath
+    if (path === undefined) {
+      try { path = (await sharedProjectReads()).path }
+      catch (error) { unavailable.push('project read tools: ' + (error instanceof Error ? error.message : String(error))) }
+    } else if (path === null) unavailable.push('project read tools: host component unavailable')
+    if (path) mcpServers['bgs-ui-layout'] = { command: process.execPath, args: [path, root] }
   }
-  const http = Object.keys(httpServers).length ? await startNativeMcpHttp(httpServers, networkOptions) : undefined
-  Object.assign(mcpServers, http?.config)
-  const context = 'BGS MCP: enabled auto-start servers use the native MCP client and normal tool permissions. ' +
-    'Configured is not connected or verified. ' + (unavailable.length ? 'Not injected: ' + unavailable.join('; ') : '')
-  return { config: { mcp_servers: mcpServers }, context, close: async () => { await http?.close() } }
+  if (imageGenerationEntry) {
+    if (!sessionId) throw Error('Image MCP requires a current session identity')
+    mcpServers['beegame-images'] = { command:process.execPath,args:[imageGenerationEntry,'--mcp'],tool_timeout_sec:180,
+      env:{BEEGAME_ASSET_CAPABILITY_FILE:projectPreviewCapabilityPath(root,sessionId),
+        ...(environment.BEEGAME_SHARP_MODULE ? {BEEGAME_SHARP_MODULE:environment.BEEGAME_SHARP_MODULE} : {})} }
+  }
+  let socketDirectory: string | undefined
+  if (socketEnvironments.length) {
+    // macOS's per-user TMPDIR and project scratch paths exceed Unix socket limits.
+    // Keep this IPC root private to the native runtime; Shell keeps its own TMPDIR.
+    const directory = await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'bgs-mcp-'))
+    socketDirectory = directory
+    for (const env of socketEnvironments) env.PWTEST_SOCKETS_DIR = directory
+  }
+  try {
+    const http = Object.keys(httpServers).length ? await startNativeMcpHttp(httpServers, networkOptions) : undefined
+    Object.assign(mcpServers, http?.config)
+    // The native client applies the same explicit selection to stdio and relayed HTTP tools.
+    for (const server of servers) {
+      const config = mcpServers['bgs-' + server.id] as Record<string, unknown> | undefined
+      if (!config) continue
+      if (server.enabledTools !== undefined) config.enabled_tools = server.enabledTools
+      if (server.disabledTools !== undefined) config.disabled_tools = server.disabledTools
+    }
+    const context = 'BGS MCP: enabled auto-start servers use the native MCP client and normal tool permissions. ' +
+      'Configured is not connected or verified. ' + (unavailable.length ? 'Not injected: ' + unavailable.join('; ') : '')
+    return { config: { mcp_servers: mcpServers }, context, close: async () => {
+      // The native client closes its MCP processes before invoking this cleanup.
+      try { await http?.close() } finally { if (socketDirectory) await rm(socketDirectory, { recursive: true, force: true }) }
+    } }
+  } catch (error) {
+    if (socketDirectory) await rm(socketDirectory, { recursive: true, force: true })
+    throw error
+  }
 }

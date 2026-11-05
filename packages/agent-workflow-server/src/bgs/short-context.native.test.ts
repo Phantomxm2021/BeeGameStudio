@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, realpath, rm, writeFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -34,10 +35,11 @@ localTest.each([false, true])('native children retain scope/capacity and reused 
   } })
   const tools = await openAgentTools({ workspacePath: game, sessionId: 'fixture', getAuthToken: () => undefined,
     openImage: () => ({ endpoint: bridge.url.origin, instruction: 'Offline fixture', close: async () => {} }) })
-  const entry = join(game, tools.directory, 'assets.mjs')
+  const entry = resolve(game,tools.directory, 'assets.mjs')
   const message = (text: string) => ({ id: 'answer', type: 'message', role: 'assistant', status: 'completed',
     content: [{ type: 'output_text', text, annotations: [] }] })
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     const body = await request.json() as any
     const requestIndex = requests.push(body)
     const text = JSON.stringify(body.input)
@@ -159,7 +161,7 @@ localTest.each([false, true])('native children retain scope/capacity and reused 
   } finally {
     releaseChildren(); releaseReuse(); reuseStarted()
     await runtime?.dispose?.(); await tools.close(); bridge.stop(true); server.stop(true)
-    await rm(nativeSessionOutputPath(game, 'fixture', await realpath(tmpdir())), { recursive: true, force: true })
+    await rm(nativeSessionOutputPath(game, 'fixture'), { recursive: true, force: true })
     await rm(root, { recursive: true, force: true })
   }
 }, 45000)

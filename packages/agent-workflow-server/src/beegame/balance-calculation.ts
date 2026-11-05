@@ -1,8 +1,6 @@
-import { mkdir, writeFile, readFile, realpath, rename, unlink } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { dirname, join, isAbsolute, relative, resolve, sep } from 'node:path'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 
 const inside = (root: string, path: string) => {
   const rel = relative(root, path)
@@ -35,44 +33,3 @@ export function readCalculationInputs(workspace: string, outputPath: string): st
 }
 
 export const BALANCE_CALCULATOR_PATH = '.beegame/delivery/calculate-balance.mjs'
-
-/** Publish only platform tooling. Execution and authored outputs remain native Agent work. */
-let calculatorSource: Promise<string> | undefined
-export async function materializeBalanceCalculator(workspacePath: string): Promise<void> {
-  // Bundle the shared Scene projection rather than publishing server imports or
-  // keeping a second, drifting definition of what Content is allowed to bind.
-  calculatorSource ??= (async () => {
-    const child = Bun.spawn([process.execPath, 'build', fileURLToPath(new URL('./balance-calculation.mjs', import.meta.url)),
-      '--target=bun', '--production'], { stdout: 'pipe', stderr: 'pipe' })
-    const [code, source, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
-    if (code !== 0 || !source) throw Error('Cannot prepare balance calculator: ' + error)
-    return source
-  })().catch(error => { calculatorSource = undefined; throw error })
-  const root = await realpath(workspacePath)
-  const target = join(root, BALANCE_CALCULATOR_PATH)
-  await mkdir(dirname(target), { recursive: true })
-  if (await realpath(dirname(target)) !== dirname(target)) throw Error('Calculator directory must not be a symlink')
-  const archive = join(dirname(target), 'calculators')
-  await mkdir(archive, { recursive: true })
-  if (await realpath(archive) !== archive) throw Error('Calculator archive must not be a symlink')
-  const retain = async (bytes: Buffer) => {
-    const path = join(archive, createHash('sha256').update(bytes).digest('hex') + '.mjs')
-    try { await writeFile(path, bytes, { flag: 'wx' }) }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      if (await realpath(path) !== path || !(await readFile(path)).equals(bytes))
-        throw Error('Retained calculator version changed: ' + path)
-    }
-  }
-  const source = Buffer.from(await calculatorSource)
-  try {
-    if (await realpath(target) !== target) throw Error('Calculator must not be a symlink')
-    const previous = await readFile(target)
-    await retain(previous)
-    if (previous.equals(source)) return
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  await retain(source)
-  const temporary = target + '.' + randomUUID() + '.tmp'
-  try { await writeFile(temporary, source, { flag: 'wx' }); await rename(temporary, target) }
-  finally { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error }) }
-}

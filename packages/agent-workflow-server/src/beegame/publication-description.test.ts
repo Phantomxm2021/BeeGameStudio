@@ -11,14 +11,14 @@ const brief = { kind: 'confirmed_build_brief', game_user_visible_language: 'zh',
 
 test('copies only confirmed public fields, with no inferred key mappings or private request data', () => {
   const source = JSON.stringify(brief)
-  expect(publicationDescriptionFromBrief(source)).toBe('# 港口竞速\n\n## 操作\n- 键鼠\n- 手柄\n\n设计文档未提供具体操作说明，请在发布前补充。\n\n## 游戏介绍\n抵达灯塔。\n\n## 玩法\n收集信标，然后驶向终点。')
+  expect(publicationDescriptionFromBrief(source)).toBe('# 港口竞速\n\n## 操作\n- 键鼠\n- 手柄\n\n## 游戏介绍\n抵达灯塔。\n\n## 玩法\n收集信标，然后驶向终点。')
   expect(JSON.stringify(brief)).toBe(source)
   expect(publicationDescriptionFromBrief(source)).not.toContain('PRIVATE')
 })
 
-test('marks missing controls explicitly and omits duplicate introduction', () => {
+test('omits internal missing-controls notices and duplicate introduction', () => {
   const source = { kind: 'confirmed_build_brief', selected_option: { gameplay: 'Find the exit', pitch: 'Find the exit' }, settings: { inputs: ['PRIVATE_CUSTOM_INPUT'] } }
-  expect(publicationDescriptionFromBrief(JSON.stringify(source), 'en')).toBe('## Controls\nDetailed controls are not documented. Add them before publishing.\n\n## How to play\nFind the exit')
+  expect(publicationDescriptionFromBrief(JSON.stringify(source), 'en')).toBe('## How to play\nFind the exit')
 })
 
 test('plain brief text cannot introduce Markdown images, links, HTML or headings', () => {
@@ -80,4 +80,13 @@ test('reads the saved merged GDD without indexes or project writes and rejects u
     await symlink(outside, path);
     await expect(readPublicationControls(workspace)).rejects.toThrow(PUBLIC_DESCRIPTION_SOURCE_INVALID);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('extracts numbered input mapping tables without leaking adjacent feel or implementation sections', () => {
+  const source = '# Design\n## 8. 操作与手感\n### 8.1 输入映射\n\n| 动作 | 键盘 | 手柄 |\n|---|---|---|\n| 移动 | `J` / `L` | 十字键 |\n| 交互 | `Enter` | 主操作键 |\n\n### 8.2 手感参数\nPRIVATE_TUNING';
+  const controls = publicationControlsFromGdd(source);
+  expect(controls).toContain('| 移动 | `J` / `L` | 十字键 |');
+  expect(controls).not.toContain('PRIVATE');
+  expect(publicationDescriptionFromBrief(JSON.stringify(brief), 'zh', controls)).not.toContain('未提供具体操作说明');
 });

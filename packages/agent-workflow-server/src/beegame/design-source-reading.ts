@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createHash } from 'node:crypto'
 import { array, strictObject, string } from 'zod/v4'
 import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
-import { designDocumentSections } from './design-document-sections'
+import { designDocumentSections, findDesignSections } from './design-document-sections'
 
 /** One explicit source batch instead of repository-wide grep or a narrative
  * handoff. Hash and text come from the same bytes; no semantic PASS is inferred. */
@@ -63,7 +63,7 @@ export function readDesignSections(workspace: string, input: unknown) {
   return { ok: true, scope: 'saved-design-source', semanticCoverage: 'not-certified', sources: requests.map(request => {
     const body = readSource(workspace, request.document), sections = designDocumentSections(body), lines = body.replace(/\r(?=\n|$)/g, '').split('\n')
     const ranges = request.sections.map(heading => {
-      const matches = sections.filter(s => s.heading === heading)
+      const matches = findDesignSections(sections, heading)
       if (matches.length !== 1) throw Error(`${request.document}: missing/ambiguous heading ${JSON.stringify(heading)}; refresh the actual source locations`)
       return matches[0]!
     }).sort((a, b) => a.start - b.start)

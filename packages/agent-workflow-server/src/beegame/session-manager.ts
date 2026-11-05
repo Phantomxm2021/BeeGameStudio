@@ -1,6 +1,8 @@
+import type { BeeGameModelUsage } from './model-runtime-host'
+import { ProductionBlockedError } from './production-blocked'
 import { initializeProjectRepository } from '../local-runtime-service'
 import {inferRuntimeModelType} from '@bee-game-studio/agent-workflow/runtime-environment'
-import type { DesignFileChanges } from './workflow-v3/state'
+import type { DesignFileChanges, ProjectFileChanges } from './workflow-v3/state'
 import { createHash, randomUUID } from 'node:crypto'
 import { projectRuntimeDisplayReason } from './project-runtime-display'
 import { normalizeRuntimeEnvironment } from '@bee-game-studio/agent-workflow/runtime-environment'
@@ -46,6 +48,7 @@ import type {
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { validateConfirmedBriefContext } from './confirmed-brief-context'
 import { appendChatTranscript, appendRuntimeDiagnostic, projectChatPath } from './project-records'
+import { projectHostDirectory, projectWorkDirectory, projectWorkRoot } from './project-storage-paths'
 import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
@@ -236,7 +239,12 @@ export type BeeGameSession = {
   updatedAt: Date
 }
 
+// Host acknowledgement of context already supplied to this exact native thread.
+// Hashes only; no second conversation or instruction store.
+export type BeeGameNativeContext = { threadId: string; runtimeSha256: string; briefSha256: string }
+
 export type BeeGameRuntimeSnapshot = {
+  nativeContext?: BeeGameNativeContext
   providerUsageIncomplete?: boolean
   runtime?: 'bgs'
   sessionId: string
@@ -309,22 +317,28 @@ export type BeeGameNativeGoalInput =
 /** Current host turn capability; never serialized into model input or snapshots. */
 export type BeeGameHostToolCapability = (value: unknown, signal?: AbortSignal) => Promise<unknown>
 export type BeeGameTurnTools = {
+  /** Existing startup-only recovery from reviewed design when no native history exists. */
+  restartFromDesign?: { prompt: string; authorize(): Promise<void> }
   /** Host-validated final JSON; schema is model guidance, not an API output constraint. */
   finalOutput?: {
     /** Native/Shell project writes remain denied; the host may authorize one document below. */
     readOnly?: boolean
     writeDocument?: { path: string; authorize(): Promise<void> }
     designReview?: {
+      /** Effective target interpretation and current handoff facts shared with the author. */
+      context: string
       candidate(value: unknown): Promise<{ source: { path: string; sha256: string }; summary: string;
         reviewResponses?: import('./workflow-v3/design-review').DesignReviewDisposition[] }>
       record(receipt: import('./workflow-v3/design-review').DesignReviewReceipt): Promise<void>
     }
     schema: Record<string, unknown>
+    /** Accept a response-only result without submitting production; validate that its sources were unchanged. */
+    answer?(value: unknown): Promise<string | undefined>
     accept(value: unknown): Promise<string>
   }
   workflow?: BeeGameHostToolCapability
-  measurement?: BeeGameHostToolCapability
-  finishDelivery?: BeeGameHostToolCapability
+  /** Trusted current-turn asset command; native MCP uses the existing image service. */
+  imageGenerationEntry?: string
 }
 
 export type BeeGameSessionRunnerStartInput = BeeGameTurnTools & {
@@ -339,6 +353,8 @@ export type BeeGameSessionRunnerStartInput = BeeGameTurnTools & {
   /** Host-confirmed UI check conditions; never accepted from model tool input. */
   uiLayoutConstraints?: import('./ui-layout-audit').LayoutConstraints
   resumeSessionId?: string
+  nativeContext?: BeeGameNativeContext
+  onNativeContext?(context: BeeGameNativeContext): void
   /** Records the UUID emitted by the native runtime for durable resume. */
   onNativeSessionId?(sessionId: string): void
   /** Native replay of this exact submitted command, not merely CLI startup. */
@@ -404,8 +420,7 @@ export type BeeGameSessionRuntime = {
   readonly reusable?: boolean
   submit(input: BeeGameSessionSubmitInput): Promise<void>
   stop(): void
-  /** Host-authorized final delivery; ordinary native Goal endings keep their final response. */
-  completeGoal?(status?: 'complete' | 'blocked'): Promise<void>
+  /** Close owned runtime resources and confirm process cleanup. */
   dispose?(): void | Promise<void>
 }
 
@@ -454,6 +469,7 @@ export type BeeGamePendingPermission = DashboardPermissionRequest & {
 }
 
 type SessionRecord = {
+  nativeContext?: BeeGameNativeContext
   executionIdentity?: BeeGameRuntimeSnapshot['executionIdentity']
   /** Redact runtime credentials from persisted and streamed Chat events only. */
   redactVisible?: ReturnType<typeof createResponseRedactor>
@@ -491,12 +507,15 @@ type SessionRecord = {
   activeNativeTaskToolUseIds: Map<string, string>
   /** Start time for each visible thinking block, used when its end event arrives. */
   thinkingBlockStartedAt: Map<string, string>
+  pendingTranscript: BeeGameEvent[]
+  streamPersistenceTimer?: ReturnType<typeof setTimeout>
   events: BeeGameEvent[]
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
   /** The complete active model turn, including final event/usage callbacks. */
   activeTurn?: Promise<void>
+  /** Successful host close, distinct from merely appending a delivery submission. */
   /** Serializes usage billing events without blocking the runtime callback. */
   usageWriteTail: Promise<void>
   usageLastCommittedKey?: string
@@ -653,6 +672,17 @@ export class BeeGameSessionManager {
     return this.usageOutbox.submit({ userId, input: { ...input, dataDir: this.dashboardDataRoot } })
   }
 
+  /** Display auxiliary provider receipts separately from native counters and billing. */
+  observeExternalModelUsage(sessionId: string, usage: BeeGameModelUsage, billingSource: ModelBillingSource, querySource: string): void {
+    const record = this.sessions.get(sessionId)
+    if (!record) throw Error('Unknown session for auxiliary model usage')
+    this.append(record, 'usage', '', { type: 'usage', subtype: 'model_runtime_host', querySource, billingSource,
+      usage: { prompt_tokens: usage.input_tokens, completion_tokens: usage.output_tokens,
+        cache_read_tokens: usage.cache_read_tokens, cache_creation_tokens: usage.cache_creation_tokens, total_tokens: usage.total_tokens },
+      ...(usage.incomplete ? { providerUsageIncomplete: true } : {}),
+    })
+  }
+
   async assertModelRequestAllowed(userId: string): Promise<void> {
     if (this.closing) throw Error('BeeGame runtime is shutting down')
     if (this.usageBillingBackend.assertUsageAvailable) {
@@ -778,6 +808,9 @@ export class BeeGameSessionManager {
         resolveExistingPath(cwd)
         ? { nativeSessionId: persistedRuntime.nativeSessionId }
         : {}),
+      ...(!input.freshNativeContext && persistedRuntime?.workspacePath === cwd &&
+        persistedRuntime.nativeContext?.threadId === (input.resumeNativeSessionId ?? persistedRuntime.nativeSessionId)
+        ? { nativeContext: persistedRuntime.nativeContext } : {}),
       runtime,
       userId: input.userId,
       ...(input.authToken ? { authToken: input.authToken } : {}),
@@ -798,6 +831,7 @@ export class BeeGameSessionManager {
       approvedNetworkHosts: new Set(),
       activeNativeTaskToolUseIds: new Map(),
       thinkingBlockStartedAt: new Map(),
+      pendingTranscript: [],
       events: recoveredTranscript?.events ?? [],
       nextEventId: nextProjectId,
       nextTurnIndex: recoveredTranscript
@@ -921,6 +955,7 @@ export class BeeGameSessionManager {
     record.runner = null
     record.nativeSessionId = nativeSessionId
     record.systemContext = undefined
+    delete record.nativeContext
     record.uiLayoutConstraints = undefined
     this.persistRuntimeSnapshot(record)
   }
@@ -1107,15 +1142,13 @@ export class BeeGameSessionManager {
 
   /** Display-only host snapshot, independent of the author's final answer. */
   recordHostEvidence(sessionId: string, facts: {
-    attemptId: string; turnId?: string; execution: string; measurementId?: string;
-    checkStatuses: { id: string; status: string }[]; unmeasured: readonly string[]; note: string; designFileChanges?: DesignFileChanges;
+    attemptId: string; turnId?: string; execution: string; note: string; designFileChanges?: DesignFileChanges; projectFileChanges?: ProjectFileChanges;
   }): void {
     const record = this.sessions.get(sessionId)
     if (!record) return
     if (record.events.some(event => event.payload?.subtype === 'host_evidence' && event.payload?.attemptId === facts.attemptId)) return
     const note = projectRuntimeDisplayReason(facts.note)?.detail ?? ''
     const zh = record.language === 'zh'
-    const statuses: Record<string, string> = {passed:'通过',failed:'失败',unverified:'未验证','execution-error':'执行错误'}
     const text = [
       zh ? 'BGS 执行记录｜本轮执行已结束' : 'BGS execution record | Turn ended',
       (zh ? '执行状态：' : 'Execution: ')+facts.execution,
@@ -1124,12 +1157,7 @@ export class BeeGameSessionManager {
           (facts.designFileChanges.status === 'unverified' ? (zh ? '未验证' : 'unverified') :
             facts.designFileChanges.files.map(file => file.path+' ('+file.change+')').join(', ') || (zh ? '无' : 'none')),
       ] : []),
-      facts.measurementId ? (zh ? '已保存测量（非整体验收）：' : 'Saved measurement (not acceptance): ')+facts.measurementId : (zh ? '本轮没有宿主测量记录。' : 'No host measurement in this turn.'),
-      ...facts.checkStatuses.map(check => check.id+': '+(zh ? statuses[check.status] ?? check.status : check.status)),
-      ...(facts.unmeasured.length ? [(zh ? '未测量：' : 'Not measured: ')+facts.unmeasured.join(', ')] : []),
-      facts.measurementId ? (zh ? '以上是回合结束时的有限范围检查；不证明玩法、审美或完整覆盖。作者测试报告的断言数量和语义未经宿主认证；游戏质量仍未验证。后续改动需重新检查证据有效性。'
-        : 'Turn-end scoped checks only, not gameplay, aesthetics or complete coverage. Author report assertions/semantics are not host-certified; game quality remains unverified. Later edits require freshness inspection.')
-        : (zh ? '执行结束和文件变化不代表内容验收；内容质量未验证。' : 'Execution and file changes do not certify content acceptance; quality is unverified.'),
+      zh ? '执行结束和文件变化不代表内容验收；内容质量未验证。' : 'Execution and file changes do not certify content acceptance; quality is unverified.',
       note,
     ].join('\n')
     this.append(record, 'system.status', text, {type:'system.status',subtype:'host_evidence',...facts,note,quality:'unverified',deliveryEligible:false}, facts.turnId)
@@ -1175,6 +1203,8 @@ export class BeeGameSessionManager {
       nativeGoal?: BeeGameNativeGoalInput
       nativeRecovery?: boolean
       onTurnAccepted?: (turnId: string) => void
+      /** Called before entering the native runner; absence is known only by this live caller. */
+      onNativeStart?: () => void
       executionIdentity?: Pick<NonNullable<BeeGameRuntimeSnapshot['executionIdentity']>, 'attemptId'|'workerId'|'fence'>
       prepareTurn?: () => Promise<BeeGameTurnTools & { systemContext?: string; turnContext?: string;
         uiLayoutConstraints?: BeeGameSessionRunnerStartInput['uiLayoutConstraints']; close?: () => Promise<void> }>
@@ -1257,11 +1287,11 @@ export class BeeGameSessionManager {
       display?.onTurnAccepted?.(nextTurnId)
       turnAccepted = true
       record.abortController = new AbortController()
-      this.append(record, 'turn.started', text, display?.messageOrigin === 'workflow' ? {
+      this.append(record, 'turn.started', text, display?.messageOrigin === 'workflow' || display?.nativeRecovery ? {
         type: 'turn.started', messageOrigin: 'workflow',
         ...(display.confirmedBriefContext ? { confirmedBriefContext: display.confirmedBriefContext } : {}),
       } : undefined)
-      if (display?.messageOrigin !== 'workflow') this.append(record, 'user.message', text, {
+      if (display?.messageOrigin !== 'workflow' && !display?.nativeRecovery) this.append(record, 'user.message', text, {
         type: 'user.message',
         ...(preparedPrompt.attachments.length ? { attachments: preparedPrompt.attachments } : {}),
         ...(display?.displayText ? { displayText: display.displayText } : {}),
@@ -1296,7 +1326,8 @@ export class BeeGameSessionManager {
         },
         display?.nativeGoal,
         display?.nativeRecovery,
-        { workflow: context?.workflow, measurement: context?.measurement, finishDelivery: context?.finishDelivery, finalOutput: context?.finalOutput },
+        { workflow: context?.workflow, finalOutput: context?.finalOutput, restartFromDesign: context?.restartFromDesign, imageGenerationEntry: context?.imageGenerationEntry },
+        display?.onNativeStart,
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
       })
@@ -1322,22 +1353,6 @@ export class BeeGameSessionManager {
     } finally {
       record.preparingTurn = false
     }
-  }
-
-  async completeNativeGoal(sessionId:string,turnId:string,submission:{attemptId:string;requirementsRevision:string;
-    reportPath:string;reportSha256:string;measurementId?:string;sourceSha256:string;summary:string;status:'passed'|'failed'|'blocked'}):Promise<void> {
-    const record=this.sessions.get(sessionId)
-    if(!record || record.currentTurnId!==turnId || record.executionIdentity?.attemptId!==submission.attemptId ||
-        record.session.status!=='running' || record.session.turnStatus!=='running' || record.abortController?.signal.aborted)
-      throw Error('Delivery no longer belongs to the active task')
-    if(record.pendingPermissions.size || record.activeNativeTaskToolUseIds.size)
-      throw Error('Delivery has unfinished permission requests or child work')
-    if(!record.runner?.completeGoal)throw Error('The current runtime cannot accept delivery completion')
-    // Persist the explicit author submission before closing its process. This
-    // is evidence of submission, never a claim that cleanup already succeeded.
-    this.append(record,'system.status','Delivery submitted by the execution agent: '+submission.summary,
-      {type:'system.status',subtype:'delivery_submission',...submission,quality:'unverified',deliveryEligible:false},turnId)
-    await record.runner.completeGoal(submission.status==='passed'?'complete':'blocked')
   }
 
   stop(sessionId: string, reason = 'user_stop'): BeeGameSession {
@@ -1378,6 +1393,7 @@ export class BeeGameSessionManager {
       record.approvedNetworkHosts.clear()
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
+      this.flushStreamPersistence(record)
     }
     return cloneSession(record.session)
   }
@@ -1420,6 +1436,7 @@ export class BeeGameSessionManager {
       )
       if (deletedWorkspacePath) deletedArtifactPaths.push(deletedWorkspacePath)
     }
+    this.flushStreamPersistence(record)
     this.sessions.delete(sessionId)
     this.eventSubscribers.delete(sessionId)
     return { deleted: true, deletedArtifactPaths }
@@ -1466,6 +1483,7 @@ export class BeeGameSessionManager {
     await Promise.all(this.runnerDisposals.keys())
     await Promise.all([...this.sessions.values()].map(record => record.usageWriteTail))
     await this.usageOutbox?.dispose()
+    for (const record of this.sessions.values()) this.flushStreamPersistence(record)
     this.eventSubscribers.clear()
   }
 
@@ -1558,6 +1576,7 @@ export class BeeGameSessionManager {
     nativeGoal?: BeeGameNativeGoalInput,
     nativeRecovery?: boolean,
     tools: BeeGameTurnTools = {},
+    onNativeStart?: () => void,
   ): Promise<void> {
     let turnRunner: BeeGameSessionRuntime | null = null
     let billingSource: ModelBillingSource = 'platform'
@@ -1590,8 +1609,10 @@ export class BeeGameSessionManager {
         record.runner = null
         record.runnerNeedsRefresh = false
       }
+      if (nativeGoal) delete record.nativeContext // Historical Goal injection has its own context lifecycle.
       if (!record.runner) record.nativeAccountingEpoch = randomUUID()
       const accountingEpoch = record.nativeAccountingEpoch
+      onNativeStart?.()
       const runner =
         record.runner ??
         (await this.runner.start({
@@ -1605,7 +1626,14 @@ export class BeeGameSessionManager {
           ...(record.nativeSessionId
             ? { resumeSessionId: record.nativeSessionId }
             : {}),
+          nativeContext: record.nativeContext,
+          onNativeContext: context => {
+            if (context.threadId !== record.nativeSessionId) throw Error('Native context belongs to another thread')
+            record.nativeContext = context
+            this.persistRuntimeSnapshot(record)
+          },
           onNativeSessionId: nativeSessionId => {
+            if (record.nativeContext?.threadId !== nativeSessionId) delete record.nativeContext
             record.nativeSessionId = nativeSessionId
             this.persistRuntimeSnapshot(record)
           },
@@ -1723,7 +1751,9 @@ export class BeeGameSessionManager {
       // The disposed process cannot keep any task live. Clear attribution,
       // without fabricating completed events for unfinished writers.
       record.activeNativeTaskToolUseIds.clear()
-      if (record.session.status === 'running') {
+      if (record.session.status === 'running' && err instanceof ProductionBlockedError && record.abortController?.signal.aborted === false) {
+        this.append(record, 'turn.completed', err.message, { type: 'turn.completed', subtype: 'production_blocked' })
+      } else if (record.session.status === 'running') {
         this.append(
           record,
           'turn.failed',
@@ -1989,11 +2019,14 @@ export class BeeGameSessionManager {
     // Validate before consuming the pending request so a failed submission can retry.
     if (decision.behavior === 'allow' &&
         (['AskUserQuestion', 'McpElicitation'].includes(pending.toolName) || decision.answers !== undefined)) {
+      const updatedInput = answeredQuestionInput(pending.toolName, pending.input, decision.answers)
+      const approvalPersist = pending.toolName === 'McpElicitation' ? updatedInput.approvalPersist : undefined
       decision = {
         ...decision,
-        updatedInput: answeredQuestionInput(pending.toolName, pending.input, decision.answers),
+        updatedInput,
         source: 'user',
-        scope: 'once',
+        scope: approvalPersist === 'session' ? 'session' : 'once',
+        remember: approvalPersist === 'always',
         updatedPermissions: [],
       }
     }
@@ -2235,7 +2268,19 @@ export class BeeGameSessionManager {
       ...(record.events.some(item => item.type === 'usage' && item.payload?.providerUsageIncomplete === true)
         ? { providerUsageIncomplete: true } : {}),
     }
-    appendChatTranscript(record.transcriptPath, event)
+    record.pendingTranscript.push(event)
+    if (isSnapshotDetailFrame(event) && getDashboardPayloadString(event.payload, 'status') !== 'ended') {
+      // Keep live events and their IDs intact. Only disk I/O and derived
+      // snapshots are batched; lifecycle, usage and approval events flush now.
+      record.streamPersistenceTimer ??= setTimeout(() => {
+        try { this.flushStreamPersistence(record) }
+        catch (error) {
+          // A deferred snapshot I/O failure must be visible without becoming
+          // an uncaught timer exception that terminates unrelated sessions.
+          console.warn('[BeeGame] Stream snapshot persistence failed', { sessionId: record.session.id, cause: toErrorMessage(error) })
+        }
+      }, 100)
+    } else this.flushStreamPersistence(record)
     // This index locates a Chat transcript; it is not a runtime event log.
     if (event.type === 'session.started' || event.type === 'session.resumed')
       updateProjectTranscriptIndex(record)
@@ -2272,8 +2317,16 @@ export class BeeGameSessionManager {
       }
     }
     record.session.updatedAt = new Date()
-    this.persistRuntimeSnapshot(record)
     return event
+  }
+
+  private flushStreamPersistence(record: SessionRecord): void {
+    clearTimeout(record.streamPersistenceTimer)
+    record.streamPersistenceTimer = undefined
+    if (!record.pendingTranscript.length) return
+    appendChatTranscript(record.transcriptPath, record.pendingTranscript)
+    record.pendingTranscript = []
+    this.persistRuntimeSnapshot(record)
   }
 
   private persistRuntimeSnapshot(record: SessionRecord): void {
@@ -2297,6 +2350,7 @@ export class BeeGameSessionManager {
       ),
       activeSubagentToolUseIds: [...record.activeNativeTaskToolUseIds.values()],
       ...(record.executionIdentity?{executionIdentity:record.executionIdentity}:{}),
+      ...(record.nativeContext ? {nativeContext:record.nativeContext} : {}),
     }
   }
 
@@ -2372,6 +2426,8 @@ async function deleteSessionWorkspaceRoot(
   const rel = relative(dataRoot, workspaceRoot)
   if (rel.startsWith('..') || isAbsolute(rel)) return undefined
   await rm(workspaceRoot, { recursive: true, force: true })
+  await rm(projectHostDirectory(workspaceRoot), { recursive: true, force: true })
+  await rm(projectWorkRoot(workspaceRoot), { recursive: true, force: true })
   return workspaceRoot
 }
 
@@ -2493,10 +2549,10 @@ export async function recoverLatestProjectSessionFromDisk(
     )
 
   for (const [sessionId, entry] of candidates) {
-    const indexedTranscriptPath = resolve(workspacePath, entry.transcript)
+    const indexedTranscriptPath = resolve(projectHostDirectory(workspacePath), entry.transcript)
     const expectedTranscriptPath = projectChatPath(workspacePath)
     if (
-      relative(workspacePath, indexedTranscriptPath).startsWith('..') ||
+      relative(projectHostDirectory(workspacePath), indexedTranscriptPath).startsWith('..') ||
       indexedTranscriptPath !== expectedTranscriptPath
     ) {
       continue
@@ -3125,15 +3181,15 @@ export function getLatestRuntimeUsage(
       billableOnly,
     )
     addRuntimeUsage(modelUsage, inFlight)
-    return modelUsage
+    return includeAuxiliaryUsage(modelUsage, events, billableOnly)
   }
 
   // Before a terminal result exists, message_delta is the only authoritative
   // usage source exposed by the streaming transport.
   const streamedUsage = latestCumulativeUsageEvent(events, -1, billableOnly)
-  if (streamedUsage.total_tokens > 0) return streamedUsage
+  if (streamedUsage.total_tokens > 0) return includeAuxiliaryUsage(streamedUsage, events, billableOnly)
 
-  return emptyRuntimeUsage()
+  return includeAuxiliaryUsage(emptyRuntimeUsage(), events, billableOnly)
 }
 
 function findLastModelUsageEventIndex(events: readonly BeeGameEvent[]): number {
@@ -3166,7 +3222,7 @@ function latestCumulativeUsageEvent(
   if (epoch && events.some(event => event.type === 'usage' && event.payload?.subtype === 'native_accounting' &&
       getDashboardPayloadString(event.payload, 'nativeAccountingEpoch') === epoch)) return latest
   for (const event of events.slice(afterIndex + 1)) {
-    if (event.type !== 'usage' || event.payload?.subtype === 'native_accounting' ||
+    if (event.type !== 'usage' || event.payload?.subtype === 'native_accounting' || event.payload?.subtype === 'model_runtime_host' ||
         (billableOnly && !isPlatformUsageEvent(event))) continue
     const usage = getUsageFromEventPayload(event.payload)
     latest.prompt_tokens = Math.max(latest.prompt_tokens, usage.prompt_tokens)
@@ -3204,9 +3260,9 @@ export function getRuntimeUsageForTurn(
   if (modelUsage) {
     addRuntimeUsage(modelUsage, latestCumulativeUsageEvent(scopedEvents,
       findLastModelUsageEventIndex(scopedEvents), billableOnly))
-    return modelUsage
+    return includeAuxiliaryUsage(modelUsage, scopedEvents, billableOnly)
   }
-  return latestCumulativeUsageEvent(scopedEvents, -1, billableOnly)
+  return includeAuxiliaryUsage(latestCumulativeUsageEvent(scopedEvents, -1, billableOnly), scopedEvents, billableOnly)
 }
 
 function deriveLatestTurnDiagnostics(
@@ -3502,6 +3558,15 @@ function subtractRuntimeUsage(
   }
 }
 
+function includeAuxiliaryUsage(usage: BeeGameRuntimeSnapshot['usage'], events: readonly BeeGameEvent[], billableOnly: boolean) {
+  // These physical calls are billed by their existing recorder, not native settlement.
+  if (!billableOnly) for (const event of events) {
+    if (event.type === 'usage' && event.payload?.subtype === 'model_runtime_host')
+      addRuntimeUsage(usage, getUsageFromEventPayload(event.payload))
+  }
+  return usage
+}
+
 function emptyRuntimeUsage(): BeeGameRuntimeSnapshot['usage'] {
   return {
     prompt_tokens: 0,
@@ -3597,6 +3662,12 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
       attemptId:execution.attemptId,workerId:execution.workerId,fence:execution.fence,turnId:execution.turnId,
       ...(execution.nativeSubmitted===true?{nativeSubmitted:true as const}:{}),
     }:undefined
+  const context = record.nativeContext as Partial<BeeGameNativeContext> | undefined
+  const nativeContext = context && typeof context === 'object' && ['bgs', 'codex'].includes(String(record.runtime)) &&
+    typeof context.threadId === 'string' && context.threadId.length > 0 && context.threadId === record.nativeSessionId &&
+    typeof context.runtimeSha256 === 'string' && /^[a-f0-9]{64}$/.test(context.runtimeSha256) &&
+    typeof context.briefSha256 === 'string' && /^[a-f0-9]{64}$/.test(context.briefSha256)
+    ? {threadId:context.threadId,runtimeSha256:context.runtimeSha256,briefSha256:context.briefSha256} : undefined
   const usage =
     record.usage &&
     typeof record.usage === 'object' &&
@@ -3605,6 +3676,7 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
       : {}
   return {
     runtime: 'bgs',
+    ...(nativeContext ? {nativeContext} : {}),
     sessionId: String(record.sessionId || ''),
     ...(executionIdentity?{executionIdentity}:{}),
     ...(['bgs', 'codex'].includes(String(record.runtime)) && typeof record.nativeSessionId === 'string' && record.nativeSessionId
@@ -3864,7 +3936,9 @@ function projectWorkspaceFileAccessAuthority(
     ? workspaceRoot
     : resolveProspectivePath(record.session.cwd, inputPath as string)
   const rel = relative(workspaceRoot, targetPath)
-  if (rel.startsWith('..') || isAbsolute(rel)) {
+  const workRel = relative(projectWorkDirectory(workspaceRoot, record.session.id), targetPath)
+  const currentToolsRead = !writing && !isAbsolute(workRel) && workRel !== '..' && !workRel.startsWith('..' + sep)
+  if ((rel.startsWith('..') || isAbsolute(rel)) && !currentToolsRead) {
     return {
       behavior: 'deny',
       reason: 'project_workspace_boundary',
@@ -4019,7 +4093,7 @@ function updateProjectTranscriptIndex(record: SessionRecord): void {
     index.updatedAt = now
     index.sessions[record.session.id] = {
       sessionId: record.session.id,
-      transcript: toProjectRelativePath(workspacePath, record.transcriptPath),
+      transcript: relative(projectHostDirectory(workspacePath), record.transcriptPath).split(sep).join('/'),
       updatedAt: now,
     }
     writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf8')
@@ -4064,7 +4138,7 @@ function readProjectLogIndex(
 }
 
 function getProjectLogsDir(workspacePath: string): string {
-  return resolve(workspacePath, 'logs')
+  return resolve(projectHostDirectory(workspacePath), 'logs')
 }
 
 function getProjectLogsDirForRecord(record: SessionRecord): string {

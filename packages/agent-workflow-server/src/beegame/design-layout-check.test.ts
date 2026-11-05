@@ -718,3 +718,16 @@ test('joint layout inspection supports incremental UI-only content without an em
   expect(checkReviewDesignLayouts(f.root).issues.join(' ')).toContain('later.json')
   expect(checkReviewDesignLayouts(f.root).valid).toBe(false)
 })
+
+
+test('automatic project direction permits concrete historical layout directions while explicit conflicts still fail',()=>{
+  for(const direction of ['Landscape','Portrait']){
+    const f=fixture(),ui=uiLayoutFixture() as any
+    ui.data.nodes[0].data.orientation=direction
+    ui.data.nodes[0].data.targetViewports=direction==='Portrait'?[[540,960]]:[[960,540]]
+    f.save(ui)
+    expect(checkDesignLayouts(f.root,{orientation:'Auto'}).issues.join(' ')).not.toContain('orientation differs')
+    expect(checkDesignLayouts(f.root,{orientation:direction==='Landscape'?'Portrait':'Landscape'}).issues.join(' ')).toContain('orientation differs')
+    expect(checkDesignLayouts(f.root,{orientation:'Invalid'}).issues.join(' ')).toContain('orientation differs')
+  }
+})

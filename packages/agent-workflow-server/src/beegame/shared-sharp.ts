@@ -6,11 +6,6 @@ import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 let runtime: Promise<{ roots: string[]; moduleUrl: string }> | undefined
-let fontRuntime: typeof runtime
-export function sharedFont() {
-  return fontRuntime ??= prepareDependency('fonteditor-core', 'lib/main.js', 'beegame-font-')
-    .catch(error => { fontRuntime = undefined; throw error })
-}
 /** Resolve once per host, then isolate installed dependencies. Package-manager
  * symlinks require denied parent directories under the project sandbox. Copy
  * this small pinned closure, rather than granting the server's node_modules. */

@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os'
 import { createAgentWorkflowApp } from '../../app'
 import { createLocalWorkflowStore } from './store'
 import { MANAGED_WEB_BOOT_PATHS } from './managed-web-boot'
-import { PROJECT_DOCUMENTS } from '../project-content-authority'
-import { projectPreviewCapabilityPath } from '../project-preview-capability'
 
 // Real bootstrap, canonical brief, workflow, permissions and implementation
 // handoff; only the author is replaced. No model, compiler or target device.
@@ -34,26 +32,23 @@ test.each([
           expect(start).not.toHaveProperty('managedWebBoot')
           expect(start.systemContext).not.toContain('export async function createGame')
           expect(start.systemContext).not.toContain('src/game.jsx')
-          const native=['Unity','Godot','Unreal'].includes(settings.engine)
-          expect(start.systemContext?.includes('Register Scene/UI documents in content/index.json')).toBe(!native)
-          if(submitted.length===1) {
+          expect(start.systemContext).not.toContain('Register Scene/UI documents in content/index.json')
+          if(turn.finalOutput?.designReview) {
             const guide=await readFile(join(workspace,'AGENTS.md'),'utf8')
-            expect(guide).toContain('create and maintain the eight design documents')
+            expect(guide).not.toContain('create and maintain the eight design documents')
             expect(guide).not.toContain('4. UI/Scene JSON:')
+            await turn.finalOutput.writeDocument!.authorize()
             await mkdir(join(workspace,'docs'))
-            for(const document of PROJECT_DOCUMENTS)
-              await writeFile(join(workspace,'docs',document),'# '+document+'\nOffline fixture for '+settings.engine+' / '+settings.platform+'. Quality is unverified.\n')
+            await writeFile(join(workspace,'docs/GDD.md'),'# Required behavior\nOffline product decisions for '+settings.engine+' / '+settings.platform+'.\n')
+            const review=turn.finalOutput.designReview
+            const {source}=await review.candidate({status:'ready',summary:'Design ready'})
+            await review.record({source,nativeThreadId:'synthetic-review',nativeTurnId:'synthetic-review-turn',
+              startedAt:'2026-01-01T00:00:00Z',finishedAt:'2026-01-01T00:00:01Z',report:{summary:'Synthetic review',findings:[]}})
+            await turn.finalOutput.accept({status:'ready',summary:'Saved GDD'})
           }
-          const capability=JSON.parse(await readFile(projectPreviewCapabilityPath(workspace,start.sessionId,'measurement'),'utf8'))
-          const response=await fetch(capability.apiUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({designAction:'implementation'})})
-          const handoff=await response.json()
-          expect(response.status,JSON.stringify(handoff)).toBe(200)
-          expect(handoff.valid).toBe(true)
-          expect(handoff.webBoot).toBeUndefined()
           for(const path of ['index.html','package.json','src/game.jsx','content/index.json',...MANAGED_WEB_BOOT_PATHS])
             expect(await Bun.file(join(workspace,path)).exists()).toBe(false)
-          // A retired creation policy must not reserve these ordinary source paths.
-          for(const path of MANAGED_WEB_BOOT_PATHS) {
+          if(!turn.finalOutput?.readOnly)for(const path of MANAGED_WEB_BOOT_PATHS) {
             const decision=await turn.requestPermission({toolName:'Write',toolUseID:crypto.randomUUID(),input:{file_path:join(workspace,path),content:'Fixture permission probe only'},message:'Local permission check'})
             expect(decision.behavior).toBe('allow')
           }
@@ -70,24 +65,27 @@ test.each([
   try {
     expect((await request('/api/model-configs',{name:'Offline',provider:'openai-compatible',apiKey:'fake',model: 'fake',isDefault:true})).status).toBe(200)
     const goal=await request('/api/projects/bootstrap',{project:{id:'fixture',name:'Fixture',created_at:Date.now()},projectName:'Fixture',language:'en',
-      brief:{creationMode:'creative',idea:'Only prepare the eight design documents using the selected engine and platform.',option:{title:'Fixture'},
+      brief:{creationMode:'creative',idea:'Build a tiny game using the selected engine and platform.',option:{title:'Fixture'},
         settings:{...settings,dimension:settings.platform==='VR/AR'?'VR':'2D',orientation:'Landscape',resourceLibraryUsage:'optional'},
         documentLanguage:'en',gameUserVisibleLanguage:'en',agentResponseLanguage:'en'}})
     expect(goal.status,await goal.clone().text()).toBe(202)
-    let run=await wait(1)
+    let run=await wait(2)
     expect(failures).toEqual([])
     expect(run.requirements.constraints).toMatchObject(settings)
-    expect(run.creation?.initialDelivery).toBe('design-led-first-version')
+    expect(run.creation?.initialDelivery).toBe('complete-game')
     expect(run.creation?.webBoot).toBeUndefined();expect(run.creation?.webStarter).toBeUndefined();expect(run.webBoot).toBeUndefined()
+    expect(run.agentTurns!.map(turn=>turn.production?.stage)).toEqual(['design','implementation'])
+    expect(starts[1].confirmedBriefContext).toBe(submitted[0].confirmedBriefContext)
+    expect(JSON.stringify(submitted[1].prompt)).toContain('Saved design input at task preparation')
     const confirmed=submitted[0].confirmedBriefContext
     const changed=await request('/api/projects/fixture/workflow-v3/agent/messages',{requestKey:'inspect',runId:run.id,chatSessionId:run.chatSessionId,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent:'work',text:'Inspect the saved technical design only.'})
     expect(changed.status).toBe(202)
-    run=await wait(2)
+    run=await wait(3)
     expect(failures).toEqual([])
-    expect(submitted).toHaveLength(2)
-    expect(submitted[1].confirmedBriefContext).toBe(confirmed)
-    expect(starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
+    expect(submitted).toHaveLength(3)
+    expect(submitted[2].confirmedBriefContext).toBe(confirmed)
+    expect(starts[2].resumeSessionId).toBe(run.agentTurns![1]!.nativeSessionId)
     expect(run.webBoot).toBeUndefined()
   }finally{for(const close of cleanups)await close();await rm(root,{recursive:true,force:true})}
 },30000)

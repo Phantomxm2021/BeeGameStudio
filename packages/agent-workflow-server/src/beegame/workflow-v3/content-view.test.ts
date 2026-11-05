@@ -173,13 +173,13 @@ test('V3 source route reads stable saved files during a writer but keeps editing
     catch (e: any) { return c.json({ code: e.code }, e.status ?? 500) } })
   try {
     expect((await app.request('/view')).status).toBe(200)
-    // Autonomous saves use direct project authorization, not fabricated Tasks.
+    // Retired Scene/UI sources stay readable; no task or idle state re-enables editing.
     run!.agentTurns = []
     const nativeView = await (await app.request('/view')).json()
     expect(nativeView.state).toBe('draft')
-    expect(nativeView.readOnly).toBe(false)
+    expect(nativeView.readOnly).toBe(true)
     expect(nativeView.documents.map((d: {path:string}) => d.path)).toEqual(['scenes/level.json','ui/menu.json'])
-    expect(nativeView.editing).toMatchObject({version:run!.version,planRevision:0,paths:['scenes/level.json','ui/menu.json']})
+    expect(nativeView).not.toHaveProperty('editing')
     run!.paused={at:new Date().toISOString()}
     expect((await (await app.request('/view')).json()).readOnly).toBe(true)
     delete run!.paused
@@ -204,7 +204,7 @@ test('V3 source route reads stable saved files during a writer but keeps editing
     expect(partial.documents[0]).not.toHaveProperty('error')
     expect(partial.documents[1]).toMatchObject({ path: 'ui/menu.json', error: expect.stringContaining('gap') })
     delete run.writer
-    expect((await (await app.request('/metadata')).json()).editing.paths).toEqual(['scenes/level.json'])
+    expect(await (await app.request('/metadata')).json()).not.toHaveProperty('editing')
     const indexBytes = await readFile(join(root, 'content/index.json'))
     await writeFile(join(root, 'content/index.json'), '{invalid')
     const discovered = await (await app.request('/metadata')).json()

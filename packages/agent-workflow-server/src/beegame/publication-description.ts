@@ -19,18 +19,6 @@ const headings: Record<string, [string, string, string]> = {
   it: ['Comandi', 'Introduzione', 'Come giocare'],
   pt: ['Controles', 'Introdução', 'Como jogar'],
 }
-const missingControls: Record<string, string> = {
-  en: 'Detailed controls are not documented. Add them before publishing.',
-  zh: '设计文档未提供具体操作说明，请在发布前补充。',
-  'zh-TW': '設計文件未提供具體操作說明，請在發布前補充。',
-  ja: '詳しい操作方法がありません。公開前に追記してください。',
-  ko: '상세 조작 방법이 없습니다. 게시 전에 추가하세요.',
-  fr: 'Les commandes détaillées ne sont pas documentées. Ajoutez-les avant publication.',
-  de: 'Die genaue Steuerung fehlt. Bitte vor der Veröffentlichung ergänzen.',
-  es: 'Faltan los controles detallados. Añádelos antes de publicar.',
-  it: 'Mancano i comandi dettagliati. Aggiungili prima della pubblicazione.',
-  pt: 'Os controles detalhados não estão documentados. Adicione-os antes de publicar.',
-}
 const inputNames: Record<string, [string, string]> = {
   'Keyboard/mouse': ['键鼠', '鍵鼠'], Gamepad: ['手柄', '手把'], Touch: ['触屏', '觸控'],
   Motion: ['体感', '體感'], Voice: ['语音', '語音'], 'Hand tracking': ['手势追踪', '手勢追蹤'],
@@ -45,7 +33,7 @@ export const PUBLIC_DESCRIPTION_SOURCE_LIMIT = 256 * 1024
 export const PUBLIC_DESCRIPTION_SOURCE_INVALID = 'Cannot read the saved GDD controls; check docs/GDD.md or enter the description manually'
 
 // Match control-section titles, not mentions in ordinary prose or code examples.
-const controlsTitle = /(?:操作(?:说明|說明|指南|方式|规则|規則|映射)?|按键(?:说明|映射|绑定)?|按鍵(?:說明|映射|綁定)?|键位(?:说明|映射|绑定)?|鍵位(?:說明|映射|綁定)?|控制(?:方式|说明|說明)|\bcontrols?|\bkey\s*(?:bindings?|mapping)|\binput mapping|操作方法|조작(?: 방법)?|commandes|steuerung|controles|comandi)\s*$/i
+const controlsTitle = /(?:操作(?:说明|說明|指南|方式|规则|規則|映射)?|按键(?:说明|映射|绑定)?|按鍵(?:說明|映射|綁定)?|键位(?:说明|映射|绑定)?|鍵位(?:說明|映射|綁定)?|控制(?:方式|说明|說明)|\bcontrols?|\bkey\s*(?:bindings?|mapping)|\binput mapping|输入映射|輸入映射|操作方法|조작(?: 방법)?|commandes|steuerung|controles|comandi)\s*$/i
 const deviceTitle = /^(?:键盘|鍵盤|鼠标|滑鼠|键鼠|鍵鼠|手柄|手把|触屏|觸控|keyboard|mouse|keyboard\s*(?:and|[&/])\s*mouse|gamepad|controller|touch)(?:操作|控制|方案|说明|說明| controls?| bindings?)?$/i
 const titleText = (node: { value?: string; children?: any[] }): string => node.value ?? node.children?.map(titleText).join('') ?? ''
 
@@ -81,7 +69,7 @@ export function publicationControlsFromGdd(source: string): string {
   return blocks.join('\n\n')
 }
 
-/** Read one bounded, regular project file. Missing GDD is explicit in the draft. */
+/** Read one bounded, regular project file; missing GDD has no detailed bindings. */
 export async function readPublicationControls(workspace: string): Promise<string> {
   let file
   try {
@@ -121,8 +109,8 @@ export function publicationDescriptionFromBrief(context: string | undefined, lan
   const inputs = record(brief.settings) && Array.isArray(brief.settings.inputs)
     ? [...new Set(brief.settings.inputs.filter((value): value is string => typeof value === 'string' && Object.hasOwn(inputNames, value)))] : []
   const names = inputs.map(value => lang === 'zh' ? inputNames[value]![0] : lang === 'zh-TW' ? inputNames[value]![1] : value)
-  const controlText = controls.trim() || [names.map(value => '- ' + literal(value)).join('\n'), missingControls[lang] ?? missingControls.en].filter(Boolean).join('\n\n')
-  sections.push('## ' + controlsHeading + '\n' + controlText)
+  const controlText = controls.trim() || names.map(value => '- ' + literal(value)).join('\n')
+  if (controlText) sections.push('## ' + controlsHeading + '\n' + controlText)
   if (pitch && pitch !== gameplay) sections.push('## ' + introductionHeading + '\n' + literal(pitch))
   if (gameplay) sections.push('## ' + gameplayHeading + '\n' + literal(gameplay))
   const description = sections.join('\n\n')

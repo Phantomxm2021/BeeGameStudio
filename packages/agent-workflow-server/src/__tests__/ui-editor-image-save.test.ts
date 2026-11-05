@@ -5,12 +5,8 @@ import { join } from 'node:path'
 import type { BeeGameAssetManifest } from '../beegame/asset-contracts'
 import { BEEGAME_SCENE_MODEL, parseBeeGameContentDocument, validateContentDocument } from '../beegame/game-content-package'
 
-import { createRun } from '../beegame/workflow-v3/state'
-import { readContentView } from '../beegame/workflow-v3/content-view'
-import { prepareSourceEdit, writeSourceEdit } from '../beegame/workflow-v3/source-edit'
-import { reserveSourceEdit } from '../beegame/workflow-v3/changes'
 
-test('editor image edits preserve roles through the current source save and shared content validation', async () => {
+test('historical UI image validation preserves roles without re-enabling editor saves', async () => {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'bgs-ui-image-save-')))
   try {
     const documentRevision = 'a'.repeat(64)
@@ -46,25 +42,14 @@ test('editor image edits preserve roles through the current source save and shar
     const original = structuredClone(document)
     Object.assign(original.data.nodes[4]!, { text: 'Before edit' })
     await writeFile(join(workspacePath, 'content/ui/menu.json'), JSON.stringify(original))
-    const view = await readContentView(workspacePath)
-    if (view.state !== 'draft') throw Error('Expected editable fixture')
-    const current = view.documents.find(entry => entry.path === 'ui/menu.json')!
-    const run = createRun({ projectId: 'fixture', ownerId: 'test', workspacePath, chatSessionId: 'test',
-      requestKey: 'fixture', text: 'Offline editor fixture', constraints: {}, ids: ['req.edit'] })
-    const edit = await prepareSourceEdit(run, { path: current.path, expectedRevision: current.revision, document,
-      workflow: { version: run.version, planRevision: run.planRevision, requirementsRevision: run.requirements.revision } })
-    const reserved = reserveSourceEdit(run, { path: edit.path, before: edit.beforeHash, after: edit.afterHash,
-      workerId: 'fixture', requestKey: 'save', requestHash: edit.afterHash })
-    await writeSourceEdit(reserved, reserved.writer!.attemptId, edit, new AbortController().signal)
-    expect(JSON.parse(await readFile(join(workspacePath, 'content/ui/menu.json'), 'utf8'))).toEqual(document)
     const issues: string[] = []
-    validateContentDocument({ workspacePath, path: 'content/ui/menu.json', document: edit.document, authority, issues })
+    validateContentDocument({ workspacePath, path: 'content/ui/menu.json', document: parseBeeGameContentDocument(document), authority, issues })
     expect(issues).toEqual([])
     const invalid = structuredClone(document)
     Object.assign(invalid.data.nodes[1], { assetRef: 'RES-UI' })
     validateContentDocument({ workspacePath, path: 'content/ui/menu.json', document: parseBeeGameContentDocument(invalid), authority, issues })
     expect(issues.join('; ')).toContain('UI role container is not an asset type')
-    expect(JSON.parse(await readFile(join(workspacePath, 'content/ui/menu.json'), 'utf8'))).toEqual(document)
+    expect(JSON.parse(await readFile(join(workspacePath, 'content/ui/menu.json'), 'utf8'))).toEqual(original)
   } finally {
     await rm(workspacePath, { recursive: true, force: true })
   }

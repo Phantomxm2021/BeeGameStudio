@@ -6,16 +6,22 @@ function gameOptions() {
     id: `mode_${index + 1}`, title,
     gameplay: 'Move to catch stars, avoid meteors, score points, and finish after 45 seconds.',
     recommendedPlatform: 'Web', recommendedEngine: 'React', recommendedDimension: '2D',
-    recommendedGenre: 'Arcade', recommendedStyle: 'Minimal', recommendedInputs: ['Keyboard/mouse'],
+    recommendedGenre: 'Arcade', recommendedInputs: ['Keyboard/mouse'],
   }))
 }
 
 test('host-assigned choice IDs stay unique when model IDs collide or are missing', () => {
-  const options = gameOptions().map((option, index) => ({ ...option, id: index < 2 ? 'same' : '' }))
+  const options = gameOptions().map((option, index) => ({ ...option, id: index < 2 ? 'same' : '',
+    recommendedStyle: 'Minimal', scope: 'Hidden generated artwork restriction' }))
   const result = parseBeeGameIntakeContent(JSON.stringify({ options }))
   expect(result.options.map(option => option.id)).toEqual(['mode_1', 'mode_2', 'mode_3'])
   expect(result.options.map(option => option.title)).toEqual(options.map(option => option.title))
   expect(result.options.map(option => option.gameplay)).toEqual(options.map(option => option.gameplay))
+  for (const option of result.options) {
+    expect(option).not.toHaveProperty('recommendedStyle')
+    expect(option).not.toHaveProperty('scope')
+  }
+  expect(options[0]!.scope).toBe('Hidden generated artwork restriction')
 })
 
 test.each([
@@ -44,8 +50,8 @@ test.each([{ inputs: ['Dance pad'] }, { inputs: ['Keyboard/mouse', 'Dance pad'] 
 })
 
 test('normalizing inputs does not fill another missing production setting or invent a third option', () => {
-  const options = gameOptions(); options[2]!.recommendedInputs = ['Keyboard']; options[2]!.recommendedStyle = 'Auto'
-  expect(() => parseBeeGameIntakeContent(JSON.stringify({ options }))).toThrow('recommendedStyle')
+  const options = gameOptions(); options[2]!.recommendedInputs = ['Keyboard']; options[2]!.recommendedPlatform = 'Auto'
+  expect(() => parseBeeGameIntakeContent(JSON.stringify({ options }))).toThrow('recommendedPlatform')
   expect(() => parseBeeGameIntakeContent(JSON.stringify({ options: gameOptions().slice(0, 2) }))).toThrow('Expected 3, received 2 from 2 returned')
 })
 

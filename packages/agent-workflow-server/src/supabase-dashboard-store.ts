@@ -24,6 +24,7 @@ import type {
   McpServerScope,
   McpServerTransport,
 } from './mcp-servers-store'
+import { normalizeMcpToolSelection } from './mcp-servers-store'
 import type {
   BeeGameProjectMetadata,
   BeeGameProjectRuntimeSnapshot,
@@ -705,6 +706,8 @@ export class SupabaseDashboardStore {
           url: normalized.url,
           cwd: normalized.cwd,
           autoStart: normalized.autoStart,
+          enabledTools: normalized.enabledTools,
+          disabledTools: normalized.disabledTools,
         },
         env_ciphertext: {
           headers: (normalized.headers ?? []).map(item => ({ ...item,
@@ -788,6 +791,14 @@ export class SupabaseDashboardStore {
     return normalized
   }
 
+  async retainProjectPublications(ownerId: string, id: string): Promise<void> {
+    // This RPC also verifies the retention migration before any destructive I/O.
+    // R2 release objects are detached from the development project atomically.
+    await this.rpc('beegame_retain_project_publications', {
+      p_owner_id: ownerId, p_project_id: id,
+    })
+  }
+
   async deleteProject(
     ownerId: string,
     id: string,
@@ -814,10 +825,10 @@ export class SupabaseDashboardStore {
       owner_id: ownerId,
       project_id: id,
     })
-    await this.deleteWhere('beegame_deployments', {
-      owner_id: ownerId,
-      project_id: id,
-    })
+    await this.rest(
+      `/rest/v1/beegame_deployments?owner_id=eq.${q(ownerId)}&project_id=eq.${q(id)}&or=(status.neq.succeeded,portal_published_at.is.null)`,
+      { method: 'DELETE' },
+    )
     await this.deleteProjectSessions(ownerId, id)
     return this.deleteWhere('beegame_projects', {
       owner_id: ownerId,
@@ -1220,7 +1231,7 @@ export class SupabaseDashboardStore {
     projectId: string,
   ): Promise<Map<string, string[]>> {
     const rows = await this.rest<Array<{ artifact_path: string | null }>>(
-      `/rest/v1/beegame_deployments?owner_id=eq.${q(ownerId)}&project_id=eq.${q(projectId)}&select=artifact_path`,
+      `/rest/v1/beegame_deployments?owner_id=eq.${q(ownerId)}&project_id=eq.${q(projectId)}&or=(status.neq.succeeded,portal_published_at.is.null)&select=artifact_path`,
     )
     const byBucket = new Map<string, Set<string>>()
     for (const row of rows) {
@@ -1431,6 +1442,8 @@ function rowToMcpServer(row: SupabaseMcpServerRow): McpServerConfig {
         : {}),
     })),
     autoStart: config.autoStart !== false,
+    enabledTools: normalizeMcpToolSelection(config.enabledTools),
+    disabledTools: normalizeMcpToolSelection(config.disabledTools),
   })
 }
 
@@ -1457,6 +1470,8 @@ function normalizeMcpServerInput(
     cwd: trimString(input.cwd) || undefined,
     env,
     headers: normalizeMcpHeaders(input.headers, existing?.headers),
+    enabledTools: normalizeMcpToolSelection(input.enabledTools, existing?.enabledTools),
+    disabledTools: normalizeMcpToolSelection(input.disabledTools, existing?.disabledTools),
     autoStart:
       typeof input.autoStart === 'boolean'
         ? input.autoStart

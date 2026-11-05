@@ -52,8 +52,8 @@ function headerOf(head: Buffer, tail: Buffer, includeText = false): JsonlHeader 
   const routingSuffix = suffix.slice(-4096)
   for (const key of ['toolUseID', 'toolName', 'parentToolUseID', 'parent_tool_use_id', 'messageId',
     'assistantBlockId', 'thinkingBlockId', 'thinkingStartedAt', 'contentMode', 'status', 'subtype',
-    'sourceSequence',
-    'clientMessageId', 'supersedesMessageId', 'language']) {
+    'sourceSequence', 'childThreadId', 'childStatus', 'willRetry',
+    'clientMessageId', 'supersedesMessageId', 'displayKind', 'displayText', 'language']) {
     const value = complete ? originalPayload?.[key] : scalar(routingPrefix, key) ?? scalar(routingSuffix, key)
     if (value !== undefined && (typeof value !== 'string' || value.length <= 4096)) payload[key] = value
   }
@@ -243,8 +243,11 @@ export class ChatJsonlReader<T> {
   /** Display omission is explicit and separate from the validated Shell fact
    * projection. Neither path rewrites the raw journal. */
   private omitted(entry: JsonlEntry, header = entry.header): T {
+    // Legacy native resumes are empty control records, even when the page budget is exhausted.
+    const nativeRecovery = header.type === 'user.message' && header.payload?.displayKind === 'workflow_v3_continue' &&
+      header.payload.displayText === '恢复原生执行' && !header.text
     return { ...header,
-      text: header.text || '[Historical event body exceeds the display limit; original retained in transcript.]',
+      text: nativeRecovery ? '' : header.text || '[Historical event body exceeds the display limit; original retained in transcript.]',
       payload: { ...header.payload, type: header.type,
         ...(header.type === 'tool.progress' ? { output: '[Cumulative progress body omitted; original retained in transcript.]\n' + header.text } : {}),
         historyBodyOmitted: true, originalBytes: entry.end - entry.offset },

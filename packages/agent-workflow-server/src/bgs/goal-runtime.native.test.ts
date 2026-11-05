@@ -443,7 +443,9 @@ nativeTest(
     const currentSystemContext = 'CURRENT_NATIVE_TOOL_MARKER'
     const currentBriefContext = 'CURRENT_NATIVE_BRIEF_MARKER'
     const freshObjective = 'Start a fresh protected design record.'
-    const freshTokenBudget = 100
+    // Each fixture response uses 48 tokens. A fresh active response fits,
+    // while the 96-token retained Goal would exceed this budget if not reset.
+    const freshTokenBudget = 72
     const freshSystemContext = 'FRESH_NATIVE_TOOL_MARKER'
     const freshBriefContext = 'FRESH_NATIVE_BRIEF_MARKER'
     const initialEvents: Json[] = []
@@ -763,7 +765,6 @@ for (const outcome of ['complete', 'paused'] as const) nativeTest(
       // Scripted Responses exercise the real execution chain without a model.
       const output=n===1
         ? [functionOutput('exec_command',{cmd:outcome==='paused' ? 'printf observed > technical-check.txt; sleep 30' : 'printf observed > technical-check.txt',yield_time_ms:1000},n)]
-        : n===2 ? [functionOutput('update_goal',{status:'complete'},n)]
         : [messageOutput('Technical check observed; ready for user feedback.',n)]
       return responseStream(body,output,n)
     }})
@@ -789,14 +790,12 @@ for (const outcome of ['complete', 'paused'] as const) nativeTest(
       await store.commit(run.projectId,run.ownerId,0,run,'agent.goal-confirmed')
       await executor.start(run,{userDataRoot:config})
       if(outcome==='paused') {
-        // Stop after provider usage arrives while the tool is still running:
-        // the prior Goal event has not yet accounted this response.
+        // Stop while the ordinary native tool is still running.
         const pauseDeadline=Date.now()+15000
         while(!(await readFile(join(workspace,'technical-check.txt'),'utf8').catch(()=>'')) && Date.now()<pauseDeadline)
           await Bun.sleep(10)
         expect(await readFile(join(workspace,'technical-check.txt'),'utf8')).toBe('observed')
-        const beforePause=sessions.transcript(session.id).findLast(event=>event.payload?.subtype==='native_goal')?.payload?.nativeGoal as Json
-        expect(beforePause.tokensUsed).toBe(0)
+        expect(sessions.transcript(session.id).some(event=>event.payload?.subtype==='native_goal')).toBe(false)
         await executor.stop((await store.read(run.projectId,run.ownerId))!)
       }
       let settled=await store.read(run.projectId,run.ownerId)
@@ -808,20 +807,21 @@ for (const outcome of ['complete', 'paused'] as const) nativeTest(
       expect(settled!.writer).toBeUndefined()
       expect(settled!.requirements).toEqual(run.requirements)
       expect(settled!.deliveryEligible).toBe(false)
-      expect(settled!.status,settled!.blockedReason).toBe('blocked')
-      if(outcome==='complete')expect(settled!.blockedReason).toContain('Implementation delivery was not submitted')
+      expect(settled!.status,settled!.blockedReason).toBe(outcome==='complete'?'completed':'blocked')
+      if(outcome==='complete')expect(settled!.blockedReason).toBeUndefined()
       expect(settled!.agentTurns).toHaveLength(1)
       expect(settled!.agentTurns![0]!.status,settled!.blockedReason).toBe(outcome==='paused'?'interrupted':'ended')
       expect(settled!.agentTurns![0]!.quiescedAt).toBeDefined()
       const events=sessions.transcript(session.id)
-      const goal=events.findLast(event=>event.payload?.subtype==='native_goal')?.payload?.nativeGoal as Json
-      expect(goal).toMatchObject({status:outcome,tokenBudget:null})
-      if(outcome==='paused')expect(goal.tokensUsed).toBe(48)
+      expect(events.some(event=>event.payload?.subtype==='native_goal')).toBe(false)
+      expect(settled!.agentTurns![0]!).not.toHaveProperty('nativeGoal')
+      expect(settled!.agentTurns![0]!.measurements).toBeUndefined()
+      expect(settled!.agentTurns![0]!.deliverySubmission).toBeUndefined()
       const sentText=requests[0]!.input.flatMap((item:Json)=>(item.content??[]).map((part:Json)=>part.text??'')).join('\n')
       expect(sentText.includes(agentGoalPrompt(run))).toBe(true)
       expect(sentText.includes(brief)).toBe(true)
       expect(await readFile(join(workspace,'technical-check.txt'),'utf8')).toBe('observed')
-      expect(events.filter(event=>event.payload?.subtype==='native_goal_turn_started')).toHaveLength(1)
+      expect(events.filter(event=>event.payload?.subtype==='native_goal_turn_started')).toHaveLength(0)
       const count=requests.length
       await Bun.sleep(100)
       expect(requests).toHaveLength(count)
@@ -832,65 +832,23 @@ for (const outcome of ['complete', 'paused'] as const) nativeTest(
   }, 30000,
 )
 
-nativeTest('explicit delivery rejects visual gaps, retains Preview evidence and closes the real native task without another response',async()=>{
+nativeTest('ordinary implementation verifies actual input and ends without BGS receipts or submission',async()=>{
   const root=await mkdtemp('/private/tmp/bgs-native-delivery-')
   const workspace=join(root,'project'),catalog=join(root,'skills'),config=join(root,'config')
   await mkdir(workspace);await mkdir(join(catalog,'fixture'),{recursive:true});await initializeProjectGuide(workspace)
-  await writeFile(join(catalog,'fixture/SKILL.md'),'---\nname: fixture\ndescription: Offline delivery fixture.\n---\nRead only when needed.\n')
+  await writeFile(join(catalog,'fixture/SKILL.md'),'---\nname: fixture\ndescription: Offline execution fixture.\n---\nRead only when needed.\n')
   await writeFile(join(workspace,'input.txt'),'expected')
-  await mkdir(join(workspace,'reports'))
-  await writeFile(join(workspace,'verify.mjs'),`import {readFile,appendFile} from 'node:fs/promises';
+  await writeFile(join(workspace,'verify.mjs'),`import {readFile,writeFile} from 'node:fs/promises';
     if(await readFile('input.txt','utf8')!==process.argv[2])throw Error('Unexpected actual input');
-    await appendFile('reports/calls.txt','observed\\n');console.log('PASS: actual input observed');`)
-  await writeFile(join(workspace,'submit.mjs'),`import {readFile,writeFile,mkdir,readdir} from 'node:fs/promises';
-    import {spawnSync} from 'node:child_process';
-    import assert from 'node:assert/strict';
-    const directory='.beegame/tmp/'+(await readdir('.beegame/tmp')).find(name=>name.startsWith('goal-tools-'));
-    const preview=value=>{const child=spawnSync(process.execPath,[directory+'/preview.mjs','--request','saved-observation','--run','verify.mjs',value],{encoding:'utf8'});
-      assert.ok(child.stdout,child.stderr);return {code:child.status,result:JSON.parse(child.stdout)}};
-    const one=preview('expected'),two=preview('expected'),first=one.result,second=two.result;
-    assert.equal(one.code,0,JSON.stringify(one.result));assert.equal(two.code,0,JSON.stringify(two.result));assert.equal(first.exitCode,0);assert.equal(second.reused,true);assert.equal(second.reportPath,first.reportPath);
-    const changed=preview('different');assert.equal(changed.code,1);assert.match(changed.result.error,/PREVIEW_REQUEST_CONFLICT/);
-    const capability=JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE,'utf8'));
-    const post=body=>fetch(capability.apiUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const inputs=await (await post({executionInputs:true})).json();
-    const report={scope:'delivery',status:'passed',summary:'The requested input was observed once; the second request reused its receipt.',
-      environment:'Real Node check under the native sandbox; offline synthetic fixture',evidencePaths:[first.reportPath,first.stdoutPath,'input.txt'],artifactPaths:['input.txt'],
-      verification:{target:'deployment',observation:'target-runtime',knownIssues:[],unverified:[],visualComparisons:[{
-        state:'Synthetic comparison transport fixture',sourcePath:'input.txt',observationPaths:[first.stdoutPath],
-        status:'different',differences:['Synthetic visual mismatch; no image-quality assertion']}]}};
-    await mkdir('.beegame/delivery',{recursive:true});
-    await writeFile('.beegame/delivery/acceptance.json',JSON.stringify(report));
-    const stale=await post({finish:{requirementsRevision:'stale'}});assert.equal(stale.status,409);
-    const different=await post({finish:{requirementsRevision:inputs.requirementsRevision}});assert.equal(different.status,409);
-    assert.match(await different.text(),/Synthetic visual mismatch/);
-    report.verification.visualComparisons[0]={...report.verification.visualComparisons[0],status:'unverified',observationPaths:[],differences:['Synthetic missing observation']};
-    await writeFile('.beegame/delivery/acceptance.json',JSON.stringify(report));
-    const unverified=await post({finish:{requirementsRevision:inputs.requirementsRevision}});assert.equal(unverified.status,409);
-    assert.match(await unverified.text(),/Synthetic missing observation/);
-    report.verification.visualComparisons[0]={...report.verification.visualComparisons[0],status:'matched',observationPaths:[first.stdoutPath],differences:[]};
-    report.evidencePaths=[first.reportPath,'input.txt'];
-    await writeFile('.beegame/delivery/acceptance.json',JSON.stringify(report));
-    const omitted=spawnSync(process.execPath,[directory+'/handoff.mjs','--design','acceptance'],{encoding:'utf8'});
-    assert.equal(omitted.status,1);assert.match(JSON.parse(omitted.stdout).summary,/must also appear in evidencePaths/);
-    report.evidencePaths.push(first.stdoutPath);
-    await writeFile('.beegame/delivery/acceptance.json',JSON.stringify(report));
-    const inspected=spawnSync(process.execPath,[directory+'/handoff.mjs','--design','acceptance'],{encoding:'utf8'});
-    assert.equal(inspected.status,1,inspected.stdout);const retained=JSON.parse(inspected.stdout);
-    assert.match(retained.summary,/verification.designRevision is missing/); // This engine-neutral fixture has no design-bound GDD.
-    assert.deepEqual(retained.verification.visualComparisons,report.verification.visualComparisons);assert.equal(retained.quality,'unverified');
-    await writeFile('reports/reuse.json',JSON.stringify({first:first.reportPath,second:second.reportPath,reused:second.reused,staleRejected:true,visualDifferenceRejected:true,missingObservationRejected:true,comparisonRetained:true}));
-    spawnSync(process.execPath,[directory+'/measure.mjs','--finish','--requirements',inputs.requirementsRevision],{encoding:'utf8'});
-    await writeFile('reports/continued-after-finish.txt','UNEXPECTED');`)
+    await writeFile('observed.txt','observed');console.log('PASS: actual input observed');`)
   const requests:Json[]=[]
-  let releaseUnexpected:(()=>void)|undefined
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
-    const path=new URL(request.url).pathname
-    if(path==='/preview/status')return Response.json({preview:{status:'idle'}})
-    if(path!=='/v1/responses')return new Response('not found',{status:404})
+    if(new URL(request.url).pathname!=='/v1/responses')return new Response('not found',{status:404})
     const body=await request.json() as Json;requests.push(body);const n=requests.length
-    if(n>1)await new Promise<void>(resolve=>{releaseUnexpected=resolve;request.signal.addEventListener('abort',()=>resolve(),{once:true})})
-    return responseStream(body,[functionOutput('exec_command',{cmd:'node submit.mjs',yield_time_ms:10000},n)],n)
+    if(n>2)return Response.json({error:{message:'Unexpected repeated native request'}},{status:400})
+    return responseStream(body,n===1
+      ? [functionOutput('exec_command',{cmd:'node verify.mjs expected',yield_time_ms:10000},n)]
+      : [messageOutput('The requested input check passed. Game quality is unverified.',n)],n)
   }})
   const runner=createBgsRunner({resolveOutboundTarget:async value=>{
     const url=new URL(value);if(url.origin!==server.url.origin)throw Error('Offline endpoint only')
@@ -900,63 +858,55 @@ nativeTest('explicit delivery rejects visual gaps, retains Preview evidence and 
     BEEGAME_MODEL_BILLING_SOURCE:'byok',BEEGAME_MODEL:'offline-delivery-fixture',OPENAI_API_KEY:'fixture-only',OPENAI_BASE_URL:server.url.origin+'/v1'}),{},true)
   const store=createLocalWorkflowStore(join(root,'store')),executor=createAgentGoalExecutor({store,sessions})
   const session=sessions.start({workspacePath:workspace,projectId:'fixture',userId:'owner',userDataRoot:config})
-  const brief=JSON.stringify({kind:'confirmed_build_brief',idea:'Verify the entire requested input and hand off the observed result.',
-    selected_option:{title:'Offline native delivery'},settings:{engine:'Node fixture'},document_language:'en',game_user_visible_language:'en',agent_response_language:'en',resource_library_usage:'optional'})
+  const brief=JSON.stringify({kind:'confirmed_build_brief',idea:'Verify the requested input and report the observed result.',
+    selected_option:{title:'Offline native execution'},settings:{engine:'Node fixture'},document_language:'en',game_user_visible_language:'en',agent_response_language:'en',resource_library_usage:'optional'})
   const run=createRun({projectId:'fixture',ownerId:'owner',workspacePath:workspace,chatSessionId:session.id,requestKey:'delivery',text:brief,constraints:{},ids:['goal']})
-  let previewClosed=0
   try {
     await store.commit(run.projectId,run.ownerId,0,run,'agent.goal-confirmed')
-    await executor.start(run,{userDataRoot:config,openPreview:()=>({baseUrl:server.url.origin+'/preview',instruction:'Offline Node execution observation; no browser required.',close:async()=>{previewClosed++}})})
+    await executor.start(run,{userDataRoot:config})
     let settled=await store.read(run.projectId,run.ownerId)
     const deadline=Date.now()+20000
-    while(!settled?.agentTurns?.[0]?.finishedAt && requests.length<2 && Date.now()<deadline){await Bun.sleep(20);settled=await store.read(run.projectId,run.ownerId)}
+    while(!settled?.agentTurns?.[0]?.finishedAt && Date.now()<deadline){await Bun.sleep(20);settled=await store.read(run.projectId,run.ownerId)}
     expect(settled?.status,JSON.stringify({run:settled,events:sessions.transcript(session.id).slice(-8)})).toBe('completed')
     expect(settled?.writer).toBeUndefined();expect(settled?.requirements).toEqual(run.requirements)
     expect(settled?.deliveryEligible).toBe(false);expect(settled?.agentTurns).toHaveLength(1)
     expect(settled?.agentTurns?.[0]).toMatchObject({status:'ended',quiescedAt:expect.any(String)})
-    expect(await readFile(join(workspace,'reports/calls.txt'),'utf8')).toBe('observed\n')
-    expect(JSON.parse(await readFile(join(workspace,'reports/reuse.json'),'utf8'))).toMatchObject({reused:true,staleRejected:true,visualDifferenceRejected:true,missingObservationRejected:true,comparisonRetained:true})
-    expect(await readFile(join(workspace,'reports/continued-after-finish.txt'),'utf8').catch(()=>null)).toBeNull()
-    expect(requests).toHaveLength(1)
+    expect(settled?.agentTurns?.[0]).not.toHaveProperty('nativeGoal')
+    expect(settled?.agentTurns?.[0]?.measurements).toBeUndefined()
+    expect(settled?.agentTurns?.[0]?.deliverySubmission).toBeUndefined()
+    expect(await readFile(join(workspace,'observed.txt'),'utf8')).toBe('observed')
+    expect(await readFile(join(workspace,'.beegame/delivery/acceptance.json'),'utf8').catch(()=>null)).toBeNull()
+    expect(requests).toHaveLength(2)
+    expect(requests.flatMap(body=>body.tools).some((tool:Json)=>['create_goal','update_goal','BgsMeasure','BgsFinishDelivery'].includes(tool.name))).toBe(false)
     const sent=requests[0]!.input.flatMap((item:Json)=>(item.content??[]).map((part:Json)=>part.text??'')).join('\n')
     expect(sent).toContain(brief)
     const events=sessions.transcript(session.id)
-    expect(events.findLast(event=>event.payload?.subtype==='native_goal')?.payload?.nativeGoal).toMatchObject({status:'complete',tokenBudget:null,tokensUsed:48})
-    expect(events.find(event=>event.payload?.subtype==='delivery_submission')?.payload).toMatchObject({attemptId:settled!.agentTurns![0]!.attemptId,
-      requirementsRevision:run.requirements.revision,quality:'unverified',deliveryEligible:false})
+    expect(events.some(event=>event.payload?.subtype==='native_goal' || event.payload?.subtype==='delivery_submission')).toBe(false)
     expect(events.some(event=>event.type==='turn.failed')).toBe(false)
-    expect(previewClosed).toBe(1)
     expect(sessions.runtimeStatus()).toMatchObject({activeTurns:0,activeNativeTasks:0,runnerDisposals:0,cleanupFailures:0})
-    await Bun.sleep(100);expect(requests).toHaveLength(1)
-  } finally {await executor.dispose();await sessions.dispose();releaseUnexpected?.();server.stop(true);await rm(root,{recursive:true,force:true})}
+    await Bun.sleep(100);expect(requests).toHaveLength(2)
+  } finally {await executor.dispose();await sessions.dispose();server.stop(true);await rm(root,{recursive:true,force:true})}
 },30000)
 
-nativeTest('four-stage host handoffs preserve a real native thread and enable Goal only for implementation',async()=>{
+nativeTest('complete-game reviews GDD before native implementation with optional visuals and no Goal',async()=>{
   const root=await mkdtemp('/private/tmp/bgs-native-production-'),workspace=join(root,'project'),config=join(root,'config'),catalog=join(root,'skills')
-  await mkdir(join(workspace,'docs'),{recursive:true});await mkdir(join(catalog,'fixture'),{recursive:true})
-  await writeFile(join(catalog,'fixture/SKILL.md'),'---\nname: fixture\ndescription: Offline stage transport fixture.\n---\nFixture only.\n')
-  await writeFile(join(workspace,'docs/GDD.md'),'# Synthetic host fixture\n## Decisions\nThis tests transport, not design quality.\n')
-  await writeFile(join(workspace,'docs/design.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>')
-  await writeFile(join(workspace,'advance.mjs'),`import {readFile,readdir} from 'node:fs/promises';import {spawnSync} from 'node:child_process';
-    const cap=JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE,'utf8'));
-    const response=await fetch(cap.apiUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({workflow:{action:'status'}})});
-    const {assignment}=await response.json();let tool;
-    for(const name of await readdir('.beegame/tmp'))if(name.startsWith('goal-tools-')){
-      const path='.beegame/tmp/'+name+'/workflow.mjs';if((await readFile(path,'utf8')).includes(cap.apiUrl))tool=path;
-    }
-    if(!tool)throw Error('Current workflow capability missing');
-    const child=spawnSync(process.execPath,[tool,'--advance',JSON.stringify({summary:'Synthetic native handoff',sections:['Decisions'],files:assignment.stage==='visual'?['docs/design.svg']:[]})],{encoding:'utf8'});
-    if(child.status!==0)throw Error(child.stdout+child.stderr);console.log(child.stdout);`)
-  const store=createLocalWorkflowStore(join(root,'store')),requests:Json[]=[],calls=new Map<string,number>()
+  await mkdir(join(workspace,'assets'),{recursive:true});await mkdir(join(catalog,'fixture'),{recursive:true})
+  await writeFile(join(catalog,'fixture/SKILL.md'),'---\nname: fixture\ndescription: Offline visual selection transport fixture.\n---\nFixture only.\n')
+  await writeFile(join(workspace,'assets/design.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>')
+  const store=createLocalWorkflowStore(join(root,'store')),requests:Json[]=[]
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
     if(new URL(request.url).pathname!=='/v1/responses')return new Response('not found',{status:404})
     const body=await request.json() as Json;requests.push(body);const n=requests.length
-    const current=await store.read('fixture','owner'),turn=current!.agentTurns!.at(-1)!,count=(calls.get(turn.attemptId)??0)+1;calls.set(turn.attemptId,count)
-    const implementing=turn.production!.stage==='implementation'
-    expect(body.tools.some((tool:Json)=>tool.name==='update_goal')).toBe(implementing)
-    if(count>2)return Response.json({error:{message:'Unexpected repeated native stage request'}},{status:400})
-    return responseStream(body,count===1 ? [functionOutput(implementing?'update_goal':'exec_command',
-      implementing?{status:'complete'}:{cmd:'node advance.mjs',yield_time_ms:10000},n)] : [messageOutput('Current synthetic assignment ended.',n)],n)
+    expect(body.tools.some((tool:Json)=>['create_goal','update_goal'].includes(tool.name))).toBe(false)
+    if(n>6)return Response.json({error:{message:'Unexpected repeated native request'}},{status:400})
+    const output=n===1
+      ? functionOutput('WriteProjectFile',{file_path:'docs/GDD.md',content:'# Synthetic\n## Decisions\nOne playable loop; visuals as needed.\n'},n)
+      : n===2 ? messageOutput(JSON.stringify({status:'ready',summary:'Saved design decisions'}),n)
+      : n===3 ? messageOutput(JSON.stringify({summary:'Current design is consistent',findings:[]}),n)
+      : n===4 ? functionOutput('BgsWorkflow',{action:'select-visual',summary:'Retain the synthetic source in this task',sections:[],files:['assets/design.svg']},n)
+      : n===5 ? functionOutput('exec_command',{cmd:'printf observed > implementation.txt',yield_time_ms:10000},n)
+      : messageOutput('Synthetic implementation finished with its selected source; visual quality is unverified.',n)
+    return responseStream(body,[output],n)
   }})
   const runner=createBgsRunner({resolveOutboundTarget:async value=>{
     const url=new URL(value);if(url.origin!==server.url.origin)throw Error('Offline endpoint only')
@@ -966,24 +916,25 @@ nativeTest('four-stage host handoffs preserve a real native thread and enable Go
     BEEGAME_MODEL_BILLING_SOURCE:'byok',BEEGAME_MODEL:'offline-production-fixture',OPENAI_API_KEY:'fixture-only',OPENAI_BASE_URL:server.url.origin+'/v1'}),{},true)
   const executor=createAgentGoalExecutor({store,sessions}),session=sessions.start({workspacePath:workspace,projectId:'fixture',userId:'owner',userDataRoot:config})
   const run=createRun({projectId:'fixture',ownerId:'owner',workspacePath:workspace,chatSessionId:session.id,requestKey:'production',
-    text:JSON.stringify({kind:'confirmed_build_brief',idea:'Synthetic stage transport',settings:{engine:'fixture'},selected_option:{title:'Offline'},document_language:'en',game_user_visible_language:'en',agent_response_language:'en',resource_library_usage:'optional'}),constraints:{},ids:['goal']})
-  run.productionWorkflow=1
+    text:JSON.stringify({kind:'confirmed_build_brief',idea:'Synthetic native implementation',settings:{engine:'fixture'},selected_option:{title:'Offline'},document_language:'en',game_user_visible_language:'en',agent_response_language:'en',resource_library_usage:'optional'}),constraints:{},ids:['goal']})
+  run.productionWorkflow=1;run.creation={initialDelivery:'complete-game',editableContent:false}
   try {
     await store.commit(run.projectId,run.ownerId,0,run,'agent.goal-confirmed');await executor.start(run,{userDataRoot:config})
-    let current=await store.read(run.projectId,run.ownerId);const deadline=Date.now()+60000
-    while(Date.now()<deadline && !(current?.agentTurns?.length===11 && current.agentTurns.at(-1)?.finishedAt)){
-      if(current?.agentTurns?.at(-1)?.status==='failed')break
-      await Bun.sleep(25);current=await store.read(run.projectId,run.ownerId)
-    }
-    expect(current?.agentTurns?.length,JSON.stringify({current,events:sessions.transcript(session.id).slice(-5)})).toBe(11)
-    expect(current!.agentTurns!.every(t=>t.status==='ended' && t.quiescedAt)).toBe(true)
-    expect(new Set(current!.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
-    expect(current!.status).toBe('blocked');expect(current!.blockedReason).toContain('delivery was not submitted')
-    const goals=sessions.transcript(session.id).filter(e=>e.payload?.subtype==='native_goal')
-    expect(goals.length).toBeGreaterThan(0)
-    expect(goals.every(e=>e.turnId===current!.agentTurns!.at(-1)!.turnId)).toBe(true)
-    expect(current!.agentTurns!.slice(0,10).every(t=>t.productionHandoff)).toBe(true)
-    expect(requests).toHaveLength(22)
+    let current=await store.read(run.projectId,run.ownerId);const deadline=Date.now()+20000
+    while(Date.now()<deadline && !(current?.agentTurns?.length===2 && current.agentTurns[1]?.finishedAt && !current.writer)){await Bun.sleep(25);current=await store.read(run.projectId,run.ownerId)}
+    expect(current?.status,JSON.stringify({current,events:sessions.transcript(session.id).slice(-5)})).toBe('completed')
+    expect(current?.agentTurns).toHaveLength(2)
+    expect(current!.agentTurns![0]!.designReviews).toHaveLength(1)
+    expect(current!.agentTurns![0]!.productionHandoff?.next?.stage).toBe('implementation')
+    expect(current!.agentTurns![1]).toMatchObject({status:'ended',quiescedAt:expect.any(String),production:{stage:'implementation'}})
+    expect(current!.agentTurns![1]!.visualSelection?.sources).toEqual([{path:'assets/design.svg',sha256:expect.stringMatching(/^[a-f0-9]{64}$/)}])
+    expect(current!.agentTurns![1]!.productionHandoff).toBeUndefined()
+    expect(current!.agentTurns![1]!).not.toHaveProperty('nativeGoal')
+    expect(await readFile(join(workspace,'implementation.txt'),'utf8')).toBe('observed')
+    expect(await readFile(join(workspace,'docs/GDD.md'),'utf8')).toContain('One playable loop')
+    expect(current!.status).toBe('completed');expect(current!.blockedReason).toBeUndefined()
+    expect(requests).toHaveLength(6)
+    expect(sessions.transcript(session.id).some(event=>event.payload?.subtype==='native_goal')).toBe(false)
     expect(sessions.runtimeStatus()).toMatchObject({activeTurns:0,activeNativeTasks:0,cleanupFailures:0})
   }finally{await executor.dispose();await sessions.dispose();server.stop(true);await rm(root,{recursive:true,force:true})}
-},90000)
+},30000)

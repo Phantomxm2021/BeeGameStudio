@@ -1,3 +1,5 @@
+import { projectHostDirectory } from '../beegame/project-storage-paths'
+import { projectChatPath } from '../beegame/project-records'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import {
   appendFile,
@@ -190,7 +192,7 @@ it('does not offer a stopped native permission as actionable after service resta
     // part of the transcript, but can never be answered by the new process.
     const recovered = await recoverLatestProjectSessionFromDisk(workspace)
     expect(recovered?.transcriptPath).toBeTruthy()
-    await appendFile(join(workspace, recovered!.transcriptPath), `${JSON.stringify({ id: 999_998, sessionId: session.id, type: 'system.status',
+    await appendFile(join(projectHostDirectory(workspace), recovered!.transcriptPath), `${JSON.stringify({ id: 999_998, sessionId: session.id, type: 'system.status',
       text: 'task_started', createdAt: new Date().toISOString(),
       payload: { type: 'system', subtype: 'task_started', task_id: 'orphaned-child',
         tool_use_id: 'orphaned-child-use' },
@@ -282,15 +284,15 @@ it('keeps provider refusal actionable after host settlement and a later successf
     const recovered = await recoverLatestProjectSessionFromDisk(workspace)
     expect(recovered?.transcriptPath).toBeTruthy()
     for (const cleanup of cleanups.splice(0)) await cleanup()
-    const saved = await readFile(join(workspace, recovered!.transcriptPath), 'utf8')
+    const saved = await readFile(join(projectHostDirectory(workspace), recovered!.transcriptPath), 'utf8')
     const baseId = Math.max(...saved.trim().split('\n').map(line => JSON.parse(line).id))
     const oversizedShellOutput = 'x'.repeat(5 * 1024 * 1024)
     const append = async (offset: number, type: string, text: string, turnId = 'failed-turn') => appendFile(
-      join(workspace, recovered!.transcriptPath), JSON.stringify({ id: baseId + offset, sessionId: session.id,
+      join(projectHostDirectory(workspace), recovered!.transcriptPath), JSON.stringify({ id: baseId + offset, sessionId: session.id,
         turnId, type, text, createdAt: new Date().toISOString(), payload: { type, subtype: 'host_evidence',
           ...(type === 'session.stopped' ? { reason: 'agent_goal_settled' } : {}) } }) + '\n')
     const appendShellReceipt = async (offset: number, type: 'tool.completed' | 'tool.failed', toolUseID: string, failed: boolean) =>
-      appendFile(join(workspace, recovered!.transcriptPath), JSON.stringify({ id: baseId + offset, sessionId: session.id,
+      appendFile(join(projectHostDirectory(workspace), recovered!.transcriptPath), JSON.stringify({ id: baseId + offset, sessionId: session.id,
         turnId: 'failed-turn', type, text: failed ? 'Shell failed' : 'Shell completed', createdAt: new Date().toISOString(),
         payload: { type, toolName: 'Shell', toolUseID, parentToolUseID: 'agent-parent',
           input: { command: 'printf shell-route-fixture', cwd: workspace }, output: oversizedShellOutput,
@@ -303,7 +305,7 @@ it('keeps provider refusal actionable after host settlement and a later successf
     await append(5, 'session.stopped', 'BeeGame session stopped')
     await append(6, 'system.status', 'Execution settled; quality unverified')
     // History reads use this same canonical file without copying its rows.
-    const journalPath = join(workspace, '.beegame/chat/project-events.jsonl')
+    const journalPath = projectChatPath(workspace)
     const originalJournal = await readFile(journalPath, 'utf8')
     const restarted = createAgentWorkflowApp({ ...options, registerCleanup: cleanup => cleanups.push(cleanup) })
     const state = await (await restarted.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, unknown>

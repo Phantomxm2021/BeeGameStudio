@@ -46,23 +46,6 @@ async function runNativeGoal() {
   const event = (method: string, params: any) => send({ method, params: { threadId, turnId, ...params } })
   event('turn/started', { turn: { id: turnId, status: 'inProgress' } })
   if (process.env.BGS_FIXTURE_REUSED_CHILD === '1') reusedChild(event, 'running')
-  if (process.env.BGS_FIXTURE_NATIVE_FINISH) {
-    const extra = process.env.BGS_FIXTURE_NATIVE_FINISH
-    if (extra === 'command') event('item/started', { item: { id: 'other-command', type: 'commandExecution', command: 'unfinished', status: 'inProgress' } })
-    if (extra === 'dynamic') event('item/started', { item: { id: 'other-tool', type: 'dynamicToolCall', tool: 'BgsMeasurement', status: 'inProgress' } })
-    if (extra === 'child') reusedChild(event, 'running')
-    event('item/started', { item: { id: 'native-finish', type: 'dynamicToolCall', tool: 'BgsFinishDelivery', status: 'inProgress' } })
-    const result = await new Promise<any>(resolve => {
-      awaiting = resolve
-      send({ id: 'native-finish', method: 'item/tool/call', params: { threadId, turnId,
-        callId: 'native-finish', tool: 'BgsFinishDelivery', arguments: { requirementsRevision: 'fixture-revision' } } })
-    })
-    awaiting = undefined
-    // Rejected submissions stay in the current turn. An accepted terminal
-    // submission must close the process instead of reaching a model follow-up.
-    event('item/completed', { item: { id: 'finish-result', type: 'agentMessage', text: JSON.stringify(result) } })
-    return
-  }
   if (process.env.BGS_FIXTURE_NATIVE_GOAL_FINALIZE === '1') {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
     const childPidFile = process.env.BGS_FIXTURE_NATIVE_GOAL_CHILD_PID_FILE
@@ -121,10 +104,17 @@ createInterface({ input: process.stdin }).on('line', async line => {
   const reply = (result: unknown) => send({ id: request.id, result })
   if (request.method === 'fixture/events') { for (const event of p.events) send(event); reply({}) }
   else if (request.method === 'fixture/responses') reply({ responses: serverResponses })
+  else if (request.method === 'thread/unsubscribe') reply({ status: 'unsubscribed' })
   else if (request.method === 'initialize') reply({ userAgent: 'fixture/0.163.0' })
   else if (request.method === 'thread/start' || request.method === 'thread/resume') {
+    if (request.method === 'thread/resume' && process.env.BGS_FIXTURE_RESUME_ERROR) {
+      send({id:request.id,error:{code:-32600,message:process.env.BGS_FIXTURE_RESUME_ERROR==='missing'
+        ? 'no rollout found for thread id '+p.threadId : 'PRIVATE_OTHER_ERROR'}}); return
+    }
+    if (p.ephemeral) { reply({ thread: { id: 'discovery-context' } }); return }
     resumed = request.method === 'thread/resume'
-    const resolvedThreadId = p.threadId ?? (++startedThreads === 1 ? threadId : 'review-thread-' + startedThreads)
+    startedThreads++
+    const resolvedThreadId = p.threadId ?? (startedThreads === 1 ? threadId : 'review-thread-' + startedThreads)
     reply({ thread: { id: resolvedThreadId } })
     if (request.method === 'thread/resume' && nativeGoal?.status === 'active') void runNativeGoal()
     // A real cold paginated resume can replay the last persisted cumulative
@@ -213,7 +203,15 @@ createInterface({ input: process.stdin }).on('line', async line => {
     } else if (prompt?.startsWith('native-denial:')) {
       const mode = prompt.slice('native-denial:'.length)
       event('item/started', { item: { id: 'denied-command', type: 'commandExecution', command: 'fixture command', status: 'inProgress' } })
-      if (mode !== 'unspecified') {
+      if (mode.startsWith('review-')) {
+        event('item/autoApprovalReview/completed', {
+          ...(mode === 'review-stale-turn' ? { turnId: 'old-turn' } : {}),
+          targetItemId: mode === 'review-missing-target' ? null : mode === 'review-other-target' ? 'other-command' : 'denied-command',
+          review: { status: mode === 'review-timeout' ? 'timedOut' : mode === 'review-aborted' ? 'aborted' : 'denied',
+            riskLevel: mode === 'review-denied' ? 'high' : null, userAuthorization: mode === 'review-denied' ? 'low' : null,
+            rationale: mode === 'review-denied' ? 'PRIVATE_ASSESSMENT' : 'Automatic approval review failed: PRIVATE_PROVIDER_BODY' },
+        })
+      } else if (mode !== 'unspecified') {
         const result = await new Promise<any>(resolve => {
           awaiting = resolve
           send({ id: 'host-approval', method: 'item/commandExecution/requestApproval', params: { threadId, turnId,

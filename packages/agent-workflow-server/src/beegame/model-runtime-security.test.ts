@@ -46,6 +46,8 @@ test('real auxiliary worker pins serialized addresses and returns usage on succe
         throw Error('Expected a model failure')
       } catch (error) {
         expect(error).toBeInstanceOf(BeeGameModelRuntimeError)
+        expect((error as BeeGameModelRuntimeError).diagnosticId).toEqual(expect.any(String))
+        if(!partial)expect((error as BeeGameModelRuntimeError).failureCode).toBe('structured-output-missing')
         const usage = (error as BeeGameModelRuntimeError).usage
         expect(usage?.total_tokens).toBe(partial ? 100 : 120)
         expect(usage?.incomplete).toBe(partial ? true : undefined)
@@ -78,6 +80,7 @@ test('real auxiliary worker pins serialized addresses and returns usage on succe
       } catch (error) {
         expect(error).toBeInstanceOf(BeeGameModelRuntimeError)
         expect((error as Error).message).toBe(message!)
+        expect((error as BeeGameModelRuntimeError).failureCode).toBe(model==='max_output_tokens'?'max-output-tokens':model==='content_filter'?'content-filter':'incomplete-response')
         expect((error as Error).message).not.toContain('PRIVATE_TRUNCATED_DRAFT')
         expect((error as BeeGameModelRuntimeError).usage).toMatchObject({ output_tokens: 2048, total_tokens: 2148 })
       }

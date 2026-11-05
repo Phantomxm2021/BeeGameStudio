@@ -126,7 +126,7 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     const designInputsChanged=measurement.designInputRevision !== undefined &&
       measurement.designInputRevision !== designInputRevision(run.workspacePath)
     const designInputsMissing=measurement.designInputRevision === undefined &&
-      purpose !== 'preview' && run.creation?.initialDelivery === 'design-led-first-version'
+      purpose !== 'preview' && ['design-led-first-version','complete-game'].includes(run.creation?.initialDelivery ?? '')
     const dependenciesChanged=proof.dependencySha256!==await projectDependencies(run.workspacePath)
     // Export identity and observed runtime evidence are different facts. A
     // source-only edit must not be described as changed runtime bytes. These

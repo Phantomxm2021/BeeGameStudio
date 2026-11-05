@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DEFAULT_LOCAL_USER_ID } from './auth/user-context'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
 import { assertWorkspacePath } from './filesystem/workspace-path'
+import { projectHostDirectory, projectWorkRoot } from './beegame/project-storage-paths'
 
 export async function deleteWorkspaceDirectoryIfSafe(
   workspacePath: string,
@@ -30,6 +31,8 @@ export async function deleteWorkspaceDirectoryIfSafe(
   const rel = relative(dataRoot, workspaceRoot)
   if (rel.startsWith('..') || isAbsolute(rel)) return undefined
   await rm(workspaceRoot, { recursive: true, force: true })
+  await rm(projectHostDirectory(workspaceRoot), { recursive: true, force: true })
+  await rm(projectWorkRoot(workspaceRoot), { recursive: true, force: true })
   return workspaceRoot
 }
 
@@ -141,8 +144,7 @@ export async function initializeProjectRepository(
 }
 
 const COMMON_GIT_IGNORES = [
-  '/.beegame/chat/', '/.beegame/tmp/', '/.beegame/artifacts/', '/.runtime/',
-  '/logs/index.json', '/logs/runtime-diagnostics.jsonl*', '/transcripts/',
+  '/reports/runtime/',
   'node_modules/', '.DS_Store', '.env', '.env.*',
   '!.env.example', '!.env.sample', '!.env.template',
 ]
@@ -151,6 +153,8 @@ const COMMON_GIT_IGNORES = [
 // and Unreal Build/Content/Config/Source and binary-only plugins versionable.
 const ENGINE_GIT_IGNORES = {
   React: ['/dist/', '.vite/', '.cache/', '*.tsbuildinfo'],
+  Phaser: ['/dist/', '.vite/', '.cache/', '*.tsbuildinfo'],
+  'Three.js': ['/dist/', '.vite/', '.cache/', '*.tsbuildinfo'],
   Unity: ['/[Ll]ibrary/', '/[Tt]emp/', '/[Oo]bj/', '/[Ll]ogs/', '/[Uu]ser[Ss]ettings/', '/.vs/'],
   Godot: ['/.godot/', '/.import/', '/.mono/'],
   Unreal: ['/Intermediate/', '/Saved/', '/DerivedDataCache/', '/.vs/', '/Plugins/*/Intermediate/'],

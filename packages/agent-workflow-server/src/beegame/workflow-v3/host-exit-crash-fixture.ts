@@ -1,14 +1,13 @@
 // Dedicated child of host-exit-receipt.test.ts. Never opens a real project or
 // real provider. The parent kills this exact process at an observed checkpoint.
-import { readFile, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createLocalWorkflowStore, type WorkflowStore } from './store'
 import { createHostExitReceipts } from './host-exit-receipt'
 import { createAgentGoalExecutor } from './agent-goal'
-import { createV3Executor } from './execution'
 import { BeeGameSessionManager } from '../session-manager'
-import type { Run } from './state'
+import { digest, type Run } from './state'
 
 const job = JSON.parse(await Bun.stdin.text()) as {
   root: string; key: string; mode: 'agent' | 'source' | 'no-start' | 'before-exit' | 'during-native'; run: Run; body?: unknown
@@ -43,7 +42,25 @@ const sessions = new BeeGameSessionManager({ async start(input) {
 } }, join(root,'sessions'), async()=>({}), {}, true)
 const exitReceipts = createHostExitReceipts({dataRoot:join(root,'host'),key:Buffer.from(job.key,'hex'),
   identity:async()=>({machine:'synthetic-host',boot:'boot-a'})})!
-if(job.mode === 'source') await createV3Executor({store,sessions,exitReceipts}).edit(job.run,job.body)
+if(job.mode === 'source') {
+  // Model a legacy host that already wrote and drained its synthetic candidate.
+  // Only receipt persistence/recovery is under test; no retired editor is run.
+  const path='content/ui/menu.json',before=await readFile(join(job.run.workspacePath,path))
+  const after=Buffer.from(JSON.stringify((job.body as {document:unknown}).document))
+  const run=structuredClone(job.run),attemptId=crypto.randomUUID()
+  run.version++;run.fence++;run.status='running'
+  run.writer={attemptId,fence:run.fence,workerId:'legacy-fixture-host'}
+  const archive='.beegame/workflow-v3-edits/'+attemptId+'/before.json'
+  run.sourceEdits=[{...run.writer,requestKey:'save',requestHash:digest(after),sessionId:'host-edit:'+attemptId,
+    requirementsRevision:run.requirements.revision,status:'running',startedAt:new Date().toISOString(),
+    sourceEdit:{path,before:digest(before),after:digest(after),archive,status:'reserved'}}]
+  await base.commit(run.projectId,run.ownerId,job.run.version,run,'synthetic.historical-save')
+  await mkdir(dirname(join(run.workspacePath,archive)),{recursive:true})
+  await writeFile(join(run.workspacePath,archive),before)
+  await writeFile(join(run.workspacePath,path),after)
+  await exitReceipts.save(run,{quiescedAt:new Date().toISOString()})
+  await checkpoint('receipt-before-database')
+}
 else await createAgentGoalExecutor({store,sessions,exitReceipts}).start(job.run,{})
 // Native execution is asynchronous; keep this exact synthetic worker alive.
 for (;;) await Bun.sleep(1000)

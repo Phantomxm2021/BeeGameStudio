@@ -1,5 +1,5 @@
-import { isWebReactTarget } from './web-project-start'
 import type { Hono } from 'hono'
+import type { BeeGamePreviewManager } from '../preview-manager'
 import { realpath } from 'node:fs/promises'
 import { z } from 'zod/v4'
 import type { BeeGameUserContext } from '../../auth/user-context'
@@ -17,13 +17,13 @@ import { exportAgentMeasuredBuild, selectAgentMeasuredBuild, inspectAgentMeasure
 import { mergeDeploymentRecords, type BeeGameDeploymentManager, type BeeGameDeploymentRecord } from '../deployment-manager'
 import { measurementSummary, activeUserTask, agentSkillFacts } from './agent-measurement'
 import { agentGoalSchema, agentMessageSchema, createAgentGoalExecutor } from './agent-goal'
-import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
+import type { AgentImageAccess } from './agent-tools'
 import { auditEventPage } from './event-page'
 import type { HostExitReceipts } from './host-exit-receipt'
 import { observeProjectCreation } from './web-project-start'
 import { initializeProjectGuide } from './project-guide'
 import { preparePublicationCover } from '../publication-cover'
-import { capturePublicationCover } from '../publication-cover-capture'
+import { capturePublicationCover, capturePublicationCovers } from '../publication-cover-capture'
 import { artifactDigest } from '../runtime-acceptance'
 import { publicationBuildPlan, rebuildPublication } from './publication-build'
 
@@ -36,6 +36,7 @@ export function registerV3Routes(app: Hono, input: {
   store?: WorkflowStore; sessions: BeeGameSessionManager; preview?: MeasuredPreviewManager; exitReceipts?: HostExitReceipts;
   deployment?: () => BeeGameDeploymentManager;
   capturePublicationCover?: (previewUrl: string) => Promise<Buffer>;
+  capturePublicationCovers?: (previewUrl: string) => Promise<Buffer[]>;
   persistDeployment?(request:Request, user:BeeGameUserContext, record:BeeGameDeploymentRecord):Promise<unknown>;
   listDeployments?(request:Request, user:BeeGameUserContext, sessionId:string):Promise<BeeGameDeploymentRecord[] | undefined>;
   getUser(request: Request): BeeGameUserContext;
@@ -48,8 +49,8 @@ export function registerV3Routes(app: Hono, input: {
   readBody(request: Request): Promise<unknown>;
   registerCleanup?: (fn: () => Promise<void>) => void;
   resourceLibraryBaseUrl?: string;
-  openAgentPreview?: (value: {request: Request; user: BeeGameUserContext; projectId: string; workspacePath: string; sessionId: string}) => AgentPreviewAccess | Promise<AgentPreviewAccess>;
-  openAgentImage?: (value: {user: BeeGameUserContext; projectId: string; workspacePath: string; visualHandoffVersion?: 1; screenOrientation?: 'Landscape' | 'Portrait'}) => AgentImageAccess | Promise<AgentImageAccess>;
+  developmentPreview?: () => BeeGamePreviewManager;
+  openAgentImage?: (value: {request: Request; user: BeeGameUserContext; projectId: string; workspacePath: string; sessionId: string; modelConfigId?: string; confirmedRequirements: string; requireGdd: boolean; visualHandoffVersion?: 1; screenOrientation?: 'Landscape' | 'Portrait'}) => AgentImageAccess | Promise<AgentImageAccess>;
 }) {
   const executor = input.store ? createV3Executor({ store: input.store, sessions: input.sessions, exitReceipts:input.exitReceipts }) : undefined
   const agentExecutor = input.store ? createAgentGoalExecutor({ store: input.store, sessions: input.sessions,
@@ -96,18 +97,22 @@ export function registerV3Routes(app: Hono, input: {
       const ctx = await current(c.req.raw, c.req.param('id'), false)
       if (!hasBeeGamePermission(ctx.user, 'deployment.manage') || !hasBeeGamePermission(ctx.user, 'preview.manage'))
         throw new WorkflowError('permission-denied', 'Publication and Preview permission required', 403)
-      z.object({}).strict().parse(await input.readBody(c.req.raw))
+      const { count = 1 } = z.object({ count: z.union([z.literal(1), z.literal(3)]).optional() }).strict().parse(await input.readBody(c.req.raw))
       if (!input.preview) throw new WorkflowError('preview-unavailable', 'Project Preview is not configured', 503)
       // Reuse the ordinary isolated Preview of the saved build; never rebuild or run an Agent.
       const preview = await input.preview.openCandidate(ctx.run)
-      let image: Buffer
-      try { image = await (input.capturePublicationCover ?? capturePublicationCover)(preview.url) }
+      let images: Buffer[]
+      try {
+        images = count === 3 ? await (input.capturePublicationCovers ?? capturePublicationCovers)(preview.url)
+          : [await (input.capturePublicationCover ?? capturePublicationCover)(preview.url)]
+      }
       catch { throw new WorkflowError('publication-cover-unavailable', 'Could not capture the current build. Open Preview to check it, then try again.', 400) }
       const currentPreview = await input.preview.candidateStatus(ctx.project.id, ctx.user.id)
       if (currentPreview.preview?.id !== preview.id ||
           await artifactDigest(ctx.workspace, preview.artifact.path, true) !== preview.artifact.sha256)
         throw new WorkflowError('preview-stale', 'Project Preview changed during capture; try again', 409)
-      return c.json({ mediaType: 'image/webp' as const, filename: 'game-preview.webp', data: image.toString('base64') })
+      const covers = images.map((image, index) => ({ mediaType: 'image/webp' as const, filename: `game-preview-${index + 1}.webp`, data: image.toString('base64') }))
+      return count === 3 ? c.json({ covers }) : c.json({ ...covers[0]!, filename: 'game-preview.webp' })
     } catch (error) { const result = routeError(error); return c.json({ error: result.error, code: result.code }, result.status) }
   })
 
@@ -145,8 +150,8 @@ export function registerV3Routes(app: Hono, input: {
             const busy = (run:Run) => input.sessions.hasActiveProjectTurn(run.ownerId,run.projectId,run.workspacePath)
             const validateRun = async () => {
               const current = await ctx.store.read(project.id,user.id)
-              if (!current || current.id !== ctx.run.id || current.version !== ctx.run.version ||
-                  current.workspacePath !== ctx.run.workspacePath)
+              if (!current || current.id !== ctx.run.id || current.fence !== ctx.run.fence ||
+                  current.requirements.revision !== ctx.run.requirements.revision || current.workspacePath !== ctx.run.workspacePath)
                 throw new WorkflowError('revision-conflict','Project changed while preparing publication; publish the updated version again')
               if (current.writer || busy(current))
                 throw new WorkflowError('workspace-busy','Wait for the project writer and owned tools to stop before publishing')
@@ -322,7 +327,7 @@ export function registerV3Routes(app: Hono, input: {
         run=createRun({projectId:ctx.project.id,ownerId:ctx.user.id,workspacePath:ctx.workspace,
           chatSessionId:body.chatSessionId,requestKey:body.requestKey,text,constraints,ids:['goal']})
         run.creation=await observeProjectCreation(ctx.workspace,body.brief)
-        if(run.creation?.initialDelivery==='design-led-first-version')run.productionWorkflow=1
+        if(run.creation?.initialDelivery==='complete-game')run.productionWorkflow=1
         await ctx.store.commit(ctx.project.id,ctx.user.id,0,run,'agent.goal-confirmed')
       }
       // Persist mode before any model dispatch; retry can reconcile this same
@@ -330,15 +335,14 @@ export function registerV3Routes(app: Hono, input: {
       await input.persistMode(request,ctx.user,ctx.project,run)
       // Only a blank creative intake before its first turn. Resumes, imported
       // sources and running projects never receive a backfilled guide.
-      if(run.creation?.initialDelivery==='design-led-first-version' && run.agentTurns!.length===0)
+      if(['design-led-first-version','complete-game'].includes(run.creation?.initialDelivery ?? '') && run.agentTurns!.length===0)
         await initializeProjectGuide(ctx.workspace)
       const turn=await ctx.agentExecutor.start(run,{
-        openImage:input.openAgentImage ? ()=>input.openAgentImage!({user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,visualHandoffVersion:run.visualHandoffVersion,screenOrientation:imageScreenOrientation(run)}) : undefined,
+        developmentPreview: hasBeeGamePermission(ctx.user, 'preview.manage') ? input.developmentPreview : undefined,
+        openImage:input.openAgentImage ? imageContext=>input.openAgentImage!({request,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:run.chatSessionId,modelConfigId:chat.modelConfigId,confirmedRequirements:imageContext.requirements,requireGdd:imageContext.requireGdd,visualHandoffVersion:run.visualHandoffVersion,screenOrientation:imageScreenOrientation(run)}) : undefined,
         modelConfigId:chat.modelConfigId,language:body.brief.agent_response_language,
         userDataRoot:input.getUserDataRoot?.(request),
         authToken:input.getAuthToken(request),getValidAuthToken:input.getValidAuthToken(request),
-        openPreview:hasBeeGamePermission(ctx.user,'preview.manage') && input.openAgentPreview ?
-          ()=>input.openAgentPreview!({request,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:body.chatSessionId}) : undefined,
       })
       return {turn,runId:run.id,deliveryEligible:false}
   }
@@ -346,6 +350,24 @@ export function registerV3Routes(app: Hono, input: {
     c.header('Cache-Control','no-store')
     try {
       return c.json(await startAgentGoal(c.req.raw,c.req.param('id')!,await input.readBody(c.req.raw)),202)
+    } catch(error) {const detail=routeError(error);return c.json(detail,detail.status)}
+  })
+  app.post(prefix+'/agent/continue-production', async c => {
+    try {
+      const ctx=await current(c.req.raw,c.req.param('id')!,true)
+      const body=z.object({expectedVersion:z.number().int().positive(),afterAttemptId:z.string().uuid()}).strict().parse(await input.readBody(c.req.raw))
+      if(body.expectedVersion!==ctx.run.version)throw new WorkflowError('revision-conflict','Read the current workflow version before continuing production')
+      const metadata=input.sessions.metadata(ctx.run.chatSessionId),chat=input.sessions.get(ctx.run.chatSessionId)
+      if(!metadata || !chat || metadata.workflowExecution || metadata.userId!==ctx.user.id ||
+          metadata.projectId!==ctx.project.id || await realpath(metadata.workspacePath)!==ctx.workspace)
+        throw new WorkflowError('invalid-chat-binding','Restore this project’s bound native Chat before continuing production',400)
+      const turn=await ctx.agentExecutor.continueProduction(ctx.run,body.afterAttemptId,{
+        developmentPreview: hasBeeGamePermission(ctx.user, 'preview.manage') ? input.developmentPreview : undefined,
+        modelConfigId:chat.modelConfigId,userDataRoot:input.getUserDataRoot?.(c.req.raw),
+        authToken:input.getAuthToken(c.req.raw),getValidAuthToken:input.getValidAuthToken(c.req.raw),
+        openImage:input.openAgentImage ? imageContext=>input.openAgentImage!({request:c.req.raw,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:ctx.run.chatSessionId,modelConfigId:chat.modelConfigId,confirmedRequirements:imageContext.requirements,requireGdd:imageContext.requireGdd,visualHandoffVersion:ctx.run.visualHandoffVersion,screenOrientation:imageScreenOrientation(ctx.run)}) : undefined,
+      })
+      return c.json({turn,runId:ctx.run.id,deliveryEligible:false},202)
     } catch(error) {const detail=routeError(error);return c.json(detail,detail.status)}
   })
   app.post(prefix+'/agent/messages', async c => {
@@ -363,13 +385,12 @@ export function registerV3Routes(app: Hono, input: {
         throw new WorkflowError('invalid-chat-binding','Restore this project’s bound native Chat before messaging',400)
       await input.persistMode(c.req.raw,ctx.user,ctx.project,ctx.run)
       const turn=await ctx.agentExecutor.message(ctx.run,body,{
+        developmentPreview: hasBeeGamePermission(ctx.user, 'preview.manage') ? input.developmentPreview : undefined,
         attachments,
-        openImage:input.openAgentImage ? ()=>input.openAgentImage!({user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,visualHandoffVersion:ctx.run.visualHandoffVersion,screenOrientation:imageScreenOrientation(ctx.run)}) : undefined,
+        openImage:input.openAgentImage ? imageContext=>input.openAgentImage!({request:c.req.raw,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:ctx.run.chatSessionId,modelConfigId:chat.modelConfigId,confirmedRequirements:imageContext.requirements,requireGdd:imageContext.requireGdd,visualHandoffVersion:ctx.run.visualHandoffVersion,screenOrientation:imageScreenOrientation(ctx.run)}) : undefined,
         modelConfigId:chat.modelConfigId,
         userDataRoot:input.getUserDataRoot?.(c.req.raw),
         authToken:input.getAuthToken(c.req.raw),getValidAuthToken:input.getValidAuthToken(c.req.raw),
-        openPreview:hasBeeGamePermission(ctx.user,'preview.manage') && input.openAgentPreview ?
-          ()=>input.openAgentPreview!({request:c.req.raw,user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace,sessionId:body.chatSessionId}) : undefined,
       })
       return c.json({turn,runId:ctx.run.id,deliveryEligible:false},202)
     } catch(error) {const detail=routeError(error);return c.json(detail,detail.status)}
@@ -455,16 +476,7 @@ export function registerV3Routes(app: Hono, input: {
     if (!after || after.id !== ctx.run.id || after.workspacePath !== ctx.workspace ||
         (snapshot.state === 'draft' && !await versionsMatch(ctx.workspace, snapshot.sourceVersions)))
       throw new WorkflowError('content-changed', 'Saved content changed while loading; refresh and retry', 409)
-    // Run progress can advance while the saved files remain unchanged. That only invalidates edit authority, not a read-only view.
-    const workflowChanged = after.version !== ctx.run.version
-    const writerActive = Boolean(ctx.run.writer || after.writer || input.sessions.hasActiveProjectTurn(user.id, projectId, ctx.workspace))
-    const editablePaths = snapshot.state === 'draft' && snapshot.index && !snapshot.indexIssues.length && !ctx.run.paused ? snapshot.documents.filter(d =>
-      !('error' in d && d.error) && ['scene-2d','scene-3d','ui-screen','ui-hud','ui-flow'].includes('kind' in d ? d.kind! : d.document!.kind)).map(d => d.path) : []
-    const canEdit = !isWebReactTarget(ctx.run.requirements.constraints) && !writerActive && !workflowChanged && hasBeeGamePermission(user, 'project.create') &&
-      hasBeeGamePermission(user, 'agent.send_message') && editablePaths.length > 0
-    return { ...snapshot, readOnly: !canEdit, ...(canEdit ? { editing: { version: ctx.run.version, planRevision: ctx.run.planRevision,
-      requirementsRevision: ctx.run.requirements.revision, paths: editablePaths } } : {}),
-      note: 'Saved source candidate, not game acceptance. Saving invalidates affected qualifications; rebuild and measure before new Preview/export.' }
+    return { ...snapshot, readOnly: true, note: 'Historical saved content is read-only; Scene/UI implementation uses the selected engine sources.' }
   }, async saveContent(request: Request, projectId: string, value: unknown) {
     const user = input.getUser(request), project = await input.getProject(request, user, projectId)
     if (!project?.root_path) throw new WorkflowError('project-not-found', 'Owned project workspace not found', 404)
@@ -472,7 +484,7 @@ export function registerV3Routes(app: Hono, input: {
     if (!stored && project.runtime_snapshot?.workflow_protocol !== 'bgs.workflow.v3') return undefined
     const ctx = await current(request, projectId, true)
     if (!hasBeeGamePermission(user, 'project.create')) throw new WorkflowError('permission-denied', 'Source editing permission denied', 403)
-    return ctx.executor.edit(ctx.run, value)
+    throw new WorkflowError('editor-unavailable', 'BGS Scene/UI editing has been retired; use the selected engine sources', 409)
   }, async assertLegacy(projectId: string, ownerId: string, request: Request) {
     const project = await input.getProject(request, input.getUser(request), projectId)
     if (project?.runtime_snapshot?.workflow_protocol === 'bgs.workflow.v3' || (project && input.store && await input.store.read(projectId, ownerId)))

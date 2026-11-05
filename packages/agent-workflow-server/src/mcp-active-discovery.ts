@@ -5,6 +5,7 @@ import type { McpServerConfig, McpServerInput } from './mcp-servers-store'
 import { tmpdir } from 'node:os'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from '@modelcontextprotocol/sdk/shared/protocol.js'
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import {
   createPinnedUndiciDispatcher,
@@ -105,7 +106,7 @@ export async function testMcpServerConnection(
   options: ActiveMcpDiscoveryOptions = {},
 ): Promise<McpServerTestResult> {
   if (input.transport === 'stdio') {
-    return testStdioServer(input, options.timeoutMs ?? 10_000)
+    return testStdioServer(input, options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MSEC)
   }
   if (!input.url?.trim()) {
     return unavailable('MCP URL is required.')

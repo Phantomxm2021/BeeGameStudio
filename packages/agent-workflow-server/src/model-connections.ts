@@ -1,4 +1,5 @@
 import { defaultModelApiProtocol, resolveModelApiProtocol } from '@bee-game-studio/agent-workflow'
+import { sameModelEndpointOrigin } from '@bee-game-studio/agent-workflow/model-protocol'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   existsSync,
@@ -273,12 +274,16 @@ export function saveConnection(
     method === 'byok'
       ? validateByokModel(byok?.model ?? previous?.model ?? config.model ?? '')
       : previous?.model
+  const previousBaseUrl = previous?.baseUrl ?? config.baseUrl
+  // Verify the original binding before reusing a key for a same-origin path edit.
+  const reuseKey = previous?.endpoint === endpoint(config, previousBaseUrl) &&
+    sameModelEndpointOrigin(previousBaseUrl, baseUrl ?? config.baseUrl)
   const secret =
     method === 'byok'
       ? key?.trim()
         ? encryptSecret(key.trim(), `model-connection:${config.id}`)
-        : previous?.endpoint === endpoint(config, baseUrl)
-          ? previous.secret
+        : reuseKey
+          ? previous?.secret
           : undefined
       : previous?.secret
   if (method === 'byok' && !secret) throw new Error('Enter your API key')

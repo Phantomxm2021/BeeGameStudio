@@ -13,6 +13,7 @@ type ViteModule = {
   createServer: (config: {
     root: string
     base: string
+    cacheDir?: string
     plugins: Array<{
       name: string
       enforce?: 'post'
@@ -42,6 +43,7 @@ type ViteModule = {
 }
 
 type HostOptions = {
+  viteEntry?: string
   host: string
   port: number
   base: string
@@ -308,10 +310,14 @@ export function parseVitePreviewHostOptions(argv: string[]): HostOptions {
   let host = '127.0.0.1'
   let port = 5173
   let base = '/'
+  let viteEntry: string | undefined
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     const next = argv[index + 1]
-    if (value === '--host' && next) {
+    if (value === '--vite-entry' && next) {
+      viteEntry = next
+      index += 1
+    } else if (value === '--host' && next) {
       host = next
       index += 1
     } else if (value === '--port' && next) {
@@ -325,7 +331,7 @@ export function parseVitePreviewHostOptions(argv: string[]): HostOptions {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`Invalid preview port: ${port}`)
   }
-  return { host, port, base }
+  return { host, port, base, ...(viteEntry ? { viteEntry } : {}) }
 }
 
 export async function startVitePreviewHost(
@@ -335,12 +341,14 @@ export async function startVitePreviewHost(
   // Vite resolves module IDs through realpath. Its FS allow-list/root must use
   // the same identity, especially /var -> /private/var and linked workspaces.
   workspacePath = await realpath(workspacePath)
-  const projectRequire = createRequire(join(workspacePath, 'package.json'))
-  const viteEntry = projectRequire.resolve('vite')
+  const viteEntry = options.viteEntry ?? createRequire(join(workspacePath, 'package.json')).resolve('vite')
   const vite = await import(pathToFileURL(viteEntry).href) as ViteModule
   const server = await vite.createServer({
     root: workspacePath,
     base: options.base,
+    // Managed preview output belongs to its private runtime home, not the
+    // installed dependency tree whose original bytes back saved receipts.
+    cacheDir: process.env.BGS_VITE_CACHE_DIR,
     plugins: [createManagedVitePreviewPlugin(options.base)],
     server: {
       host: options.host,

@@ -1,4 +1,3 @@
-import { isWebReactTarget } from './beegame/workflow-v3/web-project-start'
 import { registerPortalSsoRoutes } from './auth/portal-sso-routes'
 import { normalizeMcpHeaders } from './mcp-http-headers'
 import { resolveMcpOutboundTarget } from './mcp-outbound-policy'
@@ -21,8 +20,8 @@ import { createLocalWorkflowStore, createRemoteWorkflowStore, type WorkflowStore
 import { normalizeRuntimeEnvironment } from '@bee-game-studio/agent-workflow/runtime-environment'
 import { UserQuestionValidationError } from './beegame/user-question'
 import { intakeReferenceParts } from './beegame/intake-references'
-import { openPreviewTestAccess } from './beegame/preview-test-access'
 import { appendRuntimeDiagnostic } from './beegame/project-records'
+import { projectHostDirectory } from './beegame/project-storage-paths'
 import { readChatAttachment } from './beegame/chat-attachments'
 import { materializeBeeGameAttachments } from './beegame/session-manager'
 import { readChatHistoryPage } from './beegame/chat-history'
@@ -133,6 +132,7 @@ import { createImageResultRequest } from './image-generation/image-result-networ
 import { hasChatGPTAccount } from './model-connections'
 import { getModelBillingSource, isPersonalModelBillingSource } from './model-billing-source'
 import { openImageGenerationAccess } from './image-generation/access'
+import { IMAGE_PROMPT_REVIEW_INSTRUCTIONS, imagePromptReviewSchema, imagePromptReviewInput, parseImagePromptReview } from './image-generation/prompt-review'
 import { loadRuntimeImageConfig } from './image-generation/runtime-config'
 import { loadPersonalImageConnection, publicPersonalImageConnection, savePersonalImageConnection } from './image-generation/personal-connection'
 import { createImageBillingClient } from '@bee-game-studio/beegame-billing-core/image-billing'
@@ -294,9 +294,10 @@ type BeeGameIntakeOption = {
   recommendedEngine?: string
   recommendedDimension: string
   recommendedGenre: string
-  recommendedStyle: string
   recommendedInputs: string[]
-  scope: string
+  // Historical intake fields remain readable but are not generated settings.
+  recommendedStyle?: string
+  scope?: string
 }
 
 type BeeGameClarificationOption = {
@@ -339,17 +340,6 @@ const BEEGAME_INTAKE_SETTING_VALUES = {
     'Platformer',
     'Casual',
   ],
-  styles: [
-    'Pixel',
-    'Cartoon',
-    'Stylized',
-    'Minimal',
-    'Realistic',
-    'Low Poly',
-    'Hand-drawn',
-    'Sci-fi',
-    'Fantasy',
-  ],
   inputs: [
     'Keyboard/mouse',
     'Touch',
@@ -376,6 +366,7 @@ export type AgentWorkflowAppOptions = {
   workflowV3Store?: WorkflowStore | false
   workflowV3PreviewOrigin?: string
   publicationCoverCapture?: (previewUrl: string) => Promise<Buffer>
+  publicationCoversCapture?: (previewUrl: string) => Promise<Buffer[]>
   sessionRunner?: BeeGameSessionRunner
   modelRuntimeHost?: BeeGameModelRuntimeHost
   previewRunner?: BeeGamePreviewRunner
@@ -475,9 +466,9 @@ export function createAgentWorkflowApp(
   )
   const outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {
     ...options.outboundTargetPolicyOptions,
-    allowedHosts:
-      options.outboundTargetPolicyOptions?.allowedHosts ??
-      readAllowedOutboundHosts(),
+    trustedDevelopmentProxyHosts:
+      options.outboundTargetPolicyOptions?.trustedDevelopmentProxyHosts ??
+      readTrustedDevelopmentProxyHosts(),
     allowTrustedDevelopmentProxy:
       options.outboundTargetPolicyOptions?.allowTrustedDevelopmentProxy ??
       (process.env.NODE_ENV !== 'production' &&
@@ -691,21 +682,38 @@ export function createAgentWorkflowApp(
   options.registerCleanup?.(async () => { measuredPreview?.dispose(); previewStorage.close() })
   registerV3DebugPage(app, process.env.BEEGAME_WORKFLOW_V3_DEBUG === '1')
   const v3Routes = registerV3Routes(app, {
+    developmentPreview: () => beeGamePreviews,
     capturePublicationCover: options.publicationCoverCapture,
+    capturePublicationCovers: options.publicationCoversCapture,
     deployment:()=>beeGameDeployments,
     persistDeployment:(request,user,record)=>dashboardRepository.upsertDeploymentRecord(request,user,record),
     listDeployments:(request,user,sessionId)=>dashboardRepository.listDeploymentRecords(request,user,sessionId),
     exitReceipts:createHostExitReceipts({dataRoot:dashboardDataRoot,key:getSecretEncryptionKey()}),
     resourceLibraryBaseUrl: options.resourceSelectionRuntimeConfig?.baseUrl,
-    // Evaluated only for an authorized production turn, after app setup.
-    // Reuse the existing candidate Preview; no Task or engine routing.
-    openAgentPreview: value => openProjectPreviewAccess({...value,isolatedProductionProjectId:value.projectId}),
     openAgentImage: value => {
       const personal = loadPersonalImageConnection(getUserDashboardDataRoot(dashboardDataRoot, value.user.id))
       return openImageGenerationAccess({ userId: value.user.id, projectId: value.projectId,
         workspacePath: value.workspacePath, service: imageGeneration, source: personal.source,
-        requiredQuality: value.visualHandoffVersion === 1 ? 'low' : undefined,
         screenOrientation: value.screenOrientation,
+        reviewPrompt: async (prompt: string) => {
+          const credential = sessionAuth?.getCredential?.(value.request)
+          const authToken = credential ? await credential.getValidAccessToken() : getRequestAuthToken(value.request)
+          const runtimeEnv = await dashboardRepository.getRuntimeEnv(
+            getCurrentUserDataRoot(value.request), value.user.id, authToken, value.modelConfigId)
+          const content = await generateBeeGameModelWithUsage(modelRuntimeHost, {
+            cwd: value.workspacePath, runtimeEnv,
+            systemPrompt: IMAGE_PROMPT_REVIEW_INSTRUCTIONS,
+            messages: [{ role: 'user', content: imagePromptReviewInput(
+              value.workspacePath, value.confirmedRequirements, prompt, value.requireGdd) }],
+            structuredOutput: { name: 'image_prompt_review', description: 'Report concrete image-prompt conflicts or ambiguity',
+              inputSchema: z.toJSONSchema(imagePromptReviewSchema, { target: 'draft-7' }) },
+            querySource: 'beegame_image_prompt_review',
+          }, createUsageRecorder({ sessionId: value.sessionId, projectId: value.projectId,
+            submit: record => beeGameSessions.recordExternalUsage(value.user.id, record) }), true,
+            () => beeGameSessions.assertModelRequestAllowed(value.user.id),
+            (usage, querySource) => beeGameSessions.observeExternalModelUsage(value.sessionId, usage, getModelBillingSource(runtimeEnv), querySource))
+          return parseImagePromptReview(content)
+        },
         loadConfig: personal.source !== 'platform' ? async () => personal.config :
           () => loadRuntimeImageConfig(dashboardDataRoot, { remote: Boolean(supabaseStore), billing: billingConfig },
             (url, init) => serviceFetch(url, init)) })
@@ -786,56 +794,6 @@ export function createAgentWorkflowApp(
     beeGamePreviews.dispose()
     await beeGameSessions.dispose()
   })
-  const openProjectPreviewAccess = (input: { request: Request; user: BeeGameUserContext; workspacePath: string; sessionId: string; keepProjectPreview?: boolean; isolatedProductionProjectId?: string }) => {
-    const { workspacePath, sessionId } = input
-    let production: {preview:CandidatePreview;writerId:string}|undefined
-    const snapshot = () => {
-      if(production)return {status:'running',mode:'production',url:production.preview.url,message:production.preview.limitations.join(' ')}
-      const value = beeGamePreviews.status(sessionId, workspacePath)
-      return { ...value, ...(value.url ? { url: previewCapabilities.issueUrl(
-        new URL(value.url, input.request.url).href, sessionId, input.user.id,
-      ) } : {}) }
-    }
-    const closeProduction=()=>{
-      if(production)measuredPreview?.closeCandidate(input.isolatedProductionProjectId!,input.user.id,production.preview.id,production.writerId)
-      production=undefined
-    }
-    const start=async(mode:'development'|'production',restart=false)=>{
-      if(mode==='production'&&input.isolatedProductionProjectId) {
-        if(restart)closeProduction()
-        const run=await v3Store?.read(input.isolatedProductionProjectId,input.user.id)
-        if(!run?.writer||run.workspacePath!==workspacePath||run.chatSessionId!==sessionId||!measuredPreview)
-          throw new Error('Production Preview no longer belongs to this native project writer')
-        beeGamePreviews.stop(sessionId,workspacePath)
-        production={preview:await measuredPreview.openCandidate(run,run.writer),writerId:run.writer.attemptId}
-      }else {
-        closeProduction()
-        if(restart)await beeGamePreviews.restart({sessionId,workspacePath,mode})
-        else await beeGamePreviews.start({sessionId,workspacePath,mode})
-      }
-      return snapshot()
-    }
-    return openPreviewTestAccess({
-      recordingRoot: join(getCurrentUserDataRoot(input.request), 'preview-tests', createHash('sha256').update(sessionId).digest('hex')),
-      onRecordingFinished: report => appendRuntimeDiagnostic({
-        path: join(workspacePath, '.beegame', 'logs', 'native-runtime.jsonl'),
-        maxBytes: 4 * 1024 * 1024, archiveCount: 3,
-        record: { type: 'preview.recording.finished', sessionId, recordingId: report.id,
-          timestamp: report.endedAt, durationMs: report.durationMs, endReason: report.endReason,
-          counts: report.counts, files: report.files, droppedEvents: report.droppedEvents,
-          truncatedEvents: report.truncatedEvents, gameplayVerdict: report.gameplayVerdict },
-      }),
-      start: mode => start(mode),
-      restart: mode => start(mode,true),
-      status: snapshot,
-      stop: () => {
-        if (input.keepProjectPreview) return
-        closeProduction()
-        beeGamePreviews.stop(sessionId, workspacePath)
-        previewCapabilities.revokeSession(sessionId)
-      },
-    })
-  }
   const beeGameDeployments = new BeeGameDeploymentManager({
     dataRoot: dashboardDataRoot,
     runner: options.deploymentRunner,
@@ -1603,7 +1561,8 @@ export function createAgentWorkflowApp(
       if (body?.source === 'byok') {
         const previous = loadPersonalImageConnection(getCurrentUserDataRoot(c.req.raw))
         const url = typeof body.baseUrl === 'string' ? body.baseUrl : previous.config.baseUrl
-        await assertPermittedOutboundUrl(url)
+        const inspection = await inspectPermittedOutboundUrl(url)
+        if (inspection && !inspection.approved) return c.json(toOutboundTargetError(inspection), 400)
       }
       return c.json(savePersonalImageConnection(getCurrentUserDataRoot(c.req.raw), body))
     } catch { return c.json({ error: 'Personal image connection could not be saved; check provider, HTTPS endpoint, model and key' }, 400) }
@@ -2158,8 +2117,11 @@ export function createAgentWorkflowApp(
           dashboardRepository.deleteSessionMetadata(c.req.raw, user, metadata, sessionId))
       }
       if (projectId) cleanup.push(dashboardRepository.deleteProject(c.req.raw, user, projectId))
-      if (workspacePath) cleanup.push(rm(workspacePath, {recursive: true, force: true}))
-      if ((await Promise.allSettled(cleanup)).some(result => result.status === 'rejected'))
+      const cleanupResults = await Promise.allSettled(cleanup)
+      if (workspacePath) cleanupResults.push(...await Promise.allSettled([
+        deleteWorkspaceDirectoryIfSafe(workspacePath, getDashboardDataRoot(options.defaultWorkspacePath)),
+      ]))
+      if (cleanupResults.some(result => result.status === 'rejected'))
         return c.json({error: 'Clone failed and cleanup was incomplete for ' + projectId, code: 'clone-cleanup-failed'}, 503)
       if (error instanceof WorkflowError) return c.json({ error: error.message, code: error.code }, error.status)
       if (error instanceof ProjectQuotaExceededError)
@@ -2201,9 +2163,9 @@ export function createAgentWorkflowApp(
       const language = isBeeGameSessionLanguage(languageValue) ? languageValue : undefined
       // Validate the same canonical brief consumed by V3 before creating any
       // project, session or attachment. Reference paths are filled by the host.
-      const confirmedBrief = agentGoalSchema.shape.brief.parse(JSON.parse(extractConfirmedBriefContext(
-        buildConfirmedBriefPrompt({ ...brief, referenceFiles: [] }, language),
-      )))
+      const confirmedBrief = agentGoalSchema.shape.brief.parse(buildConfirmedBrief(
+        { ...brief, referenceFiles: [] }, language,
+      ))
       await dashboardRepository.assertProjectQuotaAllowsUpsert(c.req.raw, user, projectId)
       const modelConfigId = await resolveDefaultModelConfigId(
           c.req.raw,
@@ -2633,7 +2595,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       const run = await v3Store?.read(projectId, user.id)
-      state.scene_ui_editor_available = Boolean(run) && !isWebReactTarget(run?.requirements.constraints)
+      state.scene_ui_editor_available = false
       // Native events still describe the interrupted turn while the accepted
       // writer rebuilds its session/tools. Do not report that live work as idle.
       if (run && run.workspacePath === project.root_path && !run.paused && v3Routes.hasLiveAgentWriter(run) &&
@@ -4273,27 +4235,26 @@ async function generateBeeGameIntakeOptions(input: {
     'maturity must be one of vague, directional, concrete.',
     'For a game idea, always return exactly 3 valid, meaningfully distinct game directions for the user to choose from, including when the submitted idea is already concrete.',
     'For a game idea, do not ask the user for clarification during intake. Set needs_clarification=false, leave clarification empty, leave clarification_questions empty, and set recommended_next_step="choose_direction".',
-    'Each option must include title, projectFolderName, gameplay, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, recommendedInputs, and scope.',
+    'Each option must include title, projectFolderName, gameplay, recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, and recommendedInputs.',
     'Keep each option concise. BeeGame derives the expanded planning fields after the user chooses a direction; do not duplicate the same explanation across multiple fields.',
     'projectFolderName must be an English lowercase kebab-case directory name based on the actual game concept, not a random identifier and not a BeeGame/dashboard name.',
     'title must be a game mode name, such as an objective, combat, puzzle, survival, race, sandbox, boss, narrative, simulation, or strategy mode name. Do not copy the user idea into the title and do not write an abstract production or delivery title.',
     'gameplay must explain the playable rules: player goal, main actions, opposition or pressure, scoring or progress, and win/fail/round end condition. Do not write abstract experience prose.',
     'The direction must be suitable for a complete game later, but this intake option should stay lightweight: name the mode, explain the core gameplay, and summarize the first target the user is choosing.',
-    'Each option.scope is the first complete playable release, not a future roadmap. When the user has not specified content breadth, keep one coherent core loop and only enough representative content to prove it (usually one or two levels if the game has levels). Defer extra modes, large campaigns, cosmetic sets, and nonessential screens; preserve quantities and features the user explicitly requested.',
-    'Do not write the full GDD, its art direction/UI/UX/resources/implementation chapters, or a separate asset inventory in intake options. Those belong to the confirmed planning/build stage.',
+    'Keep each playable direction within the user’s stated content breadth. For unspecified breadth, describe one coherent core loop with representative content rather than a roadmap.',
+    'Intake options describe gameplay, not art direction, UI layout, asset production or implementation strategy. Appearance is determined in the existing production settings and design work, preserving the user’s explicit requirements.',
     'Every option must be experience-first and gameplay-first, not implementation-first. Platform and presentation are supporting metadata, not the main point.',
     'The production setting fields are selected values, not optional suggestions. Choose them by understanding the full user request and the proposed game mode, not by keyword matching.',
     'Choose recommendedPlatform only from: Web, Mobile, PC, Console, VR/AR.',
-    'Choose recommendedEngine only from: React, Unity, Godot, Unreal.',
+    'Choose recommendedEngine only from: React, Unity, Godot, Unreal. React is the Web application choice; gameplay libraries are selected internally during design, not offered as user engine choices.',
     'Choose recommendedDimension only from: 2D, 2.5D, 3D, VR, AR.',
     'Choose recommendedGenre only from: Arcade, Action, Adventure, Puzzle, Racing, RPG, Strategy, Simulation, Shooter, Platformer, Casual.',
-    'Choose recommendedStyle only from: Pixel, Cartoon, Stylized, Minimal, Realistic, Low Poly, Hand-drawn, Sci-fi, Fantasy.',
     'Choose recommendedInputs as a JSON array containing one or more values only from: Keyboard/mouse, Touch, Gamepad, Motion, Voice, Hand tracking.',
-    'recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, recommendedStyle, and recommendedInputs are selected production settings and must use the exact English enum tokens above. Do not translate these enum token values.',
+    'recommendedPlatform, recommendedEngine, recommendedDimension, recommendedGenre, and recommendedInputs are selected production settings and must use the exact English enum tokens above. Do not translate these enum token values.',
     'These selected production settings must fit the request; do not force a specific platform, engine, genre, style, input model, or implementation stack.',
     'Choose production settings from the actual game direction and user constraints, not from a fixed menu order or default.',
     'Do not output Auto or placeholder values for recommended metadata.',
-    'At least one option must stay faithful to the original idea. Do not transform explicit user constraints such as genre, platform, perspective, controls, reference game, or intended fidelity unless the option clearly explains that it is a lower-cost validation alternative.',
+    'At least one option must stay faithful to the original idea. Do not transform explicit user constraints such as genre, platform, perspective, controls, reference game, or intended fidelity when proposing a gameplay direction.',
     'Avoid generic production strategy titles. Titles should name an actual game mode.',
     'For each option, make gameplay a concise natural-language rules description that the user can immediately understand. Do not output internal rubric names or template section labels in visible option text.',
     'Reject vague options that only say "add levels", "add items", or "make it fun" without explaining the player decisions and failure pressure.',
@@ -4606,18 +4567,7 @@ function normalizeBeeGameIntakeOption(
       ),
       BEEGAME_INTAKE_SETTING_VALUES.genres,
     ),
-    recommendedStyle: pickAllowedProductionSetting(
-      getFirstStringishField(
-        value,
-        'recommendedStyle',
-        'recommended_style',
-        'selectedStyle',
-        'selected_style',
-      ),
-      BEEGAME_INTAKE_SETTING_VALUES.styles,
-    ),
     recommendedInputs: [...new Set(selectedInputs)],
-    scope: getStringishField(value, 'scope'),
   }
   if (
     !option.title ||
@@ -4626,7 +4576,6 @@ function normalizeBeeGameIntakeOption(
     !option.recommendedEngine ||
     !option.recommendedDimension ||
     !option.recommendedGenre ||
-    !option.recommendedStyle ||
     invalidInputs
   ) {
     rejectedReasons?.push(
@@ -4637,7 +4586,6 @@ function normalizeBeeGameIntakeOption(
         !option.recommendedEngine ? 'recommendedEngine' : '',
         !option.recommendedDimension ? 'recommendedDimension' : '',
         !option.recommendedGenre ? 'recommendedGenre' : '',
-        !option.recommendedStyle ? 'recommendedStyle' : '',
         invalidInputs
           ? `recommendedInputs received ${JSON.stringify(rawInputs.map(value => value.slice(0, 128)))}; allowed: ${BEEGAME_INTAKE_SETTING_VALUES.inputs.join(', ')}`
           : '',
@@ -6584,72 +6532,45 @@ function toProjectMetadata(body: JsonObject): BeeGameProjectMetadata {
   }
 }
 
-function buildConfirmedBriefPrompt(
+function buildConfirmedBrief(
   brief: JsonObject,
   language?: BeeGameSessionLanguage,
-): string {
+): JsonObject {
   const { documentLanguage, gameUserVisibleLanguage, agentResponseLanguage } =
     resolveCanonicalConfirmedLanguages(brief, language)
   const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(brief)
   const orientation = resolveConfirmedOrientation(brief)
-  const confirmedBrief = JSON.stringify(
-    {
-      kind: 'confirmed_build_brief',
-      document_language: documentLanguage,
-      game_user_visible_language: gameUserVisibleLanguage,
-      agent_response_language: agentResponseLanguage,
-      idea: typeof brief.idea === 'string' ? brief.idea.trim() : '',
-      default_first_release_scope: {
-        target: 'small complete playable version',
-        content: 'one working core loop with only representative content; usually one or two levels if levels apply',
-        defer: 'unrequested extra levels and modes; do not defer the audiovisual feedback or usability needed by the agreed core loop',
-      },
-      selected_option: toCanonicalConfirmedOption(brief.option),
-      settings: { ...(isObject(brief.settings) ? brief.settings : {}), ...(orientation ? { orientation } : {}) },
-      confirmed_gdd: brief.confirmedGdd ?? null,
-      build_source: brief.buildSource ?? null,
-      analysis_id: brief.analysisId ?? null,
-      creation_mode: brief.creationMode === 'blueprint' ? 'blueprint' : 'creative',
-      reference_files: brief.referenceFiles ?? [],
-      resource_library_usage: resourceLibraryUsage,
+  // New bootstrap input may come from an older, unconfirmed intake cache.
+  const settings = { ...(isObject(brief.settings) ? brief.settings : {}) }
+  delete settings.scope
+  return {
+    kind: 'confirmed_build_brief',
+    document_language: documentLanguage,
+    game_user_visible_language: gameUserVisibleLanguage,
+    agent_response_language: agentResponseLanguage,
+    idea: typeof brief.idea === 'string' ? brief.idea.trim() : '',
+    default_first_release_scope: {
+      target: 'playable MVP for first user playtesting',
+      content: 'a usable core loop with representative content and the controls, visual treatment and feedback needed to judge it; explicit user requirements remain in scope',
+      defer: 'unrequested content expansion and nonessential product features',
     },
-    null,
-    2,
-  )
-  return [
-    'Work on the confirmed project below within the current user assignment. Complete and self-check the requested deliverables, then report results and unresolved work. A document-only assignment does not authorize subsequent production. Continue only within the authorized workflow.',
-    '',
-    `Write all human-readable project documentation in ${getDocumentLanguageName(documentLanguage)}.`,
-    `Write all player-visible game text in ${getDocumentLanguageName(gameUserVisibleLanguage)}.`,
-    `Respond to the user in ${getDocumentLanguageName(agentResponseLanguage)}.`,
-    'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
-    '',
-    'Use the confirmed brief as the source of truth. Keep the project documents and resulting game consistent with its explicit choices and constraints.',
-    'Screen games support the confirmed Landscape or Portrait direction only. Preserve any user-confirmed dimensions; otherwise the UI/UX chapter in docs/GDD.md owns reference resolution, minimum usable host dimensions and layout/adaptation, coordinated with the level/scene chapter\'s world/framing requirements. The GDD records the confirmed orientation and core gameplay, not invented host dimensions or an adaptation method. Other directions or insufficient space show a rotation/size message instead of another composition or unusable whole-screen shrinking. Input methods are independent: Touch does not imply Portrait and Landscape does not imply mouse-only. VR/AR world-space interfaces use their confirmed spatial requirements.',
-    'Use default_first_release_scope only for unspecified content breadth when a playable release is requested; it does not expand a scoped document or design assignment. Preserve explicit user requirements; a model-suggested option or scope does not by itself authorize an expansive first release.',
-    '',
-    'Confirmed brief:',
-    confirmedBrief,
-  ].join('\n')
+    selected_option: toCanonicalConfirmedOption(brief.option),
+    settings: { ...settings, ...(orientation ? { orientation } : {}) },
+    confirmed_gdd: brief.confirmedGdd ?? null,
+    build_source: brief.buildSource ?? null,
+    analysis_id: brief.analysisId ?? null,
+    creation_mode: brief.creationMode === 'blueprint' ? 'blueprint' : 'creative',
+    reference_files: brief.referenceFiles ?? [],
+    resource_library_usage: resourceLibraryUsage,
+  }
 }
 
-function resolveConfirmedOrientation(brief: JsonObject): 'Landscape' | 'Portrait' | undefined {
+function resolveConfirmedOrientation(brief: JsonObject): 'Auto' | 'Landscape' | 'Portrait' | undefined {
   const settings = isObject(brief.settings) ? brief.settings : undefined
   if (settings?.dimension === 'VR' || settings?.dimension === 'AR') return undefined
   const value = settings?.orientation ?? brief.orientation
-  if (value !== 'Landscape' && value !== 'Portrait') throw new Error('Confirmed brief must explicitly select Landscape or Portrait orientation')
+  if (value !== 'Auto' && value !== 'Landscape' && value !== 'Portrait') throw new Error('Confirmed brief must explicitly select Auto, Landscape or Portrait orientation')
   return value
-}
-
-function extractConfirmedBriefContext(prompt: string): string {
-  const marker = '\nConfirmed brief:\n'
-  const markerIndex = prompt.lastIndexOf(marker)
-  if (markerIndex < 0)
-    throw new Error('Confirmed brief prompt is missing canonical context')
-  const context = prompt.slice(markerIndex + marker.length).trim()
-  if (!context)
-    throw new Error('Confirmed brief prompt has empty canonical context')
-  return context
 }
 
 function resolveConfirmedResourceLibraryUsage(
@@ -6728,26 +6649,7 @@ function toCanonicalConfirmedOption(value: unknown): JsonObject | null {
       : {}),
     ...(pitch && pitch !== gameplay ? { pitch } : {}),
     ...(gameplay ? { gameplay } : {}),
-    ...(typeof value.scope === 'string' && value.scope.trim()
-      ? { scope: value.scope.trim() }
-      : {}),
   }
-}
-
-function getDocumentLanguageName(language: BeeGameSessionLanguage): string {
-  const names: Record<BeeGameSessionLanguage, string> = {
-    en: 'English',
-    zh: 'Simplified Chinese',
-    'zh-TW': 'Traditional Chinese',
-    ja: 'Japanese',
-    ko: 'Korean',
-    fr: 'French',
-    de: 'German',
-    es: 'Spanish',
-    it: 'Italian',
-    pt: 'Portuguese',
-  }
-  return names[language]
 }
 
 function parseResourceSemanticRuntimeEnv(
@@ -6951,8 +6853,8 @@ async function validateMcpServerBody(
   return null
 }
 
-function readAllowedOutboundHosts(): string[] {
-  const value = process.env.BEEGAME_OUTBOUND_ALLOWED_HOSTS
+function readTrustedDevelopmentProxyHosts(): string[] {
+  const value = process.env.BEEGAME_TRUSTED_DEVELOPMENT_PROXY_HOSTS
   return value
     ? value
         .split(',')

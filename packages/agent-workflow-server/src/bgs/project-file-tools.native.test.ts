@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { createBgsRunner } from './runner'
 
 const localTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
-localTest('ordinary document writes work through exec_command without widening protected-file access', async () => {
+localTest.each([false, true])('ordinary and protected document tools run through the native entry (code-mode=%s)', async codeMode => {
   const root = await mkdtemp('/private/tmp/bgs-native-file-route-'), game = join(root, 'game'), catalog = join(root, 'skills')
   await mkdir(join(game, 'docs'), {recursive: true})
   await mkdir(join(catalog, 'fixture'), {recursive: true})
@@ -12,10 +12,16 @@ localTest('ordinary document writes work through exec_command without widening p
   let calls = 0
   const requests: any[] = []
   const server = Bun.serve({hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     const body = await request.json() as any
     requests.push(body)
-    const output = calls++ === 0 ? [{type: 'function_call', id: 'write-item', call_id: 'write-call', name: 'exec_command',
-      arguments: JSON.stringify({cmd: "printf 'Local fixture index\\n' > docs/README.md"}), status: 'completed'}] :
+    const command = {cmd: "printf 'Local fixture index\\n' > docs/README.md"}
+    const first = codeMode
+      ? {type: 'custom_tool_call', id: 'write-item', call_id: 'write-call', name: 'exec', namespace: 'functions',
+        input: `text(await tools.exec_command(${JSON.stringify(command)})); text(await tools.WriteProjectFile(${JSON.stringify({file_path: 'docs/GDD.md', content: '# Local fixture design\n'})}));`, status: 'completed'}
+      : {type: 'function_call', id: 'write-item', call_id: 'write-call', name: 'exec_command',
+        arguments: JSON.stringify(command), status: 'completed'}
+    const output = calls++ === 0 ? [first] :
       [{id: 'answer', type: 'message', role: 'assistant', status: 'completed', content: [{type: 'output_text', text: 'Done', annotations: []}]}]
     const response = {id: 'resp_' + calls, object: 'response', created_at: 1, model: body.model, status: 'completed', output,
       usage: {input_tokens: 10, output_tokens: 2, total_tokens: 12}}
@@ -38,13 +44,17 @@ localTest('ordinary document writes work through exec_command without widening p
   try {
     runtime = await runner.start({sessionId: 'file-route-fixture', cwd: game,
       env: {BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
-        OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'unknown-fixture-model'},
-      requestPermission: async () => ({behavior: 'deny'}),
+        OPENAI_API_KEY: 'fixture-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: codeMode ? 'gpt-6.1-sol' : 'unknown-fixture-model'},
+      requestPermission: async request => ({behavior: request.toolName === 'Write' ? 'allow' : 'deny'}),
     })
     await runtime.submit({prompt: 'Write an index in this temporary fixture.', signal: AbortSignal.timeout(15000),
-      onMessage() {}, requestPermission: async () => ({behavior: 'deny'})})
+      onMessage() {}, requestPermission: async request => ({behavior: request.toolName === 'Write' ? 'allow' : 'deny'})})
     expect(calls).toBe(2)
-    expect(requests[0].tools.some((tool: any) => tool.name === 'exec_command')).toBe(true)
+    const tools = codeMode ? requests[0].input.find((item: any) => item.type === 'additional_tools').tools : requests[0].tools
+    expect(tools.some((tool: any) => codeMode
+      ? tool.type === 'namespace' && tool.name === 'functions' && tool.tools.some((nested: any) => nested.name === 'exec')
+      : tool.name === 'exec_command')).toBe(true)
+    if (codeMode) expect(await readFile(join(game, 'docs/GDD.md'), 'utf8')).toBe('# Local fixture design\n')
     expect(await readFile(join(game, 'docs/README.md'), 'utf8')).toBe('Local fixture index\n')
   } finally { await runtime?.dispose?.(); server.stop(true); await rm(root, {recursive: true, force: true}) }
 }, 20000)

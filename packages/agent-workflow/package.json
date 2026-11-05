@@ -12,6 +12,7 @@
     "./subagent-activity": "./src/subagent-activity.ts",
     "./design-review-result": "./src/design-review-result.ts",
     "./preview-environment": "./src/preview-environment.ts",
+    "./cover-similarity": "./src/cover-similarity.ts",
     "./package.json": "./package.json",
     "./runtime-environment": "./src/runtime-environment.ts",
     "./runtime-path": "./src/runtime-path.ts",

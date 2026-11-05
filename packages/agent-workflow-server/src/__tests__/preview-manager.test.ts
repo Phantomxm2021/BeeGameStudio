@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { parseVitePreviewHostOptions } from '../beegame/vite-preview-host'
 import { BeeGamePreviewManager, type BeeGamePreviewProcess } from '../beegame/preview-manager'
 
 describe('BeeGamePreviewManager generic Vite contract', () => {
@@ -124,7 +125,7 @@ describe('BeeGamePreviewManager generic Vite contract', () => {
     const outsideMarker = join(outside, 'marker.txt')
     await writeFile(outsideSecret, 'sandbox-secret')
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { dev: 'node dev.cjs' } }))
-    await writeFile(join(workspace, 'dev.cjs'), `const fs=require('node:fs');const path=require('node:path');const outside=path.resolve(process.cwd(),'..','outside');let read=false,write=false;try{fs.readFileSync(path.join(outside,'secret.txt'));read=true}catch{}try{fs.writeFileSync(path.join(outside,'marker.txt'),'escaped');write=true}catch{}fs.writeFileSync(path.join(process.cwd(),'sandbox-result.json'),JSON.stringify({read,write}));process.on('SIGTERM',()=>{});require('node:http').createServer((_req,res)=>res.end('ok')).listen(Number(process.env.PORT),'127.0.0.1')`)
+    await writeFile(join(workspace, 'dev.cjs'), `const fs=require('node:fs');const path=require('node:path');const outside=path.resolve(process.cwd(),'..','outside');let read=false,write=false;try{fs.readFileSync(path.join(outside,'secret.txt'));read=true}catch{}try{fs.writeFileSync(path.join(outside,'marker.txt'),'escaped');write=true}catch{}fs.mkdirSync(process.env.BGS_VITE_CACHE_DIR,{recursive:true});fs.writeFileSync(path.join(process.env.BGS_VITE_CACHE_DIR,'fixture'),'cache');fs.writeFileSync(path.join(process.cwd(),'sandbox-result.json'),JSON.stringify({read,write,cacheDir:process.env.BGS_VITE_CACHE_DIR,runtimeHome:process.env.HOME}));process.on('SIGTERM',()=>{});require('node:http').createServer((_req,res)=>res.end('ok')).listen(Number(process.env.PORT),'127.0.0.1')`)
     const readiness = async (url: string): Promise<boolean> => {
       const deadline = Date.now() + 5_000
       while (Date.now() < deadline) {
@@ -137,20 +138,129 @@ describe('BeeGamePreviewManager generic Vite contract', () => {
       }
       return false
     }
-    const manager = new BeeGamePreviewManager(undefined, 63100, async () => 63100, readiness)
+    const manager = new BeeGamePreviewManager(undefined, 63100, undefined, readiness)
     try {
       const snapshot = await manager.start({ sessionId: 'sandbox-preview', workspacePath: workspace })
-      expect(snapshot.status).toBe('running')
-      const result = JSON.parse(await Bun.file(join(workspace, 'sandbox-result.json')).text()) as { read: boolean; write: boolean }
-      expect(result).toEqual({ read: false, write: false })
+      expect(snapshot.status,JSON.stringify({snapshot,current:manager.status('sandbox-preview',workspace)})).toBe('running')
+      const result = JSON.parse(await Bun.file(join(workspace, 'sandbox-result.json')).text()) as { read: boolean; write: boolean; cacheDir: string; runtimeHome: string }
+      expect(result).toEqual({ read: false, write: false, cacheDir: join(result.runtimeHome,'cache','vite'), runtimeHome: result.runtimeHome })
+      expect(result.cacheDir).not.toContain(workspace)
+      expect(await readFile(join(result.cacheDir,'fixture'),'utf8')).toBe('cache')
       expect(await Bun.file(outsideMarker).exists()).toBe(false)
       expect(await Bun.file(outsideSecret).text()).toBe('sandbox-secret')
       manager.dispose()
       await Bun.sleep(1_100)
       await expect(fetch(`http://127.0.0.1:${snapshot.port}/`)).rejects.toThrow()
+      await expect(stat(result.runtimeHome)).rejects.toMatchObject({code:'ENOENT'})
+      // Exercise the real parent -> CLI sandbox -> existing host launch. The
+      // small module fixture captures arguments; real Vite refresh is covered
+      // by project-execution-cache.native.test.ts.
+      const viteRoot=join(workspace,'node_modules/vite')
+      await mkdir(viteRoot,{recursive:true})
+      await writeFile(join(viteRoot,'package.json'),JSON.stringify({name:'vite',type:'module',main:'index.mjs'}))
+      await writeFile(join(viteRoot,'index.mjs'), `
+        import {writeFileSync} from 'node:fs';
+        import {createServer as httpServer} from 'node:http';
+        export async function createServer(config) {
+          writeFileSync('vite-start.json',JSON.stringify({argv:process.argv,watch:config.server.watch,cache:config.cacheDir}));
+          const server=httpServer((_req,res)=>res.end('VITE_FIXTURE'));
+          return {listen:()=>new Promise(resolve=>server.listen(config.server.port,config.server.host,resolve)),
+            close:()=>new Promise(resolve=>server.close(resolve)),
+            printUrls:()=>console.log('http://127.0.0.1:'+config.server.port+'/')};
+        }
+      `)
+      await writeFile(join(workspace,'package.json'),JSON.stringify({scripts:{dev:'vite'},devDependencies:{vite:'*'}}))
+      const viteSnapshot=await manager.start({sessionId:'sandbox-vite',workspacePath:workspace})
+      expect(viteSnapshot.status,JSON.stringify(viteSnapshot)).toBe('running')
+      const launch=JSON.parse(await readFile(join(workspace,'vite-start.json'),'utf8'))
+      expect(launch.argv.slice(-2)).toEqual(['--vite-entry',await realpath(join(viteRoot,'index.mjs'))])
+      expect(launch.watch).toEqual(process.platform==='darwin'?{usePolling:true}:undefined)
+      expect(launch.cache).not.toContain(workspace)
+      await manager.stopAndWait('sandbox-vite',workspace)
+      await expect(fetch(`http://127.0.0.1:${viteSnapshot.port}/`)).rejects.toThrow()
+
     } finally {
       manager.dispose()
       await rm(root, { recursive: true, force: true })
     }
   }, 30_000)
+})
+
+
+test('preview host parses the parent-resolved entry without changing host/port/base', () => {
+  expect(parseVitePreviewHostOptions(['--vite-entry','/current/project/node_modules/vite/dist/node/index.js',
+    '--host','127.0.0.1','--port','63101','--base','/previews/project/'])).toEqual({
+      viteEntry:'/current/project/node_modules/vite/dist/node/index.js',host:'127.0.0.1',port:63101,base:'/previews/project/'})
+})
+
+test('cancelled preview startup stops and awaits its process even when readiness is pending', async () => {
+  const root=await mkdtemp(join(tmpdir(),'preview-start-cancel-'))
+  await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'node dev.cjs'}}))
+  const controller=new AbortController()
+  let spawned=0,killed=0,exited=false,finish!:()=>void
+  const exit=new Promise<void>(resolve=>{finish=()=>{exited=true;resolve()}})
+  const manager=new BeeGamePreviewManager(()=>{spawned++;return {kill(){killed++},exited:exit}},
+    63100,async()=>63100,async()=>new Promise<boolean>(()=>{}))
+  try {
+    const starting=manager.start({sessionId:'cancel',workspacePath:root,signal:controller.signal})
+    for(let i=0;i<100 && !spawned;i++)await Bun.sleep(1)
+    expect(spawned).toBe(1)
+    let settled=false
+    const result=starting.catch(error=>error).finally(()=>{settled=true})
+    controller.abort(new Error('Synthetic pause'))
+    await Bun.sleep(5)
+    expect(killed).toBe(1);expect(settled).toBe(false)
+    finish()
+    expect((await result).message).toBe('Synthetic pause')
+    expect(exited).toBe(true)
+    expect(manager.status('cancel',root).status).toBe('stopped')
+    const restored=new BeeGamePreviewManager(()=>{let finish!:()=>void;return {kill(){finish()},exited:new Promise<void>(resolve=>{finish=resolve})}},63100,async()=>63100,async()=>true)
+    try {
+      expect((await restored.start({sessionId:'cancel',workspacePath:root})).status).toBe('running')
+      await restored.stopAndWait('cancel',root)
+    }finally{restored.dispose()}
+  }finally{finish();manager.dispose();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('partial server/client startup failure closes the already-started server', async () => {
+  const root=await mkdtemp(join(tmpdir(),'preview-partial-start-'))
+  await mkdir(join(root,'client'));await mkdir(join(root,'server'))
+  await writeFile(join(root,'package.json'),'{}')
+  await writeFile(join(root,'client/package.json'),JSON.stringify({scripts:{dev:'vite'},devDependencies:{vite:'*'}}))
+  await writeFile(join(root,'server/package.json'),JSON.stringify({scripts:{dev:'node server.cjs'}}))
+  let calls=0,killed=0
+  const manager=new BeeGamePreviewManager(()=>{
+    if(++calls===2)throw Error('Synthetic missing client dependency')
+    let finish!:()=>void
+    return {kill(){killed++;finish()},exited:new Promise<void>(resolve=>{finish=resolve})}
+  },63100,async start=>start,async()=>true)
+  try {
+    await expect(manager.start({sessionId:'partial',workspacePath:root})).rejects.toThrow('Synthetic missing client dependency')
+    expect(calls).toBe(2);expect(killed).toBe(1)
+    expect(manager.runningForWorkspace(root)).toBeUndefined()
+  }finally{manager.dispose();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('output from a stopped preview cannot overwrite its replacement after recovery', async () => {
+  const root=await mkdtemp(join(tmpdir(),'preview-late-output-'))
+  await writeFile(join(root,'package.json'),JSON.stringify({scripts:{dev:'node dev.cjs'}}))
+  const output:Array<(text:string)=>void>=[]
+  let port=63100
+  const manager=new BeeGamePreviewManager((_command,options)=>{
+    output.push(options.onOutput);let finish!:()=>void
+    return {kill(){finish()},exited:new Promise<void>(resolve=>{finish=resolve})}
+  },63100,async()=>port++,async()=>true)
+  try {
+    await manager.start({sessionId:'same-chat',workspacePath:root})
+    await manager.stopAndWait('same-chat',root)
+    output[0]!('http://127.0.0.1:60000/')
+    expect(manager.status('same-chat',root).status).toBe('stopped')
+    const replacement=await manager.start({sessionId:'same-chat',workspacePath:root})
+    output[0]!('http://127.0.0.1:60000/')
+    expect(manager.status('same-chat',root)).toEqual(replacement)
+    expect(manager.internalUrl('same-chat')).toBe('http://127.0.0.1:63101/')
+    await manager.stopAndWait('same-chat',root)
+  }finally{manager.dispose();await rm(root,{recursive:true,force:true})}
 })

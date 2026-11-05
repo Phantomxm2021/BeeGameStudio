@@ -6,10 +6,10 @@ import {createRun} from './state'
 import {previewRunState} from './store'
 import {createMeasuredPreview} from './measured-preview'
 import {createPreviewCapabilityManager} from '../../auth/preview-capability'
-import {previewTestHostDocument} from '../preview-test-access'
+import {previewTestHostDocument} from '@bee-game-studio/agent-workflow/preview-environment'
 import {sharedPlaywright} from '../shared-playwright'
 
-test('writer Preview uses the ordinary isolated build root, preserves the opaque iframe and fences old writers',async()=>{
+test('ordinary Preview preserves its opaque frame and rejects active writers',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-writer-preview-')))
   let preview:ReturnType<typeof createMeasuredPreview>|undefined,browser:any,viewUrl=''
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
@@ -26,10 +26,11 @@ test('writer Preview uses the ordinary isolated build root, preserves the opaque
     run.writer={attemptId:'first',workerId:'worker',fence:1};run.fence=1
     preview=createMeasuredPreview({origin:'http://localhost:'+server.port,capabilities:createPreviewCapabilityManager(),
       readRun:async(id,owner)=>id===run.projectId&&owner===run.ownerId?structuredClone(run):undefined,isBusy:()=>Boolean(run.writer)})
-    await expect(preview.openCandidate(run)).rejects.toThrow('current writer')
-    const first=await preview.openCandidate(run,run.writer)
-    expect((await preview.openCandidate(run,run.writer)).id).toBe(first.id)
-    expect((await preview.candidateStatus('project','owner')).preview).toBeNull()
+    await expect(preview.openCandidate(run)).rejects.toThrow('writer to stop')
+    delete run.writer
+    const first=await preview.openCandidate(run)
+    expect((await preview.openCandidate(run)).id).toBe(first.id)
+    expect((await preview.candidateStatus('project','owner')).preview?.id).toBe(first.id)
     expect((await preview.handle(new Request(new URL('/assets/main.js',first.url))))?.status).toBe(200)
     expect((await preview.handle(new Request(new URL('/content/state.json',first.url))))?.headers.get('Access-Control-Allow-Origin')).toBe('*')
     expect((await preview.handle(new Request(new URL('/api/projects',first.url))))?.status).toBe(404)
@@ -53,11 +54,12 @@ test('writer Preview uses the ordinary isolated build root, preserves the opaque
     expect((await preview.handle(new Request(first.url)))?.status).toBe(200)
     run.writer={attemptId:'second',workerId:'worker',fence:2};run.fence=2
     expect((await preview.handle(new Request(first.url)))?.status).toBe(409)
-    const second=await preview.openCandidate(run,run.writer)
+    delete run.writer
+    const second=await preview.openCandidate(run)
     expect(second.id).not.toBe(first.id)
     expect((await preview.handle(new Request(first.url)))?.status).toBe(404)
-    delete run.writer;run.version++
-    expect((await preview.handle(new Request(second.url)))?.status).toBe(409)
+    run.version++
+    expect((await preview.handle(new Request(second.url)))?.status).toBe(200)
     const ordinary=await preview.openCandidate(run)
     expect((await preview.handle(new Request(new URL('/assets/main.js',ordinary.url))))?.status).toBe(200)
     expect((await preview.candidateStatus('project','owner')).preview?.id).toBe(ordinary.id)
@@ -70,9 +72,8 @@ test('candidate files minimize state reads while retaining identity, race, capab
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-preview-state-')))
   try {
     await mkdir(join(root,'dist'));await writeFile(join(root,'dist/index.html'),'fixture')
-    for(const owned of [false,true]) for(const failure of ['none','version','writer','writer-ended','binding','owner','run-id','missing','capability','capability-before','bytes'] as const) {
+    for(const failure of ['none','version','writer','writer-ended','binding','owner','run-id','missing','capability','capability-before','bytes'] as const) {
       const run=createRun({projectId:'project',ownerId:'owner',workspacePath:root,chatSessionId:'chat',requestKey:'goal',text:'Fixture',constraints:{},ids:['goal']})
-      if(owned)run.writer={attemptId:'first',workerId:'w',fence:1}
       let full=0,small=0,armed=false,capabilitySession=''
       const capabilities=createPreviewCapabilityManager()
       const issueRoute=capabilities.issueRouteId
@@ -81,7 +82,7 @@ test('candidate files minimize state reads while retaining identity, race, capab
         readRun:async()=>{full++;return structuredClone(run)},
         readPreviewState:async()=>{
           small++
-          if(armed && small===(owned?1:2)) {
+          if(armed && small===2) {
             if(failure==='version')run.version++
             if(failure==='writer')run.writer={attemptId:'other',workerId:'w',fence:2}
             if(failure==='writer-ended')delete run.writer
@@ -94,27 +95,27 @@ test('candidate files minimize state reads while retaining identity, race, capab
           return previewRunState(run)
         }})
       try {
-        const opened=await preview.openCandidate(run,run.writer);full=0;small=0;armed=true
+        const opened=await preview.openCandidate(run);full=0;small=0;armed=true
         if(failure==='capability-before')capabilities.revokeSession(capabilitySession)
         if(failure==='bytes')await writeFile(join(root,'dist/index.html'),'changed')
         const response=await preview.handle(new Request(opened.url))
-        const allowed=failure==='none'||(failure==='version'&&owned)||(failure==='writer-ended'&&!owned)
+        const allowed=failure==='none'||failure==='writer-ended'
         expect(response?.status).toBe(allowed?200:409)
         if(!allowed)expect(await response?.text()).not.toBe('fixture')
         expect(full).toBe(0)
-        expect(small).toBe(failure==='capability-before'?0:failure==='bytes'?(owned?0:1):owned?1:2)
+        expect(small).toBe(failure==='capability-before'?0:failure==='bytes'?1:2)
         if(failure==='none') {
           for(const method of ['HEAD','OPTIONS']) {
             small=0
             const result=await preview.handle(new Request(opened.url,{method}))
             expect(result?.status).toBe(method==='HEAD'?200:204)
             expect(await result?.text()).toBe('')
-            expect(small).toBe(method==='OPTIONS'||owned?1:2)
+            expect(small).toBe(method==='OPTIONS'?1:2)
           }
           small=0
           const responses=await Promise.all(Array.from({length:6},()=>preview.handle(new Request(opened.url))))
           expect(responses.map(item=>item?.status)).toEqual(Array(6).fill(200))
-          expect(small).toBe(owned?6:12)
+          expect(small).toBe(12)
         }
       }finally{preview.dispose();await writeFile(join(root,'dist/index.html'),'fixture')}
     }

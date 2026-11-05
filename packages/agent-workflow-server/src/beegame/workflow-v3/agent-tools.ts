@@ -1,379 +1,156 @@
-import { isWebReactTarget } from './web-project-start'
+import { produceResources } from '../resource-production'
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { relative, resolve } from 'node:path'
+import { resolve } from 'node:path'
+import { projectWorkDirectory } from '../project-storage-paths'
 import { ZodError } from 'zod/v4'
-import { CURRENT_CONTENT_CHECKER_ENTRY, CONTENT_BINDING_ENTRY, MEDIA_PRODUCTION_ENTRY, RESOURCE_PRODUCTION_ENTRY } from '../content-checker-runtime'
+import { MEDIA_PRODUCTION_ENTRY, RESOURCE_PRODUCTION_ENTRY } from '../content-checker-runtime'
 import { writeProjectAssetCommand } from '../project-asset-command'
 import { openResourceLibraryAccess } from '../resource-library-access'
-import { PREVIEW_CLIENT_API, type openPreviewTestAccess } from '../preview-test-access'
-import { publishProjectAssetCapabilities, publishProjectPreviewCapability } from '../project-preview-capability'
-import type { createAgentMeasurement } from './agent-measurement'
+import { publishProjectAssetCapabilities } from '../project-preview-capability'
 import type { openImageGenerationAccess } from '../../image-generation/access'
-import { contentConsumerDistribution, contentConsumerCommand, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
 import type { LayoutConstraints } from '../ui-layout-audit'
-import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
-import { checkDesignHandoff, checkDesignHandoffDraft, DESIGN_HANDOFF_INSTRUCTION, DESIGN_IMPLEMENTATION_INSTRUCTION, DESIGN_INDEX_INSTRUCTION,
-  finalizeDesignDocuments, readDesignAcceptanceRequirements, readDesignImplementationChecklist, snapshotDesignDocuments } from '../design-handoff'
-import { DESIGN_RUNTIME_REPORT_INSTRUCTION, inspectDesignAcceptance } from '../runtime-acceptance'
-import { CONTENT_RUNTIME_REPORT_INSTRUCTION } from '../content-runtime-contract'
-import { PREVIEW_ENVIRONMENT } from '@bee-game-studio/agent-workflow/preview-environment'
-import { BALANCE_CALCULATOR_PATH, materializeBalanceCalculator } from '../balance-calculation'
 
-export type AgentPreviewAccess = ReturnType<typeof openPreviewTestAccess>
 export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
 
-/** Same design indexes and writer lifetime; no new workflow state or copied plan. */
-export function openDesignActions(root: string, requireVisualComparison = false) {
-  let before = snapshotDesignDocuments(root, PROJECT_DOCUMENTS)
-  return async (action: string, documents: string[] = [], executionIdentity?: {runId:string;requirementsRevision:string}, details = false) => {
-    const selected = documents.map(name => name.startsWith('docs/') ? name.slice(5) : name)
-    if (selected.some(name => !PROJECT_DOCUMENTS.includes(name as typeof PROJECT_DOCUMENTS[number])))
-      throw Error('Expected an existing design document name')
-    if (documents.length && action !== 'finalize' && action !== 'draft') throw Error('Document selection is supported only by finalize or draft')
-    if (action === 'draft') {
-      if (selected.length !== 1) throw Error('Draft inspection requires one design document')
-      return checkDesignHandoffDraft(root, selected[0]!, { includeRequirements: selected[0] === 'GDD.md' })
-    }
-    if (action === 'help') return {
-      valid: true, documents: [...PROJECT_DOCUMENTS],
-      instruction: details ? DESIGN_HANDOFF_INSTRUCTION : DESIGN_INDEX_INSTRUCTION,
-      help: 'ReadDesignHandoff {} lists saved GDD availability; read:[{document}] lists chapter headings; add sections to read selected prose. Plain GDDs need no index or finalization.' +
-        (details ? ' Compatibility commands: --design draft GDD.md inspects saved prose and any existing index; --design finalize [GDD.md] updates existing index metadata only and skips a plain GDD. --design baseline reads saved inputs; --design baseline --details includes indexed requirements and source hashes. Baseline checks saved sources and any existing index integrity, not visual design or layout geometry.' : ''),
-      ...(!details ? { details: 'Use --design help --details only when reference/evidence or existing index compatibility details are needed.' } : {}),
-      relatedHelp: '--design implementation --help describes the implementation handoff; --design acceptance --help describes runtime reports. Help only reads contracts; it does not lock planning, build or invoke a model.',
-    }
-    if (action === 'implementation-help') return { valid: true, instruction: DESIGN_IMPLEMENTATION_INSTRUCTION,
-      help: '--design implementation reads and checks current saved design sources without freezing them or granting authorization. Use --details for full task/source references and requirement hashes. Update affected records through the supplied file tools within the current user assignment; Shell cannot write these protected paths.',
-    }
-    if (action === 'acceptance-help') return { valid: true,
-      acceptanceExample: {
-        scope: 'delivery', status: 'blocked', summary: 'Example only: runtime verification is incomplete.',
-        environment: 'Describe the actual engine/build, browser/device and viewport as a string.',
-        evidencePaths: [], artifactPaths: [],
-        verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [],
-          unverified: ['Replace this example with missing required observations in the confirmed scope.'],
-          coverageLimitations: [], outsideScope: [],
-          requirementChecks: [], ...(existsSync(resolve(root, 'content/index.json')) ? { contentChecks: [] } : {}), visualComparisons: [] },
-      },
-      acceptanceInstruction: DESIGN_RUNTIME_REPORT_INSTRUCTION + ' Save .beegame/delivery/acceptance.json using the field types in acceptanceExample; it is an incomplete shape example, not evidence or a passed report. Allowed status values are "passed"|"failed"|"blocked". A design-bound delivery PASS requires verification.designRevision (64 lowercase hexadecimal characters), not a top-level designRevision. Use the designRevision from an existing implementation handoff, or read the current revision with --design baseline (read-only). Record the version actually verified; a changed revision requires revalidating affected evidence, not just replacing the hash. The blocked/failed report may omit verification.designRevision, as this example does. Filling it does not resolve knownIssues or unverified items. Source hashes are needed only for existing indexed checks. Do not invent hashes or create indexes. Record real differences from selected designs and missing observations honestly. --design acceptance reads this same validator; it never executes or retries tests. Include finalized reports with --report .beegame/delivery/acceptance.json in the original measurement request. An existing measurement is immutable; --report does not attach to it. Inspect retained evidence without rebuilding. ' + (existsSync(resolve(root, 'content/index.json')) ? CONTENT_RUNTIME_REPORT_INSTRUCTION : ''),
-    }
-    if (action === 'finalize') {
-      const names = PROJECT_DOCUMENTS.filter(name => selected.length ? selected.includes(name) :
-        existsSync(resolve(root,'docs',name)))
-      const issues: string[] = [], finalized: string[] = [], skipped: string[] = []
-      for (const name of names) {
-        const draft = checkDesignHandoffDraft(root, name).issues
-        if (draft.length) { issues.push(...draft); continue }
-        const result = finalizeDesignDocuments(root, [name], before)
-        issues.push(...result.issues)
-        skipped.push(...result.skipped)
-        if (!result.issues.length && !result.skipped.includes(name)) {
-          before.documents[name] = snapshotDesignDocuments(root, [name]).documents[name]
-          finalized.push(name)
-        }
-      }
-      if (!names.length) issues.push('No saved GDD to finalize')
-      return { valid: !issues.length, issues, finalized, skipped,
-        ...(skipped.length ? { note: 'The GDD has no existing index; a plain GDD needs no finalization. This is not design approval.' } : {}) }
-    }
-    if (action === 'baseline') {
-      const { availableRequirements = [], ...check } = checkDesignHandoff(root, PROJECT_DOCUMENTS, { includeRequirements: true })
-      return { ...check, requirements: availableRequirements,
-        requirementScope: 'Available source pointers, including incomplete drafts; valid:false means this source/index integrity check failed. Inspect the reported issues and repair affected inputs.' }
-    }
-    if (action === 'implementation') return { valid: true, ...readDesignImplementationChecklist(root),
-      requirements:readDesignAcceptanceRequirements(root) }
-    if (action === 'acceptance') return inspectDesignAcceptance(root,true,false,executionIdentity,
-      {requireVisualComparison})
-    throw Error('Unknown design action; use --design help')
-  }
-}
-
-/** Entry points only: no stage, Task, invented authority or tool/result rewriting.
- * Native execution already supplies the shared checker/Sharp environment. */
+/** Account/resource capabilities and source-bound workflow operations only. */
 export async function openAgentTools(input: {
   workspacePath: string
   constraints?: LayoutConstraints
-  requireVisualComparison?: boolean
   libraryBaseUrl?: string
   getAuthToken: () => string | undefined | Promise<string | undefined>
-  sessionId?: string
-  openPreview?: () => AgentPreviewAccess | Promise<AgentPreviewAccess>
-  measurement?: ReturnType<typeof createAgentMeasurement>
-  workflow?: (value: unknown) => Promise<unknown>
+  sessionId: string
+  workflow?: (value: unknown, signal?: AbortSignal) => Promise<unknown>
   openImage?: () => AgentImageAccess | Promise<AgentImageAccess>
 }) {
   const root = await realpath(input.workspacePath)
-  const design = openDesignActions(root, input.requireVisualComparison)
-  // Check each parent before creating a child; a project symlink must not
-  // redirect host-written adapters outside the authorized workspace.
-  let parent = root
-  for (const name of ['.beegame', 'tmp']) {
-    parent = resolve(parent, name)
-    await mkdir(parent, { recursive: false, mode: 0o700 }).catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    })
-    if (await realpath(parent) !== parent) throw Error('BGS tool directory must not resolve through a link')
-  }
+  const openImage = input.openImage, libraryBaseUrl = input.libraryBaseUrl
+  const orientation = input.constraints?.orientation
+  const screenOrientation = orientation === 'Landscape' || orientation === 'Portrait' ? orientation : undefined
+  const parent = projectWorkDirectory(root, input.sessionId)
+  await mkdir(parent, { recursive: true, mode: 0o700 })
+  if (await realpath(parent) !== parent) throw Error('BGS tool directory must not resolve through a link')
   const directory = await mkdtemp(resolve(parent, 'goal-tools-'))
-  const entry = (name: string) => relative(root, resolve(directory, name))
+  const entry = (name: string) => resolve(directory, name)
   let library: ReturnType<typeof openResourceLibraryAccess> | undefined
-  let preview: AgentPreviewAccess | undefined
   let image: AgentImageAccess | undefined
+  let openingImage: Promise<AgentImageAccess> | undefined
   let revokeAssets: (() => Promise<void>) | undefined
-  let revokePreview: (() => Promise<void>) | undefined
+  let server: ReturnType<typeof Bun.serve> | undefined
   let closing: Promise<void> | undefined
-  const workflowRequests = new Set<Promise<unknown>>()
-  // Native dynamic calls and the legacy workflow.mjs endpoint must share one
-  // host-owned closure.  The optional signal only gates admission/response;
-  // a CAS callback that already committed is never rolled back on cancellation.
+  const operations = new Set<Promise<unknown>>()
+  const lifetime = new AbortController()
   const workflow = async (value: unknown, signal?: AbortSignal) => {
-    if (signal?.aborted || closing) throw Error('Workflow capability unavailable')
-    if (!input.workflow) throw Error('Workflow capability unavailable')
-    const operation = input.workflow(value)
-    workflowRequests.add(operation)
+    const requestSignal = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal
+    if (requestSignal.aborted || closing || !input.workflow) throw Error('Workflow capability unavailable')
+    const operation = input.workflow(value, requestSignal)
+    operations.add(operation)
     try {
       const result = await operation
-      if (signal?.aborted) throw Error('Workflow request cancelled')
+      if (requestSignal.aborted) throw Error('Workflow request cancelled')
       return result
-    } finally { workflowRequests.delete(operation) }
+    } finally { operations.delete(operation) }
   }
-  let measurementHelp = ''
-  const assertMeasurement = (signal?: AbortSignal) => {
-    if (closing || !input.measurement || signal?.aborted) throw Error('Measurement capability unavailable')
+  const forward = async (request: Request, endpoint: () => string | Promise<string>) => {
+    if (closing) throw Error('Resource capability unavailable')
+    const operation = (async () => {
+      const target = await endpoint()
+      if (closing || request.signal.aborted) throw Error('Resource request cancelled')
+      const response = await fetch(new Request(target, request), { redirect: 'error' })
+      return new Response(response.body ? await response.arrayBuffer() : null, { status: response.status, headers: response.headers })
+    })()
+    operations.add(operation)
+    try { return await operation }
+    finally { operations.delete(operation) }
   }
-  const measurement = async (value: unknown, signal?: AbortSignal): Promise<unknown> => {
-    assertMeasurement(signal)
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Measurement requires an object')
-    const body = value as Record<string, unknown>
-    if (body && typeof body === 'object' && 'help' in body) {
-      if (Object.keys(body).length !== 1 || body.help !== true) throw Error('Help accepts help:true only')
-      return { help: measurementHelp }
-    }
-    if (body && typeof body === 'object' && 'designAction' in body) {
-      if (Object.keys(body).some(key => !['designAction','documents','details'].includes(key)) || typeof body.designAction !== 'string' ||
-          body.details !== undefined && typeof body.details !== 'boolean' ||
-          body.documents !== undefined && (!Array.isArray(body.documents) || body.documents.some((name: unknown) => typeof name !== 'string')))
-        throw Error('Design accepts designAction, optional document names and boolean details')
-      const identity = await input.measurement!.assertActive(body.designAction === 'finalize')
-      return await design(body.designAction, body.documents, identity, body.details === true)
-    }
-    if (body && typeof body === 'object' && 'executionInputs' in body) {
-      if (Object.keys(body).length !== 1 || body.executionInputs !== true)
-        throw Error('Execution input inspection accepts executionInputs:true only')
-      return await input.measurement!.executionInputs()
-    }
-    if(body && typeof body==='object' && 'handoffPaths' in body) {
-      if(Object.keys(body).some(key=>!['handoffPaths','details'].includes(key)) ||
-        !Array.isArray(body.handoffPaths) ||
-        body.handoffPaths.some((path:unknown)=>typeof path!=='string') ||
-        (body.details!==undefined && typeof body.details!=='boolean'))
-        throw Error('Handoff accepts explicit handoffPaths and optional boolean details only')
-      return await input.measurement!.handoff(body.handoffPaths,body.details)
-    }
-    if(body && typeof body==='object' && 'inspectRequestKey' in body) {
-      if(Object.keys(body).some(key=>!['inspectRequestKey','details'].includes(key)) ||
-        typeof body.inspectRequestKey!=='string' || !body.inspectRequestKey.trim() ||
-        (body.details!==undefined && typeof body.details!=='boolean'))
-        throw Error('Inspection accepts a nonempty inspectRequestKey and optional boolean details')
-      return await input.measurement!.inspect(body.inspectRequestKey,body.details)
-    }
-    const record=await input.measurement!.measure(body, signal)
-    return await input.measurement!.inspect(record.id)
-  }
-  // A successful finish closes the native connection from inside this call.
-  // Never add it to a drain queue that its own cleanup would await.
-  const finishDelivery = async (value: unknown, signal?: AbortSignal) => {
-    assertMeasurement(signal)
-    return input.measurement!.finish(value, signal)
-  }
-  let measurementServer: ReturnType<typeof Bun.serve> | undefined
-  let revokeMeasurement: (() => Promise<void>) | undefined
   const close = () => closing ??= (async () => {
-    // Revoke lookup first; drain actual browser/process cleanup before returning
-    // the writer. Delayed old-turn revocation is identity-safe.
-    try {
-      await revokeAssets?.()
-    } finally {
-      try {
-        try {await revokeMeasurement?.()} finally {
-          measurementServer?.stop(true)
-          await Promise.allSettled([...workflowRequests])
-          await input.measurement?.close()
-        }
-      } finally {
-        try { await revokePreview?.() }
-        finally { try { await preview?.close() } finally { try {await image?.close()} finally {library?.close()} } }
-      }
+    lifetime.abort(new Error('Workflow capability closed'))
+    try { await revokeAssets?.() }
+    finally {
+      server?.stop(true)
+      await Promise.allSettled([...operations])
+      try { await image?.close() } finally { library?.close() }
     }
   })()
-  let libraryState = 'Built-in resource library is not configured for this session.'
+  const libraryState = input.libraryBaseUrl
+    ? 'Resource library bridge is configured; catalog requests verify authentication/availability. Errors are not empty search results.'
+    : 'Built-in resource library is not configured for this session.'
   try {
-    // Refresh existing helpers only; new projects do not need a calculation appendix.
-    if (existsSync(resolve(root, BALANCE_CALCULATOR_PATH))) await materializeBalanceCalculator(root)
-    if (input.measurement) {
-      if(!input.sessionId)throw Error('Measurement requires the bound native session')
-      const token = crypto.randomUUID()
-      measurementServer = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
-        if(request.headers.has('origin') || new URL(request.url).pathname!=='/'+token || request.method!=='POST')
-          return new Response('Not found',{status:404})
-        try {
-          const body=await request.json()
-          if (body && typeof body==='object' && 'workflow' in body) {
-            if (Object.keys(body).length!==1) throw Error('Workflow capability unavailable')
-            return Response.json(await workflow(body.workflow),{headers:{'Cache-Control':'no-store'}})
-          }
-          if(body && typeof body==='object' && 'finish' in body) {
-            if(Object.keys(body).length!==1)throw Error('Delivery accepts finish with requirementsRevision and optional measurementId only')
-            return Response.json(await finishDelivery(body.finish),{headers:{'Cache-Control':'no-store'}})
-          }
-          return Response.json(await measurement(body),{headers:{'Cache-Control':'no-store'}})
-        } catch(error) {
-          // Keep the existing text error; expose validator facts without double parsing or echoing inputs.
-          const issues=error instanceof ZodError ? error.issues.map(({path,code,message})=>({path,code,message})) : undefined
-          return Response.json({error:error instanceof Error?error.message:'Measurement failed; no automatic retry',
-            ...(issues?{issues}:{})},{status:409})
+    const token = crypto.randomUUID()
+    const path = '/' + token
+    server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+      if (closing || request.headers.has('origin')) return new Response('Not found', { status: 404 })
+      const url = new URL(request.url)
+      try {
+        if (url.pathname === path + '/image' && openImage) {
+          return await forward(request, async () => {
+            openingImage ??= Promise.resolve().then(openImage).then(value => image = value)
+            return (await openingImage).endpoint + url.search
+          })
         }
-      }})
-      revokeMeasurement=await publishProjectPreviewCapability(root,input.sessionId,measurementServer.url.origin+'/'+token,'measurement')
-      if(input.workflow) await writeFile(resolve(directory,'workflow.mjs'),[
+        if (url.pathname.startsWith(path + '/library/') && libraryBaseUrl) {
+          return await forward(request, () => {
+            library ??= openResourceLibraryAccess({ baseUrl: libraryBaseUrl, getAuthToken: input.getAuthToken })
+            return library.baseUrl + url.pathname.slice((path + '/library').length) + url.search
+          })
+        }
+        if (url.pathname !== path || request.method !== 'POST') return new Response('Not found', { status: 404 })
+        const body = await request.json()
+        if (body && typeof body === 'object' && 'registration' in body) {
+          if (Object.keys(body).length !== 1 || body.registration?.operation !== 'register' || closing)
+            throw Error('Resource registration capability unavailable')
+          const operation = produceResources(root, body.registration)
+          operations.add(operation)
+          try { return Response.json(await operation, { headers: { 'Cache-Control': 'no-store' } }) }
+          finally { operations.delete(operation) }
+        }
+        if (body && typeof body === 'object' && 'workflow' in body && Object.keys(body).length === 1)
+          return Response.json(await workflow(body.workflow, request.signal), { headers: { 'Cache-Control': 'no-store' } })
+        throw Error('Expected resource registration or workflow operation')
+      } catch (error) {
+        const issues = error instanceof ZodError ? error.issues.map(({ path, code, message }) => ({ path, code, message })) : undefined
+        return Response.json({ error: error instanceof Error ? error.message : 'Resource operation failed',
+          ...(issues ? { issues } : {}) }, { status: 409 })
+      }
+    } })
+    if(input.workflow) await writeFile(resolve(directory,'workflow.mjs'),[
         'import {realpath,readFile} from "node:fs/promises";',
-        'const help='+JSON.stringify('Current assignment: --status. Preparatory production handoff: --advance <JSON>. Implementation authorized by the current user request: --implement <JSON>. When the native BgsWorkflow tool is exposed, prefer BgsWorkflow({action:"status"|"advance"|"implement", ...handoff fields}); use these commands for legacy native sessions without that tool. JSON: {summary,sections:[exact existing GDD headings],files:[actual project-relative files]}. GDD document tasks follow their current final-result contract and do not use advance. If necessary decisions are blocked, report them without advancing. Advance preserves the full original assignment. Implement is allowed only when the current user request authorizes implementation. Submit once after finalizing outputs, then end this native turn. BGS verifies source identities after cleanup and continues in the same conversation; no model review or quality certification. No automatic retry after failure/pause.')+';',
+        'const help='+JSON.stringify('Development preview: --preview start|status returns the current project server and does not run tests or end the turn. New task-owned servers close with the task; existing user previews remain user-owned. Reload the page after edits when reloadAfterEdits is true. Current assignment: --status. For tasks using a tool handoff: --advance <JSON>. Requested deliverable: --visual <JSON>, --resources <JSON>, or --implement <JSON>. When the native BgsWorkflow tool is exposed, prefer BgsWorkflow({action:"status"|"advance"|"visual"|"resources"|"implement"|"select-visual"|"preview", ...handoff fields}); use these commands for legacy native sessions without that tool. JSON: {summary,sections:[exact existing GDD headings],files:[actual project-relative files]}. GDD and visual-design results use the current final JSON contract, not advance. If necessary decisions are blocked, report them without advancing. Advance preserves the full original assignment. Implement is allowed only when the current user request authorizes implementation. In the implementation stage, implement optionally records the current authorized work in this same turn; continue without scheduling implementation again. Normal completion needs no delivery submission. Use --select-visual <JSON> in implementation or resource tasks to retain selected design images; it preserves path/hash references without ending the turn or registering runtime assets. Existing selections cannot be overwritten within that task. For other handoffs, submit once after finalizing outputs, then end this native turn. BGS verifies source identities after cleanup and continues within the requested scope; no model review or quality certification. No automatic retry after failure/pause.')+';',
         'const args=process.argv.slice(2);if(args.length===1 && args[0]==="--help"){console.log(help);process.exit(0)}',
-        'let value;if(args.length===1 && args[0]==="--status")value={action:"status"};else if(args.length===2 && ["--advance","--implement"].includes(args[0]))value={...JSON.parse(args[1]),action:args[0].slice(2)};else throw Error(help);',
+        'let value;if(args.length===1 && args[0]==="--status")value={action:"status"};else if(args.length===2 && args[0]==="--preview" && ["start","status"].includes(args[1]))value={action:"preview",operation:args[1]};else if(args.length===2 && ["--advance","--visual","--resources","--implement","--select-visual"].includes(args[0]))value={...JSON.parse(args[1]),action:args[0].slice(2)};else throw Error(help);',
         'if(await realpath(process.cwd())!=='+JSON.stringify(root)+')throw Error("Workflow belongs to another workspace");',
-        'if(!process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE)throw Error("No active BGS turn capability");',
-        'const capability=JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE,"utf8"));',
+        'if(!process.env.BEEGAME_ASSET_CAPABILITY_FILE)throw Error("No active BGS turn capability");',
+        'const capability=JSON.parse(await readFile(process.env.BEEGAME_ASSET_CAPABILITY_FILE,"utf8"));',
         'if(capability.version!==1 || capability.workspace!==await realpath(process.cwd()) || capability.sessionId!=='+JSON.stringify(input.sessionId)+' || !capability.executionId)throw Error("Expired or mismatched turn capability");',
-        'const api=new URL(capability.apiUrl);if(api.protocol!=="http:" || api.hostname!=="127.0.0.1" || api.username || api.password || api.search || api.hash)throw Error("Invalid workflow endpoint");',
+        'const api=new URL(capability.assets.registrationEndpoint);if(api.protocol!=="http:" || api.hostname!=="127.0.0.1" || api.username || api.password || api.search || api.hash)throw Error("Invalid workflow endpoint");',
         'const response=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({workflow:value}),redirect:"error"});const result=await response.json();console.log(JSON.stringify(result));if(!response.ok)process.exitCode=1;',
       ].join('\n'),{flag:'wx',mode:0o600})
-      const help='When exposed, prefer BgsMeasurement with the same JSON fields directly; {help:true} reads this contract. Use BgsFinishDelivery for terminal submission; it closes the native connection on success. These commands remain for saved native sessions without those tools. Optional static-Web source-copy build + browser smoke: node <this-entry> --request <stable-id> --artifact <public-build-folder> [--report <existing-file>]... . Runs saved package.json build, replaces only that build folder. Does not install dependencies or execute a model. reports/ is evidence excluded from source copies; game/build inputs belong outside it. Selected reports are separately hashed; edits invalidate their receipt. Finalize them first; do not append receipt IDs/hashes to measured files. --inspect <measurement-ID-or-unique-request-key> [--details] reads any saved receipt in this Run and current freshness without build/browser/model work. Default inspection includes failed check identities and reasons; --details adds raw observations, not another test. Reused keys require the exact measurement ID from handoff. A same-turn request retry inspects without replay; changed inputs need an intended new request. Native/SSR, gameplay, report semantics and quality are NOT certified. --finish --requirements <current-revision> [--measurement <measurement-ID>] explicitly submits the existing .beegame/delivery/acceptance.json and closes this implementation task after validation. For PASS, the latest measurement must bind that finalized report; without a measurement, a current source-bound execution receipt is required. An explicit delivery-scoped blocked/failed report instead ends execution as blocked, preserving its reason and remaining work, without requiring successful execution evidence. Invalid reports and rejected PASS claims do not trigger a terminal close. This action starts no tests or model summary. The author summary is retained in Chat; the submitting process may close with the task. Read-only --inspect and handoff never submit delivery.';
-      const consumptionHelp=[
-        "Optional --consumption-json JSON reuses existing static-Web drivers without a Task. JSON shape example (replace selectors with actual controls): {\"checks\":[\"ui-data-consumption\"],\"uiProbes\":[{\"document\":\"content/ui/menu.json\",\"nodeId\":\"play\",\"selector\":\"#play\",\"viewport\":[1280,720],\"steps\":[{\"click\":\"#start\"}]}]}. Put steps INSIDE each uiProbes item, not at the consumption JSON root.",
-        "UI checks source-derived DOM geometry, enabled visibility, marked composition and visible text fit for selected scenarios. Optional bindingValues:{\"visible\":true,\"progress\":0.5} supplies expected values for exact saved node.bindings state keys. The host uses the shared enabled/widthRatio semantics; unsupported or missing binding inputs remain unverified. The target must be active/non-collapsed after binding and responsive resolution. Supply the actual click path for that scenario. State-dependent Touch phone cases need explicit values, not copied desktop assumptions. Values are declared test inputs, not observations of private state or proof of complete state transitions. Unselected screens, states and viewports remain outside coverage.",
-        "Optional UI-only coordinateRoot:\"#logical-root\" selects an independent unpadded DOM ancestor for a fixed logical canvas scaled/letterboxed into the window. Logical dimensions come from saved root referenceResolution/layout.size. Its positive axis-aligned mapping must stay stable through perturbation/restoration. Without coordinateRoot, compare window CSS pixels. Unsupported roots remain unverified; this does not certify intended whole-frame adaptation.",
-        "scene-data-consumption uses sceneProbes with document, nodeId, selector of the actual Canvas, viewport and optional click steps. It checks stable enabled causality and a selected color-only 2D Sprite against source-derived pixel polygons under local position/rotation/scale and parent transforms. The Canvas CSS viewport must match the declared viewport. Enabled-only evidence, custom materials, asset Sprites and unsupported geometry remain unverified, not a demand to change the renderer. No appearance/game-quality verdict.",
-        "pixel-data-consumption uses pixelProbes with componentId for bound static 2D images/Tilemaps; procedural Canvas graphics are unsupported by that resource/geometry driver. font-data-consumption uses uiProbes for explicitly bound custom-font plain DOM text; system fonts/rich text are unsupported.",
-        "Audio JSON example: {\"checks\":[\"audio-data-consumption\"],\"audioProbes\":[{\"document\":\"content/scenes/level.json\",\"nodeId\":\"board\",\"componentId\":\"sound\",\"selector\":\"#clip\",\"viewport\":[960,540],\"playSteps\":[{\"click\":\"#start\"}],\"stopSteps\":[{\"click\":\"#stop\"}]}]}. Replace document, node/component IDs, HTML audio selector, viewport and controls with actual project inputs. playSteps and stopSteps are non-empty arrays of {click:\"selector\"} only; wait steps are not supported. The saved audio-source must bind an encoded assetRef and explicit data.volume (0..1)/data.loop. These verify encoded HTML audio, not WebAudio synthesis, concurrency or listening quality.",
-        "Select applicable inputs only. Probes change isolated responses, not project sources. --inspect ID [--details] reads retained evidence and unmeasured coverage without rerunning; scoped geometry/resource causality is not complete gameplay or game acceptance.",
-      ].join(' ')
-      measurementHelp = help+'\n'+consumptionHelp+'\nNative BgsMeasurement accepts the same JSON request fields directly. Use {inspectRequestKey:ID,details?:boolean}, {handoffPaths:[paths],details?:boolean}, {executionInputs:true}, or {designAction,documents?:[names],details?:boolean}. Submit delivery with BgsFinishDelivery({requirementsRevision,measurementId?}); that terminal call closes the native connection.'
-      await writeFile(resolve(directory,'measure.mjs'),[
-        'import {realpath,readFile} from "node:fs/promises";',
-        'const help='+JSON.stringify(help+'\n'+consumptionHelp+'\n--artifact is project-relative (e.g. dist), not an absolute path. Probes accept optional deviceScaleFactor (positive number, default 1); receipts record observed browser conditions and the declared click path. Other pixel densities and unselected gameplay remain untested.')+';',
-        'const args=process.argv.slice(2); if(args.length===1 && args[0]==="--help"){console.log(help);process.exit(0)}',
-        'const inspecting=args[0]==="--inspect",finishing=args[0]==="--finish";if(inspecting && !(args[1]?.trim() && !args[1].startsWith("--") && (args.length===2 || args.length===3 && args[2]==="--details")))throw Error(help);const body=inspecting ? {inspectRequestKey:args[1],details:args.length===3} : finishing ? {finish:{}} : {reportPaths:[]}; if(!inspecting){for(let i=finishing?1:0;i<args.length;i+=2){const key=args[i],value=args[i+1]; if(!value || !value.trim() || value.startsWith("--"))throw Error(help); if(finishing){if(key==="--requirements" && !body.finish.requirementsRevision)body.finish.requirementsRevision=value;else if(key==="--measurement" && !body.finish.measurementId)body.finish.measurementId=value;else throw Error(help)}else if(key==="--report")body.reportPaths.push(value); else if(key==="--request" && !body.requestKey)body.requestKey=value; else if(key==="--artifact" && !body.runtimeArtifact)body.runtimeArtifact=value; else if(key==="--consumption-json" && !("consumption" in body))body.consumption=JSON.parse(value); else throw Error(help)} if(finishing ? !body.finish.requirementsRevision : !body.requestKey || !body.runtimeArtifact)throw Error(help)}',
-        'if(await realpath(process.cwd())!=='+JSON.stringify(root)+')throw Error("Measurement belongs to another workspace");',
-        'if(!process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE)throw Error("No active BGS measurement capability");',
-        'const capability=JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE,"utf8"));',
-        'if(capability.version!==1 || capability.workspace!==await realpath(process.cwd()) || capability.sessionId!=='+JSON.stringify(input.sessionId)+' || !capability.executionId)throw Error("Expired or mismatched measurement capability");',
-        'const api=new URL(capability.apiUrl);if(api.protocol!=="http:" || api.hostname!=="127.0.0.1" || api.username || api.password || api.search || api.hash)throw Error("Invalid measurement endpoint");',
-        'const response=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),redirect:"error"});',
-        'const result=await response.json();console.log(JSON.stringify(result,null,body.details?2:undefined));',
-        'if(!response.ok || result.error || !finishing && (!result.finishedAt || !result.freshness?.current || !["build","runtime-smoke"].every(id=>result.checks?.some(c=>c.id===id && c.status==="passed"))))process.exitCode=1;',
-      ].join('\n'),{flag:'wx',mode:0o600})
-      // Reuse the same workspace/session capability; reading evidence does not
-      // start measurement or manufacture an author-written review assignment.
-      await writeFile(resolve(directory,'handoff.mjs'),[
-        'import {realpath,readFile} from "node:fs/promises";',
-        'const help="Task/evidence handoff: node <this-entry> [FILE ...] [--details]. With no files: source navigation and latest measurement/freshness. For documents, use ReadDesignHandoff to list files/headings and read selected sections. Plain documents need no index or finalization. Files must be explicit public project-relative design/source/test/report paths. --details includes selected source text and saved observations/history. --design help --details describes explicit source/index compatibility commands. --design implementation --help and --design acceptance --help describe authorized implementation and runtime reports. Reads do not build, test, invoke a model or certify quality.";',
-        'const args=process.argv.slice(2);if(args.length===1 && args[0]==="--help"){console.log(help);process.exit(0)}',
-        'const helpOnly=args.length===3 && args[0]==="--design" && ["implementation","acceptance"].includes(args[1]) && args[2]==="--help";const details=args.at(-1)==="--details",positional=details||helpOnly?args.slice(0,-1):args;let designAction=positional[0]==="--design"?positional[1]:undefined;if(positional[0]==="--design" && (!designAction || designAction==="draft" && positional.length!==3 || !["finalize","draft"].includes(designAction) && positional.length!==2 || details && !["baseline","implementation","help"].includes(designAction)))throw Error("Use --design help");if(helpOnly)designAction+="-help";const documents=["finalize","draft"].includes(designAction)?positional.slice(2):[];const paths=designAction?[]:positional;if(paths.some(p=>p.startsWith("--")))throw Error(help);',
-        'if(await realpath(process.cwd())!=='+JSON.stringify(root)+')throw Error("Handoff belongs to another workspace");',
-        'if(!process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE)throw Error("No active BGS turn capability");',
-        'const capability=JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE,"utf8"));',
-        'if(capability.version!==1 || capability.workspace!==await realpath(process.cwd()) || capability.sessionId!=='+JSON.stringify(input.sessionId)+' || !capability.executionId)throw Error("Expired or mismatched turn capability");',
-        'const api=new URL(capability.apiUrl);if(api.protocol!=="http:" || api.hostname!=="127.0.0.1" || api.username || api.password || api.search || api.hash)throw Error("Invalid handoff endpoint");',
-        'const response=await fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(designAction?{designAction,documents,details}:{handoffPaths:paths,details}),redirect:"error"});',
-        'const result=await response.json();let output=result;',
-        'if(designAction==="baseline" && !details && typeof result.valid==="boolean")output={scope:"design-source-integrity",valid:result.valid,issues:result.issues,revision:result.revision,documentVersions:result.documentVersions,...(result.indexedDocuments?.length?{requirementCount:result.requirements.length,requirementScope:"Existing indexed requirements only; not prose coverage"}:{}),layoutVerified:false,runtimeVerified:false,note:result.note,details:"Use --design baseline --details for full requirements/source hashes. Geometry is not checked here; use check-content.mjs --design-layouts --draft."};',
-        'if(designAction==="implementation" && response.ok && !result.error && result.valid===true){const execution={sources:"ReadDesignHandoff locates saved GDD sections. ReadImplementationTask exposes existing indexed tasks or GDD navigation; choose Skills and work organization as needed."};output=details?{...result,execution}:{scope:"implementation-handoff",valid:true,source:result.source,designRevision:result.designRevision,resultPath:result.resultPath,...(result.documents?{documents:result.documents}:{}),items:result.items.map(item=>({id:item.id,dependsOn:item.dependsOn,section:item.taskSource.section})),execution,webBoot:result.webBoot,limitation:result.limitation,details:result.items.length?"Use --design implementation --details for full task/source references and requirement hashes.":"Use ReadDesignHandoff with a relevant GDD section to read original implementation guidance; no task index is required."}};',
-        'console.log(JSON.stringify(output,null,2));if(!response.ok || result.error || !(designAction?result.valid:result.sources?.valid))process.exitCode=1;',
-      ].join('\n'),{flag:'wx',mode:0o600})
-    }
-    if (input.libraryBaseUrl) {
-      try {
-        library = openResourceLibraryAccess({ baseUrl: input.libraryBaseUrl, getAuthToken: input.getAuthToken })
-        libraryState = 'Resource library bridge is configured; catalog requests verify authentication/availability. Errors are not empty search results.'
-      } catch { libraryState = 'Resource library bridge could not start; availability is unverified, not an empty search result.' }
-    }
-    if(input.openImage)image=await input.openImage()
-    if (input.openPreview) {
-      if (!input.sessionId) throw Error('Preview requires the bound native session')
-      preview = await input.openPreview()
-      revokePreview = await publishProjectPreviewCapability(root, input.sessionId, preview.baseUrl)
-      // Long usage is available on demand, not repeated in every model input.
-      await writeFile(resolve(directory, 'preview.mjs'),
-        'const args=process.argv.slice(2);let requestKey;if(args[0]==="--request"){if(!args[1]?.trim() || args[2]!=="--run")throw Error("Use --request <stable-id> --run <script> [args...]");requestKey=args[1];args.splice(0,2); }\n'+
-        'if((args[0]==="--sprite-sample" && args.length>=6)||(args[0]==="--sprite-capture" && args.length===1)){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {resolvePreviewApi}=await import(new URL("./preview-test-client.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const api=await resolvePreviewApi();if(!(await fetch(api+"/status",{redirect:"error"})).ok)throw Error("Preview capability expired");const {createSpriteSample,captureSpriteSample}=await import(new URL("./sprite-sample.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));console.log(JSON.stringify(args[0]==="--sprite-sample"?await createSpriteSample(args[1],args[2],Number(args[3]),args.slice(4)):await captureSpriteSample(),null,2));}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}} else '+
-        'if(args[0]==="--inspect" && args.length===2){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {inspectPreviewTest}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));console.log(JSON.stringify(await inspectPreviewTest(args[1]),null,2));}catch(error){console.log(JSON.stringify({error:error.message,quality:"unverified"}));process.exitCode=1;}} else '+
-        'if(args[0]==="--run" && args[1]){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {runPreviewTest}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await runPreviewTest(args[1],args.slice(2),{requestKey});console.log(JSON.stringify(result,null,2));if(result.exitCode!==0)process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,execution:"unconfirmed; inspect retained files before any new execution",quality:"unverified"}));process.exitCode=1;}}\n'+
-        'else if(args[0]==="--keyboard-sample" && args.length===2){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {captureKeyboardSample}=await import(new URL("./preview-play-capture.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await captureKeyboardSample(JSON.parse(args[1]));console.log(JSON.stringify(result,null,2));if(result.status!=="observed")process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}}\n'+
-        'else if(args[0]==="--countdown-blur-sample" && args.length===2){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {captureCountdownBlurSample}=await import(new URL("./preview-play-capture.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await captureCountdownBlurSample(JSON.parse(args[1]));console.log(JSON.stringify(result,null,2));if(result.status!=="observed")process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}}\n'+
-        'else if(args[0]==="--design-snapshot" && args.length===2){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {captureDesignSnapshots}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await captureDesignSnapshots(JSON.parse(args[1]));console.log(JSON.stringify(result,null,2));if(result.status!=="observed")process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}}\n'+
-        'else if(args[0]==="--snapshot" && args.length===4){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {capturePreviewSnapshot}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await capturePreviewSnapshot(args[1],Number(args[2]),Number(args[3]));console.log(JSON.stringify(result,null,2));if(result.status!=="observed")process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}}\n'+
-        'else if(args.length===1 && args[0]==="--client")console.log(JSON.stringify({...'+JSON.stringify({
-          ...PREVIEW_CLIENT_API,
-          environment:{helper:'BEEGAME_PREVIEW_TEST_MODULE',playwright:'BEEGAME_PLAYWRIGHT_MODULE',capability:'BEEGAME_PREVIEW_CAPABILITY_FILE'},
-          runCommand:'node '+JSON.stringify(entry('preview.mjs'))+' [--request <stable-id>] --run <project-test.mjs> [args...]',
-          scope:'Existing test tooling only; no browser, build, test or model executed. Capability still requires the active project turn.',
-        }) +',playwrightModule:process.env.BEEGAME_PLAYWRIGHT_MODULE || null,helperModule:process.env.BEEGAME_PREVIEW_TEST_MODULE || new URL("./preview-test-client.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE).href}));\n'+
-        'else if(args.length===1 && args[0]==="--help")console.log('+JSON.stringify('Preview: --design-snapshot <JSON> (local HTML design, no game build/server); --snapshot development|production <width> <height> (first-load diagnostic); [--request <stable-id>] --run <project-test.mjs> [args...] (one existing playtest); --inspect <execution.json> (read retained evidence); --client (helper signatures, options, frame lifetimes and observations).\nDesign JSON: {path:"docs/design.html",views:[{width:1280,height:720,query:"?screen=menu",readySelector:"#ready"}]}; query and readySelector are optional. Uses current managed browser, public project files and normal external assets. Waits for load, fonts/images and an optional ready selector. Captures selected views under docs/design/render-* (public handoff paths) with complete saved observations and compact errors/paths; inspect images and read reportPath for full details. Rerender affected views after edits. This is static design evidence, not game Preview or animation/play acceptance.\nOptional diagnostics: --keyboard-sample <JSON> {startSelector?,readySelector,key,holdMs,observeMs,viewport?}; --countdown-blur-sample <JSON> {startSelector,countdownSelector,playingSelector,countdownMs,observeMs?,viewport?}; --sprite-sample <sheet.png> <atlas.json> <frame-ms> <frame-id> ...; --sprite-capture.\n--snapshot captures the actual first-load viewport and runtime error counts into a unique .beegame/tmp/preview-snapshot-* directory, without a project test script. This is a visual diagnostic, not a pass, playtest or freshness receipt. --request binds one execution to a stable ID in the current attempt. Same-key calls return the retained receipt without execution; different script/argv/input identity conflicts. Failed or unfinished requests never automatically replay. A deliberate new sample uses a new request ID. Without --request, --run remains a fresh execution. Reuse is a historical observation, not a new browser-state or stability test. --run executes once with Node, retaining stdout/stderr and execution.json, with a five-minute execution budget and no retries. Non-success execution receipts include failureOutput: at most 2 KiB read per stream, retaining redacted head/tail excerpts with truncation/unavailability flags. Redaction and omission use the original sampled text; replacements do not redefine credential or line boundaries. Only an incomplete first tail line is omitted; complete tail lines and the head prefix are retained within the output limit. Truncation omits the middle; the key error may be absent. Redaction covers recognizable sampled credential forms only: unlabeled values or multiline credentials beginning in the unread middle may remain. Full logs remain at stdoutPath/stderrPath. Catchable interruption/timeout is retained as non-success; hard termination can leave an unfinished receipt, never a pass. --inspect reads source freshness and supplied-tool identity separately without executing it; legacy/missing tool identity and actual browser environment remain unverified. Exit code is not test quality; scripts choose assertions and use the existing helper for current access.\nPreview environment: '+JSON.stringify(PREVIEW_ENVIRONMENT)+'\n'+preview.instruction)+');\n'+
-        'else {console.error("Use --help, --design-snapshot <JSON>, --countdown-blur-sample <JSON>, --keyboard-sample <JSON>, --snapshot <mode> <width> <height>, --client, or --run <project-test.mjs> [args...]");process.exitCode=1;}\n', { flag: 'wx', mode: 0o600 })
-    }
-    const assets = {
-      ...(library ? { libraryBaseUrl: library.baseUrl } : {}),
-      ...(image ? { imageEndpoint: image.endpoint } : {}),
-    }
-    if (input.sessionId) revokeAssets = await publishProjectAssetCapabilities(root, input.sessionId, assets)
-    await writeProjectAssetCommand(resolve(directory, 'assets.mjs'), {
-      ...(input.sessionId ? { sessionId: input.sessionId } : assets),
-      mediaCommand: 'bun ' + JSON.stringify(entry('media.mjs')),
+    revokeAssets = await publishProjectAssetCapabilities(root, input.sessionId, {
+      registrationEndpoint: server.url.origin + '/' + token,
+      ...(input.libraryBaseUrl ? { libraryBaseUrl: server.url.origin + path + '/library' } : {}),
+      ...(input.openImage ? { imageEndpoint: server.url.origin + path + '/image', screenOrientation } : {}),
     })
+    await writeProjectAssetCommand(entry('assets.mjs'), { sessionId: input.sessionId,
+      mediaCommand: 'bun ' + JSON.stringify(entry('media.mjs')),
+      ...(input.openImage ? {imageMcpModules:{
+        server:import.meta.resolve('@modelcontextprotocol/sdk/server/index.js'),
+        stdio:import.meta.resolve('@modelcontextprotocol/sdk/server/stdio.js'),
+        types:import.meta.resolve('@modelcontextprotocol/sdk/types.js'),
+      }} : {}) })
+    for (const [name, source] of [['media.mjs', MEDIA_PRODUCTION_ENTRY], ['resources.mjs', RESOURCE_PRODUCTION_ENTRY]] as const)
+      await writeFile(entry(name), source, { flag: 'wx', mode: 0o600 })
     const { platform, engine, inputs, orientation, dimension } = input.constraints ?? {}
-    const editorContent = !isWebReactTarget({platform, engine})
-    const contentEntry = CURRENT_CONTENT_CHECKER_ENTRY.replace("{ profile: 'current' }",
-      JSON.stringify({ profile: 'current', confirmed: { platform, inputs, orientation, dimension } }))
-    for (const [name, source] of [['check-content.mjs', contentEntry],
-      ...(editorContent ? [['bind-content.mjs',CONTENT_BINDING_ENTRY] as const] : []),
-      ['media.mjs', MEDIA_PRODUCTION_ENTRY], ['resources.mjs', RESOURCE_PRODUCTION_ENTRY]] as const)
-      await writeFile(resolve(directory, name), source, { flag: 'wx', mode: 0o600 })
-    // Optional existing geometry/paint implementation, not generated game code.
-    // The bundle stays out of model context; the Agent chooses whether to use it.
-    // Existing registered projects may still import the portable runtime.
-    if (editorContent || existsSync(resolve(root, 'content/index.json'))) {
-      for (const [name, body] of Object.entries(await contentConsumerDistribution()))
-        await writeFile(resolve(directory, name), body, { flag: 'wx', mode: 0o600 })
-      await writeFile(resolve(directory, 'registered-runtime-files.mjs'), await registeredRuntimeFilesSource(), { flag: 'wx', mode: 0o600 })
-      await writeFile(resolve(directory, 'consumer.mjs'),
-        contentConsumerCommand(root, entry('content-consumer.mjs')), { flag: 'wx', mode: 0o600 })
-    }
     return {
-      directory: relative(root, directory),
+      directory,
+      imageGenerationEntry: input.openImage ? entry('assets.mjs') : undefined,
       uiLayoutConstraints: { platform, engine, inputs, orientation, dimension },
-      // Keep the locator outside compactable message history. Capabilities
-      // still expire normally; this is only the current turn's tool location.
-      systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
-        (editorContent ? 'Optional saved-content contracts: bun check-content.mjs --format uiLayoutContract; bun consumer.mjs --api; bun bind-content.mjs --help. ' : '') +
-        'Read contracts as needed: bun resources.mjs --contract registration (resource fields). --help: bun assets.mjs, bun media.mjs'+
-        (input.measurement ? '; node measure.mjs, node handoff.mjs' : '')+(input.workflow ? '; node workflow.mjs' : '')+(preview ? '; node preview.mjs' : '')+
-        '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. '+
-        (input.workflow ? 'Use BgsWorkflow for status/advance/implement when exposed; otherwise use workflow.mjs for the saved native session. ' : '')+
-        (input.measurement ? 'Use BgsMeasurement when exposed for measurement, receipt inspection and handoff; {help:true} reads the probe contract without execution. BgsFinishDelivery submits the existing report and ends this execution (validated passed delivery or explicit blocked/failed handoff); the native call closes with the connection. Saved sessions without these tools use measure.mjs/handoff.mjs. Document navigation: ReadDesignHandoff {} lists files; read:[{document}] lists headings; add sections for selected prose. Reuse relevant text still in context; after edits or context loss, reread affected sections. handoff.mjs --details returns full selected files and is not a status check. Plain documents need no index or finalization. ' : ''),
-      turnContext: [
-        libraryState,
-        ...(!preview ? ['Managed browser Preview is unavailable; native tools remain available.'] : []),
-        ...(preview ? ['Preview uses a sandboxed opaque iframe: native browser storage can fail. Contract: check-content.mjs --format preview. Browser commands: preview.mjs --help; --design-snapshot renders project HTML before game implementation, without starting Preview.'] : []),
-        image ? 'Image generation is configured, not yet verified available; assets.mjs generate --help provides request examples, quoting and reference-image revisions; ui-assets-plan --help covers runtime skins.' : 'No AI image bridge is configured for this turn.',
-        'Credentials stay in BGS. Tool availability is not runtime consumption or quality evidence.',
+      systemContext: 'Current BGS tools directory (absolute path): ' + JSON.stringify(directory) + '. ' +
+        'Read contracts as needed: bun resources.mjs --contract registration (resource fields). --help: bun assets.mjs, bun media.mjs. ' +
+        'Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end. ' +
+        (input.workflow ? 'Use BgsWorkflow for operations allowed by the current assignment. GDD and visual-design results use their final JSON contract. Saved sessions without this tool use workflow.mjs. If a saved native schema does not list preview, use workflow.mjs --preview start|status.' : ''),
+      turnContext: [libraryState,
+        input.openImage ? 'Image generation is configured. Task-authorized requests use the existing generation service for availability, pricing and applicable Credit checks. Generate or edit with generate_image from the configured beegame-images MCP; independent image requests can use parallel tool calls. assets.mjs generate is the CLI alternative for sessions without that tool or explicit command-line use; --help documents the same request fields. ui-assets-plan --help covers runtime skins.' : 'No AI image bridge is configured for this turn.',
       ].join('\n'),
-      // Retain tiny adapters as execution evidence, not game deliverables.
-      // Revocation closes the bridge; do not delete Agent-created files.
       workflow: input.workflow ? workflow : undefined,
-      measurement: input.measurement ? measurement : undefined,
-      finishDelivery: input.measurement ? finishDelivery : undefined,
       close,
     }
   } catch (error) { await close(); throw error }

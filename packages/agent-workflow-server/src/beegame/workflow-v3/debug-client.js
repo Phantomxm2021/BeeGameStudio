@@ -110,7 +110,7 @@ function showDocument() {
 function selected() {
   const run = current(), measurementId = el('measurement').value;
   if (!run.agentTurns?.some(t => t.measurements?.some(m => m.id === measurementId)))
-    throw Error('没有选中的实际宿主测量；不能用报告 PASS 代替');
+    throw Error('未选中已保存的历史测量记录；报告 PASS 不能代替原始记录');
   return { measurementId, requirementsRevision: run.requirements.revision };
 }
 function showQuestion() {
@@ -133,7 +133,7 @@ async function answerQuestion(decision) {
 const actions = {
   'read-measurement': () => {
     const selection=selected();
-    if(!selection.measurementId)throw Error('此入口只核对自主 Agent 测量');
+    if(!selection.measurementId)throw Error('此入口只读取已有历史测量');
     return request('/workflow-v3/agent/measurements/'+encodeURIComponent(selection.measurementId));
   },
   load, events: async () => {
@@ -215,6 +215,13 @@ const actions = {
   },
   stop: async () => { current(); const result = await request('/workflow-v3/stop', 'POST'); await load(); return result; },
   resume: async () => { const run = current(); const result = await request('/workflow-v3/resume', 'POST', { planRevision: run.planRevision }); await load(); return result; },
+  'continue-production': async () => {
+    const run=current(), after=run.agentTurns?.at(-1);
+    if(!after?.productionHandoff?.next)throw Error('当前没有可续接的阶段交接');
+    if(!await confirmAction('从已保存的交接继续下一生产阶段，使用原阶段提示词；可能产生模型和资源费用。'))return {cancelled:true};
+    const result=await request('/workflow-v3/agent/continue-production','POST',{expectedVersion:run.version,afterAttemptId:after.attemptId});
+    await load();return result;
+  },
   'recover-writer': async () => {
     const run = current();
     if (!run.writer) throw Error('没有待收尾的写者');
@@ -238,7 +245,7 @@ const actions = {
   'prepare-observation': () => {
     const run = current(), selection = selected();
     if (!preview || preview.runId !== run.id || preview.measurementId !== selection.measurementId)
-      throw Error('请显式打开选中测量的当前已测 Preview，再准备观察');
+      throw Error('请先打开所选历史测量的构建 Preview，再准备观察');
     observationSource={runId:run.id,...selection,artifactSha256:preview.artifact.sha256};
     el('observation-json').value = pretty({ requestKey: crypto.randomUUID(), ...selection,
       artifactSha256: preview.artifact.sha256, steps: '', expected: '', observed: '' });
@@ -305,7 +312,7 @@ for (const [id, kind] of [['static', 'static'], ['project-export', 'project']]) 
   if (blob.type !== 'application/zip') throw Error('返回内容不是 ZIP；没有创建下载');
   const url = URL.createObjectURL(blob); urls.add(url);
   const link = document.createElement('a'); link.href = url; link.download = 'bgs-v3-' + kind + '.zip'; link.textContent = '下载 ' + kind + ' ZIP';
-  el('downloads').append(link); return { kind, bytes: blob.size, note: '点击链接下载；仅已有实际测量资格' };
+  el('downloads').append(link); return { kind, bytes: blob.size, note: '点击链接下载；仅使用所选历史记录并保留原有文件校验' };
 };
 for (const [id, action] of Object.entries(actions)) el(id).addEventListener('click', async () => {
   const isStop = id === 'stop';

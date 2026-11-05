@@ -2,10 +2,10 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createRun, type TaskSpec } from './state'
+import { createRun } from './state'
 import { skillEvidence, priorMainSkillLoads } from './context'
 import { versionsMatch } from './checks'
-import { runChecks } from './checker-test-driver'
+import { runContentCheck } from './content-checks'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { auditAssetContract } from '../asset-contract-audit'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
@@ -28,8 +28,7 @@ test('historical Skill evidence preserves same-session successful loads without 
   expect(run).toEqual(before)
 })
 
-const task: TaskSpec = { id: 'ui', kind: 'game.develop', goal: 'Deliver the confirmed UI', dependsOn: [], requirementIds: ['req.loop'], inputs: [],
-  writablePaths: ['content/**'], expectedOutputs: ['content/ui/menu.json'], checks: ['content-structure', 'content-layout', 'content-resources'] }
+const task = { expectedOutputs: ['content/ui/menu.json'] }
 
 test('Skill evidence records completion without treating a failed load as success', () => {
   const started = { id: 1, type: 'tool.started', payload: { toolName: 'Skill', toolUseID: 'skill-1', parentToolUseID: 'child', input: { skill: 'bgs-builtins:game-ui-ux-designer' } } }
@@ -46,19 +45,20 @@ test('scoped content checks need no GDD, catch overflow, distinguish unbound dra
     const save = async (ui: unknown) => writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
     await save(uiLayoutFixture())
     await writeFile(join(root, 'content/ui/unrelated.json'), 'not a document')
-    const checked = await runChecks(root, task, [], undefined, { orientation: 'Landscape' })
-    expect(checked.checks.map(check => check.status)).toEqual(['passed', 'passed', 'passed'])
-    expect(checked.checks[2]!.observation).toContain('empty declared resource closure')
-    expect(checked.checks[2]!.observation).toContain('final resource coverage and runtime use remain unverified')
-    expect(checked.checks[1]!.coverage?.files).toEqual(['content/ui/menu.json'])
-    expect(checked.checks[1]!.inputs.some(file => file.path.includes('unrelated'))).toBe(false)
+    const checked = await Promise.all((['content-structure', 'content-layout', 'content-resources'] as const)
+      .map(id => runContentCheck(root, id, task, [], { orientation: 'Landscape' })))
+    expect(checked.map(check => check.status)).toEqual(['passed', 'passed', 'passed'])
+    expect(checked[2]!.observation).toContain('empty declared resource closure')
+    expect(checked[2]!.observation).toContain('final resource coverage and runtime use remain unverified')
+    expect(checked[1]!.coverage?.files).toEqual(['content/ui/menu.json'])
+    expect(checked[1]!.inputs.some(file => file.path.includes('unrelated'))).toBe(false)
     await save(uiLayoutFixture(2000))
-    expect((await runChecks(root, task, [])).checks[1]!.status).toBe('failed')
+    expect((await runContentCheck(root, 'content-layout', task, [], {})).status).toBe('failed')
     await save(uiLayoutFixture())
-    expect((await runChecks(root, task, [], undefined, { orientation: 'Portrait' })).checks[1]!.observation).toContain('orientation differs')
+    expect((await runContentCheck(root, 'content-layout', task, [], { orientation: 'Portrait' })).observation).toContain('orientation differs')
     const wrong = uiLayoutFixture() as any; wrong.data.nodes[1].parentId = 'missing'
     await save(wrong)
-    expect((await runChecks(root, task, [])).checks[0]!.status).toBe('failed')
+    expect((await runContentCheck(root, 'content-structure', task, [], {})).status).toBe('failed')
     expect(auditAssetContract(root, []).valid).toBe(false)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -71,17 +71,17 @@ test('actual linked Scene and underlay versions invalidate results; missing link
     ui.data.nodes.push({ id: 'game-view', parentId: 'root', role: 'container', layout: { size: [300, 200] } })
     ui.data.nodes[0].data.layoutCamera = { nodeId: 'game-view', path: 'content/scenes/level.json' }
     await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
-    const missing = await runChecks(root, { ...task, checks: ['content-layout'] }, [])
-    expect(missing.checks[0]!.status).not.toBe('passed')
+    const missing = await runContentCheck(root, 'content-layout', task, [], {})
+    expect(missing.status).not.toBe('passed')
     await writeFile(join(root, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
-    const checked = await runChecks(root, { ...task, checks: ['content-layout'] }, [])
-    expect(checked.checks[0]!.status).toBe('passed')
-    expect(checked.checks[0]!.inputs.map(file => file.path)).toContain('content/scenes/level.json')
+    const checked = await runContentCheck(root, 'content-layout', task, [], {})
+    expect(checked.status).toBe('passed')
+    expect(checked.inputs.map(file => file.path)).toContain('content/scenes/level.json')
     await writeFile(join(root, 'content/scenes/level.json'), JSON.stringify({ ...sceneLayoutFixture(), id: 'changed' }))
-    expect(await versionsMatch(root, checked.checks[0]!.inputs)).toBe(false)
+    expect(await versionsMatch(root, checked.inputs)).toBe(false)
     ui.data.nodes[0].data.layoutUnderlay = { path: 'content/ui/below.json', clearance: 'allow-cover' }
     await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
-    expect((await runChecks(root, { ...task, checks: ['content-layout'] }, [])).checks[0]!.status).not.toBe('passed')
+    expect((await runContentCheck(root, 'content-layout', task, [], {})).status).not.toBe('passed')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -98,22 +98,21 @@ test('resource checks bind actual modules/members and retain required Manifest c
     ui.assetRefs = [manifest.resources[0]!.id]
     ui.data.nodes[1].data = { image: { assetRef: manifest.resources[0]!.id } }
     await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
-    const scoped = { ...task, checks: ['content-resources'] as const }
-    const incomplete = await runChecks(root, { ...scoped, checks: [...scoped.checks] }, [])
-    expect(incomplete.checks[0]!.status).toBe('failed')
-    expect(incomplete.checks[0]!.observation).toContain('req-unrelated')
+    const incomplete = await runContentCheck(root, 'content-resources', task, [], {})
+    expect(incomplete.status).toBe('failed')
+    expect(incomplete.observation).toContain('req-unrelated')
     manifest.requirements.pop()
     await writeBeeGameAssetManifest(root, manifest)
-    const checked = await runChecks(root, { ...scoped, checks: [...scoped.checks] }, [])
-    expect(checked.checks[0]!.status, checked.checks[0]!.observation).toBe('passed')
-    expect(checked.checks[0]!.inputs.map(file => file.path)).toContain('assets/runtime/example/resource.json')
-    expect(checked.checks[0]!.inputs.some(file => file.path.startsWith('assets/manifest/'))).toBe(true)
+    const checked = await runContentCheck(root, 'content-resources', task, [], {})
+    expect(checked.status, checked.observation).toBe('passed')
+    expect(checked.inputs.map(file => file.path)).toContain('assets/runtime/example/resource.json')
+    expect(checked.inputs.some(file => file.path.startsWith('assets/manifest/'))).toBe(true)
     expect(auditAssetContract(root).valid).toBe(true)
     await writeFile(join(root, 'assets/runtime/example/resource.json'), 'broken json')
-    expect(await versionsMatch(root, checked.checks[0]!.inputs)).toBe(false)
-    expect((await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!.status).toBe('failed')
+    expect(await versionsMatch(root, checked.inputs)).toBe(false)
+    expect((await runContentCheck(root, 'content-resources', task, [], {})).status).toBe('failed')
     await rm(join(root, 'assets/runtime/example/resource.json'))
-    expect((await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!.status).toBe('failed')
+    expect((await runContentCheck(root, 'content-resources', task, [], {})).status).toBe('failed')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -125,23 +124,9 @@ test('an embedded assetRef with an empty declaration is a resource error, not a 
     ui.assetRefs = []
     ui.data.nodes[1].data = { image: { assetRef: 'missing-art' } }
     await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
-    const result = (await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!
+    const result = (await runContentCheck(root, 'content-resources', task, [], {}))
     expect(result.status).toBe('failed')
     expect(result.observation).toContain('uses undeclared assetRef missing-art')
-  } finally { await rm(root, { recursive: true, force: true }) }
-})
-
-test('host build creates and checks actual first-build artifacts; zero exit without artifacts is not PASS', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-v3-build-artifact-'))
-  try {
-    await writeFile(join(root, 'build.mjs'), 'await Bun.write("built.json", "{}");')
-    await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: { build: 'bun build.mjs' } }))
-    const buildTask: TaskSpec = { ...task, writablePaths: ['built.json'], expectedOutputs: ['built.json'], checks: ['artifact-json', 'build'] }
-    const checked = await runChecks(root, buildTask, [])
-    expect(checked.checks.map(check => [check.id, check.status])).toEqual([['build', 'passed'], ['artifact-json', 'passed']])
-    expect(checked.outputs[0]?.path).toBe('built.json')
-    await rm(join(root, 'built.json')); await writeFile(join(root, 'build.mjs'), 'console.log("no artifact");')
-    expect((await runChecks(root, buildTask, [])).checks[0]?.status).toBe('unverified')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

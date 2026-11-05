@@ -12,10 +12,20 @@ export function elicitationAnswer(input: RpcObject, answers: unknown): RpcObject
   if (typeof encoded !== 'string') throw Error('Complete the MCP form before submitting')
   let content: unknown
   try { content = JSON.parse(encoded) } catch { throw Error('Invalid MCP form response') }
-  // Validate against the server's original schema, never a schema from the browser.
-  const validator = new AjvJsonSchemaValidator().getValidator(input.requestedSchema)
+  // Tool approvals carry their scope in metadata, not arbitrary form answers.
+  // Keep ordinary forms bound to the server's original schema.
+  const approval = input._meta?.bgs_approval_kind === 'mcp_tool_call'
+  const schema = approval ? { ...input.requestedSchema, additionalProperties: false } : input.requestedSchema
+  const validator = new AjvJsonSchemaValidator().getValidator(schema)
   if (!validator(content).valid) throw Error('MCP response does not match the requested form')
-  return { ...input, content }
+  const persist = (answers as RpcObject).persist
+  if (persist !== undefined) {
+    const advertised = input._meta?.persist
+    const allowed = Array.isArray(advertised) ? advertised : [advertised]
+    if (!approval || !['session', 'always'].includes(persist) || !allowed.includes(persist))
+      throw Error('MCP approval scope is not offered by this request')
+  }
+  return { ...input, content, ...(persist !== undefined ? { approvalPersist: persist } : {}) }
 }
 
 type ApprovalContext = {

@@ -187,9 +187,17 @@ export function assertCommit(projectId: string, actorId: string, version: number
     const turn=next.agentTurns?.find(t=>t.attemptId===old.attemptId)
     if(!turn || ['attemptId','requestKey','sessionId','workerId','fence','startedAt','requirementsRevision'].some(k=>turn[k as keyof typeof turn]!==old[k as keyof typeof old]) ||
         !sameJson(turn.message,old.message) || !sameJson(turn.production,old.production) ||
+        !sameJson(turn.projectInputs,old.projectInputs) ||
         old.productionHandoff && !sameJson(turn.productionHandoff,old.productionHandoff) ||
         old.status!=='running' && !sameJson(old,turn) || old.quiescedAt && turn.quiescedAt!==old.quiescedAt)
       throw new WorkflowError('immutable-exit-evidence','Native goal execution history cannot be removed or rewritten')
+    if (!sameJson(turn.visualSelection, old.visualSelection)) {
+      if (old.quiescedAt || prior.writer?.attemptId !== turn.attemptId || next.writer?.attemptId !== turn.attemptId)
+        throw new WorkflowError('stale-attempt', 'Visual source selection requires the active writer')
+      const selected = turn.visualSelection?.sources ?? []
+      if (!sameJson(old.visualSelection?.sources ?? [], selected.slice(0, old.visualSelection?.sources.length ?? 0)))
+        throw new WorkflowError('immutable-visual-source', 'Selected visual source bytes cannot be removed or replaced within a task')
+    }
     if(turn.productionHandoff && !old.productionHandoff && (old.status!=='running' || old.quiescedAt ||
         prior.writer?.attemptId!==turn.attemptId || next.writer?.attemptId!==turn.attemptId))
       throw new WorkflowError('stale-attempt','Production handoff requires the active writer')
@@ -198,8 +206,8 @@ export function assertCommit(projectId: string, actorId: string, version: number
         prior.writer.workerId!==turn.workerId || next.writer.workerId!==turn.workerId ||
         prior.writer.fence!==turn.fence || next.writer.fence!==turn.fence))
       throw new WorkflowError('invalid-exit-evidence','Native quiescence must retain the current writer until settlement')
-    if (turn.notStarted && turn.status==='ended' || old.notStarted && (!turn.notStarted || turn.nativeSessionId!==old.nativeSessionId || turn.turnId || turn.measurements?.length) ||
-        turn.notStarted && !old.notStarted && (old.quiescedAt || !turn.quiescedAt || turn.status!=='running' || turn.turnId ||
+    if (turn.notStarted && turn.status==='ended' || old.notStarted && (!turn.notStarted || turn.nativeSessionId!==old.nativeSessionId || turn.turnId!==old.turnId || turn.measurements?.length) ||
+        turn.notStarted && !old.notStarted && (old.quiescedAt || !turn.quiescedAt || turn.status!=='running' ||
           turn.measurements?.length || turn.usage || turn.skillUses?.length))
       throw new WorkflowError('invalid-exit-evidence','No-start proof must be recorded with original quiescence before execution, and remain immutable')
   }

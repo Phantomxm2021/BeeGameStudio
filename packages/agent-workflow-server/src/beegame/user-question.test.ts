@@ -37,7 +37,7 @@ test('keeps invalid submissions pending and delivers valid answers once', async 
       for (let i = 0; i < 200 && !manager.pendingPermissionsForProject('owner', 'project', root).length; i++) await Bun.sleep(5)
       expect(manager.pendingPermissionsForProject('owner', 'project', root)).toHaveLength(1)
       expect(() => manager.resolvePermission(session.id, 'question', { behavior: 'allow', answers: {} })).toThrow()
-      expect(() => manager.resolvePermission(session.id, 'question', { behavior: 'allow', answers, intent:'change' })).toThrow('current locked-design question')
+      expect(() => manager.resolvePermission(session.id, 'question', { behavior: 'allow', answers, intent:'change' })).toThrow('Question answers do not rewrite the authorized task; use the existing task change request')
 
       expect(manager.pendingPermissionsForProject('owner', 'project', root)).toHaveLength(1)
       manager.resolvePermission(session.id, 'question', { behavior: 'allow', scope: 'once', answers })

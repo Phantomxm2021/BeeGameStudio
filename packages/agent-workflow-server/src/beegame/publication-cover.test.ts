@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import sharp from 'sharp'
-import { preparePublicationCover } from './publication-cover'
+import { preparePublicationCover, distinctPublicationCovers } from './publication-cover'
 
 test('decodes actual cover dimensions and returns a metadata-free 16:9 WebP', async () => {
   const input = await sharp({ create: { width: 160, height: 90, channels: 3, background: '#345678' } })
@@ -49,4 +49,16 @@ test('validates and compresses using EXIF-oriented dimensions', async () => {
   const metadata = await sharp(output).metadata()
   expect(metadata).toMatchObject({ format: 'webp', width: 1280, height: 720 })
   expect(metadata.exif).toBeUndefined()
+})
+
+
+test('deduplicates identical views despite JPEG noise or a small animation, retaining a visibly different cover', async () => {
+  const base = await sharp({ create: { width: 1280, height: 720, channels: 3, background: '#182333' } }).png().toBuffer()
+  const jpeg = await sharp(base).jpeg({ quality: 65 }).toBuffer()
+  const smallAnimation = await sharp(base).composite([{ input: await sharp({ create: { width: 20, height: 20, channels: 3, background: '#ffffff' } }).png().toBuffer(), left: 600, top: 350 }]).webp().toBuffer()
+  const different = await sharp({ create: { width: 1280, height: 720, channels: 3, background: '#b2d8a1' } }).webp().toBuffer()
+  const result = await distinctPublicationCovers([base, base, jpeg, smallAnimation, different])
+  expect(result).toHaveLength(2)
+  expect(result[0]).toEqual(base)
+  expect(result[1]).toEqual(different)
 })

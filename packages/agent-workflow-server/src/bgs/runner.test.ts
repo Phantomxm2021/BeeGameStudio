@@ -1,17 +1,152 @@
+import { reasoningConnectionKey, saveReasoningPreference } from './preferences-store'
+import { ProductionBlockedError } from '../beegame/production-blocked'
 import { expect, test, spyOn } from 'bun:test'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import { createBgsRunner, nativeRgNoMatch, nativeSkillReadTargets, bgsUsage, bgsProviderConfig, editProtectedFileText, bgsApplicationContext } from './runner'
 import { BeeGameSessionManager, getLatestRuntimeUsage, type BeeGameEvent, type DashboardPermissionRequest } from '../beegame/session-manager'
 import { appendChatTranscript } from '../beegame/project-records'
 import * as browserCleanup from '../beegame/native-test-browser-cleanup'
-import type { BgsClient } from './client'
-import { assertDesignReviewReady, type DesignReviewReceipt, type DesignReviewDisposition } from '../beegame/workflow-v3/design-review'
+import { BgsClient } from './client'
+import { assertDesignReviewReady, DESIGN_REVIEW_INSTRUCTIONS, type DesignReviewReceipt, type DesignReviewDisposition } from '../beegame/workflow-v3/design-review'
+
+import { parseProductionResult, productionOutputSchema } from '../beegame/workflow-v3/production-workflow'
 
 const resolveOutboundTarget: typeof import('@bee-game-studio/security-core').resolveApprovedOutboundTarget = async (value) => ({ url: new URL(value), addresses: ['93.184.216.34'],
   lookup: (_host, _options, callback) => callback(null, '93.184.216.34', 4) })
 const command = [process.execPath, fileURLToPath(new URL('./fixtures/app-server.ts', import.meta.url))]
+
+for (const mode of ['plain-result','failed-checks','repair','changed-scope','alternate-tool','stop','native-failure','cold-resume','missing-history'] as const)
+test('implementation uses native completion without a BGS browser contract: '+mode,async()=>{
+  const cleanup=spyOn(browserCleanup,'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  const original=BgsClient.prototype.request,trace:Array<{method:string;params:any}>=[]
+  let authorized=0
+  const rpc=spyOn(BgsClient.prototype,'request').mockImplementation(async function(this:BgsClient,method:string,params:any,timeout?:number):Promise<any>{
+    trace.push({method,params})
+    if(method==='turn/interrupt'){
+      await original.call(this,'fixture/events',{events:[{method:'turn/completed',params:{threadId:params.threadId,turnId:params.turnId,turn:{id:params.turnId,status:'interrupted'}}}]})
+      return {}
+    }
+    return original.call(this,method,params,timeout)
+  })
+  let f:Awaited<ReturnType<typeof fixture>>|undefined
+  const abort=new AbortController()
+  try{
+    f=await fixture('allow',{OPENAI_AUTH_MODE:'chatgpt',BGS_FIXTURE_DESIGN_REVIEW:'manual',
+      ...(mode==='missing-history'?{BGS_FIXTURE_RESUME_ERROR:'missing'}:{}),
+      BEEGAME_NATIVE_MCP_SERVERS_JSON:JSON.stringify([{id:'browser',name:'Browser',enabled:true,autoStart:true,scope:'global',transport:'stdio',command:'/fixture/browser',
+        enabledTools:['browser_run_code_unsafe','browser_evaluate'],disabledTools:['browser_click']}]),
+    },resolveOutboundTarget,mode==='cold-resume'?'saved-browser-author':mode==='missing-history'?'019a0000-0000-7000-8000-000000000099':undefined,
+      undefined,mode==='cold-resume'||mode==='missing-history',undefined,undefined,
+      mode==='missing-history'?{restartFromDesign:{prompt:'Retained reviewed implementation assignment',authorize:async()=>{authorized++}}}:{})
+    const runtime=f.runtime as any,client=runtime.client as BgsClient
+    const emit=(...events:any[])=>client.request('fixture/events',{events})
+    let ended=false
+    const pending=f.submit('Implement the current scope',abort.signal).then(()=>{ended=true;return null},error=>{ended=true;return error as Error})
+    await waitUntil(()=>runtime.active?.turnId==='turn-1')
+    const call=async(id:string,result:any,tool='browser_run_code_unsafe')=>{
+      const item={id,type:'mcpToolCall',server:'bgs-browser',tool,status:'inProgress',arguments:{code:"await import('./existing-checks.js')"}}
+      await emit({method:'item/started',params:{threadId:f!.sessionId,turnId:'turn-1',item}},
+        {method:'item/completed',params:{threadId:f!.sessionId,turnId:'turn-1',item:{...item,status:'completed',result}}})
+      await waitUntil(()=>f!.events.some(event=>event.eventType==='tool.completed'&&event.toolUseID===id))
+      expect(ended).toBe(false)
+    }
+    await call('first-check',{content:[{type:'text',text:'Browser diagnostic output'}],structuredContent:{checks:[{
+      id:'first',status:mode==='failed-checks'||mode==='repair'?'failed':'passed',observed:'Actual fixture observation'}]}})
+    if(mode==='repair'||mode==='changed-scope')await call('next-check',{content:[],structuredContent:{checks:[{id:'different-diagnostic',status:'passed',observed:'Affected input repaired'}]}})
+    if(mode==='alternate-tool')await call('focused-observation',{content:[{type:'text',text:'Current browser state'}]},'browser_evaluate')
+    // A passing tool result does not end implementation or replace the Agent's answer.
+    expect(trace.some(entry=>entry.method==='turn/interrupt')).toBe(false)
+    const answer=mode==='failed-checks'?'Implementation ended; one browser behavior remains unverified.':'Implementation and affected verification finished.'
+    if(mode==='stop')abort.abort()
+    else await emit({method:'item/completed',params:{threadId:f.sessionId,turnId:'turn-1',item:{id:'author-answer',type:'agentMessage',phase:'final_answer',text:answer}}},
+      {method:'turn/completed',params:{threadId:f.sessionId,turnId:'turn-1',turn:{id:'turn-1',status:mode==='native-failure'?'failed':'completed',
+        ...(mode==='native-failure'?{error:{message:'Native execution failed'}}:{})}}})
+    const error=await pending
+    if(mode==='stop'||mode==='native-failure')expect(error).toBeInstanceOf(Error)
+    else{expect(error).toBeNull();expect(f.events.some(event=>event.eventType==='assistant.message'&&event.text===answer)).toBe(true)}
+    expect(authorized).toBe(mode==='missing-history'?1:0)
+    const author=trace.find(entry=>entry.method===(mode==='cold-resume'?'thread/resume':'thread/start')&&entry.params.permissions==='bgs-project')!
+    expect(author.params).toMatchObject({approvalPolicy:'on-request',approvalsReviewer:'auto_review'})
+    expect(author.params.config.mcp_servers['bgs-browser']).toMatchObject({enabled_tools:['browser_run_code_unsafe','browser_evaluate'],disabled_tools:['browser_click']})
+    expect(trace.some(entry=>entry.method==='mcpServerStatus/list'||entry.method==='mcpServer/tool/call')).toBe(false)
+    expect(trace.filter(entry=>entry.method==='thread/start'&&entry.params.permissions==='bgs-project-review')).toHaveLength(0)
+    expect(trace.filter(entry=>entry.method==='turn/start')).toHaveLength(1)
+    if(mode==='cold-resume')expect(trace.find(entry=>entry.method==='turn/start')!.params.input).toEqual([])
+  }finally{try{await f?.close()}finally{rpc.mockRestore();cleanup.mockRestore()}}
+},30000)
+
+for (const mode of ['live-command', 'pending-mcp', 'document-task',
+  'receipt-exit', 'receipt-content-exit', 'receipt-running', 'receipt-malformed', 'receipt-wrong-thread', 'receipt-wrong-turn', 'receipt-spoofed-output', 'receipt-without-placeholder', 'receipt-unknown-call', 'receipt-no-context', 'receipt-no-identity', 'receipt-no-history'] as const)
+test('preparation handoff retains genuine unfinished-tool checks: ' + mode, async () => {
+  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
+  const original = BgsClient.prototype.request
+  let cleaned = 0, accepted = 0
+  let historyPath: string | undefined
+  const succeeds = ['receipt-exit','receipt-content-exit'].includes(mode)
+  const rpc = spyOn(BgsClient.prototype, 'request').mockImplementation(async function(this: BgsClient, method: string, params: any, timeout?: number): Promise<any> {
+    if (method === 'thread/resume') throw Error('no rollout found for fresh thread')
+    if (method === 'thread/read' && historyPath) return {thread:{id:params.threadId,path:mode==='receipt-no-history'?null:historyPath}}
+    if (method === 'mcpServerStatus/list') return {data:[{name:'bgs-browser',tools:{
+      browser_run_code_unsafe:{name:'browser_run_code_unsafe',inputSchema:{type:'object',properties:{code:{type:'string'}},required:['code']}}
+    }}],nextCursor:null}
+    if (method === 'thread/backgroundTerminals/clean') cleaned++
+    if (method === 'turn/interrupt') {
+      await original.call(this,'fixture/events',{events:[{method:'turn/completed',params:{threadId:params.threadId,turnId:params.turnId,
+        turn:{id:params.turnId,status:'interrupted'}}}]})
+      return {}
+    }
+    return original.call(this,method,params,timeout)
+  })
+  const finalOutput={schema:{type:'object'},accept:async()=>{accepted++;return 'Verified'}}
+  const f=await fixture('allow',{OPENAI_AUTH_MODE:'chatgpt',BGS_FIXTURE_DESIGN_REVIEW:'manual',
+    BEEGAME_NATIVE_MCP_SERVERS_JSON:JSON.stringify([{id:'browser',name:'Browser',enabled:true,autoStart:true,scope:'global',transport:'stdio',command:'/fixture/browser'}])
+  },resolveOutboundTarget,undefined,undefined,false,undefined,undefined,{finalOutput})
+  try {
+    const runtime=f.runtime as any,client=runtime.client as BgsClient
+    const emit=(...events:any[])=>client.request('fixture/events',{events})
+    const pending=f.submit('Complete current assignment').then(()=>null,error=>error as Error)
+    await waitUntil(()=>runtime.active?.turnId==='turn-1')
+    const receiptMode=mode.startsWith('receipt-')
+    const commandItem={id:'retained-terminal',type:mode === 'pending-mcp' ? 'mcpToolCall' : 'commandExecution',
+      command:'custom-engine-start',cwd:f.workspace,status:'inProgress',
+      source:receiptMode && mode !== 'receipt-without-placeholder' ? 'agent' : 'unifiedExecStartup',
+      ...(receiptMode && mode !== 'receipt-without-placeholder' ? {} : {processId:'20469'})}
+    await emit({method:'item/started',params:{threadId:f.sessionId,turnId:'turn-1',item:commandItem}})
+    if(receiptMode) {
+      const header='Chunk ID: 821203\nWall time: 0.0000 seconds\nProcess exited with code 134\nOriginal token count: 379\nOutput:\nOperation not permitted'
+      const output=mode==='receipt-running' || mode==='receipt-spoofed-output'
+        ? 'Chunk ID: fixture\nWall time: 1.0000 seconds\nProcess running with session ID 20469\nOriginal token count: 2\nOutput:\n'+(mode==='receipt-spoofed-output'?header:'Live output')
+        : mode==='receipt-malformed' ? 'Process exited with code 134' : header
+      historyPath=join(f.workspace,'fixture-native-history.jsonl')
+      await writeFile(historyPath,[
+        ...(mode==='receipt-no-identity'?[]:[{type:'session_meta',payload:{id:mode==='receipt-wrong-thread'?'unrelated-thread':f.sessionId}}]),
+        ...(mode==='receipt-no-context'?[]:[{type:'turn_context',payload:{turn_id:mode==='receipt-wrong-turn'?'wrong-turn':'turn-1'}}]),
+        {type:'response_item',payload:{type:'function_call_output',call_id:mode==='receipt-unknown-call'?'another-call':commandItem.id,
+          output:mode==='receipt-content-exit'?[{type:'input_text',text:output}]:output}}
+      ].map(item=>JSON.stringify(item)).join('\n')+'\n')
+      expect(runtime.items.has(commandItem.id)).toBe(true)
+    }
+    await emit({method:'item/completed',params:{threadId:f.sessionId,turnId:'turn-1',item:{id:'ready',type:'agentMessage',phase:'final_answer',text:JSON.stringify({status:'ready'})}}},
+      {method:'turn/completed',params:{threadId:f.sessionId,turnId:'turn-1',turn:{id:'turn-1',status:'completed'}}})
+    const error=await pending
+    expect(accepted).toBe(succeeds ? 1 : 0)
+    if (succeeds) {
+      expect(error).toBeNull()
+      if(receiptMode) {
+        const ended=f.events.filter(event=>event.toolUseID===commandItem.id&&event.eventType==='tool.failed')
+        expect(ended).toHaveLength(1);expect(ended[0]).toMatchObject({exitCode:134,output:'Operation not permitted'})
+      }
+      expect(runtime.items.has('retained-terminal')).toBe(false)
+      expect(f.events.some(event=>event.toolUseID==='retained-terminal' && event.eventType==='tool.completed')).toBe(false)
+    } else expect(error?.message).toContain(mode === 'receipt-wrong-thread' ? 'another thread' : mode === 'receipt-no-identity' ? 'missing its thread identity' : 'unfinished tools')
+
+    await f.runtime.dispose?.()
+    expect(cleaned).toBe(1)
+  } finally {await f.close();rpc.mockRestore();cleanup.mockRestore()}
+},30000)
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
@@ -81,7 +216,8 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
   nativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput, nativeRecovery = false,
   permissionHandler?: (request: DashboardPermissionRequest) => Promise<import('../beegame/session-manager').DashboardPermissionDecision>,
   workflow?: import('../beegame/session-manager').BeeGameHostToolCapability,
-  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'measurement'|'finishDelivery'|'finalOutput'> = {}) {
+  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'finalOutput'> &
+    Pick<import('../beegame/session-manager').BeeGameSessionRunnerStartInput,'uiLayoutConstraints'> = {}) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
   const childPidFile = join(root, 'owned-child.pid')
   const confirmedBriefContext = hostTools.finalOutput?.designReview ? 'Synthetic confirmed PC requirements' : undefined
@@ -116,7 +252,7 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
 }
 
 test('streams text once, preserves tool lifecycle, and counts cached tokens once', async () => {
-  const f = await fixture()
+  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' })
   try {
     await f.submit('hello')
     expect(f.events.filter(e => e.eventType.startsWith('assistant.')).map(e => e.text).join('')).toBe('Hello Bgs')
@@ -140,71 +276,6 @@ test('native Goal injects the current assignment before activation and owns cont
     expect(f.events.find(event => event.eventType === 'assistant.message')?.text).toBe('Native Goal: native assignment')
     expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal_turn_completed')).toHaveLength(1)
   } finally { await f.close(); cleanup.mockRestore() }
-}, 30_000)
-
-test('host-controlled native Goal completion closes the turn without another model turn and cleans owned children', async () => {
-  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
-  const f = await fixture('allow', {
-    OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_GOAL_FINALIZE: '1',
-  }, resolveOutboundTarget, undefined, { mode: 'start', objective: 'Finalize the delivery' })
-  let submit: Promise<void> | undefined
-  let childPid = 0
-  try {
-    submit = f.submit('delivery submission')
-    await waitUntil(() => f.events.some(event => event.eventType === 'tool.started' && event.toolUseID === 'submission-command'))
-    childPid = Number(await readFile(f.childPidFile, 'utf8'))
-    expect(childPid).toBeGreaterThan(0)
-    expect(() => process.kill(childPid, 0)).not.toThrow()
-
-    await (f.runtime as unknown as { completeGoal(): Promise<void> }).completeGoal()
-    await submit
-    await waitUntil(() => {
-      try { process.kill(childPid, 0); return false } catch { return true }
-    })
-
-    expect(f.events.filter(event => event.eventType === 'assistant.message')).toHaveLength(0)
-    expect(f.events.filter(event => event.eventType?.startsWith('tool.')).map(event => event.eventType))
-      .toEqual(['tool.started', 'tool.completed'])
-    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal_turn_started')).toHaveLength(1)
-    expect(f.events.findLast(event => event.eventType === 'system.status' && event.subtype === 'native_goal')?.nativeGoal?.status).toBe('complete')
-    expect(getLatestRuntimeUsage(f.usage)).toMatchObject({ total_tokens: 130 })
-  } finally {
-    await submit?.catch(() => {})
-    await f.close()
-    cleanup.mockRestore()
-    if (childPid) { try { process.kill(childPid, 'SIGKILL') } catch {} }
-  }
-}, 30_000)
-
-test('host-controlled completion publishes the goal/set response when no Goal update notification follows', async () => {
-  const cleanup = spyOn(browserCleanup, 'closeSessionTestBrowsers').mockResolvedValue(undefined)
-  const f = await fixture('allow', {
-    OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_GOAL_FINALIZE: '1',
-    BGS_FIXTURE_NATIVE_GOAL_FINALIZE_NO_UPDATED: '1',
-  }, resolveOutboundTarget, undefined, { mode: 'start', objective: 'Finalize without a Goal update notification' })
-  let submit: Promise<void> | undefined
-  let childPid = 0
-  try {
-    submit = f.submit('delivery submission without update')
-    await waitUntil(() => f.events.some(event => event.eventType === 'tool.started' && event.toolUseID === 'submission-command'))
-    childPid = Number(await readFile(f.childPidFile, 'utf8'))
-    expect(childPid).toBeGreaterThan(0)
-    await (f.runtime as unknown as { completeGoal(): Promise<void> }).completeGoal()
-    await submit
-    await waitUntil(() => {
-      try { process.kill(childPid, 0); return false } catch { return true }
-    })
-
-    expect(f.events.filter(event => event.eventType === 'system.status' && event.subtype === 'native_goal')
-      .map(event => event.nativeGoal?.status)).toEqual(['active', 'complete'])
-    expect(f.events.filter(event => event.eventType === 'assistant.message')).toHaveLength(0)
-    expect(getLatestRuntimeUsage(f.usage)).toMatchObject({ total_tokens: 130 })
-  } finally {
-    await submit?.catch(() => {})
-    await f.close()
-    cleanup.mockRestore()
-    if (childPid) { try { process.kill(childPid, 'SIGKILL') } catch {} }
-  }
 }, 30_000)
 
 test('native Goal keeps one outer turn across multiple native continuations', async () => {
@@ -313,7 +384,7 @@ test('native file change receipts retain the actual diff in a structured field',
   try {
     await f.submit('file-diff')
     expect(f.events.find(e => e.eventType === 'tool.completed')).toMatchObject({
-      toolUseID: 'edit-1:0', toolName: 'Edit', input: { file_path: 'src/Example.ts' },
+      toolUseID: 'edit-1:src/Example.ts', toolName: 'Edit', input: { file_path: 'src/Example.ts' },
       diff: '@@ -11 +11 @@\n-old\n+new\n', output: '@@ -11 +11 @@\n-old\n+new\n',
     })
   } finally { await f.close() }
@@ -415,19 +486,6 @@ test.each(['completed', 'turn-completed', 'errored', 'interrupted', 'shutdown', 
     } finally { await f.close() }
   })
 
-test('host-controlled Goal completion refuses a running reused child', async () => {
-  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_GOAL_FINALIZE: '1',
-    BGS_FIXTURE_REUSED_CHILD: '1' }, resolveOutboundTarget, undefined, {mode:'start',objective:'Offline reused-child check'})
-  const abort = new AbortController()
-  const submitted = f.submit('delivery submission', abort.signal).catch(error => error)
-  try {
-    await waitUntil(() => f.events.some(event => event.toolUseID === 'submission-command'))
-    await expect((f.runtime as unknown as {completeGoal():Promise<void>}).completeGoal())
-      .rejects.toThrow('requires all child agents to finish')
-    expect(f.events.findLast(event => event.subtype === 'native_goal')?.nativeGoal?.status).toBe('active')
-  } finally { abort.abort(); await submitted; await f.close() }
-})
-
 test('failed turns retain upstream error details from completion or the preceding error notification', async () => {
   for (const prompt of ['failure-details', 'failure-notification']) {
     const f = await fixture()
@@ -461,28 +519,75 @@ test('cache is a subset of input; reasoning output is not counted twice', () => 
 
 test('BGS resumes Bgs history without double charging and does not resume legacy agent UUIDs', async () => {
   const root=await mkdtemp('/private/tmp/bgs-bgs-resume-'), workspace=join(root,'game')
-  const environment=()=>({BEEGAME_CONFIG_DIR:join(root,'config'),OPENAI_API_KEY:'fixture-only'})
-  let manager=new BeeGameSessionManager(createBgsRunner({command,resolveOutboundTarget}),root,environment)
+  const environment=()=>({BEEGAME_CONFIG_DIR:join(root,'config'),OPENAI_AUTH_MODE:'chatgpt'})
+  const runner = createBgsRunner({command,resolveOutboundTarget}), originalStart = runner.start
+  const retained: Array<import('../beegame/session-manager').BeeGameNativeContext | undefined> = []
+  runner.start = input => { retained.push(input.nativeContext); return originalStart(input) }
+  let manager=new BeeGameSessionManager(runner,root,environment)
   try {
     const session=manager.start({workspacePath:workspace,userId:'owner'})
     await manager.sendWithDisplay(session.id,'hello');await manager.waitForSessionIdle(session.id)
     expect(manager.runtimeSnapshot(session.id).runtime).toBe('bgs')
     expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(130)
+    const nativeContext = manager.runtimeSnapshot(session.id).nativeContext!
+    expect(manager.runtimeSnapshot(session.id).nativeSessionId).toBe(nativeContext.threadId)
+    expect(nativeContext.runtimeSha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(nativeContext.briefSha256).toMatch(/^[a-f0-9]{64}$/)
     await manager.dispose()
-    manager=new BeeGameSessionManager(createBgsRunner({command,resolveOutboundTarget}),root,environment)
+    manager=new BeeGameSessionManager(runner,root,environment)
     manager.start({workspacePath:workspace,userId:'owner',transcriptSessionId:session.id})
     await manager.sendWithDisplay(session.id,'hello');await manager.waitForSessionIdle(session.id)
     expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(260)
+    expect(manager.runtimeSnapshot(session.id).nativeContext).toEqual(nativeContext)
+    expect(retained).toEqual([undefined, nativeContext])
+    await manager.restoreProjectEditCheckpoint(session.id, nativeContext.threadId)
+    expect(manager.runtimeSnapshot(session.id).nativeContext).toBeUndefined()
     expect(manager.transcriptFacts(session.id).some(event=>event.type==='turn.completed')).toBe(true)
     await manager.dispose()
-    const path=join(root,'snapshots',session.id+'.json'), snapshot=JSON.parse(await readFile(path,'utf8'))
+    const path=join(root,'snapshots',session.id+'.json')
+    for (const nativeContext of [
+      {threadId:'another-thread', runtimeSha256:'a'.repeat(64), briefSha256:'b'.repeat(64)},
+      {threadId:retained[1]!.threadId, runtimeSha256:'invalid', briefSha256:'b'.repeat(64)},
+    ]) {
+      const snapshot=JSON.parse(await readFile(path,'utf8'))
+      snapshot.nativeContext=nativeContext
+      await writeFile(path,JSON.stringify(snapshot))
+      manager=new BeeGameSessionManager(runner,root,environment)
+      manager.start({workspacePath:workspace,userId:'owner',transcriptSessionId:session.id})
+      await manager.sendWithDisplay(session.id,'hello');await manager.waitForSessionIdle(session.id)
+      expect(retained.at(-1)).toBeUndefined()
+      await manager.dispose()
+    }
+    const snapshot=JSON.parse(await readFile(path,'utf8'))
     delete snapshot.runtime
     await writeFile(path,JSON.stringify(snapshot))
-    manager=new BeeGameSessionManager(createBgsRunner({command,resolveOutboundTarget}),root,environment)
+    manager=new BeeGameSessionManager(runner,root,environment)
     manager.start({workspacePath:workspace,userId:'owner',transcriptSessionId:session.id})
     expect(manager.runtimeSnapshot(session.id).nativeSessionId).toBeUndefined()
   } finally {await manager.dispose();await rm(root,{recursive:true,force:true})}
 },30_000)
+
+test('historical Goal execution invalidates ordinary context fingerprints', async () => {
+  const root=await mkdtemp('/private/tmp/bgs-bgs-resume-'), workspace=join(root,'game')
+  const context={threadId:'native-fixture',runtimeSha256:'a'.repeat(64),briefSha256:'b'.repeat(64)}
+  const starts: import('../beegame/session-manager').BeeGameSessionRunnerStartInput[]=[]
+  const manager=new BeeGameSessionManager({async start(input){
+    starts.push(input)
+    input.onNativeSessionId?.(context.threadId)
+    if (!input.nativeGoal) input.onNativeContext?.(context)
+    return {reusable:false,stop(){},async submit(){}}
+  }},root)
+  try {
+    const session=manager.start({workspacePath:workspace,userId:'owner'})
+    await manager.sendWithDisplay(session.id,'Ordinary task');await manager.waitForSessionIdle(session.id)
+    expect(manager.runtimeSnapshot(session.id).nativeContext).toEqual(context)
+    await manager.sendWithDisplay(session.id,'Historical Goal continuation',{nativeGoal:{mode:'resume'}})
+    await manager.waitForSessionIdle(session.id)
+    expect(starts.at(-1)!.nativeGoal).toEqual({mode:'resume'})
+    expect(starts.at(-1)!.nativeContext).toBeUndefined()
+    expect(manager.runtimeSnapshot(session.id).nativeContext).toBeUndefined()
+  } finally {await manager.dispose();await rm(root,{recursive:true,force:true})}
+})
 
 test.each(['write', 'edit', 'denied', 'revoked', 'cancelled', 'instructions'] as const)(
   'protected write rechecks preserve authority and audit results: %s', async mode => {
@@ -629,7 +734,8 @@ test.each(['success', 'missing-match', 'denied'] as const)('protected batch edit
 
 test('provider unknown tools reach the active BGS event stream without executing or retrying them', async () => {
   let requests = 0
-  const provider = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+  const provider = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    if (request.method === 'GET' && /\/models(?:\/|$)/.test(new URL(request.url).pathname)) return new Response(null, { status: 404 })
     requests++
     return new Response('data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'unknown-call',
       function: { name: 'PRIVATE_UNSUPPORTED_NAME', arguments: '{"secret":"PRIVATE_ARGUMENT"}' } }] }, finish_reason: 'tool_calls' }],
@@ -664,6 +770,26 @@ test.each(['boundary', 'policy', 'unspecified'])('native denial receipts retain 
     expect(f.questions).toHaveLength(mode === 'policy' ? 1 : 0)
   } finally { await f.close() }
 }, 10000)
+
+test.each([
+  ['error', 'Automatic approval review failed before a decision; the action was not executed.'],
+  ['denied', 'Automatic approval review denied this action; it was not executed.'],
+  ['timeout', 'Automatic approval review timed out; the action was not executed.'],
+  ['aborted', 'Automatic approval review was interrupted; the action was not executed.'],
+  ['missing-target', 'Native tool approval was declined; no detailed reason was supplied.'],
+  ['other-target', 'Native tool approval was declined; no detailed reason was supplied.'],
+  ['stale-turn', 'Native tool approval was declined; no detailed reason was supplied.'],
+])('native automatic review keeps its classification on the correct tool only: %s', async (mode, reason) => {
+  const f = await fixture()
+  try {
+    await f.submit('native-denial:review-' + mode)
+    const failures = f.events.filter(event => event.eventType === 'tool.failed')
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toMatchObject({ toolUseID: 'denied-command', output: reason })
+    expect(JSON.stringify(f.events)).not.toContain('PRIVATE_')
+    expect(f.questions).toHaveLength(0)
+  } finally { await f.close() }
+}, 10_000)
 
 test.each(['empty', 'result'])('native MCP failures keep their message and any partial result: %s', async mode => {
   const f = await fixture()
@@ -735,10 +861,11 @@ test('a unique line-prefix helps locate stale text without applying fuzzy or par
 })
 
 
-test('BGS bounds native child concurrency without enabling tools or overriding child models', () => {
+test('BGS inherits native and user concurrency and plan-tool configuration', () => {
   for (const goals of [false, true]) {
     const config = bgsProviderConfig({ OPENAI_AUTH_MODE: 'chatgpt' }, { goals })
-    expect(config['agents.max_concurrent_threads_per_session']).toBe(2)
+    expect(config).not.toHaveProperty('agents.max_concurrent_threads_per_session')
+    expect(config).not.toHaveProperty('tools.update_plan.enabled')
     expect(config).not.toHaveProperty('agents.enabled')
     expect(config).not.toHaveProperty('agents.default_subagent_model')
     expect(config).not.toHaveProperty('agents.default_subagent_reasoning_effort')
@@ -767,9 +894,12 @@ test('doubling streamed output doubles persisted bytes instead of replaying all 
 }, 30_000)
 
 
-test('provider retry policy is left to the native CLI defaults for API and ChatGPT connections', () => {
-  for (const env of [{}, { OPENAI_AUTH_MODE: 'chatgpt' }] as Record<string, string>[]) {
+test('provider retries, tool output budgets and system Skills retain native defaults for API and ChatGPT connections', () => {
+  for (const auth of [{}, {OPENAI_AUTH_MODE:'chatgpt'}] as Record<string,string>[]) for (const model of [undefined,'known-model','unknown-model']) {
+    const env={BGS_HOME:'/synthetic',...auth,...(model?{BEEGAME_MODEL:model}:{})}
     const config = bgsProviderConfig(env) as any
+    expect(config).not.toHaveProperty('skills.config')
+    expect(config).not.toHaveProperty('tool_output_token_limit')
     expect(config.model_providers?.bgs).not.toHaveProperty('request_max_retries')
     expect(config.model_providers?.bgs).not.toHaveProperty('stream_max_retries')
   }
@@ -907,158 +1037,34 @@ test('native workflow registration respects new versus resumed thread capabiliti
       const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
       const start = rpc.find(call => ['thread/start', 'thread/resume'].includes(call.method))
       expect(start.params.dynamicTools?.some((tool: any) => tool.name === 'BgsWorkflow') ?? false).toBe(mode === 'new-workflow')
+      if (mode === 'new-workflow') {
+        const tool=start.params.dynamicTools.find((tool: any) => tool.name === 'BgsWorkflow')
+        expect(tool.inputSchema.properties.action.enum).toEqual(['status','advance','visual','resources','implement','select-visual'])
+        expect(tool.description).toContain('GDD and visual-design results use the current final JSON contract, not advance')
+        expect(tool.description).toContain('select-visual in implementation or resource tasks')
+      }
       if (mode === 'resumed-workflow') expect(start.params).not.toHaveProperty('dynamicTools')
       else expect(start.params.dynamicTools.every((tool: any) => tool.type === 'function')).toBe(true)
     } finally { await f.close() }
   }
 })
 
-test('native workflow uses the live parent callback and rejects cancelled, stale and child requests', async () => {
-  const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt' }, resolveOutboundTarget,
-    undefined, undefined, false, undefined, async () => { throw Error('Must not use startup callback') })
-  const client = (f.runtime as unknown as { client: BgsClient }).client
-  const abort = new AbortController()
-  const calls: unknown[] = []
-  let pendingSignal: AbortSignal | undefined, release: (() => void) | undefined
-  const submitted = f.runtime.submit({ prompt: 'hang', signal: abort.signal,
-    measurement: async value => ({ receipt: value }),
-    workflow: async (value, signal) => {
-      calls.push(value)
-      if ((value as any).action === 'advance') {
-        pendingSignal = signal
-        await new Promise<void>(resolve => { release = resolve })
-      }
-      return { assignment: 'current' }
-    }, onMessage: () => {}, requestPermission: async () => ({ behavior: 'deny' }) }).catch(error => error)
-  const emit = (...events: unknown[]) => client.request('fixture/events', { events })
-  const call = (id: string, action = 'status', threadId = f.sessionId, turnId = 'turn-1') => ({ id, method: 'item/tool/call',
-    params: { threadId, turnId, callId: id, tool: 'BgsWorkflow', arguments: { action } } })
-  const response = async (id: string) => {
-    for (let i = 0; i < 100; i++) {
-      const result = (await client.request('fixture/responses', {})).responses.find((item: any) => item.id === id)
-      if (result) return result
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    throw Error('No fixture response: ' + id)
-  }
-  try {
-    await emit(call('status'))
-    expect((await response('status')).result).toEqual({ success: true, contentItems: [{ type: 'inputText', text: '{"assignment":"current"}' }] })
-    await emit({ id:'measure', method:'item/tool/call', params:{threadId:f.sessionId,turnId:'turn-1',callId:'measure',
-      tool:'BgsMeasurement',arguments:{inspectRequestKey:'saved'}} })
-    expect((await response('measure')).result).toEqual({success:true,contentItems:[{type:'inputText',text:'{"receipt":{"inspectRequestKey":"saved"}}'}]})
-    await emit({ method: 'item/completed', params: { threadId: f.sessionId, turnId: 'turn-1', item: {
-      id: 'spawn-child', type: 'collabAgentToolCall', tool: 'spawnAgent', receiverThreadIds: ['child'],
-      agentsStates: { child: { status: 'running' } }, status: 'completed' } } }, call('child', 'advance', 'child', 'child-1'))
-    expect((await response('child')).result.success).toBe(false)
-    await emit(call('stale', 'advance', f.sessionId, 'stale-turn'))
-    expect((await response('stale')).error).toBeDefined()
-    expect(calls).toEqual([{ action: 'status' }])
-    await emit(call('cancelled', 'advance'))
-    await waitUntil(() => pendingSignal !== undefined)
-    await emit({ method: 'serverRequest/resolved', params: { threadId: f.sessionId, requestId: 'cancelled' } })
-    await waitUntil(() => pendingSignal!.aborted)
-    release!()
-    await emit(call('after-cancel'))
-    expect((await response('after-cancel')).result.success).toBe(true)
-    expect((await client.request('fixture/responses', {})).responses.some((item: any) => item.id === 'cancelled')).toBe(false)
-  } finally { abort.abort(); release?.(); await submitted; await f.close() }
-})
 
-
-test.each(['valid', 'blocked', 'command', 'dynamic', 'child'])(
-  'native terminal delivery closes only its own submission and rejects other work: %s', async mode => {
-    let f!: Awaited<ReturnType<typeof fixture>>
-    let calls = 0
-    f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_FINISH: mode==='blocked'?'valid':mode },
-      resolveOutboundTarget, undefined, { mode: 'start', objective: 'Deliver the fixture' }, false, undefined, undefined,
-      { measurement: async () => ({}), finishDelivery: async (value, signal) => {
-        expect(value).toEqual({ requirementsRevision: 'fixture-revision' })
-        expect(signal?.aborted).toBe(false)
-        calls++
-        await f.runtime.completeGoal!(mode==='blocked'?'blocked':'complete')
-        return { submitted: true }
-      } })
-    const abort = new AbortController()
-    const submitted = f.submit('Submit the saved report', abort.signal).catch(error => error)
+test('new and resumed threads do not register retired measurement or submission tools',async()=>{
+  for (const resumed of [false,true]) {
+    const f=await fixture('allow',{OPENAI_AUTH_MODE:'chatgpt'},resolveOutboundTarget,
+      resumed?'019a0000-0000-7000-8000-000000000001':undefined,
+      undefined,false,undefined,undefined,{uiLayoutConstraints:{platform:'Web'}})
     try {
-      if (mode === 'valid' || mode === 'blocked') {
-        expect(await submitted).toBeUndefined()
-        expect(f.events.some(event => event.eventType === 'assistant.message')).toBe(false)
-        expect(f.events.findLast(event => event.subtype === 'native_goal')?.nativeGoal.status).toBe(mode==='blocked'?'blocked':'complete')
-        expect(f.events.some(event => event.eventType === 'tool.completed' && event.toolUseID === 'native-finish')).toBe(false)
-      } else {
-        await waitUntil(() => f.events.some(event => event.eventType === 'assistant.message'))
-        expect(f.events.find(event => event.eventType === 'assistant.message')?.text).toContain('"success":false')
-      }
-      const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-      const names = rpc.find(call => call.method === 'thread/start').params.dynamicTools.map((tool: any) => tool.name)
-      expect(names).toContain('BgsMeasurement'); expect(names).toContain('BgsFinishDelivery')
-      expect(rpc.filter(call => call.method === 'thread/goal/set' && call.params.status === (mode==='blocked'?'blocked':'complete'))).toHaveLength(mode === 'valid' || mode==='blocked' ? 1 : 0)
-      expect(rpc.some(call => call.method === 'turn/start')).toBe(false)
-      expect(calls).toBe(1)
-    } finally { abort.abort(); await submitted; await f.close() }
-  })
+      const rpc=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+      const start=rpc.find(call=>['thread/start','thread/resume'].includes(call.method))
+      const server=start.params.config.mcp_servers['bgs-ui-layout']
+      expect(start.params.dynamicTools?.some((tool:any)=>['BgsMeasurement','BgsFinishDelivery'].includes(tool.name))??false).toBe(false)
 
-
-test('cancelled native terminal delivery cannot finish the Goal after its callback resumes', async () => {
-  let f!: Awaited<ReturnType<typeof fixture>>
-  let signal: AbortSignal | undefined, release!: () => void, attempted!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve })
-  const done = new Promise<void>(resolve => { attempted = resolve })
-  f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BGS_FIXTURE_NATIVE_FINISH: 'valid' },
-    resolveOutboundTarget, undefined, { mode:'start', objective:'Deliver the fixture' }, false, undefined, undefined,
-    { finishDelivery: async (_value, requestSignal) => {
-      signal = requestSignal
-      await gate
-      try { await f.runtime.completeGoal!(); return {} } finally { attempted() }
-    } })
-  const abort = new AbortController(), submitted = f.submit('Submit the saved report', abort.signal).catch(error => error)
-  const client = (f.runtime as unknown as { client: BgsClient }).client
-  try {
-    await waitUntil(() => signal !== undefined)
-    await client.request('fixture/events', { events: [{ method:'serverRequest/resolved', params:{threadId:f.sessionId,requestId:'native-finish'} }] })
-    await waitUntil(() => signal!.aborted)
-    release(); await done
-    const rpc = (await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
-    expect(rpc.some(call => call.method==='thread/goal/set' && call.params.status==='complete')).toBe(false)
-    expect((await client.request('fixture/responses',{})).responses.some((item:any)=>item.id==='native-finish')).toBe(false)
-  } finally { release(); abort.abort(); await submitted; await f.close() }
+      expect(server).not.toHaveProperty('disabled_tools')
+    } finally {await f.close()}
+  }
 })
-
-
-test('native terminal delivery crosses SessionManager submission persistence and settlement cleanup', async () => {
-  const root = await mkdtemp('/private/tmp/bgs-native-delivery-session-')
-  const native = createBgsRunner({ command, resolveOutboundTarget })
-  const manager = new BeeGameSessionManager({ start: input => native.start({ ...input,
-    env: { ...input.env, BGS_FIXTURE_NATIVE_FINISH:'valid' } }) }, root,
-    () => ({ BEEGAME_CONFIG_DIR:join(root,'config'), OPENAI_AUTH_MODE:'chatgpt' }))
-  let turnId = '', closed = 0
-  try {
-    const session = manager.start({workspacePath:join(root,'game'),userId:'owner'})
-    await manager.sendWithDisplay(session.id,'Submit the validated fixture',{
-      nativeGoal:{mode:'start',objective:'Deliver the fixture'},
-      executionIdentity:{attemptId:'fixture-attempt',workerId:'fixture-worker',fence:1},
-      onTurnAccepted:id=>{turnId=id},
-      prepareTurn:async()=>({finishDelivery:async value=>{
-        // Validation itself is covered with real reports in agent-measurement;
-        // this fixture exercises persistence, native shutdown and settlement.
-        await manager.completeNativeGoal(session.id,turnId,{attemptId:'fixture-attempt',
-          requirementsRevision:(value as any).requirementsRevision,reportPath:'.beegame/delivery/acceptance.json',
-          reportSha256:'a'.repeat(64),sourceSha256:'b'.repeat(64),status:'passed',summary:'Synthetic validated submission'})
-        return {}
-      },close:async()=>{closed++}}),
-    })
-    await manager.waitForSessionIdle(session.id)
-    const events=manager.transcript(session.id)
-    const receipt=events.findIndex(event=>event.payload?.subtype==='delivery_submission')
-    const complete=events.findIndex(event=>event.payload?.subtype==='native_goal' && (event.payload.nativeGoal as any)?.status==='complete')
-    expect(receipt).toBeGreaterThanOrEqual(0);expect(complete).toBeGreaterThan(receipt)
-    expect(events.some(event=>event.type==='turn.failed')).toBe(false)
-    expect(closed).toBe(1)
-    expect(manager.get(session.id)?.turnStatus).toBe('idle')
-  } finally {await manager.dispose();await rm(root,{recursive:true,force:true})}
-}, 10000)
 
 
 test('native Skill read targets use catalog identity and structured read actions, never path mentions',()=>{
@@ -1135,6 +1141,46 @@ for(const result of ['ready','malformed','missing','rejected'] as const)test('na
   }finally{await f.close()}
 })
 
+
+for (const [text, phase, visible] of [
+  ['正在读取设计文档。', undefined, true],
+  ['Explicit progress', 'commentary', true],
+  ['Not a progress message', 'final_answer', false],
+  ['{"summary":"PRIVATE_CANDIDATE"}', undefined, false],
+  ['{"summary":"PRIVATE_TRUNCATED', undefined, false],
+  ['```json\n{"summary":"PRIVATE_FENCED"}\n```', undefined, false],
+] as const) test('structured tasks publish only confirmed public progress: ' + text, async () => {
+  const accepted: unknown[] = []
+  const f = await fixture('allow', { BGS_FIXTURE_DESIGN_REVIEW: 'manual' }, resolveOutboundTarget,
+    undefined, undefined, false, undefined, undefined, { finalOutput: {
+      schema: { type: 'object' }, accept: async value => { accepted.push(value); return 'Validated handoff' },
+    } })
+  const client = (f.runtime as unknown as { client: BgsClient }).client
+  const submitted = f.submit('Complete the saved design')
+  try {
+    await waitUntil(() => (f.runtime as unknown as { active?: { turnId?: string } }).active?.turnId === 'turn-1')
+    const emit = (...events: unknown[]) => client.request('fixture/events', { events })
+    const params = { threadId: f.sessionId, turnId: 'turn-1' }
+    await emit(
+      { method: 'item/agentMessage/delta', params: { ...params, itemId: 'progress', delta: text } },
+      { method: 'item/completed', params: { ...params, item: { id: 'progress', type: 'agentMessage', text,
+        ...(phase ? { phase } : {}) } } },
+    )
+    const tool = { id: 'read-design', type: 'commandExecution', command: 'cat docs/GDD.md' }
+    await emit(
+      { method: 'item/started', params: { ...params, item: { ...tool, status: 'inProgress' } } },
+      { method: 'item/completed', params: { ...params, item: { ...tool, status: 'completed', exitCode: 0, aggregatedOutput: 'Saved design', durationMs: 1 } } },
+      { method: 'item/completed', params: { ...params, item: { id: 'final', type: 'agentMessage',
+        text: '{"summary":"PRIVATE_FINAL"}' } } },
+      { method: 'turn/completed', params: { ...params, turn: { id: 'turn-1', status: 'completed' } } },
+    )
+    await submitted
+    expect(accepted).toEqual([{ summary: 'PRIVATE_FINAL' }])
+    const messages = f.events.filter(event => ['assistant.message', 'assistant.partial'].includes(event.eventType))
+    expect(messages.map(event => event.text)).toEqual(visible ? [text, 'Validated handoff'] : ['Validated handoff'])
+    expect(messages.some(event => event.text.includes('PRIVATE_'))).toBe(false)
+  } finally { await f.close() }
+})
 
 test('rg no-result classification requires a literal whole command and an ordinary empty exit 1', () => {
   const receipt = {type:'commandExecution',status:'failed',exitCode:1,aggregatedOutput:''}
@@ -1316,14 +1362,18 @@ test.each(['request', 'task', 'revoked'] as const)('document authorization block
   }
 }, 10_000)
 
-for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect', 'missing-response', 'missing-resolution', 'advisory-label', 'invalid', 'failed', 'source-changed', 'cancel', 'blocked'] as const)
+for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect', 'missing-response', 'missing-resolution', 'advisory-label', 'invalid', 'failed', 'source-changed', 'snapshot-changed', 'exhausted', 'cancel', 'blocked'] as const)
   test('independent GDD review: ' + outcome, async () => {
     const receipts: DesignReviewReceipt[] = [], accepted: unknown[] = []
     const needsRevision = ['revise', 'rejected', 'unresolved', 'new-defect', 'missing-response', 'missing-resolution'].includes(outcome)
-    let sourceHash = 'candidate-1'
+    const candidateText = outcome === 'revise'
+      ? '# Rules\nRequired: a player can confirm or cancel a choice.\nAuthor proposal: confirmation is immediate.\nAuthor proposal: confirmation requires a second action.\nSOURCE_END\n'
+      : 'candidate-1\n完整设计 🎮\r\nSOURCE_END\n'
+    let sourceHash = createHash('sha256').update(candidateText).digest('hex')
     const source = () => ({ path: 'docs/GDD.md', sha256: sourceHash })
     const contract = { readOnly: true, schema: { type: 'object' },
       designReview: {
+        context: 'Current GDD handoff: visual design with the approved target library.',
         candidate: async (value: unknown) => {
           const result = value as { status: string; summary: string; reviewResponses?: DesignReviewDisposition[] }
           if (result.status !== 'ready') throw Error('Draft blocked')
@@ -1335,21 +1385,24 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
     }
     const f = await fixture('allow', { BGS_FIXTURE_DESIGN_REVIEW: 'manual', BEEGAME_MODEL: 'chosen-model' },
       resolveOutboundTarget, undefined, undefined, false, undefined, undefined, { finalOutput: contract })
+    await writeFile(join(f.workspace, 'docs/GDD.md'), outcome === 'snapshot-changed' ? 'Changed before snapshot' : candidateText)
     const client = (f.runtime as unknown as { client: BgsClient }).client
     const trace = async () => (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     const emit = (...events: unknown[]) => client.request('fixture/events', { events })
-    const finish = (threadId: string, turnId: string, text: string, status = 'completed') => emit(
+    const finish = (threadId: string, turnId: string, text: string, status = 'completed', error?: { message: string; bgsErrorInfo: string }) => emit(
       { method: 'item/completed', params: { threadId, turnId, item: { type: 'agentMessage', id: turnId + '-final', text, phase: 'final_answer' } } },
       { method: 'thread/tokenUsage/updated', params: { threadId, turnId, tokenUsage: { total: { inputTokens: 100, cachedInputTokens: 20, outputTokens: 30 } } } },
-      { method: 'turn/completed', params: { threadId, turnId, turn: { id: turnId, status } } },
+      { method: 'turn/completed', params: { threadId, turnId, turn: { id: turnId, status, ...(error ? { error } : {}) } } },
     )
     const finding = { location: 'GDD §Rules', issue: 'Contradictory transition',
       evidence: 'The same event has two mutually exclusive results.', impact: 'The implementation must invent a rule.' }
     const disposition = { finding: 1, status: outcome === 'rejected' ? 'rejected' as const : 'corrected' as const,
-      evidence: 'Saved Rules defines the event condition and outcome; the original condition excludes the reported counterexample.' }
+      evidence: outcome === 'revise'
+        ? 'Rules retains player confirmation and cancellation; the unconfirmed second-action proposal was withdrawn, leaving immediate confirmation.'
+        : 'Saved Rules defines the event condition and outcome; the original condition excludes the reported counterexample.' }
     const report = (hasFindings = false, followup = false) => JSON.stringify({
       summary: hasFindings ? 'Transition needs resolution' : 'No material issue found; runtime remains unverified',
-      findings: hasFindings ? [finding] : outcome === 'advisory-label' ? [{ ...finding, severity: 'advisory' }] : [],
+      findings: hasFindings && !(followup && outcome === 'unresolved') ? [finding] : outcome === 'advisory-label' ? [{ ...finding, severity: 'advisory' }] : [],
       ...(followup && outcome !== 'missing-resolution' ? { resolutions: [{ ...disposition,
         status: outcome === 'unresolved' ? 'unresolved' : disposition.status }] } : {}),
     })
@@ -1358,8 +1411,8 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
       const submitted = f.submit('Author-only history marker', controller.signal).then(() => null, error => error as Error)
       await waitUntilAsync(async () => (await trace()).some(row => row.method === 'turn/start'))
       await finish(f.sessionId, 'turn-1', JSON.stringify({ status: outcome === 'blocked' ? 'blocked' : 'ready', summary: 'Author-only summary marker' }))
-      if (outcome === 'blocked') {
-        expect((await submitted)?.message).toContain('Draft blocked')
+      if (outcome === 'blocked' || outcome === 'snapshot-changed') {
+        expect((await submitted)?.message).toContain(outcome === 'blocked' ? 'Draft blocked' : 'changed before independent review')
         expect((await trace()).filter(row => row.method === 'thread/start')).toHaveLength(1)
         expect(receipts).toHaveLength(0)
         return
@@ -1369,18 +1422,32 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
       expect(starts).toHaveLength(2)
       const reviewer = starts[1].params
       expect(reviewer.model).toBe('chosen-model')
-      expect(reviewer.permissions).toBe(starts[0].params.permissions)
+      expect(starts[0].params.permissions).toBe('bgs-project')
+      expect(reviewer.permissions).toBe('bgs-project-review')
+      expect(reviewer.config.shell_environment_policy.include_only).toEqual(expect.arrayContaining(['PATH', 'TMPDIR', 'BUN_INSTALL_CACHE_DIR']))
+      expect(reviewer.config.shell_environment_policy.include_only.some((key: string) => /^(BEEGAME_|PLAYWRIGHT_)/.test(key))).toBe(false)
       expect(reviewer.dynamicTools).toEqual([])
+      expect(reviewer.baseInstructions).toContain('independent game-design document reviewer')
+      expect(reviewer.config.project_doc_max_bytes).toBe(0)
+      expect(reviewer.config).not.toHaveProperty('tools.update_plan.enabled')
       expect(reviewer.config['features.multi_agent']).toBe(false)
       expect(reviewer.config['features.multi_agent_v2']).toBe(false)
       expect(reviewer.config['features.goals']).toBe(false)
+      expect(reviewer.config['features.image_generation']).toBe(false)
+      expect(reviewer.config['features.view_image']).toBe(false)
+      expect(reviewer.developerInstructions).toContain(DESIGN_REVIEW_INSTRUCTIONS)
       expect(reviewer.developerInstructions).not.toContain('Author-only')
       expect(reviewer.developerInstructions).not.toContain('Return only the required status and summary')
       const initialReview = (await trace()).filter(row => row.method === 'turn/start')[1].params
       expect(initialReview.threadId).toBe('review-thread-2')
       expect(initialReview.parentTurnId).toBe('turn-1')
       expect(initialReview.input[0].text).toContain('Synthetic confirmed PC requirements')
-      expect(initialReview.input[0].text).toContain('candidate-1')
+      expect(initialReview.input[0].text).toContain(contract.designReview.context)
+      expect(f.events.find(event => event.eventType === 'tool.started' && event.text === 'Independent GDD review')!.input.prompt).not.toContain(contract.designReview.context)
+      expect(initialReview.input[0].text).toContain(JSON.stringify(candidateText))
+      expect(initialReview.input[0].text).toContain(sourceHash)
+      expect(f.events.find(event => event.eventType === 'tool.started' && event.text === 'Independent GDD review')!.input.prompt).not.toContain('SOURCE_END')
+      expect(reviewer.config['skills.config'].every((skill: {enabled: boolean}) => !skill.enabled)).toBe(true)
       expect(initialReview.input[0].text).not.toContain('Author-only')
       expect(initialReview).not.toHaveProperty('outputSchema')
       if (outcome === 'cancel') {
@@ -1401,13 +1468,30 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         const denied = (await client.request('fixture/responses', {})).responses.find((r: any) => r.id === 'review-write')
         expect(denied.result.success).toBe(false)
       }
-      if (outcome === 'source-changed') sourceHash = 'external-change'
-      await finish('review-thread-2', 'turn-2', outcome === 'invalid' ? 'not a report' : report(needsRevision), outcome === 'failed' ? 'failed' : 'completed')
+      if (outcome === 'source-changed') {
+        await writeFile(join(f.workspace, 'docs/GDD.md'), 'external-change')
+        sourceHash = createHash('sha256').update('external-change').digest('hex')
+      }
+      await finish('review-thread-2', 'turn-2', outcome === 'invalid' ? 'not a report' : report(needsRevision),
+        outcome === 'failed' || outcome === 'exhausted' ? 'failed' : 'completed',
+        outcome === 'exhausted' ? { message: 'Incomplete response returned, reason: max_output_tokens PRIVATE_UPSTREAM_DATA', bgsErrorInfo: 'other' } : undefined)
       if (needsRevision) {
         await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 3)
+        const revision = (await trace()).filter(row => row.method === 'turn/start')[2].params.input[0].text
+        expect(revision).toContain('Verify this current numbered revision list before editing')
+        expect(revision).toContain('reject the finding with those supporting clauses')
+        expect(revision).toContain('revise or withdraw an unconfirmed author proposal')
+        expect(revision).toContain('preserve explicit user requirements and selected designs')
+        expect(reviewer.developerInstructions).toContain('A real contradiction remains a finding even when its clauses are author proposals')
         expect(receipts).toHaveLength(1)
         expect(accepted).toHaveLength(0)
-        if (outcome !== 'rejected') sourceHash = 'candidate-2'
+        if (outcome !== 'rejected') {
+          const revisedText = outcome === 'revise'
+            ? '# Rules\nRequired: a player can confirm or cancel a choice.\nAuthor proposal: confirmation is immediate.\n'
+            : 'candidate-2'
+          await writeFile(join(f.workspace, 'docs/GDD.md'), revisedText)
+          sourceHash = createHash('sha256').update(revisedText).digest('hex')
+        }
         await finish(f.sessionId, 'turn-3', JSON.stringify({ status: 'ready', summary: 'AUTHOR_BLANKET_SUMMARY_NOT_EVIDENCE',
           ...(outcome !== 'missing-response' ? { reviewResponses: [disposition] } : {}) }))
         if (outcome === 'missing-response') {
@@ -1419,38 +1503,301 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         }
         await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 4)
         const followup = (await trace()).filter(row => row.method === 'turn/start')[3].params
-        expect(followup.threadId).toBe('review-thread-2')
+        expect(followup.threadId).toBe('review-thread-3')
+        expect(followup.parentTurnId).toBe('turn-3')
+        expect(followup.input[0].text).toContain('Synthetic confirmed PC requirements')
+        expect(followup.input[0].text).toContain(contract.designReview.context)
+        const followupStart = (await trace()).filter(row => row.method === 'thread/start')[2].params
+        expect(followupStart.permissions).toBe('bgs-project-review')
+        expect(followupStart.dynamicTools).toEqual([])
+        expect(followupStart.config).toEqual(reviewer.config)
         expect(followup.input[0].text).toContain('Targeted follow-up only')
         expect(followup.input[0].text).toContain(sourceHash)
         expect(followup.input[0].text).toContain(disposition.evidence)
+        if (outcome === 'revise') {
+          expect(followup.input[0].text).toContain('Required: a player can confirm or cancel a choice.')
+          expect(followup.input[0].text).toContain('Author proposal: confirmation is immediate.')
+          expect(await readFile(join(f.workspace, 'docs/GDD.md'), 'utf8')).not.toContain('confirmation requires a second action')
+        }
         expect(followup.input[0].text).not.toContain('AUTHOR_BLANKET_SUMMARY_NOT_EVIDENCE')
         await emit({ method: 'item/completed', params: { threadId: 'review-thread-2', turnId: 'turn-2',
           item: { type: 'agentMessage', id: 'stale-review', text: 'stale malformed report', phase: 'final_answer' } } })
-        await finish('review-thread-2', 'turn-4', report(outcome === 'unresolved' || outcome === 'new-defect', true))
+        await finish('review-thread-3', 'turn-4', report(outcome === 'unresolved' || outcome === 'new-defect', true))
+        expect(f.events.filter(event => event.eventType === 'assistant.message' || event.eventType === 'assistant.partial')
+          .some(event => event.text.includes('stale malformed report'))).toBe(false)
+      }
+      if (outcome === 'unresolved' || outcome === 'new-defect') {
+        await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 5)
+        const revision = (await trace()).filter(row => row.method === 'turn/start')[4].params
+        expect(revision.threadId).toBe(f.sessionId)
+        expect(revision.input[0].text).toContain(finding.issue)
+        await writeFile(join(f.workspace, 'docs/GDD.md'), 'candidate-3')
+        sourceHash = createHash('sha256').update('candidate-3').digest('hex')
+        await finish(f.sessionId, 'turn-5', JSON.stringify({ status: 'ready', summary: 'Second revision', reviewResponses: [disposition] }))
+        await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 6)
+        const finalReview = (await trace()).filter(row => row.method === 'turn/start')[5].params
+        expect(finalReview.threadId).toBe('review-thread-4')
+        await finish('review-thread-4', 'turn-6', report(outcome === 'unresolved', true))
       }
       const error = await submitted
-      if (outcome === 'pass' || outcome === 'revise' || outcome === 'rejected') {
+      if (outcome === 'pass' || outcome === 'revise' || outcome === 'rejected' || outcome === 'new-defect') {
         expect(error).toBeNull()
         expect(accepted).toHaveLength(1)
         expect(receipts.at(-1)?.source.sha256).toBe(sourceHash)
-        expect(receipts.at(-1)?.nativeThreadId).toBe('review-thread-2')
-        expect(receipts.at(-1)?.nativeTurnId).toBe(outcome === 'pass' ? 'turn-2' : 'turn-4')
+        expect(receipts.at(-1)?.nativeThreadId).toBe(outcome === 'pass' ? 'review-thread-2' : outcome === 'new-defect' ? 'review-thread-4' : 'review-thread-3')
+        expect(receipts.at(-1)?.nativeTurnId).toBe(outcome === 'pass' ? 'turn-2' : outcome === 'new-defect' ? 'turn-6' : 'turn-4')
         if (needsRevision) expect(receipts.at(-1)?.authorResponses).toEqual([disposition])
         expect(f.events.filter(e => e.eventType === 'assistant.message').map(e => e.text).join('')).toContain('GDD handed off')
       } else {
-        expect(error?.message).toContain({ unresolved: 'still has unresolved', 'new-defect': 'still has unresolved', 'missing-resolution': 'exactly one evidence-backed disposition', 'missing-response': 'exactly one evidence-backed disposition', 'advisory-label': 'invalid report', invalid: 'invalid JSON', failed: 'review failed', 'source-changed': 'changed during' }[outcome])
+        expect(error?.message).toContain({ unresolved: 'did not reduce outstanding', 'missing-resolution': 'exactly one evidence-backed disposition', 'missing-response': 'exactly one evidence-backed disposition', 'advisory-label': 'invalid report', invalid: 'invalid JSON', failed: 'review failed', exhausted: 'max_output_tokens', 'source-changed': 'changed during' }[outcome])
         expect(accepted).toHaveLength(0)
-        if (outcome === 'unresolved' || outcome === 'new-defect') {
-          expect(error?.message).toContain(finding.issue)
-          expect(error?.message).toContain(disposition.evidence)
-          expect(error?.message).toContain('without another automatic review')
+        if (outcome === 'exhausted') {
+          expect(error).toMatchObject({ bgsErrorInfo: 'other' })
+          expect(error!.message).not.toContain('PRIVATE_UPSTREAM_DATA')
+          const failed = f.events.find(event => event.eventType === 'tool.failed' && event.text === 'Independent GDD review')!
+          expect(failed.output).toContain('max_output_tokens')
+          expect(failed.output).not.toContain('PRIVATE_UPSTREAM_DATA')
+        }
+        if (outcome === 'unresolved') {
+          expect(error).toBeInstanceOf(ProductionBlockedError)
+          expect(error?.message).not.toContain(finding.issue)
+          expect(error?.message).not.toContain(disposition.evidence)
+          expect(receipts.at(-1)?.report.resolutions?.[0]?.status).toBe('unresolved')
         }
       }
-      const rounds = needsRevision ? 2 : 1
-      expect(receipts).toHaveLength(['invalid', 'failed', 'source-changed', 'advisory-label'].includes(outcome) ? 0 : outcome === 'missing-resolution' ? 1 : rounds)
+      const rounds = outcome === 'unresolved' || outcome === 'new-defect' ? 3 : needsRevision ? 2 : 1
+      expect(receipts).toHaveLength(['invalid', 'failed', 'exhausted', 'source-changed', 'advisory-label'].includes(outcome) ? 0 : outcome === 'missing-resolution' ? 1 : rounds)
       const calls = await trace()
-      expect(calls.filter(row => row.method === 'thread/start')).toHaveLength(2)
+      const reviewThreads = calls.filter(row => row.method === 'thread/start').slice(1)
+      expect(reviewThreads).toHaveLength(rounds)
+      expect(new Set(receipts.map(receipt => receipt.nativeThreadId)).size).toBe(receipts.length)
+      expect(calls.some(row => row.method === 'thread/resume' || row.method === 'thread/fork')).toBe(false)
       expect(calls.filter(row => row.method === 'turn/start')).toHaveLength(rounds * 2)
       expect(calls.some(row => row.method === 'thread/goal/set')).toBe(false)
     } finally { controller.abort(); await f.close() }
   })
+
+for (const counts of [[3, 2, 1, 0], [1, 2, 1]]) test('GDD progress tracks best outstanding count: ' + counts.join(' → '), async () => {
+  const receipts: DesignReviewReceipt[] = []
+  let hash = createHash('sha256').update('candidate-0').digest('hex'), accepted = false
+  const source = () => ({ path: 'docs/GDD.md', sha256: hash })
+  const contract = { readOnly: true, schema: { type: 'object' }, designReview: {
+    context: 'Current GDD handoff: visual design.',
+    candidate: async (value: unknown) => ({ source: source(), ...(value as { summary: string; reviewResponses?: DesignReviewDisposition[] }) }),
+    record: async (receipt: DesignReviewReceipt) => { receipts.push(receipt) },
+  }, accept: async () => { assertDesignReviewReady(source(), receipts); accepted = true; return 'Handed off' } }
+  const f = await fixture('allow', { BGS_FIXTURE_DESIGN_REVIEW: 'manual' }, resolveOutboundTarget,
+    undefined, undefined, false, undefined, undefined, { finalOutput: contract })
+  const client = (f.runtime as unknown as { client: BgsClient }).client
+  const trace = async () => (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+  const finish = (threadId: string, n: number, value: unknown) => client.request('fixture/events', { events: [
+    { method: 'item/completed', params: { threadId, turnId: 'turn-' + n, item: { type: 'agentMessage', id: 'final-' + n, text: JSON.stringify(value), phase: 'final_answer' } } },
+    { method: 'turn/completed', params: { threadId, turnId: 'turn-' + n, turn: { id: 'turn-' + n, status: 'completed' } } },
+  ] })
+  const controller = new AbortController()
+  const submitted = f.submit('Synthetic progress test', controller.signal).then(() => null, error => error as Error)
+  try {
+    let previousCount = 0
+    for (const [index, count] of counts.entries()) {
+      const n = index * 2 + 1
+      await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === n)
+      const responses = Array.from({ length: previousCount }, (_, i) => ({ finding: i + 1, status: 'corrected' as const, evidence: 'Saved owning definition and dependent uses updated.' }))
+      const text = 'candidate-' + index
+      await writeFile(join(f.workspace, 'docs/GDD.md'), text)
+      hash = createHash('sha256').update(text).digest('hex')
+      await finish(f.sessionId, n, { status: 'ready', summary: 'Candidate saved', ...(index ? { reviewResponses: responses } : {}) })
+      await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === n + 1)
+      await finish('review-thread-' + (index + 2), n + 1, { summary: 'Current findings',
+        findings: Array.from({ length: count }, (_, i) => ({ location: 'Rules ' + i, issue: 'Current defect ' + index + '-' + i,
+          evidence: 'The same condition gives incompatible results.', impact: 'Implementation needs a decision.' })),
+        ...(index ? { resolutions: responses } : {}),
+      })
+      previousCount = count
+    }
+    const error = await submitted
+    if (counts.at(-1) === 0) { expect(error).toBeNull(); expect(accepted).toBe(true) }
+    else { expect(error).toBeInstanceOf(ProductionBlockedError); expect(accepted).toBe(false) }
+    expect(receipts).toHaveLength(counts.length)
+    const calls = await trace()
+    expect(calls.filter(row => row.method === 'thread/start')).toHaveLength(counts.length + 1)
+    expect(new Set(receipts.map(receipt => receipt.nativeThreadId)).size).toBe(counts.length)
+    expect(calls.filter(row => row.method === 'turn/start')).toHaveLength(counts.length * 2)
+  } finally { controller.abort(); await submitted; await f.close() }
+})
+
+test.each([null, 'high'] as const)('GDD author and reviewer retain the original reasoning preference: %s', async effort => {
+  const configRoot = await mkdtemp('/private/tmp/bgs-design-effort-')
+  const env = { BEEGAME_CONFIG_DIR: configRoot, BGS_FIXTURE_DESIGN_REVIEW: 'manual', BEEGAME_API_PROTOCOL: 'chat-completions',
+    OPENAI_BASE_URL: 'https://opencode.ai/zen/go/v1', BEEGAME_MODEL: 'deepseek-v4.1-flash' }
+  if (effort) saveReasoningPreference(env, reasoningConnectionKey(env, env.BEEGAME_MODEL), effort)
+  const f = await fixture('allow', env, async value => ({ url: new URL(value), addresses: ['127.0.0.1'],
+    lookup: (_host, _options, callback) => callback(Error('No external requests allowed in this fixture'), '', 4) }),
+    undefined, undefined, false, undefined, undefined, { finalOutput: { readOnly: true, schema: { type: 'object' },
+      designReview: { context: 'Current GDD handoff: visual design.', candidate: async () => ({ source: { path: 'docs/GDD.md', sha256: createHash('sha256').update('Fixture GDD').digest('hex') }, summary: 'Draft' }), record: async () => {} },
+      accept: async () => { throw Error('Fixture must stop during review') },
+    } })
+  await writeFile(join(f.workspace, 'docs/GDD.md'), 'Fixture GDD')
+  const controller = new AbortController()
+  const submitted = f.submit('Draft', controller.signal).catch(error => error)
+  const trace = async () => (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+  try {
+    await waitUntilAsync(async () => (await trace()).some(row => row.method === 'turn/start'))
+    await (f.runtime as unknown as { client: BgsClient }).client.request('fixture/events', { events: [
+      { method: 'item/completed', params: { threadId: f.sessionId, turnId: 'turn-1', item: { type: 'agentMessage', id: 'final-1', text: '{}', phase: 'final_answer' } } },
+      { method: 'turn/completed', params: { threadId: f.sessionId, turnId: 'turn-1', turn: { id: 'turn-1', status: 'completed' } } },
+    ] })
+    await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 2)
+    const starts = (await trace()).filter(row => row.method === 'thread/start')
+    expect(starts).toHaveLength(2)
+    for (const row of starts) expect(row.params.config.model_reasoning_effort).toBe(effort ?? undefined)
+  } finally { controller.abort(); await submitted; await f.close(); await rm(configRoot, { recursive: true, force: true }) }
+})
+
+for(const rejected of [false,true])test('design Chat answer does not invoke review or handoff: '+rejected,async()=>{
+  let reviews=0,accepted=0
+  const contract={readOnly:true,schema:{type:'object'},
+    answer:async(value:unknown)=>{
+      expect(value).toEqual({status:'answered',summary:'Current draft status'})
+      if(rejected)throw Error('Changed design cannot be an answer-only result')
+      return 'Current draft status'
+    },
+    designReview:{context:'Current GDD document assignment: answer the current message.',candidate:async()=>{reviews++;throw Error('An answer has no candidate')},record:async()=>{}},
+    accept:async()=>{accepted++;throw Error('An answer cannot hand off a design')},
+  }
+  const f=await fixture('allow',{BGS_FIXTURE_DESIGN_REVIEW:'manual'},resolveOutboundTarget,undefined,undefined,false,undefined,undefined,{finalOutput:contract})
+  const client=(f.runtime as unknown as {client:BgsClient}).client
+  const controller=new AbortController()
+  try {
+    const submitted=f.submit('Only explain the draft status.',controller.signal).then(()=>null,error=>error as Error)
+    await waitUntil(()=>Boolean((f.runtime as unknown as {active?:{turnId?:string}}).active?.turnId))
+    await client.request('fixture/events',{events:[
+      {method:'item/completed',params:{threadId:f.sessionId,turnId:'turn-1',item:{type:'agentMessage',id:'answer-final',
+        text:JSON.stringify({status:'answered',summary:'Current draft status'}),phase:'final_answer'}}},
+      {method:'turn/completed',params:{threadId:f.sessionId,turnId:'turn-1',turn:{id:'turn-1',status:'completed'}}},
+    ]})
+    const error=await submitted
+    if(rejected)expect(error?.message).toContain('Changed design')
+    else {
+      expect(error).toBeNull()
+      expect(f.events.filter(e=>e.eventType==='assistant.message').map(e=>e.text)).toContain('Current draft status')
+    }
+    expect(reviews).toBe(0);expect(accepted).toBe(0)
+    const trace=(await readFile(join(f.root,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+    expect(trace.filter(row=>row.method==='thread/start')).toHaveLength(1)
+    expect(trace.filter(row=>row.method==='turn/start')).toHaveLength(1)
+  }finally{controller.abort();await f.close()}
+},10000)
+
+for (const resumed of [false, true])
+  test('visual final result uses normal handoff without an image-review thread: ' + resumed, async () => {
+    const accepted: unknown[] = []
+    const assignment = { stage: 'visual' as const, originRequestKey: 'original-assignment' }
+    const contract = { schema: productionOutputSchema(assignment), accept: async (value: unknown) => {
+      accepted.push(parseProductionResult(assignment, value)); return 'Selected visual sources retained'
+    } }
+    const f = await fixture('allow', { BGS_FIXTURE_DESIGN_REVIEW: 'manual' }, resolveOutboundTarget,
+      resumed ? '019a0000-0000-7000-8000-000000000001' : undefined,
+      undefined, false, undefined, undefined, { finalOutput: contract })
+    const client = (f.runtime as unknown as { client: BgsClient }).client
+    const trace = async () => (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    const controller = new AbortController()
+    const submitted = f.submit('Current visual assignment', controller.signal).then(() => null, error => error as Error)
+    try {
+      await waitUntilAsync(async () => (await trace()).some(row => row.method === 'turn/start'))
+      const result = { status: 'ready', summary: 'Saved concepts', sections: ['UI'], files: ['assets/concept.png'],
+        ...(resumed ? { reviewResponses: [{ finding: 1, status: 'unresolved', evidence: 'Historical author text' }] } : {}) }
+      await client.request('fixture/events', { events: [
+        { method: 'item/completed', params: { threadId: f.sessionId, turnId: 'turn-1', item: {
+          type: 'agentMessage', id: 'final-1', text: JSON.stringify(result), phase: 'final_answer' } } },
+        { method: 'turn/completed', params: { threadId: f.sessionId, turnId: 'turn-1', turn: { id: 'turn-1', status: 'completed' } } },
+      ] })
+      expect(await submitted).toBeNull()
+      expect(accepted).toEqual([{ action: 'advance', summary: 'Saved concepts', sections: ['UI'], files: ['assets/concept.png'] }])
+      const calls = await trace()
+      expect(calls.filter(row => row.method === 'turn/start')).toHaveLength(1)
+      expect(calls.some(row => row.method === 'thread/start' &&
+        String(row.params.baseInstructions).includes('visual coverage reviewer'))).toBe(false)
+      expect(f.events.some(event => event.eventType === 'tool.started' && event.toolName === 'Agent')).toBe(false)
+      expect(calls.some(row => row.method === 'thread/goal/set')).toBe(false)
+    } finally { controller.abort(); await submitted; await f.close() }
+  })
+
+test('Responses per-request receipts and native cumulative updates are not counted twice', async () => {
+  const provider = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    if (request.method === 'GET') return new Response(null, { status: 404 })
+    return Response.json({ id: 'receipt', status: 'completed', output: [], usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } })
+  } })
+  let f: Awaited<ReturnType<typeof fixture>> | undefined
+  try {
+    f = await fixture('allow', { BEEGAME_API_PROTOCOL: 'responses', OPENAI_BASE_URL: provider.url.origin, BEEGAME_MODEL: 'fixture' },
+      async value => ({ url: new URL(value), addresses: ['127.0.0.1'], lookup: (_h, _o, callback) => callback(null, '127.0.0.1', 4) }))
+    await f.submit('provider-unknown-tool')
+    expect(f.usage.some(event => event.payload?.usageBaselineOnly === true)).toBe(true)
+    expect(getLatestRuntimeUsage(f.usage)).toMatchObject({ total_tokens: 12, prompt_tokens: 10, completion_tokens: 2 })
+  } finally { await f?.close(); provider.stop(true) }
+})
+
+
+test('new and cold-resumed native threads retain the selected browser tool set and approval policy', async () => {
+  const servers = [{ id: 'browser', name: 'Browser', enabled: true, autoStart: true, scope: 'global',
+    transport: 'stdio', command: '/fixture/browser', enabledTools: ['browser_run_code_unsafe'], disabledTools: ['browser_click'] }]
+  for (const resumed of [false, true]) {
+    const f = await fixture('allow', { OPENAI_AUTH_MODE: 'chatgpt', BEEGAME_NATIVE_MCP_SERVERS_JSON: JSON.stringify(servers) },
+      resolveOutboundTarget, resumed ? '019a0000-0000-7000-8000-000000000001' : undefined)
+    try {
+      const rpc = (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      const start = rpc.find(call => call.method === (resumed ? 'thread/resume' : 'thread/start'))
+      expect(start.params.config.mcp_servers['bgs-browser']).toMatchObject({
+        enabled_tools: ['browser_run_code_unsafe'], disabled_tools: ['browser_click'],
+      })
+      expect(start.params.approvalPolicy).toBe('on-request')
+      expect(start.params.approvalsReviewer).toBe('auto_review')
+    } finally { await f.close() }
+  }
+})
+
+
+test('image tool display strips direct and JSON-wrapped previews without changing native results or ordinary text', async () => {
+  const f = await fixture('allow', { BGS_FIXTURE_DESIGN_REVIEW: 'manual' })
+  try {
+    const runtime = f.runtime as any
+    const submitted = f.submit('Inspect image results')
+    await waitUntil(() => runtime.active?.turnId === 'turn-1')
+    const facts = {path:'assets/source/sprites.png',width:1536,height:1024,sha256:'saved-source-hash',chargedCredits:6,requestId:'paid-request'}
+    const data = 'private-preview-data-' + 'A'.repeat(128 * 1024)
+    const original: any = {content:[{type:'text',text:JSON.stringify(facts)},
+      {type:'text',text:'Transparency viewing preview on a checkerboard.'},
+      {type:'image',mimeType:'image/png',data}],isError:false,_meta:{receipt:'retained'}}
+    const wrapped = {content:[{type:'text',text:JSON.stringify(original)}]}
+    const doubleWrapped = {content:[{type:'text',text:JSON.stringify(wrapped)}]}
+    const ordinary = {content:[{type:'text',text:'Image saved; viewing preview unavailable: decoder error'},
+      {type:'text',text:'{  "path": "assets/source/sprites.png", "width": 1536 }'},
+      {type:'text',text:'{"content": not valid JSON'}]}
+    const results = [original,wrapped,doubleWrapped,ordinary,wrapped]
+    const before = JSON.stringify(results)
+    await (runtime.client as BgsClient).request('fixture/events', {events: results.map((result,index) => ({
+      method:'item/completed',params:{threadId:f.sessionId,turnId:'turn-1',item:{id:'image-'+index,type:'mcpToolCall',
+        server:index === 4 ? 'other-images' : 'beegame-images',tool:'generate_image',status:'completed',result}},
+    }))})
+    await waitUntil(() => f.events.filter(e => e.eventType === 'tool.completed').length === results.length)
+    const receipts = f.events.filter(e => e.eventType === 'tool.completed')
+    for (let index = 0; index < 3; index++) {
+      const output = receipts[index]!.output
+      expect(JSON.stringify(output)).not.toContain('private-preview-data-')
+      expect(JSON.stringify(output).length).toBeLessThan(2000)
+      let nested = output
+      for (let depth = 0; depth < index; depth++) nested = JSON.parse(nested.content[0].text)
+      expect(JSON.parse(nested.content[0].text)).toEqual(facts)
+      expect(nested._meta).toEqual(original._meta)
+      expect(nested.isError).toBe(false)
+      expect(nested.content[2]).toEqual({type:'text',text:'Viewing preview (image/png) retained in native tool history.'})
+    }
+    expect(receipts[3]!.output).toEqual(ordinary)
+    expect(receipts[4]!.output).toEqual(wrapped)
+    expect(JSON.stringify(results)).toBe(before)
+    await (runtime.client as BgsClient).request('fixture/events', {events:[{method:'turn/completed',params:{
+      threadId:f.sessionId,turnId:'turn-1',turn:{id:'turn-1',status:'completed'},
+    }}]})
+    await submitted
+  } finally { await f.close() }
+}, 30_000)

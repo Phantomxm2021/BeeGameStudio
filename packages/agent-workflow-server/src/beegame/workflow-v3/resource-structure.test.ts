@@ -11,7 +11,7 @@ import { runContentCheck } from './content-checks'
 import { measurementSummary } from './agent-measurement'
 import { checkIsCurrent } from './checks'
 import { CHECK_VERSIONS } from './check-versions'
-import { audioProbeWav } from './audio-consumption'
+import { audioFixtureWav } from '../fixtures/web-content-fixture'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(),'bgs-resource-structure-'))
@@ -141,7 +141,7 @@ test('actual GLB counts override authored animation claims; one model can contai
     await saveModel([{channels:[],samplers:[]}])
     const structural=auditAssetContract(f.root)
     expect(structural.requirements[0]?.structure?.status).toBe('passed')
-    expect(structural.requirements[0]?.structure?.observations.join(' ')).toContain('runtime use/quality unverified')
+    expect(structural.requirements[0]?.structure?.observations.join(' ')).toContain('file/header facts satisfy the supported structural checks')
   }finally{await f.close()}
 })
 
@@ -163,7 +163,7 @@ test.each(['2d','3d'] as const)('Scene hierarchy/component/behavior inventory su
       components:[{id:'art-renderer',type:'sprite-renderer',bindings:[{assetRef:'surface-art'}]}],
       behaviors:[{id:'response',kind:'project-script'}]})
     const summary=measurementSummary({id:'fixture',requestKey:'fixture',runtimeArtifact:'dist',reports:[],reportPaths:[],
-      requirementsRevision:'fixture',startedAt:new Date().toISOString(),checks:[check]},false)
+      requirementsRevision:'fixture',startedAt:new Date().toISOString(),checks:[check]},true)
     expect(summary.sceneBindingCoverage.nodes?.every(node=>node.observations.length===0)).toBe(true)
     expect(summary.sceneBindingCoverage.limitation).toContain('XR')
     expect(summary.quality).toBe('unverified')
@@ -184,7 +184,7 @@ test('encoded alpha and PCM16 facts reach resource checks without promoting loop
     expect(await checkIsCurrent(f.root,{...alpha,version:'v3-content.5'})).toBe(false)
     profile.asset_kinds=['audio-clip'];profile.capabilities=[];resource.asset_kind='audio-clip';resource.capabilities=[]
     resource.root_path='assets/runtime/tone.wav';resource.file_paths=[resource.root_path]
-    await writeFile(join(f.root,resource.root_path),audioProbeWav(false));await f.save()
+    await writeFile(join(f.root,resource.root_path),audioFixtureWav(false));await f.save()
     const pcm=await runContentCheck(f.root,'content-resources',{expectedOutputs:[]},[],{})
     expect(pcm.status,pcm.observation).toBe('passed')
     expect(pcm.inputs.some(file=>file.path===resource.root_path)).toBe(true)

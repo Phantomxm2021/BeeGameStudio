@@ -6,17 +6,11 @@ import { ZodError } from 'zod/v4'
 import { artifactDigest } from '../runtime-acceptance'
 import { contentIndexSchema, contentDocumentSchema, isContentEntryKind } from '../game-content-schema'
 import { createPreviewTestBrowser } from '../preview-test-browser'
-import { previewTestHostDocument } from '../preview-test-access'
+import { previewTestHostDocument } from '@bee-game-studio/agent-workflow/preview-environment'
 import { sharedPlaywright } from '../shared-playwright'
 import { readVersion, versionsMatch } from './checks'
 import { runContentCheck } from './content-checks'
 import type { TaskSpec, FileVersion, CheckResult } from './state'
-import { prepareUiProbes, type PreparedUiProbe } from './ui-consumption'
-import { preparePixelProbes, type PreparedPixelProbe } from './pixel-consumption'
-import { prepareSceneProbes, type PreparedSceneProbe } from './scene-consumption'
-import { prepareFontProbes, type PreparedFontProbe } from './font-consumption'
-import { prepareAudioProbes, type PreparedAudioProbe } from './audio-consumption'
-import { sharedSharp } from '../shared-sharp'
 import { CHECK_VERSIONS } from './check-versions'
 
 /** Enumerate actual files, refusing aliases/escapes rather than serving workspace
@@ -42,8 +36,8 @@ export async function staticArtifactFiles(root: string, folder: string): Promise
 }
 
 export const STATIC_ARTIFACT_CHECK_VERSION = CHECK_VERSIONS['runtime-smoke']
-export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'delivery-package' | 'ui-data-consumption' | 'scene-data-consumption' | 'pixel-data-consumption' | 'font-data-consumption' | 'audio-data-consumption', task: Pick<TaskSpec, 'runtimeArtifact'|'expectedOutputs'|'uiProbes'|'sceneProbes'|'pixelProbes'|'audioProbes'>,
-  inputs: FileVersion[], constraints: Record<string, unknown>, signal?: AbortSignal, uiScope: 'registered'|'selected' = 'registered'): Promise<CheckResult> {
+export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'delivery-package', task: Pick<TaskSpec, 'runtimeArtifact'|'expectedOutputs'>,
+  inputs: FileVersion[], constraints: Record<string, unknown>, signal?: AbortSignal): Promise<CheckResult> {
   const result: CheckResult = { id, version: CHECK_VERSIONS[id], inputs: [...inputs], status: 'unverified',
     observation: 'Declare runtimeArtifact for a static web build with index.html. Server/native/XR runtimes are not supported by this driver.',
     createdAt: new Date().toISOString() }
@@ -107,51 +101,8 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
         if (source.sha256 !== packed.sha256) { result.status = 'failed'; result.observation = 'Packaged bytes differ from current source: '+file; return result }
       }
       result.status = 'passed'; result.observation = 'Host checked actual static package registry, structure, resource closure and identical packaged source bytes. Not runtime data consumption or game delivery acceptance.'
-    } else if (id === 'ui-data-consumption') {
-      let probes: PreparedUiProbe[]
-      try { probes = await prepareUiProbes(root, task, result, uiScope) }
-      catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported UI consumption input'; return result }
-      // prepareUiProbes records the selected scope and unobserved screens;
-      // do not replace it with an implicit whole-registry coverage claim.
-      await observeStaticBuild(root, artifact, paths, result, signal, probes, undefined, hasTouch)
-    } else if (id === 'scene-data-consumption') {
-      let probes: PreparedSceneProbe[]
-      try { probes = await prepareSceneProbes(root, task, result) }
-      catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported Scene consumption input'; return result }
-      result.coverage = { files: [...new Set(probes.map(probe => probe.document))], limitations: [
-        'Selected color-only 2D Sprite: stable enabled causality plus source-derived pixel polygons for baseline, local position/rotation/scale and parent transforms.',
-        'Asset materials, other nodes/states, Canvas/window adaptation, gameplay and visual quality are not certified. Unsupported, occluded or unobservable geometry remains unverified; enabled-only evidence cannot pass transforms.',
-      ] }
-      await observeStaticBuild(root, artifact, paths, result, signal, probes)
-    } else if (id === 'pixel-data-consumption') {
-      let probes: PreparedPixelProbe[]
-      try { probes = await preparePixelProbes(root, task, result) }
-      catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported pixel consumption input'; return result }
-      result.coverage = { files: [...new Set(probes.flatMap(probe => [probe.document, probe.resource.path, ...probe.variants.flatMap(v=>v.path ? [v.path] : [])]))], limitations: [
-        'Actual static Canvas screenshots: isolated 2D image/frame or axis-aligned nonoverlapping Tilemap cells, source/Grid/TileSet geometry, resource replacement and restoration at declared paths/viewports.',
-        'Not Tilemap collision/sorting, rotation/occlusion/shared frames across bindings, 3D, animation, text/fonts, audio, full gameplay or release acceptance.',
-      ] }
-      await observeStaticBuild(root, artifact, paths, result, signal, probes)
-    } else if (id === 'font-data-consumption') {
-      let probes: PreparedFontProbe[]
-      try { probes = await prepareFontProbes(root, task, result, uiScope) }
-      catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported font consumption input'; return result }
-      result.coverage = { files: [...new Set(probes.flatMap(probe => [probe.document, probe.resource.path]))], limitations: [
-        'Explicitly bound static single-line DOM text: saved text/fontSize mutations, actual glyph fonts, selected resource suppression and restoration.',
-        'Not Canvas/Scene text, inherited font bindings, rich/dynamic text, full responsive fit, shaping, font weight/style/variation or aesthetics. Unbound/system fonts are outside coverage.',
-      ] }
-      await observeStaticBuild(root, artifact, paths, result, signal, probes)
-    } else if (id === 'audio-data-consumption') {
-      let probes: PreparedAudioProbe[]
-      try { probes = await prepareAudioProbes(root, task, result) }
-      catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported audio consumption input'; return result }
-      result.coverage = { files: [...new Set(probes.flatMap(probe => [probe.document, probe.resource.path]))], limitations: [
-        'Explicit encoded Scene audio-source bindings played/stopped by declared real game clicks: native media clock/state, volume/loop properties and isolated decoded signal, silence replacement/restoration.',
-        'No physical audibility/final mix gain, listening quality, actual loop boundary/restart semantics, short one-shots, detached Audio/Web Audio/synthesis/spatial audio, full event coverage or game delivery acceptance.',
-      ] }
-      await observeStaticBuild(root, artifact, paths, result, signal, probes)
     } else {
-      await observeStaticBuild(root, artifact, paths, result, signal, undefined, undefined, hasTouch)
+      await observeStaticBuild(root, artifact, paths, result, signal, undefined, hasTouch)
     }
     if (result.status === 'passed' && (!await versionsMatch(root, result.inputs) ||
         await artifactDigest(root, artifact, true) !== result.artifacts[0]!.sha256)) {
@@ -172,15 +123,15 @@ export async function observeStaticPublication(root: string, artifact: string, e
   const result: CheckResult = {id:'runtime-smoke',version:STATIC_ARTIFACT_CHECK_VERSION,
     inputs:await Promise.all(paths.map(path=>readVersion(root,path))),status:'unverified',
     observation:'Publication path loading not yet observed',createdAt:new Date().toISOString()}
-  await observeStaticBuild(root,artifact,paths,result,undefined,undefined,entryUrl)
+  await observeStaticBuild(root,artifact,paths,result,undefined,entryUrl)
   if(result.status !== 'passed') throw new Error('Publication URL loading '+result.status+': '+result.observation)
   if(!await versionsMatch(root,result.inputs)) throw new Error('Publication copy changed during observation')
 }
 
-export async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedSceneProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[], entryUrl?: string, hasTouch = false, timeoutMs = 120_000) {
+export async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, entryUrl?: string, hasTouch = false, timeoutMs = 120_000) {
   const owned = createPreviewTestBrowser()
   let child: ReturnType<typeof spawn> | undefined
-  // One host-owned budget for the whole browser batch, not a per-probe retry.
+  // One host-owned deadline for this static-load check.
   // The optional budget is a host/test input, never an agent request field.
   const deadline = new AbortController()
   const timer = setTimeout(() => deadline.abort(new Error('Browser observation timed out after '+timeoutMs+'ms; no automatic retry')), timeoutMs)
@@ -198,10 +149,9 @@ export async function observeStaticBuild(root: string, artifact: string, paths: 
     if (!node) throw new Error('Browser driver needs an installed Node executable; no runtime was downloaded')
     const files = paths.map(path => ({ path: path.slice(artifact.length+1), sha256: result.inputs.find(v => v.path === path)!.sha256,
       mime: Bun.file(resolve(root, path)).type || 'application/octet-stream' }))
-    const sharpModule = uiProbes?.some(probe => 'mode' in probe && (probe.mode === 'pixels' || probe.mode === 'scene')) ? (await sharedSharp()).moduleUrl : undefined
     const observation = await new Promise<string>((resolvePromise, reject) => {
       child = spawn(node, [fileURLToPath(new URL('./runtime-browser.mjs', import.meta.url))], { cwd: root,
-        env: { PATH: process.env.PATH, BGS_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl, BGS_SHARP_MODULE: sharpModule }, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] })
+        env: { PATH: process.env.PATH, BGS_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl }, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] })
       let output = '', errors = ''
       const stop = () => {
         try { if (process.platform !== 'win32' && child?.pid) process.kill(-child.pid, 'SIGKILL'); else child?.kill('SIGKILL') }
@@ -220,18 +170,16 @@ export async function observeStaticBuild(root: string, artifact: string, paths: 
       })
       if (observationSignal.aborted) stop()
       // Publication relocation checks keep their standalone target semantics.
-      // Preview measurements use the same shell/sandbox, but serve only this
+      // Publication preflight uses the same shell/sandbox, but serves only this
       // immutable copy; no running project Preview is started or replaced.
       else {
         const measuredEntry = new URL(entryUrl ?? 'http://bgs-runtime.invalid/previews/measurement/index.html')
-        child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes, entryUrl: measuredEntry.href, hasTouch,
+        child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, entryUrl: measuredEntry.href, hasTouch,
           previewHost: entryUrl ? undefined : previewTestHostDocument(measuredEntry) }))
       }
     })
-    const actual = JSON.parse(observation) as { surfacePresent: boolean; errors: string[]; missingFiles: string[]; unsupported: string[]; probes?: { status: string }[] }
+    const actual = JSON.parse(observation) as { surfacePresent: boolean; errors: string[]; missingFiles: string[]; unsupported: string[] }
     result.status = actual.unsupported.length ? 'unverified' : actual.errors.length || actual.missingFiles.length ? 'failed'
-      : uiProbes ? !actual.probes?.length || actual.probes.length !== uiProbes.length ? 'unverified'
-        : actual.probes.some(probe => probe.status === 'failed') ? 'failed' : actual.probes.every(probe => probe.status === 'passed') ? 'passed' : 'unverified'
       : actual.surfacePresent ? 'passed' : 'unverified'
     result.observation = observation.trim()
   } catch (error) {

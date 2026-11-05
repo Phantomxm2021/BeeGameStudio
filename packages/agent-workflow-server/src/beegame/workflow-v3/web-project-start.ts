@@ -27,16 +27,10 @@ export async function observeProjectCreation(root: string, brief: {
 }): Promise<Run['creation']> {
   if (brief.build_source != null || !['creative', 'blueprint'].includes(String(brief.creation_mode)) ||
       (await sourcePaths(await realpath(root))).length) return undefined
-  return {initialDelivery:'design-led-first-version',editableContent:false}
+  return {initialDelivery:'complete-game',editableContent:false}
 }
 
-/** Web/React uses project-native UI and scene code, not the BGS editor contract. */
-export function isWebReactTarget(settings: { platform?: unknown; engine?: unknown } | undefined): boolean {
-  return settings?.platform === 'Web' && settings.engine === 'React'
-}
-
-/** Visual evidence belongs to delivery quality, independently of editor support. */
-export function requiresWebVisualComparison(run: Pick<Run, 'creation'> & Partial<Pick<Run, 'requirements'>>): boolean {
-  return isWebReactTarget(run.requirements?.constraints) &&
-    (run.creation?.initialDelivery === 'design-led-first-version' || run.creation?.editableContent === true)
+/** These Web runtimes use project code, not the BGS editor contract. */
+export function isWebCodeTarget(settings: { platform?: unknown; engine?: unknown } | undefined): boolean {
+  return settings?.platform === 'Web' && ['React','Phaser','Three.js'].includes(String(settings.engine))
 }

@@ -1,6 +1,7 @@
+import { projectHostDirectory } from './project-storage-paths'
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { afterEach, describe, expect, it } from 'bun:test'
 import {
   readProjectArtifactPublicationToken,
@@ -10,7 +11,7 @@ import {
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })))
+  await Promise.all(temporaryDirectories.splice(0).map(async path => { await rm(projectHostDirectory(path), { recursive: true, force: true }); await rm(path, { recursive: true, force: true }) }))
 })
 
 async function workspace(): Promise<string> {
@@ -20,7 +21,7 @@ async function workspace(): Promise<string> {
 }
 
 async function writeLegacyCommit(root: string, token = 'a'.repeat(64)) {
-  const directory = join(root, '.beegame/artifacts')
+  const directory = join(projectHostDirectory(root), 'artifacts')
   await mkdir(directory, { recursive: true })
   const path = join(directory, 'materialization.json')
   await writeFile(path, JSON.stringify({ version: 1, publicationId: 'legacy-publication',
@@ -28,8 +29,8 @@ async function writeLegacyCommit(root: string, token = 'a'.repeat(64)) {
   return path
 }
 
-describe('canonical project artifact reads with legacy metadata', () => {
-  it('reads current workspace bytes without creating a store when legacy metadata is absent', async () => {
+describe('canonical project artifact reads with host metadata', () => {
+  it('reads current workspace bytes without creating a store when host metadata is absent', async () => {
     const root = await workspace()
     await writeFile(join(root, 'a.txt'), 'current bytes')
     expect(await readProjectArtifactPublicationToken(join(root, 'missing'))).toBeUndefined()
@@ -54,7 +55,7 @@ describe('canonical project artifact reads with legacy metadata', () => {
       return bytes
     })).rejects.toThrow(/changed during canonical read/i)
 
-    const pending = join(root, '.beegame/artifacts/pending')
+    const pending = join(projectHostDirectory(root), 'artifacts/pending')
     await mkdir(pending)
     const pendingPath = join(pending, 'race.json')
     await writeFile(pendingPath, '{}')
@@ -68,14 +69,14 @@ describe('canonical project artifact reads with legacy metadata', () => {
   it.each(['{not-json', '{}', JSON.stringify({ version: 1, publicationId: 'legacy',
     snapshotDigest: 'b'.repeat(64), token: 'invalid' }), JSON.stringify({ version: 1,
     publicationId: 'legacy', snapshotDigest: 'b'.repeat(64), token: 'a'.repeat(64) }) + ' '])(
-    'rejects corrupt or noncanonical legacy commit metadata: %s', async raw => {
+    'rejects corrupt or noncanonical host commit metadata: %s', async raw => {
       const root = await workspace(), path = await writeLegacyCommit(root)
       await writeFile(path, raw)
       await expect(readProjectArtifactPublicationToken(root)).rejects.toThrow(/metadata|materialization commit/i)
       expect(await readFile(path, 'utf8')).toBe(raw)
     })
 
-  it('rejects oversized legacy metadata before reading its contents', async () => {
+  it('rejects oversized host metadata before reading its contents', async () => {
     const root = await workspace(), path = await writeLegacyCommit(root)
     await truncate(path, 32 * 1024 * 1024 + 1)
     await expect(readProjectArtifactPublicationToken(root)).rejects.toThrow(/maximum size/i)
@@ -83,7 +84,8 @@ describe('canonical project artifact reads with legacy metadata', () => {
 
   it('rejects symlinked store parents and commit files', async () => {
     const root = await workspace(), outside = await workspace()
-    await symlink(outside, join(root, '.beegame'))
+    await mkdir(dirname(projectHostDirectory(root)), { recursive: true })
+    await symlink(outside, projectHostDirectory(root))
     await expect(readProjectArtifactPublicationToken(root)).rejects.toThrow(/symlink/i)
     const clean = await workspace(), path = await writeLegacyCommit(clean)
     const target = join(outside, 'commit.json')

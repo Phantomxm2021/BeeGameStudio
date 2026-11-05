@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -29,6 +30,7 @@ export type BeeGamePreviewSnapshot = {
 }
 
 export type BeeGamePreviewStartOptions = {
+  signal?: AbortSignal
   mode?: 'development' | 'production'
   sessionId: string
   workspacePath: string
@@ -51,7 +53,7 @@ export type BeeGamePreviewRunner = (
 
 export type BeeGamePreviewPortAllocator = (start: number) => Promise<number>
 
-export type BeeGamePreviewReadinessProbe = (url: string) => Promise<boolean>
+export type BeeGamePreviewReadinessProbe = (url: string, signal?: AbortSignal) => Promise<boolean>
 
 type PreviewRecord = {
   snapshot: BeeGamePreviewSnapshot
@@ -126,6 +128,7 @@ export class BeeGamePreviewManager {
   }
 
   async start(options: BeeGamePreviewStartOptions): Promise<BeeGamePreviewSnapshot> {
+    options.signal?.throwIfAborted()
     const workspacePath = normalizeWorkspacePath(options.workspacePath)
     const existing = this.records.get(options.sessionId)
     if (
@@ -155,6 +158,7 @@ export class BeeGamePreviewManager {
       return snapshot
     }
 
+    options.signal?.throwIfAborted()
     const startedAt = new Date().toISOString()
     const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'starting', {
       mode: options.mode ?? 'development',
@@ -166,38 +170,60 @@ export class BeeGamePreviewManager {
       message: `Preview starting at ${plan.url}`,
       updatedAt: startedAt,
     })
-    const processes = plan.processes.map(processPlan => this.runner(processPlan.command, {
-      cwd: processPlan.cwd,
-      workspacePath,
-      env: buildPreviewProcessEnv(processPlan, plan),
-      onOutput: text => {
-        const record = this.records.get(options.sessionId)
-        if (!record) return
-        const internalUrl = processPlan.role === 'client'
-          ? extractPreviewUrl(text) || record.internalUrl || ''
-          : record.internalUrl || ''
-        if (internalUrl) record.internalUrl = internalUrl
-        record.snapshot = {
-          ...record.snapshot,
-          url: this.publicUrl(options.sessionId, internalUrl) || record.snapshot.url,
-          status: record.snapshot.status === 'running' ? 'running' : 'starting',
-          message: text.trim().slice(0, 500) || record.snapshot.message,
-          updatedAt: new Date().toISOString(),
-        }
-      },
-    }))
+    const processes: BeeGamePreviewProcess[] = []
+    try {
+      for (const processPlan of plan.processes) processes.push(this.runner(processPlan.command, {
+        cwd: processPlan.cwd,
+        workspacePath,
+        env: buildPreviewProcessEnv(processPlan, plan),
+        onOutput: text => {
+          const record = this.records.get(options.sessionId)
+          if (!record || record.processes !== processes) return
+          const internalUrl = processPlan.role === 'client'
+            ? extractPreviewUrl(text) || record.internalUrl || ''
+            : record.internalUrl || ''
+          if (internalUrl) record.internalUrl = internalUrl
+          record.snapshot = {
+            ...record.snapshot,
+            url: this.publicUrl(options.sessionId, internalUrl) || record.snapshot.url,
+            status: record.snapshot.status === 'running' ? 'running' : 'starting',
+            message: text.trim().slice(0, 500) || record.snapshot.message,
+            updatedAt: new Date().toISOString(),
+          }
+        },
+      }))
+    } catch (error) {
+      for (const process of processes) process.kill()
+      await Promise.all(processes.map(process => process.exited))
+      throw error
+    }
     this.records.set(options.sessionId, {
       snapshot,
       processes,
       expectsPublicPath: plan.command.includes('--base') && plan.command.includes(publicPath),
     })
     this.watchPreviewProcesses(options.sessionId, processes, plan)
-    const readiness = await checkPreviewPlanReadiness(plan, this.readinessProbe)
+    const signal = options.signal
+    let onAbort: (() => void) | undefined
+    const cancelled = signal ? new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(signal.reason)
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) onAbort()
+    }) : undefined
+    let readiness: Awaited<ReturnType<typeof checkPreviewPlanReadiness>>
+    try {
+      const ready = checkPreviewPlanReadiness(plan, this.readinessProbe, signal)
+      readiness = await (cancelled ? Promise.race([ready, cancelled]) : ready)
+    } catch (error) {
+      await this.stopAndWait(options.sessionId, workspacePath)
+      throw error
+    } finally {
+      if (onAbort) signal!.removeEventListener('abort', onAbort)
+    }
     const record = this.records.get(options.sessionId)
     if (!record || record.processes !== processes) return { ...snapshot }
     if (!readiness.ready) {
-      for (const process of processes) process.kill()
-      delete record.processes
+      await this.stopAndWait(options.sessionId, workspacePath)
       record.snapshot = {
         ...record.snapshot,
         status: 'failed',
@@ -243,6 +269,14 @@ export class BeeGamePreviewManager {
       updatedAt: new Date().toISOString(),
     }
     return { ...record.snapshot }
+  }
+
+  async stopAndWait(sessionId: string, workspacePath: string): Promise<void> {
+    const record = this.records.get(sessionId)
+    const processes = record && sameWorkspace(record.snapshot.workspacePath, workspacePath)
+      ? record.processes ?? [] : []
+    this.stop(sessionId, workspacePath)
+    await Promise.all(processes.map(process => process.exited))
   }
 
   dispose(): void {
@@ -577,18 +611,19 @@ function buildPreviewProcessEnv(
 async function checkPreviewPlanReadiness(
   plan: SupportedPreviewPlan,
   readinessProbe: BeeGamePreviewReadinessProbe,
+  signal?: AbortSignal,
 ): Promise<{ ready: true } | { ready: false; message: string }> {
   const backendProcesses = plan.processes.filter(process => process.role === 'server' && process.url)
   for (const process of backendProcesses) {
     const url = process.url || ''
-    if (!(await readinessProbe(url))) {
+    if (!(await readinessProbe(url, signal))) {
       return {
         ready: false,
         message: `Backend server did not become reachable at ${url}. Client preview was not exposed because networked games need the backend running.`,
       }
     }
   }
-  if (!(await readinessProbe(plan.url))) {
+  if (!(await readinessProbe(plan.url, signal))) {
     return {
       ready: false,
       message: `Preview client did not become reachable at ${plan.url}.`,
@@ -614,6 +649,11 @@ function runPreviewProcess(
 ): BeeGamePreviewProcess {
   const root = realpathSync(options.workspacePath)
   const cwd = realpathSync(options.cwd)
+  // Resolve the project module before entering Seatbelt. Bun's resolver can
+  // stall on dependency links there; the child only imports this exact entry.
+  const launchCommand = command[1] === VITE_PREVIEW_HOST_PATH
+    ? [...command, '--vite-entry', createRequire(join(cwd, 'package.json')).resolve('vite')]
+    : command
   const runtimeHome = mkdtempSync(join(realpathSync(tmpdir()), 'bgs-preview-'))
   try {
     for (const directory of ['cache', 'config', 'npm-cache', 'zsh'])
@@ -642,7 +682,7 @@ function runPreviewProcess(
     const sandboxCommand = bgsCommand().concat(
       'sandbox', '-C', root, '-P', PREVIEW_SANDBOX_PROFILE,
       '-c', `permissions.${PREVIEW_SANDBOX_PROFILE}=${toml(sandboxConfig)}`,
-      '--', ...command,
+      '--', ...launchCommand,
     )
     const env = {
       ...options.env,
@@ -652,6 +692,7 @@ function runPreviewProcess(
       TEMP: runtimeHome,
       TMPPREFIX: join(runtimeHome, 'zsh'),
       XDG_CACHE_HOME: join(runtimeHome, 'cache'),
+      BGS_VITE_CACHE_DIR: join(runtimeHome, 'cache', 'vite'),
       XDG_CONFIG_HOME: join(runtimeHome, 'config'),
       NPM_CONFIG_CACHE: join(runtimeHome, 'npm-cache'),
       npm_config_cache: join(runtimeHome, 'npm-cache'),
@@ -771,9 +812,10 @@ function findAvailablePort(start: number): Promise<number> {
   })
 }
 
-async function waitForPreviewReady(url: string): Promise<boolean> {
+async function waitForPreviewReady(url: string, signal?: AbortSignal): Promise<boolean> {
   const deadline = Date.now() + getPreviewReadyTimeoutMs()
   while (Date.now() < deadline) {
+    signal?.throwIfAborted()
     if (await canReachPreview(url, Math.min(2_000, Math.max(1, deadline - Date.now())))) return true
     await sleep(getPreviewReadyPollMs())
   }

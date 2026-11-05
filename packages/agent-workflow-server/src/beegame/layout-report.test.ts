@@ -15,7 +15,7 @@ test('report groups identical failures without dropping scenes, geometry, condit
   const result = { valid: false, diagnostics, issues: diagnostics.map(d => `${d.source}: Scene ${d.scene} ${d.message}`),
     coverage: { checked: 10, unverified: ['Fonts unavailable'] }, deferred: ['Image bounds unavailable'] }
   result.issues.push('Missing planned screen')
-  const report = formatLayoutReport(result, '.beegame/tmp/layout-reports/result.json')
+  const report = formatLayoutReport(result, 'reports/runtime/layout-reports/result.json')
   expect(report.match(/Measured geometry:/g)).toHaveLength(1)
   for (const diagnostic of diagnostics) expect(report).toContain(diagnostic.scene)
   expect(report).toContain(JSON.stringify(diagnostics[0]!.geometry))
@@ -39,7 +39,7 @@ test('full reports are separate immutable snapshots; symlinked caches cannot red
     expect(first).not.toBe(second)
     expect(JSON.parse(readFileSync(join(root, first), 'utf8'))).toEqual(result)
     const linked = join(root, 'linked'); mkdirSync(linked)
-    symlinkSync(outside, join(linked, '.beegame'))
+    symlinkSync(outside, join(linked, 'reports'))
     expect(() => retainLayoutReport(linked, result)).toThrow('symlink')
     expect(readdirSync(outside)).toEqual([])
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }) }

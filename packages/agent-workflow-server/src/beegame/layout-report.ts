@@ -131,7 +131,7 @@ export function formatSceneLayoutInspection(inspection: ReturnType<typeof inspec
 export function retainLayoutReport(workspace: string, result: unknown): string {
   const root = realpathSync(workspace)
   let directory = root
-  for (const name of ['.beegame', 'tmp', 'layout-reports']) {
+  for (const name of ['reports', 'runtime', 'layout-reports']) {
     directory = join(directory, name)
     mkdirSync(directory, { recursive: true })
     if (realpathSync(directory) !== directory) throw new Error('Layout report directory must not be a symlink')

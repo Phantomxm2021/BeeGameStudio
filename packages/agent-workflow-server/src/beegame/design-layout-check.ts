@@ -75,7 +75,7 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutCons
       }
       const orientation = root.data?.orientation
       if (orientation !== 'Landscape' && orientation !== 'Portrait') throw new Error('root.data.orientation must declare Landscape or Portrait')
-      if (confirmed?.orientation && orientation !== confirmed.orientation) throw new Error('Layout orientation differs from the confirmed brief')
+      if (confirmed?.orientation && confirmed.orientation !== 'Auto' && orientation !== confirmed.orientation) throw new Error('Layout orientation differs from the confirmed brief')
       const targets = root.data?.targetViewports
       if (!Array.isArray(targets) || !targets.length || !targets.every(isViewportPair))
         throw new Error('root.data.targetViewports must be a non-empty array of positive [width, height] pairs, for example [[960, 540]], not {width, height} objects. Choose the smallest supported size and relevant transition sizes for this composition.')

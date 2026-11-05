@@ -142,3 +142,23 @@ test('remote writer status uses a host-only HEAD count and treats missing counts
   mode = 'failure'
   expect(await store.writerStatus!()).toEqual({ writers: null, state: 'unknown', scope: 'configured-store' })
 })
+
+
+test('visual source records require the active writer and cannot rewrite already selected bytes', () => {
+  const prior = run()
+  prior.status='running';prior.fence=1
+  prior.writer={attemptId:'author',workerId:'host',fence:1}
+  prior.agentTurns=[{attemptId:'author',workerId:'host',fence:1,sessionId:'chat',requestKey:'create',
+    requirementsRevision:prior.requirements.revision,status:'running',startedAt:'2026-01-01T00:00:00Z',
+    production:{stage:'implementation',originRequestKey:'create'}}]
+  const selected=structuredClone(prior);selected.version++
+  selected.agentTurns![0]!.visualSelection={request:{action:'select-visual',summary:'Reference',sections:[],files:['look.png']},sources:[{path:'look.png',sha256:'a'.repeat(64)}]}
+  expect(() => assertCommit('synthetic','alice',prior.version,selected,prior,'agent.visual-sources-selected')).not.toThrow()
+  const replaced=structuredClone(selected);replaced.version++
+  replaced.agentTurns![0]!.visualSelection!.sources[0]!.sha256='b'.repeat(64)
+  expect(() => assertCommit('synthetic','alice',selected.version,replaced,selected,'agent.visual-sources-selected')).toThrow('cannot be removed or replaced')
+  const stopped=structuredClone(selected);stopped.agentTurns![0]!.quiescedAt='2026-01-01T00:00:01Z'
+  const late=structuredClone(stopped);late.version++
+  late.agentTurns![0]!.visualSelection!.sources.push({path:'late.png',sha256:'c'.repeat(64)})
+  expect(() => assertCommit('synthetic','alice',stopped.version,late,stopped,'agent.visual-sources-selected')).toThrow('active writer')
+})

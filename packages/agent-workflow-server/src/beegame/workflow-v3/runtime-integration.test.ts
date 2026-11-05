@@ -3,24 +3,23 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkIsCurrent } from './checks'
-import { runChecks } from './checker-test-driver'
-import type { TaskSpec } from './state'
+import { runArtifactCheck } from './runtime-checks'
 
-const task: TaskSpec = { id: 'smoke', kind: 'game.verify', goal: 'Observe actual static build', dependsOn: [], requirementIds: ['req.loop'], inputs: [],
-  writablePaths: [], expectedOutputs: ['dist/index.html'], checks: ['runtime-smoke'], runtimeArtifact: 'dist' }
+const task = { expectedOutputs: ['dist/index.html'], runtimeArtifact: 'dist' }
 
-for (const orientation of ['Landscape','Portrait']) test('Web Touch smoke always observes a phone: '+orientation, async () => {
+for (const orientation of ['Landscape','Portrait']) test('publication Touch smoke preserves its stated viewport: '+orientation, async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-phone-smoke-'))
   try {
     await mkdir(join(root, 'dist'))
     await writeFile(join(root, 'dist/index.html'), '<body><button>Start</button><script>if(innerWidth<900)throw Error("phone-only failure")</script>')
-    const result = (await runChecks(root,task,[],undefined,{platform:'Web',inputs:['Touch'],orientation})).checks[0]!
-    expect(result.status,result.observation).toBe('failed')
-    const phone=JSON.parse(result.observation).phone
-    expect(phone.viewport).toEqual(orientation==='Portrait'?[390,844]:[844,390])
-    expect(phone.environment.maxTouchPoints).toBeGreaterThan(0)
-    expect(phone.errors).toContain('phone-only failure')
-    const desktop=(await runChecks(root,task,[],undefined,{platform:'Web',inputs:['Keyboard'],orientation})).checks[0]!
+    const result = await runArtifactCheck(root,'runtime-smoke',task,[],{platform:'Web',inputs:['Touch'],orientation})
+    expect(result.status,result.observation).toBe('passed')
+    const observed=JSON.parse(result.observation)
+    expect(observed.viewport).toEqual([1280,720])
+    expect(observed.phone).toBeUndefined()
+    expect(observed.environment.maxTouchPoints).toBeGreaterThan(0)
+    expect(observed.errors).toEqual([])
+    const desktop=await runArtifactCheck(root,'runtime-smoke',task,[],{platform:'Web',inputs:['Keyboard'],orientation})
     expect(desktop.status,desktop.observation).toBe('passed')
   } finally { await rm(root,{recursive:true,force:true}) }
 },30000)
@@ -35,7 +34,7 @@ for (const kind of ['surface', 'script-error', 'missing-resource', 'external', '
         : kind === 'external' ? '<script>fetch("http://outside.invalid/private")</script>'
         : kind === 'websocket' ? '<script>new WebSocket("ws://outside.invalid/private")</script>' : ''
       await writeFile(join(root, 'dist/index.html'), '<!doctype html><body>'+(kind === 'empty' ? '' : '<canvas width="100" height="100"></canvas>')+extra+'</body>')
-      const checked = (await runChecks(root, task, [])).checks[0]!
+      const checked = await runArtifactCheck(root, 'runtime-smoke', task, [], {})
       expect(checked.status, checked.observation).toBe(kind === 'surface' ? 'passed' : ['external', 'websocket', 'empty'].includes(kind) ? 'unverified' : 'failed')
       expect(checked.observation).toContain('Initial load/error smoke only')
       expect(checked.artifacts?.[0]?.path).toBe('dist')
@@ -55,7 +54,7 @@ test('cancelling a busy observed build terminates the owned driver/browser, keep
     const body = '<!doctype html><body>busy fixture<script>setInterval(()=>fetch("./index.html?tick="+Date.now()),20)</script></body>'
     await writeFile(join(root, 'dist/index.html'), body)
     timer = setTimeout(() => controller.abort(), 1500)
-    const result = (await runChecks(root, task, [], controller.signal)).checks[0]!
+    const result = await runArtifactCheck(root, 'runtime-smoke', task, [], {}, controller.signal)
     expect(result.status).toBe('execution-error')
     expect(result.observation).toContain('cancelled')
     expect(await Bun.file(join(root, 'dist/index.html')).text()).toBe(body)

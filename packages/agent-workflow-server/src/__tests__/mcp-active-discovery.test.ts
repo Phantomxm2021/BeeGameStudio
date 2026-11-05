@@ -9,10 +9,11 @@ afterEach(async () => {
 })
 
 describe('active MCP discovery', () => {
-  test('initializes a stdio server with configured environment without inheriting host secrets or invoking tools', async () => {
+  test.each([0, 10_100])('initializes a stdio server after %i ms without inheriting host secrets or invoking tools', async delayMs => {
     const require = createRequire(import.meta.url)
     const code = `import {McpServer} from ${JSON.stringify(require.resolve('@modelcontextprotocol/sdk/server/mcp.js'))};
 import {StdioServerTransport} from ${JSON.stringify(require.resolve('@modelcontextprotocol/sdk/server/stdio.js'))};
+await new Promise(resolve=>setTimeout(resolve,${delayMs}));
 const configured=process.env.FIXTURE_MCP_VALUE==='configured' && !process.env.BGS_MCP_TEST_HOST_SECRET;
 const server=new McpServer({name:configured?'fixture':'bad-environment',version:'1'});
 server.registerTool('must_not_run',{inputSchema:{}},async()=>{process.exit(1)});
@@ -30,7 +31,7 @@ await server.connect(new StdioServerTransport());`
       if (previous === undefined) delete process.env.BGS_MCP_TEST_HOST_SECRET
       else process.env.BGS_MCP_TEST_HOST_SECRET = previous
     }
-  })
+  }, 20_000)
 
   test('reports an uninstalled stdio command as unavailable', async () => {
     const result = await testMcpServerConnection({

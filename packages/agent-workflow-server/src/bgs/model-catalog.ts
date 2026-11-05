@@ -2,13 +2,12 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { bgsCommand } from './client'
 import { getSafeRuntimeProcessEnvironment } from '../beegame/runtime-process-environment'
-import fallbackModel from './fallback-model.json'
 
 const execute = promisify(execFile)
 
-/** Preserve the running CLI's bundled entries and its current unknown-model
- * defaults. The packaged fallback mirrors 0.166.0; the native regression checks
- * prompt/tool/capacity compatibility on upgrades. No provider discovery or LLM. */
+/** Reuse native metadata for the selected connection without advertising other
+ * bundled models as provider capabilities. Without an advertised reviewer,
+ * native approval review uses its existing parent-model fallback. */
 export async function loadBgsModelCatalog(input: {
   cwd: string; env: Record<string, string>; command?: readonly string[]
 }): Promise<string> {
@@ -30,9 +29,9 @@ export async function loadBgsModelCatalog(input: {
         new Set(catalog.models.map(model => model.slug)).size !== catalog.models.length) throw Error()
   } catch { throw Error('BGS returned an invalid bundled model catalog') }
   const model = input.env.BEEGAME_MODEL
-  if (model && !catalog.models.some(entry => entry.slug === model))
-    catalog.models.push({ ...fallbackModel, slug: model, display_name: model })
-  const body = JSON.stringify(catalog)
+  // An absent model uses the running CLI's native fallback. Do not copy its
+  // instructions or turn unknown capabilities into an advertised catalog entry.
+  const body = JSON.stringify({ ...catalog, models: catalog.models.filter(entry => entry.slug === model) })
   // The native provider-catalog reader has the same 1 MiB limit.
   if (Buffer.byteLength(body) > 1024 * 1024) throw Error('BGS model catalog exceeds the native size limit')
   return body

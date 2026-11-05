@@ -40,6 +40,12 @@ createInterface({ input: process.stdin }).on('line', async line => {
       if (prompt !== 'file-missing') event('item/started', { item: { id: 'file', type: 'fileChange', changes: [{ path, kind, diff: 'game code' }] } })
       answer = await ask('item/fileChange/requestApproval', { threadId, turnId, itemId: 'file',
         ...(prompt === 'file-grant-root' ? { grantRoot: process.cwd() } : {}) })
+    } else if (prompt === 'mcp-approval' || prompt === 'mcp-approval-once') {
+      answer = await ask('mcpServer/elicitation/request', { threadId, turnId, serverName: 'fixture-blender',
+        mode: 'form', message: 'Allow the fixture-blender MCP server to run tool "execute_blender_code"?',
+        _meta: { bgs_approval_kind: 'mcp_tool_call', tool_params: { code: 'print("noop")', user_prompt: 'Build a game' },
+          ...(prompt === 'mcp-approval' ? { persist: ['session', 'always'] } : {}) },
+        requestedSchema: { type: 'object', properties: {} } })
     } else if (prompt === 'mcp' || prompt === 'mcp-url') {
       answer = await ask('mcpServer/elicitation/request', { threadId, turnId, serverName: 'fixture-mcp',
         ...(prompt === 'mcp-url' ? { mode: 'url', url: 'https://example.org/authorize', message: 'Authorize this MCP' }

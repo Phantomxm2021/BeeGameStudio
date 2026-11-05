@@ -1,3 +1,4 @@
+import { projectHostDirectory, projectWorkDirectory, projectWorkRoot } from './beegame/project-storage-paths'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, test } from 'bun:test'
@@ -9,6 +10,7 @@ import {
   resolveSessionWorkspacePath,
   createManagedProjectWorkspacePath,
   initializeProjectRepository,
+  deleteWorkspaceDirectoryIfSafe,
 } from './local-runtime-service'
 
 const originalWorkspacePath = process.env.AGENT_WORKFLOW_WORKSPACE_PATH
@@ -149,8 +151,7 @@ test('Git initialization failure is visible instead of claiming a repository exi
 
 test('project Git excludes runtime data, dependencies and secrets while retaining authored inputs', async () => {
   const root = await repositoryFixture()
-  const ignored = ['.beegame/chat/project-events.jsonl', '.beegame/tmp/npm-cache/blob',
-    '.beegame/artifacts/archive.zip', '.runtime/state.json', 'logs/runtime-diagnostics.jsonl',
+  const ignored = ['reports/runtime/preview-test-fixture/execution.json',
     'node_modules/pkg/index.js', 'nested/node_modules/pkg/index.js', 'dist/index.html',
     '.vite/cache', '.cache/blob', 'tsconfig.app.tsbuildinfo', '.DS_Store', '.env', '.env.local']
   const retained = ['src/main.ts', 'assets/image.png', 'content/data.json', 'reports/result.json',
@@ -189,7 +190,7 @@ test('existing ignore rules and staged runtime files are preserved; local fallba
   await initializeProjectRepository(root, {createIfMissing: false})
   expect(await readFile(join(root, '.gitignore'), 'utf8')).toEndWith(authored)
   expect(await readFile(join(root, '.git/info/exclude'), 'utf8')).toEndWith('# Existing local rules\nlocal-cache/')
-  expect(await gitAt(root, 'check-ignore', '--', '.beegame/chat/project-events.jsonl')).toBe('.beegame/chat/project-events.jsonl')
+  expect(await gitAt(root, 'check-ignore', '--', 'reports/runtime/preview-test-fixture/execution.json')).toBe('reports/runtime/preview-test-fixture/execution.json')
   expect(await gitAt(root, 'ls-files')).toBe('logs/retained.log')
   const noGit = await repositoryFixture()
   await initializeProjectRepository(noGit, {createIfMissing: false})
@@ -214,8 +215,8 @@ test('ignore setup refuses linked metadata without writing outside the repositor
 
 
 test.each([
-  {engine: 'React', ignored: ['dist/index.html', '.vite/cache', '.cache/cache', 'tsconfig.tsbuildinfo'],
-    retained: ['src/main.tsx', 'public/image.png', 'package.json', 'bun.lock', 'Library/art.png', 'Build/tool.ts', 'logs/game-data.json']},
+  ...['React','Phaser','Three.js'].map(engine => ({engine, ignored: ['dist/index.html', '.vite/cache', '.cache/cache', 'tsconfig.tsbuildinfo'],
+    retained: ['src/main.tsx', 'public/image.png', 'package.json', 'bun.lock', 'Library/art.png', 'Build/tool.ts', 'logs/game-data.json']})),
   {engine: 'Unity', ignored: ['Library/cache', 'Temp/cache', 'obj/cache', 'Logs/editor.log', 'UserSettings/EditorUserSettings.asset', '.vs/cache'],
     retained: ['Assets/Game.cs', 'Assets/Game.cs.meta', 'Assets/Library/image.png', 'Assets/Plugins/native.dll', 'Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt', 'dist/source.json']},
   {engine: 'Godot', ignored: ['.godot/cache', '.import/cache', '.mono/cache'],
@@ -267,7 +268,7 @@ test('engine changes replace owned blocks without changing custom rules or their
 test.each([undefined, 'Unknown', '__proto__'])('missing or unsupported engine only gets common rules: %s', async engine => {
   const root = await repositoryFixture()
   await initializeProjectRepository(root, {engine})
-  expect(await gitAt(root, 'check-ignore', '--', '.beegame/chat/project-events.jsonl')).toBe('.beegame/chat/project-events.jsonl')
+  expect(await gitAt(root, 'check-ignore', '--', 'reports/runtime/preview-test-fixture/execution.json')).toBe('reports/runtime/preview-test-fixture/execution.json')
   const ignored = (await readFile(join(root, '.gitignore'), 'utf8')).split('\n')
   for (const rule of ['/dist/', '/[Ll]ibrary/', '/.godot/', '/Intermediate/', '*.tsbuildinfo', '/logs/'])
     expect(ignored).not.toContain(rule)
@@ -340,4 +341,25 @@ test('worktrees do not share engine exclusions through the common Git directory'
   expect(visible).toContain('dist/resource.pck')
   expect(await gitAt(root, 'check-ignore', '--', 'Library/cache')).toBe('Library/cache')
   expect(await gitAt(worktree, 'check-ignore', '--', '.godot/cache')).toBe('.godot/cache')
+})
+
+
+test('authorized project deletion removes its host and work records without touching siblings', async () => {
+  const base = await repositoryFixture(), projects = join(base, 'projects')
+  const target = join(projects, 'target'), sibling = join(projects, 'sibling'), outside = join(base, 'outside')
+  for (const workspace of [target, sibling, outside]) {
+    await mkdir(workspace, {recursive:true})
+    for (const path of [projectHostDirectory(workspace), projectWorkDirectory(workspace, 'fixture')]) {
+      await mkdir(path, {recursive:true}); await writeFile(join(path, 'retained'), 'fixture')
+    }
+  }
+  expect(await deleteWorkspaceDirectoryIfSafe(projects, projects)).toBeUndefined()
+  expect(await deleteWorkspaceDirectoryIfSafe(outside, projects)).toBeUndefined()
+  expect(await deleteWorkspaceDirectoryIfSafe(target, projects)).toBe(target)
+  for (const path of [target, projectHostDirectory(target), projectWorkRoot(target)])
+    await expect(access(path)).rejects.toThrow()
+  for (const workspace of [sibling, outside]) {
+    expect(await readFile(join(projectHostDirectory(workspace), 'retained'), 'utf8')).toBe('fixture')
+    expect(await readFile(join(projectWorkDirectory(workspace, 'fixture'), 'retained'), 'utf8')).toBe('fixture')
+  }
 })

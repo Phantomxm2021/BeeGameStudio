@@ -1,7 +1,7 @@
 // Runs in Node: the shared Playwright CDP client is not reliable inside Bun.
 let input = ''
 for await (const part of process.stdin) input += part
-const { endpoint, previewUrl, host } = JSON.parse(input)
+const { endpoint, previewUrl, host, count = 1 } = JSON.parse(input)
 const { chromium } = await import(process.env.BGS_PLAYWRIGHT_MODULE)
 const browser = await chromium.connectOverCDP(endpoint, { timeout: 10_000 })
 try {
@@ -27,6 +27,11 @@ try {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   })
   // Initial rendered game screen only. No automatic Start button or gameplay input.
-  process.stdout.write(await page.screenshot({ type: 'jpeg', quality: 85, timeout: 5_000 }))
+  const frames = []
+  for (let index = 0; index < count; index++) {
+    if (index) await page.waitForTimeout(1000)
+    frames.push(await page.screenshot({ type: 'jpeg', quality: 85, timeout: 5_000 }))
+  }
+  process.stdout.write(count === 1 ? frames[0] : JSON.stringify(frames.map(frame => frame.toString('base64'))))
   await context.close()
 } finally { await browser.close() }

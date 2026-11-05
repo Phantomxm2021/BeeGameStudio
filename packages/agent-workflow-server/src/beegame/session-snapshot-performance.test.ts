@@ -1,5 +1,5 @@
-import {expect,test} from 'bun:test'
-import {mkdtemp,rm} from 'node:fs/promises'
+import {expect,test,spyOn} from 'bun:test'
+import {mkdtemp,rm,readFile} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {BeeGameSessionManager,type BeeGameEvent} from './session-manager'
@@ -101,4 +101,58 @@ test('indexed snapshots equal full-event calculation after mixed lifecycle, usag
       expect(indexed).toEqual(full)
     }
   }finally{await f.close()}
+})
+
+
+test.each(['session.stopped','turn.failed','permission.requested','usage','thinking-ended'] as const)('stream writes are batched while %s flushes the full ordered history',async boundary=>{
+  const f=await fixture(),host=f.manager as any,record=host.sessions.get(f.session.id)
+  let snapshots=0
+  const persist=host.persistRuntimeSnapshot.bind(host)
+  host.persistRuntimeSnapshot=(r:unknown)=>{snapshots++;persist(r)}
+  try {
+    const baseline=f.record.events.length
+    for(let i=0;i<1000;i++)host.append(record,'assistant.thinking','片'+i,{type:'assistant.thinking',status:'streaming',thinkingBlockId:'one'},'stream')
+    expect(snapshots).toBe(0)
+    expect(f.record.events).toHaveLength(baseline+1000)
+    if(boundary==='session.stopped')f.manager.stop(f.session.id)
+    else if(boundary==='thinking-ended')host.append(record,'assistant.thinking','完整思考',{type:'assistant.thinking',status:'ended',thinkingBlockId:'one'},'stream')
+    else host.append(record,boundary,'boundary',undefined,'stream')
+    expect(snapshots).toBe(1)
+    const saved=(await readFile(record.transcriptPath,'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+    expect(saved.map(x=>x.id)).toEqual(f.record.events.map(x=>x.id))
+    expect(saved.slice(baseline,baseline+1000).map(x=>x.text)).toEqual(Array.from({length:1000},(_,i)=>'片'+i))
+    expect(record.pendingTranscript).toHaveLength(0)
+    expect(record.streamPersistenceTimer).toBeUndefined()
+  }finally{await f.close()}
+})
+
+test('active streams flush on the bounded timer and server disposal retains their tail',async()=>{
+  const f=await fixture(),host=f.manager as any,record=host.sessions.get(f.session.id)
+  try {
+    host.append(record,'assistant.partial','timer-frame',undefined,'stream')
+    await new Promise(resolve=>setTimeout(resolve,150))
+    expect((await readFile(record.transcriptPath,'utf8'))).toContain('timer-frame')
+    expect(record.pendingTranscript).toHaveLength(0)
+    host.append(record,'tool.progress','last-frame',undefined,'stream')
+    await f.manager.dispose()
+    const saved=(await readFile(record.transcriptPath,'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+    expect(saved.map(x=>x.id)).toEqual(f.record.events.map(x=>x.id))
+    expect(saved.some(x=>x.text==='last-frame')).toBe(true)
+    expect(record.streamPersistenceTimer).toBeUndefined()
+  }finally{await f.close()}
+})
+
+
+test('deferred snapshot I/O failure is reported without losing the appended transcript',async()=>{
+  const f=await fixture(),host=f.manager as any,record=host.sessions.get(f.session.id)
+  const persist=host.persistRuntimeSnapshot.bind(host)
+  const warnings=spyOn(console,'warn').mockImplementation(()=>{})
+  host.persistRuntimeSnapshot=()=>{throw Object.assign(Error('Synthetic snapshot I/O failure'),{code:'EIO'})}
+  try {
+    host.append(record,'assistant.partial','saved-before-snapshot',undefined,'stream')
+    await new Promise(resolve=>setTimeout(resolve,150))
+    expect(warnings).toHaveBeenCalledWith('[BeeGame] Stream snapshot persistence failed',expect.objectContaining({sessionId:f.session.id}))
+    expect(await readFile(record.transcriptPath,'utf8')).toContain('saved-before-snapshot')
+    expect(record.streamPersistenceTimer).toBeUndefined()
+  }finally{host.persistRuntimeSnapshot=persist;warnings.mockRestore();await f.close()}
 })

@@ -41,8 +41,8 @@ test('summary omits routine inventories, retains all problems, and details retur
   for (const summary of [compact, detailed]) {
     const expectedResources=summary===compact ? {...assetContract,resourcesScope:'issues-only',routineVerifiedResourceCount:0} : assetContract
     expect(summary.resourceStructureCoverage).toEqual(expectedResources)
-    expect(summary.checks[0]!.coverage).toEqual({ files: [ui[0]!.document, scene[0]!.document],
-      limitations: ['Static structure only'], uiSurfaceCompatibility: surface })
+    expect(summary.checks[0]!.coverage).toEqual(summary===compact ? { limitations: ['Static structure only'] } : {
+      files: [ui[0]!.document, scene[0]!.document], limitations: ['Static structure only'], uiSurfaceCompatibility: surface })
     expect('observation' in summary.checks[0]! ? summary.checks[0].observation : undefined).toBe(record.checks[0]!.observation)
   }
   expect(detailed.uiBindingCoverage.nodesScope).toBe('all')
@@ -103,11 +103,34 @@ test('compact resource evidence preserves problems and provisional resources; de
   const expectedResources={ ...assetContract, resourcesScope:'issues-only',routineVerifiedResourceCount:1, resources:problems }
   expect(compact.resourceStructureCoverage).toEqual(expectedResources)
   expect(compact.checks[0]).toMatchObject({ status: 'failed', observation: record.checks[0]!.observation,
-    coverage: { files: [assetContract.manifestPath], limitations: ['Static resource evidence only'] } })
+    coverage: { limitations: ['Static resource evidence only'] } })
+  expect(detailed.checks[0]!.coverage).toEqual({files: [assetContract.manifestPath], limitations: ['Static resource evidence only']})
   expect(compact).toMatchObject({ quality: 'unverified', deliveryEligible: false })
-  expect(compact.detailsHint).toContain('--inspect ID --details')
+  expect(compact.detailsHint).toContain('details:true')
   expect(compact.detailsHint).toContain('resource file evidence')
   expect(detailed.resourceStructureCoverage).toEqual(assetContract)
   expect(measurementSummary(record)).toEqual(detailed)
   expect(JSON.stringify(record)).toBe(before)
+})
+
+
+test('historical package composition is returned as saved data without rebuilding or reclassifying files', () => {
+  const composition: import('./state').PackageComposition = {
+    artifact:{path:'dist',sha256:'saved-artifact'}, fileCount:1,totalBytes:12,
+    directories:[{path:'.',fileCount:1,bytes:12}],fileTypes:[{extension:'.html',fileCount:1,bytes:12}],
+    largestFiles:[{path:'index.html',bytes:12}],duplicateBytes:0,duplicates:[],
+    productionMaterials:{status:'unverified',candidates:null,reason:'Saved historical limitation'},limitations:['Saved byte-count scope'],
+  }
+  const record: AgentMeasurement = {id:'historical',requestKey:'saved',runtimeArtifact:'dist',reports:[],reportPaths:[],
+    requirementsRevision:'original',startedAt:'2026-01-01',checks:[{
+      id:'build',version:'historical',status:'passed',inputs:[],observation:'Saved build',createdAt:'2026-01-01',
+      projectBuild:{version:'v3-editable-build.2',files:[],excludedReports:[],artifact:composition.artifact,
+        runtime:'Saved runtime',packageComposition:composition},
+    }]}
+  const before=structuredClone(record)
+  expect(measurementSummary(record,true).packageComposition).toEqual(composition)
+  expect(measurementSummary(record,false)).not.toHaveProperty('packageComposition')
+  expect(record).toEqual(before)
+  delete record.checks[0]!.projectBuild!.packageComposition
+  expect(measurementSummary(record,true).packageComposition).toBeNull()
 })

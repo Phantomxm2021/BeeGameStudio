@@ -1,127 +1,47 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { prepareNativeMcpConfig } from '../native-mcp-config'
+import { CONTENT_CHECKER_ENTRY } from '../content-checker-runtime'
+import { contentConsumerDistribution, contentConsumerCommand, registeredRuntimeFilesSource } from '../game-content-consumer-cli'
 import { test, expect } from 'bun:test'
-import sharp from 'sharp'
-import { access, copyFile, mkdir, mkdtemp, realpath, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { access, mkdir, mkdtemp, realpath, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { join, resolve, dirname } from 'node:path'
+import { projectWorkDirectory, projectWorkRoot } from '../project-storage-paths'
 import { tmpdir } from 'node:os'
-import { openAgentTools, openDesignActions } from './agent-tools'
+import { openAgentTools } from './agent-tools'
 import { sharedContentChecker } from '../content-checker-runtime'
 import { CONTENT_DRAFT_EXAMPLES } from '../game-content-validation-cli'
-import { openPreviewTestAccess } from '../preview-test-access'
 import { projectPreviewCapabilityPath } from '../project-preview-capability'
 import { createPreviewTestBrowser } from '../preview-test-browser'
 import { sharedPlaywright } from '../shared-playwright'
-import { buildEditableProject } from './editable-project'
+import { commandCheck, projectFiles } from './checks'
 import { sceneLayoutFixture, uiLayoutFixture } from '../fixtures/layout-fixture'
 import { createHash } from 'node:crypto'
-import { registeredContentChecks } from './agent-measurement'
+import { runContentCheck } from './content-checks'
 import { runArtifactCheck } from './runtime-checks'
 import { readContentView } from './content-view'
-import { designHandoffPath, readDesignImplementationChecklist } from '../design-handoff'
-import { writeDesignDocumentsFixture, designHandoffFixture } from '../fixtures/layout-fixture'
-import { BALANCE_CALCULATOR_PATH, materializeBalanceCalculator } from '../balance-calculation'
-
-test('finalize updates the single GDD and ignores retired sibling files', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-single-design-')))
-  try {
-    await writeDesignDocumentsFixture(root, ['GDD.md'])
-    const design = openDesignActions(root), path = join(root,'docs/GDD.md')
-    await writeFile(join(root,'docs/UI_UX_SPEC.md'),'Retired sibling; not a design owner')
-    const original = await readFile(path,'utf8')
-    await writeFile(path,original.replace('Fixture decision.','Changed decision.'))
-    expect(await design('finalize')).toMatchObject({valid:true,finalized:['GDD.md']})
-    const finalized = await readFile(path,'utf8')
-    expect(finalized).toContain('- Version: v1.1')
-    expect(await readFile(join(root,'docs/UI_UX_SPEC.md'),'utf8')).toBe('Retired sibling; not a design owner')
-    expect(await design('finalize',['docs/GDD.md'])).toMatchObject({valid:true})
-    await expect(design('finalize',['../GDD.md'])).rejects.toThrow('document name')
-  } finally { await rm(root,{recursive:true,force:true}) }
-})
-
-test('GDD handoff exposes one requirement and optional implementation pointers', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-single-actions-')))
-  try {
-    await writeDesignDocumentsFixture(root, ['GDD.md'])
-    const design = openDesignActions(root), path = join(root, designHandoffPath('GDD.md'))
-    const handoff = JSON.parse(await readFile(path, 'utf8'))
-    delete handoff.implementationItems
-    await writeFile(path, JSON.stringify(handoff))
-    expect((await design('baseline') as any).requirements).toHaveLength(1)
-    expect(await design('implementation')).toMatchObject({ valid: true, items: [] })
-    await writeFile(path, JSON.stringify(designHandoffFixture('GDD.md')))
-    const implementation = await design('implementation') as any
-    expect(implementation).toMatchObject({valid:true,globalSources:['docs/GDD.md']})
-    expect(implementation.items).toHaveLength(1)
-    await rm(path)
-    expect((await design('baseline') as any).requirements).toHaveLength(0)
-  } finally { await rm(root, {recursive:true,force:true}) }
-})
-
-test('GDD draft validates saved pointers without requiring sibling documents', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-single-draft-')))
-  try {
-    await writeDesignDocumentsFixture(root, ['GDD.md'])
-    const design = openDesignActions(root), path = join(root, designHandoffPath('GDD.md'))
-    expect(await design('draft', ['GDD.md'])).toMatchObject({valid:true,issues:[]})
-    const handoff = JSON.parse(await readFile(path, 'utf8'))
-    handoff.outputs[0].section = 'Absent heading'
-    await writeFile(path, JSON.stringify(handoff))
-    const failed = await design('draft', ['GDD.md']) as any
-    expect(failed.valid).toBe(false)
-    expect(failed.issues.join(' ')).toContain('absent section')
-    expect((await design('help', [], undefined, true) as any).documents).toEqual(['GDD.md'])
-    await expect(design('draft', ['TECHNICAL_DESIGN.md'])).rejects.toThrow('document name')
-    await expect(design('draft', ['GDD.md','GDD.md'])).rejects.toThrow('one design document')
-  } finally { await rm(root, { recursive: true, force: true }) }
-})
-
-test('handoff sends reference reading to native Read without a visual certification command', async () => {
-  const root = await mkdtemp(join(tmpdir(),'bgs-reference-help-'))
-  try {
-    const design = openDesignActions(root)
-    const help = await design('help', [], undefined, true) as any
-    expect(help.instruction).toContain('Read selected reference pictures')
-    expect(help.instruction).toContain('Keep later inputs planned')
-    expect(help.instruction).toContain('reconcile the interfaces and inputs needed for the current part before consuming them')
-    expect(help.instruction).toContain('Author all design decisions in docs/GDD.md')
-    expect(help.instruction).not.toContain('TECHNICAL_DESIGN.md')
-    expect(help.instruction).toContain('BGS does not require output indexes, task graphs or coverage mappings')
-    expect(help.instruction).not.toContain('Technical notes before these inputs are drafts')
-    expect(help.instruction).not.toContain('begin their geometry during planning')
-    expect(help.help).toContain('Baseline checks saved sources and any existing index integrity, not visual design or layout geometry')
-    expect(help.help).toContain('--design baseline --details')
-    expect(help.help).not.toContain('baseline|visual')
-    expect(help.help).not.toContain('generation record')
-    await expect(design('visual')).rejects.toThrow('Unknown design action')
-  } finally { await rm(root,{recursive:true,force:true}) }
-})
-
-test('acceptance help exposes the runtime verification field contract and entry point', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-acceptance-help-'))
-  try {
-    const help = await openDesignActions(root)('acceptance-help') as any
-    expect(help.acceptanceExample.verification).toMatchObject({ target: 'deployment', observation: 'target-runtime' })
-    expect(help.acceptanceExample.verification).not.toHaveProperty('contentChecks')
-    expect(help.acceptanceInstruction).not.toContain('document:"content/<registered file>"')
-    await mkdir(join(root,'content'))
-    await writeFile(join(root,'content/index.json'),'{}')
-    const legacy = await openDesignActions(root)('acceptance-help') as any
-    expect(legacy.acceptanceExample.verification.contentChecks).toEqual([])
-    expect(legacy.acceptanceInstruction).toContain('document:"content/<registered file>"')
-    expect(help.acceptanceInstruction).toContain('verification.target must be "deployment"')
-    expect(help.acceptanceInstruction).toContain('verification.observation must be "target-runtime"')
-    expect(help.acceptanceInstruction).toContain('verification.observation allows "target-runtime"|"simulation"')
-    expect(help.acceptanceInstruction).toContain('--design acceptance --help')
-  } finally { await rm(root, { recursive: true, force: true }) }
-})
+import { BALANCE_CALCULATOR_PATH } from '../balance-calculation'
+import { writeBalanceCalculatorFixture } from './balance-calculation-fixture'
 
 async function command(root: string, directory: string, name: string, ...args: string[]) {
-  const child = Bun.spawn([process.execPath, join(root, directory, name), ...args], {
-    cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl,
+  const child = Bun.spawn([process.execPath, resolve(root, directory, name), ...args], {
+    cwd: root, env: { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: projectPreviewCapabilityPath(root, 'fixture'), BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl,
       BEEGAME_PLAYWRIGHT_MODULE: sharedPlaywright().moduleUrl },
     stdout: 'pipe', stderr: 'pipe',
   })
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   return { stdout, stderr, code }
+}
+// Explicit historical-library fixture, never default Agent tool preparation.
+async function legacyCommand(root:string,directory:string,name:string,...args:string[]) {
+  const target=resolve(root,directory)
+  if(name==='check-content.mjs')await writeFile(join(target,name),CONTENT_CHECKER_ENTRY)
+  else if(name==='consumer.mjs') {
+    for(const [file,body] of Object.entries(await contentConsumerDistribution()))await writeFile(join(target,file),body)
+    await writeFile(join(target,'registered-runtime-files.mjs'),await registeredRuntimeFilesSource())
+    await writeFile(join(target,name),contentConsumerCommand(await realpath(root),join(target,'content-consumer.mjs')))
+  }
+  return command(root,directory,name,...args)
 }
 test('existing balance helpers remain usable without default appendix guidance or automatic calculation', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs optional balance-')))
@@ -134,10 +54,15 @@ export async function calculate({readJson}) {
     checks:[{name:'Nonnegative count',passed:p.count >= 0,details:String(p.count)}],
     limitations:['Synthetic calculation, not a game simulator']};
 }`)
-  await materializeBalanceCalculator(root)
-  const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined })
+  await writeBalanceCalculatorFixture(root)
+  const retainedCalculator = (await readFile(join(root,BALANCE_CALCULATOR_PATH),'utf8')) + '\n// Retained project version.\n'
+  await writeFile(join(root,BALANCE_CALCULATOR_PATH),retainedCalculator)
+  const tools = await openAgentTools({ sessionId: 'fixture', workspacePath: root, getAuthToken: () => undefined,
+    openImage: () => { throw Error('An unused image bridge must not be opened') } })
   try {
+    expect(tools.turnContext).toContain('Image generation is configured')
     expect(tools.systemContext).not.toContain(BALANCE_CALCULATOR_PATH)
+    expect(await readFile(join(root,BALANCE_CALCULATOR_PATH),'utf8')).toBe(retainedCalculator)
     const help = await command(root, '', BALANCE_CALCULATOR_PATH, '--help')
     expect(help.code, help.stderr).toBe(0)
     expect(help.stdout).toContain('calculate({readJson, readText})')
@@ -159,13 +84,13 @@ export async function calculate({readJson}) {
     expect(failed.stderr).toContain('Scenario check failed: Nonnegative count')
     expect(await readFile(join(root, 'result.md'), 'utf8')).toBe(result)
     expect(await readFile(join(root, 'runs.txt'), 'utf8')).toBe('run\nrun\n')
-  } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
+  } finally { await tools.close(); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 }, 30000)
-test('actual author entry supplies executable pure UI examples with no manual hashes or dummy Scene', async () => {
+test('explicit historical checker library retains executable UI examples without enabling default authoring', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-pure-ui-author-')))
-  const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined })
+  const tools = await openAgentTools({ sessionId: 'fixture', workspacePath: root, getAuthToken: () => undefined })
   try {
-    const format = await command(root, tools.directory, 'check-content.mjs', '--format', 'examples')
+    const format = await legacyCommand(root, tools.directory, 'check-content.mjs', '--format', 'examples')
     expect(format.code, format.stdout+format.stderr).toBe(0)
     const examples = JSON.parse(format.stdout).values.examples
     expect(examples.index).not.toHaveProperty('documentRevision')
@@ -174,10 +99,11 @@ test('actual author entry supplies executable pure UI examples with no manual ha
     await mkdir(join(root, 'content/ui'), { recursive: true })
     const sources = { 'content/index.json': JSON.stringify(examples.index), 'content/ui/menu.json': JSON.stringify(examples.ui) }
     for (const [path, bytes] of Object.entries(sources)) await writeFile(join(root, path), bytes)
-    const current = await command(root, tools.directory, 'check-content.mjs', '--current')
+    const current = await legacyCommand(root, tools.directory, 'check-content.mjs', '--current')
     expect(current.code, current.stdout+current.stderr).toBe(0)
     expect(JSON.parse(current.stdout)).toMatchObject({ valid: true, contentCount: 1, runtimeVerified: false })
-    const checked = await registeredContentChecks(root, {}, true)
+    const checked = await Promise.all((['content-structure', 'content-layout', 'content-resources'] as const)
+      .map(id => runContentCheck(root, id, { expectedOutputs: ['content/ui/menu.json'] }, [], {})))
     expect(checked.map(c => [c.id, c.status, c.status === 'passed' ? '' : c.observation])).toEqual([
       ['content-structure', 'passed', ''], ['content-layout', 'passed', ''], ['content-resources', 'passed', ''],
     ])
@@ -198,14 +124,13 @@ test('actual author entry supplies executable pure UI examples with no manual ha
       { ...examples.index, documents: [{ ...examples.index.documents[0], loadPhase: 'on-demand' }] },
     ]) {
       await writeFile(join(root, 'content/index.json'), JSON.stringify(invalid))
-      expect((await command(root, tools.directory, 'check-content.mjs', '--current')).code).toBe(1)
-      expect((await registeredContentChecks(root, {}, true))[0]?.status).toBe('failed')
+      expect((await legacyCommand(root, tools.directory, 'check-content.mjs', '--current')).code).toBe(1)
     }
-  } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
+  } finally { await tools.close(); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 }, 30000)
-test('materialized layout command preserves confirmed orientation without adding phone targets', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-layout-target-tools-'))
-  const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined,
+test('explicit historical layout checker preserves confirmed orientation without adding phone targets', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-layout-target-tools-')))
+  const tools = await openAgentTools({ sessionId: 'fixture', workspacePath: root, getAuthToken: () => undefined,
     constraints: { platform: 'Web', inputs: ['Touch'], orientation: 'Landscape', dimension: '2D' } })
   try {
     const ui = uiLayoutFixture() as any
@@ -215,50 +140,51 @@ test('materialized layout command preserves confirmed orientation without adding
     await mkdir(join(root, 'content/ui'), { recursive: true })
     const path = join(root, 'content/ui/menu.json'), bytes = JSON.stringify(ui)
     await writeFile(path, bytes)
-    const check = await command(root, tools.directory, 'check-content.mjs', '--design-layouts', '--details')
+    const check = await legacyCommand(root, tools.directory, 'check-content.mjs', '--design-layouts', '--details')
     expect(check.code).toBe(0)
     const result = JSON.parse(check.stdout)
     expect(result.coverage.targets[0].viewports).not.toContainEqual([844, 390])
     expect(await readFile(path, 'utf8')).toBe(bytes)
+    await writeFile(resolve(root,tools.directory,'check-content.mjs'),CONTENT_CHECKER_ENTRY.replace("{ profile: 'current' }",JSON.stringify({profile:'current',confirmed:tools.uiLayoutConstraints})))
     const conflict = await command(root, tools.directory, 'check-content.mjs', '--design-layouts', '--orientation', 'Portrait')
     expect(conflict.code).toBe(1)
     expect(conflict.stdout).toContain('differs from the confirmed project target')
-  } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
+  } finally { await tools.close(); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 })
 
 test('autonomous tools use actual auth and drafts without stages, documents or invented authority', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-agent-tools-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-agent-tools-')))
   const calls: string[] = []; let token = 'synthetic-user-a'
   const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     calls.push(request.headers.get('authorization') ?? '')
     return Response.json({ items: [{ packId: 'actual-fixture', license: 'CC0' }] })
   } })
-  const tools = await openAgentTools({ workspacePath: root, libraryBaseUrl: upstream.url.origin, getAuthToken: () => token })
+  const tools = await openAgentTools({ sessionId: 'fixture', workspacePath: root, libraryBaseUrl: upstream.url.origin, getAuthToken: () => token })
   try {
-    const source = await readFile(join(root, tools.directory, 'assets.mjs'), 'utf8')
+    const source = await readFile(resolve(root, tools.directory, 'assets.mjs'), 'utf8')
     expect(source).not.toContain(token); expect(tools.turnContext).not.toContain(token)
     expect(tools.turnContext.length).toBeLessThan(2200)
     expect(tools.turnContext).not.toContain('React/Canvas does not waive promised editable data') // responsibility remains in the production system slot
-    expect(tools.turnContext).toContain('Tool availability is not runtime consumption or quality evidence')
-    expect(tools.systemContext).toContain('consumer.mjs')
-    expect(tools.systemContext).toContain('bun check-content.mjs --format uiLayoutContract')
+    expect(tools.turnContext).not.toContain('quality evidence')
+    expect(tools.systemContext).not.toContain('consumer.mjs')
+    expect(tools.systemContext).not.toContain('check-content.mjs')
     expect(tools.systemContext).toContain('bun resources.mjs --contract registration')
     expect(tools.turnContext).not.toContain('consumer.mjs')
     expect(tools.turnContext).not.toContain('Native bgs-ui-layout reads:')
     expect(tools.turnContext).not.toContain('detailsFor:')
     // Even with all compactable turn text discarded, the system locator is
     // sufficient to invoke current adapters; it contains no bridge secret.
-    const located = JSON.parse(tools.systemContext.match(/root\): ("[^"]+")/)![1]!)
+    const located = JSON.parse(tools.systemContext.match(/absolute path\): ("[^"]+")/)![1]!)
     expect(located).toBe(tools.directory)
     expect(tools.systemContext).not.toContain(token)
     expect(tools.systemContext).not.toContain('node preview.mjs') // unavailable here
     expect(tools.systemContext.length).toBeLessThan(600)
-    const contracts = await command(root, located, 'check-content.mjs', '--format', 'index', 'preview')
+    const contracts = await legacyCommand(root, located, 'check-content.mjs', '--format', 'index', 'preview')
     expect(contracts.code, contracts.stderr).toBe(0)
     expect(JSON.parse(contracts.stdout)).toMatchObject({
       ok: true, values: { preview: { environment: { origin: 'opaque' }, runtimeVerified: false, quality: 'unverified' } },
     })
-    const layoutContract = await command(root, located, 'check-content.mjs', '--format', 'uiLayoutContract')
+    const layoutContract = await legacyCommand(root, located, 'check-content.mjs', '--format', 'uiLayoutContract')
     expect(layoutContract.code, layoutContract.stderr).toBe(0)
     const layoutReference = JSON.parse(layoutContract.stdout).values.uiLayoutContract
     expect(layoutReference.model).toContain('before measurement/rendering')
@@ -271,11 +197,11 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     for (const path of ['assets', 'content', 'docs']) await expect(access(join(root, path))).rejects.toThrow()
     // Execute the runtime advertised by navigation, not the test helper's Bun
     // default: a missing/wrong runtime used to send these entries through Node.
-    for (const name of ['resources', 'bind-content']) {
+    for (const name of ['resources']) {
       const runtime = tools.systemContext.match(new RegExp('(bun|node) ' + name + '\\.mjs'))?.[1]
       expect(runtime).toBeDefined()
-      const child = Bun.spawn([runtime === 'bun' ? process.execPath : 'node', join(root, located, name+'.mjs'), '--help'],
-        { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl },
+      const child = Bun.spawn([runtime === 'bun' ? process.execPath : 'node', resolve(root, located, name+'.mjs'), '--help'],
+        { cwd: root, env: { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: projectPreviewCapabilityPath(root, 'fixture'), BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl },
           stdout: 'pipe', stderr: 'pipe' })
       const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
       expect(code, out + err).toBe(0)
@@ -286,13 +212,13 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
         expect(out).not.toContain('.beegame/delivery/')
       }
     }
-    const consumerHelp=await command(root,tools.directory,'consumer.mjs','--help')
+    const consumerHelp=await legacyCommand(root,tools.directory,'consumer.mjs','--help')
     expect(consumerHelp.code).toBe(0)
     expect(consumerHelp.stdout).toContain(tools.directory+'/content-consumer.mjs')
     expect(consumerHelp.stdout).toContain('host tool files are excluded')
     expect(consumerHelp.stdout).toContain('Camera center AND orthographicSize')
     expect(consumerHelp.stdout).toContain('beforeNavigate')
-    const consumer=await import(join(root,tools.directory,'content-consumer.mjs'))
+    const consumer=await import(resolve(root,tools.directory,'content-consumer.mjs'))
     expect(typeof consumer.createProductionUiSurface).toBe('function')
     expect(typeof consumer.sceneNodeClientPoint2d).toBe('function')
     expect((await command(root, tools.directory, 'assets.mjs', '--help')).stdout).toContain(tools.directory + '/media.mjs')
@@ -300,21 +226,22 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     token = 'synthetic-user-b'
     expect((await command(root, tools.directory, 'assets.mjs', 'pack', 'actual-fixture')).code).toBe(0)
     expect(calls).toEqual(['Bearer synthetic-user-a', 'Bearer synthetic-user-b'])
-    const format = await command(root, tools.directory, 'check-content.mjs', '--format', 'coordinates', 'uiVocabulary')
+    const format = await legacyCommand(root, tools.directory, 'check-content.mjs', '--format', 'coordinates', 'uiVocabulary')
     expect(format.code, format.stdout).toBe(0)
     expect(JSON.parse(format.stdout).values).toHaveProperty('coordinates')
     expect(JSON.stringify(JSON.parse(format.stdout))).not.toContain('documentRevision')
     const ui = structuredClone(CONTENT_DRAFT_EXAMPLES.ui)
     await writeFile(join(root, 'menu.json'), JSON.stringify(ui))
-    expect((await command(root, tools.directory, 'check-content.mjs', '--check-drafts', 'menu.json')).code).toBe(0)
-    const layout = await command(root, tools.directory, 'check-content.mjs', '--layout-draft', 'menu.json', '960', '540')
+    expect((await legacyCommand(root, tools.directory, 'check-content.mjs', '--check-drafts', 'menu.json')).code).toBe(0)
+    const layout = await legacyCommand(root, tools.directory, 'check-content.mjs', '--layout-draft', 'menu.json', '960', '540')
     expect(layout.code, layout.stdout).toBe(0); expect(JSON.parse(layout.stdout).scope).toContain('draft')
     const resourceContract = await command(root, tools.directory, 'resources.mjs', '--contract')
     expect(resourceContract.code, resourceContract.stderr).toBe(0)
     expect(resourceContract.stdout).toContain('Asset Manifest authoring contract')
     expect(resourceContract.stdout).toContain('current BGS\ntools directory')
-    expect(resourceContract.stdout).toContain('check-content.mjs --current')
-    expect(resourceContract.stdout).toContain('This command requires a content index.')
+    expect(resourceContract.stdout).toContain('CheckResourcesAndBindings {}')
+    expect(resourceContract.stdout).toContain('no platform requires')
+    expect(resourceContract.stdout).not.toContain('This command requires a content index.')
     expect(resourceContract.stdout).not.toContain('assets/manifest/check.mjs')
     expect(resourceContract.stdout).not.toContain('CONTRACT.md')
     await expect(access(join(root, 'assets'))).rejects.toThrow()
@@ -323,8 +250,8 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(mediaHelp.stdout).toContain('current BGS tools directory supplied in the project context')
     expect(mediaHelp.stdout).toContain('bun <current-tools-directory>/media.mjs request.json')
     expect(mediaHelp.stdout).not.toContain('.beegame/delivery/')
-    for (const name of ['check-content.mjs', 'media.mjs', 'resources.mjs', 'bind-content.mjs']) {
-      const wrongRuntime = Bun.spawn([Bun.which('node')!, join(root,tools.directory,name), '--help'], {
+    for (const name of ['media.mjs', 'resources.mjs']) {
+      const wrongRuntime = Bun.spawn([Bun.which('node')!, resolve(root,tools.directory,name), '--help'], {
         cwd: root, env: { PATH: process.env.PATH, BEEGAME_CONTENT_CHECKER_MODULE: 'file:///absent-fixture.mjs' },
         stdout: 'pipe', stderr: 'pipe',
       })
@@ -333,10 +260,10 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
       expect(JSON.parse(output).issues[0]).toContain('BGS_BUN_REQUIRED')
       expect(output).not.toContain('UH is not a function')
     }
-    const batch = await command(root, tools.directory, 'check-content.mjs', '--review-sources', 'menu.json', '--details')
+    const batch = await legacyCommand(root, tools.directory, 'check-content.mjs', '--review-sources', 'menu.json', '--details')
     expect(batch.code, batch.stdout).toBe(0)
     expect(JSON.parse(batch.stdout).sources[0].text).toBe(await readFile(join(root,'menu.json'),'utf8'))
-    const full = await command(root, tools.directory, 'check-content.mjs', '--authority')
+    const full = await legacyCommand(root, tools.directory, 'check-content.mjs', '--authority')
     expect(full.code).toBe(1); expect(JSON.parse(full.stdout).valid).toBe(false)
     for (const path of ['docs', 'content/index.json', 'assets/asset-manifest.json', '.beegame/delivery/content-format.json'])
       await expect(access(join(root, path))).rejects.toThrow()
@@ -346,7 +273,7 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     await mkdir(join(root, 'content/ui'), { recursive: true })
     await writeFile(join(root, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
     await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
-    const first = await command(root, tools.directory, 'check-content.mjs', '--package-metadata',
+    const first = await legacyCommand(root, tools.directory, 'check-content.mjs', '--package-metadata',
       'content/scenes/level.json', 'content/ui/menu.json')
     expect(first.code, first.stdout + first.stderr).toBe(0)
     const metadata = JSON.parse(first.stdout)
@@ -357,33 +284,33 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
       files: ['scenes/level.json', 'ui/menu.json'], ...metadata.indexMetadata,
       documents: [{ id: 'level', kind: 'scene-2d', path: 'scenes/level.json', loadPhase: 'startup' },
         { id: 'menu', kind: 'ui-screen', path: 'ui/menu.json', loadPhase: 'on-demand' }] }))
-    const current = await command(root, tools.directory, 'check-content.mjs')
+    const current = await legacyCommand(root, tools.directory, 'check-content.mjs')
     expect(current.code, current.stdout + current.stderr).toBe(0)
     expect(JSON.parse(current.stdout)).toMatchObject({ valid: true, designVerified: false, runtimeVerified: false })
     await expect(access(join(root, 'docs'))).rejects.toThrow()
     await expect(access(join(root, 'assets/asset-manifest.json'))).rejects.toThrow()
     await mkdir(join(root,'.beegame/delivery'),{recursive:true})
     await writeFile(join(root,'.beegame/delivery/content-format.json'),'{invalid-existing-format')
-    const corrupt = await command(root,tools.directory,'check-content.mjs','--format','coordinates')
+    const corrupt = await legacyCommand(root,tools.directory,'check-content.mjs','--format','coordinates')
     expect(corrupt.code).toBe(1) // only absent format falls back; corruption stays visible
     await writeFile(join(root,'.beegame/delivery/content-format.json'),JSON.stringify({fixtureSection:{kept:true}}))
-    const retained = await command(root,tools.directory,'check-content.mjs','--format','fixtureSection')
+    const retained = await legacyCommand(root,tools.directory,'check-content.mjs','--format','fixtureSection')
     expect(JSON.parse(retained.stdout).values.fixtureSection).toEqual({kept:true})
     expect(await readFile(join(root,'.beegame/delivery/content-format.json'),'utf8')).toBe('{"fixtureSection":{"kept":true}}')
     await tools.close()
     const closed = await command(root, tools.directory, 'assets.mjs', 'catalog')
     expect(closed.code).toBe(1); expect(calls).toHaveLength(2)
-  } finally { await tools.close(); upstream.stop(true); await rm(root, { recursive: true, force: true }) }
+  } finally { await tools.close(); upstream.stop(true); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 }, 30000)
 
 test('tool preparation leaves catalog reads to the Agent through the existing authenticated entry',async()=>{
-  const root=await mkdtemp(join(tmpdir(),'bgs-catalog-on-demand-'))
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-catalog-on-demand-')))
   const calls:{path:string;auth:string|null}[]=[]
   const upstream=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
     calls.push({path:new URL(request.url).pathname,auth:request.headers.get('authorization')})
     return Response.json({items:[{packId:'audio-pack',license:'CC0'}],total:1})
   }})
-  const tools=await openAgentTools({workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic-catalog-token'})
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic-catalog-token'})
   try {
     expect(calls).toHaveLength(0)
     expect(tools.turnContext).not.toContain('audio-pack')
@@ -393,48 +320,55 @@ test('tool preparation leaves catalog reads to the Agent through the existing au
     expect(result.stdout).toContain('audio-pack')
     expect(calls).toEqual([{path:'/api/resource-catalog/packs',auth:'Bearer synthetic-catalog-token'}])
     await expect(access(join(root,'assets'))).rejects.toThrow()
-  }finally{await tools.close();upstream.stop(true);await rm(root,{recursive:true,force:true})}
+  }finally{await tools.close();upstream.stop(true);await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
 },30000)
 
 test('missing credentials and invalid configuration do not become empty catalogs or block pure tools', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'bgs-agent-tools-unavailable-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-agent-tools-unavailable-')))
   const upstream = Bun.serve({ hostname:'127.0.0.1', port:0, fetch:()=>{ throw Error('No unauthenticated upstream call allowed') } })
-  const tools = await openAgentTools({ workspacePath:root, libraryBaseUrl:upstream.url.origin, getAuthToken:()=>undefined })
+  const tools = await openAgentTools({ sessionId: 'fixture', workspacePath:root, libraryBaseUrl:upstream.url.origin, getAuthToken:()=>undefined })
   try {
     expect(tools.turnContext).toContain('Resource library bridge is configured; catalog requests verify authentication/availability')
     const failed = await command(root,tools.directory,'assets.mjs','catalog')
     expect(failed.code).toBe(1); expect(failed.stderr).toContain('not an empty search result')
-    const invalid = await openAgentTools({workspacePath:root,libraryBaseUrl:'file:///not-a-service',getAuthToken:()=>undefined})
+    const invalid = await openAgentTools({ sessionId: 'fixture',workspacePath:root,libraryBaseUrl:'file:///not-a-service',getAuthToken:()=>undefined})
     try {
-      expect(invalid.turnContext).toContain('could not start')
+      expect(invalid.turnContext).toContain('configured; catalog requests verify authentication/availability')
       expect(invalid.turnContext).not.toContain('Initial built-in resource catalog')
-      expect((await command(root,invalid.directory,'check-content.mjs','--format','coordinates')).code).toBe(0)
-      expect((await command(root,invalid.directory,'assets.mjs','catalog')).code).toBe(1)
+      expect((await legacyCommand(root,invalid.directory,'check-content.mjs','--format','coordinates')).code).toBe(0)
+      const rejected=await command(root,invalid.directory,'assets.mjs','catalog')
+      expect(rejected.code).toBe(1);expect(rejected.stderr).toContain('HTTP(S) endpoint')
     } finally { await invalid.close() }
-  } finally { await tools.close(); upstream.stop(true); await rm(root,{recursive:true,force:true}) }
+  } finally { await tools.close(); upstream.stop(true); await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true}) }
 },30000)
 
 test('image quote is read-only and a generated visual proposal is saved for later inspection', async () => {
-  const root=await mkdtemp(join(tmpdir(),'bgs-agent-image-proposal-'))
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-agent-image-proposal-')))
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==','base64')
   let quotes=0,generated=0
   const bridge=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
     if(request.method==='GET'){
       quotes++
-      return Response.json({available:true,provider:'fixture',billingSource:'external'})
+      return Response.json({available:true,provider:'fixture',billingSource:'platform',fixedPrice:false,quotedCredits:null})
     }
     generated++
     return new Response(png,{headers:{'content-type':'image/png'}})
   }})
-  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined,
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined,
     openImage:()=>({endpoint:bridge.url.origin+'/generate',instruction:'fixture image bridge',close:async()=>{}})})
   try {
-    expect(tools.turnContext).toContain('not yet verified available')
+    expect(tools.turnContext).toContain('Image generation is configured. Task-authorized requests use the existing generation service for availability, pricing and applicable Credit checks.')
     expect(quotes).toBe(0)
     expect(generated).toBe(0)
     const quote=await command(root,tools.directory,'assets.mjs','cost')
     expect(quote.code,quote.stderr).toBe(0)
-    expect(JSON.parse(quote.stdout).available).toBe(true)
+    expect(JSON.parse(quote.stdout)).toMatchObject({available:true,fixedPrice:false,quotedCredits:null})
+    expect(tools.turnContext).not.toMatch(/already authorized|already approved|consent granted/i)
+    expect(tools.turnContext).toContain('Task-authorized requests')
+    expect(tools.turnContext).toContain('Generate or edit with generate_image from the configured beegame-images MCP')
+    expect(tools.turnContext).toContain('independent image requests can use parallel tool calls')
+    expect(tools.turnContext).toContain('CLI alternative for sessions without that tool or explicit command-line use')
+    expect(tools.turnContext).not.toContain('assets.mjs generate --help provides request examples')
     expect(quotes).toBe(1)
     await writeFile(join(root,'visual-request.json'),JSON.stringify({requestId:'visual-proposal-1',prompt:'Fixture play and UI view'}))
     const saved=await command(root,tools.directory,'assets.mjs','generate','visual-request.json','assets/concepts/visual-target.png')
@@ -443,36 +377,36 @@ test('image quote is read-only and a generated visual proposal is saved for late
       sha256:createHash('sha256').update(png).digest('hex')})
     expect(await readFile(join(root,'assets/concepts/visual-target.png'))).toEqual(png)
     expect(generated).toBe(1)
-  }finally{await tools.close();bridge.stop(true);await rm(root,{recursive:true,force:true})}
+  }finally{await tools.close();bridge.stop(true);await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
 },30000)
 
 test('an open image bridge does not falsely claim its default quote is usable',async()=>{
-  const root=await mkdtemp(join(tmpdir(),'bgs-agent-image-unavailable-'))
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-agent-image-unavailable-')))
   let generated=0
   const bridge=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
     if(request.method==='GET')return Response.json({available:false})
     generated++
     return new Response('not available',{status:503})
   }})
-  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined,
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined,
     openImage:()=>({endpoint:bridge.url.origin+'/generate',instruction:'fixture image bridge',close:async()=>{}})})
   try {
-    expect(tools.turnContext).toContain('not yet verified available')
+    expect(tools.turnContext).toContain('Image generation is configured. Task-authorized requests use the existing generation service for availability, pricing and applicable Credit checks.')
     expect(generated).toBe(0)
     expect(JSON.parse((await command(root,tools.directory,'assets.mjs','cost')).stdout).available).toBe(false)
-  }finally{await tools.close();bridge.stop(true);await rm(root,{recursive:true,force:true})}
+  }finally{await tools.close();bridge.stop(true);await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
 },30000)
 
-test('a chosen consumer copy remains buildable without the temporary host tools',async()=>{
-  const root=await mkdtemp(join(tmpdir(),'bgs-v3-consumer-build-'))
-  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined})
+test('explicit historical consumer copies remain buildable without temporary host tools',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-consumer-build-')))
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined})
   try {
     await mkdir(join(root,'src'))
-    const installed=await command(root,tools.directory,'consumer.mjs','--install','src/bgs-content-consumer.mjs')
+    const installed=await legacyCommand(root,tools.directory,'consumer.mjs','--install','src/bgs-content-consumer.mjs')
     expect(installed.code,installed.stderr).toBe(0)
     expect(JSON.parse(installed.stdout)).toMatchObject({alreadyPresent:false,runtimeVerified:false})
-    expect(JSON.parse((await command(root,tools.directory,'consumer.mjs','--install','src/bgs-content-consumer.mjs')).stdout).alreadyPresent).toBe(true)
-    const publicationHelp = await command(root,tools.directory,'consumer.mjs','--help')
+    expect(JSON.parse((await legacyCommand(root,tools.directory,'consumer.mjs','--install','src/bgs-content-consumer.mjs')).stdout).alreadyPresent).toBe(true)
+    const publicationHelp = await legacyCommand(root,tools.directory,'consumer.mjs','--help')
     expect(publicationHelp.code,publicationHelp.stderr).toBe(0)
     expect(publicationHelp.stdout).toContain('every registered resource file_paths entry and dependency local_path')
     expect(publicationHelp.stdout).toContain('required licenses')
@@ -480,28 +414,31 @@ test('a chosen consumer copy remains buildable without the temporary host tools'
     const assetHelp = await command(root,tools.directory,'assets.mjs','generate','--help')
     expect(assetHelp.code,assetHelp.stderr).toBe(0)
     expect(assetHelp.stdout).toContain('purpose: reference|experiment|production')
-    expect(assetHelp.stdout).toContain('existing Manifest requirementIds')
-    const publication=await command(root,tools.directory,'consumer.mjs','--install-runtime-files','src/bgs-runtime-files.mjs')
+    expect(assetHelp.stdout).toContain('When requirements already exist, include their requirementIds')
+    expect(assetHelp.stdout).not.toContain('Production requires existing Manifest requirementIds')
+    const publication=await legacyCommand(root,tools.directory,'consumer.mjs','--install-runtime-files','src/bgs-runtime-files.mjs')
     expect(publication.code,publication.stderr).toBe(0)
     expect(await readFile(join(root,'src/bgs-runtime-files.mjs'),'utf8')).toContain('copyRegisteredRuntimeFiles')
     await writeFile(join(root,'src/main.js'),"import{readUiData}from'./bgs-content-consumer.mjs';window.readUiData=readUiData;")
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{build:'bun build.mjs'}}))
     await writeFile(join(root,'build.mjs'),"import{writeFile}from'node:fs/promises';const r=await Bun.build({entrypoints:['src/main.js'],outdir:'dist',target:'browser'});if(!r.success)throw Error('Synthetic build failed');await writeFile('dist/index.html','<!doctype html><script src=main.js></script>');")
-    const built=await buildEditableProject(root,{editableProject:true,runtimeArtifact:'dist',writablePaths:['dist/**']},[],[])
-    expect(built.status,built.observation).toBe('passed')
-    expect(built.projectBuild!.files.some(f=>f.path==='src/bgs-content-consumer.mjs')).toBe(true)
-    expect(built.projectBuild!.files.some(f=>f.path.startsWith('.beegame/'))).toBe(false)
-    expect(await readFile(join(root,'src/bgs-content-consumer.mjs'),'utf8')).toBe(await readFile(join(root,tools.directory,'content-consumer.mjs'),'utf8'))
-  } finally {await tools.close();await rm(root,{recursive:true,force:true})}
+    const built=await commandCheck(root,'build')
+    expect(built.code,built.log).toBe(0)
+    const sources=await projectFiles(root,'dist',[])
+    expect(sources.some(f=>f.path==='src/bgs-content-consumer.mjs')).toBe(true)
+    expect(sources.some(f=>f.path.startsWith('.beegame/'))).toBe(false)
+    expect(await readFile(join(root,'dist/main.js'),'utf8')).toContain('readUiData')
+    expect(await readFile(join(root,'src/bgs-content-consumer.mjs'),'utf8')).toBe(await readFile(resolve(root,tools.directory,'content-consumer.mjs'),'utf8'))
+  } finally {await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
 },30000)
 
 // Uses the module supplied by the V3 entry, not a hand-built replacement or a
 // real game. No personal Chrome profile, model or resource download is involved.
-test('consumer compatibility is batched/read-only and installation never overwrites or follows a link',async()=>{
+test('explicit historical consumer compatibility is read-only and installation never overwrites or follows links',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-consumer-access-')))
-  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined})
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined})
   try {
-    const api=await command(root,tools.directory,'consumer.mjs','--api')
+    const api=await legacyCommand(root,tools.directory,'consumer.mjs','--api')
     expect(api.code,api.stderr).toBe(0)
     const reference=JSON.parse(api.stdout)
     expect(reference.createProductionUiSurface.lifecycle).toContain('No update/setState')
@@ -517,7 +454,7 @@ test('consumer compatibility is batched/read-only and installation never overwri
     expect(reference.resources.SurfaceImage).toContain('[sx,sy,sw,sh]')
     expect(reference.resources.resolveSurfaceImage).toContain('member?,frame?,initialFacing?')
     expect(reference.scene.resolveSceneCameraView).toContain('orthographicSize')
-    const consumer = await import(join(root, tools.directory, 'content-consumer.mjs'))
+    const consumer = await import(resolve(root, tools.directory, 'content-consumer.mjs'))
     const geometry = consumer.sceneWorldTransforms2d([
       {id:'parent',transform:{position:[10,20,0],scale:[2,3,1]}},
       {id:'panel',parentId:'parent',transform:{position:[1,2,0]},components:[{type:'rect-transform',data:{
@@ -550,29 +487,30 @@ test('consumer compatibility is batched/read-only and installation never overwri
       {id:'button',parentId:'root',role:'button',data:{action:'legacy-action'},layout:{size:[80,30]}},
     ]}}
     const source=JSON.stringify(doc);await writeFile(join(root,'menu.json'),source)
-    const inspection=await command(root,tools.directory,'consumer.mjs','--inspect','menu.json')
+    const inspection=await legacyCommand(root,tools.directory,'consumer.mjs','--inspect','menu.json')
     expect(inspection.code,inspection.stderr).toBe(0)
     expect(JSON.parse(inspection.stdout).results[0].support).toMatchObject({supported:false,issues:[],
       projectSemantics:[{nodeId:'button',property:'data.action'}],runtimeVerified:false})
     expect(await readFile(join(root,'menu.json'),'utf8')).toBe(source)
     await mkdir(join(root,'src'));await writeFile(join(root,'src/custom.mjs'),'keep existing implementation')
-    expect((await command(root,tools.directory,'consumer.mjs','--install','src/custom.mjs')).code).toBe(1)
+    expect((await legacyCommand(root,tools.directory,'consumer.mjs','--install','src/custom.mjs')).code).toBe(1)
     expect(await readFile(join(root,'src/custom.mjs'),'utf8')).toBe('keep existing implementation')
     await symlink(join(root,'src/custom.mjs'),join(root,'src/link.mjs'))
-    expect((await command(root,tools.directory,'consumer.mjs','--install','src/link.mjs')).code).toBe(1)
+    expect((await legacyCommand(root,tools.directory,'consumer.mjs','--install','src/link.mjs')).code).toBe(1)
     await symlink(join(root,'src'),join(root,'alias'))
-    expect((await command(root,tools.directory,'consumer.mjs','--install','alias/new.mjs')).code).toBe(1)
+    expect((await legacyCommand(root,tools.directory,'consumer.mjs','--install','alias/new.mjs')).code).toBe(1)
     await expect(access(join(root,'src/new.mjs'))).rejects.toThrow()
     for(const path of ['../outside.mjs','.beegame/consumer.mjs','src/node_modules/module.mjs'])
-      expect((await command(root,tools.directory,'consumer.mjs','--install',path)).code).toBe(1)
-  }finally{await tools.close();await rm(root,{recursive:true,force:true})}
+      expect((await legacyCommand(root,tools.directory,'consumer.mjs','--install',path)).code).toBe(1)
+  }finally{await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
 },30000)
 
 test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('V3 consumer paints saved geometry/font mutations and applies the authored Camera',async()=>{
-  const root=await mkdtemp(join(tmpdir(),'bgs-v3-consumer-browser-'))
-  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined})
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-consumer-browser-')))
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined})
   const browserAccess=createPreviewTestBrowser()
-  const source=await readFile(join(root,tools.directory,'content-consumer.mjs'),'utf8')
+  await legacyCommand(root,tools.directory,'consumer.mjs','--api')
+  const source=await readFile(resolve(root,tools.directory,'content-consumer.mjs'),'utf8')
   const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
     return new URL(request.url).pathname==='/consumer.mjs' ? new Response(source,{headers:{'Content-Type':'application/javascript'}})
       : new Response('<!doctype html><style>body{margin:0}</style><body></body>',{headers:{'Content-Type':'text/html'}})
@@ -640,12 +578,12 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('V3 consumer paints saved geom
     expect(result.zoomed.point.x).toBeCloseTo(202.5,4)
     expect(result.zoomed.point.y).toBeCloseTo(125,4)
     expect(result.zoomed.red).toBe(255)
-  } finally {driver?.kill();await browserAccess.close();server.stop(true);await tools.close();await rm(root,{recursive:true,force:true})}
+  } finally {driver?.kill();await browserAccess.close();server.stop(true);await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
 },30000)
 
-test('existing layout CLI computes precise expectations from current saved bytes, not prose coordinates or a wide sample',async()=>{
-  const root=await mkdtemp(join(tmpdir(),'bgs-exact-source-'))
-  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined})
+test('explicit historical layout CLI computes expectations from saved bytes',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-exact-source-')))
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined})
   try {
     const scene:any=sceneLayoutFixture()
     scene.data.nodes[0].transform={position:[480,270,0]}
@@ -654,7 +592,7 @@ test('existing layout CLI computes precise expectations from current saved bytes
     const inspect=async()=>{
       const source=JSON.stringify(scene)
       await writeFile(join(root,'scene.json'),source)
-      const output=await command(root,tools.directory,'check-content.mjs','--layout-draft','scene.json','960','540','--details')
+      const output=await legacyCommand(root,tools.directory,'check-content.mjs','--layout-draft','scene.json','960','540','--details')
       expect(output.code,output.stdout+output.stderr).toBe(0)
       const result=JSON.parse(output.stdout)
       expect(result.runtimeVerified).toBe(false)
@@ -672,340 +610,44 @@ test('existing layout CLI computes precise expectations from current saved bytes
     const actualCenter=(bounds.left+bounds.right)/2,wrongExpected=373.5
     expect(Math.abs(actualCenter-wrongExpected)).toBeLessThan(35) // broad 70px sample would conceal the defect
     expect(actualCenter).not.toBe(wrongExpected) // precise input-derived expectation does not
-    expect((await command(root,tools.directory,'consumer.mjs','--help')).stdout).toContain('wide colored region')
-  }finally{await tools.close();await rm(root,{recursive:true,force:true})}
-},30000)
-
-test('Preview test entry uses Node, retains complete output, and cannot reuse a revoked capability', async () => {
-  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-test-entry-')))
-  const preview=openPreviewTestAccess({start:async()=>({status:'running'}),status:()=>({status:'idle'}),stop(){},
-    browser:{start:async()=>{throw Error('No browser requested')},status:()=>({status:'idle'}),close:async()=>{}} as any})
-  const tools=await openAgentTools({workspacePath:root,sessionId:'test-entry',getAuthToken:()=>undefined,openPreview:()=>preview})
-  expect(tools.turnContext).toContain('preview.mjs --help')
-  expect(tools.turnContext).not.toContain('Root-absolute /assets or /content URLs escape')
-  const help = await command(root, tools.directory, 'preview.mjs', '--help')
-  expect(help.code, help.stderr).toBe(0)
-  expect(help.stdout).toContain('localStorage/sessionStorage can throw')
-  expect(help.stdout).toContain('async createGameStorage()')
-  expect(help.stdout).toContain('Root-absolute /assets or /content URLs escape')
-  const run=async(...args:string[])=>{
-    const child=Bun.spawn([Bun.which('node')!,join(root,tools.directory,'preview.mjs'),...args],{cwd:root,
-      env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,
-        BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'test-entry')},stdout:'pipe',stderr:'pipe'})
-    const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
-    return {code,stderr,result:JSON.parse(stdout)}
-  }
-  try {
-    for (const invalid of [
-      {readySelector:'#ready',key:'ArrowRight',holdMs:100,observeMs:100,callback:'window.fastForward()'},
-      {readySelector:'#ready',key:'Control+R',holdMs:100,observeMs:100},
-      {readySelector:'#ready',key:'ArrowRight',holdMs:0,observeMs:100},
-      {readySelector:'#ready',key:'ArrowRight',holdMs:5000,observeMs:120000},
-      {readySelector:'#ready',key:'ArrowRight',holdMs:100,observeMs:100,viewport:{width:640,height:360,isMobile:true}},
-    ]) {
-      const rejected=await run('--keyboard-sample',JSON.stringify(invalid))
-      expect(rejected.code).toBe(1)
-      expect(rejected.result).toMatchObject({status:'error',quality:'unverified'})
-      expect(rejected.result.error).not.toContain('No browser requested')
-    }
-    const countdownOptions = { startSelector:'#start', countdownSelector:'#countdown', playingSelector:'#playing', countdownMs:1500 }
-    for (const invalid of [
-      {...countdownOptions,callback:'pauseGame()'}, {...countdownOptions,countdownMs:0},
-      {...countdownOptions,countdownMs:30001}, {...countdownOptions,observeMs:0},
-      {...countdownOptions,countdownSelector:''}, {...countdownOptions,viewport:{width:640,height:0}},
-    ]) {
-      const rejected=await run('--countdown-blur-sample',JSON.stringify(invalid))
-      expect(rejected.code).toBe(1)
-      expect(rejected.result).toMatchObject({status:'error',quality:'unverified'})
-      expect(rejected.result.error).not.toContain('No browser requested')
-    }
-    await writeFile(join(root,'test.mjs'),`import {appendFile} from 'node:fs/promises';
-      await appendFile('calls.txt','once\\n');
-      console.log(JSON.stringify({node:!process.versions.bun,arg:process.argv[2],checks:[false]}));
-      console.log('x'.repeat(80000));console.error('actual failure details');process.exitCode=Number(process.argv[3]||0);`)
-    const first=await run('--run','test.mjs','literal;not-a-shell-command','7')
-    expect(first.code).toBe(1)
-    expect(first.result).toMatchObject({status:'exited',exitCode:7,runtime:'node',quality:'unverified'})
-    const stdout=await readFile(join(root,first.result.stdoutPath),'utf8')
-    expect(JSON.parse(stdout.split('\n')[0]!)).toEqual({node:true,arg:'literal;not-a-shell-command',checks:[false]})
-    expect(stdout.length).toBeGreaterThan(80000)
-    expect(await readFile(join(root,first.result.stderrPath),'utf8')).toContain('actual failure details')
-    expect(first.result.failureOutput.stderr).toEqual({text:'actual failure details\n',truncated:false})
-    expect(first.result.failureOutput.stdout.truncated).toBe(true)
-    expect(JSON.stringify(first.result).length).toBeLessThan(6000)
-    expect(first.result).not.toHaveProperty('passed')
-    for(let i=0;i<3;i++) {
-      const saved=JSON.parse(await readFile(join(root,first.result.reportPath),'utf8'))
-      expect(saved).toMatchObject({inputIdentity:'unverified',before:{status:'unverified'},after:{status:'unverified'}})
-      expect(saved.before.scriptSha256).toBe(saved.after.scriptSha256)
-      expect(saved.stdoutPath).toBe(first.result.stdoutPath)
-    }
-    expect(await readFile(join(root,'calls.txt'),'utf8')).toBe('once\n')
-    const second=await run('--run','test.mjs','same-test','0')
-    expect(second.code).toBe(0);expect(second.result.quality).toBe('unverified')
-    expect(second.result).not.toHaveProperty('failureOutput')
-    expect(second.result.reportPath).not.toBe(first.result.reportPath)
-    expect(await readFile(join(root,first.result.stdoutPath),'utf8')).toBe(stdout)
-    expect((await run('--snapshot','development','0','540')).result.error).toContain('Expected --snapshot')
-    const moduleUrl=new URL('../preview-test-command.mjs',import.meta.url).href
-    const snapshotChild=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',
-      `const {capturePreviewSnapshot}=await import(${JSON.stringify(moduleUrl)});
-       const result=await capturePreviewSnapshot('development',960,540,async(options,inspect)=>inspect({
-         page:{screenshot:async()=>Buffer.from('synthetic-image')},
-         gameFrame:{waitForLoadState:async()=>{}},
-         observedEnvironment:{viewport:{width:960,height:540}},
-         runtimeErrors:{pageErrors:1,consoleErrors:0,failedRequests:0,httpErrors:0}}));
-       console.log(JSON.stringify(result));`],{cwd:root,
-      env:{PATH:process.env.PATH,BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'test-entry')},
-      stdout:'pipe',stderr:'pipe'})
-    const [snapshotOut,snapshotErr,snapshotExit]=await Promise.all([
-      new Response(snapshotChild.stdout).text(),new Response(snapshotChild.stderr).text(),snapshotChild.exited])
-    expect(snapshotExit,snapshotErr).toBe(0)
-    const snapshot=JSON.parse(snapshotOut)
-    expect(snapshot).toMatchObject({status:'observed',quality:'unverified',viewport:[960,540],
-      runtimeErrors:{pageErrors:1},observedEnvironment:{viewport:{width:960,height:540}}})
-    expect(await readFile(join(root,snapshot.imagePath),'utf8')).toBe('synthetic-image')
-    expect(JSON.parse(await readFile(join(root,snapshot.reportPath),'utf8')).imageSha256).toBe(snapshot.imageSha256)
-    expect(snapshot.reportPath).toMatch(/^\.beegame\/tmp\/preview-snapshot-[^/]+\/observation\.json$/)
-    expect((await run('--inspect',first.result.reportPath)).result).toMatchObject({quality:'unverified',
-      freshness:{status:'unverified'},exitCode:7})
-    expect((await run('--inspect','../outside.json')).code).toBe(1)
-    await tools.close()
-    expect((await run('--inspect',first.result.reportPath)).result.exitCode).toBe(7)
-    const expired=await run('--run','test.mjs')
-    expect(expired.code).toBe(1);expect(expired.result.error).toContain('PREVIEW_CAPABILITY_EXPIRED')
-    expect(await readFile(join(root,'calls.txt'),'utf8')).toBe('once\nonce\n')
-  } finally {await tools.close();await rm(root,{recursive:true,force:true})}
-})
-
-test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('one Preview snapshot observes the real isolated game frame without a project test script', async()=>{
-  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-visual-snapshot-')))
-  const game=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response(
-    '<!doctype html><style>body{margin:0;background:#153148;color:white}</style><h1>Visible game</h1><script>throw Error("synthetic boot failure")</script>',
-    {headers:{'content-type':'text/html'}})})
-  let state={status:'idle',url:''}
-  const preview=openPreviewTestAccess({start:async()=>state={status:'running',url:game.url.origin},
-    status:()=>state,stop(){},browser:createPreviewTestBrowser()})
-  const tools=await openAgentTools({workspacePath:root,sessionId:'visual-snapshot',getAuthToken:()=>undefined,openPreview:()=>preview})
-  try {
-    const child=Bun.spawn([Bun.which('node')!,join(root,tools.directory,'preview.mjs'),'--snapshot','development','640','360'],
-      {cwd:root,env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,
-        BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'visual-snapshot'),
-        BEEGAME_PLAYWRIGHT_MODULE:sharedPlaywright().moduleUrl},stdout:'pipe',stderr:'pipe'})
-    const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
-    expect(code,stderr+'\n'+stdout).toBe(0)
-    const report=JSON.parse(stdout)
-    expect(report).toMatchObject({status:'observed',quality:'unverified',viewport:[640,360]})
-    expect(report.runtimeErrors.pageErrors).toBeGreaterThan(0)
-    expect(report.runtimeErrorDetails.pageErrors).toContainEqual({name:'Error',message:'synthetic boot failure'})
-    const png=await readFile(join(root,report.imagePath))
-    expect(png.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a')
-    expect(png.readUInt32BE(16)).toBe(640)
-    expect(png.readUInt32BE(20)).toBe(360)
-    expect(JSON.parse(await readFile(join(root,report.reportPath),'utf8')).imageSha256).toBe(report.imageSha256)
-    expect(JSON.parse(await readFile(join(root,report.reportPath),'utf8')).runtimeErrorDetails).toEqual(report.runtimeErrorDetails)
-  }finally{await tools.close();game.stop(true);await rm(root,{recursive:true,force:true})}
+    expect((await legacyCommand(root,tools.directory,'consumer.mjs','--help')).stdout).toContain('wide colored region')
+  }finally{await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
 },30000)
 
 test('tool preparation refuses linked parent before writing outside the project', async () => {
-  const root=await mkdtemp(join(tmpdir(),'bgs-agent-tools-link-')), outside=await mkdtemp(join(tmpdir(),'bgs-agent-tools-outside-'))
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-agent-tools-link-'))), outside=await realpath(await mkdtemp(join(tmpdir(),'bgs-agent-tools-outside-')))
   try {
-    await symlink(outside,join(root,'.beegame'))
-    await expect(openAgentTools({workspacePath:root,getAuthToken:()=>undefined})).rejects.toThrow('link')
-    await expect(access(join(outside,'tmp'))).rejects.toThrow()
-    await rm(join(root,'.beegame')); await mkdir(join(root,'.beegame'))
-    await symlink(outside,join(root,'.beegame/tmp'))
-    await expect(openAgentTools({workspacePath:root,getAuthToken:()=>undefined})).rejects.toThrow('link')
-  } finally { await rm(root,{recursive:true,force:true}); await rm(outside,{recursive:true,force:true}) }
+    await mkdir(dirname(projectWorkDirectory(root,'fixture')), { recursive:true })
+    await symlink(outside,projectWorkDirectory(root,'fixture'))
+    await expect(openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined})).rejects.toThrow('link')
+    await expect(access(join(outside,'goal-tools'))).rejects.toThrow()
+    await rm(projectWorkDirectory(root,'fixture'))
+    await symlink(outside,projectWorkDirectory(root,'fixture'))
+    await expect(openAgentTools({ sessionId: 'fixture',workspacePath:root,getAuthToken:()=>undefined})).rejects.toThrow('link')
+  } finally { await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true}); await rm(outside,{recursive:true,force:true}) }
 })
-
-test('optional Preview is published to the bound native session, lazy help works and close drains once', async () => {
-  const root = await mkdtemp(join(tmpdir(),'bgs-agent-preview-'))
-  let stops=0, closes=0, release!:()=>void
-  const drained=new Promise<void>(resolve=>{release=resolve})
-  const preview=openPreviewTestAccess({start:async()=>({status:'unsupported'}),status:()=>({status:'idle'}),
-    stop(){stops++},browser:{start:async()=>{throw Error('Not started by preparation')},status:()=>({status:'not-running'}),
-      close:async()=>{closes++;await drained}}})
-  const tools=await openAgentTools({workspacePath:root,sessionId:'synthetic-preview',getAuthToken:()=>undefined,openPreview:()=>preview})
-  try {
-    const path=projectPreviewCapabilityPath(root,'synthetic-preview')
-    expect(JSON.parse(await readFile(path,'utf8')).apiUrl).toBe(preview.baseUrl)
-    expect(tools.turnContext).not.toContain(preview.baseUrl)
-    expect(tools.turnContext).toContain('check-content.mjs --format preview')
-    expect(tools.turnContext.length).toBeLessThan(2600)
-    expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('POST /preview')
-    expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('--snapshot development|production')
-    const help=(await command(root,tools.directory,'preview.mjs','--help')).stdout
-    expect(help).toContain('--keyboard-sample <JSON>')
-    expect(help).toContain('--countdown-blur-sample <JSON>')
-    expect(help).toContain('--sprite-sample <sheet.png>')
-    for(const script of ['```js','data-node-id="title"','captureFrame("playing")',
-      'Click start, observe countdown','key down/hold/up','asserts frame coverage, pause and resume'])
-      expect(help).not.toContain(script)
-    expect(help).toContain('Exit code is not test quality')
-    expect(help).toContain('at most 2 KiB read per stream')
-    expect(help).toContain('the key error may be absent')
-    expect(help).toContain('recognizable sampled credential forms only')
-    expect(help).toContain('Redaction and omission use the original sampled text')
-    expect(help).toContain('multiline credentials beginning in the unread middle may remain')
-    expect(help).toContain('--client')
-    expect(help).not.toContain('withPreviewPage(')
-    expect(help).not.toContain('withPlayCapture(')
-
-    const diagnostic=await command(root,tools.directory,'preview.mjs','--client')
-    expect(diagnostic.code).toBe(0)
-    const client=JSON.parse(diagnostic.stdout)
-    expect(client).toMatchObject({runtime:'node',playwrightModule:sharedPlaywright().moduleUrl,
-      environment:{helper:'BEEGAME_PREVIEW_TEST_MODULE',playwright:'BEEGAME_PLAYWRIGHT_MODULE',capability:'BEEGAME_PREVIEW_CAPABILITY_FILE'}})
-    expect(client.helperModule).toBe(new URL('./preview-test-client.mjs',(await sharedContentChecker()).moduleUrl).href)
-    expect(client.playCapture).toContain('withPlayCapture')
-    expect(client.withPreviewPage).toContain('beforeNavigate?')
-    expect(client.withPreviewPage).toContain('runtimeErrorPolicy?')
-    expect(client.options).toContain('defaults to observe')
-    expect(client.preview).toContain('Managed Vite development observes edits to loaded source/content files')
-    expect(client.outputs).toContain('under reports/')
-    expect(help).toContain(client.preview)
-    expect(help).toContain(client.outputs)
-    for(const term of ['OUTER preview wrapper','frame is a FrameLocator','gameFrame is the actual game Frame',
-      'Reload can detach gameFrame','FrameLocator has no evaluate/waitForFunction'])expect(client.frames).toContain(term)
-    for(const term of ['context.addInitScript','separate window','never page.evaluate','missing probe is unverified',
-      'do not prove audible output'])expect(client.probes).toContain(term)
-    expect(client.observations).toContain('first 5 redacted samples')
-    expect(client.checkNumericSamples).toContain('empty samples are unverified')
-    expect(client.checkNumericSamples).toContain('violations return failed, without throwing')
-    expect(client.checkNumericSamples).toContain('Invalid samples/bounds throw')
-    expect(client.checkTextSeparation).toContain('missing/hidden text is unverified')
-    expect(client.checkTextSeparation).toContain('overlap returns failed, without throwing')
-    expect(client.lifecycle).toContain('returns the callback result')
-    expect(client.capture).toContain('reject with error.report')
-    expect(client.capture).toContain('setup/write failures may reject without a report')
-    expect(diagnostic.stdout).not.toContain(preview.baseUrl)
-    expect(diagnostic.stdout).not.toContain(path)
-    expect(Buffer.byteLength(diagnostic.stdout)).toBeLessThan(6000)
-    // A child script can resolve exports directly; no source read/copy, env
-    // dump, package installation, browser start or review verdict is required.
-    const node=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',
-      'const {withPreviewPage,withPlayCapture,checkTextSeparation,checkNumericSamples}=await import('+JSON.stringify(client.helperModule)+');'+
-      'const {chromium}=await import('+JSON.stringify(client.playwrightModule)+');'+
-      'console.log([typeof withPreviewPage,typeof withPlayCapture,typeof checkTextSeparation,typeof checkNumericSamples,typeof chromium.connectOverCDP].join(","))'],
-      {cwd:root,env:{PATH:process.env.PATH},stdout:'pipe',stderr:'pipe'})
-    const [stdout,stderr,exit]=await Promise.all([new Response(node.stdout).text(),new Response(node.stderr).text(),node.exited])
-    expect(exit,stderr).toBe(0);expect(stdout.trim()).toBe('function,function,function,function,function')
-    expect((await command(root,tools.directory,'preview.mjs','--client','--help')).code).toBe(1)
-    expect((await fetch(preview.baseUrl+'/status')).status).toBe(200)
-    const first=tools.close();expect(tools.close()).toBe(first)
-    let finished=false;void first.then(()=>{finished=true})
-    for(let i=0;i<100 && !closes;i++)await Bun.sleep(2)
-    expect(closes).toBe(1);expect(finished).toBe(false)
-    await expect(access(path)).rejects.toThrow()
-    await expect(fetch(preview.baseUrl+'/status')).rejects.toThrow()
-    release();await first;expect(stops).toBe(1)
-  } finally {release();await tools.close();await rm(root,{recursive:true,force:true})}
-},10000)
-
-test('failed adapter preparation revokes an already opened Preview rather than leaking it', async () => {
-  const root=await mkdtemp(join(tmpdir(),'bgs-agent-preview-failure-'));let closed=0
-  const preview=openPreviewTestAccess({start:async()=>({status:'idle'}),status:()=>({status:'idle'}),stop(){closed++},
-    browser:{start:async()=>{throw Error('Unused')},status:()=>({status:'not-running'}),close:async()=>{}}})
-  try {
-    await expect(openAgentTools({workspacePath:root,sessionId:'synthetic-preview',getAuthToken:()=>undefined,
-      openPreview:async()=>{
-        // Cause a real adapter write failure after capability publication.
-        const {readdir}=await import('node:fs/promises')
-        const directory=(await readdir(join(root,'.beegame/tmp')))[0]!
-        await mkdir(join(root,'.beegame/tmp',directory,'preview.mjs'))
-        return preview
-      }})).rejects.toThrow()
-    expect(closed).toBe(1)
-    await expect(access(projectPreviewCapabilityPath(root,'synthetic-preview'))).rejects.toThrow()
-    await expect(fetch(preview.baseUrl+'/status')).rejects.toThrow()
-  }finally{await preview.close();await rm(root,{recursive:true,force:true})}
-})
-
-
-test('plain GDD planning remains readable without an index or metadata repair gate', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-planning-inputs-')))
-  try {
-    await writeDesignDocumentsFixture(root)
-    await rm(join(root, designHandoffPath('GDD.md')))
-    const gdd = join(root, 'docs/GDD.md')
-    await writeFile(gdd, (await readFile(gdd, 'utf8')).replace('- Version: v1.0\n', ''))
-    const original = await readFile(gdd, 'utf8')
-    const design = openDesignActions(root)
-    const draft = await design('draft', ['GDD.md']) as any
-    expect(draft).toMatchObject({ valid: true, issues: [] })
-    const baseline = await design('baseline') as any
-    expect(baseline.valid).toBe(true)
-    expect(baseline.requirements).toHaveLength(0)
-    expect(await readFile(gdd, 'utf8')).toBe(original)
-    expect(await design('finalize', ['GDD.md'])).toMatchObject({valid:true,finalized:[],skipped:['GDD.md']})
-    expect(await readFile(gdd, 'utf8')).toBe(original)
-  } finally { await rm(root, {recursive:true,force:true}) }
-})
-
-
-test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('Preview capture helper retains two actual UI states in one offline playtest',async()=>{
-  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-visual-example-')))
-  let starts=0
-  const game=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response(
-    '<!doctype html><body style="background:#123;color:white"><h1 data-node-id="title">Fixture menu</h1><button data-node-id="play">Play</button><h1 data-node-id="hud" hidden>Fixture playing</h1><script>document.querySelector("button").onclick=()=>{document.querySelector("[data-node-id=title]").hidden=true;document.querySelector("button").hidden=true;document.querySelector("[data-node-id=hud]").hidden=false;document.body.style.background="#345"}</script>',
-    {headers:{'content-type':'text/html'}})})
-  let state={status:'idle',url:''}
-  const preview=openPreviewTestAccess({start:async()=>{starts++;return state={status:'running',url:game.url.origin}},
-    status:()=>state,stop(){},browser:createPreviewTestBrowser()})
-  const tools=await openAgentTools({workspacePath:root,sessionId:'visual-example',getAuthToken:()=>undefined,openPreview:()=>preview})
-  try {
-    // Synthetic input belongs to the test, not the general Preview help.
-    const script=join(root,'visual.mjs');await writeFile(script,`
-      const {withPlayCapture}=await import(process.env.BEEGAME_PREVIEW_TEST_MODULE);
-      const capture=await withPlayCapture({mode:'production',viewport:{width:1280,height:720}},async({gameFrame,captureFrame,runtimeErrors})=>{
-        await gameFrame.locator('[data-node-id="title"]').waitFor({state:'visible'});
-        await captureFrame('start');
-        await gameFrame.locator('[data-node-id="play"]').click();
-        await gameFrame.locator('[data-node-id="hud"]').waitFor({state:'visible'});
-        await captureFrame('playing');
-        return {runtimeErrors};
-      });
-      console.log(JSON.stringify(capture));`)
-    const child=Bun.spawn([Bun.which('node')!,join(root,tools.directory,'preview.mjs'),'--run',script],{
-      cwd:root,env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,
-        BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'visual-example'),
-        BEEGAME_PREVIEW_TEST_MODULE:new URL('./preview-test-client.mjs',(await sharedContentChecker()).moduleUrl).href,BEEGAME_PLAYWRIGHT_MODULE:sharedPlaywright().moduleUrl},stdout:'pipe',stderr:'pipe'})
-    const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
-    const receipt=JSON.parse(stdout)
-    const driverError=receipt.stderrPath?await readFile(join(root,receipt.stderrPath),'utf8'):''
-    expect(code,stderr+'\n'+stdout+'\n'+driverError).toBe(0)
-    const capture=JSON.parse(await readFile(join(root,receipt.stdoutPath),'utf8'))
-    expect(starts).toBe(1)
-    expect(capture.quality).toBe('unverified')
-    expect(capture.runtimeErrors).toMatchObject({pageErrors:0,consoleErrors:0,failedRequests:0,httpErrors:0})
-    expect(capture.frames.map((frame:any)=>frame.label)).toEqual(['start','playing'])
-    const images=await Promise.all(capture.frames.map((frame:any)=>readFile(join(root,frame.path))))
-    for(const image of images){expect(image.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');expect(image.readUInt32BE(16)).toBe(1280);expect(image.readUInt32BE(20)).toBe(720)}
-    expect(createHash('sha256').update(images[0]).digest('hex')).not.toBe(createHash('sha256').update(images[1]).digest('hex'))
-    expect(JSON.parse(await readFile(join(root,capture.directory,'observation.json'),'utf8')).frames).toEqual(capture.frames)
-  } finally {await tools.close();game.stop(true);await rm(root,{recursive:true,force:true})}
-},30000)
 
 
 test('new projects do not prepare or advertise a calculation appendix helper', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-no-calculator-')))
-  const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined })
+  const tools = await openAgentTools({ sessionId: 'fixture', workspacePath: root, getAuthToken: () => undefined,
+    openImage: () => { throw Error('An unused image bridge must not be opened') } })
   try {
+    expect(tools.turnContext).toContain('Image generation is configured')
     expect(tools.systemContext).not.toContain(BALANCE_CALCULATOR_PATH)
     await expect(access(join(root, BALANCE_CALCULATOR_PATH))).rejects.toThrow()
     await expect(access(join(root, '.beegame/delivery/calculators'))).rejects.toThrow()
-  } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
+  } finally { await tools.close(); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 })
 
 test('a retained asset entry uses current image and library bridges across three turns', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-assets-turns-')))
-  let catalogs = 0, quotes = 0, generated = 0
+  let catalogs = 0, quotes = 0, generated = 0, opened = 0, closed = 0
   const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
     catalogs++
     return Response.json({ items: [{ packId: 'fixture' }] })
   } })
-  const env = { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: projectPreviewCapabilityPath(root, 'fixture', 'assets') }
+  const env = { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: projectPreviewCapabilityPath(root, 'fixture') }
   const entries: string[] = []
   let active: Awaited<ReturnType<typeof openAgentTools>> | undefined
   const run = async (entry: string, ...args: string[]) => {
@@ -1016,18 +658,24 @@ test('a retained asset entry uses current image and library bridges across three
   try {
     for (let turn = 0; turn < 3; turn++) {
       active = await openAgentTools({ workspacePath: root, sessionId: 'fixture', getAuthToken: () => 'fixture-token',
-        libraryBaseUrl: upstream.url.origin, openImage: () => {
+        libraryBaseUrl: upstream.url.origin, openImage: async () => {
+          opened++; await Bun.sleep(10)
           const bridge = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
             if (request.method === 'GET') { quotes++; return Response.json({ available: true, turn }) }
             generated++; return new Response('fixture bytes', { headers: { 'content-type': 'image/png' } })
           } })
-          return { endpoint: bridge.url.origin + '/image', instruction: 'Local fixture', close: async () => { bridge.stop(true) } }
+          return { endpoint: bridge.url.origin + '/image', instruction: 'Local fixture', close: async () => { closed++; bridge.stop(true) } }
         } })
-      entries.push(join(root, active.directory, 'assets.mjs'))
+      entries.push(resolve(root, active.directory, 'assets.mjs'))
       const source = await readFile(entries.at(-1)!, 'utf8')
       expect(source.split('\n')[0]).not.toContain('127.0.0.1')
-      // Simulate a compact handoff retaining only the first tool path and current native environment.
-      const quote = await run(entries[0]!, 'cost')
+      expect(opened).toBe(turn)
+      expect((await run(entries[0]!, '--help')).code).toBe(0)
+      expect(opened).toBe(turn)
+      // Retained paths resolve only the current turn; concurrent calls share one backend.
+      const quote = turn===0 ? (await Promise.all([run(entries[0]!, 'cost'),run(entries[0]!, 'cost')]))[0]!
+        : await run(entries[0]!, 'cost')
+      expect(opened).toBe(turn+1)
       expect(quote.code, quote.stderr).toBe(0)
       expect(JSON.parse(quote.stdout).turn).toBe(turn)
       const catalog = await run(entries[0]!, 'catalog')
@@ -1039,6 +687,7 @@ test('a retained asset entry uses current image and library bridges across three
         expect(result.code, result.stderr).toBe(0)
       }
       await active.close()
+      expect(closed).toBe(turn+1)
       const expired = await run(entries[0]!, 'cost')
       expect(expired.code).toBe(1)
       expect(expired.stderr).toContain('ASSET_CAPABILITY_EXPIRED')
@@ -1046,9 +695,10 @@ test('a retained asset entry uses current image and library bridges across three
     }
     expect(new Set(entries).size).toBe(3)
     expect(catalogs).toBe(3)
-    expect(quotes).toBe(4)
+    expect(quotes).toBe(5)
     expect(generated).toBe(1)
-  } finally { await active?.close(); upstream.stop(true); await rm(root, { recursive: true, force: true }) }
+    expect(opened).toBe(3);expect(closed).toBe(3)
+  } finally { await active?.close(); upstream.stop(true); await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true }) }
 }, 30000)
 
 test('workflow helper resolves a replacement turn capability and rejects wrong or revoked identities', async () => {
@@ -1062,7 +712,7 @@ test('workflow helper resolves a replacement turn capability and rejects wrong o
   const run = async (entry: string, cwd: string, capabilityFile: string, ...args: string[]) => {
     const child = Bun.spawn([process.execPath, entry, ...args], {
       cwd,
-      env: { ...process.env, BEEGAME_MEASUREMENT_CAPABILITY_FILE: capabilityFile },
+      env: { ...process.env, BEEGAME_ASSET_CAPABILITY_FILE: capabilityFile },
       stdout: 'pipe', stderr: 'pipe',
     })
     const [stdout, stderr, code] = await Promise.all([
@@ -1072,44 +722,60 @@ test('workflow helper resolves a replacement turn capability and rejects wrong o
   }
   try {
     oldTools = await openAgentTools({ workspacePath: root, sessionId: 'chat', getAuthToken: () => undefined,
-      measurement, workflow: async value => { calls.push({ turn: 'old', value }); return { turn: 'old' } } })
-    const oldEntry = join(root, oldTools.directory, 'workflow.mjs')
+      workflow: async value => { calls.push({ turn: 'old', value }); return { turn: 'old' } } })
+    const oldEntry = resolve(root, oldTools.directory, 'workflow.mjs')
     await oldTools.close()
 
     currentTools = await openAgentTools({ workspacePath: root, sessionId: 'chat', getAuthToken: () => undefined,
-      measurement, workflow: async value => { calls.push({ turn: 'current', value }); return { turn: 'current' } } })
-    const capability = projectPreviewCapabilityPath(root, 'chat', 'measurement')
+      workflow: async value => { calls.push({ turn: 'current', value }); return { turn: 'current' } } })
+    const capability = projectPreviewCapabilityPath(root, 'chat')
+    const defaultIndex=currentTools.systemContext.split('. Prefix each filename')[0]!
+    for(const name of ['measure','handoff','workflow'])
+      expect(defaultIndex).not.toContain('node '+name+'.mjs')
+    expect(currentTools.systemContext).toContain('Saved sessions without this tool use workflow.mjs')
+    expect(currentTools.systemContext).not.toContain('BgsMeasurement')
+    for(const name of ['preview','measure','handoff'])
+      expect(await Bun.file(resolve(root,currentTools.directory,name+'.mjs')).exists()).toBe(false)
     const status = await run(oldEntry, root, capability, '--status')
     expect(status.code, status.stderr).toBe(0)
     expect(JSON.parse(status.stdout)).toEqual({ turn: 'current' })
     expect(calls).toEqual([{ turn: 'current', value: { action: 'status' } }])
     const help = await run(oldEntry, root, capability, '--help')
     expect(help.code, help.stderr).toBe(0)
-    expect(help.stdout).toContain('--status')
+    expect(help.stdout).toContain('For tasks using a tool handoff: --advance <JSON>')
+    expect(help.stdout).not.toContain('Preparatory production handoff: --advance')
+    expect(help.stdout).toContain('GDD and visual-design results use the current final JSON contract, not advance')
+    expect(help.stdout).toContain('in implementation or resource tasks')
+    expect(calls).toEqual([{ turn: 'current', value: { action: 'status' } }])
+
+    const choice={summary:'Existing design reference',sections:[],files:['assets/reference.png']}
+    const selection=await run(oldEntry,root,capability,'--select-visual',JSON.stringify(choice))
+    expect(selection.code,selection.stderr).toBe(0)
+    expect(calls.at(-1)).toEqual({turn:'current',value:{...choice,action:'select-visual'}})
 
     const wrongWorkspace = await run(oldEntry, other, capability, '--status')
     expect(wrongWorkspace.code).toBe(1)
     expect(wrongWorkspace.stderr).toContain('Workflow belongs to another workspace')
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(2)
 
     wrongTools = await openAgentTools({ workspacePath: root, sessionId: 'wrong-session', getAuthToken: () => undefined,
-      measurement, workflow: async value => { calls.push({ turn: 'wrong', value }); return { turn: 'wrong' } } })
-    const wrongSessionEntry = join(root, wrongTools.directory, 'workflow.mjs')
+      workflow: async value => { calls.push({ turn: 'wrong', value }); return { turn: 'wrong' } } })
+    const wrongSessionEntry = resolve(root, wrongTools.directory, 'workflow.mjs')
     const wrongSession = await run(wrongSessionEntry, root, capability, '--status')
     expect(wrongSession.code).toBe(1)
     expect(wrongSession.stderr).toContain('Expired or mismatched turn capability')
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(2)
     await wrongTools.close()
 
     await currentTools.close()
     const revoked = await run(oldEntry, root, capability, '--status')
     expect(revoked.code).toBe(1)
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(2)
   } finally {
     await wrongTools?.close()
     await currentTools?.close()
     await oldTools?.close()
-    await rm(root, { recursive: true, force: true })
+    await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true })
     await rm(other, { recursive: true, force: true })
   }
 })
@@ -1120,7 +786,7 @@ test('native workflow binding shares the helper closure and fails closed on canc
   const measurement = { close: async () => {} } as any
   let aborting: AbortController | undefined
   const tools = await openAgentTools({ workspacePath: root, sessionId: 'chat', getAuthToken: () => undefined,
-    measurement, workflow: async value => {
+    workflow: async value => {
       calls.push(value)
       if (value && typeof value === 'object' && (value as any).action === 'abort-after-callback') aborting?.abort()
       return { accepted: true, value }
@@ -1143,70 +809,132 @@ test('native workflow binding shares the helper closure and fails closed on canc
     await expect(tools.workflow!({ action: 'status' })).rejects.toThrow('Workflow capability unavailable')
   } finally {
     await tools.close()
-    await rm(root, { recursive: true, force: true })
+    await rm(projectWorkRoot(root), { recursive: true, force: true }); await rm(root, { recursive: true, force: true })
   }
 })
 
-
-test('native measurement and HTTP share dispatch, and terminal delivery does not await its own cleanup', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-native-measurement-')))
-  const calls: unknown[] = []
-  let tools!: Awaited<ReturnType<typeof openAgentTools>>
-  const measured = { id: 'saved-receipt', quality: 'unverified' }
-  const adapter = {
-    measure: async (value: unknown, signal?: AbortSignal) => { calls.push(['measure', value, signal?.aborted]); return measured },
-    inspect: async (id: string, details?: boolean) => { calls.push(['inspect', id, details]); return measured },
-    executionInputs: async () => ({ files: [] }),
-    handoff: async (paths: string[]) => ({ sources: paths }),
-    finish: async (value: unknown) => { calls.push(['finish', value]); await tools.close(); return { submitted: true } },
-    close: async () => { calls.push(['close']) },
-  } as any
+test.each([
+  {platform:'Web',engine:'React'},{platform:'Web',engine:'Phaser'},{platform:'Web',engine:'Three.js'},
+  {platform:'PC',engine:'Unity'},{platform:'PC',engine:'Godot'},{platform:'PC',engine:'Unreal'},
+  {platform:'Mobile',engine:'Unity'},{platform:'XR',engine:'Unity'},{}
+].flatMap(target=>[false,true].map(legacy=>({target,legacy}))))('all targets omit retired default editor adapters, even with old files: %j', async ({target,legacy}) => {
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-web-native-tools-')))
+  if(legacy){await mkdir(join(root,'content'));await writeFile(join(root,'content/index.json'),'{}')}
+  const tools=await openAgentTools({ sessionId: 'fixture',workspacePath:root,constraints:target,getAuthToken:()=>undefined})
   try {
-    tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined, sessionId: 'chat', measurement: adapter })
-    const capability = JSON.parse(await readFile(projectPreviewCapabilityPath(root, 'chat', 'measurement'), 'utf8'))
-    const body = { requestKey: 'one', runtimeArtifact: 'dist', reportPaths: [] }
-    const signal = new AbortController().signal
-    expect(await tools.measurement!(body, signal)).toEqual(measured)
-    const directCalls = structuredClone(calls)
-    calls.length = 0
-    const response = await fetch(capability.apiUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-    expect(response.ok).toBe(true); expect(await response.json()).toEqual(measured)
-    expect(calls.map(call => (call as any[]).slice(0, 2))).toEqual(directCalls.map(call => (call as any[]).slice(0, 2)))
-    const before = calls.length
-    expect(await tools.measurement!({ help: true })).toHaveProperty('help')
-    expect(calls).toHaveLength(before)
-    expect(await tools.measurement!({ inspectRequestKey: 'saved-receipt' })).toEqual(measured)
-    expect(await tools.measurement!({ executionInputs: true })).toEqual({ files: [] })
-    expect(await tools.measurement!({ handoffPaths: ['README.md'] })).toEqual({ sources: ['README.md'] })
-    await expect(tools.measurement!({ inspectRequestKey: 'saved-receipt', requestKey: 'mixed' })).rejects.toThrow('Inspection accepts')
-    const aborted = AbortSignal.abort()
-    await expect(tools.measurement!(body, aborted)).rejects.toThrow('unavailable')
-    await expect(tools.finishDelivery!({ requirementsRevision: 'current' }, aborted)).rejects.toThrow('unavailable')
-    expect(await tools.finishDelivery!({ requirementsRevision: 'current' })).toHaveProperty('submitted', true)
-    expect(calls.filter(call => (call as any[])[0] === 'finish')).toHaveLength(1)
-    await expect(tools.measurement!(body)).rejects.toThrow('unavailable')
-  } finally { await tools?.close(); await rm(root, {recursive:true,force:true}) }
-})
-
-test.each([false,true])('Web/React tools omit editing adapters and preserve legacy runtime imports: %s', async legacy => {
-  const root = await realpath(await mkdtemp(join(tmpdir(),'bgs-web-native-tools-')))
-  if (legacy) {
-    await mkdir(join(root,'content'))
-    await writeFile(join(root,'content/index.json'),'{}')
-  }
-  const constraints = { platform:'Web', engine:'React' }
-  const tools = await openAgentTools({workspacePath:root,constraints,getAuthToken:()=>undefined})
-  try {
-    expect(tools.uiLayoutConstraints).toMatchObject(constraints)
-    expect(tools.systemContext).not.toContain('bind-content.mjs')
-    expect(tools.systemContext).not.toContain('uiLayoutContract')
-    expect(tools.systemContext).toContain('resources.mjs')
-    await expect(access(join(root,tools.directory,'bind-content.mjs'))).rejects.toThrow()
-    for (const name of ['consumer.mjs','content-consumer.mjs','registered-runtime-files.mjs']) {
-      const exists = await Bun.file(join(root,tools.directory,name)).exists()
-      expect(exists).toBe(legacy)
+    for(const name of ['check-content.mjs','bind-content.mjs','consumer.mjs','content-consumer.mjs','registered-runtime-files.mjs']) {
+      expect(await Bun.file(resolve(root,tools.directory,name)).exists()).toBe(false)
+      expect(tools.systemContext).not.toContain(name)
     }
-    for (const name of ['resources.mjs','media.mjs','check-content.mjs'])
-      expect(await Bun.file(join(root,tools.directory,name)).exists()).toBe(true)
-  } finally { await tools.close(); await rm(root,{recursive:true,force:true}) }
+    expect(tools.systemContext).not.toContain('uiLayoutContract')
+    for(const name of ['resources.mjs','media.mjs','assets.mjs'])expect(await Bun.file(resolve(root,tools.directory,name)).exists()).toBe(true)
+    if(legacy)expect(await readFile(join(root,'content/index.json'),'utf8')).toBe('{}')
+  }finally{await tools.close();await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})}
+})
+
+
+test('configured image MCP generates through the existing command and keeps turn endpoints isolated',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-image-mcp-')))
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==','base64')
+  let quotes=0,opened=0,available=true,fail=false,generating=0,maxGenerating=0
+  let pauseQuote=false,quoteAborted=false,releaseQuote=()=>{}
+  const generated:any[]=[]
+  const bridge=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    if(request.method==='GET'){
+      quotes++
+      if(pauseQuote)await new Promise<void>(resolve=>{releaseQuote=resolve;request.signal.addEventListener('abort',()=>{quoteAborted=true;resolve()},{once:true})})
+      return Response.json({available,fixedPrice:true,quotedCreditsMicro:1_000_000,referenceImageSupported:true})
+    }
+    generated.push(await request.json())
+    generating++;maxGenerating=Math.max(maxGenerating,generating)
+    await Bun.sleep(20);generating--
+    return fail ? new Response('Fixture generation outcome unknown',{status:503})
+      : new Response(png,{headers:{'content-type':'image/png','x-image-credits-micro':'1000000','x-image-billing-state':'settled'}})
+  }})
+  const openImage=()=>{opened++;return {endpoint:bridge.url.origin+'/generate',instruction:'fixture',close:async()=>{}}}
+  const tools=await openAgentTools({sessionId:'fixture',workspacePath:root,getAuthToken:()=>undefined,openImage})
+  const client=new Client({name:'image-fixture',version:'1'})
+  let next:Awaited<ReturnType<typeof openAgentTools>>|undefined
+  try {
+    const noImages=await prepareNativeMcpConfig({},root,undefined,'fixture',{},null)
+    expect(noImages.config).toEqual({});await noImages.close()
+    const config=await prepareNativeMcpConfig({},root,undefined,'fixture',{},null,tools.imageGenerationEntry)
+    const server=(config.config.mcp_servers as Record<string,any>)['beegame-images']
+    expect(server.args).toEqual([tools.imageGenerationEntry,'--mcp'])
+    await client.connect(new StdioClientTransport({...server,cwd:root}))
+    expect((await client.listTools()).tools.map(t=>t.name)).toEqual(['generate_image'])
+    expect(opened).toBe(0);expect(quotes).toBe(0);expect(generated).toHaveLength(0)
+    await mkdir(join(root,'assets'));await writeFile(join(root,'assets/reference.png'),png)
+    const input={purpose:'production',prompt:'Fixture actor',quality:'high',background:'transparent',referenceImagePath:'assets/reference.png'}
+    const result:any=await client.callTool({name:'generate_image',arguments:{request:input,outputPath:'assets/actor.png'}})
+    expect(result.isError).not.toBe(true)
+    const saved=JSON.parse(result.content[0].text)
+    expect(saved).toMatchObject({path:'assets/actor.png',width:1,height:1,chargedCredits:1,billingState:'settled'})
+    expect(await readFile(join(root,saved.path))).toEqual(png)
+    expect(JSON.parse(await readFile(saved.requestFile,'utf8'))).toMatchObject({...input,requestId:saved.requestId})
+    expect(generated).toEqual([expect.objectContaining({...input,requestId:saved.requestId})])
+    expect(opened).toBe(1);expect(quotes).toBe(1)
+    available=false
+    const unavailable:any=await client.callTool({name:'generate_image',arguments:{request:input,outputPath:'assets/unavailable.png'}})
+    expect(unavailable.isError).toBe(true);expect(generated).toHaveLength(1)
+    available=true
+    const invalid:any=await client.callTool({name:'generate_image',arguments:{request:{...input,referenceImagePath:'../private.png'},outputPath:'assets/invalid.png'}})
+    expect(invalid.isError).toBe(true);expect(quotes).toBe(2);expect(generated).toHaveLength(1)
+    await mkdir(join(root,'outside'));await symlink(join(root,'outside'),join(root,'assets/alias'))
+    const alias:any=await client.callTool({name:'generate_image',arguments:{request:input,outputPath:'assets/alias/new/output.png'}})
+    expect(alias.isError).toBe(true);expect(generated).toHaveLength(1)
+    await expect(access(join(root,'outside/new'))).rejects.toMatchObject({code:'ENOENT'})
+    fail=true
+    const failed:any=await client.callTool({name:'generate_image',arguments:{request:{...input,requestId:'unchanged-recovery'},outputPath:'assets/recovery.png'}})
+    expect(failed.isError).toBe(true);expect(failed.content[0].text).toContain('requestId=unchanged-recovery')
+    expect(generated).toHaveLength(2);await expect(access(join(root,'assets/recovery.png'))).rejects.toMatchObject({code:'ENOENT'})
+    fail=false
+    const recovered:any=await client.callTool({name:'generate_image',arguments:{request:{...input,requestId:'unchanged-recovery'},outputPath:'assets/recovery.png'}})
+    expect(recovered.isError).not.toBe(true);expect(generated.at(-1).requestId).toBe('unchanged-recovery')
+    const beforeParallel=generated.length
+    const parallel=await Promise.all(['game-atlas','ui-atlas'].map(name=>client.callTool({name:'generate_image',arguments:{request:input,outputPath:`assets/${name}.png`}})))
+    expect(parallel.every(result=>!result.isError)).toBe(true)
+    expect(generated).toHaveLength(beforeParallel+2)
+    expect(maxGenerating).toBe(2)
+    const savedParallel=parallel.map(result=>JSON.parse((result.content as any[])[0].text))
+    expect(new Set(savedParallel.map(result=>result.requestId)).size).toBe(2)
+    for(const saved of savedParallel)expect(await readFile(join(root,saved.path))).toEqual(png)
+    pauseQuote=true
+    const abort=new AbortController(),beforeCancel={quotes,generated:generated.length}
+    const pending=client.callTool({name:'generate_image',arguments:{request:input,outputPath:'assets/cancelled.png'}},undefined,{signal:abort.signal})
+    const entered=Date.now()+2000
+    while(quotes===beforeCancel.quotes&&Date.now()<entered)await Bun.sleep(10)
+    expect(quotes).toBe(beforeCancel.quotes+1)
+    abort.abort();await expect(pending).rejects.toThrow()
+    const cancelled=Date.now()+2000
+    while(!quoteAborted&&Date.now()<cancelled)await Bun.sleep(10)
+    expect(quoteAborted).toBe(true);expect(generated).toHaveLength(beforeCancel.generated)
+    releaseQuote();pauseQuote=false
+    await tools.close()
+    next=await openAgentTools({sessionId:'fixture',workspacePath:root,getAuthToken:()=>undefined,openImage})
+    const before={quotes,generated:generated.length,opened}
+    const stale:any=await client.callTool({name:'generate_image',arguments:{request:input,outputPath:'assets/stale.png'}})
+    expect(stale.isError).toBe(true)
+    expect({quotes,generated:generated.length,opened}).toEqual(before)
+    await config.close()
+  } finally {
+    releaseQuote();await client.close();await tools.close();await next?.close();bridge.stop(true)
+    await rm(projectWorkRoot(root),{recursive:true,force:true});await rm(root,{recursive:true,force:true})
+  }
+},30000)
+
+
+test('saved native schemas can use the existing workflow command for development preview', async () => {
+  const root=await realpath(await mkdtemp(join(tmpdir(),'workflow-preview-command-')))
+  const observed:unknown[]=[]
+  const tools=await openAgentTools({workspacePath:root,sessionId:'saved-schema',getAuthToken:()=>undefined,
+    workflow:async(value,signal)=>{expect(signal?.aborted).toBe(false);observed.push(value);return {status:'idle'}}})
+  try {
+    const child=Bun.spawn([process.execPath,join(tools.directory,'workflow.mjs'),'--preview','status'],{
+      cwd:root,env:{...process.env,BEEGAME_ASSET_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'saved-schema')},stdout:'pipe',stderr:'pipe'})
+    const [code,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()])
+    expect(code,err).toBe(0);expect(JSON.parse(out)).toEqual({status:'idle'})
+    expect(observed).toEqual([{action:'preview',operation:'status'}])
+    expect(tools.systemContext).toContain('saved native schema does not list preview')
+  }finally{await tools.close();await rm(root,{recursive:true,force:true})}
 })

@@ -1,3 +1,6 @@
+import { projectHostDirectory } from '../beegame/project-storage-paths'
+import { dirname } from 'node:path'
+import { projectChatPath } from '../beegame/project-records'
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -46,7 +49,7 @@ async function fixture() {
   for (const [path, text] of Object.entries({'docs/GDD.md': '# Existing GDD', 'assets/sprite.png': 'fixture bytes',
     'content/ui/menu.json': '{}', 'game.gd': '# Godot source', 'project.godot': 'config_version=5',
     '.beegame-attachments/ref.png': 'reference', '.env': 'SECRET', '.env.example': 'KEY=',
-    '.beegame/delivery/acceptance.json': 'old-acceptance', 'transcripts/old.jsonl': 'old-chat',
+    'reports/runtime/preview-test-fixture/execution.json': 'old-receipt', '.beegame/delivery/acceptance.json': 'old-acceptance', 'transcripts/old.jsonl': 'old-chat',
     'node_modules/package/index.js': 'dependency', '.git/config': 'old repo', '.runtime/state.json': 'old state'})) {
     await mkdir(join(workspace, path, '..'), {recursive: true})
     await writeFile(join(workspace, path), text)
@@ -72,6 +75,7 @@ test('clone copies authored files and settings, starts no model, then accepts a 
     for (const path of ['.env', 'node_modules', '.runtime']) expect(copiedEntries).not.toContain(path)
     expect(await Bun.file(join(project.root_path, '.beegame/delivery/acceptance.json')).exists()).toBe(false)
     expect(await Bun.file(join(project.root_path, 'transcripts/old.jsonl')).exists()).toBe(false)
+    expect(await Bun.file(join(project.root_path, 'reports/runtime/preview-test-fixture/execution.json')).exists()).toBe(false)
     const run = (await f.store.read(project.id, 'owner'))!
     expect(run.agentTurns).toEqual([])
     expect(run.chatSessionId).not.toBe('old-chat')
@@ -98,7 +102,7 @@ test('clone copies authored files and settings, starts no model, then accepts a 
     expect(f.submissions).toHaveLength(1)
     expect(f.submissions[0]).toContain('Inspect existing documents only.')
     expect(f.submissions[0]).not.toContain('OLD TASK')
-    const transcript = await readFile(join(project.root_path, '.beegame', 'chat', 'project-events.jsonl'), 'utf8')
+    const transcript = await readFile(projectChatPath(project.root_path), 'utf8')
     const userEvent = transcript.split('\n').filter(Boolean).map(line => JSON.parse(line)).find(event => event.type === 'user.message')
     expect(JSON.parse(userEvent.payload.confirmedBriefContext).project_source).toMatchObject({type: 'clone', conversation_history: 'not_copied'})
     expect((f.starts[0] as {resumeSessionId?: string}).resumeSessionId).toBeUndefined()
@@ -154,7 +158,8 @@ test('a failed workflow save cleans up the new project and directory, preserving
     const result = await f.post('/api/projects/source/clone')
     expect(result.status).toBeGreaterThanOrEqual(400)
     expect((await (await f.app.request('/api/projects')).json()).length).toBe(1)
-    expect(await readdir(join(f.workspace, '..'))).toEqual(['original'])
+    expect((await readdir(join(f.workspace, '..'))).filter(name=>name!=='.runtime')).toEqual(['original'])
+    expect(await readdir(dirname(projectHostDirectory(f.workspace)))).toEqual([])
     expect(await f.store.read('source', 'owner')).toEqual(f.source)
     expect(f.starts).toHaveLength(0)
   } finally { await f.close() }

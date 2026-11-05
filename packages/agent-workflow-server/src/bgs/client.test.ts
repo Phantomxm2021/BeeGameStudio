@@ -9,6 +9,37 @@ const executable = basename(process.execPath)
 const command = [process.execPath, fixture] as const
 const secret = 'SYNTHETIC_PROVIDER_SECRET_MUST_NOT_ESCAPE'
 
+for (const reason of ['missing', 'other']) test('resume diagnostics recognize only native missing history: '+reason, async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-diagnostic-')
+  const client = await BgsClient.connect({command:[process.execPath,fileURLToPath(new URL('./fixtures/app-server.ts',import.meta.url))],
+    cwd:root,env:{...env('ok'),BGS_FIXTURE_RESUME_ERROR:reason}})
+  try {
+    let failure: unknown
+    try { await client.request('thread/resume',{threadId:'019a0000-0000-7000-8000-000000000099'}) }
+    catch (error) { failure=error }
+    expect(info(failure).code).toBe(reason==='missing'?'native-history-missing':undefined)
+    expect((failure as Error).message).toBe('BGS thread/resume rejected (code -32600)')
+    expect(JSON.stringify(failure)).not.toContain('PRIVATE_OTHER_ERROR')
+  } finally { await client.close(); await rm(root,{recursive:true,force:true}) }
+})
+
+test('notification drain includes queued terminal events even when the RPC reply has arrived', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-client-drain-')
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {release=resolve}), seen:string[]=[]
+  const client = await BgsClient.connect({command:[process.execPath,fileURLToPath(new URL('./fixtures/app-server.ts',import.meta.url))],
+    cwd:root,env:env('ok'),onNotification:async(method)=>{if(method==='first')await gate;seen.push(method)}})
+  try {
+    await client.request('fixture/events',{events:[{method:'first',params:{}},{method:'terminal',params:{}}]})
+    let drained=false
+    const drain=client.drainNotifications().then(()=>{drained=true})
+    await Promise.resolve()
+    expect(drained).toBe(false); expect(seen).toEqual([])
+    release();await drain
+    expect(seen).toEqual(['first','terminal'])
+  } finally {release();await client.close();await rm(root,{recursive:true,force:true})}
+})
+
 function env(mode: string): Record<string, string> {
   return { PATH: process.env.PATH || '', HOME: process.env.HOME || '/tmp', BGS_HOME: '/private/tmp/bgs-client-diagnostics-home',
     BGS_CLIENT_DIAGNOSTICS_MODE: mode }

@@ -1,3 +1,4 @@
+import { safeErrorFacts } from '../security/safe-error-facts'
 import { providerConfig } from '../model-providers/config'
 import { requestProvider } from '../model-providers/request'
 import { modelRuntimeFetch } from './model-runtime-transport'
@@ -11,6 +12,7 @@ import type {
   ModelRuntimeWorkerRequest,
   ModelRuntimeWorkerResponse,
   BeeGameModelRuntimeFailureStage,
+  BeeGameModelRuntimeFailureCode,
   BeeGameModelUsage,
 } from './model-runtime-host'
 import {
@@ -28,6 +30,8 @@ async function generate(message: ModelRuntimeWorkerRequest) {
   const input = message.input,
     env = input.runtimeEnv
   let stage: BeeGameModelRuntimeFailureStage = 'model_request'
+  let failureCode: BeeGameModelRuntimeFailureCode = 'request-failed'
+  let httpStatus: number | undefined
   let usage: BeeGameModelUsage | undefined
   const unknownUsage: BeeGameModelUsage = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
     cache_creation_tokens: 0, total_tokens: 0, incomplete: true }
@@ -138,17 +142,21 @@ async function generate(message: ModelRuntimeWorkerRequest) {
         AbortSignal.timeout(120_000),
         reported => { usage = reported },
       )
-      if (!response.ok) throw Error(`Model request failed (${response.status})`)
+      if (!response.ok) {
+        failureCode = 'upstream-http-error'; httpStatus = response.status
+        throw Error(`Model request failed (${response.status})`)
+      }
       usage ??= unknownUsage
       result = (await response.json()) as Record<string, any>
     }
     if (result.usage) usage = responseUsage(result.usage)
     stage = 'model_response'
+    failureCode = 'incomplete-response'
     if (result.status !== 'completed' || !Array.isArray(result.output)) {
       // Keep the provider's bounded failure category, never its private output.
       const reason = result.incomplete_details?.reason
-      if (reason === 'max_output_tokens') throw Error('Model response reached its output token limit before completion')
-      if (reason === 'content_filter') throw Error('Model response was stopped by the provider content filter')
+      if (reason === 'max_output_tokens') { failureCode = 'max-output-tokens'; throw Error('Model response reached its output token limit before completion') }
+      if (reason === 'content_filter') { failureCode = 'content-filter'; throw Error('Model response was stopped by the provider content filter') }
       throw Error('Model response was incomplete')
     }
     let content: string
@@ -158,10 +166,10 @@ async function generate(message: ModelRuntimeWorkerRequest) {
           item.type === 'function_call' &&
           item.name === input.structuredOutput!.name,
       )
-      if (calls.length !== 1)
-        throw Error(
-          'Structured model response must contain exactly one required function call',
-        )
+      if (calls.length !== 1) {
+        failureCode = 'structured-output-missing'
+        throw Error('Structured model response must contain exactly one required function call')
+      }
       content = JSON.stringify(JSON.parse(calls[0].arguments))
     } else
       content = result.output
@@ -175,6 +183,10 @@ async function generate(message: ModelRuntimeWorkerRequest) {
         .join('\n')
     send({ type: 'model.result', requestId: message.requestId, content, ...(usage ? { usage } : {}) })
   } catch (error) {
+    const facts = safeErrorFacts(error)
+    if (error instanceof SyntaxError) failureCode = 'invalid-json'
+    else if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) failureCode = 'request-timeout'
+    else if (facts.networkCode) failureCode = 'network-error'
     send({
       type: 'model.error',
       requestId: message.requestId,
@@ -185,7 +197,9 @@ async function generate(message: ModelRuntimeWorkerRequest) {
           : error instanceof Error
             ? error.message
             : 'Model request failed',
-      stage,
+      stage, failureCode,
+      ...(httpStatus ? { httpStatus } : {}),
+      ...(facts.networkCode ? { networkCode: facts.networkCode } : {}),
     })
   } finally {
     await request.close()

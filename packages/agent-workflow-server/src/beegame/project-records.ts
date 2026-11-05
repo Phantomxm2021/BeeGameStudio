@@ -1,9 +1,10 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
+import { projectHostDirectory } from './project-storage-paths'
 
 /**
- * The only two project-local runtime record classes:
+ * Host-owned runtime records, stored outside the game workspace:
  * - transcript: durable, user-visible Chat events;
  * - diagnostics: bounded, non-UI troubleshooting facts.
  *
@@ -20,10 +21,10 @@ export type ChatTranscriptRecord = {
   createdAt: Date
 }
 
-export function appendChatTranscript(path: string, event: ChatTranscriptRecord): void {
+export function appendChatTranscript(path: string, events: ChatTranscriptRecord | ChatTranscriptRecord[]): void {
   try {
     mkdirSync(dirname(path), { recursive: true })
-    appendFileSync(path, `${JSON.stringify({
+    appendFileSync(path, (Array.isArray(events) ? events : [events]).map(event => `${JSON.stringify({
       id: event.id,
       sessionId: event.sessionId,
       ...(event.turnId ? { turnId: event.turnId } : {}),
@@ -31,7 +32,7 @@ export function appendChatTranscript(path: string, event: ChatTranscriptRecord):
       text: event.text,
       ...(event.payload ? { payload: event.payload } : {}),
       createdAt: event.createdAt.toISOString(),
-    })}\n`, 'utf8')
+    })}\n`).join(''), 'utf8')
   } catch {
     // A history write must never interrupt an active agent turn.
   }
@@ -39,7 +40,7 @@ export function appendChatTranscript(path: string, event: ChatTranscriptRecord):
 
 /** The single event-body store used by live Chat, recovery and history. */
 export function projectChatPath(workspacePath: string): string {
-  return resolve(workspacePath, '.beegame', 'chat', 'project-events.jsonl')
+  return resolve(projectHostDirectory(workspacePath), 'chat', 'project-events.jsonl')
 }
 
 export function appendRuntimeDiagnostic(input: {

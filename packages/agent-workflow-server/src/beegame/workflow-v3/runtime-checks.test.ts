@@ -4,11 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { taskSchema, type TaskSpec } from './state'
 import { checkIsCurrent } from './checks'
-import { runChecks } from './checker-test-driver'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
-import { observeStaticBuild, observeStaticPublication } from './runtime-checks'
+import { runArtifactCheck, observeStaticBuild, observeStaticPublication } from './runtime-checks'
 import { readVersion } from './checks'
 import type { CheckResult } from './state'
 
@@ -28,7 +27,7 @@ test.each([
   try {
     await mkdir(join(root,'dist'))
     await writeFile(join(root,'dist/index.html'),'<!doctype html><body style="margin:0">'+html+'</body>')
-    const check=(await runChecks(root,{...artifactTask,checks:['runtime-smoke']},[])).checks[0]!
+    const check=await runArtifactCheck(root,'runtime-smoke',artifactTask,[],{})
     expect(check.status,check.observation).toBe(expected)
     expect(JSON.parse(check.observation).surfacePresent).toBe(expected==='passed')
     expect(await checkIsCurrent(root,{...check,version:'v3-static-artifact.1'})).toBe(false)
@@ -40,8 +39,8 @@ test('Touch smoke keeps its stated viewport without adding an implicit phone run
   try {
     await mkdir(join(root,'dist'))
     await writeFile(join(root,'dist/index.html'),'<button>Play</button><script>if(innerWidth<1000)throw Error("Outside fixture target");if(!navigator.maxTouchPoints)throw Error("Touch unavailable");</script>')
-    const check=(await runChecks(root,{...artifactTask,checks:['runtime-smoke']},[],undefined,
-      {platform:'Web',inputs:['Touch'],orientation:'Landscape'})).checks[0]!
+    const check=await runArtifactCheck(root,'runtime-smoke',artifactTask,[],
+      {platform:'Web',inputs:['Touch'],orientation:'Landscape'})
     expect(check.status,check.observation).toBe('passed')
     const observed=JSON.parse(check.observation)
     expect(observed.viewport).toEqual([1280,720])
@@ -55,7 +54,7 @@ test('Preview smoke observes opaque-origin storage/Canvas failures without chang
   try {
     await mkdir(join(root, 'dist'))
     await writeFile(join(root, 'dist/pixel.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="red"/></svg>')
-    const check = () => runChecks(root, { ...artifactTask, checks: ['runtime-smoke'] }, []).then(result => result.checks[0]!)
+    const check = () => runArtifactCheck(root, 'runtime-smoke', artifactTask, [], {})
     await writeFile(join(root, 'dist/index.html'), '<button>Play</button><script>localStorage.setItem("fixture","1")</script>')
     const storage = await check()
     expect(storage.status, storage.observation).toBe('failed')
@@ -103,7 +102,7 @@ test('Preview measurement rejects root-relative resources but accepts build-rela
     for (const prefix of ['/', './']) {
       await writeFile(join(root, 'dist/index.html'), '<button>Play</button><script type="module">' +
         'const response=await fetch("'+prefix+'data.json");if(!response.ok)throw Error("Fixture resource failed");await response.json();</script>')
-      const check = (await runChecks(root, { ...artifactTask, checks: ['runtime-smoke'] }, [])).checks[0]!
+      const check = await runArtifactCheck(root, 'runtime-smoke', artifactTask, [], {})
       expect(check.status, check.observation).toBe(prefix === '/' ? 'failed' : 'passed')
       const observed = JSON.parse(check.observation)
       expect(observed.missingFiles).toEqual(prefix === '/' ? ['/data.json (outside publication base /previews/measurement/)'] : [])
@@ -121,11 +120,11 @@ test('a stalled browser evaluation reaches the host deadline and does not block 
     const result: CheckResult = { id: 'runtime-smoke', version: 'deadline-fixture', inputs: [await readVersion(root, path)],
       status: 'unverified', observation: '', createdAt: new Date().toISOString() }
     const started = Date.now()
-    await expect(observeStaticBuild(root, 'dist', [path], result, undefined, undefined, undefined, undefined, 2000))
+    await expect(observeStaticBuild(root, 'dist', [path], result, undefined, undefined, undefined, 2000))
       .rejects.toThrow('Browser observation timed out after 2000ms; no automatic retry')
     expect(Date.now() - started).toBeLessThan(8000)
     await writeFile(join(root, path), '<button>Play</button>')
-    const next = (await runChecks(root, { ...artifactTask, checks: ['runtime-smoke'] }, [])).checks[0]!
+    const next = await runArtifactCheck(root, 'runtime-smoke', artifactTask, [], {})
     expect(next.status, next.observation).toBe('passed')
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 15000)
@@ -139,7 +138,7 @@ test('runtime artifact is an optional local path, never an arbitrary URL/host me
 test('actual package bytes/resources checked without eight documents; additions and source edits invalidate historical checks', async () => {
   const root = await fixture()
   try {
-    const result = (await runChecks(root, artifactTask, [])).checks[0]!
+    const result = (await runArtifactCheck(root, 'delivery-package', artifactTask, [], {}))
     expect(result.status).toBe('passed')
     expect(result.observation).toContain('Not runtime data consumption')
     expect(result.artifacts?.[0]?.path).toBe('dist')
@@ -153,7 +152,7 @@ test('actual package bytes/resources checked without eight documents; additions 
     await rm(join(root, 'content/ui/extra.json'))
     await writeFile(join(root, 'assets/runtime/example/resource.json'), '{"changed":true}')
     expect(await checkIsCurrent(root, result)).toBe(false)
-    const stale = (await runChecks(root, artifactTask, [])).checks[0]!
+    const stale = (await runArtifactCheck(root, 'delivery-package', artifactTask, [], {}))
     expect(stale.status).toBe('failed'); expect(stale.observation).toContain('Packaged bytes differ')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -162,20 +161,20 @@ test('empty registry, stale ID, absent packed member and unregistered JSON canno
   const root = await fixture()
   try {
     await rm(join(root, 'dist/assets/runtime/example/resource.json'))
-    expect((await runChecks(root, artifactTask, [])).checks[0]!.status).toBe('unverified')
+    expect((await runArtifactCheck(root, 'delivery-package', artifactTask, [], {})).status).toBe('unverified')
     await cp(join(root, 'assets'), join(root, 'dist/assets'), { recursive: true })
     const index = await Bun.file(join(root, 'content/index.json')).json()
     index.documents[0].id = 'wrong'
     await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
-    expect((await runChecks(root, artifactTask, [])).checks[0]!.status).toBe('failed')
+    expect((await runArtifactCheck(root, 'delivery-package', artifactTask, [], {})).status).toBe('failed')
     index.documents = []
     await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
-    expect((await runChecks(root, artifactTask, [])).checks[0]!.status).toBe('unverified')
+    expect((await runArtifactCheck(root, 'delivery-package', artifactTask, [], {})).status).toBe('unverified')
   } finally { await rm(root, { recursive: true, force: true }) }
   const other = await fixture()
   try {
     await writeFile(join(other, 'content/ui/unregistered.json'), JSON.stringify(uiLayoutFixture()))
-    expect((await runChecks(other, artifactTask, [])).checks[0]!.observation).toContain('Unregistered')
+    expect((await runArtifactCheck(other, 'delivery-package', artifactTask, [], {})).observation).toContain('Unregistered')
   } finally { await rm(other, { recursive: true, force: true }) }
 })
 
@@ -184,12 +183,12 @@ test('artifact aliases/escapes and cancellation are not accepted or allowed to w
   try {
     await writeFile(join(outside, 'secret.txt'), 'not a game asset')
     await symlink(join(outside, 'secret.txt'), join(root, 'dist/secret.txt'))
-    expect((await runChecks(root, artifactTask, [])).checks[0]!.status).toBe('execution-error')
+    expect((await runArtifactCheck(root, 'delivery-package', artifactTask, [], {})).status).toBe('execution-error')
     const controller = new AbortController(); controller.abort()
-    const result = (await runChecks(root, artifactTask, [], controller.signal)).checks[0]!
+    const result = await runArtifactCheck(root, 'delivery-package', artifactTask, [], {}, controller.signal)
     expect(result.status).toBe('execution-error')
     expect(result.observation).toContain('cancelled')
-    const noDriver = (await runChecks(root, { ...artifactTask, runtimeArtifact: undefined, checks: ['runtime-smoke'] }, [])).checks[0]!
+    const noDriver = await runArtifactCheck(root, 'runtime-smoke', { ...artifactTask, runtimeArtifact: undefined }, [], {})
     expect(noDriver.status).toBe('unverified')
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
 })

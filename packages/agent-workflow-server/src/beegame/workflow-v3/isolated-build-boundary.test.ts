@@ -1,11 +1,10 @@
 import { expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildEditableProject } from './editable-project'
+import { copyBuildDependencies, prepareBuildCaches } from './editable-project'
 import { commandCheck, projectDependencies, projectFiles } from './checks'
 
-const task = { editableProject: true as const, runtimeArtifact: 'dist', writablePaths: ['dist/**'] }
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-build-boundary-')))
   await mkdir(join(root, 'node_modules/tiny'), { recursive: true })
@@ -47,9 +46,14 @@ await assert.rejects(fetch(${JSON.stringify(upstream.url.origin)},{signal:AbortS
 ${output}`)
     const sources = await projectFiles(root, 'dist', [])
     const dependencies = await projectDependencies(root)
-    const result = await buildEditableProject(root, task, [], [])
-    expect(result.status, result.observation).toBe('passed')
-    expect(await readFile(join(root, 'dist/index.html'), 'utf8')).toContain('Boundary checks passed')
+    const isolated=join(root,'.isolated-copy')
+    await mkdir(isolated)
+    for (const path of ['package.json','build.mjs']) await cp(join(root,path),join(isolated,path))
+    expect(await copyBuildDependencies(root,isolated)).toBe(true)
+    await prepareBuildCaches(isolated)
+    const result = await commandCheck(isolated,'build',undefined,true)
+    expect(result.code,result.log).toBe(0)
+    expect(await readFile(join(isolated,'dist/index.html'),'utf8')).toContain('Boundary checks passed')
     expect(await projectFiles(root, 'dist', [])).toEqual(sources)
     expect(await projectDependencies(root)).toBe(dependencies)
     expect(requests).toBe(0)
@@ -64,7 +68,10 @@ test.each(['symlink', 'file'] as const)('isolated build rejects a %s cache befor
     else await writeFile(cache, 'not a directory')
     await writeFile(join(root, 'build.mjs'), 'throw Error("PROJECT_CODE_EXECUTED")')
     const before = await projectDependencies(root)
-    await expect(buildEditableProject(root, task, [], [])).rejects.toThrow('Vite build cache must be a canonical directory')
+    const isolated=join(root,'.isolated-copy')
+    await mkdir(isolated)
+    await copyBuildDependencies(root,isolated)
+    await expect(prepareBuildCaches(isolated)).rejects.toThrow('Build cache must be a canonical directory in the isolated copy')
     expect(await projectDependencies(root)).toBe(before)
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 15000)

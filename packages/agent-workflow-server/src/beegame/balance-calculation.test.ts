@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { BALANCE_CALCULATOR_PATH, materializeBalanceCalculator, readCalculationInputs } from './balance-calculation'
+import { BALANCE_CALCULATOR_PATH, readCalculationInputs } from './balance-calculation'
 import { checkDesignHandoff } from './design-handoff'
+import { writeBalanceCalculatorFixture } from './workflow-v3/balance-calculation-fixture'
 import { sceneLayoutFixture, writeDesignDocumentFixture } from './fixtures/layout-fixture'
 
 // A tiny legal-action model, not a prefilled game answer or a runtime simulator.
@@ -26,7 +27,7 @@ const model = `export async function calculate({readJson}) {
 async function fixture(run: (workspace: string) => Promise<void>) {
   const workspace = await mkdtemp(join(tmpdir(), 'bgs-balance-calculation-'))
   try {
-    await materializeBalanceCalculator(workspace)
+    await writeBalanceCalculatorFixture(workspace)
     await writeFile(join(workspace, 'model.mjs'), model)
     await writeFile(join(workspace, 'parameters.json'), JSON.stringify({ stock: 12, rate: 3, actions: [5, 20, 2] }))
     await run(workspace)
@@ -42,15 +43,17 @@ async function command(workspace: string, ...args: string[]) {
   return { code, stdout, stderr }
 }
 
-test('calculator deployment retains executable identity without masking source changes', () => fixture(async workspace => {
+test('retained historical calculator identity does not mask source changes', () => fixture(async workspace => {
   const helper = join(workspace, BALANCE_CALCULATOR_PATH)
   // Emulate a different deployed build; the real synthetic calculation uses it.
   const previous = (await readFile(helper, 'utf8')) + '\n// synthetic previous build\n'
   await writeFile(helper, previous)
   expect((await command(workspace, 'model.mjs', 'docs/calc/result.md')).code).toBe(0)
   const saved = await readFile(join(workspace, 'docs/calc/result.md'), 'utf8')
-  await materializeBalanceCalculator(workspace)
   const digest = createHash('sha256').update(previous).digest('hex')
+  await mkdir(join(workspace,'.beegame/delivery/calculators'),{recursive:true})
+  await writeFile(join(workspace,'.beegame/delivery/calculators',digest+'.mjs'),previous)
+  await writeFile(helper,previous+'\n// current helper differs\n')
   expect(await readFile(join(workspace, '.beegame/delivery/calculators', digest + '.mjs'), 'utf8')).toBe(previous)
   expect((await command(workspace, '--check-result', 'docs/calc/result.md')).code).toBe(0)
   expect(await readFile(join(workspace, 'docs/calc/result.md'), 'utf8')).toBe(saved)

@@ -5,11 +5,10 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { readDesignHandoff, readImplementationTask, checkResourcesAndBindings, readVerificationResults } from './workflow-read-tools'
+import { readDesignHandoff, readImplementationTask, checkResourcesAndBindings } from './workflow-read-tools'
 import { prepareNativeMcpConfig, NATIVE_READ_TOOLS } from './native-mcp-config'
-import { projectPreviewCapabilityPath, publishProjectPreviewCapability } from './project-preview-capability'
 import { designDocumentFixture, designHandoffFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, uiLayoutFixture } from './fixtures/layout-fixture'
-import { checkDesignHandoffDraft, designHandoffPath, readDesignImplementationChecklist, designReviewIndexes } from './design-handoff'
+import { checkDesignHandoffDraft, designHandoffPath, designReviewIndexes } from './design-handoff'
 import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from './asset-contracts'
 import sharp from 'sharp'
@@ -78,7 +77,9 @@ test('design reads distinguish availability from delivery completeness without r
   expect(empty.issues).toEqual([])
   expect(empty.documents).toHaveLength(1)
   expect(empty.documents.every(document => !document.available)).toBe(true)
-  expect(empty.contracts).toContain('check-content.mjs --format')
+  expect(empty).not.toHaveProperty('contracts')
+  expect(JSON.stringify(empty)).not.toContain('check-content.mjs')
+  expect(empty.note).toContain('the document title reads the full file')
   save(root, 'docs/GDD.md', '# GDD\n\n' + Array.from({ length: 250 }, (_, i) => `## Decision ${i}\nOriginal prose ${i}.\n`).join('\n'))
   const before = snapshot(root), overview = readDesignHandoff(root, {})
   expect(overview.valid).toBe(true)
@@ -89,6 +90,10 @@ test('design reads distinguish availability from delivery completeness without r
   const directory = readDesignHandoff(root, { read: [{ document: 'GDD.md' }] })
   expect(directory.valid).toBe(true)
   expect(directory.documents[0]!.sections).toHaveLength(251)
+  const whole = readDesignHandoff(root, {read:[{document:'GDD.md',sections:['GDD','Decision 3']}]})
+  expect(whole.valid).toBe(true)
+  expect(whole.sources[0]!.reads).toHaveLength(1)
+  expect(whole.sources[0]!.reads[0]!.text).toBe(readFileSync(join(root,'docs/GDD.md'),'utf8'))
   const selected = readDesignHandoff(root, { read: [{ document: 'GDD.md', sections: ['Decision 3'] }] })
   expect(selected.valid).toBe(true)
   expect(selected.issues).toEqual([])
@@ -110,6 +115,53 @@ test('design reads distinguish availability from delivery completeness without r
   expect(snapshot(root)).toEqual(before)
 })
 
+test('design source reads share Markdown heading resolution while retaining literal symbols and source bytes', () => {
+  const root = fixture()
+  const body = '# Design\n## 9.2 状态一：开始画面 `Ready`\nREADY_SOURCE\n' +
+    '## **Playing**\nPLAY_SOURCE\n## [Result](#outcome)\nRESULT_SOURCE\n' +
+    '## Literal `*keep*`\nLITERAL_SYMBOL_SOURCE\n## Literal keep\nOTHER_LITERAL_SOURCE\n'
+  save(root, 'docs/GDD.md', body)
+  const before = snapshot(root)
+  for (const heading of ['9.2 状态一：开始画面 `Ready`', '9.2 状态一：开始画面 Ready', '### 9.2 状态一：开始画面 `Ready`']) {
+    const result = readDesignHandoff(root, { read: [{ document: 'GDD.md', sections: [heading] }] })
+    expect(result.valid).toBe(true)
+    expect(result.issues).toEqual([])
+    expect(result.documents[0]!.sections?.map(section => section.heading)).toEqual(['9.2 状态一：开始画面 Ready'])
+    expect(result.sources[0]!.reads).toEqual([{ file_path: 'docs/GDD.md', offset: 2, limit: 2,
+      text: '## 9.2 状态一：开始画面 `Ready`\nREADY_SOURCE' }])
+  }
+  const formatted = readDesignHandoff(root, { read: [{ document: 'GDD.md', sections: ['**Playing**', '[Result](#outcome)'] }] })
+  expect(formatted.valid).toBe(true)
+  expect(formatted.documents[0]!.sections?.map(section => section.heading)).toEqual(['Playing', 'Result'])
+  expect(formatted.sources[0]!.reads[0]!.text).toContain('PLAY_SOURCE')
+  expect(formatted.sources[0]!.reads[0]!.text).toContain('RESULT_SOURCE')
+  const literal = readDesignHandoff(root, { read: [{ document: 'GDD.md', sections: ['Literal *keep*'] }] })
+  expect(literal.valid).toBe(true)
+  expect(literal.documents[0]!.sections?.map(section => section.heading)).toEqual(['Literal *keep*'])
+  expect(literal.sources[0]!.reads[0]!.text).toContain('LITERAL_SYMBOL_SOURCE')
+  expect(literal.sources[0]!.reads[0]!.text).not.toContain('OTHER_LITERAL_SOURCE')
+  for (const heading of ['状态一：开始画面 Ready', '9.2 状态一：开始画面 Readyy', 'Missing\n## Playing']) {
+    const missing = readDesignHandoff(root, { read: [{ document: 'GDD.md', sections: [heading] }] })
+    expect(missing.valid).toBe(false)
+    expect(missing.issues.join(' ')).toContain('missing/ambiguous heading')
+    expect(missing.sources).toEqual([])
+  }
+  expect(snapshot(root)).toEqual(before)
+})
+
+test('formatted duplicate source headings remain ambiguous for literal and Markdown references', () => {
+  const root = fixture()
+  save(root, 'docs/GDD.md', '# Design\n## **Repeated**\nFIRST_SOURCE\n## Repeated\nSECOND_SOURCE\n')
+  const before = snapshot(root)
+  for (const heading of ['Repeated', '**Repeated**', '## **Repeated**']) {
+    const result = readDesignHandoff(root, { read: [{ document: 'GDD.md', sections: [heading] }] })
+    expect(result.valid).toBe(false)
+    expect(result.issues.join(' ')).toContain('missing/ambiguous heading')
+    expect(result.sources).toEqual([])
+  }
+  expect(snapshot(root)).toEqual(before)
+})
+
 test('delivered GDD remains source availability, not quality approval', () => {
   const root = fixture()
   for (const document of readDesignHandoff(root, {}).documents)
@@ -121,6 +173,32 @@ test('delivered GDD remains source availability, not quality approval', () => {
   expect(result).not.toHaveProperty('deliveryEligible')
   expect(snapshot(root)).toEqual(before)
 })
+
+test.each(['none','self','unknown','duplicate-dependency','cycle','duplicate-task','missing-section','unknown-output','missing-acceptance'] as const)(
+  'current task reader preserves optional planning and rejects invalid supplied mappings: %s',async kind=>{
+    const root=fixture()
+    await writeDesignDocumentFixture(root,'GDD.md')
+    const file=join(root,designHandoffPath('GDD.md'))
+    const index=JSON.parse(readFileSync(file,'utf8')),task=index.implementationItems[0]
+    if(kind==='none')delete index.implementationItems
+    else if(kind==='self')task.dependsOn=[task.id]
+    else if(kind==='unknown')task.dependsOn=['absent']
+    else if(kind==='duplicate-dependency') {
+      task.dependsOn=['other','other'];index.implementationItems.push({...task,id:'other',dependsOn:[]})
+    } else if(kind==='cycle') {
+      task.dependsOn=['other'];index.implementationItems.push({...task,id:'other',dependsOn:[task.id]})
+    } else if(kind==='duplicate-task')index.implementationItems.push({...task})
+    else if(kind==='missing-section')task.section='Absent task source'
+    else if(kind==='unknown-output')task.requirementRefs[0].id='absent'
+    else if(kind==='missing-acceptance')delete index.outputs[0].acceptance
+    writeFileSync(file,JSON.stringify(index))
+    const before=snapshot(root)
+    const result=readImplementationTask(root,kind==='none'?{}:{id:task.id})
+    expect(result.valid).toBe(kind==='none')
+    if(kind==='none')expect(result.directory).toEqual([])
+    else expect(result.issues.length).toBeGreaterThan(0)
+    expect(snapshot(root)).toEqual(before)
+  })
 
 test('task ID supplies original requirement and acceptance prose while the directory stays brief', async () => {
   const root = fixture(), handoff = designHandoffFixture('GDD.md')
@@ -198,216 +276,61 @@ test('bad referenced headings retain readable task and requirement text with exp
   expect(snapshot(root)).toEqual(before)
 })
 
-test('binding check catches nested unknown resources and missing manifest, keeps actual operands and all-file scope', async () => {
-  const root = fixture(), ui = uiLayoutFixture()
-  ;(ui.data.nodes[1] as any).data = { image: { assetRef: 'missing-atlas', member: 'no.png', atlasMember: 'atlas.json', frame: 'idle' } }
-  ui.assetRefs = ['missing-atlas'] as never[]
-  save(root, 'content/ui/menu.json', ui)
-  const other = uiLayoutFixture(); other.id = 'other'; other.assetRefs = ['missing-other'] as never[]
-  ;(other.data.nodes[1] as any).data = { image: { assetRef: 'missing-other', member: 'other.png', atlasMember: 'other.json', frame: 'idle' } }
-  save(root, 'content/ui/other.json', other)
-  mkdirSync(join(root, 'content/scenes'), { recursive: true })
-  const beforeMissing = snapshot(root)
-  const missing = await checkResourcesAndBindings(root, { detailsFor: 'content/ui/menu.json' })
-  expect(missing.valid).toBe(false)
-  expect(missing.issues.join(' ')).toContain('manifest.json is missing')
-  expect(missing.files).toHaveLength(2)
-  const selected = missing.files.find(file => file.file === 'content/ui/menu.json') as any
-  const unselected = missing.files.find(file => file.file === 'content/ui/other.json') as any
-  expect(selected.nodes.find((node: any) => node.id === 'play').data.image).toEqual({
-    assetRef: 'missing-atlas', member: 'no.png', atlasMember: 'atlas.json', frame: 'idle',
-  })
-  expect(unselected).toMatchObject({ nodeCount: 2, bindingNodeCount: 1 })
-  expect(unselected).not.toHaveProperty('nodes')
-  expect(unselected).not.toHaveProperty('bindings')
-  expect(snapshot(root)).toEqual(beforeMissing)
+test('resource check needs a Manifest, never a proprietary UI or Scene document', async () => {
+  const root = fixture()
+  expect((await checkResourcesAndBindings(root, {})).issues.join(' ')).toContain('manifest.json is missing')
   const manifest = assetManifestAuthoringExamples().canonical
   manifest.resources = []; manifest.requirements = []
   await writeBeeGameAssetManifest(root, manifest)
   const before = snapshot(root), result = await checkResourcesAndBindings(root, {})
-  expect(result.issues.join(' ')).toContain('Unknown resource missing-atlas')
-  expect(result.issues.join(' ')).toContain('Unknown resource missing-other')
-  expect(result.issues.join(' ')).toContain('content/ui/menu.json')
-  expect(result.issues.join(' ')).toContain('content/ui/other.json')
-  const expanded = await checkResourcesAndBindings(root, { detailsFor: 'content/ui/menu.json' })
-  expect(expanded.valid).toBe(result.valid)
-  expect(expanded.issues).toEqual(result.issues)
-  const summary = result.files.find(file => file.file === 'content/ui/menu.json') as any
-  expect(summary).toMatchObject({ nodeCount: 2, bindingNodeCount: 1 })
-  expect(summary).not.toHaveProperty('nodes')
-  expect(summary).not.toHaveProperty('bindings')
+  expect(result).toMatchObject({valid:true,scope:'registered-resources',resources:[],requirementBindings:[]})
+  expect(result.note).toContain('registered files, hashes and supported structure')
+  expect(result.note).not.toMatch(/runtime|visual quality|native scene/i)
   expect(snapshot(root)).toEqual(before)
-  await expect(checkResourcesAndBindings(root, { detailsFor: 'content/ui/../../secret.json' })).rejects.toThrow()
-  symlinkSync(join(root, 'content/ui/menu.json'), join(root, 'content/ui/alias.json'))
-  expect((await checkResourcesAndBindings(root, {})).issues.join(' ')).toContain('symlink')
+  // An unrelated directory/filename does not declare a BGS data contract.
+  save(root, 'content/ui/menu.json', 'not a BGS document')
+  save(root, 'content/index.json', '{}')
+  expect((await checkResourcesAndBindings(root, {})).valid).toBe(true)
+  await expect(checkResourcesAndBindings(root, {detailsFor:'content/ui/menu.json'})).rejects.toThrow()
 })
 
-test('binding check verifies current bytes/hash and exact atlas member rather than inventory success', async () => {
+test('resource check preserves actual file, hash and requirement checks without UI inputs', async () => {
   const root = fixture(), manifest = assetManifestAuthoringExamples().canonical
-  const resource = manifest.resources[0]!, path = resource.file_paths[0]!
-  resource.local_file_hashes = { [path]: createHash('sha256').update('{}').digest('hex') }
-  save(root, path, '{}')
+  const resource = manifest.resources[0]!, path = 'assets/runtime/image.png'
+  const png = await sharp({create:{width:16,height:16,channels:4,background:'#ffffff'}}).png().toBuffer()
+  manifest.requirements = []; resource.fulfills = []
+  resource.root_path = path; resource.file_paths = [path]; resource.asset_kind = 'image'; resource.dimension = '2D'
+  resource.local_file_hashes = {[path]:createHash('sha256').update(png).digest('hex')}
   await writeBeeGameAssetManifest(root, manifest)
-  const ui = uiLayoutFixture()
-  ui.assetRefs = [resource.id] as never[]
-  ;(ui.data.nodes[1] as any).data = { image: { assetRef: resource.id, member: 'nonexistent-file', atlasMember: path, frame: 'missing-frame' } }
-  save(root, 'content/ui/menu.json', ui)
-  mkdirSync(join(root, 'content/scenes'), { recursive: true })
-  const before = snapshot(root), broken = await checkResourcesAndBindings(root, {})
-  expect(broken.valid).toBe(false)
-  expect(broken.issues.join(' ')).toContain('Missing or ambiguous member')
+  expect((await checkResourcesAndBindings(root, {})).valid).toBe(false)
+  mkdirSync(join(root,'assets/runtime'),{recursive:true}); writeFileSync(join(root,path),png)
+  const before = snapshot(root), checked = await checkResourcesAndBindings(root, {})
+  expect(checked.valid).toBe(true)
+  expect(checked.resources[0]!.files[0]).toMatchObject({path,sha256:resource.local_file_hashes[path],facts:{width:16,height:16}})
   expect(snapshot(root)).toEqual(before)
-  save(root, path, '{"changed":true}')
+  writeFileSync(join(root,path),'changed bytes')
   expect((await checkResourcesAndBindings(root, {})).issues.join(' ')).toContain('hash does not match')
 })
 
-test('binding check resolves exact atlas frames and reports missing required asset bindings', async () => {
+test('resource check validates atlas structure and representation requirements without Scene/UI bindings', async () => {
   const root = fixture(), manifest = assetManifestAuthoringExamples().canonical, resource = manifest.resources[0]!
   const image = 'assets/runtime/atlas.png', atlas = 'assets/runtime/atlas.json'
-  resource.root_path = image; resource.file_paths = [image, atlas]; resource.asset_kind = 'sprite-atlas'
-  const png = await sharp({ create: { width: 16, height: 16, channels: 4, background: '#ffffff' } }).png().toBuffer()
-  mkdirSync(join(root, 'assets/runtime'), { recursive: true }); writeFileSync(join(root, image), png)
-  save(root, atlas, { frames: { idle: { frame: { x: 0, y: 0, w: 16, h: 16 } } } })
+  resource.root_path = image; resource.file_paths = [image,atlas]; resource.asset_kind = 'sprite-atlas'
+  const png = await sharp({create:{width:16,height:16,channels:4,background:'#ffffff'}}).png().toBuffer()
+  mkdirSync(join(root,'assets/runtime'),{recursive:true}); writeFileSync(join(root,image),png)
+  save(root,atlas,{frames:{idle:{frame:{x:0,y:0,w:16,h:16}}}})
   manifest.requirements[0]!.acquisition_profile.asset_kinds = ['sprite']
   manifest.requirements[0]!.acquisition_profile.capabilities = []
   resource.local_file_hashes = Object.fromEntries(resource.file_paths.map(path =>
-    [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]))
-  await writeBeeGameAssetManifest(root, manifest)
-  const ui = uiLayoutFixture(); ui.assetRefs = [resource.id] as never[]
-  ;(ui.data.nodes[1] as any).data = { image: { assetRef: resource.id, member: image, atlasMember: atlas, frame: 'missing' } }
-  save(root, 'content/ui/menu.json', ui); mkdirSync(join(root, 'content/scenes'), { recursive: true })
-  expect((await checkResourcesAndBindings(root, {})).issues.join(' ')).toContain('no frame "missing"')
-  ;(ui.data.nodes[1] as any).data.image.frame = 'idle'
-  save(root, 'content/ui/menu.json', ui)
-  const before = snapshot(root), validFrame = await checkResourcesAndBindings(root, {})
-  expect(validFrame.issues.join(' ')).not.toContain('no frame "missing"')
-  expect(validFrame.requirements[0]!.structure!.status).toBe('passed')
-  expect(validFrame.requirements[0]!.structure!.observations[0]).toContain('expected kinds [sprite]')
-  expect(validFrame.requirements[0]!.structure!.observations[0]).toContain(resource.id+' (sprite-atlas)')
-  expect(snapshot(root)).toEqual(before)
-  ;(ui.data.nodes[1] as any).role = 'image'; delete (ui.data.nodes[1] as any).data
-  save(root, 'content/ui/menu.json', ui)
-  expect((await checkResourcesAndBindings(root, {})).issues.join(' ')).toContain('requires assetRef')
-})
-
-test('binding check rejects image mesh inputs, accepts a model root, and blocks image member bypasses', async () => {
-  const root = fixture(), manifest = assetManifestAuthoringExamples().canonical
-  manifest.requirements = []
-  manifest.project_target!.asset_format_capabilities = ['json', 'png', 'glb']
-  const image = 'assets/runtime/image.png', model = 'assets/runtime/model.glb', modelTexture = 'assets/runtime/model.png'
-  const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#ffffff' } }).png().toBuffer()
-  const glb = minimalGlb()
-  mkdirSync(join(root, 'assets/runtime'), { recursive: true })
-  writeFileSync(join(root, image), png)
-  writeFileSync(join(root, model), glb)
-  writeFileSync(join(root, modelTexture), png)
-  const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-  const template = manifest.resources[0]!
-  manifest.resources = [
-    { ...template, id: 'RES-IMAGE', fulfills: [], root_path: image, file_paths: [image], local_file_hashes: { [image]: hash(png) }, dimension: '2D', asset_kind: 'image' },
-    { ...template, id: 'RES-MODEL', fulfills: [], root_path: model, file_paths: [model, modelTexture], local_file_hashes: { [model]: hash(glb), [modelTexture]: hash(png) }, dimension: '3D', asset_kind: 'model' },
-  ]
-  await writeBeeGameAssetManifest(root, manifest)
-  mkdirSync(join(root, 'content/ui'), { recursive: true })
-  mkdirSync(join(root, 'content/scenes'), { recursive: true })
-  save(root, 'content/scenes/scene.json', scene3dMesh('RES-IMAGE'))
-  const imageResult = await checkResourcesAndBindings(root, {})
-  expect(imageResult.valid).toBe(false)
-  expect(imageResult.issues.join(' ')).toContain('requires a mesh/model resource')
-  save(root, 'content/scenes/scene.json', scene3dMesh('RES-MODEL'))
-  expect((await checkResourcesAndBindings(root, {})).valid).toBe(true)
-  save(root, 'content/scenes/scene.json', scene3dMesh('RES-MODEL', modelTexture))
-  const memberResult = await checkResourcesAndBindings(root, {})
-  expect(memberResult.valid).toBe(false)
-  expect(memberResult.issues.join(' ')).toContain('selects image member')
-})
-
-test('native tools discover all six; result reads use fixed read requests, preserve newest failure and do not execute receipts', async () => {
-  const root = fixture(), sessionId = 'offline-session'
-  await writeDesignDocumentsFixture(root)
-  await writeDesignDocumentFixture(root, 'GDD.md', undefined,
-    designDocumentFixture('GDD.md') + '\nNATIVE_ORIGINAL_REQUIREMENT_AND_CHECK\n')
-  const requests: unknown[] = [], server = Bun.serve({ hostname: '127.0.0.1', port: 43123, async fetch(request) {
-    const body = await request.json(); requests.push(body)
-    if (body.executionInputs === true) return Response.json({ files: [], requirementsRevision: 'r1', runId: 'run', attemptId: 'turn' })
-    if (body.inspectRequestKey) return Response.json({ id: body.inspectRequestKey, freshness: { current: false }, error: 'retained failure' })
-    if (Array.isArray(body.handoffPaths)) return Response.json({ scope: 'agent-task-evidence-handoff',
-      designFileChanges: { status: 'observed', files: [{ path: 'content/ui/menu.json', change: 'modified' }] },
-      measurement: { id: 'newest-interrupted', error: 'interrupted', freshness: { current: false } },
-      acceptance: { valid: false }, checkScope: { build: 'source-copy only' }, note: 'No executions',
-      measurements: [{ id: 'older-success' }, { id: 'newest-interrupted' }] })
-    throw Error('Unexpected request could start verification')
-  } })
-  const revoke = await publishProjectPreviewCapability(root, sessionId, server.url.origin + '/fixture', 'measurement')
-  save(root, 'test.mjs', 'throw Error("Receipt inspection must never run this script")')
-  save(root, '.beegame/tmp/preview-test-fixture/execution.json', { script: 'test.mjs', status: 'interrupted',
-    stdoutPath: '.beegame/tmp/preview-test-fixture/stdout.txt', after: { status: 'observed', scriptSha256: 'old',
-      inputs: { files: [], requirementsRevision: 'r1', runId: 'run', attemptId: 'old-turn' } } })
-  const prepared = await prepareNativeMcpConfig({}, root, { dimension: '2D' }, sessionId)
-  const config = prepared.config as { mcp_servers: Record<string, { command: string; args: string[] }> }
-  const client = new Client({ name: 'offline-reader-test', version: '1' })
-  const before = snapshot(root)
-  const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const response = await client.callTool({ name, arguments: args })
-    const text = (response.content as { text: string }[])[0]!.text
-    return { response, text, json: () => JSON.parse(text) }
-  }
-  try {
-    await client.connect(new StdioClientTransport({ ...config.mcp_servers['bgs-ui-layout']!, cwd: root }))
-    const tools = (await client.listTools()).tools
-    expect(tools.map(tool => tool.name).sort()).toEqual([...NATIVE_READ_TOOLS].sort())
-    expect(tools.every(tool => tool.annotations?.readOnlyHint)).toBe(true)
-    expect((await call('ReadDesignHandoff')).json().documents).toHaveLength(1)
-    const sourcePath = join(root, 'docs/GDD.md'), original = readFileSync(sourcePath)
-    rmSync(sourcePath)
-    try {
-      expect((await call('ReadDesignHandoff')).response.isError).toBe(false)
-      expect((await call('ReadDesignHandoff', {read:[{document:'GDD.md',sections:['Design']}]})).response.isError).toBe(true)
-      expect((await call('ReadDesignHandoff', {read:[{document:'GDD.md'}]})).response.isError).toBe(true)
-    } finally { writeFileSync(sourcePath, original) }
-    const task = await call('ReadImplementationTask', { id: 'fixture-GDD' })
-    expect(task.response.isError).toBe(false)
-    expect(task.text).toContain('Fixture decision.')
-    expect(task.text).toContain('NATIVE_ORIGINAL_REQUIREMENT_AND_CHECK')
-    expect((await call('CheckResourcesAndBindings')).response.isError).toBe(true)
-    const latest = (await call('ReadVerificationResults')).json()
-    expect(latest.measurement.id).toBe('newest-interrupted')
-    expect(latest.measurement.freshness.current).toBe(false)
-    expect(latest.measurement.error).toBe('interrupted')
-    expect(latest.designFileChanges).toEqual({ status: 'observed', files: [{ path: 'content/ui/menu.json', change: 'modified' }] })
-    expect(latest.quality).toBe('unverified')
-    for (const field of ['acceptance', 'checkScope', 'measurements']) expect(latest).not.toHaveProperty(field)
-    const detailed = (await call('ReadVerificationResults', { details: true })).json()
-    expect(detailed.measurement).toEqual(latest.measurement)
-    expect(detailed.designFileChanges).toEqual(latest.designFileChanges)
-    expect(detailed.acceptance).toEqual({ valid: false })
-    expect(detailed.checkScope).toEqual({ build: 'source-copy only' })
-    expect(detailed.measurements).toEqual([{ id: 'older-success' }, { id: 'newest-interrupted' }])
-    expect((await call('ReadVerificationResults', { measurementId: 'exact-id', details: true })).json().id).toBe('exact-id')
-    const receipt = (await call('ReadVerificationResults', { previewReceipt: '.beegame/tmp/preview-test-fixture/execution.json' })).json()
-    expect(receipt.status).toBe('interrupted')
-    expect(receipt.freshness.status).toBe('changed')
-    expect(receipt.toolingFreshness?.status ?? 'unverified').toBe('unverified') // Legacy receipts/inspectors may omit tooling identity; neither proves it
-    const count = requests.length
-    expect((await call('ReadVerificationResults', { operation: 'measure' })).response.isError).toBe(true)
-    expect((await call('ReadVerificationResults', { measurementId: 'x', previewReceipt: 'x' })).response.isError).toBe(true)
-    expect(requests).toHaveLength(count)
-    expect(requests.every((body: any) => body.executionInputs === true || Array.isArray(body.handoffPaths) || typeof body.inspectRequestKey === 'string')).toBe(true)
-    await revoke()
-    expect((await call('ReadVerificationResults')).response.isError).toBe(true)
-    expect(requests).toHaveLength(count)
-    expect(snapshot(root)).toEqual(before)
-  } finally { await client.close(); await prepared.close(); await revoke(); server.stop(true) }
-}, 20_000)
-
-test('result access rejects another project/session before any host request', async () => {
-  const root = fixture(), other = fixture(), file = projectPreviewCapabilityPath(root, 'ours', 'measurement')
-  const revoke = await publishProjectPreviewCapability(root, 'ours', 'http://127.0.0.1:1/unused', 'measurement')
-  try {
-    await expect(readVerificationResults(other, {}, { capabilityFile: file, sessionId: 'ours' })).rejects.toThrow('does not match')
-    await expect(readVerificationResults(root, {}, { capabilityFile: file, sessionId: 'other' })).rejects.toThrow('does not match')
-    await expect(readVerificationResults(root, {})).rejects.toThrow('unavailable')
-  } finally { await revoke() }
+    [path,createHash('sha256').update(readFileSync(join(root,path))).digest('hex')]))
+  await writeBeeGameAssetManifest(root,manifest)
+  const result = await checkResourcesAndBindings(root,{})
+  expect(result.requirements[0]!.structure!.status).toBe('passed')
+  expect(result.requirements[0]!.structure!.observations[0]).toContain(resource.id+' (sprite-atlas)')
+  save(root,atlas,{frames:{idle:{frame:{x:0,y:0,w:32,h:16}}}})
+  resource.local_file_hashes[atlas]=createHash('sha256').update(readFileSync(join(root,atlas))).digest('hex')
+  await writeBeeGameAssetManifest(root,manifest)
+  expect((await checkResourcesAndBindings(root,{})).valid).toBe(false)
 })
 
 test('selected design reads omit unrelated directories and all requirement hashes; table task reads identify the ID without dropping shared prose', async () => {
@@ -474,7 +397,6 @@ test('one malformed task does not hide independently readable implementation tas
   expect(readImplementationTask(root, {}).directory.map(task => task.id)).toEqual(['valid-task'])
   expect(readImplementationTask(root, { id: 'broken-task' }).valid).toBe(false)
   expect(designReviewIndexes(root, ['GDD.md'])[0]).toHaveProperty('issues')
-  expect(() => readDesignImplementationChecklist(root)).toThrow()
   expect(snapshot(root)).toEqual(before)
 })
 

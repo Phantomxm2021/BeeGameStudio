@@ -88,8 +88,9 @@ export function compactTranscriptForChatHistory<
   for (const event of events) {
     const payload: NonNullable<BeeGameEvent['payload']> = event.payload ?? { type: event.type }
     if (event.type === 'system.status' &&
-      !['task_started', 'task_progress', 'task_notification', 'compact_boundary', 'delivery_phase', 'delivery_error', 'host_evidence'].includes(String(payload.subtype)) &&
-      !(payload.subtype === 'status' && payload.status === 'compacting')) continue
+      !['task_started', 'task_progress', 'task_notification', 'compact_boundary', 'delivery_phase', 'delivery_error', 'design_revision', 'runtime_notice', 'host_evidence'].includes(String(payload.subtype)) &&
+      !(payload.subtype === 'status' && payload.status === 'compacting') &&
+      typeof payload.childStatus !== 'string' && payload.willRetry !== true) continue
     const thinking = event.type === 'assistant.thinking'
     const text = event.type === 'assistant.partial' || event.type === 'assistant.message'
     const tool = ['tool.started', 'tool.progress', 'tool.completed', 'tool.failed'].includes(event.type)

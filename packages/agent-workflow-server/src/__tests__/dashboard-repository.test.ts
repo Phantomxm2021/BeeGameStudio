@@ -898,4 +898,147 @@ describe('DashboardRepository Supabase boundaries', () => {
       await rm(dataRoot, { recursive: true, force: true })
     }
   })
+
+  test.each(['ready', 'missing-migration', 'forbidden'])('project deletion retains public releases before cleanup: %s', async retention => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-public-release-retention-'))
+    const ordered: string[] = []
+    const deletions: Array<{ url: URL; body: unknown }> = []
+    let retentionCommitted = false
+    const release = { artifact_path: 'supabase://deliveries/deployments/public-release' }
+    const privateBuild = { artifact_path: 'supabase://deliveries/deployments/private-build' }
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot, getUserDataRoot: () => dataRoot,
+      getAuthToken: () => 'owner-token',
+      projectAssetStorage: {
+        uploadAssetFile: async () => 'r2-object://fixture',
+        deleteAssetFile: async () => undefined,
+        deleteProjectFiles: async () => {
+          // Provider cleanup must run only after the database has moved public
+          // delivery objects out of this project's deletion scope.
+          expect(retentionCommitted).toBe(true)
+          ordered.push('provider-cleanup')
+        },
+      },
+      supabaseStore: new SupabaseDashboardStore({
+        url: 'https://project.supabase.co', anonKey: 'anon-key',
+        fetchImpl: async (input, init) => {
+          const url = new URL(String(input))
+          const method = init?.method ?? 'GET'
+          if (url.pathname.endsWith('/beegame_projects') && method === 'GET')
+            return Response.json([{ id: 'project-1', owner_id: 'owner-1', name: 'Project',
+              created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z', runtime_snapshot: {} }])
+          if (url.pathname.endsWith('/rpc/beegame_retain_project_publications')) {
+            ordered.push('retention')
+            expect(JSON.parse(String(init?.body))).toEqual({ p_owner_id: 'owner-1', p_project_id: 'project-1' })
+            if (retention !== 'ready') return Response.json({ message: retention }, { status: retention === 'forbidden' ? 403 : 404 })
+            retentionCommitted = true
+            return Response.json(null)
+          }
+          if (method === 'DELETE') {
+            deletions.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null })
+            return Response.json([{ id: 'project-1' }])
+          }
+          if (url.pathname.endsWith('/beegame_deployments')) {
+            expect(url.searchParams.get('owner_id')).toBe('eq.owner-1')
+            expect(url.searchParams.get('project_id')).toBe('eq.project-1')
+            return Response.json(url.searchParams.get('or') === '(status.neq.succeeded,portal_published_at.is.null)'
+              ? [privateBuild] : [release, privateBuild])
+          }
+          return Response.json([])
+        },
+      }),
+    })
+    try {
+      const deleting = repository.deleteProject(new Request('http://beegame.test/api/projects/project-1', {
+        headers: { authorization: 'Bearer owner-token' },
+      }), { id: 'owner-1', role: 'owner' }, 'project-1', async () => { ordered.push('workflow-cleanup') })
+      if (retention !== 'ready') {
+        await expect(deleting).rejects.toThrow(retention)
+        expect(ordered).toEqual(['retention'])
+        expect(deletions).toEqual([])
+        return
+      }
+      expect(await deleting).toBe(true)
+      expect(ordered).toEqual(['retention', 'provider-cleanup', 'workflow-cleanup'])
+      const deliveryDeletes = deletions.filter(item => item.url.pathname === '/storage/v1/object/deliveries')
+      expect(deliveryDeletes.map(item => item.body)).toEqual([{ prefixes: ['deployments/private-build'] }])
+      const records = deletions.find(item => item.url.pathname.endsWith('/beegame_deployments'))!
+      expect(records.url.searchParams.get('or')).toBe('(status.neq.succeeded,portal_published_at.is.null)')
+      expect(records.url.searchParams.get('owner_id')).toBe('eq.owner-1')
+      expect(records.url.searchParams.get('project_id')).toBe('eq.project-1')
+      expect(deletions.some(item => item.url.pathname.endsWith('/beegame_sessions'))).toBe(true)
+      expect(deletions.some(item => item.url.pathname.endsWith('/beegame_projects'))).toBe(true)
+      expect(deletions.some(item => item.url.pathname.endsWith('/beegame_portal_games'))).toBe(false)
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
+
+})
+
+
+test('Supabase MCP tool selections survive real repository save, read and runtime environment assembly', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'beegame-repository-supabase-env-'))
+  const owner = { id: 'owner-user', role: 'owner' as const }
+  const request = new Request('https://fixture.test/api/mcp-servers', {
+    headers: { authorization: 'Bearer user-token' },
+  })
+  type Row = { id: string; owner_id: string; name: string; config: Record<string, unknown> }
+  const rows = new Map<string, Row>()
+  const writes: Row[] = []
+  const store = new SupabaseDashboardStore({
+    url: 'https://project.supabase.co', anonKey: 'anon-key', authToken: 'user-token',
+    fetchImpl: async (input, init) => {
+      const url = new URL(String(input))
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer user-token')
+      if (url.pathname === '/rest/v1/beegame_model_configs') return Response.json([])
+      expect(url.pathname).toBe('/rest/v1/beegame_mcp_servers')
+      if (init?.method === 'POST') {
+        const row = JSON.parse(String(init.body)) as Row
+        expect(row.owner_id).toBe(owner.id)
+        writes.push(row)
+        rows.set(row.id, row)
+        return Response.json([row])
+      }
+      expect(url.searchParams.get('owner_id')).toBe('eq.' + owner.id)
+      const id = url.searchParams.get('id')?.slice(3)
+      return Response.json([...rows.values()].filter(row => !id || row.id === id))
+    },
+  })
+  const repository = new DashboardRepository({
+    dashboardDataRoot: root, getUserDataRoot: () => root, skillsConfig: false,
+    resolveRuntimeUser: async () => owner, supabaseStore: store,
+    supabaseRuntimeEnvClient: new SupabaseRuntimeEnvClient({
+      url: 'https://project.supabase.co', anonKey: 'anon-key',
+      fetchImpl: async () => Response.json({ env: {} }),
+    }),
+  })
+  const input = { name: 'Project browser', enabled: true, autoStart: true, scope: 'project' as const,
+    cwd: root, transport: 'stdio' as const, command: '/fixture/browser' }
+  const enabledTools = ['browser_run_code_unsafe'], disabledTools = ['browser_click']
+  const runtimeSelection = async (id: string) => {
+    const env = await repository.getRuntimeEnv(root, owner.id, 'user-token')
+    return JSON.parse(env.BEEGAME_NATIVE_MCP_SERVERS_JSON!).find((server: { id: string }) => server.id === id)
+  }
+  try {
+    const saved = await repository.upsertMcpServer(request, owner, { ...input, enabledTools, disabledTools })
+    expect(writes[0]?.config).toMatchObject({ enabledTools, disabledTools })
+    expect((await repository.listMcpServers(request, owner))[0]).toMatchObject({ enabledTools, disabledTools })
+    expect(await runtimeSelection(saved.id)).toMatchObject({ id: saved.id, scope: 'project', cwd: root, enabledTools, disabledTools })
+    await repository.upsertMcpServer(request, owner, { ...input, id: saved.id, name: 'Renamed browser' })
+    expect(await runtimeSelection(saved.id)).toMatchObject({ enabledTools, disabledTools })
+    const beforeInvalid = writes.length
+    await expect(repository.upsertMcpServer(request, owner, { ...input, id: saved.id, enabledTools: [''] }))
+      .rejects.toThrow('MCP tool selection')
+    expect(writes).toHaveLength(beforeInvalid)
+    expect(await runtimeSelection(saved.id)).toMatchObject({ enabledTools, disabledTools })
+    await repository.upsertMcpServer(request, owner, { ...input, id: saved.id, enabledTools: [], disabledTools: [] })
+    expect(await runtimeSelection(saved.id)).toMatchObject({ enabledTools: [], disabledTools: [] })
+    await repository.upsertMcpServer(request, owner, { ...input, id: saved.id, enabledTools: null, disabledTools: null })
+    expect(await runtimeSelection(saved.id)).not.toHaveProperty('enabledTools')
+    expect(await runtimeSelection(saved.id)).not.toHaveProperty('disabledTools')
+    const legacy = await repository.upsertMcpServer(request, owner, { ...input, name: 'Legacy browser' })
+    expect(await runtimeSelection(legacy.id)).not.toHaveProperty('enabledTools')
+    expect(await runtimeSelection(legacy.id)).not.toHaveProperty('disabledTools')
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

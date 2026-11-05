@@ -214,8 +214,8 @@ test('an existing project gets Git ignore coverage before a resumed session star
   await writeFile(join(root, '.gitignore'), '# Existing authored ignore rules\ncustom-cache/\n')
   let starts = 0
   const runner = { start: async (input: {cwd: string}) => {
-    const ignored = await exec('git', ['-C', input.cwd, 'check-ignore', '--', '.beegame/chat/project-events.jsonl'], {env})
-    expect(ignored.stdout.trim()).toBe('.beegame/chat/project-events.jsonl')
+    const ignored = await exec('git', ['-C', input.cwd, 'check-ignore', '--', 'reports/runtime/preview-test-fixture/execution.json'], {env})
+    expect(ignored.stdout.trim()).toBe('reports/runtime/preview-test-fixture/execution.json')
     expect(await readFile(join(root, '.gitignore'), 'utf8')).toEndWith('# Existing authored ignore rules\ncustom-cache/\n')
     expect(await readFile(join(root, '.gitignore'), 'utf8')).toContain('# Engine: Unity')
     starts++

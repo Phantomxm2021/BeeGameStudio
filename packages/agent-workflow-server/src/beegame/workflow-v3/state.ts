@@ -81,7 +81,7 @@ export type Run = {
   // Host-observed blank-project intake, not a phase or model-authored plan.
   // Absent on existing/imported runs; never infer it from missing content later.
   // webStarter/webBoot are historical observations only; new intake never assigns them.
-  creation?: { initialDelivery: 'playable-slice' | 'design-led-first-version'; editableContent: boolean; webStarter?: 'react-canvas-2d-v1'; webBoot?: 'react-web-storage-v1' };
+  creation?: { initialDelivery: 'playable-slice' | 'design-led-first-version' | 'complete-game'; editableContent: boolean; webStarter?: 'react-canvas-2d-v1'; webBoot?: 'react-web-storage-v1' };
   // Historical installation receipt only. It neither locks project sources
   // nor dictates entry points; retain it without rewriting the saved history.
   webBoot?: { version: 'react-web-storage-v1'; files: FileVersion[] };
@@ -117,17 +117,41 @@ export type DesignFileChanges = {
   status: 'observed' | 'unverified'; files: Array<{ path: string; change: 'added' | 'modified' | 'deleted' }>;
   error?: string;
 }
+export type ProjectFileChanges = Omit<DesignFileChanges, 'scope'> & {
+  scope: 'project-input-files'; dependenciesChanged: boolean;
+}
 export type AgentTurn = {
   production?: import('./production-workflow').ProductionAssignment;
+  /** Archived browser receipts only; never a current completion requirement. */
+  browserVerification?: {
+    checks: Array<{id:string;requirement:string;expected:string}>;
+    attempts: Array<{
+      id: string; server: string; script: { path: string; sha256: string }; startedAt: string;
+      finishedAt?: string;
+      report?: {status:'passed';checks:Array<{id:string;status:'passed'|'failed'|'unverified';observed:string}>} |
+        {status:'failed';kind:'tool-error'|'invalid-result'|'check-failed';message:string;checks:Array<{id:string;status:'passed'|'failed'|'unverified';observed:string}>};
+      error?: string;
+    }>;
+  };
   productionHandoff?: import('./production-workflow').ProductionHandoff;
+  // Selected reference bytes; recording them does not end this implementation turn.
+  visualSelection?: import('./production-workflow').ProductionHandoff;
   designReviews?: import('./design-review').DesignReviewReceipt[];
+  visualBaseline?: import('./visual-review').VisualReviewBaseline;
+  visualReviews?: import('./visual-review').VisualReviewReceipt[];
   attemptId: string; requestKey: string; sessionId: string; workerId: string; fence: number;
   status: 'running' | 'ended' | 'failed' | 'interrupted'; startedAt: string; finishedAt?: string;
   turnId?: string; nativeRuntime?: 'bgs'; nativeSessionId?: string; usage?: unknown; skillUses?: SkillUse[];
   quiescedAt?: string; error?: string;
   designFileChanges?: DesignFileChanges;
+  // Host input identity before this user task; same-task recovery retains it.
+  projectInputs?: { files: FileVersion[]; dependencySha256?: string } | { error: string };
+  projectFileChanges?: ProjectFileChanges;
+  // Existing validated finish receipt, retained for continuation decisions.
+  deliverySubmission?: import('./agent-measurement').AgentDeliverySubmission;
   // Original host observed no native submission. Not inferred from missing
   // history/UUID or an error string; permits a separately authorized new work.
+  // A host turn/user message can already exist before entering the native runner.
   notStarted?: true;
   // Original user request, not a host-authored execution/repair plan.
   message?: AgentMessage;

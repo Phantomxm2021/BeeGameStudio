@@ -4,7 +4,9 @@ import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, wr
 import { dirname, join, parse } from 'node:path'
 import { tmpdir } from 'node:os'
 import { BeeGamePreviewManager } from '../preview-manager'
-import { buildEditableProject, projectDependencies, projectFiles } from './editable-project'
+import { projectDependencies, projectFiles } from './editable-project'
+import { rebuildPublication } from './publication-build'
+import { createRun } from './state'
 
 // Use the Vite installation already used by the frontend. The fixture is a
 // disposable package project; it never installs from a registry or touches a
@@ -42,7 +44,7 @@ async function copyViteDependencies(root: string): Promise<string> {
   // Vite 7's runtime closure on this macOS arm64 host. The two native
   // packages are needed by esbuild/Rollup; copying package bytes (rather than
   // the frontend's Bun-store links) keeps the fixture canonical and portable
-  // through buildEditableProject's dependency identity checks.
+  // through the publication dependency copier.
   const packages: PackageSpec[] = [
     { name: 'vite' },
     { name: 'esbuild' },
@@ -116,8 +118,6 @@ for (const preexistingCache of [false, true] as const) {
           name: 'bgs-isolated-vite-fixture', private: true, type: 'module',
           scripts: { build: 'vite build' }, devDependencies: { vite: viteVersion },
         }))
-        // buildEditableProject requires a saved lockfile when node_modules is
-        // present, but it never installs from this lockfile.
         await writeFile(join(root, 'package-lock.json'), JSON.stringify({ name: 'bgs-isolated-vite-fixture', lockfileVersion: 3, requires: true, packages: {} }))
         await mkdir(join(root, 'src'), { recursive: true })
         await writeFile(join(root, 'index.html'), '<!doctype html><html><body><main id="app"></main><script type="module" src="/src/main.js"></script></body></html>')
@@ -126,6 +126,7 @@ for (const preexistingCache of [false, true] as const) {
 import { readdirSync } from 'node:fs'
 if (!readdirSync('node_modules/.vite-temp').some(name => name.includes('vite.config'))) throw new Error('Vite config was not loaded from .vite-temp')
 export default defineConfig({
+  base: './',
   define: { __BGS_ISOLATED_VITE_CONFIG_MARKER__: ${JSON.stringify(JSON.stringify(marker))} },
   build: { outDir: 'dist' },
 })
@@ -134,16 +135,17 @@ export default defineConfig({
         const sourceBefore = await projectFiles(root, 'dist', [])
         const dependencyBefore = await projectDependencies(root)
         const cacheBefore = await cacheState(cache)
-        const result = await buildEditableProject(root,
-          { editableProject: true, runtimeArtifact: 'dist', writablePaths: ['dist/**'] }, [], [])
-
-        expect(result.status, result.observation).toBe('passed')
+        const run=createRun({projectId:'vite-fixture',ownerId:'fixture',workspacePath:root,chatSessionId:'fixture',
+          requestKey:'fixture',text:'Vite publication fixture',constraints:{},ids:['fixture']})
+        const published=join(root,'.publication-fixture')
+        const result = await rebuildPublication(run,{runtimeArtifact:'dist'},published,async()=>{})
+        expect(result.artifact.path).toBe('dist')
         expect(await projectFiles(root, 'dist', [])).toEqual(sourceBefore)
         expect(await projectDependencies(root)).toBe(dependencyBefore)
         expect(await cacheState(cache)).toEqual(cacheBefore)
 
-        const built = await Promise.all((await filesUnder(join(root, 'dist'))).map(async path =>
-          readFile(join(root, 'dist', path), 'utf8').catch(() => '')))
+        const built = await Promise.all((await filesUnder(join(published, 'dist'))).map(async path =>
+          readFile(join(published, 'dist', path), 'utf8').catch(() => '')))
         expect(built.join('\n')).toContain(marker)
         expect(built).not.toHaveLength(0)
       } finally {

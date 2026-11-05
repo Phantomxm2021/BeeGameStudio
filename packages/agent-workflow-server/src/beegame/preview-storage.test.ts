@@ -7,10 +7,10 @@ import { createGameStorage, handlePreviewStorageRequest, PREVIEW_STORAGE_PATH, P
 import { createMeasuredPreview } from './workflow-v3/measured-preview'
 import { createRun } from './workflow-v3/state'
 import { createPreviewCapabilityManager } from '../auth/preview-capability'
-import { previewTestHostDocument } from './preview-test-access'
+import { previewTestHostDocument } from '@bee-game-studio/agent-workflow/preview-environment'
 import { sharedPlaywright } from './shared-playwright'
 import { bundleContentConsumer } from './game-content-consumer-cli'
-import { runChecks } from './workflow-v3/checker-test-driver'
+import { runArtifactCheck } from './workflow-v3/runtime-checks'
 
 test('Preview saves survive store recreation, isolate both identity axes, enforce atomic quotas and do not follow directory aliases',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-preview-saves-')))
@@ -153,7 +153,7 @@ async function expectText(surface:any,text:string) {
   expect(await surface.locator('#best').textContent()).toBe(text)
 }
 
-test('measurement provides the same async storage contract in a disposable namespace, without persisting test writes',async()=>{
+test('static build checks preserve the async storage contract without persisting test writes',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-measure-saves-')))
   try {
     await mkdir(join(root,'dist'))
@@ -161,9 +161,9 @@ test('measurement provides the same async storage contract in a disposable names
     await writeFile(join(root,'dist/index.html'),'<!doctype html><output>Loading</output><script type="module">import {createGameStorage} from "./consumer.mjs";'+
       'const s=await createGameStorage();if(await s.getItem("best")!==null)throw Error("Leaked saved test state");await s.setItem("best","123");'+
       'if(await s.getItem("best")!=="123")throw Error("Save failed");document.querySelector("output").textContent="Measured";</script>')
-    const task:any={id:'storage-smoke',kind:'game.verify',goal:'Synthetic',dependsOn:[],requirementIds:['save'],inputs:[],writablePaths:[],expectedOutputs:['dist/index.html'],runtimeArtifact:'dist',checks:['runtime-smoke']}
+    const task={expectedOutputs:['dist/index.html'],runtimeArtifact:'dist'}
     for(let i=0;i<2;i++) {
-      const result=(await runChecks(root,task,[])).checks[0]!
+      const result=await runArtifactCheck(root,'runtime-smoke',task,[],{})
       expect(result.status,result.observation).toBe('passed')
       expect(JSON.parse(result.observation).environment.storage).toBe('disposable-preview')
     }
