@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { BeeGamePreviewManager, BeeGamePreviewSnapshot } from '../preview-manager'
 import { messageProductionAssignment, initialProductionAssignment, productionAssignmentPrompt, DESIGN_DECISION_SCOPE, PRODUCTION_WORKFLOW_GUIDANCE, prepareProductionHandoff, verifyProductionHandoff, productionOutputSchema, parseProductionResult, prepareDesignDocumentHandoff, type ProductionAssignment } from './production-workflow'
 import { z } from 'zod/v4'
 import { readSessionTranscriptFactsFromDisk, type BeeGameAttachment, type BeeGameSessionManager, type StartBeeGameSessionInput, type BeeGameNativeGoalInput, type BeeGameEvent } from '../session-manager'
@@ -13,10 +14,11 @@ import { isWebCodeTarget } from './web-project-start'
 import { artifactDigest } from '../runtime-acceptance'
 import { PROJECT_DESIGN_PATHS, snapshotDesignRevisionFiles, designRevisionFileDigest } from '../design-handoff'
 import { projectFiles, projectDependencies, changedProjectPaths, AGENT_SOURCE_EXCLUSIONS } from './checks'
-import { assertDesignReviewReady } from './design-review'
+import { assertDesignReviewReady, assertDesignReviewCoverage, designReviewProgress, type DesignReviewReceipt } from './design-review'
 import { designDocumentSource, designDocumentSnapshot, productionAssignmentFacts } from './production-workflow'
 
 type AgentExecutionOptions = Partial<StartBeeGameSessionInput> & {
+  developmentPreview?: () => BeeGamePreviewManager
   attachments?: BeeGameAttachment[]
   openImage?: (context: { stage: ProductionAssignment['stage'] | undefined; requirements: string; requireGdd: boolean }) => AgentImageAccess | Promise<AgentImageAccess>
 }
@@ -52,6 +54,7 @@ const limitedParallelWorkContext = 'BGS limited parallel work: delegate only use
 const webLibraryContext = 'For a new Web/React project, select the gameplay library internally from the confirmed presentation: Phaser for 2D and Three.js for 3D. React remains the confirmed application choice; retain the selected library in the project package/configuration. Preserve existing runtime dependencies when modifying a project. User Preview runs in a sandboxed opaque iframe inside a resizable panel. Its CSS viewport is the available game container, not the display resolution; use that container for layout and scaling. Preview may use a URL subpath; root-absolute asset/content URLs can escape that path, and native localStorage/sessionStorage can throw.'
 // Native execution reads production guidance from the saved project guide once.
 export const agentProfessionalContextForRun = (run: Pick<Run, 'visualHandoffVersion'> & Partial<Pick<Run, 'creation' | 'requirements'>>, followup = false) => [
+  DESIGN_DECISION_SCOPE,
   enginePlatformContext,
   nativeRuntimeContext,
   ...(isWebCodeTarget(run.requirements?.constraints) ? [webLibraryContext] : []),
@@ -76,7 +79,7 @@ function agentRequestText(run: Run): string {
 }
 
 // The Agent owns implementation and verification; host completion records execution only.
-const implementationHandoff = 'Complete the current authorized scope and settled product behavior, including the adopted visual treatment. Choose verification for required behavior and affected risks; provisional values and open hypotheses do not by themselves require additional experiments. Reuse valid observations and recheck affected behavior after changes. Judge completion against those requirements and repair observed deviations. Alternative cosmetic preferences within an already satisfied treatment remain follow-up suggestions unless refinement is requested. End with the implemented result, checks actually performed and remaining defects, unverified behavior or external blockers.'
+const implementationHandoff = 'Complete the currently authorized player behavior and adopted visual treatment. Choose verification for required behavior and affected risks. Reuse valid observations and recheck affected behavior after changes. Judge completion against those requirements and repair observed deviations. Alternative cosmetic preferences within an already satisfied treatment remain follow-up suggestions unless refinement is requested. End with the implemented result, checks actually performed and remaining defects, unverified behavior or external blockers.'
 
 export function agentGoalPrompt(run: Run): string {
   if (run.creation?.initialDelivery === 'playable-slice') return [
@@ -109,6 +112,22 @@ function productionMessage(run: Run, turn: AgentTurn): AgentMessage | undefined 
   }
   return source.message
 }
+function designReviewReceipts(run: Run, turn: AgentTurn): DesignReviewReceipt[] {
+  const receipts: DesignReviewReceipt[] = []
+  let current = turn
+  while (true) {
+    receipts.unshift(...current.designReviews ?? [])
+    const message = current.message
+    if (message?.intent !== 'continue' || message.text || message.attachmentDigests?.length || message.contextMode === 'focused') return receipts
+    const index = run.agentTurns!.indexOf(current)
+    const previous = run.agentTurns!.slice(0, index).find(item => item.attemptId === message.continuationOf)
+    if (!previous || !sameJson(previous.production, turn.production) || previous.requirementsRevision !== turn.requirementsRevision ||
+        previous.nativeRuntime !== 'bgs' || current.nativeSessionId && previous.nativeSessionId !== current.nativeSessionId)
+      throw new WorkflowError('invalid-continuation', 'GDD review continuation does not match its original assignment, requirements or native history')
+    current = previous
+  }
+}
+
 function productionContextChanged(previous: AgentTurn | undefined, production: ProductionAssignment | undefined, message?: AgentMessage): boolean {
   return Boolean(previous && (previous.production || production) &&
     (previous.production?.stage !== production?.stage || previous.production?.originRequestKey !== production?.originRequestKey ||
@@ -373,6 +392,9 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
     let nativeGoal: NativeGoalObservation | undefined
     let tools: Awaited<ReturnType<typeof openAgentTools>> | undefined
     let image: AgentImageAccess | undefined
+    let developmentPreview: BeeGamePreviewManager | undefined
+    let ownsDevelopmentPreview = false
+    let previewStart: Promise<BeeGamePreviewSnapshot> | undefined
     let executionContext: Record<string, unknown> | undefined
   // Capture once for this user turn, not at compact, context read or finalize.
   let before: Record<string, string | null> | undefined, snapshotError: string | undefined
@@ -500,6 +522,8 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
               if (saved.productionHandoff) throw new WorkflowError('request-conflict', 'GDD was already submitted')
               return current
             }
+            const previousReviews = designReviewReceipts(run, turn)
+            const progress = designReviewProgress(previousReviews)
             return {
               turnContext: confirmedChanges,
               systemContext: designContext + '\n' + DESIGN_DECISION_SCOPE,
@@ -511,18 +535,28 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                   const changes = designFileChanges()
                   if (changes.status !== 'observed') throw Error('Cannot verify an unchanged design for an answer-only result')
                   if (changes.files.some(file => file.path === 'docs/GDD.md') ||
-                      current.agentTurns!.find(t => t.attemptId === turn.attemptId)!.designReviews?.length)
+                      designReviewReceipts(current, current.agentTurns!.find(t => t.attemptId === turn.attemptId)!).length)
                     throw Error('A changed design or reviewed candidate requires a ready/blocked result, not an answer-only result')
                   return answer.data.summary
                 } } : {}),
                 writeDocument: { path: 'docs/GDD.md', authorize: async () => { await currentDesignWriter() } },
                 designReview: {
                   context: designContext + '\n' + DESIGN_DECISION_SCOPE,
+                  previousReviews,
                   candidate: async value => {
+                    const current = await currentDesignWriter()
+                    const reviews = designReviewReceipts(current, current.agentTurns!.find(t => t.attemptId === turn.attemptId)!)
+                    const progress = designReviewProgress(reviews)
                     const request = parseProductionResult(turn.production!, value)
-                    await currentDesignWriter()
-                    return { source: designDocumentSource(run.workspacePath), summary: request.summary,
-                      ...('reviewResponses' in request ? { reviewResponses: request.reviewResponses } : {}) }
+                    const source = designDocumentSource(run.workspacePath), last = reviews.at(-1)
+                    // A cold parent can repeat its already-reviewed result. Reuse only
+                    // the same saved source and exact author response, never a new claim.
+                    const echoed = last && !progress.findings.length && sameJson(last.source, source) &&
+                      sameJson('reviewResponses' in request ? request.reviewResponses : undefined, last.authorResponses)
+                    assertDesignReviewCoverage('reviewResponses' in request ? request.reviewResponses ?? [] : [],
+                      echoed ? last.authorResponses?.length ?? 0 : progress.findings.length, 'GDD author round ' + (progress.rounds + 1))
+                    return { source, summary: request.summary,
+                      ...(!echoed && 'reviewResponses' in request ? { reviewResponses: request.reviewResponses } : {}) }
                   },
                   record: async receipt => {
                     const current = await currentDesignWriter()
@@ -532,11 +566,12 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
                     await input.store.commit(run.projectId, run.ownerId, current.version, next, 'agent.design-reviewed')
                   },
                 },
-                schema: designChat ? {anyOf:[productionOutputSchema(turn.production), z.toJSONSchema(designAnswerSchema, {target:'draft-7'})]}
-                  : productionOutputSchema(turn.production), accept: async (value: unknown) => {
-                  const request = parseProductionResult(turn.production!, value)
+                schema: designChat ? {anyOf:[productionOutputSchema(turn.production, progress.findings.length), z.toJSONSchema(designAnswerSchema, {target:'draft-7'})]}
+                  : productionOutputSchema(turn.production, progress.findings.length), accept: async (value: unknown) => {
                   const current = await currentDesignWriter()
-                  assertDesignReviewReady(designDocumentSource(run.workspacePath), current.agentTurns!.find(t => t.attemptId === turn.attemptId)!.designReviews ?? [])
+                  const reviews = designReviewReceipts(current, current.agentTurns!.find(t => t.attemptId === turn.attemptId)!)
+                  const request = parseProductionResult(turn.production!, value)
+                  assertDesignReviewReady(designDocumentSource(run.workspacePath), reviews)
                   const handoff = prepareDesignDocumentHandoff(run.workspacePath, request.summary)
                   if (!designChat && turn.production!.stopAfter)
                     handoff.next = {...turn.production!, stage: turn.production!.stopAfter === 'implementation' ? 'implementation' : 'visual'}
@@ -552,11 +587,36 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
             sessionId:session.id,
             libraryBaseUrl:input.resourceLibraryBaseUrl,
             getAuthToken:()=>options.getValidAuthToken?.() ?? options.authToken,
-            workflow:async value=>{
+            workflow:async (value, signal)=>{
               const current=await read(run)
               if(!sameWriter(current,turn) || current.paused)throw new WorkflowError('stale-attempt','Production writer changed or paused')
               const saved=current.agentTurns!.find(t=>t.attemptId===turn.attemptId)!
               if(saved.quiescedAt)throw new WorkflowError('stale-attempt','Production writer has stopped')
+              if (value && typeof value === 'object' && 'action' in value && value.action === 'preview') {
+                const request = z.object({ action: z.literal('preview'), operation: z.enum(['start', 'status']) }).strict().parse(value)
+                if (!options.developmentPreview || saved.production && saved.production.stage !== 'implementation')
+                  throw new WorkflowError('preview-unavailable', 'Development preview is unavailable for this assignment')
+                developmentPreview ??= options.developmentPreview()
+                const existing = developmentPreview.runningForWorkspace(run.workspacePath)
+                let snapshot = existing ?? developmentPreview.status(run.chatSessionId, run.workspacePath)
+                if (request.operation === 'start') {
+                  if (existing && existing.mode === 'production')
+                    throw new WorkflowError('preview-conflict', 'A production preview is already running; it was not replaced')
+                  if (!existing) {
+                    if (!previewStart) {
+                      ownsDevelopmentPreview = true
+                      previewStart = developmentPreview.start({ sessionId: run.chatSessionId,
+                        workspacePath: run.workspacePath, signal }).finally(() => { previewStart = undefined })
+                    }
+                    snapshot = await previewStart
+                  }
+                  if (snapshot.status !== 'running') throw new WorkflowError('preview-start-failed', snapshot.message ?? 'Development preview did not start')
+                  const latest = await read(run)
+                  if (!sameWriter(latest, turn) || latest.paused) throw new WorkflowError('stale-attempt', 'Preview request was cancelled')
+                }
+                return { status: snapshot.status, url: developmentPreview.internalUrl(snapshot.sessionId),
+                  message: snapshot.message, ...(snapshot.command?.includes('vite-preview-host.ts') ? { reloadAfterEdits: true } : {}) }
+              }
               if(value && typeof value==='object' && 'action' in value && value.action==='status')
                 return {assignment:saved.production ?? null,handoff:saved.productionHandoff ?? null,quality:'unverified'}
               if (saved.production?.stage === 'visual' && value && typeof value === 'object' &&
@@ -660,8 +720,12 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
       // Native idle waits for settlement but intentionally consumes its rejected
       // promise. Independently confirm our capability cleanup before recording
       // quiescence. Preparation failures may have opened Preview without tools.
-      if (tools) await tools.close()
-      else await image?.close()
+      try {
+        if (tools) await tools.close()
+        else await image?.close()
+      } finally {
+        if (ownsDevelopmentPreview) await developmentPreview!.stopAndWait(run.chatSessionId, run.workspacePath)
+      }
     }
     // The terminal native claim does not excuse a cleanup-time source/report
     // change. Validate the submitted bytes after all owned writers are stopped.

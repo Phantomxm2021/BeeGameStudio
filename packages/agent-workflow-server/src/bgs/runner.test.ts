@@ -216,7 +216,7 @@ async function fixture(permission: 'allow' | 'deny' = 'allow', env: Record<strin
   nativeGoal?: import('../beegame/session-manager').BeeGameNativeGoalInput, nativeRecovery = false,
   permissionHandler?: (request: DashboardPermissionRequest) => Promise<import('../beegame/session-manager').DashboardPermissionDecision>,
   workflow?: import('../beegame/session-manager').BeeGameHostToolCapability,
-  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'finalOutput'> &
+  hostTools: Pick<import('../beegame/session-manager').BeeGameTurnTools, 'finalOutput' | 'restartFromDesign'> &
     Pick<import('../beegame/session-manager').BeeGameSessionRunnerStartInput,'uiLayoutConstraints'> = {}) {
   const root = await mkdtemp('/private/tmp/bgs-bgs-runner-'), workspace = join(root, 'game')
   const childPidFile = join(root, 'owned-child.pid')
@@ -1039,7 +1039,7 @@ test('native workflow registration respects new versus resumed thread capabiliti
       expect(start.params.dynamicTools?.some((tool: any) => tool.name === 'BgsWorkflow') ?? false).toBe(mode === 'new-workflow')
       if (mode === 'new-workflow') {
         const tool=start.params.dynamicTools.find((tool: any) => tool.name === 'BgsWorkflow')
-        expect(tool.inputSchema.properties.action.enum).toEqual(['status','advance','visual','resources','implement','select-visual'])
+        expect(tool.inputSchema.properties.action.enum).toEqual(['status','advance','visual','resources','implement','select-visual','preview'])
         expect(tool.description).toContain('GDD and visual-design results use the current final JSON contract, not advance')
         expect(tool.description).toContain('select-visual in implementation or resource tasks')
       }
@@ -1449,7 +1449,8 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
       expect(f.events.find(event => event.eventType === 'tool.started' && event.text === 'Independent GDD review')!.input.prompt).not.toContain('SOURCE_END')
       expect(reviewer.config['skills.config'].every((skill: {enabled: boolean}) => !skill.enabled)).toBe(true)
       expect(initialReview.input[0].text).not.toContain('Author-only')
-      expect(initialReview).not.toHaveProperty('outputSchema')
+      expect(initialReview.outputSchema).toMatchObject({ required: ['summary', 'findings'], additionalProperties: false })
+      expect(initialReview.outputSchema.properties).not.toHaveProperty('resolutions')
       if (outcome === 'cancel') {
         controller.abort()
         expect((await submitted)?.message).toContain('interrupted')
@@ -1505,6 +1506,9 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         const followup = (await trace()).filter(row => row.method === 'turn/start')[3].params
         expect(followup.threadId).toBe('review-thread-3')
         expect(followup.parentTurnId).toBe('turn-3')
+        expect(followup.outputSchema.required).toEqual(['summary', 'findings', 'resolutions'])
+        expect(followup.outputSchema.properties.resolutions).toMatchObject({ minItems: 1, maxItems: 1,
+          items: { properties: { finding: { minimum: 1, maximum: 1 } } } })
         expect(followup.input[0].text).toContain('Synthetic confirmed PC requirements')
         expect(followup.input[0].text).toContain(contract.designReview.context)
         const followupStart = (await trace()).filter(row => row.method === 'thread/start')[2].params
@@ -1530,7 +1534,8 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
         await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 5)
         const revision = (await trace()).filter(row => row.method === 'turn/start')[4].params
         expect(revision.threadId).toBe(f.sessionId)
-        expect(revision.input[0].text).toContain(finding.issue)
+        expect(revision.additionalContext.bgsRuntime_part_000001.value).toContain(finding.issue)
+        expect(revision.additionalContext.bgsRuntime_part_000001.value).toContain('reviewResponses')
         await writeFile(join(f.workspace, 'docs/GDD.md'), 'candidate-3')
         sourceHash = createHash('sha256').update('candidate-3').digest('hex')
         await finish(f.sessionId, 'turn-5', JSON.stringify({ status: 'ready', summary: 'Second revision', reviewResponses: [disposition] }))

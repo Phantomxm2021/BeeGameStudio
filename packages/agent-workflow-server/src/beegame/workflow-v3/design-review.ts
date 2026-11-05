@@ -7,8 +7,26 @@ export const designReviewDispositionSchema = z.object({
 }).strict()
 export type DesignReviewDisposition = z.infer<typeof designReviewDispositionSchema>
 
+export function designAuthorResultSchema(findingCount = 0) {
+  const base = z.object({
+    status: z.enum(['ready', 'blocked']),
+    summary: z.string().trim().min(1).describe('User-facing outcome or concrete blocker in the response language'),
+    reviewResponses: z.array(designReviewDispositionSchema).optional(),
+  }).strict()
+  return findingCount ? z.union([
+    base.extend({ status: z.literal('ready'), reviewResponses: z.array(designReviewDispositionSchema.extend({
+      finding: z.number().int().min(1).max(findingCount),
+    })).length(findingCount) }),
+    base.extend({ status: z.literal('blocked') }),
+  ]) : base
+}
+
+export function designAuthorOutputSchema(findingCount: number) {
+  return z.toJSONSchema(designAuthorResultSchema(findingCount), { target: 'draft-7' })
+}
+
 // The reviewer supplies evidence, not a certification of game quality.
-const reportSchema = z.object({
+const reportFields = {
   summary: z.string().trim().min(1),
   findings: z.array(z.object({
     location: z.string().trim().min(1),
@@ -16,8 +34,21 @@ const reportSchema = z.object({
     evidence: z.string().trim().min(1),
     impact: z.string().trim().min(1),
   }).strict()),
-  resolutions: z.array(designReviewDispositionSchema).optional().describe('Omit on initial review. On follow-up, explicitly verify every current revision finding, including rejected findings; omission from findings is not resolution'),
+}
+const reportSchema = z.object({
+  ...reportFields,
+  resolutions: z.array(designReviewDispositionSchema).optional(),
 }).strict()
+
+/** The native output contract must match the coverage checked after generation. */
+export function designReviewOutputSchema(findingCount: number) {
+  return z.toJSONSchema(z.object({
+    ...reportFields,
+    ...(findingCount ? { resolutions: z.array(designReviewDispositionSchema.extend({
+      finding: z.number().int().min(1).max(findingCount),
+    })).length(findingCount) } : {}),
+  }).strict(), { target: 'draft-7' })
+}
 
 export type DesignReviewReport = z.infer<typeof reportSchema>
 export type DesignReviewReceipt = {
@@ -35,22 +66,28 @@ export const DESIGN_REVIEW_INSTRUCTIONS = [
   'Review the confirmed brief and saved GDD together for requirement preservation, compatible product rules, and a connected player flow from entry through play and outcomes to the agreed restart or recovery. Judge the current MVP or explicitly requested scope. Requirements settled in the brief need not be repeated in the GDD.',
   'Each finding requires corrective work before handoff. Report an issue once when the supplied clauses demonstrate a changed user requirement, an undetermined required player action/information/outcome, or mutually incompatible outcomes under the same applicable conditions. Cite those clauses and the concrete consequence. Read local details together with global definitions. Clarifications and suggestions without a demonstrated violation may be summarized, not turned into findings. Return an empty findings array when no violation is supported. A real contradiction remains a finding even when its clauses are author proposals; a provisional choice does not override an explicit requirement.',
   'Use the complete supplied snapshot. Check product decisions and preserve user-stated appearance and source constraints. Asset availability, sourcing, generation, atlas preparation, registration and runtime checks belong to production, not this review. Stay read-only; source identity is checked by BGS. Use read-only tools only for a necessary calculation or evidence absent from the snapshot. Do not load Skills, browse, delegate, read histories or unrelated files, or write. Implementation tuning and hypothetical bad implementations are outside this document review.',
-  'Return one JSON object matching this schema, with concise user-language conclusions in summary and source-supported corrective issues in findings.\n' + JSON.stringify(z.toJSONSchema(reportSchema, { target: 'draft-7' })),
+  'Return one JSON object matching this turn’s output schema, with concise user-language conclusions in summary and source-supported corrective issues in findings.',
 ].join('\n\n')
 
 export function assertDesignReviewCoverage(dispositions: readonly DesignReviewDisposition[], findingCount: number, kind = 'GDD') {
   const indices = dispositions.map(item => item.finding).sort((a, b) => a - b)
-  if (indices.length !== findingCount || indices.some((id, index) => id !== index + 1))
-    throw Error('Every original ' + kind + ' finding requires exactly one evidence-backed disposition; missing, duplicate or unknown findings cannot be accepted')
+  if (indices.length !== findingCount || indices.some((id, index) => id !== index + 1)) {
+    const seen = new Set(indices)
+    const missing = Array.from({ length: findingCount }, (_, index) => index + 1).filter(id => !seen.has(id))
+    const duplicate = [...new Set(indices.filter((id, index) => index > 0 && indices[index - 1] === id))]
+    const unknown = [...seen].filter(id => id < 1 || id > findingCount)
+    throw Error('Every original ' + kind + ' finding requires exactly one evidence-backed disposition; missing, duplicate or unknown findings cannot be accepted. ' +
+      JSON.stringify({ expectedCount: findingCount, received: indices, missing, duplicate, unknown }))
+  }
 }
 
-export function parseDesignReview(text: string, findingCount = 0): DesignReviewReport {
+export function parseDesignReview(text: string, findingCount = 0, round = 1): DesignReviewReport {
   let value: unknown
   try { value = JSON.parse(text) }
   catch { throw Error('Independent GDD review returned invalid JSON; no automatic retry') }
   const result = reportSchema.safeParse(value)
   if (!result.success) throw Error('Independent GDD review returned an invalid report; no automatic retry')
-  assertDesignReviewCoverage(result.data.resolutions ?? [], findingCount)
+  assertDesignReviewCoverage(result.data.resolutions ?? [], findingCount, 'GDD reviewer round ' + round)
   return result.data
 }
 
@@ -59,13 +96,23 @@ export function assertDesignReviewReady(source: { path: string; sha256: string }
   if (!review) throw Error('GDD has no completed independent review')
   if (review.source.path !== source.path || review.source.sha256 !== source.sha256)
     throw Error('GDD changed after its independent review; the final source is unreviewed')
-  if (reviews.length > 1) {
-    const findingCount = reviews.slice(0, -1).reduce((pending, item) => pendingDesignReviewFindings(item.report, pending), [] as DesignReviewReport['findings']).length
-    assertDesignReviewCoverage(review.authorResponses ?? [], findingCount)
-    assertDesignReviewCoverage(review.report.resolutions ?? [], findingCount)
-  }
-  if (review.report.findings.length || review.report.resolutions?.some(item => item.status === 'unresolved'))
+  if (designReviewProgress(reviews).findings.length)
     throw Error('GDD still has unresolved review findings; preserve the draft')
+}
+
+/** Rebuild the existing review loop from durable receipts, including after stop. */
+export function designReviewProgress(reviews: readonly DesignReviewReceipt[]) {
+  let findings: DesignReviewReport['findings'] = [], bestCount = Infinity, stalled = 0
+  for (const [index, receipt] of reviews.entries()) {
+    assertDesignReviewCoverage(receipt.authorResponses ?? [], findings.length, 'GDD author round ' + (index + 1))
+    assertDesignReviewCoverage(receipt.report.resolutions ?? [], findings.length, 'GDD reviewer round ' + (index + 1))
+    findings = pendingDesignReviewFindings(receipt.report, findings)
+    if (findings.length) {
+      stalled = findings.length < bestCount ? 0 : stalled + 1
+      bestCount = Math.min(bestCount, findings.length)
+    } else { bestCount = Infinity; stalled = 0 }
+  }
+  return { findings, rounds: reviews.length, bestCount, stalled }
 }
 
 /** Resolutions refer to the immediately preceding revision list. Unresolved

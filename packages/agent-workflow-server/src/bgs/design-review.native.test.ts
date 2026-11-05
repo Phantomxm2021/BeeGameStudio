@@ -7,7 +7,7 @@ import { assertDesignReviewReady, type DesignReviewReceipt } from '../beegame/wo
 import { getLatestRuntimeUsage, type BeeGameEvent } from '../beegame/session-manager'
 
 const nativeTest = process.env.BGS_SANDBOX_TESTS === '1' ? test : test.skip
-for (const outcome of ['repaired', 'exhausted'] as const)
+for (const outcome of ['repaired', 'exhausted', 'missing-resolution', 'resumed', 'resume-during-review', 'resume-after-pass'] as const)
 for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
   protocol + ' native GDD review snapshot, isolation and repair: ' + outcome, async () => {
     const root = await mkdtemp('/private/tmp/bgs-independent-review-'), game = join(root, 'game'), skills = join(root, 'skills')
@@ -27,7 +27,7 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
       evidence: 'The same condition has two declared outcomes.', impact: 'Implementation would have to invent a decision.' }
     const disposition = { finding: 1, status: 'corrected' as const, evidence: 'Saved GDD now specifies one result for the sample condition.' }
     const report = (initial: boolean, newDefect = false) => JSON.stringify({ summary: initial ? 'Resolve the sample rule' : 'Rule checked; runtime quality remains unverified',
-      findings: initial ? [finding] : newDefect ? [{ ...finding, issue: 'New dependent defect' }] : [], ...(initial ? {} : { resolutions: [disposition] }) })
+      findings: initial ? [finding] : newDefect ? [{ ...finding, issue: 'New dependent defect' }] : [], ...(initial || outcome === 'missing-resolution' ? {} : { resolutions: [disposition] }) })
     const probe = `const fs=require('node:fs'); const fd=fs.openSync('docs/GDD.md','r'); const part=Buffer.alloc(64); const count=fs.readSync(fd,part,0,64,0); fs.closeSync(fd); console.log(part.subarray(0,count).toString('utf8')); for(const file of ['docs/GDD.md','forbidden.txt']) { let denied=false; try {fs.writeFileSync(file,'Forbidden')} catch {denied=true} if(!denied) throw Error('Reviewer could write '+file) } console.log('review read-only verified'); for(const key of ['PLAYWRIGHT_BROWSERS_PATH', 'BEEGAME_PLAYWRIGHT_MODULE', 'BEEGAME_PREVIEW_TEST_MODULE', 'BEEGAME_PREVIEW_CAPABILITY_FILE', 'BEEGAME_MEASUREMENT_CAPABILITY_FILE', 'BEEGAME_ASSET_CAPABILITY_FILE', 'BEEGAME_CONTENT_CHECKER_MODULE', 'BEEGAME_SHARP_MODULE', 'BEEGAME_FONT_MODULE', 'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR']) { if(Object.hasOwn(process.env,key)) throw Error('Reviewer inherited '+key) } console.log('review environment and calculation verified: '+String(6n*7n))`
     const command = process.execPath + ' -e ' + "'" + probe.replaceAll("'", "'\\''") + "'"
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
@@ -35,7 +35,8 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
       if (new URL(request.url).pathname !== '/v1/' + (protocol === 'responses' ? 'responses' : 'chat/completions')) return new Response('Unexpected route', { status: 404 })
       const body = await request.json() as any
       const step = requests.push(body) - 1
-      if (step > 8) return new Response('Unexpected extra model request', { status: 400 })
+      if(outcome==='resume-during-review' && step===5) {stop.abort();return new Response(null,{status:499})}
+      if (step > (outcome==='resume-after-pass'?9:8)) return new Response('Unexpected extra model request', { status: 400 })
       const exhausted = outcome === 'exhausted' && step === 2
       const tool = step === 1 || step === 3 || step === 6
       const call = step === 1
@@ -43,7 +44,7 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
         : { id: 'fc_write-' + step, call_id: 'author-revise-' + step, name: 'WriteProjectFile', arguments: JSON.stringify({ file_path: 'docs/GDD.md', content: step === 6 ? finalDraft : revised }), status: 'completed' }
       const text = step === 2 ? report(true) : step === 5 ? report(false, true) : step === 8 ? report(false)
         : JSON.stringify({ status: 'ready', summary: step === 0 ? authorSecret : 'Resolved the sample-rule contradiction in GDD.',
-          ...(step === 0 ? {} : { reviewResponses: [disposition] }) })
+          ...(step === 0 || step === 9 ? {} : { reviewResponses: [disposition] }) })
       if (protocol === 'chat-completions') return new Response([
         { choices: [{ index: 0, delta: exhausted ? {} : tool ? { tool_calls: [{ index: 0, id: call.call_id, type: 'function', function: { name: call.name, arguments: call.arguments } }] } : { content: text }, finish_reason: null }] },
         { choices: [{ index: 0, delta: {}, finish_reason: exhausted ? 'length' : tool ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 100, completion_tokens: exhausted ? 32000 : 20 } },
@@ -75,26 +76,50 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
           const result = value as { summary: string; reviewResponses?: typeof disposition[] }
           return { source: await source(), summary: result.summary, reviewResponses: result.reviewResponses }
         },
-        record: async (receipt: DesignReviewReceipt) => { receipts.push(receipt) },
+        record: async (receipt: DesignReviewReceipt) => { receipts.push(receipt); if(outcome==='resumed' && receipts.length===1 || outcome==='resume-after-pass' && receipts.length===3) stop.abort() },
       },
       accept: async (value: unknown) => { assertDesignReviewReady(await source(), receipts); accepted.push(value); return 'Reviewed candidate handed off' },
     }
+    const stop = new AbortController()
     const requestPermission = async (request: any) => ({ behavior: request.toolName === 'Write' ? 'allow' as const : 'deny' as const })
     try {
-      runtime = await runner.start({ sessionId: 'independent-review-fixture', cwd: game, language: 'zh', systemContext: targetContext + '\n' + authorSecret, confirmedBriefContext, finalOutput,
+      const startInput: Parameters<typeof runner.start>[0] = { sessionId: 'independent-review-fixture', cwd: game, language: 'zh', systemContext: targetContext + '\n' + authorSecret, confirmedBriefContext, finalOutput,
         env: { BEEGAME_CONFIG_DIR: join(root, 'private'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: skills, OPENAI_API_KEY: 'fixture-only', BEEGAME_API_PROTOCOL: protocol,
           OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'fixture-review-model' },
         requestPermission, onNativeSessionId: id => { authorThread = id },
         onNativeUsage: (value, epoch, details) => usage.push({ id: usage.length, type: 'usage', sessionId: 'fixture', text: '', createdAt: new Date(),
           payload: { type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: epoch, usage: value,
             ...(details?.baselineOnly ? { usageBaselineOnly: true } : {}), ...(details?.replayed ? { usageReplayed: true } : {}) } }),
-      })
+      }
+      runtime = await runner.start(startInput)
       let failure: unknown
       try {
         await runtime.submit({ prompt: authorSecret + ': save the candidate', confirmedBriefContext, finalOutput,
-          signal: AbortSignal.timeout(25_000), onMessage: message => { events.push(message) }, requestPermission })
+          signal: outcome==='resumed'||outcome==='resume-during-review'||outcome==='resume-after-pass'?stop.signal:AbortSignal.timeout(25_000), onMessage: message => { events.push(message) }, requestPermission })
       } catch (error) { failure = error }
+      if(outcome==='resumed'||outcome==='resume-during-review'||outcome==='resume-after-pass') {
+        expect(failure).toBeInstanceOf(Error)
+        expect(receipts).toHaveLength(outcome==='resume-after-pass'?3:1)
+        expect(requests).toHaveLength(outcome==='resumed'?3:outcome==='resume-after-pass'?9:6)
+        const originalAuthor=authorThread
+        await runtime.dispose?.()
+        const resumedOutput={...finalOutput,designReview:{...finalOutput.designReview,previousReviews:[...receipts]}}
+        runtime=await runner.start({...startInput,resumeSessionId:originalAuthor,nativeRecovery:true,finalOutput:resumedOutput})
+        expect(authorThread).toBe(originalAuthor)
+        failure=undefined
+        try {await runtime.submit({prompt:'',confirmedBriefContext,finalOutput:resumedOutput,nativeRecovery:true,
+          signal:AbortSignal.timeout(25000),onMessage:message=>{events.push(message)},requestPermission})}
+        catch(error){failure=error}
+        if(outcome!=='resume-after-pass')expect(JSON.stringify(requests[outcome==='resumed'?3:6])).toContain('Current GDD revision findings')
+        expect(JSON.stringify(requests[outcome==='resumed'?3:6])).toContain('Synthetic contradictory result')
+        expect(JSON.stringify(requests[outcome==='resumed'?3:6])).toContain('reviewResponses')
+        expect(events.filter(event=>event.eventType==='tool.started'&&event.text==='Independent GDD review').map(event=>event.reviewRound)).toEqual(outcome==='resume-during-review'?[1,2,2]:[1,2,3])
+      }
       expect(JSON.stringify(requests[0])).not.toContain('preview-test-client.mjs')
+      const outputFormat = (index: number) => protocol === 'responses' ? requests[index].text.format : requests[index].response_format.json_schema
+      expect(outputFormat(1)).toMatchObject({ strict: true, schema: { required: ['summary', 'findings'], additionalProperties: false } })
+      expect(outputFormat(1).schema.properties).not.toHaveProperty('resolutions')
+      expect(outputFormat(2)).toEqual(outputFormat(1))
       const reviewerInput = JSON.stringify(requests[1])
       const toolNames=requests[1].tools.flatMap((tool:any)=>tool.type==='namespace' ? tool.tools.map((child:any)=>child.name) : [tool.name??tool.function?.name])
       expect(toolNames).not.toContain('view_image')
@@ -122,8 +147,21 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
         expect(getLatestRuntimeUsage(usage).total_tokens).toBe(32340)
         return
       }
+      expect(outputFormat(5)).toMatchObject({ strict: true, schema: { required: ['summary', 'findings', 'resolutions'],
+        properties: { resolutions: { minItems: 1, maxItems: 1, items: { properties: { finding: { minimum: 1, maximum: 1 } } } } } } })
+      if (outcome === 'missing-resolution') {
+        // Providers may ignore strict output: local validation still rejects, never guesses or retries.
+        expect(failure).toBeInstanceOf(Error)
+        expect((failure as Error).message).toContain('exactly one evidence-backed disposition')
+        expect(requests).toHaveLength(6)
+        expect(receipts).toHaveLength(1)
+        expect(accepted).toHaveLength(0)
+        expect(events.some(event => event.eventType === 'tool.failed' && event.text === 'Independent GDD review')).toBe(true)
+        return
+      }
+      expect(outputFormat(8)).toEqual(outputFormat(5))
       expect(failure).toBeUndefined()
-      expect(requests).toHaveLength(9)
+      expect(requests).toHaveLength(outcome==='resume-after-pass'?10:9)
       expect(requests.every(request => protocol === 'responses' ? request.max_output_tokens === 42424 : request.max_tokens === 42424)).toBe(true)
       expect(JSON.stringify(requests[0])).toContain('UNUSED_REVIEW_SKILL_CATALOG_MARKER')
       for (const [index,expected] of [[1,candidate],[2,candidate],[5,revised],[8,finalDraft]] as const) {
@@ -146,7 +184,7 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
       const reviewEvents = events.filter(event => event.eventType === 'tool.started' && event.text === 'Independent GDD review')
       expect(reviewEvents).toHaveLength(3)
       expect(reviewEvents.every(event => !JSON.stringify(event.input).includes('SOURCE_BEGIN'))).toBe(true)
-      expect(receipts).toHaveLength(3)
+      expect(receipts).toHaveLength(outcome==='resume-during-review'?2:3)
       expect(accepted).toHaveLength(1)
       expect(receipts[0]!.nativeThreadId).not.toBe(authorThread)
       expect(receipts[1]!.nativeThreadId).not.toBe(receipts[0]!.nativeThreadId)
@@ -185,12 +223,15 @@ for (const protocol of ['responses', 'chat-completions'] as const) nativeTest(
         expect(toolNames).not.toContain('spawn_agent')
         expect(toolNames).not.toContain('BgsFinishDelivery')
       }
-      expect(JSON.stringify(requests[3])).toContain('Synthetic contradictory result')
+      expect(JSON.stringify(requests[outcome==='resumed'?3:6])).toContain('Synthetic contradictory result')
+      expect(JSON.stringify(requests[3]).includes('Return only the required status and summary')).toBe(false)
+      expect(JSON.stringify(requests[3])).toContain('Return the fields in the current final-result contract')
       expect(JSON.stringify(requests[5])).toContain('Targeted follow-up only')
-      expect(JSON.stringify(requests[6])).toContain('New dependent defect')
-      expect(new Set(receipts.map(receipt=>receipt.nativeThreadId)).size).toBe(3)
-      expect(receipts[2]!.source.sha256).not.toBe(receipts[1]!.source.sha256)
-      expect(getLatestRuntimeUsage(usage).total_tokens).toBe(1080)
+      if(outcome==='resume-during-review')expect(JSON.stringify(requests[6]).includes('New dependent defect')).toBe(false)
+      else expect(JSON.stringify(requests[6])).toContain('New dependent defect')
+      expect(new Set(receipts.map(receipt=>receipt.nativeThreadId)).size).toBe(outcome==='resume-during-review'?2:3)
+      expect(receipts.at(-1)!.source.sha256).not.toBe(receipts[outcome==='resume-during-review'?0:1]!.source.sha256)
+      expect(getLatestRuntimeUsage(usage).total_tokens).toBe(outcome==='resume-during-review'?960:outcome==='resume-after-pass'?1200:1080)
       expect(events.filter(e => e.eventType === 'assistant.message').map(e => e.text).join('')).toContain('Reviewed candidate handed off')
     } finally { await runtime?.dispose?.(); server.stop(true); await rm(root, { recursive: true, force: true }) }
   }, 35_000)

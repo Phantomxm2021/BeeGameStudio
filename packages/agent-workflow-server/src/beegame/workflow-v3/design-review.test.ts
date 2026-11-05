@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { DESIGN_REVIEW_INSTRUCTIONS, assertDesignReviewReady, parseDesignReview, pendingDesignReviewFindings, type DesignReviewDisposition, type DesignReviewReceipt } from './design-review'
+import { DESIGN_REVIEW_INSTRUCTIONS, designReviewOutputSchema, designAuthorResultSchema, designAuthorOutputSchema, designReviewProgress, assertDesignReviewCoverage, assertDesignReviewReady, parseDesignReview, pendingDesignReviewFindings, type DesignReviewDisposition, type DesignReviewReceipt } from './design-review'
 import { parseProductionResult } from './production-workflow'
 
 const finding = { location: 'GDD Rules', issue: 'Conflicting transition', evidence: 'One event has two incompatible outcomes.', impact: 'The agreed behavior is ambiguous.' }
@@ -34,7 +34,20 @@ test('a finding cannot be downgraded to advisory or bypass handoff in an otherwi
   expect(()=>assertDesignReviewReady(source,[receipt({summary:'Optional clarification only',findings:[]})])).not.toThrow()
 })
 
-test('follow-up requires exact coverage, not disappearance of earlier findings', () => {
+test('follow-up requires exact coverage in the native schema and local report, not disappearance of earlier findings', () => {
+  const initial = designReviewOutputSchema(0)
+  expect(initial.required).toEqual(['summary', 'findings'])
+  expect(initial.properties).not.toHaveProperty('resolutions')
+  expect(initial.additionalProperties).toBe(false)
+  const followup = designReviewOutputSchema(2)
+  expect(followup.required).toEqual(['summary', 'findings', 'resolutions'])
+  expect(followup.properties!.resolutions).toMatchObject({ type: 'array', minItems: 2, maxItems: 2,
+    items: { required: ['finding', 'status', 'evidence'], additionalProperties: false,
+      properties: { finding: { type: 'integer', minimum: 1, maximum: 2 }, evidence: { minLength: 1 } } } })
+  expect(DESIGN_REVIEW_INSTRUCTIONS).not.toContain('Omit on initial review')
+  // Even a corrected claim and a new finding cannot substitute for a numbered resolution.
+  expect(() => parseDesignReview(JSON.stringify({ summary: 'Original finding corrected; new defect found', findings: [finding] }), 1))
+    .toThrow('exactly one evidence-backed disposition')
   for (const resolutions of [undefined, [], [disposition, disposition], [{ ...disposition, finding: 2 }]]) {
     expect(() => parseDesignReview(JSON.stringify({ summary: 'All fixed', findings: [], resolutions }), 1)).toThrow('exactly one evidence-backed disposition')
   }
@@ -67,7 +80,7 @@ test('reviewer resolution decides uncertain author responses but cannot excuse n
 test('author responses extend the small final result, never replace the saved draft with a returned body', () => {
   const task = { stage: 'design' as const, originRequestKey: 'synthetic' }
   const value = { status: 'ready', summary: 'Rejected the unsupported finding', reviewResponses: [disposition] }
-  expect(parseProductionResult(task, value)).toMatchObject({ action: 'advance', reviewResponses: [disposition] })
+  expect(parseProductionResult(task, value, 1, 2)).toMatchObject({ action: 'advance', reviewResponses: [disposition] })
   for (const invalid of [{ ...value, document: '# Replacement' },
     { ...value, reviewResponses: [{ ...disposition, finding: 0 }] },
     { ...value, reviewResponses: [{ ...disposition, evidence: '' }] }])
@@ -89,4 +102,54 @@ test('successive revision lists use current indices and retain unresolved issues
   expect(() => assertDesignReviewReady(source, [first, second, third, last])).not.toThrow()
   last.report.resolutions = [{ ...disposition, finding: 2 }]
   expect(() => assertDesignReviewReady(source, [first, second, third, last])).toThrow('exactly one')
+})
+
+
+test('author revision schema and local validation share exact ready coverage while blocked remains available', () => {
+  const task = {stage:'design' as const, originRequestKey:'synthetic'}
+  const schema = designAuthorOutputSchema(2)
+  expect(schema.anyOf).toHaveLength(2)
+  expect(schema.anyOf![0]).toMatchObject({required:['status','summary','reviewResponses'],
+    properties:{status:{const:'ready'},reviewResponses:{minItems:2,maxItems:2}}})
+  for (const reviewResponses of [undefined,[],[disposition],[disposition,disposition],[disposition,{...disposition,finding:3}]]) {
+    const value={status:'ready',summary:'Saved revision',reviewResponses}
+    expect(()=>parseProductionResult(task,value,2,3)).toThrow('GDD author round 3')
+  }
+  const value={status:'ready',summary:'Saved revision',reviewResponses:[disposition,{...disposition,finding:2}]}
+  expect(designAuthorResultSchema(2).safeParse(value).success).toBe(true)
+  expect(parseProductionResult(task,value,2,3)).toMatchObject({action:'advance',reviewResponses:value.reviewResponses})
+  expect(designAuthorResultSchema(2).safeParse({status:'blocked',summary:'Needs a user decision'}).success).toBe(true)
+  expect(()=>parseProductionResult(task,{status:'blocked',summary:'Needs a user decision'},2,3)).toThrow('Needs a user decision')
+  expect(parseProductionResult(task,{status:'ready',summary:'Initial saved draft'})).toMatchObject({action:'advance'})
+})
+
+test('restored receipts retain pending findings, round and no-progress budget and reject broken history', () => {
+  const first=receipt({summary:'Two issues',findings:[finding,{...finding,issue:'Second issue'}]})
+  const second=receipt({summary:'One remains and one new',findings:[{...finding,issue:'New issue'}],
+    resolutions:[{...disposition,status:'unresolved'},{...disposition,finding:2}]})
+  second.authorResponses=[disposition,{...disposition,finding:2}]
+  expect(designReviewProgress([first,second])).toMatchObject({rounds:2,bestCount:2,stalled:1})
+  expect(designReviewProgress([first,second]).findings.map(item=>item.issue)).toEqual([finding.issue,'New issue'])
+  const third=receipt({summary:'Still unresolved',findings:[],resolutions:[{...disposition,status:'unresolved'},{...disposition,finding:2,status:'unresolved'}]})
+  third.authorResponses=[disposition,{...disposition,finding:2}]
+  expect(designReviewProgress([first,second,third])).toMatchObject({rounds:3,bestCount:2,stalled:2})
+  const repaired=receipt({summary:'All resolved',findings:[],resolutions:[disposition,{...disposition,finding:2}]})
+  repaired.authorResponses=[disposition,{...disposition,finding:2}]
+  expect(designReviewProgress([first,second,repaired])).toMatchObject({findings:[],bestCount:Infinity,stalled:0})
+  const changed=receipt({summary:'A newly changed source has an issue',findings:[finding]})
+  expect(designReviewProgress([first,second,repaired,changed])).toMatchObject({findings:[finding],bestCount:1,stalled:0})
+  const corrupt=structuredClone(second);delete corrupt.authorResponses
+  expect(()=>assertDesignReviewReady(source,[first,corrupt,repaired])).toThrow('GDD author round 2')
+})
+
+test('coverage errors identify the actor, round and affected numbers without exposing evidence', () => {
+  let error=''
+  try {assertDesignReviewCoverage([disposition,disposition,{...disposition,finding:3}],2,'GDD author round 4')}
+  catch(value){error=(value as Error).message}
+  expect(error).toContain('GDD author round 4')
+  expect(error).toContain('"missing":[2]')
+  expect(error).toContain('"duplicate":[1]')
+  expect(error).toContain('"unknown":[3]')
+  expect(error).not.toContain(disposition.evidence)
+  expect(()=>parseDesignReview(JSON.stringify({summary:'Corrected',findings:[]}),1,4)).toThrow('GDD reviewer round 4')
 })

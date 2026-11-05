@@ -327,6 +327,8 @@ export type BeeGameTurnTools = {
     designReview?: {
       /** Effective target interpretation and current handoff facts shared with the author. */
       context: string
+      /** Completed receipts from this assignment’s authorized native continuation lineage. */
+      previousReviews?: readonly import('./workflow-v3/design-review').DesignReviewReceipt[]
       candidate(value: unknown): Promise<{ source: { path: string; sha256: string }; summary: string;
         reviewResponses?: import('./workflow-v3/design-review').DesignReviewDisposition[] }>
       record(receipt: import('./workflow-v3/design-review').DesignReviewReceipt): Promise<void>

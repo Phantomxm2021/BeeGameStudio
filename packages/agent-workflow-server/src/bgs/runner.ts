@@ -21,7 +21,7 @@ import { closeSessionTestBrowsers } from '../beegame/native-test-browser-cleanup
 import { responseLanguageInstruction } from '../beegame/response-language'
 import { BEEGAME_USER_RESPONSE_SCOPE } from '../beegame/user-response-scope'
 import { getBuiltinSkillsDirectory } from '@bee-game-studio/beegame-skills-core/store'
-import { DESIGN_REVIEW_INSTRUCTIONS, assertDesignReviewCoverage, parseDesignReview, pendingDesignReviewFindings, type DesignReviewReport } from '../beegame/workflow-v3/design-review'
+import { DESIGN_REVIEW_INSTRUCTIONS, designReviewOutputSchema, designAuthorOutputSchema, designReviewProgress, assertDesignReviewCoverage, parseDesignReview, type DesignReviewReport, type DesignReviewReceipt } from '../beegame/workflow-v3/design-review'
 
 const protectedWriteTools: DynamicToolSpec[] = ['WriteProjectFile', 'EditProjectFile'].map(name => ({ type: 'function', name,
   description: name === 'WriteProjectFile'
@@ -44,9 +44,9 @@ protectedWriteTools.push({ type: 'function', name: 'AskUserQuestion', descriptio
       multiSelect: { type: 'boolean' } }, required: ['question','header','options'], additionalProperties: false } } }, required: ['questions'], additionalProperties: false } })
 
 const workflowTool: DynamicToolSpec = { type: 'function', name: 'BgsWorkflow',
-  description: 'Read the current BGS assignment (status), hand off preparatory work when the current task uses a tool handoff (advance), or request visual, resources, or implementation work (visual/resources/implement) within the current user scope. For handoffs provide a summary, exact existing GDD headings in sections, and actual project-relative files. Follow the current assignment. GDD and visual-design results use the current final JSON contract, not advance. Implement within an already active implementation stage optionally records the current user work in place: continue and finish in this turn. No implementation handoff or delivery submission is required for normal completion. Use select-visual in implementation or resource tasks with the same summary/sections/files fields to retain actual selected reference images without ending the task or registering them as production assets. Existing selections retain their hashes; use an explicit user change to replace the agreed target. Other successful handoffs end this native turn; BGS checks source identity after cleanup and continues within the requested scope. Follow the returned instruction. Handoffs record author-declared readiness; source selection records reference bytes. Neither certifies quality.',
+  description: 'Use preview with operation start/status to open or inspect the current project development server; reuse its returned local URL. If reloadAfterEdits is true, reload the page after source changes. This operation does not run tests or end the task. New task-owned servers close with the task; existing user previews remain user-owned. Read the current BGS assignment (status), hand off preparatory work when the current task uses a tool handoff (advance), or request visual, resources, or implementation work (visual/resources/implement) within the current user scope. For handoffs provide a summary, exact existing GDD headings in sections, and actual project-relative files. Follow the current assignment. GDD and visual-design results use the current final JSON contract, not advance. Implement within an already active implementation stage optionally records the current user work in place: continue and finish in this turn. No implementation handoff or delivery submission is required for normal completion. Use select-visual in implementation or resource tasks with the same summary/sections/files fields to retain actual selected reference images without ending the task or registering them as production assets. Existing selections retain their hashes; use an explicit user change to replace the agreed target. Other successful handoffs end this native turn; BGS checks source identity after cleanup and continues within the requested scope. Follow the returned instruction. Handoffs record author-declared readiness; source selection records reference bytes. Neither certifies quality.',
   inputSchema: { type: 'object', properties: {
-    action: { type: 'string', enum: ['status', 'advance', 'visual', 'resources', 'implement', 'select-visual'] }, summary: { type: 'string' },
+    action: { type: 'string', enum: ['status', 'advance', 'visual', 'resources', 'implement', 'select-visual', 'preview'] }, operation: { type: 'string', enum: ['start', 'status'] }, summary: { type: 'string' },
     sections: { type: 'array', items: { type: 'string' } }, files: { type: 'array', items: { type: 'string' } },
   }, required: ['action'], additionalProperties: false },
 }
@@ -274,18 +274,21 @@ export async function readNativeCommandExits(path: string, threadId: string, cal
 // preparation contract cannot outlive its task. The baseline copy preserves
 // the same current contract across compaction.
 function currentRuntimeContext(systemContext: string | undefined, finalOutput: BeeGameSessionSubmitInput['finalOutput'],
-  access: Awaited<ReturnType<typeof projectExecutionAccess>>) {
+  access: Awaited<ReturnType<typeof projectExecutionAccess>>,
+  findings = designReviewProgress(finalOutput?.designReview?.previousReviews ?? []).findings) {
   return [
     'The current BGS task scope, file access and final-result contract replace the corresponding instructions of earlier tasks. bgsConfirmedBrief records user requirements and subsequent requests. Later explicit user requests can change the task scope; an earlier per-task stopping point does not permanently restrict future requests. Preserve unrelated requirements and the current platform/engine restrictions.',
     finalOutput?.readOnly ? (finalOutput.writeDocument
-      ? 'Shell cannot modify project files. The current parent may maintain only ' + finalOutput.writeDocument.path + ' with WriteProjectFile/EditProjectFile through current task authority. This working document may remain after interruption; final readiness is a separate source-bound handoff. Return only the required status and summary, not the document body.'
+      ? 'Shell cannot modify project files. The current parent may maintain only ' + finalOutput.writeDocument.path + ' with WriteProjectFile/EditProjectFile through current task authority. This working document may remain after interruption; final readiness is a separate source-bound handoff. Return the fields in the current final-result contract, not the document body.'
       : 'Project files are read-only for this document task.') : 'Use WriteProjectFile or EditProjectFile for these host-protected paths relative to the project root: ' + JSON.stringify(access.protectedPaths.map(path => relative(access.root, path))) +
       '. Shell cannot modify these protected paths. For ordinary project files, use exec_command with project-local file operations. Only use apply_patch if it is listed as an available tool; do not assume a shell executable exists. Preserve the current user requirements and authorization when updating design records.',
     systemContext,
     process.platform === 'darwin' && !finalOutput?.readOnly
       ? 'Native macOS filesystem notifications are unavailable in this sandbox; development watchers using an explicit polling option remain usable.' : undefined,
     finalOutput ? 'For this task, end with one JSON object matching the schema below, without Markdown fences or surrounding prose. BGS validates the final result locally before accepting it.\n' +
-      JSON.stringify(finalOutput.schema) : 'No preparation JSON result is required for this task. Follow the response and delivery requirements of the current request.',
+      JSON.stringify(finalOutput.designReview && findings.length ? designAuthorOutputSchema(findings.length) : finalOutput.schema) : 'No preparation JSON result is required for this task. Follow the response and delivery requirements of the current request.',
+    finalOutput?.designReview && findings.length ? 'Current GDD revision findings (1-based indices): ' +
+      JSON.stringify(findings.map((finding, index) => ({ finding: index + 1, ...finding }))) : undefined,
   ].filter(Boolean).join('\n\n')
 }
 
@@ -355,6 +358,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
   private liveChildren = new Set<string>()
   private childTurns = new Map<string, { id?: string; endedIds: Set<string> }>()
   private designReviewer?: { threadId: string; rounds: number; findings: DesignReviewReport['findings']; bestCount: number; stalled: number }
+  private designReviews: DesignReviewReceipt[] = []
   private pendingDesignReview?: { text?: string; resolve(value: { text: string; turnId: string }): void; reject(error: Error): void }
   private restartedImplementation = false
   private closing?: Promise<void>
@@ -547,6 +551,11 @@ class BgsRuntime implements BeeGameSessionRuntime {
     if (nativeGoal && input.finalOutput) throw Error('A preparation result cannot replace native Goal delivery')
     if (nativeGoal) this.nativeGoal = nativeGoal
     let abort = () => {}
+    if (input.finalOutput?.designReview) {
+      this.designReviews = [...input.finalOutput.designReview.previousReviews ?? []]
+      const last = this.designReviews.at(-1)
+      if (last) this.designReviewer = { threadId: last.nativeThreadId, ...designReviewProgress(this.designReviews) }
+    }
     try {
       await new Promise<void>((resolveTurn, reject) => {
         const turn: NonNullable<BgsRuntime['active']> = { input, turnId: undefined, nativeGoal, goalArmed: false, nativeSubmitted: false, resolve: resolveTurn, reject }
@@ -575,7 +584,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
         // the existing slot; the current thread instructions above survive
         // later compaction. New threads already contain these facts once.
         // The JSON contract is guidance; only the host enforces acceptance.
-        const systemContext = currentRuntimeContext(this.input.systemContext, input.finalOutput, this.access)
+        const systemContext = currentRuntimeContext(this.input.systemContext, input.finalOutput, this.access, this.designReviewer?.findings)
         const fingerprint = { threadId: this.threadId,
           runtimeSha256: createHash('sha256').update(systemContext).digest('hex'),
           briefSha256: createHash('sha256').update(input.confirmedBriefContext ?? '').digest('hex') }
@@ -738,7 +747,15 @@ class BgsRuntime implements BeeGameSessionRuntime {
     const text = bytes.toString('utf8')
     const startedAt = new Date().toISOString()
     const responses = candidate.reviewResponses ?? []
-    assertDesignReviewCoverage(responses, this.designReviewer?.findings.length ?? 0)
+    assertDesignReviewCoverage(responses, this.designReviewer?.findings.length ?? 0, 'GDD author round ' + ((this.designReviewer?.rounds ?? 0) + 1))
+    const completed = this.designReviews.at(-1)
+    if (completed && !this.designReviewer!.findings.length && completed.source.path === source.path && completed.source.sha256 === source.sha256) {
+      const summary = await contract.accept(value)
+      turn.input.signal.throwIfAborted()
+      await this.emit('assistant.message', summary + '\n\n' + completed.report.summary, { messageId: turn.finalOutputId, assistantBlockId: turn.finalOutputId })
+      turn.resolve()
+      return
+    }
     const shared = this.shared!
     const mcpServers = Object.fromEntries(Object.entries(shared.config.mcp_servers ?? {}).map(([name, config]) =>
       [name, { ...config as RpcObject, enabled: false }]))
@@ -766,7 +783,8 @@ class BgsRuntime implements BeeGameSessionRuntime {
     else this.designReviewer = { threadId: result.thread.id, rounds: 0, findings: [], bestCount: Infinity, stalled: 0 }
     turn.input.signal.throwIfAborted()
     const reviewer = this.designReviewer
-    const followup = reviewer.rounds++ > 0
+    const followup = reviewer.rounds > 0 && reviewer.findings.length > 0
+    const round = reviewer.rounds + 1
     const authorResponses = followup ? responses : undefined
     const response = followup ? candidate.summary : undefined
     const prompt = [followup
@@ -782,34 +800,34 @@ class BgsRuntime implements BeeGameSessionRuntime {
     this.childOwners.set(reviewer.threadId, owner)
     this.liveChildren.add(reviewer.threadId)
     await this.emit('tool.started', 'Independent GDD review', { toolName: 'Agent', toolUseID: owner,
-      input: { prompt, model: this.shared!.model }, reviewRound: reviewer.rounds })
+      input: { prompt, model: this.shared!.model }, reviewRound: round })
     let reviewCompleted = false
     try {
       const result = await new Promise<{ text: string; turnId: string }>((resolveReview, reject) => {
         this.pendingDesignReview = { resolve: resolveReview, reject }
         void this.client.request('turn/start', { threadId: reviewer.threadId,
-          parentTurnId: turn.turnId, input: [{ type: 'text', text: reviewInput }] }).catch(reject)
+          parentTurnId: turn.turnId, input: [{ type: 'text', text: reviewInput }],
+          outputSchema: designReviewOutputSchema(reviewer.findings.length) }).catch(reject)
       })
       this.pendingDesignReview = undefined
       turn.input.signal.throwIfAborted()
       const currentSource = (await review.candidate(value)).source
       if (currentSource.path !== source.path || currentSource.sha256 !== source.sha256)
         throw Error('GDD changed during independent review; no result can be accepted')
-      const report = parseDesignReview(result.text, reviewer.findings.length)
+      const report = parseDesignReview(result.text, reviewer.findings.length, round)
       const receipt = { source, nativeThreadId: reviewer.threadId, nativeTurnId: result.turnId,
         startedAt, finishedAt: new Date().toISOString(), ...(response ? { response, authorResponses } : {}), report }
       await review.record(receipt)
       turn.input.signal.throwIfAborted()
       await this.emit('tool.completed', 'Independent GDD review', { toolName: 'Agent', toolUseID: owner, output: receipt })
       reviewCompleted = true
-      const pending = pendingDesignReviewFindings(report, reviewer.findings)
+      this.designReviews.push(receipt)
+      Object.assign(reviewer, designReviewProgress(this.designReviews))
+      const pending = reviewer.findings
       if (pending.length) {
         // Only independently reviewed reduction counts, not changed bytes or
         // the author's claim. A replacement/new defect gets a further attempt;
         // oscillating counts cannot reset the best result and loop forever.
-        reviewer.stalled = pending.length < reviewer.bestCount ? 0 : reviewer.stalled + 1
-        reviewer.bestCount = Math.min(reviewer.bestCount, pending.length)
-        reviewer.findings = pending
         if (reviewer.stalled >= 2) throw new ProductionBlockedError(this.input.language === 'zh'
           ? '设计修订连续两次复核未减少待解决问题；已保留草稿和审查记录，需要调整方案或补充决策。'
           : 'Two consecutive design rechecks did not reduce outstanding issues; the draft and review records are retained. A revised approach or decision is needed.')
@@ -818,7 +836,8 @@ class BgsRuntime implements BeeGameSessionRuntime {
           : 'Revising ' + pending.length + ' outstanding design issues.', { subtype: 'design_revision', reviewRound: reviewer.rounds, findingCount: pending.length })
         turn.finalOutputText = undefined; turn.finalOutputId = undefined; turn.pendingProgress = undefined; turn.turnId = undefined
         const resumed = await this.client.request('turn/start', { threadId: this.threadId, input: [{ type: 'text', text:
-          'Verify this current numbered revision list before editing under the existing author revision contract; these are claims, not authoritative corrections. Where the saved definitions already satisfy the requirement or the cited definitions are compatible under their stated conditions, reject the finding with those supporting clauses. Correct a demonstrated defect by making the affected definitions consistent: preserve explicit user requirements and selected designs; revise or withdraw an unconfirmed author proposal when that resolves the conflict. Inspect only the implicated definitions and affected uses; batch related edits and reuse saved evidence. Return the required ready/blocked result and one reviewResponses entry per current finding.\n\n' + JSON.stringify({ findings: pending.map((finding, index) => ({ finding: index + 1, ...finding })) }) }] })
+          'Verify this current numbered revision list before editing under the existing author revision contract; these are claims, not authoritative corrections. Where the saved definitions already satisfy the requirement or the cited definitions are compatible under their stated conditions, reject the finding with those supporting clauses. Correct a demonstrated defect by making the affected definitions consistent: preserve explicit user requirements and selected designs; revise or withdraw an unconfirmed author proposal when that resolves the conflict. Inspect only the implicated definitions and affected uses; batch related edits and reuse saved evidence. Return the required ready/blocked result under the current GDD revision contract.' }],
+          additionalContext: bgsApplicationContext('bgsRuntime', currentRuntimeContext(this.input.systemContext, contract, this.access, pending)) })
         if (typeof resumed.turn?.id !== 'string') throw Error('BGS did not acknowledge the GDD revision turn')
         if (this.active === turn) turn.turnId = resumed.turn.id
         return
