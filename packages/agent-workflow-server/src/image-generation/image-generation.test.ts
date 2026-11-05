@@ -1,10 +1,12 @@
-import { test, expect } from 'bun:test'
+import { test, expect, spyOn } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { imageConfigSchema, publicImageConfig, updateImageConfig } from './config'
 import { loadLocalImageConfig, saveLocalImageConfig } from './config-store'
 import { OpenAIImageProvider } from './openai-provider'
+import { OpenRouterImageProvider } from './openrouter-provider'
+import { ImageProviderError } from './provider'
 import { createAgentWorkflowApp } from '../app'
 
 test('OpenAI provider uses configured endpoint/model, one submission, and preserves usage', async () => {
@@ -80,3 +82,59 @@ test('image settings API is admin-only and never returns the key', async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+
+test('OpenAI references use the edits route and preserve custom endpoint prefixes and PNG bytes', async () => {
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1])
+  for (const [baseUrl, endpoint] of [
+    ['https://images.example/tenant/v1/images/generations', 'https://images.example/tenant/v1/images/edits'],
+    ['https://images.example/v1/images/generations/', 'https://images.example/v1/images/edits'],
+    ['https://images.example/v1/images/edits', 'https://images.example/v1/images/edits'],
+    ['https://images.example/custom-image-route', 'https://images.example/custom-image-route'],
+  ]) {
+    let calls = 0
+    const provider = new OpenAIImageProvider(async (url, init) => {
+      calls++
+      expect(url).toBe(endpoint)
+      expect(JSON.parse(String(init.body))).toMatchObject({ model: 'selected-model', size: '1536x1024',
+        images: [{ image_url: 'data:image/png;base64,' + png.toString('base64') }] })
+      return Response.json({ data: [{ b64_json: png.toString('base64') }] })
+    })
+    const result = await provider.generate(imageConfigSchema.parse({ baseUrl, model: 'selected-model', apiKey: 'test-key' }), {
+      prompt: 'Use this layout', size: '1536x1024', referenceImage: { bytes: png, sha256: 'a'.repeat(64), mimeType: 'image/png' },
+    })
+    expect(result.bytes).toEqual(png)
+    expect(calls).toBe(1)
+  }
+})
+
+for (const Provider of [OpenAIImageProvider, OpenRouterImageProvider]) {
+  test.each(['cancelled', 'network', 'response-cancelled'] as const)(`${Provider.name} preserves %s diagnostics without retrying or leaking secrets`, async kind => {
+    const controller = new AbortController(), prompt = 'PRIVATE image prompt', key = 'PRIVATE_API_KEY'
+    const cause = Object.assign(new Error('socket closed ' + key), { code: 'ECONNRESET' })
+    const failure = kind === 'network' ? new TypeError('fetch failed ' + key + ' ' + prompt, { cause })
+      : new DOMException('connection closed ' + key + ' ' + prompt, 'AbortError')
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    let calls = 0
+    const provider = new Provider(async (_url, init) => {
+      calls++
+      expect(init.signal).toBe(controller.signal)
+      if (kind !== 'network') controller.abort(new Error('caller closed ' + key + ' ' + prompt))
+      if (kind === 'response-cancelled') return new Response(new ReadableStream({ start(stream) { stream.error(failure) } }))
+      throw failure
+    })
+    try {
+      const error = await provider.generate(imageConfigSchema.parse({ apiKey: key }), { prompt, signal: controller.signal }).catch(error => error)
+      expect(error).toBeInstanceOf(ImageProviderError)
+      expect(error).toMatchObject({ outcome: 'unknown', code: kind === 'network' ? 'network-error' : 'request-aborted', cause: failure })
+      expect(calls).toBe(1)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0]![1]).toMatchObject({ event: 'upstream-failed', diagnosticId: error.diagnosticId,
+        stage: kind === 'response-cancelled' ? 'response' : 'request', signalAborted: kind !== 'network',
+        ...(kind === 'network' ? { cause: { code: 'ECONNRESET' } } : { error: { name: 'AbortError' }, abortReason: { name: 'Error' } }) })
+      const diagnostics = JSON.stringify(warn.mock.calls)
+      expect(diagnostics).not.toContain(key)
+      expect(diagnostics).not.toContain(prompt)
+    } finally { warn.mockRestore() }
+  })
+}

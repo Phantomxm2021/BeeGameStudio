@@ -14,7 +14,7 @@ import type {
   BeeGameUsageBillingRecordResult,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { createTLSAwareFetch } from '@bee-game-studio/security-core'
-import type { ImageBillingInput, ImageBillingReceipt } from '@bee-game-studio/beegame-billing-core/image-billing'
+import { ImageBillingError, imageBillingErrors, type ImageBillingInput, type ImageBillingReceipt } from '@bee-game-studio/beegame-billing-core/image-billing'
 
 type JsonObject = Record<string, unknown>
 
@@ -478,6 +478,14 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
     })
     if (!response.ok) {
       const text = await response.text().catch(() => '')
+      if (path === '/rest/v1/rpc/beegame_image_billing') {
+        let failure: { code?: string; message?: string } | undefined
+        try { failure = JSON.parse(text) } catch { /* Non-JSON failures remain unavailable. */ }
+        if (failure?.code === 'P0001') {
+          for (const code of Object.keys(imageBillingErrors) as (keyof typeof imageBillingErrors)[])
+            if (failure.message === imageBillingErrors[code].message) throw new ImageBillingError(code)
+        }
+      }
       throw new Error(
         `Supabase request failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
       )

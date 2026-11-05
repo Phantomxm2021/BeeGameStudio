@@ -39,7 +39,7 @@ function response(encoded: string, options: { events?: unknown[]; terminal?: boo
 }
 const png = () => sharp({ create: { width: 2, height: 2, channels: 4, background: '#fff' } }).png().toBuffer()
 
-test('subscription stream reuses the selected local login, keeps final PNG and actual usage, and never sends API keys', async () => {
+test.each([false, true])('subscription stream reference=%s preserves selected login, image bytes and usage without API keys', async reference => {
   const root = mkdtempSync(join(tmpdir(), 'subscription-image-'))
   const first = join(root, 'first'), second = join(root, 'second')
   const one = login(first, 'one'), two = login(second, 'two')
@@ -58,13 +58,17 @@ test('subscription stream reuses the selected local login, keeps final PNG and a
     expect(body).toMatchObject({ model: config.responseModel, stream: true, store: false,
       tool_choice: { type: 'image_generation' }, tools: [{ type: 'image_generation', model: config.model,
         partial_images: 0, output_format: 'png', background: 'transparent' }] })
+    expect(body.tools[0].action).toBe(reference ? 'edit' : 'generate')
+    expect(body.input[0].content).toEqual([{ type: 'input_text', text: 'PRIVATE_PROMPT' },
+      ...(reference ? [{ type: 'input_image', image_url: 'data:image/png;base64,' + bytes.toString('base64') }] : [])])
     expect(JSON.stringify(body)).not.toContain(one.tokens.refresh_token)
     expect(JSON.stringify(body)).not.toContain(one.tokens.access_token)
     expect(JSON.stringify(body)).not.toContain(one.tokens.id_token)
     return response(bytes.toString('base64'), { usage, imageUsage: { output_tokens: 5 } })
   }) as typeof fetch
   try {
-    const result = await new ChatGPTSubscriptionImageProvider(first, request).generate(config, { prompt: 'PRIVATE_PROMPT', background: 'transparent' })
+    const result = await new ChatGPTSubscriptionImageProvider(first, request).generate(config, { prompt: 'PRIVATE_PROMPT', background: 'transparent',
+      ...(reference ? { referenceImage: { bytes, sha256: 'a'.repeat(64), mimeType: 'image/png' as const } } : {}) })
     expect(result.bytes).toEqual(bytes)
     expect(result.usage).toEqual({ source: 'chatgpt-subscription', response: usage, image: { output_tokens: 5 },
       limits: { 'x-codex-primary-used-percent': 12.5, 'x-codex-primary-window-minutes': 300 } })

@@ -1,19 +1,18 @@
 import { createHash } from 'node:crypto'
-import type { ImageBillingClient, ImageBillingInput } from '@bee-game-studio/beegame-billing-core/image-billing'
+import { ImageBillingError, type ImageBillingClient, type ImageBillingInput } from '@bee-game-studio/beegame-billing-core/image-billing'
 import { ImageAttemptError, ImageAttemptStore, type ImageAttemptInput } from './attempt'
 import { imagePricingSchema, imageChargeCreditsMicro, fixedImageChargeCreditsMicro, creditsToMicro } from './pricing'
-import { ImageReferenceError } from './reference-image'
 import { CHATGPT_IMAGE_ENDPOINT, platformImageBillingUnavailableReason, type ImageSource } from './config'
 
 export class ImageServiceError extends Error {
-  constructor(readonly stage: string) { super('Image service failed at ' + stage) }
+  constructor(readonly stage: string, readonly billingError?: ImageBillingError) { super(billingError?.message ?? 'Image service failed at ' + stage) }
 }
 
 /** Only host policy/billing; no Agent planning, retries, asset selection or workflow stages. */
 export class ImageGenerationService {
   constructor(private readonly attempts: ImageAttemptStore, private readonly billing: ImageBillingClient) {}
 
-  async generate(input: ImageAttemptInput, source: ImageSource = 'platform') {
+  async generate(input: ImageAttemptInput & { reviewPrompt?: () => Promise<void> }, source: ImageSource = 'platform') {
     input = { ...input, source }
     const sharedSubscription = input.config.provider === 'chatgpt-subscription'
     const fixedPrice = sharedSubscription || input.config.provider === 'cloudflare'
@@ -30,21 +29,21 @@ export class ImageGenerationService {
         return value
       } catch (error) {
         console.warn('[image-generation]', { ...identity, event: 'failed', elapsedMs: Date.now() - started,
-          reason: error instanceof ImageAttemptError ? error.reason : 'unavailable',
+          reason: error instanceof ImageAttemptError ? error.reason : error instanceof ImageBillingError ? error.code : 'unavailable',
           ...(error instanceof ImageAttemptError && error.status !== undefined ? { upstreamStatus: error.status } : {}) })
-        throw error instanceof ImageAttemptError ? error : new ImageServiceError(stage)
+        throw error instanceof ImageAttemptError ? error : new ImageServiceError(stage, error instanceof ImageBillingError ? error : undefined)
       }
     }
-    if ((input.request.referenceImage && input.config.provider !== 'cloudflare') ||
-        (input.request.size && input.config.provider !== 'cloudflare' && source !== 'chatgpt-subscription' && !sharedSubscription))
-      throw new ImageReferenceError('provider-unsupported')
     // Read-only preflight before any new wallet reservation or provider call.
     // Missing/corrupt paid output still cannot resubmit: recoverOnly below stays unchanged.
+    let newRequest = false
     this.attempts.validateNewRequest({ ...input, validateNewRequest: () => {
       if (source === 'platform' && platformImageBillingUnavailableReason(input.config.provider))
         throw new ImageServiceError('billing-unsupported')
       input.validateNewRequest?.()
+      newRequest = true
     } })
+    if (newRequest) await input.reviewPrompt?.()
     if (source === 'chatgpt-subscription') {
       if (input.config.provider !== 'openai' || input.config.baseUrl !== CHATGPT_IMAGE_ENDPOINT ||
           !input.config.responseModel || input.config.apiKey || input.config.upstreamApiKey)

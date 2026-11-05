@@ -16,7 +16,7 @@ export class ChatGPTSubscriptionImageProvider implements ImageGenerationProvider
 
   private async generateWithAccount(config: ImageGenerationConfig, input: ImageRequest): Promise<ImageResult> {
     if (!['openai', 'chatgpt-subscription'].includes(config.provider) || config.baseUrl !== CHATGPT_IMAGE_ENDPOINT || !config.responseModel ||
-        config.apiKey || config.upstreamApiKey || !input.prompt.trim() || input.prompt.length > 32000 || input.referenceImage)
+        config.apiKey || config.upstreamApiKey || !input.prompt.trim() || input.prompt.length > 32000)
       throw new ImageProviderError('Invalid subscription image configuration', 'rejected', undefined, 'subscription-configuration')
     input.signal?.throwIfAborted()
     const limits: Record<string, number> = {}
@@ -41,8 +41,11 @@ export class ChatGPTSubscriptionImageProvider implements ImageGenerationProvider
         signal: input.signal ?? new AbortController().signal,
         request: { model: config.responseModel, stream: true, store: false,
           instructions: 'Generate exactly one image using the image_generation tool.',
-          input: [{ role: 'user', content: [{ type: 'input_text', text: input.prompt }] }],
-          tools: [{ type: 'image_generation', model: config.model, action: 'generate', output_format: 'png', partial_images: 0,
+          input: [{ role: 'user', content: [{ type: 'input_text', text: input.prompt },
+            ...(input.referenceImage ? [{ type: 'input_image',
+              image_url: `data:${input.referenceImage.mimeType};base64,${Buffer.from(input.referenceImage.bytes).toString('base64')}`,
+            }] : [])] }],
+          tools: [{ type: 'image_generation', model: config.model, action: input.referenceImage ? 'edit' : 'generate', output_format: 'png', partial_images: 0,
             quality: input.quality ?? config.quality, size: input.size ?? config.size, background: input.background ?? 'auto' }],
           tool_choice: { type: 'image_generation' },
           prompt_cache_key: 'image-' + createHash('sha256').update(this.configDirectory).digest('hex'),

@@ -13,7 +13,8 @@ test('UI production compiles selected-design skins, never a screen board or inve
       { id: 'button-normal', description: 'The decorated primary control, normal state, without its label', width: 240, height: 64 }] } }
   const before = structuredClone(input), plan = compileUiAssetSheet(input)
   expect(input).toEqual(before)
-  expect(plan.request).toMatchObject({ purpose: 'production', referenceImagePath: input.referenceImagePath, background: 'transparent', quality: 'low' })
+  expect(plan.request).toMatchObject({ purpose: 'production', referenceImagePath: input.referenceImagePath, background: 'transparent' })
+  expect(plan.request).not.toHaveProperty('quality')
   expect(plan.request).not.toHaveProperty('uiAssets')
   expect(plan.request.prompt).toContain('not a new design')
   expect(plan.note).toContain('not an aesthetic verdict or measured atlas')
@@ -67,7 +68,7 @@ test('canvas/grid choice follows ratio and list length, not screen names or a pr
   }
 })
 
-test('reference prompts preserve design content without imposing pixel coordinates; production keeps its cell data', () => {
+test('reference prompts preserve design content; production describes differently sized parts without cell coordinates', () => {
   const input = request(1440, 900, 4)
   input.uiReference.style = 'Design viewport 1440x900; borders 8px; warm colors'
   const before = structuredClone(input), plan = compileUiReferenceBoard(input)
@@ -78,8 +79,12 @@ test('reference prompts preserve design content without imposing pixel coordinat
   expect(plan.request.prompt).not.toMatch(/rectangle x=|pixel screen frame|fixed equal-cell|gutters are \d+px/)
   const skins = compileUiAssetSheet({ requestId: 'control-skins', purpose: 'production', requirementIds: ['controls'], referenceImagePath: 'assets/reference/design.png',
     uiAssets: { elements: [{ id: 'control', description: 'Selected control skin', width: 240, height: 60 }] } })
-  expect(skins.request.prompt).toContain(JSON.stringify(skins.layout.panels[0]))
-  expect(skins.request).toMatchObject({ background: 'transparent', quality: 'low' })
+  expect(skins.request.prompt).toContain(skins.layout.elements[0].description)
+  expect(skins.request.prompt).toContain('design proportions 240 x 60')
+  expect(skins.request.prompt).not.toMatch(/cell |columns|rows|"x":|"y":/)
+  expect(skins.request).toMatchObject({ background: 'transparent' })
+  expect(compileUiAssetSheet({ ...skins.request, prompt: undefined,
+    uiAssets: { elements: skins.layout.elements }, quality: 'high' }).request.quality).toBe('high')
 })
 
 test('missing evidence and model-specified board geometry are rejected', () => {
@@ -93,4 +98,12 @@ test('missing evidence and model-specified board geometry are rejected', () => {
   expect(() => compileUiReferenceBoard({ ...valid, background: 'transparent' })).toThrow('opaque')
   expect(() => compileUiReferenceBoard(valid, 'Portrait')).toThrow('confirmed Portrait')
   expect(() => compileUiReferenceBoard(request(720, 1280, 3), 'Landscape')).toThrow('confirmed Landscape')
+})
+
+
+test('an image capability without a fixed project direction accepts each requested concept direction',()=>{
+  for(const [width,height] of [[1280,720],[720,1280]]){
+    const planned=compileUiReferenceBoard(request(width,height,1),undefined)
+    expect(planned.layout.viewport).toEqual({width,height})
+  }
 })

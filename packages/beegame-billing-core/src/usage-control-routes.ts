@@ -7,7 +7,7 @@ import {
 import { isObject, readJson } from './http-helpers'
 import type { BillingRouteDeps } from './billing-route-types'
 import type { BeeGameUsageBillingRecordInput } from './usage-control-client'
-import { validImageBillingInput } from './image-billing'
+import { ImageBillingError, validImageBillingInput } from './image-billing'
 
 export function registerBeeGameUsageControlRoutes(
   app: Hono,
@@ -56,7 +56,11 @@ export function registerBeeGameUsageControlRoutes(
     if (!deps.dashboardRepository.applyImageBilling)
       return c.json({ error: 'Image billing is unavailable' }, 503)
     try { return c.json(await deps.dashboardRepository.applyImageBilling(userId, body)) }
-    catch { return c.json({ error: 'Image billing could not be completed; preserve the request identity' }, 503) }
+    catch (error) {
+      if (error instanceof ImageBillingError)
+        return c.json({ error: error.message, code: error.code }, error.status)
+      return c.json({ error: 'Image billing could not be completed; preserve the request identity' }, 503)
+    }
   })
 }
 

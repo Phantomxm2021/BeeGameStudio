@@ -29,6 +29,25 @@ export type ImageBillingReceipt = {
   chargedCreditsMicro: number
   metadata: Record<string, unknown>
 }
+// Only these known ledger failures may cross the billing service boundary.
+export const imageBillingErrors = {
+  'image-request-identity-conflict': { status: 409, message: 'Image request identity conflict' },
+  'image-reservation-amount-conflict': { status: 409, message: 'Reservation amount conflict' },
+  'image-settlement-conflict': { status: 409, message: 'Image settlement conflict' },
+  'image-reservation-required': { status: 409, message: 'Image reservation required' },
+  'image-charge-exceeds-reservation': { status: 409, message: 'Charge exceeds reserved amount' },
+  'insufficient-image-credits': { status: 402, message: 'Insufficient image credits' },
+  'image-project-budget-exceeded': { status: 402, message: 'Image project budget exceeded' },
+} as const
+
+export class ImageBillingError extends Error {
+  readonly status: 402 | 409
+  constructor(readonly code: keyof typeof imageBillingErrors) {
+    super(imageBillingErrors[code].message)
+    this.status = imageBillingErrors[code].status
+  }
+}
+
 export interface ImageBillingClient {
   apply(userId: string, input: ImageBillingInput): Promise<ImageBillingReceipt>
 }
@@ -52,7 +71,14 @@ export function createImageBillingClient(config: BeeGameBillingConfig, fetchImpl
       headers: { 'content-type': 'application/json', 'x-beegame-credit-control-token': config.creditControlToken },
       body: JSON.stringify({ userId, ...input }),
     })
-    if (!response.ok) throw new Error(`Image billing unavailable (${response.status}); no automatic retry`)
+    if (!response.ok) {
+      const failure = await response.json().catch(() => null)
+      if (typeof failure?.code === 'string' && Object.hasOwn(imageBillingErrors, failure.code)) {
+        const error = new ImageBillingError(failure.code as keyof typeof imageBillingErrors)
+        if (response.status === error.status) throw error
+      }
+      throw new Error(`Image billing unavailable (${response.status}); no automatic retry`)
+    }
     const receipt = await response.json() as ImageBillingReceipt
     if (receipt.blockedByRequestId !== undefined &&
       (typeof receipt.blockedByRequestId !== 'string' || !receipt.blockedByRequestId.trim() ||

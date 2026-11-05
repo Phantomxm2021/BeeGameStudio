@@ -7,7 +7,7 @@ import { auditAssetContract } from './asset-contract-audit'
 import { validateResourceSelections } from './tilemap-contract'
 import { editorAtlasPath } from '../../../scene-editor/src/ui-preview/uiAtlas'
 import sharp from 'sharp'
-import { audioProbeWav } from './workflow-v3/audio-consumption'
+import { audioFixtureWav } from './fixtures/web-content-fixture'
 import { registerBeeGameLocalResources, readBeeGameAssetManifest, readBeeGameAssetManifestSync, toCanonicalBeeGameAssetManifest } from './asset-contracts'
 
 test('encoded authored audio rejects generic audio type before registration and accepts canonical audio-clip', async () => {
@@ -16,7 +16,7 @@ test('encoded authored audio rejects generic audio type before registration and 
   await writeBeeGameAssetManifest(root,value)
   await mkdir(join(root,'assets/runtime'),{recursive:true})
   const path='assets/runtime/tone.wav'
-  await writeFile(join(root,path),audioProbeWav(false))
+  await writeFile(join(root,path),audioFixtureWav(false))
   const input={id:'tone',root_path:path,file_paths:[path],provisional:false,reason:'Synthetic encoded tone',selection_reason:['test'],asset_kind:'audio'}
   await expect(registerBeeGameLocalResources(root,[input])).rejects.toThrow('unsupported audio type audio; use audio-clip')
   expect((await readBeeGameAssetManifest(root)).resources).toHaveLength(0)
@@ -312,7 +312,8 @@ test.each(['atlas', 'atlas-regions'])('image capability %s consumes registered a
   expect(audit.requirements[0]!.structure!.status).toBe('passed')
   const observation = audit.requirements[0]!.structure!.observations.join(' ')
   expect(observation).toContain('1 named sprite frames verified in assets/runtime/model.json against assets/runtime/model.png')
-  expect(observation).toContain('runtime use/quality unverified')
+  expect(observation).toContain('file/header facts satisfy the supported structural checks')
+  expect(observation).not.toMatch(/runtime use|quality unverified/)
   expect(JSON.stringify(readBeeGameAssetManifestSync(workspace))).toBe(before)
 })
 
@@ -684,7 +685,7 @@ test.each(['audio-clip','music','ambience','voice','loop','unsupported','broken-
     resource.asset_kind=assetKind;resource.capabilities=[...(value.requirements[0]!.acquisition_profile.capabilities??[])]
     resource.root_path='assets/runtime/tone.wav';resource.file_paths=[resource.root_path]
     if(kind==='broken-member')resource.file_paths.push('assets/runtime/member.wav')
-    const workspace=await writeFixture(value),bytes=audioProbeWav(false)
+    const workspace=await writeFixture(value),bytes=audioFixtureWav(false)
     if(kind==='unsupported')bytes.writeUInt16LE(3,20)
     await writeFile(join(workspace,resource.root_path),bytes)
     if(kind==='broken-member')await writeFile(join(workspace,'assets/runtime/member.wav'),'Not encoded WAV')
@@ -693,3 +694,22 @@ test.each(['audio-clip','music','ambience','voice','loop','unsupported','broken-
     if(kind==='loop')expect(result.requirements[0]!.structure!.observations.join(' ')).toContain('unverified capabilities/components [loop]')
     if(kind!=='unsupported')expect(result.resources[0]!.fileEvidence[0]!.facts.encoding).toBe('PCM16')
   })
+
+
+test.each(['transparent','opaque','truncated','bad-hash'] as const)('WebP runtime files retain actual alpha and integrity evidence: %s',async kind=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-webp-audit-'));workspaces.push(root)
+  await mkdir(join(root,'assets/runtime'),{recursive:true})
+  const bytes=await sharp({create:{width:17,height:9,channels:kind==='opaque'?3:4,background:{r:200,g:20,b:10,alpha:0.4}}}).webp().toBuffer()
+  const content=kind==='truncated'?bytes.subarray(0,bytes.length-1):bytes
+  const path='assets/runtime/sprite.webp'
+  await writeFile(join(root,path),content)
+  const value=manifest();value.project_target!.asset_format_capabilities=['webp']
+  value.requirements[0]!.acquisition_profile.asset_kinds=['sprite'];value.requirements[0]!.acquisition_profile.capabilities=['alpha']
+  Object.assign(value.resources[0]!,{asset_kind:'sprite',capabilities:['alpha'],root_path:path,file_paths:[path],
+    local_file_hashes:{[path]:kind==='bad-hash'?'0'.repeat(64):createHash('sha256').update(content).digest('hex')}})
+  await writeBeeGameAssetManifest(root,value)
+  const audit=auditAssetContract(root),structure=audit.requirements[0]!.structure!
+  expect(structure.status).toBe(kind==='transparent'?'passed':kind==='truncated'?'unverified':'failed')
+  if(kind==='transparent')expect(audit.resources[0]!.fileEvidence[0]!.facts).toMatchObject({width:17,height:9,hasAlpha:true})
+  if(kind==='bad-hash')expect(audit.issues.join(' ')).toContain('File hash does not match manifest')
+})

@@ -19,6 +19,7 @@ export function inspectResourceBytes(name: string, bytes: Uint8Array): Record<st
   const extension = extensionOf(name)
   let facts: Record<string, string | number | boolean> = {}
   if (extension === 'png') facts = inspectPng(bytes)
+  else if (extension === 'webp') facts = inspectWebp(bytes)
   else if (extension === 'wav') facts = inspectWav(bytes)
   else if (extension === 'glb') facts = inspectGlb(bytes)
   else if (extension === 'gltf') facts = inspectGltfText(new TextDecoder().decode(bytes))
@@ -80,6 +81,49 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   const input = new Uint8Array(bytes).buffer
   const digest = await crypto.subtle.digest('SHA-256', input)
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+/** Static WebP container/header facts, not a pixel decoder or visual check.
+ * https://developers.google.com/speed/webp/docs/riff_container
+ * Animated files stay unknown until their frame structure can be inspected. */
+function inspectWebp(bytes: Uint8Array): Record<string, number | boolean> {
+  if (bytes.length < 26 || readAscii(bytes, 0, 4) !== 'RIFF' || readAscii(bytes, 8, 4) !== 'WEBP') return {}
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (view.getUint32(4, true) + 8 !== bytes.length) return {}
+  let canvas: { width: number; height: number; alpha: boolean } | undefined
+  let image: { width: number; height: number; hasAlpha?: boolean } | undefined
+  let alphaChunk = false
+  for (let offset = 12; offset < bytes.length;) {
+    if (offset + 8 > bytes.length) return {}
+    const size = view.getUint32(offset + 4, true), start = offset + 8, end = start + size
+    const next = end + (size % 2), kind = readAscii(bytes, offset, 4)
+    if (next > bytes.length || size % 2 && bytes[end] !== 0) return {}
+    if (kind === 'VP8X') {
+      if (offset !== 12 || size !== 10 || bytes[start]! & 2) return {}
+      const uint24 = (at: number) => bytes[at]! + bytes[at + 1]! * 256 + bytes[at + 2]! * 65536
+      canvas = { width: uint24(start + 4) + 1, height: uint24(start + 7) + 1, alpha: !!(bytes[start]! & 16) }
+      if (canvas.width * canvas.height > 0xffffffff) return {}
+    } else if (kind === 'ALPH') {
+      if (!canvas?.alpha || alphaChunk || image || size < 2) return {}
+      alphaChunk = true
+    } else if (kind === 'VP8 ') {
+      if (image || size < 11 || bytes[start]! & 1 || readAscii(bytes, start + 3, 3) !== '\x9d\x01\x2a') return {}
+      const width = view.getUint16(start + 6, true) & 0x3fff, height = view.getUint16(start + 8, true) & 0x3fff
+      if (!width || !height) return {}
+      image = { width, height, hasAlpha: alphaChunk }
+    } else if (kind === 'VP8L') {
+      if (image || alphaChunk || size < 6 || bytes[start] !== 0x2f) return {}
+      const header = view.getUint32(start + 1, true)
+      if (header >>> 29) return {}
+      // The lossless alpha-used bit is a hint: absence does not prove opacity.
+      image = { width: (header & 0x3fff) + 1, height: (header >>> 14 & 0x3fff) + 1,
+        ...(header & 0x10000000 ? { hasAlpha: true } : {}) }
+    } else if (kind === 'ANIM' || kind === 'ANMF') return {}
+    offset = next
+  }
+  if (!image || canvas && (canvas.width !== image.width || canvas.height !== image.height ||
+      image.hasAlpha !== undefined && canvas.alpha !== image.hasAlpha)) return {}
+  return { ...image, ...(canvas ? { hasAlpha: canvas.alpha } : {}) }
 }
 
 function inspectPng(bytes: Uint8Array): Record<string, number | boolean> {

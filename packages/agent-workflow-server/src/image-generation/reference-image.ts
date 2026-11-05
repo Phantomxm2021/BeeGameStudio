@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import sharp from 'sharp'
+import type { compileUiReferenceBoard } from './ui-reference-board.mjs'
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 const MAX_REFERENCE_BYTES = 16 * 1024 * 1024
@@ -37,4 +38,15 @@ export async function readProjectReferenceImage(workspacePath: string, path: str
     if (error instanceof ImageReferenceError) throw error
     throw new ImageReferenceError('unreadable')
   }
+}
+
+/** Empty frame geometry only: input guidance, never a screen mockup or output measurement. */
+export async function renderUiReferenceLayout(layout: ReturnType<typeof compileUiReferenceBoard>['layout']) {
+  const { width, height } = layout.canvas
+  const frames = layout.panels.map(panel =>
+    `<rect x="${panel.x}" y="${panel.y}" width="${panel.width}" height="${panel.height}" fill="white" stroke="black" stroke-width="1"/>`).join('')
+  const bytes = await sharp(Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="white"/>${frames}</svg>`,
+  )).png().toBuffer()
+  return { bytes, sha256: createHash('sha256').update(bytes).digest('hex'), mimeType: 'image/png' as const }
 }

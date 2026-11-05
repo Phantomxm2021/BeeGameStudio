@@ -7,7 +7,9 @@ export type ProjectAssetCapabilities = {
   sessionId?: string
   libraryBaseUrl?: string
   imageEndpoint?: string
+  screenOrientation?: 'Landscape' | 'Portrait'
   mediaCommand?: string
+  imageMcpModules?: { server: string; stdio: string; types: string }
 }
 
 // Capture tool sources when the host module loads, like its imported compiler.

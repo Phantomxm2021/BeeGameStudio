@@ -1,3 +1,4 @@
+import { BeeGameModelRuntimeError } from '../beegame/model-runtime-host'
 import { test, expect } from 'bun:test'
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -9,9 +10,11 @@ import { ImageGenerationService } from './service'
 import { imageConfigSchema } from './config'
 import { imageChargeCreditsMicro, fixedImageChargeCreditsMicro, CLOUDFLARE_INITIAL_FIXED_CREDITS } from './pricing'
 import { ImageProviderError } from './provider'
+import { createImageGenerationProvider } from './index'
 import { writeProjectAssetCommand } from '../beegame/project-asset-command'
 import { openImageGenerationAccess } from './access'
 import { ImageConfigurationError } from './runtime-config'
+import { imagePromptReviewInput, parseImagePromptReview } from './prompt-review'
 import { compileUiReferenceBoard, compileUiAssetSheet } from './ui-reference-board.mjs'
 import { writeBeeGameAssetManifest, type BeeGameAssetManifest } from '../beegame/asset-contracts'
 
@@ -64,6 +67,129 @@ test.each(['platform', 'byok'] as const)('resource intent rejects new incompatib
   } finally { await access.close(); rmSync(root,{recursive:true,force:true}) }
 })
 
+test.each(['platform', 'byok'] as const)('final compiled prompt is checked before image billing; corrections and paid recovery: %s', async source => {
+  const root = mkdtempSync(join(tmpdir(), 'image-prompt-check-'))
+  const billing = fakeBilling(), checked: string[] = [], reviewInputs: string[] = []
+  const design = '# Design\n## Artwork\nThe background contains no red fruit.\n'
+  mkdirSync(join(root, 'docs'))
+  writeFileSync(join(root, 'docs/GDD.md'), design)
+  let calls = 0
+  let review = { issues: ['The shared blue-only background conflicts with a red background in the same screen.'] }
+  const service = new ImageGenerationService(new ImageAttemptStore(join(root, 'host'), { generate: async () => {
+    calls++; return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
+  } }), billing.client)
+  const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root, source,
+    loadConfig: async () => config, service, reviewPrompt: async prompt => {
+      reviewInputs.push(imagePromptReviewInput(root, 'Confirmed user requirements', prompt))
+      checked.push(prompt)
+      return review
+    } })
+  const request = { purpose: 'reference', requestId: 'prompt-check', uiReference: { viewport: { width: 1280, height: 720 },
+    style: 'Background uses blue only', screens: [{ id: 'ready', description: 'Ready screen with a red background' }] } }
+  const send = () => fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) })
+  try {
+    const rejected = await send()
+    expect(rejected.status).toBe(422)
+    expect(await rejected.json()).toMatchObject({ code: 'image-prompt-conflict', requestId: request.requestId })
+    expect(checked).toHaveLength(1)
+    expect(checked[0]).toContain('Create a visual reference board')
+    expect(checked[0]).toContain(request.uiReference.style)
+    expect(checked[0]).toContain(request.uiReference.screens[0]!.description)
+    const firstInput = JSON.parse(reviewInputs[0]!)
+    expect(Object.keys(firstInput).sort()).toEqual(['confirmedRequirements', 'design', 'prompt'])
+    expect(firstInput.confirmedRequirements).toBe('Confirmed user requirements')
+    expect(firstInput.prompt).toBe(checked[0])
+    expect(firstInput.design).toEqual([{ path: 'docs/GDD.md', sha256: new Bun.CryptoHasher('sha256').update(design).digest('hex'),
+      bytes: Buffer.byteLength(design), text: design }])
+    // A design restriction omitted from the image prompt still reaches the checker.
+    expect(firstInput.prompt).not.toContain('no red fruit')
+    expect(firstInput.design[0].text).toContain('no red fruit')
+    expect(calls).toBe(0)
+    expect(billing.actions).toEqual([])
+    review = { issues: [] }
+    request.uiReference.screens[0]!.description = 'Ready screen with a blue background'
+    const currentDesign = design + 'Preserve the paper material.\n'
+    writeFileSync(join(root, 'docs/GDD.md'), currentDesign)
+    const generated = await send()
+    expect(generated.status).toBe(200)
+    const bytes = await generated.arrayBuffer()
+    expect(checked).toHaveLength(2)
+    expect(checked[1]).toContain('Ready screen with a blue background')
+    expect(JSON.parse(reviewInputs[1]!).design).toEqual([{ path: 'docs/GDD.md',
+      sha256: new Bun.CryptoHasher('sha256').update(currentDesign).digest('hex'), bytes: Buffer.byteLength(currentDesign), text: currentDesign }])
+    expect(calls).toBe(1)
+    const actions = source === 'platform' ? ['reserve', 'settle'] : []
+    expect(billing.actions).toEqual(actions)
+    review = { issues: ['A different current judgment must not invalidate an already-paid result.'] }
+    rmSync(join(root, 'docs/GDD.md')) // Paid recovery must not read or require a new design snapshot.
+    const recovered = await send()
+    expect(recovered.status).toBe(200)
+    expect(await recovered.arrayBuffer()).toEqual(bytes)
+    expect(checked).toHaveLength(2)
+    expect(calls).toBe(1)
+    const record = readFileSync(join(root, 'assets/ai-generation-prompts.md'), 'utf8')
+    expect(record).toContain('prompt-checked')
+    expect(record).toContain('image-prompt-conflict')
+  } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('invalid or unavailable prompt checking never becomes permission to generate', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-prompt-failure-'))
+  const billing = fakeBilling()
+  let calls = 0
+  let modelFailure: BeeGameModelRuntimeError | undefined
+  const service = new ImageGenerationService(new ImageAttemptStore(join(root, 'host'), { generate: async () => {
+    calls++; return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
+  } }), billing.client)
+  const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
+    loadConfig: async () => config, service, reviewPrompt: async prompt => {
+      if(modelFailure)throw modelFailure
+      imagePromptReviewInput(root, 'Confirmed user requirements', prompt)
+      return parseImagePromptReview('{"checked":true}')
+    } })
+  const send = () => fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ purpose: 'reference', requestId: 'invalid-check', prompt: 'A complete screen' }) })
+  try {
+    // Missing source fails before model checking, image reservation or generation.
+    expect(() => imagePromptReviewInput(root, 'Confirmed user requirements', 'A complete screen')).toThrow('Cannot check image prompt against the saved GDD')
+    const missing = await send()
+    expect(missing.status).toBe(503)
+    expect(await missing.json()).toMatchObject({ code: 'prompt-review-unavailable' })
+    mkdirSync(join(root, 'docs'))
+    writeFileSync(join(root, 'docs/GDD.md'), '# Current design\nScreen definitions.\n')
+    const response = await send()
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ code: 'prompt-review-unavailable', failureCode:'invalid-review-schema', diagnosticId:expect.any(String) })
+    modelFailure=new BeeGameModelRuntimeError('PRIVATE_PROVIDER_BODY', 'model_response', {failureCode:'structured-output-missing',diagnosticId:'fixed-diagnostic'})
+    const failed=await send()
+    expect(failed.status).toBe(503)
+    const detail=await failed.json()
+    expect(detail).toMatchObject({code:'prompt-review-unavailable',failureCode:'structured-output-missing',modelStage:'model_response',diagnosticId:'fixed-diagnostic'})
+    expect(JSON.stringify(detail)).not.toContain('PRIVATE_PROVIDER_BODY')
+    expect(readFileSync(join(root,'assets/ai-generation-prompts.md'),'utf8')).toContain('fixed-diagnostic')
+    expect(calls).toBe(0)
+    expect(billing.actions).toEqual([])
+    for (const value of ['not JSON', '{}', '{"issues":"none"}', '{"issues":[" "]}', '{"issues":[],"passed":true}'])
+      expect(() => parseImagePromptReview(value)).toThrow()
+    expect(parseImagePromptReview('{"issues":[]}')).toEqual({ issues: [] })
+  } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test.each(['platform', 'byok'] as const)('cancelled prompt checking cannot later submit or reserve an image: %s', async source => {
+  const root = mkdtempSync(join(tmpdir(), 'image-prompt-cancel-'))
+  const billing = fakeBilling(), controller = new AbortController()
+  let calls = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(root, { generate: async () => {
+    calls++; return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
+  } }), billing.client)
+  try {
+    await expect(service.generate({ ...input, request: { ...input.request, signal: controller.signal },
+      reviewPrompt: async () => { controller.abort(); } }, source)).rejects.toThrow()
+    expect(calls).toBe(0)
+    expect(billing.actions).toEqual([])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('a pre-metadata paid receipt is recoverable through the new bridge', async () => {
   const root = mkdtempSync(join(tmpdir(),'image-legacy-intent-'))
   const billing = fakeBilling()
@@ -72,7 +198,8 @@ test('a pre-metadata paid receipt is recoverable through the new bridge', async 
     calls++; return {bytes:await png(),model:config.model,mimeType:'image/png',usage}
   }}),billing.client)
   await service.generate(input) // Historical request: no resource-intent metadata.
-  const access = openImageGenerationAccess({userId:'owner',projectId:'project',workspacePath:root,loadConfig:async()=>config,service})
+  const access = openImageGenerationAccess({userId:'owner',projectId:'project',workspacePath:root,loadConfig:async()=>config,service,
+    reviewPrompt:async()=>{throw Error('Historical paid recovery must not start prompt checking')}})
   try {
     const response=await fetch(access.endpoint,{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({requestId:input.requestId,prompt:input.request.prompt})})
@@ -93,7 +220,7 @@ test('host compiles screen revisions with original image bytes, records the prom
     return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
   } }), billing.client)
   const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
-    screenOrientation: 'Landscape', requiredQuality: 'low', loadConfig: async () => { configurations++; return cloudflareConfig }, service })
+    screenOrientation: 'Landscape', loadConfig: async () => { configurations++; return cloudflareConfig }, service })
   const input = { purpose: 'reference', requestId: 'ui-board', referenceImagePath: 'assets/reference/selected.png',
     uiReference: { viewport: { width: 1280, height: 720 }, style: 'Keep the original composition and subjects; change only button contrast',
       screens: ['play', 'pause', 'result'].map(id => ({ id, description: `Full ${id} screen with HUD` })) } }
@@ -137,7 +264,7 @@ test('UI skin generation passes the selected design bytes to the provider; missi
     received.push(request); return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
   } }), billing.client)
   const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
-    requiredQuality: 'low', loadConfig: async () => cloudflareConfig, service })
+    loadConfig: async () => cloudflareConfig, service })
   const input = { requestId: 'skins', purpose: 'production', requirementIds: ['ui-skins'], referenceImagePath: 'assets/visual/design.png',
     uiAssets: { elements: [{ id: 'control', description: 'Primary control skin from the selected design, no label', width: 240, height: 64 }] } }
   const send = (value: unknown) => fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) })
@@ -173,7 +300,7 @@ test('one image capability continues from a screen design into UI skins and game
     return { bytes, model: config.model, mimeType: 'image/png', usage }
   } }), billing)
   const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
-    requiredQuality: 'low', loadConfig: async () => cloudflareConfig, service })
+    screenOrientation: 'Landscape', loadConfig: async () => cloudflareConfig, service })
   const send = (value: unknown) => fetch(access.endpoint, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) })
   try {
@@ -184,6 +311,12 @@ test('one image capability continues from a screen design into UI skins and game
     mkdirSync(join(root, 'assets/reference'), { recursive: true })
     const referenceImagePath = 'assets/reference/selected.png'
     writeFileSync(join(root, referenceImagePath), Buffer.from(await design.arrayBuffer()))
+    expect(access.screenOrientation).toBe('Landscape')
+    const overlay = await send({ requestId: 'orientation-overlay', purpose: 'reference', referenceImagePath,
+      size: '1024x1536', prompt: 'Adaptation notice using the selected paper treatment; no gameplay or new controls' })
+    expect(overlay.status).toBe(200)
+    expect(Buffer.from(await overlay.arrayBuffer()).equals(bytes)).toBe(true)
+    expect(received[1]).toMatchObject({ size: '1024x1536', referenceImage: { bytes } })
     // Register needs through the existing resource contract, not another user request.
     await writeBeeGameAssetManifest(root, { version: 9, resources: [], requirements: [
       { id: 'ui', acquisition_profile: { dimensions: ['2D'], asset_kinds: ['sprite-atlas'], styles: [] } },
@@ -201,13 +334,13 @@ test('one image capability continues from a screen design into UI skins and game
       expect(result.status).toBe(200)
       expect(Buffer.from(await result.arrayBuffer()).equals(bytes)).toBe(true)
     }
-    expect(received).toHaveLength(4)
-    expect(received.map(r => r.quality)).toEqual(['low', 'low', 'low', 'low'])
-    for (const asset of received.slice(1)) {
+    expect(received).toHaveLength(5)
+    expect(received.map(r => r.quality ?? cloudflareConfig.quality)).toEqual(['low', 'medium', 'medium', 'medium', 'medium'])
+    for (const asset of received.slice(2)) {
       expect(asset.referenceImage.bytes).toEqual(bytes)
       expect(asset.background).toBe('transparent')
     }
-    expect(actions).toEqual(Array(4).fill(['reserve', 'settle']).flat())
+    expect(actions).toEqual(Array(5).fill(['reserve', 'settle']).flat())
   } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -323,27 +456,41 @@ const pricing = { model: 'test-model', version: 'test-v2', markupMultiplier: 1.5
   maxRequestCredits: 2, projectBudgetCredits: 10 }
 const config = imageConfigSchema.parse({ model: 'test-model', apiKey: 'secret', billing: pricing })
 
-test('delivery image access keeps every generation at low quality', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'image-low-delivery-'))
-  const qualities: Array<string | undefined> = []
-  const service = new ImageGenerationService(new ImageAttemptStore(root, { generate: async (_config, request) => {
-    qualities.push(request.quality)
-    return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
-  } }), fakeBilling().client)
+test('reference defaults stay local while production honors explicit and configured quality', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-quality-'))
+  const qualities: string[] = [], billing = fakeBilling()
+  let currentConfig = config
+  const service = new ImageGenerationService(new ImageAttemptStore(root, { generate: async (settings, request) => {
+    qualities.push(request.quality ?? settings.quality)
+    return { bytes: await png(), model: settings.model, mimeType: 'image/png', usage }
+  } }), billing.client)
   const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
-    requiredQuality: 'low', loadConfig: async () => config, service })
+    loadConfig: async () => currentConfig, service })
+  const send = async (value: unknown) => {
+    const response = await fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(value) })
+    expect(response.status).toBe(200)
+    await response.arrayBuffer()
+  }
+  const reference = { purpose: 'reference', requestId: 'reference', uiReference: {
+    viewport: { width: 1280, height: 720 }, style: 'Original artwork',
+    screens: [{ id: 'play', description: 'The required player view' }] } }
   try {
-    expect(await (await fetch(access.endpoint)).json()).toMatchObject({ quality: 'low' })
-    expect((await fetch(`${access.endpoint}?quality=medium`)).status).toBe(200)
-    expect(await (await fetch(`${access.endpoint}?quality=medium`)).json()).toMatchObject({ available: false })
-    const rejected = await fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ purpose: 'experiment', requestId: 'wrong-quality', prompt: 'an icon', quality: 'medium' }) })
-    expect(rejected.status).toBe(422)
-    expect(qualities).toHaveLength(0)
-    const accepted = await fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ purpose: 'experiment', requestId: 'low-quality', prompt: 'an icon' }) })
-    expect(accepted.status).toBe(200)
-    expect(qualities).toEqual(['low'])
+    expect(await (await fetch(access.endpoint)).json()).toMatchObject({ available: true, quality: 'medium' })
+    expect(await (await fetch(access.endpoint + '?quality=high')).json()).toMatchObject({ available: true, quality: 'high' })
+    await send(reference)
+    await send({ purpose: 'production', requestId: 'default', prompt: 'Character action sequence' })
+    await send({ purpose: 'production', requestId: 'explicit', prompt: 'Character action sequence', quality: 'high' })
+    expect(qualities).toEqual(['low', 'medium', 'high'])
+    // Recover the paid concept with its original compiled quality; do not regenerate.
+    await send(reference)
+    expect(qualities).toHaveLength(3)
+    currentConfig = { ...config, quality: 'high' }
+    await send({ purpose: 'production', requestId: 'new-default', prompt: 'Character action sequence' })
+    expect(qualities).toEqual(['low', 'medium', 'high', 'high'])
+    // Recovery reuses the existing paid receipt and idempotent settlement.
+    expect(billing.actions.filter(action => action === 'settle')).toHaveLength(5)
+    expect(access.instruction).not.toContain('other quality requests are unavailable')
   } finally { access.close(); rmSync(root, { recursive: true, force: true }) }
 })
 const usage = { input_tokens: 100, output_tokens: 200, total_tokens: 300,
@@ -374,16 +521,21 @@ test('a renamed unresolved billing receipt blocks upstream work and exposes the 
   } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
 })
 function fakeBilling() {
-  let receipt: ImageBillingReceipt | undefined
+  const receipts = new Map<string, ImageBillingReceipt>()
   const actions: string[] = []
-  const client: ImageBillingClient = { async apply(_user, request) {
+  const client: ImageBillingClient = { async apply(user, request) {
+    const key = JSON.stringify([user, request.projectId, request.requestId])
+    let receipt = receipts.get(key)
     actions.push(request.action)
     if (request.action === 'reserve') {
       if (receipt) return { ...receipt, created: false }
-      return receipt = { created: true, state: 'reserved', metadata: request.metadata!, reservedCreditsMicro: request.amountCreditsMicro, chargedCreditsMicro: 0 }
+      receipt = { created: true, state: 'reserved', metadata: request.metadata!, reservedCreditsMicro: request.amountCreditsMicro, chargedCreditsMicro: 0 }
+    } else {
+      if (!receipt) throw new Error('No reservation')
+      receipt = { ...receipt, created: false, state: request.action === 'settle' ? 'settled' : 'released', chargedCreditsMicro: request.amountCreditsMicro }
     }
-    if (!receipt) throw new Error('No reservation')
-    return receipt = { ...receipt, created: false, state: request.action === 'settle' ? 'settled' : 'released', chargedCreditsMicro: request.amountCreditsMicro }
+    receipts.set(key, receipt)
+    return receipt
   } }
   return { client, actions }
 }
@@ -454,7 +606,7 @@ test('asset command recovers existing OpenRouter output but cannot submit new pl
         expect(existsSync(join(workspace, `assets/${output}.png`))).toBe(false)
       } else {
         expect(code).toBe(0)
-        expect(JSON.parse(stdout)).toMatchObject({ billingState: 'pending', chargedCreditsMicro: null })
+        expect(JSON.parse(stdout)).toMatchObject({ billingState: 'pending', chargedCredits: null })
         expect(readFileSync(join(workspace, `assets/${output}.png`))).toEqual(Buffer.from(original.bytes))
       }
     }
@@ -574,15 +726,23 @@ test('a paid request identity cannot be silently changed on replay', async () =>
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('reference images on other providers fail before any wallet reservation', async () => {
-  const billing = fakeBilling()
-  const service = new ImageGenerationService(new ImageAttemptStore('/unused-image-path', {
-    generate: async () => { throw new Error('should not call provider') },
+test('reference images and explicit sizes pass through the service with normal billing', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-reference-service-')), billing = fakeBilling()
+  const bytes = await png(), referenceImage = { bytes, sha256: 'a'.repeat(64), mimeType: 'image/png' as const }
+  let calls = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(root, {
+    generate: async (selected, request) => {
+      calls++
+      expect(selected.provider).toBe('openai')
+      expect(request).toMatchObject({ size: '1536x1024', referenceImage })
+      return { bytes, model: config.model, mimeType: 'image/png', usage }
+    },
   }), billing.client)
-  await expect(service.generate({ ...input, request: { prompt: 'icon',
-    referenceImage: { bytes: await png(), sha256: 'a'.repeat(64), mimeType: 'image/png' } } }))
-    .rejects.toMatchObject({ code: 'provider-unsupported' })
-  expect(billing.actions).toEqual([])
+  try {
+    await service.generate({ ...input, request: { prompt: 'icon', size: '1536x1024', referenceImage } })
+    expect(calls).toBe(1)
+    expect(billing.actions).toEqual(['reserve', 'settle'])
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
 test('lost local receipt cannot reuse existing wallet reservation to generate again', async () => {
@@ -665,11 +825,16 @@ test('image capability binds identity, reports cost without secrets, and rejects
   try {
     expect(access.instruction).not.toContain(config.apiKey)
     expect(access.instruction).toContain('no manual maintenance is needed')
+    expect(access.instruction).toContain('beegame-images generate_image when available')
+    expect(access.instruction).toContain('assets.mjs generate is the CLI alternative')
+    expect(access.instruction).not.toContain('Use the optional project asset command')
     expect(access.instruction).not.toContain(url)
     const quote = await (await fetch(url)).json()
-    expect(quote).toMatchObject({ available: true,
+    expect(quote).toMatchObject({ available: true, model: config.model,
+      outputFormat: 'png', backgroundModes: ['auto', 'opaque', 'transparent'], maxReferenceImages: 1,
       quality: 'medium', size: '1024x1024', maxRequestCredits: 2, fixedPrice: false })
-    for (const key of ['provider', 'model', 'modelPriceMultiplier', 'creditFaceValuePerUsd', 'apiKey']) expect(quote).not.toHaveProperty(key)
+    for (const key of ['provider', 'modelPriceMultiplier', 'creditFaceValuePerUsd', 'apiKey', 'upstreamApiKey', 'subscriptionOwnerId', 'responseModel']) expect(quote).not.toHaveProperty(key)
+    expect(calls).toBe(0); expect(billing.actions).toEqual([])
     expect(access.instruction).not.toMatch(/cloudflare|gpt-image|GPT Image/i)
     expect(await (await fetch(url)).text()).not.toContain(config.apiKey)
     expect(existsSync(join(root, 'assets/ai-generation-prompts.md'))).toBe(false)
@@ -689,6 +854,44 @@ test('image capability binds identity, reports cost without secrets, and rejects
     expect(document).not.toContain(config.apiKey)
     expect(document).not.toContain(url)
   } finally { access.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test.each(['openai', 'cloudflare', 'openrouter', 'vercel', 'chatgpt-subscription'] as const)('image capability follows the selected image model without probing or charging: %s', async provider => {
+  const root = mkdtempSync(join(tmpdir(), 'image-model-capability-')), billing = fakeBilling()
+  let selected = imageConfigSchema.parse({ ...config, provider, responseModel: 'chat-orchestrator',
+    subscriptionOwnerId: 'private-administrator', upstreamApiKey: 'private-upstream-key' })
+  let calls = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(root, { generate: async () => {
+    calls++; throw Error('A capability query must not call the provider')
+  } }), billing.client)
+  const open = () => openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
+    source: provider === 'chatgpt-subscription' ? 'chatgpt-subscription' : 'byok', loadConfig: async () => selected, service })
+  const access = open()
+  let resumed: ReturnType<typeof open> | undefined
+  const inspect = async (endpoint: string) => {
+    const response = await fetch(endpoint)
+    expect(response.status).toBe(200)
+    const info = await response.json()
+    expect(info).toMatchObject({ available: true, model: selected.model, outputFormat: 'png',
+      backgroundModes: ['auto', 'opaque', 'transparent'], maxReferenceImages: 1, referenceImageSupported: true })
+    for (const key of ['apiKey', 'upstreamApiKey', 'subscriptionOwnerId', 'responseModel', 'baseUrl']) expect(info).not.toHaveProperty(key)
+    expect(JSON.stringify(info)).not.toMatch(/private-administrator|private-upstream-key|chat-orchestrator/)
+    if (provider === 'cloudflare' || provider === 'chatgpt-subscription')
+      expect(info.availableSizes).toEqual(['1024x1024', '1024x1536', '1536x1024'])
+    return info
+  }
+  try {
+    await inspect(access.endpoint)
+    selected = { ...selected, model: 'selected-next-image-model' }
+    await inspect(access.endpoint)
+    await access.close()
+    resumed = open()
+    await inspect(resumed.endpoint)
+    selected = { ...selected, apiKey: '', responseModel: undefined }
+    expect(await (await fetch(resumed.endpoint)).json()).toMatchObject({ available: false, model: selected.model })
+    expect(calls).toBe(0); expect(billing.actions).toEqual([])
+    expect(existsSync(join(root, 'assets/ai-generation-prompts.md'))).toBe(false)
+  } finally { await access.close(); await resumed?.close(); rmSync(root, { recursive: true, force: true }) }
 })
 
 test('Cloudflare reference request reads only a project image before billing', async () => {
@@ -732,4 +935,123 @@ test('Cloudflare reference request reads only a project image before billing', a
     expect(readFileSync(join(root, 'assets/ai-generation-prompts.md'), 'utf8'))
       .toContain('assets/generated/board.png')
   } finally { access.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+
+test('one live image capability follows provider changes for layout guides and selected reference images', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-reference-switch-')), billing = fakeBilling()
+  const bytes = Buffer.from(await png())
+  mkdirSync(join(root, 'assets/reference'), { recursive: true })
+  writeFileSync(join(root, 'assets/reference/design.png'), bytes)
+  let selected = { ...config, provider: 'cloudflare' as 'cloudflare' | 'openai' | 'vercel' | 'openrouter', baseUrl: 'https://gateway.example/ai/run' }
+  const received: Array<{ provider: string; url: string; body: any }> = []
+  const service = new ImageGenerationService(new ImageAttemptStore(root, {
+    generate: (cfg, request) => createImageGenerationProvider(cfg.provider, async (url, init) => {
+      const body = JSON.parse(String(init.body))
+      received.push({ provider: cfg.provider, url, body })
+      return cfg.provider === 'cloudflare'
+        ? Response.json({ result: { state: 'Completed', result: { image: 'https://cdn.example/output.png' } } })
+        : Response.json({ data: [{ b64_json: bytes.toString('base64') }], usage })
+    }, async () => new Response(bytes)).generate(cfg, request),
+  }), billing.client)
+  const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
+    source: 'byok', loadConfig: async () => selected, service })
+  try {
+    for (const [index, provider] of (['cloudflare', 'openai', 'vercel', 'openrouter'] as const).entries()) {
+      // A quote from the previous provider must not pin the subsequent submission.
+      expect(await (await fetch(access.endpoint)).json()).toMatchObject({ available: true, referenceImageSupported: true })
+      selected = { ...config, provider, baseUrl: provider === 'cloudflare' ? 'https://gateway.example/ai/run'
+        : provider === 'openrouter' ? 'https://gateway.example/api/v1/images' : 'https://gateway.example/v1/images/generations' }
+      const response = await fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestId: 'switch-' + index, purpose: 'reference',
+          ...(index % 2 ? { referenceImagePath: 'assets/reference/design.png' } : {}),
+          uiReference: { viewport: { width: 1280, height: 720 }, style: 'Shared visual identity',
+            screens: [{ id: 'play', description: 'Actual gameplay state' }] } }) })
+      expect(response.status).toBe(200)
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes)
+      const item = received.at(-1)!
+      expect(item.provider).toBe(provider)
+      expect(item.url).toBe(provider === 'openai' || provider === 'vercel'
+        ? 'https://gateway.example/v1/images/edits' : selected.baseUrl)
+      const data = provider === 'cloudflare' ? item.body.input.images[0]
+        : provider === 'openrouter' ? item.body.input_references[0].image_url.url : item.body.images[0].image_url
+      const reference = Buffer.from(data.split(',')[1], 'base64')
+      if (index % 2) expect(reference).toEqual(bytes)
+      else {
+        const metadata = await sharp(reference).metadata()
+        expect(metadata.format).toBe('png')
+        expect(metadata.width).toBeGreaterThan(2)
+      }
+    }
+    expect(received).toHaveLength(4)
+    expect(billing.actions).toEqual([])
+  } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+
+test('reference-purpose prompt checks follow requests rather than stages, while production resources keep their own contract', async () => {
+  const root=mkdtempSync(join(tmpdir(),'image-purpose-review-'))
+  const billing=fakeBilling();let checked=0,generated=0
+  const service=new ImageGenerationService(new ImageAttemptStore(join(root,'host'),{generate:async()=>{
+    generated++;return {bytes:await png(),model:config.model,mimeType:'image/png',usage}
+  }}),billing.client)
+  const access=openImageGenerationAccess({userId:'owner',projectId:'project',workspacePath:root,source:'byok',loadConfig:async()=>config,service,
+    reviewPrompt:async prompt=>{checked++;const data=JSON.parse(imagePromptReviewInput(root,'Standalone appearance request',prompt,false));expect(data.design).toEqual([]);return {issues:[]}}})
+  try {
+    const send=(value:object)=>fetch(access.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(value)})
+    const reference=await send({requestId:'reference',purpose:'reference',prompt:'A standalone character reference'})
+    expect(reference.status).toBe(200);await reference.arrayBuffer()
+    expect(checked).toBe(1)
+    await writeBeeGameAssetManifest(root,{version:9,resources:[],requirements:[{id:'ui',acquisition_profile:{dimensions:['2D'],asset_kinds:['sprite-atlas'],styles:[]}}]})
+    const production=await send({requestId:'production',purpose:'production',requirementIds:['ui'],prompt:'UI artwork atlas'})
+    expect(production.status).toBe(200);await production.arrayBuffer()
+    expect(checked).toBe(1)
+    const invalid=await send({requestId:'bad-production',purpose:'production',requirementIds:['missing'],prompt:'Unregistered resource'})
+    expect(invalid.status).toBe(422)
+    expect(checked).toBe(1);expect(generated).toBe(2);expect(billing.actions).toEqual([])
+    expect(()=>imagePromptReviewInput(root,'A complete game','A screen concept',true)).toThrow('saved GDD')
+    mkdirSync(join(root,'docs'))
+    writeFileSync(join(root,'docs/GDD.md'),Buffer.from([0xff,0xfe]))
+    expect(()=>imagePromptReviewInput(root,'Standalone appearance','A screen',false)).toThrow('saved GDD')
+  } finally {await access.close();rmSync(root,{recursive:true,force:true})}
+})
+
+
+test.each(['platform', 'byok'] as const)('new artwork needs no empty registry, while established constraints and invalid manifests still fail before charging: %s', async source => {
+  const root = mkdtempSync(join(tmpdir(), 'image-before-inventory-'))
+  const billing = fakeBilling()
+  let calls = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(join(root, 'host'), { generate: async () => {
+    calls++
+    return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
+  } }), billing.client)
+  const access = openImageGenerationAccess({userId:'owner',projectId:'project',workspacePath:root,source,loadConfig:async()=>config,service})
+  const send = (requestId:string, metadata:object={}) => fetch(access.endpoint,{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({requestId,purpose:'production',prompt:'New game parts atlas',...metadata})})
+  try {
+    const produced = await send('new-art')
+    expect(produced.status).toBe(200)
+    writeFileSync(join(root,'assets/design.png'),Buffer.from(await produced.arrayBuffer()))
+    const skins=await send('new-skins',{prompt:undefined,referenceImagePath:'assets/design.png',
+      uiAssets:{elements:[{id:'panel',description:'The supplied panel skin',width:240,height:120}]}})
+    expect(skins.status).toBe(200)
+    await skins.arrayBuffer()
+    expect(calls).toBe(2)
+    expect(existsSync(join(root,'assets/asset-manifest.json'))).toBe(false)
+    const actions = [...billing.actions]
+    expect((await send('unknown-id',{requirementIds:['absent']})).status).toBe(422)
+    await writeBeeGameAssetManifest(root,{version:9,resources:[],requirements:[],project_target:{
+      platform:'web',runtime:'fixture',asset_format_capabilities:['png'],resource_library_usage:'required',
+      runtime_asset_root:'assets/runtime',generated_asset_root:'assets/generated'}})
+    expect((await send('omit-library-preference')).status).toBe(422)
+    await writeBeeGameAssetManifest(root,{version:9,resources:[],requirements:[{id:'licensed',acquisition_profile:{
+      dimensions:['2D'],asset_kinds:['image'],styles:[],sourcing_policy:{allowed_source_kinds:['resource-library'],
+        license_constraints:['licensed'],responsible_party:'author',handoff_criteria:['usable file']}}}]})
+    expect((await send('omit-existing')).status).toBe(422)
+    expect((await send('disallowed-existing',{requirementIds:['licensed']})).status).toBe(422)
+    writeFileSync(join(root,'assets/asset-manifest.json'),'{invalid')
+    expect((await send('invalid-manifest')).status).toBe(422)
+    expect(calls).toBe(2)
+    expect(billing.actions).toEqual(actions)
+  } finally { await access.close(); rmSync(root,{recursive:true,force:true}) }
 })

@@ -320,9 +320,9 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
   const kind = atlasSprites ? 'sprite' : resource.asset_kind ?? ''
   if (obligation.assetKinds?.length && !obligation.assetKinds.some(value => value === kind))
     return { status: 'unverified', reason: resource.id+': no compatible declared resource kind' } as const
-  const png = !!facts.width && !!facts.height && root?.path.toLowerCase().endsWith('.png')
+  const image = !!facts.width && !!facts.height && /\.(png|webp)$/i.test(root?.path ?? '')
   let atlas: ReturnType<typeof inspectNamedAtlas> | undefined = atlasSprites
-  if (png && obligation.capabilities?.some(need => ['atlas', 'atlas-regions'].includes(need))) {
+  if (image && obligation.capabilities?.some(need => ['atlas', 'atlas-regions'].includes(need))) {
     atlas ??= inspectNamedAtlas(resource, audit)
     if (atlas.status !== 'passed') return atlas
   }
@@ -331,7 +331,7 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
   let unknown = Boolean(facts.externalReferences), contradiction = false
   const unverifiedNeeds: string[] = []
   if (obligation.assetKinds?.length) {
-    if (png) {
+    if (image) {
       if (!['image','texture','sprite','sprite-sheet','sprite-atlas'].includes(kind)) contradiction = true
     } else if (wav) {
       // The shared inspector proves PCM16 structure, not listening or loop quality.
@@ -349,8 +349,8 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
     mesh:'meshCount',skeleton:'skinCount','animation-clip':'animationCount',material:'materialCount',texture:'embeddedTextureCount'}
   for (const need of [...(obligation.capabilities ?? []), ...(obligation.embeddedKinds ?? [])]) {
     if (['atlas', 'atlas-regions'].includes(need) && atlas?.status === 'passed') continue
-    if (need === 'alpha' && png && typeof facts.hasAlpha === 'boolean') {
-      if (!facts.hasAlpha) return {status:'failed',reason:resource.id+': required alpha capability is absent from the inspected PNG'} as const
+    if (need === 'alpha' && image && typeof facts.hasAlpha === 'boolean') {
+      if (!facts.hasAlpha) return {status:'failed',reason:resource.id+': required alpha capability is absent from the inspected image'} as const
       continue
     }
     const count = counts[need]
@@ -369,7 +369,7 @@ function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourc
     reason: (atlas ? atlas.reason+'; ' : resource.id+': ')+(contradiction ? 'required components absent from inspected root' :
       unknown ? 'required facts are not established by supported file inspection'+
         (unverifiedNeeds.length ? '; unverified capabilities/components ['+unverifiedNeeds.join(', ')+']' : '')
-        : 'structural file/header facts only; runtime use/quality unverified') } as const
+        : 'file/header facts satisfy the supported structural checks') } as const
 }
 
 function projectFile(workspace: string, filePath: string): string | undefined {

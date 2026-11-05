@@ -1,3 +1,5 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { expect, test } from 'bun:test'
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
@@ -89,7 +91,12 @@ test('UI board CLI plans offline, quotes the computed canvas and submits structu
     const imageHelp = await run(root, script, 'generate', '--help')
     expect(imageHelp.code).toBe(0)
     expect(imageHelp.stdout).toContain('When choosing a game-screen overview board, use uiReference instead of prompt')
+    expect(imageHelp.stdout).not.toContain('Production requires existing Manifest requirementIds')
+    expect(imageHelp.stdout).toContain('Production can precede registration when no existing requirement or required-library policy blocks it')
+    expect(imageHelp.stdout).toContain('When requirements already exist, include their requirementIds')
     expect(imageHelp.stdout).not.toContain('register needs with resources: []')
+    expect(imageHelp.stdout).not.toContain('For concept inspection and UI writeback')
+    expect(imageHelp.stdout).not.toContain('Save the selected images and updated GDD')
     const [example, revision] = imageHelp.stdout.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line))
     expect(revision).toMatchObject({ referenceImagePath: 'assets/reference/selected.png', quality: 'low' })
     await writeFile(file, JSON.stringify(example))
@@ -97,12 +104,12 @@ test('UI board CLI plans offline, quotes the computed canvas and submits structu
     expect(examplePlan.code).toBe(0)
     const compiledExample = JSON.parse(examplePlan.stdout)
     expect(compiledExample.request).toMatchObject({ quality: 'low', background: 'opaque' })
-    expect(compiledExample.layout.panels.map((panel: { id: string }) => panel.id)).toEqual(['title', 'play', 'pause', 'result'])
+    expect(compiledExample.layout.panels.map((panel: { id: string }) => panel.id)).toEqual(['state-from-gdd'])
     await writeFile(file, JSON.stringify(input))
     for (const command of ['cost', 'ui-board-plan', 'ui-assets-plan']) {
       const result = await run(root, script, command, '--help')
       expect(result.code).toBe(0)
-      if (command === 'ui-assets-plan') expect(result.stdout).toContain('register needs with resources: []')
+      if (command === 'ui-assets-plan') expect(result.stdout).toContain('before any Manifest requirements exist')
     }
     expect(received).toEqual([])
     const planned = await run(root, script, 'ui-board-plan', file)
@@ -111,9 +118,17 @@ test('UI board CLI plans offline, quotes the computed canvas and submits structu
     expect(plan).toEqual(compileUiReferenceBoard(input))
     expect(plan.layout).toMatchObject({ columns: 3, rows: 1 })
     expect(plan.request).toMatchObject({ size: '1536x1024', quality: 'low', background: 'opaque' })
-    expect(plan.request.prompt).toContain('Keep each complete scene and its HUD together and readable')
+    expect(plan.request.prompt).toContain('Keep each complete screen and the interface belonging to its state readable')
     expect(received).toEqual([])
-    await writeProjectAssetCommand(script, { imageEndpoint: `http://127.0.0.1:${server.port}/generate` })
+    await writeProjectAssetCommand(script, { imageEndpoint: `http://127.0.0.1:${server.port}/generate`, screenOrientation: 'Landscape' })
+    for (const args of [['ui-board-plan', file], ['generate', file, 'assets/wrong-orientation.png']]) {
+      const result = await run(root, script, ...args)
+      expect(result.code).not.toBe(0)
+      expect(result.stderr).toContain('conflicts with the confirmed Landscape orientation')
+    }
+    expect(received).toEqual([])
+    await writeProjectAssetCommand(script, { imageEndpoint: `http://127.0.0.1:${server.port}/generate`, screenOrientation: 'Portrait' })
+    expect((await run(root, script, 'ui-board-plan', file)).code).toBe(0)
     await writeFile(file, JSON.stringify({ ...input, uiReference: { ...input.uiReference, columns: 2 } }))
     expect((await run(root, script, 'generate', file, 'assets/invalid.png')).code).not.toBe(0)
     expect(received).toEqual([])
@@ -121,12 +136,48 @@ test('UI board CLI plans offline, quotes the computed canvas and submits structu
     const generated = await run(root, script, 'generate', file, 'assets/board.png')
     expect(generated.code).toBe(0)
     expect(received).toEqual([{ quality: 'low', size: '1536x1024' }, input])
-    expect(JSON.parse(generated.stdout).requestedLayout).toEqual(plan.layout)
-    expect(JSON.parse(generated.stdout).note).toContain('none is certified')
+    const receipt = JSON.parse(generated.stdout)
+    expect(receipt).not.toHaveProperty('requestedLayout')
+    expect(receipt.path).toBe('assets/board.png')
+    expect(receipt.note).toContain('do not fulfill runtime resource requirements')
+    expect(receipt.note).not.toContain('register the selected file')
   } finally { server.stop(true); await rm(root, { recursive: true, force: true }) }
 })
 
-test('UI skin planning requires a real selected reference and submits the design-linked production request unchanged', async () => {
+test('production atlas deliverables submit once per family without a selected design or reference image', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-ui-skins-'))
+  const received: unknown[] = []
+  const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
+    if (request.method === 'GET') return Response.json({available:true,provider:'openai',referenceImageSupported:false,billingSource:'external'})
+    received.push(await request.json())
+    return new Response(new Uint8Array(await sharp({create:{width:8,height:8,channels:4,background:'#fff0'}}).png().toBuffer()),
+      {headers:{'content-type':'image/png'}})
+  }})
+  try {
+    const script = join(root,'assets.mjs'), file = join(root,'request.json')
+    await writeProjectAssetCommand(script,{imageEndpoint:`http://127.0.0.1:${server.port}/generate`})
+    const help = await run(root,script,'generate','--help')
+    expect(help.code).toBe(0)
+    expect(help.stdout).toContain('Submit each atlas as one image request')
+    expect(help.stdout).toContain('Neither a selected design image nor referenceImagePath is required')
+    expect(help.stdout).not.toContain('For parts that cannot be extracted intact from the selected design')
+    const inputs = [
+      {purpose:'production',requestId:'ui-atlas',background:'transparent',size:'1024x1024',
+        prompt:'UI atlas: empty paper panel and button skin, warm hand-drawn ink, complete shapes with transparent separation.'},
+      {purpose:'production',requestId:'game-atlas',background:'transparent',size:'1024x1024',
+        prompt:'Game-element atlas: wooden crate and blue gem, warm hand-drawn ink, distinct proportions and transparent separation.'},
+    ]
+    for (const input of inputs) {
+      await writeFile(file,JSON.stringify(input))
+      const output = await run(root,script,'generate',file,`assets/runtime/${input.requestId}.png`)
+      expect(output.code,output.stderr).toBe(0)
+      expect(JSON.parse(output.stdout).path).toBe(`assets/runtime/${input.requestId}.png`)
+    }
+    expect(received).toEqual(inputs)
+  } finally {server.stop(true);await rm(root,{recursive:true,force:true})}
+})
+
+test('optional reference-guided UI planning requires a real reference and preserves its request', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-ui-skins-'))
   const received: unknown[] = []
   let supportsReference = true
@@ -168,6 +219,7 @@ test('UI skin planning requires a real selected reference and submits the design
 test('project asset command browses facts and returns image cost without forcing a source', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-assets-command-'))
   const requests: string[] = []
+  let fixedPrice = false
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -179,10 +231,14 @@ test('project asset command browses facts and returns image cost without forcing
           facets: { dimensions: ['2D'] },
         })
       return Response.json({
-        available: true,
+        available: true, model: fixedPrice ? 'next-configured-image-model' : 'configured-image-model',
+        outputFormat: 'png', referenceImageSupported: true, maxReferenceImages: 1,
+        backgroundModes: ['auto', 'opaque', 'transparent'], availableSizes: ['1024x1024', '1024x1536', '1536x1024'],
         quality: 'medium',
         size: '1024x1024',
         maxRequestCredits: 3,
+        fixedPrice,
+        ...(fixedPrice ? { quotedCreditsMicro: 2_500_000 } : {}),
       })
     },
   })
@@ -195,10 +251,19 @@ test('project asset command browses facts and returns image cost without forcing
     expect(
       JSON.parse((await run(root, script, 'catalog')).stdout).items[0].license,
     ).toBe('CC0')
-    expect(
-      JSON.parse((await run(root, script, 'cost')).stdout).maxRequestCredits,
-    ).toBe(3)
-    expect(requests).toEqual(['/api/resource-catalog/packs', '/generate'])
+    const cost = await run(root, script, 'cost')
+    expect(JSON.parse(cost.stdout)).toMatchObject({ available: true, fixedPrice: false, model: 'configured-image-model',
+      outputFormat: 'png', referenceImageSupported: true, maxReferenceImages: 1,
+      backgroundModes: ['auto', 'opaque', 'transparent'], availableSizes: ['1024x1024', '1024x1536', '1536x1024'],
+      quotedCredits: null, currency: 'Credits' })
+    expect(JSON.parse(cost.stdout)).not.toHaveProperty('maxRequestCredits')
+    expect(cost.stderr).toContain('actual billing follows returned usage')
+    fixedPrice = true
+    const fixedCost = await run(root, script, 'cost')
+    expect(JSON.parse(fixedCost.stdout)).toMatchObject({ fixedPrice: true, quotedCredits: 2.5, model: 'next-configured-image-model' })
+    expect(JSON.parse(fixedCost.stdout)).not.toHaveProperty('maxRequestCredits')
+    expect(fixedCost.stderr).not.toContain('Usage-priced')
+    expect(requests).toEqual(['/api/resource-catalog/packs', '/generate', '/generate'])
   } finally {
     server.stop(true)
     await rm(root, { recursive: true, force: true })
@@ -398,6 +463,7 @@ test('project asset command saves only successful images, returns hash and never
   const image = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1])
   let calls = 0
   let quotes = 0
+  const submitted: unknown[] = []
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -408,6 +474,7 @@ test('project asset command saves only successful images, returns hash and never
       }
       calls++
       const body = (await request.json()) as { requestId: string; purpose?: string; requirementIds?: string[]; background?: string; size?: string; referenceImagePath?: string }
+      submitted.push(body)
       if (body.requestId === 'asset-1') {
         expect(body.purpose).toBe('production')
         expect(body.requirementIds).toEqual(['sprite-part'])
@@ -460,11 +527,14 @@ test('project asset command saves only successful images, returns hash and never
       'assets/sprite.png',
     )
     expect(first.code).toBe(0)
+    expect(quotes).toBe(1)
+    expect(calls).toBe(1)
     expect(JSON.parse(first.stdout)).toMatchObject({
       path: 'assets/sprite.png',
       source: 'agent-authored',
-      chargedCreditsMicro: '420000',
+      chargedCredits: 0.42,
       billingState: 'settled',
+      note: 'Inspect the actual image and register the selected file in the Manifest.',
     })
     expect(await readFile(join(root, 'assets/sprite.png'))).toEqual(image)
     expect(
@@ -476,6 +546,23 @@ test('project asset command saves only successful images, returns hash and never
       (await run(root, script, 'generate', request, 'assets/sprite.png')).code,
     ).not.toBe(0)
     expect(calls).toBe(1)
+    for (const purpose of ['reference', 'experiment', undefined] as const) {
+      const requestId = 'saved-' + (purpose ?? 'legacy')
+      const input = { requestId, ...(purpose ? { purpose } : {}), prompt: 'Preserve the selected composition and uncover its primary action',
+        referenceImagePath: 'assets/sprite.png' }
+      const saved = JSON.stringify(input)
+      await writeFile(request, saved)
+      const revision = await run(root, script, 'generate', request, 'assets/' + requestId + '.png')
+      expect(revision.code, revision.stderr).toBe(0)
+      expect(submitted.at(-1)).toEqual(input)
+      expect(await readFile(request, 'utf8')).toBe(saved)
+      const receipt = JSON.parse(revision.stdout)
+      expect(receipt).toMatchObject({ requestId, chargedCredits: 0.42, billingState: 'settled' })
+      expect(receipt).not.toHaveProperty('requestedLayout')
+      expect(receipt.note).toContain('Inspect the actual image')
+      expect(receipt.note).not.toContain('register the selected file')
+    }
+    expect(calls).toBe(4)
     await writeFile(
       request,
       JSON.stringify({ requestId: 'failed', prompt: 'another sprite' }),
@@ -723,13 +810,28 @@ test('managed asset commands reject absent or mismatched access and pin a paid a
     expect((await invoke(capabilityFile, 'generate', '--help')).code).toBe(0)
     const valid = capability(bridge.url.origin)
     for (const invalid of [{ ...valid, sessionId: 'another-session' }, { ...valid, workspace: root + '/another-project' },
-      { ...valid, assets: { imageEndpoint: 'https://example.com/image' } }, { ...valid, executionId: '' }]) {
+      { ...valid, assets: { imageEndpoint: 'https://example.com/image' } }, { ...valid, executionId: '' },
+      { ...valid, assets: { ...valid.assets, screenOrientation: 'Diagonal' } }]) {
       await save(invalid)
       expect((await invoke(capabilityFile, 'cost')).stderr).toContain('ASSET_CAPABILITY_MISMATCH')
     }
     await save({ ...valid, assets: {} })
     expect((await invoke(capabilityFile, 'cost')).stderr).toContain('AI image generation is unavailable for this turn')
+    const board = { purpose: 'reference', uiReference: { viewport: { width: 720, height: 1280 },
+      style: 'Selected game design', screens: [{ id: 'menu', description: 'Main menu composition' }] } }
+    await writeFile(join(root, 'board.json'), JSON.stringify(board))
+    await save({ ...valid, assets: { ...valid.assets, screenOrientation: 'Landscape' } })
+    for (const args of [['ui-board-plan', 'board.json'], ['generate', 'board.json', 'assets/rejected-board.png']]) {
+      const result = await invoke(capabilityFile, ...args)
+      expect(result.code).not.toBe(0)
+      expect(result.stderr).toContain('conflicts with the confirmed Landscape orientation')
+    }
+    expect(oldPosts).toBe(0); expect(newRequests).toBe(0)
+    expect(JSON.parse(await readFile(join(root, 'board.json'), 'utf8'))).not.toHaveProperty('requestId')
+    await save({ ...valid, assets: { ...valid.assets, screenOrientation: 'Portrait' } })
+    expect((await invoke(capabilityFile, 'ui-board-plan', 'board.json')).code).toBe(0)
     await save(valid)
+    expect((await invoke(capabilityFile, 'ui-board-plan', 'board.json')).code).toBe(0)
     mode = 'http-error'
     const upstreamFailure = await invoke(capabilityFile, 'cost')
     expect(upstreamFailure.stderr).toContain('Capability HTTP 503')
@@ -758,3 +860,49 @@ test('managed asset commands reject absent or mismatched access and pin a paid a
     expect(newRequests).toBe(1)
   } finally { bridge.stop(true); replacement.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 30000)
+
+for(const mode of ['transparent','opaque','preview-unavailable'] as const)
+test('image MCP returns source facts and one viewing preview without changing the paid image: '+mode,async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-image-mcp-preview-'))
+  const original=await sharp({create:{width:40,height:40,channels:mode==='opaque'?3:4,
+    background:mode==='opaque'?'#d66':{r:10,g:20,b:30,alpha:1/255}}}).png().toBuffer()
+  let calls=0
+  const api=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    if(request.method==='GET')return Response.json({available:true,billingSource:'external'})
+    calls++;return new Response(new Uint8Array(original),{headers:{'content-type':'image/png','x-image-billing-state':'generated','x-image-credits-micro':'100'}})
+  }})
+  const client=new Client({name:'fixture',version:'1'})
+  try {
+    const script=join(root,'images.mjs')
+    await writeProjectAssetCommand(script,{imageEndpoint:api.url.origin+'/generate',imageMcpModules:{
+      server:import.meta.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio:import.meta.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types:import.meta.resolve('@modelcontextprotocol/sdk/types.js')}})
+    await client.connect(new StdioClientTransport({command:process.execPath,args:[script,'--mcp'],cwd:root,stderr:'pipe',
+      env:{...Object.fromEntries(Object.entries(process.env).filter((entry):entry is [string,string]=>typeof entry[1]==='string')),
+        BEEGAME_ASSET_CAPABILITY_FILE:'',BEEGAME_SHARP_MODULE:mode==='preview-unavailable'?new URL('./absent-preview-decoder.mjs',import.meta.url).href:import.meta.resolve('sharp')}}))
+    const tools = await client.listTools()
+    expect(tools.tools.map(tool => tool.name)).toEqual(['generate_image'])
+    const description = tools.tools[0]!.description!
+    for (const use of ['character reference sheets', 'per-character action pose sheets', 'game-element atlases', 'UI atlases', 'backgrounds', 'assets.mjs cost']) expect(description).toContain(use)
+    expect(description).toContain('pose consistency, frame geometry and playback need inspection')
+    expect(calls).toBe(0)
+    const result=await client.callTool({name:'generate_image',arguments:{request:{purpose:'production',prompt:'Synthetic artwork',background:mode==='opaque'?'opaque':'transparent'},outputPath:'assets/sheet.png'}})
+    expect(result.isError).not.toBe(true)
+    if(!Array.isArray(result.content))throw Error('Missing MCP contents')
+    const facts=JSON.parse(result.content[0].text)
+    expect(facts).toMatchObject({path:'assets/sheet.png',sha256:createHash('sha256').update(original).digest('hex'),width:40,height:40,billingState:'generated',chargedCredits:0.0001})
+    expect((await readFile(join(root,'assets/sheet.png'))).equals(original)).toBe(true)
+    const images=result.content.filter(item=>item.type==='image')
+    expect(images).toHaveLength(mode==='transparent'?1:0)
+    if(mode==='transparent') {
+      expect(result.content.some(item=>item.type==='text'&&item.text.includes('not a production asset'))).toBe(true)
+      const {data,info}=await sharp(Buffer.from(images[0].data,'base64')).ensureAlpha().raw().toBuffer({resolveWithObject:true})
+      expect([info.width,info.height]).toEqual([40,40])
+      for(let i=3;i<data.length;i+=4)expect(data[i]).toBe(255)
+      expect(data[0]).toBeGreaterThan(200)
+      expect(new Set(Array.from({length:info.width},(_,x)=>data[x*4])).size).toBeGreaterThan(1)
+    }
+    if(mode==='preview-unavailable')expect(result.content.some(item=>item.type==='text'&&item.text.includes('Image saved; viewing preview unavailable'))).toBe(true)
+    expect(calls).toBe(1)
+    expect(await (await import('node:fs/promises')).readdir(join(root,'assets'))).toEqual(['sheet.png'])
+  }finally{await client.close();api.stop(true);await rm(root,{recursive:true,force:true})}
+},15_000)

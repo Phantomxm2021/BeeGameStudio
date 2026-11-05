@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { ImageGenerationConfig, ImageSource } from './config'
 
 export type ImageRequest = {
@@ -30,9 +31,10 @@ export interface ImageGenerationProvider {
 }
 
 export class ImageProviderError extends Error {
+  readonly diagnosticId = randomUUID()
   constructor(message: string, readonly outcome: 'rejected' | 'unknown', readonly status?: number,
-    readonly code: string = 'provider-error') {
-    super(message)
+    readonly code: string = 'provider-error', options?: ErrorOptions) {
+    super(message, options)
     this.name = 'ImageProviderError'
   }
 }

@@ -5,7 +5,7 @@ import { lstat, mkdir, open, readFile, realpath, unlink } from 'node:fs/promises
 import { hostname } from 'node:os'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { array, boolean, discriminatedUnion, literal, object, record, string, union, unknown, url } from 'zod/v4'
-import { registerBeeGameLocalResources, readBeeGameAssetManifest, type BeeGameAuthoredResourceInput, type BeeGameAssetManifest } from './asset-contracts'
+import { registerBeeGameLocalResources, readBeeGameAssetManifest, BEEGAME_RESOURCE_ROOTS, type BeeGameAuthoredResourceInput, type BeeGameAssetManifest } from './asset-contracts'
 import { parseBeeGameProgrammaticAudioResource } from './programmatic-audio-resource'
 import { atlasRequestSchema, produceMedia } from './media-production'
 import { renderAssetManifestAuthoringContract } from './asset-manifest-authoring-contract'
@@ -332,17 +332,17 @@ export async function produceResources(workspace: string, value: unknown, fetche
 }
 
 export const RESOURCE_HELP = `Usage: bun <resources-entry> request.json
-  --register-from request-1.json request-2.json   Combine registration requests
-  --registration-lock                              Inspect registration lock owner/state (read-only)
-  --list [RESOURCE-ID ...] [--details]           Read saved resource records
-  --contract registration                      Input fields and complete minimal request
-  --contract atlas | --contract tilemap         Format-specific reference
-  --contract [full]                             Complete registry reference
-  --help full                                  Audio recipes, font acquisition and provenance fields
-  --capabilities                               Available operations
-Operations: register, audio, fonts. Image/atlas processing uses the supplied media.mjs entry.
-For locally authored files, omit source and supply resource.reason; the host computes hashes and registry modules. Explicit source is web or resource-library with provenance. User-provided files use the upload/import path.
-Read --contract registration before first registration. Once established, projectTarget cannot be changed through registration; supply files in its listed formats. Keep actual requirement IDs consistent; these inputs are not the saved Manifest format.
+  --register-from request-1.json request-2.json  Combine registration requests
+  --registration-lock  Inspect registration lock owner/state (read-only)
+  --list [RESOURCE-ID ...] [--details]  Read saved resource records
+  --contract registration  Input fields and complete minimal request
+  --contract atlas | --contract tilemap  Format-specific reference
+  --contract [full]  Complete registry reference
+  --help full  Audio recipes, font acquisition and provenance fields
+  --capabilities  Available operations
+Operations: register, audio, fonts, atlas. Atlas returns files and a registrationRequest for --register-from. Crop/resize uses media.mjs images; register its actual outputs. Processing does not call generation.
+Local files: omit source; supply resource.reason. The host computes hashes/modules. Web/library files need provenance; user files use the upload/import path.
+Use --contract registration when registration fields are missing from context; reuse an available contract. BGS roots are fixed: runtime_asset_root="${BEEGAME_RESOURCE_ROOTS.runtime}", generated_asset_root="${BEEGAME_RESOURCE_ROOTS.generated}"; registered files belong beneath "${BEEGAME_RESOURCE_ROOTS.runtime}/", independently of public runtime URLs. Keep projectTarget platform/runtime/roots/source preferences fixed. For format additions, resubmit asset_format_capabilities after checking runtime support; retain existing formats. See --help full. Keep actual requirement IDs consistent; these inputs are not the saved Manifest format.
 If registration.lock remains, the host operator must first confirm that BGS and every independent resources registration process have exited and that no other recovery is running. Then inspect this lock and move exactly assets/manifest/registration.lock aside while preserving a backup. Agents must not remove it based on a PID or their own confirmation.
 No package installation is needed. Tools do not certify artistic or gameplay quality.`
 
@@ -354,13 +354,13 @@ const RESOURCE_DETAILS = `Usage: bun <resources-entry> --capabilities
 --list reads the current registry without writing: all IDs/fulfills/default roots/statuses/file counts. Specified IDs also return exact member paths. --details returns full selected records including hashes/provenance. Do not cat every resource module or reread large persisted output merely to find binding operands.
 --registration-lock is read-only. If a lock remains after an interruption, the host operator must confirm that BGS and every independent resources registration process have exited and no other recovery is running, inspect the metadata, then move exactly assets/manifest/registration.lock aside while preserving a backup. Agents must not remove it based on a PID or their own confirmation.
 No package installation is needed. Existing image processing/atlas packing stays at media.mjs.
-atlas: media.mjs atlas fields plus resource:{id,fulfills,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}, registrationOutput:"assets/atlas-registration.json". Produces the actual atlas/frame table and a ready-to-register request with exact output paths. No manual rectangles, hashes or registry edits. Registration requests can be combined with --register-from. Existing images/media.mjs remain supported.
+atlas (resources.mjs request.json): media.mjs atlas fields plus resource:{id,fulfills,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}, registrationOutput:"assets/atlas-registration.json". Produces the actual atlas/frame table and a ready-to-register request with exact output paths. No manual rectangles, hashes or registry edits. Registration requests can be combined with --register-from. Existing images/media.mjs remain supported.
 register: {operation:"register",resources:[{id,fulfills,root_path,file_paths,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}],projectTarget?,requirements?}.
 Registration input is NOT a canonical manifest resource. For locally agent-authored files, omit source and supply resource.reason; the registrar writes source.type=agent-authored and created_at. Explicit source accepts only web or resource-library with the fields below. Do not copy canonical agent-authored/user-provided source objects, status, selected_at or local_file_hashes into a request. User-provided files use the upload/import path; do not relabel them as agent-authored.
 selection_reason is a non-empty string array, not a string. Encoded audio (including recipe-rendered WAV) uses asset_kind:"audio-clip" (or music/ambience/voice), never "audio". Structured synthesis JSON uses audio-cue/audio-bank and is not encoded playback evidence.
 projectTarget and requirements describe the whole project. A configuration request with resources:[] can be combined with resource requests using --register-from config.json resources-1.json resources-2.json. This is one registration batch, not repeated initialization.
-projectTarget uses the Manifest project's project_target fields: {platform,runtime,asset_format_capabilities,resource_library_usage,runtime_asset_root,generated_asset_root}. For a Web consumer proven to load PNG/WAV/WOFF2/JSON, an example is {platform:"web",runtime:"react",asset_format_capabilities:["png","wav","woff2","json"],resource_library_usage:"optional",runtime_asset_root:"assets/runtime",generated_asset_root:"assets/generated"}. This example is NOT platform evidence or permission to broaden an existing target. Use the actual approved runtime and all required supported formats, including fonts and metadata; never infer global capabilities from one resource group’s file extensions.
-Use --contract for exact requirement objects/enums without creating a Manifest. Use the actual resources/media entries supplied in the project context. Every fulfills ID must be an actual requirement id, not its display name or a resource id. Once established, projectTarget cannot be changed through registration: omit it or pass the unchanged value, and supply files in its listed formats. Existing requirements cannot be redefined. Hashes and registry modules are computed, never supplied. Web resources use source:{type:"web",source_url,page_url,license,license_url?,retrieved_at}; fonts are not agent-authored. Library downloads return registrationSource:{type:"resource-library",pack_id,pack_version,element_id,element_path}; preserve it as source. Include required downloaded dependencies in file_paths and dependencies:[{key,parent_key,element_id,element_path,reference_path,local_path,kind?}]. Missing files or unregistered dependency paths fail registration; no manual manifest edits or source relabeling.
+projectTarget uses the Manifest project's project_target fields: {platform,runtime,asset_format_capabilities,resource_library_usage,runtime_asset_root,generated_asset_root}. runtime_asset_root is fixed at "${BEEGAME_RESOURCE_ROOTS.runtime}" and generated_asset_root at "${BEEGAME_RESOURCE_ROOTS.generated}"; register files under the runtime root, not a public URL root. For a Web consumer proven to load PNG/WAV/WOFF2/JSON, an example is {platform:"web",runtime:"react",asset_format_capabilities:["png","wav","woff2","json"],resource_library_usage:"optional",runtime_asset_root:"assets/runtime",generated_asset_root:"assets/generated"}. This example is NOT evidence that a runtime supports those formats. Use the actual approved runtime and all required supported formats, including fonts and metadata; never infer global capabilities from one resource group’s file extensions.
+Use --contract for exact requirement objects/enums without creating a Manifest. Use the actual resources/media entries supplied in the project context. Every fulfills ID must be an actual requirement id, not its display name or a resource id. Omit projectTarget to keep it, or resubmit the same platform/runtime/roots/source preferences with an expanded asset_format_capabilities list after checking the consumer supports those formats. Existing formats cannot be removed. Existing requirements cannot be redefined. Hashes and registry modules are computed, never supplied. Web resources use source:{type:"web",source_url,page_url,license,license_url?,retrieved_at}; fonts are not agent-authored. Library downloads return registrationSource:{type:"resource-library",pack_id,pack_version,element_id,element_path}; preserve it as source. Include required downloaded dependencies in file_paths and dependencies:[{key,parent_key,element_id,element_path,reference_path,local_path,kind?}]. Missing files or unregistered dependency paths fail registration; no manual manifest edits or source relabeling.
 Registration stdout lists resource IDs, file counts and the canonical manifest location; source facts, full paths and computed hashes remain in its modules. Append --details only when those full values are needed. Do not grep bundled implementations to discover these input fields.
 audio: {operation:"audio",recipe:{format:"beegame-programmatic-audio-v1",cues:[{id,duration_ms,loop?:{start_ms,end_ms},voices:[{source:{type:"oscillator",waveform:"sine"|"square"|"triangle"|"sawtooth",frequency_hz,end_frequency_hz?},start_ms,duration_ms,gain,attack_ms?,release_ms?,pan?}]}]},outputs:{"cue-id":"assets/runtime/cue.wav"},sampleRate?:44100}.
 Noise source is {type:"noise",color:"white"|"pink"|"brown"}. Sample rates 22050/44100/48000; stereo PCM16. Peak normalization is reported. Loop metadata is returned for runtime binding, not an assertion of seamless audio. Repeated identical bytes reuse files; different bytes require a new path.
@@ -383,7 +383,7 @@ export async function runResourceProductionCli(args = process.argv.slice(2)) {
     if (args[0] === '--capabilities') {
       console.log(JSON.stringify({ registration: true, audioSynthesisWav: true, fontDownload: true,
         atlasWithRegistrationRequest: true, batchRegistrationFromFiles: true,
-        aiMusicGeneration: false, fontSubsetting: false, atlasCommand: 'Use the supplied media entry with --help',
+        aiMusicGeneration: false, fontSubsetting: false, atlasCommand: 'resources.mjs request.json: atlas fields + resource + registrationOutput; media.mjs --help describes image processing fields',
         imageRuntimeConfigured: Boolean(process.env.BEEGAME_SHARP_MODULE) })); return
     }
     const root = await realpath(process.cwd())
@@ -409,7 +409,26 @@ export async function runResourceProductionCli(args = process.argv.slice(2)) {
       if (args.length !== 1) throw Error(RESOURCE_HELP)
       request = await readRequest(args[0]!)
     }
-    const result = await produceResources(root, request)
+    let result
+    if (request.operation === 'register' && process.env.BEEGAME_ASSET_CAPABILITY_FILE) {
+      // The CLI can read registry facts but only the existing host capability writes them.
+      const capability = JSON.parse(await readFile(process.env.BEEGAME_ASSET_CAPABILITY_FILE, 'utf8'))
+      if (capability.version !== 1 || capability.workspace !== root ||
+          typeof capability.sessionId !== 'string' || !capability.sessionId ||
+          typeof capability.executionId !== 'string' || !capability.executionId ||
+          typeof capability.assets?.registrationEndpoint !== 'string')
+        throw Error('Resource registration capability is unavailable for this workspace')
+      const endpoint = new URL(capability.assets.registrationEndpoint)
+      if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' ||
+          endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
+        throw Error('Invalid resource registration endpoint')
+      const response = await fetch(endpoint, { method: 'POST', redirect: 'error',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ registration: request }) })
+      result = await response.json() as Awaited<ReturnType<typeof produceResources>>
+      if (!response.ok) {
+        console.log(JSON.stringify(result)); process.exitCode = 1; return
+      }
+    } else result = await produceResources(root, request)
     console.log(JSON.stringify(!details && result.operation === 'register' && result.valid
       ? { ...result, resources: result.resources.map(item => ({
           id: item.id, fileCount: item.file_paths.length,

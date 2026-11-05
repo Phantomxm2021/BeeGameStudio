@@ -150,3 +150,19 @@ test('settings API reads individual profiles without activation, saves and clear
     else process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = previous
   }
 })
+
+
+test('Vercel reference requests reuse the Images edit protocol and base64 response contract', async () => {
+  const config = { ...defaultImageConfig('vercel'), apiKey: 'gateway-key' }
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  let calls = 0
+  const adapter = createImageGenerationProvider('vercel', async (url, init) => {
+    calls++
+    expect(url).toBe('https://ai-gateway.vercel.sh/v1/images/edits')
+    expect(JSON.parse(String(init.body))).toMatchObject({ response_format: 'b64_json',
+      images: [{ image_url: 'data:image/png;base64,' + png.toString('base64') }] })
+    return Response.json({ data: [{ b64_json: png.toString('base64') }] })
+  })
+  await adapter.generate(config, { prompt: 'Use this layout', referenceImage: { bytes: png, sha256: 'a'.repeat(64), mimeType: 'image/png' } })
+  expect(calls).toBe(1)
+})

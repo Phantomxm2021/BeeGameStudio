@@ -214,14 +214,18 @@ test('batch registration computes hashes, preserves web provenance and leaves re
     for (const term of ['bad-image', 'bad-font', 'wrong-name', 'wrong-font-id', 'png', 'woff2', 'allowed=json', 'no registry changes'])
       expect(diagnostic).toContain(term)
     expect(diagnostic).toContain('Use files in the listed formats')
-    expect(diagnostic).toContain('Registration cannot change an established projectTarget or add formats')
+    expect(diagnostic).toContain('explicitly expand asset_format_capabilities')
     expect(diagnostic).not.toContain('before correcting projectTarget')
     expect(await readFile(join(root, 'assets/asset-manifest.json'), 'utf8')).toBe(before)
-    expect(RESOURCE_HELP).toContain('projectTarget cannot be changed through registration')
-    expect(RESOURCE_HELP).toContain('supply files in its listed formats')
-    await expect(produceResources(root, { ...request, projectTarget: { ...fixture.project_target,
-      asset_format_capabilities: [...fixture.project_target!.asset_format_capabilities, 'woff2'] } }))
-      .rejects.toThrow('Omit projectTarget or pass the unchanged target; use files in its supported formats')
+    expect(RESOURCE_HELP).toContain('Keep projectTarget platform/runtime/roots/source preferences fixed')
+    expect(RESOURCE_HELP).toContain('retain existing formats')
+    // Format additions are explicit consumer declarations; unchanged replay remains idempotent.
+    const expanded={...fixture.project_target!,asset_format_capabilities:[...fixture.project_target!.asset_format_capabilities,'png']}
+    for (const target of [
+      {...expanded,runtime:'another-runtime'}, {...expanded,platform:'another-platform'},
+      {...expanded,resource_library_usage:'required'}, {...expanded,asset_format_capabilities:['png']},
+      {...expanded,runtime_asset_root:'other-root'}, {...expanded,asset_format_capabilities:[...expanded.asset_format_capabilities,'image/png']},
+    ]) await expect(produceResources(root,{...request,projectTarget:target})).rejects.toThrow()
     expect(await readBeeGameAssetManifest(root)).toEqual(manifest)
     const { projectTarget: _target, ...withoutTarget } = request
     expect((await produceResources(root, withoutTarget)).valid).toBe(true)
@@ -239,6 +243,10 @@ test('batch registration computes hashes, preserves web provenance and leaves re
     await expect(produceResources(root, { ...request, resources: [{ ...input, local_file_hashes: {} }] })).rejects.toThrow()
     // Failure released the lock; a valid retry can proceed.
     expect((await produceResources(root, request)).valid).toBe(true)
+    expect((await produceResources(root,{operation:'register',resources:[],projectTarget:expanded})).valid).toBe(true)
+    expect((await readBeeGameAssetManifest(root)).project_target).toEqual(expanded)
+    expect((await readBeeGameAssetManifest(root)).resources).toEqual(manifest.resources)
+    expect((await produceResources(root,{operation:'register',resources:[],projectTarget:expanded})).valid).toBe(true)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -412,5 +420,29 @@ test('registration input distinguishes generated provenance and reports exact we
     const saved = await readBeeGameAssetManifest(root)
     expect(saved.resources[0]!.source).toMatchObject({ type: 'agent-authored', reason: input.reason })
     expect(saved.resources[0]!.source).toHaveProperty('created_at')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+
+test('published registration request keeps fixed roots and the real registrar still rejects alternate roots and paths', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-visible-registration-'))
+  try {
+    const contract = renderAssetManifestAuthoringContract('registration')
+    const request = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(contract)![1]!)
+    expect(contract).toContain('BGS-owned roots are fixed')
+    expect(RESOURCE_HELP).toContain('runtime_asset_root="' + request.projectTarget.runtime_asset_root + '"')
+    await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
+    await writeFile(join(root, request.resources[0].root_path), '{"fixture":true}')
+    for (const [field, value] of [['runtime_asset_root', 'public/art'], ['generated_asset_root', 'assets/art']]) {
+      await expect(produceResources(root, { ...request, projectTarget: { ...request.projectTarget, [field!]: value } }))
+        .rejects.toThrow(field! + ' must be')
+    }
+    expect((await produceResources(root, request)).valid).toBe(true)
+    await mkdir(join(root, 'assets/art'), { recursive: true })
+    await writeFile(join(root, 'assets/art/resource.json'), '{"fixture":true}')
+    await expect(produceResources(root, { operation: 'register', resources: [{ ...request.resources[0], id: 'outside-root',
+      root_path: 'assets/art/resource.json', file_paths: ['assets/art/resource.json'] }] }))
+      .rejects.toThrow('Resource path is outside canonical asset root')
+    expect((await readBeeGameAssetManifest(root)).resources).toHaveLength(1)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

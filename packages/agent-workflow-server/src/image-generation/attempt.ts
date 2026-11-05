@@ -17,7 +17,9 @@ export type ImageAttemptInput = {
   /** Host preflight for new work only; never part of the paid request digest. */
   validateNewRequest?: () => void
 }
-export class ImageRequestValidationError extends Error {}
+export class ImageRequestValidationError extends Error {
+  constructor(message: string, readonly code: 'resource-intent' | 'image-prompt-conflict' = 'resource-intent') { super(message) }
+}
 type StoredResult = Omit<ImageResult, 'bytes'> & { base64: string }
 type Record = {
   digest: string
@@ -119,7 +121,7 @@ export class ImageAttemptStore {
         // A completed generation remains billable even if its download is rejected.
         const rejected = !reference && error instanceof ImageProviderError && error.outcome === 'rejected'
         const status = error instanceof ImageProviderError ? error.status : undefined
-        const diagnosticId = randomUUID()
+        const diagnosticId = error instanceof ImageProviderError ? error.diagnosticId : randomUUID()
         const code = error instanceof ImageProviderError ? error.code : 'provider-execution-failed'
         console.warn('[image-generation]', { event: 'attempt-failed', diagnosticId,
           projectId: input.projectId, requestId: input.requestId, provider: config.provider,

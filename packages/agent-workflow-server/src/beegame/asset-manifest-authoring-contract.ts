@@ -101,7 +101,7 @@ Required acquisition_profile enums (case-sensitive, non-empty arrays):
 - dimensions: ${RESOURCE_DIMENSIONS.join(', ')}
 - asset_kinds: ${RESOURCE_ASSET_KINDS.join(', ')}
 
-Minimal local-authoring request (replace example values with actual project facts):
+Minimal local-authoring request (replace placeholder IDs, runtime, formats and filenames; retain the fixed BGS roots):
 
 \`\`\`json
 ${json({ operation: 'register', projectTarget: examples.canonical.project_target,
@@ -112,6 +112,7 @@ ${json({ operation: 'register', projectTarget: examples.canonical.project_target
   }] })}
 \`\`\`
 
+BGS-owned roots are fixed: runtime_asset_root="${BEEGAME_RESOURCE_ROOTS.runtime}" and generated_asset_root="${BEEGAME_RESOURCE_ROOTS.generated}". Registered resource files belong beneath "${BEEGAME_RESOURCE_ROOTS.runtime}/"; these source locations are not the engine's public URL root.
 The example target supports JSON only; supply the actual approved runtime and supported formats.
 For locally authored files, omit source and supply resource.reason. Explicit source accepts web or resource-library provenance; user-provided files use the upload/import path.
 Hashes, status, timestamps and registry modules are computed, not request fields.
@@ -170,7 +171,7 @@ ${registration}
   \`assets/manifest/resources/\` whose root is one resource object.
 - Every required requirement must be named by at least one resource's
   \`fulfills\` array. Resource files belong under
-  \`project_target.runtime_asset_root\` (normally \`assets/runtime\`).
+  \`project_target.runtime_asset_root\` (fixed at \`${BEEGAME_RESOURCE_ROOTS.runtime}\`).
 - Use workspace-relative paths. Record source, licence facts where applicable,
   and hashes as \`local_file_hashes: { "assets/runtime/file.ext": "64-character lowercase sha256" }\`.
   \`hashes\` is not consumed for integrity checking; do not use it instead.
@@ -229,11 +230,10 @@ tools directory supplied in the project context. Read formats with
 \`bun <current-tools-directory>/resources.mjs --contract full\` or select
 \`registration\`, \`atlas\`, or \`tilemap\` as needed.
 
-After saving content/index.json and its content files, use
-\`bun <current-tools-directory>/check-content.mjs --current\` to check saved
-content and resource references. This command requires a content index.
-The host's measurement checks inspect registered resource structures even when
-no content index exists. Registration and --list do not certify complete
+\`CheckResourcesAndBindings {}\` inspects Manifest requirements and actual
+registered files, hashes, members and atlas structures; no platform requires
+BGS Scene/UI JSON or a content index. Native bindings and action/state wiring
+need target-runtime observations. Registration and --list do not certify complete
 resource delivery; --list only reads saved registration records.
 These checks do not certify artistic or gameplay quality or target-runtime
 consumption. If correcting an existing delivery, retain usable assets and

@@ -127,3 +127,20 @@ test('PNG metadata distinguishes alpha channels, transparency chunks, absence an
   const overflow=pngMetadata(2,end);new DataView(overflow.buffer).setUint32(33,0xffffffff)
   expect(inspectResourceBytes('image.png',overflow)).not.toHaveProperty('hasAlpha')
 })
+
+
+test('static WebP facts come from real lossy/lossless containers; truncated or unsupported streams stay unknown', async () => {
+  const {default:sharp}=await import('sharp')
+  for (const lossless of [false,true]) {
+    const bytes=await sharp({create:{width:17,height:9,channels:4,background:{r:200,g:20,b:10,alpha:0.4}}}).webp({lossless}).toBuffer()
+    expect(inspectResourceBytes('sprite.webp',bytes)).toMatchObject({width:17,height:9,hasAlpha:true})
+    expect(await inspectUploadedResource(new File([bytes],'sprite.webp'))).toMatchObject({width:17,height:9,hasAlpha:true,contentHash:expect.any(String)})
+    expect(inspectResourceBytes('sprite.webp',bytes.subarray(0,bytes.length-1))).toEqual({})
+    const corrupt=Buffer.from(bytes);corrupt.writeUInt32LE(0xffffffff,16)
+    expect(inspectResourceBytes('sprite.webp',corrupt)).toEqual({})
+  }
+  const opaque=await sharp({create:{width:5,height:3,channels:3,background:'#ef1010'}}).webp().toBuffer()
+  expect(inspectResourceBytes('opaque.webp',opaque)).toMatchObject({width:5,height:3,hasAlpha:false})
+  const fake=Buffer.alloc(30);fake.write('RIFF');fake.writeUInt32LE(22,4);fake.write('WEBPVP8X',8);fake.writeUInt32LE(10,16)
+  expect(inspectResourceBytes('missing-image.webp',fake)).toEqual({})
+})

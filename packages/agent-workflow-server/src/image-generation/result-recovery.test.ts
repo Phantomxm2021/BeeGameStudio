@@ -149,21 +149,24 @@ test('completed Cloudflare output recovers through the safe downloader without a
   }
 })
 
-test('unknown receipt without a result reference remains non-retryable', async () => {
+test.each(['network-error', 'request-aborted'])('unknown %s receipt without a result reference remains non-retryable after restart', async code => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-result-no-reference-'))
   const billing = wallet()
   let calls = 0
+  const failure = new ImageProviderError('upstream outcome unknown', 'unknown', undefined, code)
   const provider: ImageGenerationProvider = {
     async generate(): Promise<ImageResult> {
       calls++
-      throw new ImageProviderError('upstream outcome unknown', 'unknown', 502, 'network-error')
+      throw failure
     },
   }
   const first = new ImageGenerationService(new ImageAttemptStore(root, provider), billing.client)
   try {
-    await expect(first.generate(input())).rejects.toMatchObject({ reason: 'unknown' })
+    await expect(first.generate(input())).rejects.toMatchObject({ reason: 'unknown', code })
+    const receipt = JSON.parse(readFileSync(join(root, readdirSync(root)[0]!, 'receipt.json'), 'utf8'))
+    expect(receipt).toMatchObject({ state: 'unknown', code, diagnosticId: failure.diagnosticId })
     const second = new ImageGenerationService(new ImageAttemptStore(root, provider), billing.client)
-    await expect(second.generate(input())).rejects.toMatchObject({ reason: 'unknown', replayed: true })
+    await expect(second.generate(input())).rejects.toMatchObject({ reason: 'unknown', code, diagnosticId: receipt.diagnosticId, replayed: true })
     expect(calls).toBe(1)
     expect(billing.actions).toEqual(['reserve', 'reserve'])
   } finally { rmSync(root, { recursive: true, force: true }) }

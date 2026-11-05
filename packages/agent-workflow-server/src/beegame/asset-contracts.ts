@@ -492,8 +492,18 @@ export async function registerBeeGameLocalResources(
 ): Promise<BeeGameAssetManifest> {
   const root = normalizeWorkspacePath(workspacePath)
   let manifest = await readBeeGameAssetManifest(root)
-  if (options.projectTarget && manifest.project_target && !isDeepStrictEqual(options.projectTarget, manifest.project_target))
-    throw new Error('Registration cannot change the established project target. Omit projectTarget or pass the unchanged target; use files in its supported formats.')
+  let addedFormats: string[] = []
+  if (options.projectTarget && manifest.project_target) {
+    const issues: string[] = []
+    validateTarget(options.projectTarget, issues)
+    if (issues.length) throw new BeeGameAssetManifestError(issues)
+    const { asset_format_capabilities: existingFormats, ...existingTarget } = manifest.project_target
+    const { asset_format_capabilities: suppliedFormats, ...suppliedTarget } = options.projectTarget
+    if (!isDeepStrictEqual(existingTarget, suppliedTarget) ||
+        !Array.isArray(suppliedFormats) || existingFormats.some(format => !suppliedFormats.includes(format)))
+      throw new Error('Registration cannot change the established platform, runtime, roots or source preferences, or remove supported formats.')
+    addedFormats = suppliedFormats.filter(format => !existingFormats.includes(format))
+  }
   for (const requirement of options.requirements ?? []) {
     const existing = manifest.requirements.find(item => item.id === requirement.id)
     if (existing && !isDeepStrictEqual(existing, requirement))
@@ -505,7 +515,7 @@ export async function registerBeeGameLocalResources(
   })
   const establishedTarget = requireProjectTarget(manifest)
   const additionalFormatCapabilities = uniqueStrings(
-    options.additionalFormatCapabilities ?? [],
+    [...(options.additionalFormatCapabilities ?? []), ...addedFormats],
   )
   const target = additionalFormatCapabilities.length
     ? validateTarget(
@@ -1300,7 +1310,7 @@ function assertFilenameFormatAllowed(
   const format = normalizeFormat(extname(filename).slice(1))
   if (!format || !allowed.has(format))
     throw new Error(
-      `Resource format is not supported by the target: ${filename}; extension=${format || '(none)'}; allowed=${[...allowed].join(', ')}. Use files in the listed formats. Registration cannot change an established projectTarget or add formats.`,
+      `Resource format is not supported by the target: ${filename}; extension=${format || '(none)'}; allowed=${[...allowed].join(', ')}. Use files in the listed formats, or explicitly expand asset_format_capabilities after confirming support in the same runtime. Platform, runtime, roots and source preferences stay fixed.`,
     )
 }
 

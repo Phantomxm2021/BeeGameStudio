@@ -1,6 +1,6 @@
 // Project-local command adapter; managed sessions resolve current BGS capabilities per invocation.
-// The host prepends TOOL_CONFIG when copying this file into .beegame/tmp.
-import { createHash } from 'node:crypto'
+// The host prepends TOOL_CONFIG when copying this file into the current session work directory.
+import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
 import {
   lstat,
@@ -12,6 +12,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const catalogFilterKeys = ['packIds','dimensions','primaryCategories','categories','styles','gameTypes','packTags','usageTags','assetKinds','capabilities','formats']
 const catalogUsage = 'Catalog accepts structured filter arrays: '+catalogFilterKeys.join(', ')+
@@ -29,42 +30,42 @@ ${workspaceUsage}
   element <pack-id> <element-id>         Read element and dependency metadata
   fetch <pack-id> <element-id> <assets/path>  Download one selected library file and its complete dependency closure
   inspect <assets/path> [assets/path ...] Hash local assets in one call; no provenance/quality inference
-  cost [quality] [size]                 Show availability and the image Credit quote
+  cost [quality] [size]                 Show availability and image pricing terms
   ui-board-plan <request.json>          Read-only: complete game-screen design board grid and prompt, no network or billing
-  ui-assets-plan <request.json>         Read-only: design-linked runtime UI sheet, no network or billing
+  ui-assets-plan <request.json>         Optional reference-guided UI atlas planning, no network or billing
   generate <request.json> <assets/path>  Generate or revise a PNG; generate --help has JSON examples and quoting
   generate --help / ui-board-plan --help  Reference images and revisions
-  ui-assets-plan --help                Runtime UI skins from a selected design
+  ui-assets-plan --help                Optional reference-guided image work
   atlas <assets/sheet.png> <assets/frames.json> <assets/runtime/name.png>
                                          Publish named rectangles as a PNG + same-basename atlas JSON
 ${atlasInputFormat} Coordinates are integer source-image pixels from the top-left; x/y >= 0, w/h > 0. Rectangles must fit the PNG and not overlap. Both inputs are project-relative files under assets/; output is a new PNG under assets/runtime/.
-For compatible small AI-generated elements, prefer one shared sheet request; use atlas to publish inspected rectangles, then resources.mjs to register the pair. atlas copies the PNG bytes unchanged; separate part files and repacking are not required for a usable intact sheet. generate returns an image, not measured frame metadata. Inspect complete artwork, state alignment and sampling gutters; nonoverlap alone does not prove suitability. atlas does not pack separate images or approve appearance. A full-screen reference board is not automatically a production sheet. Split generation for a concrete visual/use need, preserving planned atlas delivery.
+Use atlas to publish inspected rectangles, then resources.mjs to register the pair. atlas copies the PNG bytes unchanged; separate part files and repacking are not required for a usable intact sheet. For static atlas generation, describe the elements, relative proportions and transparent separation; determine their source-pixel rectangles from the returned image for this import command. Inspect complete elements and sampling gutters; animated sheets additionally need pose alignment and playback checks. Nonoverlap alone does not prove suitability. atlas does not pack separate images or approve appearance. A full-screen reference board is not automatically a production sheet.
 For read-only decoded alpha/bounds measurements (operation:inspect), or a demonstrated need for crop/resize/composition and packing separate sprites, use ${TOOL_CONFIG.mediaCommand ?? 'bun <current-tools-directory>/media.mjs'} --help. Replace <current-tools-directory> with the current BGS tools directory supplied in the project context; keep the project root as cwd. Alpha bounds do not identify objects or automatically define safe crops. Its JSON request supports named crop regions, explicit filtering/padding and compatible atlas output; no package installation or custom PNG encoder is needed.
-Honor explicit source and resource-library preferences, usage rights and authorized cost. Choose sources and production methods with the applicable content pipeline Skill; commands here do not impose a sourcing order. Preserve required appearance and behavior. A generated sheet does not prove animation continuity, and PNG generation cannot supply a model or rig. No command updates the Manifest.
+Honor explicit source and resource-library preferences, usage rights and authorized cost. Preserve required appearance and behavior. No command updates the Manifest.
 ${catalogUsage}
 Commands are optional; unavailable access is not an empty catalog.`
 
 const imageUsage = `Image commands (prefix with bun <this-file>):
 ${workspaceUsage}
-For production assets, honor explicit source preferences, rights and charge authorization.
-  cost low <size>                        Read availability and price; no generation
+For production assets, honor explicit source preferences, rights and charge authorization. The existing cost command reports the current configured image model, availability and request options; it does not verify generated appearance or motion.
+For production artwork, determine image deliverables before per-object output paths: compatible static UI parts share a transparent UI atlas, and compatible static game parts share a separate game-element atlas. Submit each atlas as one image request listing all its required parts/states together. Use purpose: production and prompt from the confirmed appearance definitions; include requirementIds when requirements already exist. Neither a selected design image nor referenceImagePath is required. Describe silhouettes, relative proportions, materials, lighting and transparent separation; determine extraction bounds after generation. Backgrounds/layers with incompatible opacity or scale can remain separate; a family with only one required element can remain a single image. Character action sequences follow the sprite-animation method. Keep live text/values out of skins and production assets out of uiReference.screens.
+  cost low <size>                        Optional availability/price query; no generation
   ui-board-plan <request.json>           Optional offline board layout and chosen size
   generate <request.json> <assets/path>  Submit the JSON file; output must be a new path under assets/
-Request fields are JSON keys, not CLI flags. Use purpose: reference|experiment|production and a stable requestId; do not change the ID just to retry an unknown paid attempt. Production requires existing Manifest requirementIds; references/experiments do not fulfill runtime requirements. Missing metadata is only for recovery of an existing paid attempt.
-Optional keys: referenceImagePath, requirementIds, background (auto|opaque|transparent), quality (auto|low|medium|high|xhigh|max), size (1024x1024|1024x1536|1536x1024). Availability and the BGS delivery contract restrict these options: delivery quality remains low. Read cost for the actual quality/size within the authorized budget; generation also checks the quote before submission.
-Reference example (replace the screen/state inventory, content and viewport with the project's design):
-{"requestId":"screen-design-1","purpose":"reference","quality":"low","uiReference":{"viewport":{"width":1280,"height":720},"style":"Project visual direction","screens":[{"id":"title","description":"Complete title screen and primary action"},{"id":"play","description":"Complete game scene, subjects and HUD"},{"id":"pause","description":"Paused game with its overlay and actions"},{"id":"result","description":"Complete result screen and next actions"}]}}
-When choosing a game-screen overview board, use uiReference instead of prompt and list the required screens and key states in uiReference.screens; keep each Scene and HUD together. Viewport/content dimensions express design proportions, not literal output pixels. The system chooses the canvas when size is omitted. ui-board-plan reports that size; quote it and submit the SAME STRUCTURED file to generate, not the compiled prompt. The plan is a layout aid, not image validation.
-Revision example:
-{"requestId":"screen-design-2","purpose":"reference","quality":"low","size":"1536x1024","referenceImagePath":"assets/reference/selected.png","prompt":"Preserve composition and subjects; clarify the primary control's contrast."}
-referenceImagePath also works with uiReference. Use a project-relative PNG under assets/ and a provider reporting referenceImageSupported; viewing the image in chat does not pass it to generation. A reference guides the new image, not deterministic pixel editing. For a new free-form image, omit referenceImagePath.
-Inspect layout, hierarchy, subject identity and key-state coverage. Minor lettering/grid/pixel deviations alone do not require regeneration; exact requirements stay in documents and implementation. During reference generation, keep existing design documents unchanged unless the user explicitly requests a design change. Report image paths and consequential unresolved deviations at the requested delivery boundary. For a consequential correction, revise the affected complete screen with referenceImagePath. Full-game delivery continues from selected designs into needed UI atlases/skins and game assets without a separate request, within the existing budget and authorization. Stop after references only when the current assignment explicitly ends there; component explanation boards do not replace usable resources.
-For runtime UI skins use uiAssets (ui-assets-plan --help). For character/prop bitmap assets use purpose: production, requirementIds and prompt with the selected referenceImagePath; choose format and production methods with applicable Skills. Keep production assets out of uiReference.screens.`
+Request fields are JSON keys, not CLI flags. Use purpose: reference|experiment|production. For new work, omit requestId: generate assigns a unique ID and saves it in this JSON file before submission. For recovery, reuse the original file unchanged (including its saved requestId); an explicit requestId preserves an existing identity and is never automatically replaced. A new authorized design or revision uses a new file without requestId; do not remove or change an ID merely to retry an unknown paid attempt. Production can precede registration when no existing requirement or required-library policy blocks it. When requirements already exist, include their requirementIds. References/experiments do not fulfill runtime requirements. Missing metadata is only for recovery of an existing paid attempt.
+Optional keys: referenceImagePath, requirementIds, background (auto|opaque|transparent), quality (auto|low|medium|high|xhigh|max), size (1024x1024|1024x1536|1536x1024). Quality follows the request or configured default; a uiReference board defaults to low. Generation checks availability and applicable pricing before submission within charge authorization. Use cost when a price query or an explicit user budget needs it. fixedPrice:true supplies quotedCredits; fixedPrice:false is usage-priced with quotedCredits:null.
+Request shape only; replace screens with the distinct compositions needed to cover the GDD states; shared conditional variants map to those compositions in the handoff (this placeholder is not a screen inventory):
+{"purpose":"reference","quality":"low","uiReference":{"viewport":{"width":1280,"height":720},"style":"Shared GDD art direction and user visual choices","screens":[{"id":"state-from-gdd","description":"Player situation; necessary information/actions; GDD composition and constraints applicable to this state"}]}}
+When choosing a game-screen overview board, use uiReference instead of prompt. Derive screens from the GDD's detailed player-visible design: describe the situation, necessary information/actions, chosen composition and state-specific constraints. Use style for the shared GDD art direction and user visual choices. Image design develops concrete appearance and open visual details within that design, preserving functionality without extra controls, readouts or player-facing steps. Keep required overlays and recovery states, allowing defined copy/value and control-visibility variants to share a composition under the visual-production method. Apply gameplay camera constraints only to descriptions of states retaining that view. Each depicted panel shows one actual state; conditional reuse keeps mutually exclusive interfaces out of the same picture. Character/action sheets are resource work. Viewport is the main game viewport and follows the confirmed orientation; the tool derives grid/canvas from the list. Offline planning and submission apply the same orientation check. Quote the ui-board-plan size and submit the SAME STRUCTURED file. Its blank guide constrains input, not measured output.
+A targeted local concept edit or a separate adaptation overlay uses prompt instead of uiReference, with the supported image size and selected appearance. Its canvas may differ from the main game orientation; this does not change that orientation. Example repair of a missing required action in an otherwise usable composition:
+{"purpose":"reference","quality":"low","size":"1536x1024","referenceImagePath":"assets/reference/selected.png","prompt":"Preserve composition and subjects; uncover the required primary control hidden by the overlay, retaining only the actions available in this state."}
+referenceImagePath also works with uiReference. Use a project-relative PNG under assets/ and a provider reporting referenceImageSupported; viewing the image in chat does not pass it to generation. A reference guides the new image, not deterministic pixel editing. For a requested new composition or correction of a conflicting reference, omit that referenceImagePath; uiReference then uses the blank layout guide. If the prior request already used this guide, repeating it with stronger wording is the same method. Preserve confirmed identity, style and palette without inventing layout or camera requirements. For a new free-form image, omit referenceImagePath.
+For concept inspection and handoff, follow the shared visual-production Skill and the current stage result contract. Screen concepts are reference images, not runtime assets; the requested layout is planning data, not a measurement of the generated image.`
 
-const uiAssetUsage = `Runtime UI skins (common request fields and quoting: generate --help).
-Apply the production source priority in --help; explicit user source choices take precedence.
-Production includes existing Manifest requirementIds for PNG-compatible parts; register needs with resources: [] before files exist. PNG may supply a 3D/XR texture, not a model, rig or runtime behavior.
-For production UI skins replace prompt with uiAssets:{elements:[{id,description,width,height},...]}, purpose:production, existing requirementIds and referenceImagePath pointing to the selected UI design. Descriptions identify appearance/state in that design, not an invented visual direction. ui-assets-plan reads/hashes the actual reference and computes a shared transparent grid; generate accepts the same request. It does not generate automatically or assign frame coordinates. Keep live text/values/progress/hit areas in runtime UI; use existing media/resources for inspected named frames. Procedural UI remains supported, but this production path does not turn a reference board into a runtime atlas or certify visual fidelity.`
+const uiAssetUsage = `Optional reference-guided UI atlas (common request fields and quoting: generate --help).
+Use this path for an explicitly reference-guided image task. Ordinary resource production uses purpose: production and prompt from confirmed appearance definitions, without requiring a selected design image; explicit user source choices take precedence.
+Production artwork may be generated before any Manifest requirements exist, then registered with actual paths and provenance. This does not satisfy a resource requirement automatically. If requirements are already registered, include their requirementIds for PNG-compatible parts; omitting them cannot bypass source constraints.
+For this reference-guided operation replace prompt with uiAssets:{elements:[{id,description,width,height},...]}, purpose:production, requirementIds when requirements already exist, and referenceImagePath pointing to the selected UI design. Descriptions identify appearance/state in that design, not an invented visual direction. ui-assets-plan reads/hashes the actual reference and compiles a shared transparent atlas request on the specified canvas (1024x1024 if omitted); generate accepts the same request. Element width/height describe design proportions. The image arranges the differently sized parts with separation; the plan supplies no grid or frame coordinates and does not generate automatically. Keep live text/values/progress/hit areas in runtime UI; use existing media/resources for inspected named frames. Runtime layout, live text and simple geometric controls remain code-owned; distinctive decorative skins remain artwork. This path does not turn a reference board into a runtime atlas or certify visual fidelity.`
 
 function id(value) {
   if (!/^[A-Za-z0-9_-]+$/.test(value ?? ''))
@@ -94,13 +95,14 @@ function catalogRequest(value) {
   return { filters, ...(parsed.limit !== undefined ? {limit:parsed.limit}:{}), ...(parsed.cursor !== undefined ? {cursor:parsed.cursor}:{}) }
 }
 
-function imageRequest(value) {
+function imageRequest(value, screenOrientation) {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Image request must be a JSON object')
   const allowed = ['requestId', 'purpose', 'requirementIds', 'prompt', 'uiReference', 'uiAssets', 'background', 'quality', 'size', 'referenceImagePath']
   const unknown = Object.keys(value).filter(key => !allowed.includes(key))
   if (unknown.length) throw new Error('Unknown image request fields: ' + unknown.join(', '))
   for (const [key, max] of [['requestId', 200], ['prompt', 32000]]) {
+    if (key === 'requestId' && value.requestId === undefined) continue
     if (key === 'prompt' && (value.uiReference !== undefined || value.uiAssets !== undefined)) continue
     if (typeof value[key] !== 'string' || !value[key].trim() || value[key].trim().length > max)
       throw new Error('Image request ' + key + ' must be a nonempty string of at most ' + max + ' characters')
@@ -119,7 +121,7 @@ function imageRequest(value) {
       value.referenceImagePath.length > 512 || !value.referenceImagePath.startsWith('assets/') ||
       value.referenceImagePath.split(/[\\/]/).includes('..')))
     throw new Error('Image request referenceImagePath must be a project-relative path under assets/')
-  if (value.uiReference !== undefined) compileUiReferenceBoard(value)
+  if (value.uiReference !== undefined) compileUiReferenceBoard(value, screenOrientation)
   if (value.uiAssets !== undefined) compileUiAssetSheet(value)
   return value
 }
@@ -140,13 +142,15 @@ async function currentCapabilities() {
       typeof capability.executionId !== 'string' || !capability.executionId ||
       !capability.assets || typeof capability.assets !== 'object' || Array.isArray(capability.assets))
     throw Error('ASSET_CAPABILITY_MISMATCH: Resource connection belongs to another workspace/session or is invalid.')
-  for (const endpoint of [capability.assets.libraryBaseUrl, capability.assets.imageEndpoint]) {
+  for (const endpoint of [capability.assets.libraryBaseUrl, capability.assets.imageEndpoint, capability.assets.registrationEndpoint]) {
     if (endpoint === undefined) continue
     let url
     try { url = new URL(endpoint) } catch { throw Error('ASSET_CAPABILITY_MISMATCH: Invalid resource endpoint.') }
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.search || url.hash)
       throw Error('ASSET_CAPABILITY_MISMATCH: Invalid resource endpoint.')
   }
+  if (capability.assets.screenOrientation !== undefined && !['Landscape', 'Portrait'].includes(capability.assets.screenOrientation))
+    throw Error('ASSET_CAPABILITY_MISMATCH: Invalid screen orientation.')
   const cwd = await realpath(process.cwd())
   if (cwd !== capability.workspace) {
     const fromWorkspace = relative(capability.workspace, cwd)
@@ -166,10 +170,10 @@ async function capabilityFetch(url, init, requestId) {
   }
 }
 
-async function jsonRequest(url, init) {
+async function jsonRequest(url, init, signal) {
   const response = await capabilityFetch(url, {
     ...init,
-    signal: AbortSignal.timeout(30_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
   })
   const text = await response.text()
   let body
@@ -197,7 +201,20 @@ async function assetDestination(path, createParent = true) {
   const target = resolve(root, path)
   if (target === assets || !target.startsWith(assets + '/'))
     throw new Error('Output must be a file inside assets/')
-  if (createParent) await mkdir(dirname(target), { recursive: true })
+  if (createParent) {
+    let ancestor = dirname(target)
+    while (ancestor !== root) {
+      try {
+        if ((await lstat(ancestor)).isSymbolicLink() || await realpath(ancestor) !== ancestor)
+          throw new Error('Output directory must not resolve through a link')
+        break
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        ancestor = dirname(ancestor)
+      }
+    }
+    await mkdir(dirname(target), { recursive: true })
+  }
   const actualParent = await realpath(dirname(target))
   if (
     actualParent !== dirname(target) ||
@@ -207,7 +224,7 @@ async function assetDestination(path, createParent = true) {
   return { target, path: relative(root, target) }
 }
 
-async function existingAsset(output, expectedHash) {
+async function verifiedAssetBytes(output, expectedHash) {
   let listed
   try { listed = await lstat(output.target) }
   catch (error) {
@@ -240,10 +257,15 @@ async function existingAsset(output, expectedHash) {
     const sha256 = createHash('sha256').update(bytes).digest('hex')
     if (sha256 !== expectedHash)
       throw new Error('Asset destination already exists with a different content hash; refusing to overwrite it')
-    return { path: output.path, sha256, bytes: bytes.length, reused: true }
+    return bytes
   } finally {
     await handle.close()
   }
+}
+
+async function existingAsset(output, expectedHash) {
+  const bytes = await verifiedAssetBytes(output, expectedHash)
+  return bytes ? { path: output.path, sha256: expectedHash, bytes: bytes.length, reused: true } : undefined
 }
 
 // Keep dependency URI normalization identical to the resource binding rules:
@@ -279,6 +301,13 @@ function dependencyOutputPath(parentPath, referencePath) {
   return relative(resolve('.'), output).split(sep).join('/')
 }
 
+function pngDimensions(bytes) {
+  return bytes.length >= 24 &&
+    bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+    : {}
+}
+
 async function saveBytes(response, output, reservedFile) {
   if (!response.ok) {
     const details = await response.text()
@@ -299,6 +328,7 @@ async function saveBytes(response, output, reservedFile) {
     sha256: createHash('sha256').update(bytes).digest('hex'),
     bytes: bytes.length,
     mimeType: response.headers.get('content-type') ?? undefined,
+    ...pngDimensions(bytes),
   }
 }
 
@@ -329,8 +359,143 @@ function atlasFrames(value, width, height) {
   return { frames }
 }
 
+async function generateImage(args, capabilities, signal) {
+  if (!capabilities.imageEndpoint)
+    throw new Error('AI image generation is unavailable for this turn')
+  const submittedRequest = imageRequest(JSON.parse(await readFile(args[0], 'utf8')), capabilities.screenOrientation)
+  const newRequest = submittedRequest.requestId === undefined
+  if (newRequest) submittedRequest.requestId = randomUUID()
+  const board = submittedRequest.uiAssets !== undefined ? compileUiAssetSheet(submittedRequest) :
+    submittedRequest.uiReference === undefined ? undefined : compileUiReferenceBoard(submittedRequest, capabilities.screenOrientation)
+  const request = board?.request ?? submittedRequest
+  const quoteUrl = new URL(capabilities.imageEndpoint)
+  if (request.quality) quoteUrl.searchParams.set('quality', request.quality)
+  if (request.size) quoteUrl.searchParams.set('size', request.size)
+  const quote = await jsonRequest(quoteUrl, undefined, signal)
+  // Billing incompatibility blocks new work in the host, but paid receipts must still reach recovery.
+  if (!quote.available && quote.unavailableCode !== 'billing-unsupported')
+    throw new Error('AI image generation unavailable: ' + (quote.unavailableReason ?? 'check model, credentials and billing'))
+  if (submittedRequest.uiAssets !== undefined && quote.referenceImageSupported !== true)
+    throw Error('UI skins require a provider that accepts the selected design image; no generation was submitted')
+  if (quote.fixedPrice === true) {
+    if (!Number.isSafeInteger(quote.quotedCreditsMicro) || quote.quotedCreditsMicro <= 0)
+      throw new Error('Image has no fixed Credit price for this quality and size')
+    console.error('Image price: ' + quote.quotedCreditsMicro / 1_000_000 + ' Credits; reserving before generation')
+  }
+  const output = await assetDestination(args[1])
+  // Reserve the destination before any potentially billable provider call.
+  const reservedFile = await open(output.target, 'wx', 0o600)
+  let saved = false
+  try {
+    // Persist before submission so a lost response cannot turn recovery into new paid work.
+    if (newRequest) await writeFile(args[0], JSON.stringify(submittedRequest, null, 2) + '\n')
+    const response = await capabilityFetch(capabilities.imageEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(submittedRequest),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
+    }, request.requestId)
+    const file = await saveBytes(response, output, reservedFile)
+    saved = true
+    return {
+        ...file,
+        source: 'agent-authored',
+        requestId: request.requestId,
+        chargedCredits: response.headers.has('x-image-credits-micro') ? Number(response.headers.get('x-image-credits-micro')) / 1_000_000 : null,
+        currency: 'Credits',
+        billingState: response.headers.get('x-image-billing-state'),
+        note: submittedRequest.purpose === 'production'
+          ? 'Inspect the actual image and register the selected file in the Manifest.'
+          : 'Inspect the actual image for its declared purpose. Reference and experiment images do not fulfill runtime resource requirements.',
+    }
+  } finally {
+    await reservedFile.close()
+    if (!saved) await unlink(output.target).catch(() => undefined)
+  }
+}
+
+
+/** A viewing surface only: keep the generated PNG and its facts unchanged. */
+async function transparencyPreview(result) {
+  if (!process.env.BEEGAME_SHARP_MODULE) throw Error('Host image decoder is unavailable')
+  const image = (await import(process.env.BEEGAME_SHARP_MODULE)).default
+  const output = await assetDestination(result.path, false)
+  const bytes = await verifiedAssetBytes(output, result.sha256)
+  if (!bytes) throw Error('Saved image is missing before preview rendering')
+  const source = image(bytes, {limitInputPixels:64*1024*1024})
+  const {width,height,hasAlpha} = await source.metadata()
+  if (!hasAlpha) return undefined
+  const tw = Math.min(32,width), th = Math.min(32,height), tile = Buffer.alloc(tw*th*3)
+  for (let y=0;y<th;y++) for (let x=0;x<tw;x++) {
+    const color = (Math.floor(x/16)+Math.floor(y/16))%2 ? 220 : 250
+    tile.fill(color,(y*tw+x)*3,(y*tw+x+1)*3)
+  }
+  return image({create:{width,height,channels:3,background:'#ffffff'}})
+    .composite([{input:tile,raw:{width:tw,height:th,channels:3},tile:true},{input:bytes}])
+    .png().toBuffer()
+}
+
+async function runImageMcp() {
+  if (!TOOL_CONFIG.imageMcpModules) throw Error('Image MCP is not configured for this entry')
+  const [{Server}, {StdioServerTransport}, {CallToolRequestSchema,ListToolsRequestSchema}] = await Promise.all([
+    import(TOOL_CONFIG.imageMcpModules.server), import(TOOL_CONFIG.imageMcpModules.stdio), import(TOOL_CONFIG.imageMcpModules.types),
+  ])
+  // Bind this process to its original turn endpoint, not a later published turn.
+  const capabilities = await currentCapabilities(), execution = randomUUID()
+  const server = new Server({name:'beegame-images',version:'1'}, {capabilities:{tools:{}}})
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({tools:capabilities.imageEndpoint ? [{
+    name:'generate_image',
+    description:'Generate or edit project PNG artwork, including character reference sheets, per-character action pose sheets, game-element atlases, UI atlases and backgrounds, through the configured image service independently of the chat model. Supports a project reference image and transparent-background requests; pose consistency, frame geometry and playback need inspection and runtime preparation. assets.mjs cost reports the current configured image model and request options. Uses the existing availability, pricing, source, reference-image and recovery contract. Save to a new assets/ outputPath. Reuse requestId only to recover the unchanged original request; no automatic paid retry. Returns actual saved-file facts and, for alpha images, one checkerboard viewing preview. The source PNG stays unchanged; this does not register assets or verify appearance.',
+    inputSchema:{type:'object',properties:{
+      request:{type:'object',properties:{
+        requestId:{type:'string'},purpose:{type:'string',enum:['reference','experiment','production']},
+        prompt:{type:'string',description:'Use exactly one of prompt, uiReference or uiAssets.'},
+        uiReference:{type:'object',description:'Existing ui-board-plan specification; see assets.mjs generate --help.'},
+        uiAssets:{type:'object',description:'Existing design-linked UI atlas specification; see assets.mjs ui-assets-plan --help.'},
+        requirementIds:{type:'array',items:{type:'string'}},referenceImagePath:{type:'string',description:'Project-relative reference image under assets/.'},
+        background:{type:'string',enum:['auto','opaque','transparent']},
+        quality:{type:'string',enum:['auto','low','medium','high','xhigh','max']},
+        size:{type:'string',enum:['1024x1024','1024x1536','1536x1024']},
+      },required:['purpose'],additionalProperties:false},
+      outputPath:{type:'string',description:'New project-relative file under assets/.'},
+    },required:['request','outputPath'],additionalProperties:false},
+    annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+  }] : []}))
+  server.setRequestHandler(CallToolRequestSchema, async ({params}, extra) => {
+    let requestId, requestFile
+    try {
+      if (params.name !== 'generate_image') throw Error('Unknown image tool')
+      const args = params.arguments
+      if (!args || !args.request || typeof args.request !== 'object' || Array.isArray(args.request) || typeof args.outputPath !== 'string')
+        throw Error('Expected request and outputPath')
+      extra.signal.throwIfAborted()
+      requestId = args.request.requestId ?? 'mcp-' + createHash('sha256').update(JSON.stringify([execution,extra.requestId])).digest('hex')
+      requestFile = resolve(dirname(fileURLToPath(import.meta.url)), 'image-request-' + randomUUID() + '.json')
+      await writeFile(requestFile, JSON.stringify({...args.request,requestId},null,2)+'\n', {flag:'wx',mode:0o600})
+      const result = await generateImage([requestFile,args.outputPath],capabilities,extra.signal)
+      const content=[{type:'text',text:JSON.stringify({...result,requestFile})}]
+      // A preview failure follows a saved, potentially paid result. Preserve
+      // that result and its recovery identity rather than failing generation.
+      try {
+        const preview=await transparencyPreview(result)
+        if (preview) content.push(
+          {type:'text',text:'Transparency viewing preview on a checkerboard. The saved source PNG remains transparent; this preview is not a production asset.'},
+          {type:'image',mimeType:'image/png',data:preview.toString('base64')})
+      } catch (error) {
+        content.push({type:'text',text:'Image saved; viewing preview unavailable: '+(error instanceof Error?error.message:String(error))})
+      }
+      return {content}
+    } catch (error) {
+      return {isError:true,content:[{type:'text',text:(error instanceof Error ? error.message : String(error)) +
+        (requestFile ? '\nOriginal request: '+requestFile+'; requestId='+requestId+'. Do not automatically resubmit or change this ID.' : '')}]}
+    }
+  })
+  await server.connect(new StdioServerTransport())
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2)
+  if (command === '--mcp') return runImageMcp()
   if (!command || command === 'help' || command === '--help') {
     console.log(usage)
     return
@@ -340,7 +505,7 @@ async function main() {
     return
   }
   // Resolve once: quote and paid submission must use the same execution.
-  const capabilities = ['catalog', 'elements', 'pack', 'element', 'fetch', 'cost', 'generate'].includes(command)
+  const capabilities = ['catalog', 'elements', 'pack', 'element', 'fetch', 'cost', 'generate', 'ui-board-plan'].includes(command)
     ? await currentCapabilities() : {}
   const base = capabilities.libraryBaseUrl
   if (
@@ -564,12 +729,7 @@ async function main() {
         path: asset.path,
         bytes: bytes.length,
         sha256: createHash('sha256').update(bytes).digest('hex'),
-        ...(bytes.length >= 24 &&
-        bytes
-          .subarray(0, 8)
-          .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-          ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
-          : {}),
+        ...pngDimensions(bytes),
       }
     }))
     console.log(JSON.stringify(results.length === 1 ? results[0] : { files: results,
@@ -607,7 +767,7 @@ async function main() {
       if (!published) await unlink(output.target).catch(() => undefined)
     }
   } else if (command === 'ui-board-plan' || command === 'ui-assets-plan') {
-    const request = imageRequest(JSON.parse(await readFile(args[0], 'utf8')))
+    const request = imageRequest(JSON.parse(await readFile(args[0], 'utf8')), capabilities.screenOrientation)
     if (command === 'ui-assets-plan') {
       if (request.uiAssets === undefined) throw Error('ui-assets-plan requires uiAssets')
       const source = await assetDestination(request.referenceImagePath, false)
@@ -617,7 +777,7 @@ async function main() {
         sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length } }, null, 2))
     } else {
       if (request.uiReference === undefined) throw Error('ui-board-plan requires uiReference')
-      console.log(JSON.stringify(compileUiReferenceBoard(request), null, 2))
+      console.log(JSON.stringify(compileUiReferenceBoard(request, capabilities.screenOrientation), null, 2))
     }
   } else if (command === 'cost') {
     if (!capabilities.imageEndpoint)
@@ -625,56 +785,16 @@ async function main() {
     const endpoint = new URL(capabilities.imageEndpoint)
     if (args[0]) endpoint.searchParams.set('quality', args[0])
     if (args[1]) endpoint.searchParams.set('size', args[1])
-    console.log(JSON.stringify(await jsonRequest(endpoint)))
+    const { quotedCreditsMicro, ...quote } = await jsonRequest(endpoint)
+    // The host reservation limit is a billing detail, not the image price or user budget.
+    delete quote.maxRequestCredits
+    console.log(JSON.stringify({ ...quote,
+      quotedCredits: quotedCreditsMicro == null ? null : quotedCreditsMicro / 1_000_000,
+      currency: 'Credits' }))
+    if (quote.fixedPrice === false)
+      console.error('Usage-priced image: quotedCredits is unknown; actual billing follows returned usage.')
   } else if (command === 'generate') {
-    if (!capabilities.imageEndpoint)
-      throw new Error('AI image generation is unavailable for this turn')
-    const submittedRequest = imageRequest(JSON.parse(await readFile(args[0], 'utf8')))
-    const board = submittedRequest.uiAssets !== undefined ? compileUiAssetSheet(submittedRequest) :
-      submittedRequest.uiReference === undefined ? undefined : compileUiReferenceBoard(submittedRequest)
-    const request = board?.request ?? submittedRequest
-    const quoteUrl = new URL(capabilities.imageEndpoint)
-    if (request.quality) quoteUrl.searchParams.set('quality', request.quality)
-    if (request.size) quoteUrl.searchParams.set('size', request.size)
-    const quote = await jsonRequest(quoteUrl)
-    // Billing incompatibility blocks new work in the host, but paid receipts must still reach recovery.
-    if (!quote.available && quote.unavailableCode !== 'billing-unsupported')
-      throw new Error('AI image generation unavailable: ' + (quote.unavailableReason ?? 'check model, credentials and billing'))
-    if (submittedRequest.uiAssets !== undefined && quote.referenceImageSupported !== true)
-      throw Error('UI skins require a provider that accepts the selected design image; no generation was submitted')
-    if (quote.fixedPrice === true) {
-      if (!Number.isSafeInteger(quote.quotedCreditsMicro) || quote.quotedCreditsMicro <= 0)
-        throw new Error('Image has no fixed Credit price for this quality and size')
-      console.error('Image price: ' + quote.quotedCreditsMicro / 1_000_000 + ' Credits; reserving before generation')
-    }
-    const output = await assetDestination(args[1])
-    // Reserve the destination before any potentially billable provider call.
-    const reservedFile = await open(output.target, 'wx', 0o600)
-    let saved = false
-    try {
-      const response = await capabilityFetch(capabilities.imageEndpoint, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(submittedRequest),
-        signal: AbortSignal.timeout(180_000),
-      }, request.requestId)
-      const file = await saveBytes(response, output, reservedFile)
-      saved = true
-      console.log(
-        JSON.stringify({
-          ...file,
-          source: 'agent-authored',
-          requestId: request.requestId,
-          chargedCreditsMicro: response.headers.get('x-image-credits-micro'),
-          billingState: response.headers.get('x-image-billing-state'),
-          ...(board ? { requestedLayout: board.layout } : {}),
-          note: board ? board.note : 'Inspect the actual image and register the selected file in the Manifest.',
-        }),
-      )
-    } finally {
-      await reservedFile.close()
-      if (!saved) await unlink(output.target).catch(() => undefined)
-    }
+    console.log(JSON.stringify(await generateImage(args, capabilities)))
   } else throw new Error('Unknown command. Run help for usage.')
 }
 
