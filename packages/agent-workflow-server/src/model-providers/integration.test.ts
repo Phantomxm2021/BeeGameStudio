@@ -2,6 +2,7 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createBgsRunner } from '../bgs/runner'
+import type { BeeGameSessionRunnerStartInput } from '../beegame/session-manager'
 import type { Json } from './messages'
 import type { ModelApiProtocol } from '@bee-game-studio/agent-workflow'
 
@@ -26,9 +27,12 @@ for (const protocol of [
       const root = await mkdtemp('/private/tmp/bgs-provider-native-'),
         game = join(root, 'game')
       await mkdir(game)
-      const bodies: Json[] = [],
-        events: Json[] = [],
-        usage: Json[] = []
+      const bodies: Json[] = [], events: Json[] = []
+      type UsageObservation = Parameters<NonNullable<BeeGameSessionRunnerStartInput['onNativeUsage']>>
+      const usage: UsageObservation[] = []
+      const onNativeUsage: NonNullable<BeeGameSessionRunnerStartInput['onNativeUsage']> = (...observation) => {
+        usage.push(observation)
+      }
       let fixtureError: unknown
       const server = Bun.serve({
         hostname: '127.0.0.1',
@@ -267,9 +271,7 @@ for (const protocol of [
           onNativeSessionId: id => {
             threadId = id
           },
-          onNativeUsage: value => {
-            usage.push(value)
-          },
+          onNativeUsage,
           requestPermission: async () => ({ behavior: 'deny' }),
         })
         await runtime.submit({
@@ -295,11 +297,22 @@ for (const protocol of [
         expect(JSON.stringify(events)).not.toContain(
           'synthetic-private-reasoning',
         )
-        expect(usage.at(-1)).toMatchObject({
-          total_tokens: 26,
-          cache_read_tokens: 4,
+        // Provider receipts retain cache writes; native counters are cumulative
+        // baselines and must not be mistaken for a second billable receipt.
+        const firstReceipts = usage.filter(([, , accounting]) => !accounting?.baselineOnly)
+        expect(firstReceipts).toHaveLength(2)
+        expect(firstReceipts.map(([value]) => value.total_tokens)).toEqual([13, 26])
+        expect(firstReceipts.at(-1)?.[0]).toEqual({
+          prompt_tokens: protocol === 'anthropic-messages' ? 12 : 16,
+          completion_tokens: 6, total_tokens: 26, cache_read_tokens: 4,
           cache_creation_tokens: protocol === 'anthropic-messages' ? 4 : 0,
         })
+        const firstEpoch = firstReceipts[0]![1]
+        expect(firstEpoch).toMatch(/^provider:/)
+        expect(firstReceipts.every(([, epoch]) => epoch === firstEpoch)).toBe(true)
+        expect(usage.filter(([, , accounting]) => accounting?.baselineOnly).at(-1)?.[0].total_tokens).toBe(26)
+        await runtime.dispose?.()
+        runtime = undefined
         runtime = await createBgsRunner({
           resolveOutboundTarget: async value => ({
             url: new URL(value),
@@ -319,9 +332,7 @@ for (const protocol of [
             [prefix + '_BASE_URL']: server.url.toString().replace(/\/$/, ''),
             [prefix + '_API_KEY']: 'synthetic-provider-secret',
           },
-          onNativeUsage: value => {
-            usage.push(value)
-          },
+          onNativeUsage,
           requestPermission: async () => ({ behavior: 'deny' }),
         })
         await runtime.submit({
@@ -334,7 +345,17 @@ for (const protocol of [
         })
         if (fixtureError) throw fixtureError
         expect(bodies).toHaveLength(3)
-        expect(usage.at(-1)).toMatchObject({ total_tokens: 13 })
+        const resumedReceipts = usage.filter(([, , accounting]) => !accounting?.baselineOnly)
+        expect(resumedReceipts).toHaveLength(3)
+        expect(resumedReceipts.at(-1)?.[0]).toEqual({
+          prompt_tokens: protocol === 'anthropic-messages' ? 6 : 8,
+          completion_tokens: 3, cache_read_tokens: 2,
+          cache_creation_tokens: protocol === 'anthropic-messages' ? 2 : 0, total_tokens: 13,
+        })
+        expect(resumedReceipts.at(-1)?.[1]).toMatch(/^provider:/)
+        expect(resumedReceipts.at(-1)?.[1]).not.toBe(firstEpoch)
+        expect(usage.some(([value, , accounting]) => accounting?.baselineOnly && accounting.replayed && value.total_tokens === 26)).toBe(true)
+        expect(usage.filter(([, , accounting]) => accounting?.baselineOnly).at(-1)?.[0].total_tokens).toBe(39)
       } catch (error) {
         throw fixtureError ?? error
       } finally {

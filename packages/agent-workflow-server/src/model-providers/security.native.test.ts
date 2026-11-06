@@ -116,7 +116,7 @@ for (const malformedSuffix of [false, true]) nativeTest('converted provider unkn
     expect((await readdir(game)).filter(path => path !== '.beegame')).toEqual([])
   } finally { await runtime?.dispose?.(); supplier.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 25_000)
-nativeTest('official Bgs failure retains partial supplier usage through the runner and billing outbox', async () => {
+nativeTest('native stream retries retain partial supplier usage through the runner and billing outbox', async () => {
   const root = await mkdtemp('/private/tmp/bgs-native-partial-'), game = join(root, 'game'), catalog = join(root, 'skills')
   await mkdir(game); await mkdir(join(catalog, 'fixture'), { recursive: true })
   await writeFile(join(catalog, 'fixture', 'SKILL.md'), '---\nname: fixture\ndescription: Offline usage accounting fixture.\n---\nUse only the local fixture response.\n')
@@ -130,6 +130,8 @@ nativeTest('official Bgs failure retains partial supplier usage through the runn
       { headers: { 'content-type': 'text/event-stream' } })
   } })
   const writes: Array<Parameters<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>[1]> = []
+  let recordedTokens = 0
+  const recordedDeltas: number[] = []
   const runner = createBgsRunner({ resolveOutboundTarget: async value => ({ url: new URL(value),
     addresses: ['127.0.0.1'], lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }) })
   const manager = new BeeGameSessionManager(runner, root, () => ({
@@ -138,10 +140,15 @@ nativeTest('official Bgs failure retains partial supplier usage through the runn
     ANTHROPIC_API_KEY: 'synthetic-only', ANTHROPIC_BASE_URL: supplier.url.toString(),
   }), { recordUsage(owner, input) {
     writes.push(input)
-    return { duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: 100, creditsMicro: 100,
+    // Match the billing contract: snapshots are cumulative, charges use deltas.
+    const total = input.usage.total_tokens, delta = total - recordedTokens
+    recordedTokens = total
+    recordedDeltas.push(delta)
+    return { duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: total, creditsMicro: total,
       event: { id: input.idempotencyKey, idempotencyKey: input.idempotencyKey, userId: owner, sessionId: input.sessionId,
-        pricingVersion: 'fixture', usageSource: 'runtime_snapshot', usage: input.usage, delta: input.usage,
-        weightedTokens: 100, weightedTokensDelta: 100, creditsMicro: 100, createdAt: new Date().toISOString(),
+        pricingVersion: 'fixture', usageSource: 'runtime_snapshot', usage: input.usage,
+        delta: { ...input.usage, prompt_tokens: delta, total_tokens: delta },
+        weightedTokens: total, weightedTokensDelta: delta, creditsMicro: delta, createdAt: new Date().toISOString(),
         metadata: input.metadata ?? {} } }
   } })
   try {
@@ -149,12 +156,25 @@ nativeTest('official Bgs failure retains partial supplier usage through the runn
     await manager.sendWithDisplay(session.id, 'Explain the Phaser game loop using this offline fixture.')
     await manager.waitForSessionIdle(session.id)
     await manager.dispose()
-    expect(requests).toBe(1)
-    expect(manager.runtimeSnapshot(session.id).usage.total_tokens).toBe(100)
-    expect(writes).toHaveLength(2) // Receipt checkpoint and terminal reconciliation.
-    expect(writes.map(write => write.metadata?.sourceMessageType)).toEqual(['usage_checkpoint', 'turn.failed'])
+    // Native defaults to five stream retries. Every physical attempt here
+    // acknowledges another 100 tokens; the terminal reconciliation adds none.
+    expect(requests).toBe(6)
+    const acknowledgedTotals = [100, 200, 300, 400, 500, 600]
+    const snapshot = manager.runtimeSnapshot(session.id)
+    expect(snapshot.usage.total_tokens).toBe(600)
+    expect(snapshot.providerUsageIncomplete).toBe(true)
+    expect(writes.map(write => write.usage.total_tokens)).toEqual([...acknowledgedTotals, 600])
+    expect(writes.map(write => write.metadata?.sourceMessageType)).toEqual([
+      ...acknowledgedTotals.map(() => 'usage_checkpoint'), 'turn.failed',
+    ])
+    expect(new Set(writes.map(write => write.idempotencyKey)).size).toBe(7)
+    expect(recordedDeltas).toEqual([100, 100, 100, 100, 100, 100, 0])
+    expect(recordedDeltas.reduce((sum, delta) => sum + delta, 0)).toBe(600)
+    const receipts = manager.transcriptFacts(session.id).filter(event =>
+      event.type === 'usage' && event.payload?.subtype === 'native_accounting')
+    expect(receipts.map(event => (event.payload?.usage as Json).total_tokens)).toEqual(acknowledgedTotals)
     for (const write of writes) {
-      expect(write.usage.prompt_tokens).toBe(100)
+      expect(write.usage.prompt_tokens).toBe(write.usage.total_tokens)
       expect(write.metadata?.usageBasis).toBe('session-cumulative-v1')
       expect(write.metadata?.providerUsageIncomplete).toBe(true)
       expect(write.metadata?.billableFinalUsage).toBeUndefined()
