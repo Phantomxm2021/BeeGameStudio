@@ -1,7 +1,7 @@
 // Type-only adapters over the app-server schema generated from Rust.
 // Keep experimental/fixture methods on BgsClient.request until their payloads
 // are represented by the generated stable schema.
-import type { ClientRequest } from '../../../../vendor/bgs/bgs-rs/app-server-protocol/schema/typescript'
+import type { ClientRequest } from '../../../../vendor/bgs/codex-rs/app-server-protocol/schema/typescript'
 import type {
   ConfigReadResponse,
   GetAccountResponse,
@@ -12,7 +12,7 @@ import type {
   ThreadGoalGetResponse,
   ThreadGoalSetResponse,
   ThreadInjectItemsResponse,
-} from '../../../../vendor/bgs/bgs-rs/app-server-protocol/schema/typescript/v2'
+} from '../../../../vendor/bgs/codex-rs/app-server-protocol/schema/typescript/v2'
 
 /** The app-server methods represented by the stable generated payloads used by BGS. */
 export type BgsStableMethod =
@@ -42,4 +42,4 @@ export type BgsStableParams<M extends BgsStableMethod> =
   Extract<ClientRequest, { method: M }>['params']
 export type BgsStableResult<M extends BgsStableMethod> = BgsStableResponse[M]
 
-export type { DynamicToolSpec } from '../../../../vendor/bgs/bgs-rs/app-server-protocol/schema/typescript/v2'
+export type { DynamicToolSpec } from '../../../../vendor/bgs/codex-rs/app-server-protocol/schema/typescript/v2'

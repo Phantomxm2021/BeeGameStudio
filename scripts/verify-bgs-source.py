@@ -8,7 +8,7 @@ try:
  with tarfile.open(fileobj=io.BytesIO(data)) as tar:tar.extractall(scratch,filter='data')
  subprocess.run(['git','init','-q'],cwd=scratch,check=True)
  subprocess.run(['git','add','--force','-A'],cwd=scratch,check=True)
- report=b.convert(scratch,True,True)
+ report=b.convert(scratch,True)
  entries=subprocess.check_output(['git','ls-files','-z'],cwd=root).decode().split('\0')
  differences=[];checked=0
  for name in entries:

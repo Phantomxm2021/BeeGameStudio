@@ -162,9 +162,8 @@ localTest('native resume receives current BGS context as well as project instruc
     expect(inputs).toHaveLength(4)
     const marker = 'STABLE_PREFIX_UNCHANGED_'
     const prefix = marker.padEnd(4000, 'x'), base = prefix + 'b'.repeat(4000)
-    let prefixCopies = 0
-    // Each start is a cold resume of the same native thread. The second
-    // identical turn establishes trusted native application-context state.
+    // Each cold resume must deliver the current context. Reinjection/deduplication
+    // follows the upstream runtime; do not require the withdrawn local patch.
     for (const [index, systemContext] of [base, base, base + 'new-tail', prefix, '', base].entries()) {
       runtime = await runner.start({
         sessionId: 'context-fixture', cwd: game, resumeSessionId: nativeSessionId,
@@ -181,9 +180,6 @@ localTest('native resume receives current BGS context as well as project instruc
       const sent = inputs.at(-1)!
       expect(latestContext(sent, 'bgsRuntime')).toBe(systemContext)
       expect(latestContext(sent, 'bgsConfirmedBrief')).toBe(run.requirements.text)
-      const copies = JSON.stringify(sent).split(marker).length - 1
-      if (index === 1) { prefixCopies = copies; expect(prefixCopies).toBeGreaterThan(0) }
-      if (index === 2 || index === 3) expect(copies).toBe(prefixCopies)
       await runtime.dispose?.()
       runtime = undefined
     }

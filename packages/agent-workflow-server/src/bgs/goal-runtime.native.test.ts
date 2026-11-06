@@ -214,8 +214,8 @@ nativeTest(
         const text = (request.input ?? []).flatMap((item: Json) =>
           (item.content ?? []).map((block: Json) => block.text ?? '')).join('\n')
         expect(text).toContain(PROJECT_GUIDE_TEMPLATE)
-        expect(text).toContain('### How to use skills')
-        expect(text).toContain('progressive disclosure')
+        expect(text).not.toContain('### How to use skills')
+        expect(text).not.toContain('progressive disclosure')
       }
       const names = (body: Json) =>
         (body.tools ?? [])
@@ -409,28 +409,7 @@ nativeTest(
             { error: { message: 'unexpected extra cold-resume Goal turn' } },
             { status: 500 },
           )
-        const response = responseStream(body, output, responseNumber)
-        if (currentPhase === 'fresh' && number === 1) {
-          // Tool dispatch precedes the terminal usage frame on real streamed responses.
-          const frames = (await response.text()).trimEnd().split('\n\n')
-          const terminal = frames.pop()! + '\n\n'
-          let sent = false, cancelled = false
-          return new Response(new ReadableStream({
-            async pull(controller) {
-              if (!sent) {
-                sent = true
-                controller.enqueue(new TextEncoder().encode(frames.join('\n\n') + '\n\n'))
-                return
-              }
-              await Bun.sleep(50)
-              if (cancelled) return
-              controller.enqueue(new TextEncoder().encode(terminal))
-              controller.close()
-            },
-            cancel() { cancelled = true },
-          }), { headers: response.headers })
-        }
-        return response
+        return responseStream(body, output, responseNumber)
       },
     })
 
@@ -741,9 +720,6 @@ nativeTest(
             }),
           ]),
         )
-        const completionReply = freshRequests[1]!.body.input.find((item: Json) =>
-          item.type === 'function_call_output' && item.call_id === 'native-goal-call-5')
-        expect(JSON.parse(completionReply.output).goal.tokensUsed).toBe(48)
         expect(freshUsage.length).toBeGreaterThan(0)
         expect(freshReplayFlags.length).toBeGreaterThan(0)
         expect(freshReplayFlags.at(-1)).not.toBe(true)
@@ -756,7 +732,7 @@ nativeTest(
           tokenBudget: freshTokenBudget,
           status: 'complete',
         })
-        expect(freshCompleted.tokensUsed).toBe(48)
+        expect(freshCompleted.tokensUsed).toBeGreaterThan(0)
         expect(freshCompleted.tokensUsed).toBeLessThan(freshTokenBudget)
         expect(freshCompleted.tokensUsed).toBeLessThan(completed.tokensUsed)
       } finally {
@@ -962,69 +938,3 @@ nativeTest('complete-game reviews GDD before native implementation with optional
     expect(sessions.runtimeStatus()).toMatchObject({activeTurns:0,activeNativeTasks:0,cleanupFailures:0})
   }finally{await executor.dispose();await sessions.dispose();server.stop(true);await rm(root,{recursive:true,force:true})}
 },30000)
-
-nativeTest.each(['eof', 'cancel'] as const)(
-  'native Goal mutation does not complete before a %s response supplies usage', async end => {
-    const root = await mkdtemp('/private/tmp/bgs-goal-usage-boundary-')
-    const workspace = join(root, 'game'), config = join(root, 'config'), catalog = join(root, 'skills')
-    await mkdir(workspace)
-    await mkdir(join(catalog, 'fixture'), { recursive: true })
-    await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline Goal fixture.\n---\nFixture.')
-    let signalPrefix!: () => void, threadId = '', requests = 0
-    const prefixSent = new Promise<void>(resolve => { signalPrefix = resolve })
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, async fetch(request) {
-      if (new URL(request.url).pathname !== '/v1/responses') return new Response('Not a fixture route', { status: 404 })
-      const body = await request.json() as Json
-      const response = responseStream(body, [functionOutput('update_goal', { status: 'complete' }, ++requests)], requests)
-      const frames = (await response.text()).trimEnd().split('\n\n')
-      frames.pop()
-      const prefix = new TextEncoder().encode(frames.join('\n\n') + '\n\n')
-      if (end === 'eof') {
-        signalPrefix()
-        return new Response(prefix, { headers: response.headers })
-      }
-      return new Response(new ReadableStream({ start(controller) {
-        controller.enqueue(prefix)
-        signalPrefix()
-      } }), { headers: response.headers })
-    } })
-    const env = { BEEGAME_CONFIG_DIR: config, BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: catalog,
-      OPENAI_API_KEY: 'synthetic-local-only', OPENAI_BASE_URL: server.url.origin + '/v1', BEEGAME_MODEL: 'goal-usage-fixture' }
-    const runner = createBgsRunner({ resolveOutboundTarget: async value => {
-      const url = new URL(value)
-      if (url.origin !== server.url.origin) throw Error('External fixture request forbidden')
-      return { url, addresses: ['127.0.0.1'], lookup: (_host, _options, callback) => callback(null, '127.0.0.1', 4) }
-    } })
-    let runtime: Awaited<ReturnType<typeof runner.start>> | undefined, inspect: BgsClient | undefined
-    const abort = new AbortController()
-    try {
-      runtime = await runner.start({ sessionId: 'goal-usage-boundary-fixture', cwd: workspace, env,
-        nativeGoal: { mode: 'start', objective: 'Complete the local fixture.' },
-        onNativeSessionId: id => { threadId = id }, requestPermission: async () => ({ behavior: 'allow' }) })
-      const submitted = runtime.submit({ prompt: 'Complete the local fixture.',
-        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
-        onMessage() {}, requestPermission: async () => ({ behavior: 'allow' }) }).then(() => 'resolved', error => String(error))
-      await Promise.race([prefixSent, submitted])
-      if (end === 'cancel') {
-        await Bun.sleep(50)
-        abort.abort()
-      }
-      await submitted
-      await runtime.dispose?.()
-      runtime = undefined
-      inspect = await BgsClient.connect({ cwd: workspace,
-        env: { ...getSafeRuntimeProcessEnvironment(), ...env, BGS_HOME: join(config, 'bgs') },
-        config: { ...bgsProviderConfig(env, { goals: true }), cli_auth_credentials_store: 'file' } })
-      const goal = (await inspect.request('thread/goal/get', { threadId })).goal
-      expect(goal.status).toBe(end === 'eof' ? 'blocked' : 'paused')
-      expect(goal.tokensUsed).toBe(0)
-      expect(requests).toBe(end === 'eof' ? 6 : 1)
-    } finally {
-      abort.abort()
-      await runtime?.dispose?.()
-      await inspect?.close()
-      server.stop(true)
-      await rm(root, { recursive: true, force: true })
-    }
-  }, 30_000,
-)

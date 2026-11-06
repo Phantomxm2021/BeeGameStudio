@@ -5,13 +5,13 @@ import { homedir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const source = fileURLToPath(new URL('../vendor/bgs/bgs-rs/', import.meta.url))
+const source = fileURLToPath(new URL('../vendor/bgs/codex-rs/', import.meta.url))
 await access(join(source, 'Cargo.toml')).catch(() => {
   throw Error('Initialize the Bgs source first: git submodule update --init vendor/bgs')
 })
 const cargo = Bun.which('cargo') ?? join(homedir(), '.cargo', 'bin', process.platform === 'win32' ? 'cargo.exe' : 'cargo')
 await access(cargo, constants.X_OK).catch(() => {
-  throw Error('Install Rust with rustup; vendor/bgs/bgs-rs/rust-toolchain.toml pins the required toolchain')
+  throw Error('Install Rust with rustup; vendor/bgs/codex-rs/rust-toolchain.toml pins the required toolchain')
 })
 const args = process.argv.slice(2)
 if (args.length > 1 || args.some(arg => arg !== '--release')) throw Error('Usage: bun run bgs:build [--release]')
@@ -72,14 +72,14 @@ if (!buildEnv.RUSTY_V8_ARCHIVE && !buildEnv.RUSTY_V8_SRC_BINDING_PATH && buildEn
 // Dependency resolution stays locked. Workspace-version lock corrections are
 // committed separately in the maintained source branch.
 const child = Bun.spawn([cargo, 'build', '--offline', '--locked',
-  '-p', 'bgs-cli', '--bin', 'bgs', '-p', 'bgs-code-mode-host', '--bin', 'bgs-code-mode-host', ...args], {
+  '-p', 'codex-cli', '--bin', 'codex', '-p', 'codex-code-mode-host', '--bin', 'codex-code-mode-host', ...args], {
   cwd: source,
   env: buildEnv,
   stdout: 'inherit', stderr: 'inherit',
 })
 const code = await child.exited
 if (code !== 0) process.exit(code)
-const binary = join(source, 'target', args.length ? 'release' : 'debug', process.platform === 'win32' ? 'bgs.exe' : 'bgs')
+const binary = join(source, 'target', args.length ? 'release' : 'debug', process.platform === 'win32' ? 'codex.exe' : 'codex')
 const versionProcess = Bun.spawn([binary, '--version'], { stdout: 'pipe', stderr: 'pipe' })
 const [versionCode, output] = await Promise.all([versionProcess.exited, new Response(versionProcess.stdout).text()])
 const version = output.trim()
@@ -95,10 +95,10 @@ await writeFile(join(destination, 'BGS-NOTICE.txt'),
   'BGS is a PhantomLab distribution based on OpenAI Codex. Product branding and update entry points are modified. See LICENSE and NOTICE for upstream attribution.\n')
 // Publish the companion first, then replace the CLI atomically so existing
 // processes keep their inode and new processes can find their required host.
-for (const name of ['bgs-code-mode-host', 'bgs']) {
+for (const [name, sourceName] of [['codex-code-mode-host', 'codex-code-mode-host'], ['bgs', 'codex']]) {
   const executable = process.platform === 'win32' ? name + '.exe' : name
   const target = join(destination, executable)
-  await copyFile(join(dirname(binary), executable), target + '.new')
+  await copyFile(join(dirname(binary), process.platform === 'win32' ? sourceName + '.exe' : sourceName), target + '.new')
   await rename(target + '.new', target)
 }
 await writeFile(join(destination, 'build.json'), JSON.stringify({ ...metadata, version }, null, 2) + '\n')

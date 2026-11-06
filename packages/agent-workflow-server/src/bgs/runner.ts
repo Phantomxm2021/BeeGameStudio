@@ -1189,7 +1189,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
       await this.emit('system.status', p.willRetry === true
         ? (this.input.language?.startsWith('zh') ? '正在重试：' : 'Retrying: ') + message : message, {
         ...(p.willRetry === true ? { subtype: 'runtime_notice' } : {}),
-        willRetry: p.willRetry === true, bgsErrorInfo: p.error?.bgsErrorInfo,
+        willRetry: p.willRetry === true, bgsErrorInfo: p.error?.codexErrorInfo,
         ...(owner ? { parentToolUseID: owner } : {}) })
     } else if (method === 'turn/completed' && p.threadId !== this.threadId) {
       const childTurn = this.childTurns.get(p.threadId) ?? { endedIds: new Set<string>() }
@@ -1213,7 +1213,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
               ? 'GDD 独立审核模型输出达到上限（max_output_tokens），未形成完整报告；未自动重试。'
               : 'Independent GDD review exhausted max_output_tokens without a complete report; no automatic retry')
             : 'Independent GDD review ' + (p.turn?.status ?? 'failed') + '; no automatic retry'
-          pending.reject(Object.assign(Error(message), { bgsErrorInfo: error?.bgsErrorInfo }))
+          pending.reject(Object.assign(Error(message), { bgsErrorInfo: error?.codexErrorInfo }))
         } else if ([...this.items.values()].some(item => item.bgsThreadId === p.threadId)) pending.reject(Error('Independent GDD review ended with unfinished tools'))
         else if (!pending.text || !endedId) pending.reject(Error('Independent GDD review ended without a report or turn identity'))
         else pending.resolve({ text: pending.text, turnId: endedId })
@@ -1252,7 +1252,7 @@ class BgsRuntime implements BeeGameSessionRuntime {
         const error = p.turn?.error ?? turn.error
         const message = p.turn?.status === 'interrupted' ? 'BGS turn interrupted'
           : typeof error?.message === 'string' && error.message.trim() ? error.message : 'BGS turn failed'
-        turn.reject(Object.assign(Error(message), { bgsErrorInfo: error?.bgsErrorInfo }))
+        turn.reject(Object.assign(Error(message), { bgsErrorInfo: error?.codexErrorInfo }))
       }
     }
   }

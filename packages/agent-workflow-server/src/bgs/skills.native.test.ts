@@ -195,8 +195,9 @@ nativeTest(`${stage} task loads only selected Skill bodies and references`, asyn
     expect(sent[2]).toContain('REFERENCE_SECTION_BODY')
     expect(sent[2]).not.toContain('LATER_REFERENCE_SECTION')
     expect(sent.every(request => !request.includes('ASSIGNED_CREATIVE_BODY'))).toBe(true)
-    expect(sent[0]).toContain('### How to use skills')
-    expect(sent[0]).toContain('progressive disclosure')
+    // Unknown-model fallback follows upstream metadata; do not force extra Skill instructions.
+    expect(sent[0]).not.toContain('### How to use skills')
+    expect(sent[0]).not.toContain('progressive disclosure')
     expect(sent[0]).toContain('game-systems-designer-expert/SKILL.md')
     expect(sent[0]).toContain('game-level-designer-expert/SKILL.md')
     expect(sent.every(request => !request.includes('UNSELECTED_SKILL_BODY'))).toBe(true)

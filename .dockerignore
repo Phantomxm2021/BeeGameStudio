@@ -1,5 +1,5 @@
 node_modules
-vendor/bgs/bgs-rs/target
+vendor/bgs/codex-rs/target
 dist/*
 !dist/bgs-runtime/
 !dist/bgs-runtime/**

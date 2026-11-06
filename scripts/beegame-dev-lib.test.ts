@@ -239,7 +239,7 @@ test('existing runtime preflight rejects a missing, non-executable or broken com
   if (process.platform === 'win32') return // This fixture uses POSIX executable permissions.
   const root = await mkdtemp(join(tmpdir(), 'bgs-companion-preflight-'))
   const metadata = JSON.parse(await readFile(new URL('../dist/bgs-runtime/build.json', import.meta.url), 'utf8'))
-  const cli = join(root, 'bgs'), host = join(root, 'bgs-code-mode-host')
+  const cli = join(root, 'bgs'), host = join(root, 'codex-code-mode-host')
   await writeFile(cli, `#!/bin/sh
 if [ "$1" = "--version" ]; then echo '${metadata.version}'; else echo '~/.bgs/config.toml'; fi
 `, { mode: 0o700 })
@@ -257,7 +257,7 @@ if [ "$1" = "--version" ]; then echo '${metadata.version}'; else echo '~/.bgs/co
     await chmod(host, 0o700)
     await writeFile(host, '#!/bin/sh\necho wrong-program\n')
     expect(await check()).toMatchObject({ code: 1, text: expect.stringContaining('code-mode host could not start') })
-    await writeFile(host, '#!/bin/sh\necho "Usage: bgs-code-mode-host [OPTIONS] --listen"\n')
+    await writeFile(host, '#!/bin/sh\necho "Usage: codex-code-mode-host [OPTIONS] --listen"\n')
     expect((await check()).code).toBe(0)
     // An operator's symlinked CLI must resolve the companion beside its real executable.
     const { symlink } = await import('node:fs/promises')

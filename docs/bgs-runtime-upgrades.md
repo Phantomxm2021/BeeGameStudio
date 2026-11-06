@@ -1,24 +1,25 @@
 # BGS 源码品牌、构建与升级
 
-BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导入、类型、CLI、配置目录、环境变量、Skills、插件安装目录和 BGS 自有 API。执行循环、模型推理和原生权限逻辑不因品牌调整重写。
+BGS 基于选定的官方 Codex 版本。原生执行、Goal 计数、历史恢复、模型元数据与协议以官方为准；只保留 BGS 的命令展示、独立配置根和必要打包适配。源码目录、Cargo 包名、内部类型与协议标识沿用官方，不再全局替换字符串。原生行为偏离必须先说明依据、范围与维护成本并取得用户明确授权，详见 AGENTS.md。
 
 ## 仓库与分支
 
-- 主仓库子模块：`vendor/bgs`；Rust 工作区：`vendor/bgs/bgs-rs`。
+- 主仓库子模块：`vendor/bgs`；Rust 工作区：`vendor/bgs/codex-rs`。
 - Fork：`https://github.com/Phantomxm2021/codex.git`。这是现有真实仓库地址，保留作为来源，不虚构新地址。
 - 官方上游：`https://github.com/openai/codex.git`。
-- `bgs/source-0.167.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新、锁文件版本修正、可信应用上下文持久化去重、未知/BYOK 模型 Skill 指引和 Goal 响应回执结算补丁。
-- `bgs/0.167.0`：从源码维护分支生成的完整 BGS 命名发行分支。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
-- 完整改名规则在 `scripts/brand-bgs.py`。默认只报告，`--apply` 才写入。只遍历 Git 源码，不遍历用户运行数据。`--host` 仅为本次宿主代码的一次性迁移用途；不要对后续 BGS 宿主源码重复执行，因为兼容读取代码有意保留旧名称。
+- `bgs/source-0.167.0`：上游命名的维护分支，仅保留 CLI 展示／图标、禁止官方二进制覆盖源码包的打包保护及 workspace 锁文件版本修正；三个非品牌行为补丁已撤除。
+- `bgs/0.167.0`：由维护分支加受限配置根／文档转换生成；保留官方内部名称及协议。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
+- 受限转换在 `scripts/brand-bgs.py`：默认只报告，`--apply` 才写入；只处理受 Git 管理的源码，不重命名文件／类型／协议，不处理宿主或用户运行数据。原生配置根使用 BGS_HOME／.bgs，项目配置与其沙箱保护一致使用 .bgs，系统配置和管理域属于 BGS；其他内部实现沿用官方。
 
-后续更新在源码维护分支合并上游，再重新生成发行分支，避免对数千个改名文件逐一解决合并冲突。新增上游名称和外部协议仍需要审查；脚本不能保证未来升级无需调整。升级前还需核对仅在发行分支上的非品牌补丁，并将仍需保留的改动同步到源码维护分支，避免重新生成时丢失。
+后续更新在维护分支合并选定的官方版本，先审阅相对官方的全部差异，再生成发行分支并核对。不得自动延续非品牌行为补丁，也不得将自写测试断言作为偏离官方的依据；机械可复现不等于语义正确或外部兼容性已验证。
 
 ## 运行位置
 
 | 内容 | 位置或接口 |
 |---|---|
-| 二进制及内部 Cargo target | `bgs` |
-| Cargo 主包 | `bgs-cli` |
+| 对外二进制／内部 Cargo target | `bgs`／`codex` |
+| Cargo 主包 | `codex-cli` |
+| 原生伴随程序 | `codex-code-mode-host` |
 | CLI 配置根 | `BGS_HOME`，默认 `~/.bgs` |
 | BGS 每用户配置根 | `.runtime/app/bgs` |
 | 内置游戏 Skills | 应用共享目录 `.beegame/skills/bgs-game-skills`，通过 `skills/extraRoots/set` 直接加载，所有 BGS 账户共用、只读 |
@@ -33,11 +34,11 @@ BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导
 
 内置及用户 Skills 的原目录、投影目录只授予读取权限；不因此开放同级 auth.json、会话目录或写权限。
 
-未知模型使用本地 fallback 提示词时启用原生 Skill 使用说明，包括最小适用集合、渐进披露和必要引用的读取。目录只提供发现信息，Skill 正文仍由 Agent 按需读取；不为 BYOK 型号另写专业流程，也不修改已知模型的模板配置。`skills.native.test.ts` 使用真实 BGS 二进制和本机 Responses 替身，检查实际请求中的说明、正文未预加载，以及所选正文经原生工具读取后进入下一次请求。
+未知／BYOK 模型沿用官方 fallback 元数据，不再强制开启 include_skills_usage_instructions。共享／用户 Skill 仍通过官方 extraRoots 接口发现，显式选择与原生工具读取沿用官方机制；不得通过额外宿主提示补回已撤除的原生补丁。本机模拟可验证实际请求和读取链路，不能证明真实模型选择或产物质量。
 
 系统 `imagegen/SKILL.md` 保留原文并参与原生发现，用户显式停用设置仍生效。原生 `image_gen` 继续遵守 CLI 的连接能力与认证条件；允许使用已配置生图服务的当前任务，通过既有资源命令的 MCP 入口获得 `generate_image`，复用报价、计费、参考图、文件保存与恢复。它不冒充原生工具，不改写系统 Skill，也不要求 Shell 持有供应商 API key。
 
-明确保留的例外：真实外部 URL、模型 ID、服务端协议头及认证/额度标识；`bgs app` 所连接的官方桌面应用的签名、安装器和 URL scheme（该命令仍明确标为 upstream Codex Desktop）；第三方插件包中的 `.codex-plugin` 清单格式；LICENSE、NOTICE、来源说明；读取旧会话的兼容标识和迁移别名。安装根已属于 BGS，第三方包格式不会被擅自改写。Git 历史和 Git 自身的旧子模块元数据不做字符串改写。
+官方协议保持原名，包括 codexErrorInfo、codex/imageDetail、codex/encryptedContent、Product::Codex、Realtime 参数及官方 Apps 工具标识。真实外部 URL、模型 ID、服务端协议头及认证/额度标识保留；`bgs app` 所连接的官方桌面应用的签名、安装器和 URL scheme（该命令仍明确标为 upstream Codex Desktop）；第三方插件包中的 `.codex-plugin` 清单格式；LICENSE、NOTICE、来源说明；读取旧会话的兼容标识和迁移别名。安装根已属于 BGS，第三方包格式不会被擅自改写。Git 历史和 Git 自身的旧子模块元数据不做字符串改写。
 
 ## Scene/UI 编辑契约退出所有平台
 
@@ -86,11 +87,23 @@ bun test scripts/migrate-bgs-home.test.ts
 BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
 ```
 
-首次准备依赖可执行 `cargo fetch --locked --manifest-path vendor/bgs/bgs-rs/Cargo.toml`。正常构建使用离线锁定依赖；本地测试使用脚本化 Responses 服务，不向真实模型提交任务。macOS 权限测试需要可运行 Seatbelt 的宿主环境。
+首次准备依赖可执行 `cargo fetch --locked --manifest-path vendor/bgs/codex-rs/Cargo.toml`。正常构建使用离线锁定依赖；本地测试使用脚本化 Responses 服务，不向真实模型提交任务。macOS 权限测试需要可运行 Seatbelt 的宿主环境。
 
-产物是 `dist/bgs-runtime/bgs`、匹配的 `bgs-code-mode-host`、`build.json`、LICENSE、NOTICE 和修改说明。构建信息记录源码 SHA、上游 tag、dirty 状态及平台架构。发布构建 `bun run bgs:build --release` 拒绝未提交的源码。缺少品牌二进制时不回退到官方 npm 包。
+产物是 `dist/bgs-runtime/bgs`、匹配的 `codex-code-mode-host`、`build.json`、LICENSE、NOTICE 和修改说明。构建信息记录源码 SHA、上游 tag、dirty 状态及平台架构。发布构建 `bun run bgs:build --release` 拒绝未提交的源码。缺少品牌二进制时不回退到官方 npm 包。
 
-## Goal 计数竞态修复（2026-11-06）
+## 撤除非品牌补丁并恢复官方协议（2026-11-06）
+
+已按用户指令撤除可信应用上下文恢复去重、未知模型 Skill 指令和 Goal 等待用量三个原生补丁，停止全局改名，恢复官方源码目录、内部包名、类型和外部协议。维护提交 `2eb9e51d6e`，最终发行提交 `89e2d1dc91`；均以 rust-v0.167.0 为基线。宿主只适配原生 codexErrorInfo 读取、schema 路径和伴随程序打包，不改任务流程或补回已撤除的行为。
+
+保留的非展示差异仅用于打包：BGS_HOME／默认 ~/.bgs、官方二进制自更新覆盖保护、workspace 锁文件版本及对外 bgs 文件名；内部 target 与伴随程序保持 codex／codex-code-mode-host。BGS 用户／项目配置统一使用 .bgs，系统配置使用 /etc/bgs、macOS 管理域使用 com.phantomlab.bgs，与 Codex 配置隔离；外部协议和服务标识保持官方。没有重写已有会话、配置文件、原始日志、项目产物或账目。AGENTS.md 已明确此边界。
+
+源码复现覆盖 9,817 个文件零差异；Goal、模型元数据、上下文与历史实现同官方逐字节一致；协议字段及 MCP 元数据保留官方标识，仅将配置路径值与目录保护适配为 BGS 名称。全部额外差异按品牌／配置隔离／打包核对。5 项品牌、197 项 runner/client、62 项配置／供应商单测、40 项用量／打包回归通过；18 条相关原生回归分批通过，另用旧 BGS 包生成合成会话并由新包恢复通过。宿主类型检查及默认 CLI 冒烟通过。图像夹具仍有一条 PNG 输入断言失败，已在旧包同样复现；保留其他工作的断言与实现，不混入本轮处理。测试仅使用本机模拟，无真实模型调用；原测试名中的 pre-branding 不作为本次样本来源声明，此次旧包实际为先前 BGS 发行 439e71ad9f。
+
+候选包独立构建；第一阶段于 UTC 2026-11-06T07:40:51.914Z 在 idle 窗口切换并仅优雅重载 runtime（26045 → 65194）。用户随后明确 BGS 配置应保持 .bgs：拟添加的宿主 .codex 只读项已全部撤回，原生项目／系统配置及其目录保护统一回 BGS 名称，外部协议不变。最终包于 UTC 2026-11-06T08:05:35.908Z 再次确认 idle、无原生任务后原子发布，没有再次重启服务；四服务 health 均 200，runtime-status idle，既有服务和预览 PID 均保持不变。最终 4 项原生配置／直接工具／Code Mode 检查通过，实际默认包的 .bgs 隔离检查及 CLI 冒烟通过。没有中断在执行的任务，没有迁移或改写已有真实会话；默认 CLI／伴随程序哈希与最终候选一致。审计、原始失败记录及回退包保存在 claude-code-main/backups/bgs-official-alignment-20261106/。源码与发行分支及主仓库仅作本地提交；远端推送因本次仅授权 Git 提交而未获自动审批，不通过其他途径推送。分享或推送主仓库更新前仍需先发布子模块分支。
+
+## Goal 计数补丁历史记录（2026-11-06，现已撤除）
+
+以下仅保留当时实施与测试记录，不是现行方案，也不证明官方实现存在 bug。测试由本代理编写，计数边界尚未通过官方契约及官方发行包独立复现确认。
 
 - 根因：流式 `update_goal` 可先于其响应的终态 usage 执行，原实现当即清除 Goal 归属，导致回执确认 48 tokens 而完成结果与持久化计数为 0。
 - 在 Goal 扩展内部复用已有模型请求拦截接口；`create_goal`／`update_goal` 等待当前请求的 usage 已被 core 记账后，再沿用原有起算／结算逻辑。完成响应的用量计入 Goal，后续最终答复排除在该 Goal 外；创建请求计入新 Goal 起点以前的工作。失败、取消与缺失 usage 各自结束等待；缺失 usage 保留已知计数，不虚构数据。等待期间通过已有 `expected_goal_id` 契约防止操作替换后的新目标。未改供应商适配、宿主计费或权限策略。
@@ -146,7 +159,7 @@ bun scripts/migrate-bgs-home.ts --from /OWNER/.runtime/app/codex --to /OWNER/.ru
 
 工具检查打开的文件，拒绝已有目标、合并、覆盖以及不明状态；用同一文件系统目录重命名保留原数据和权限，再保留旧路径符号链接，使历史记录中的绝对路径继续有效。它不改写配置正文、原始日志、SQLite、项目内容或游戏产物。新启动使用 BGS_HOME，新目录采用 BGS 名称。重复执行识别已迁移状态。不要在旧别名仍被历史引用时删除它。
 
-含旧 CODEX_* 环境变量的运维配置、显式旧路径和单机 keychain 凭据不能靠改目录自动翻译：按新的 BGS_* 名称核对环境，显式旧路径可暂由别名承接。BGS 服务使用的文件型 auth.json 会原样保留；独立 CLI 的旧系统 keychain 登录可能需要重新登录。Windows 尚无已验证的打开文件检查，工具拒绝自动迁移。
+旧运维配置中只有配置根环境变量 CODEX_HOME 需要核对为 BGS_HOME，其他 CODEX_* 保持官方名称；显式旧路径和单机 keychain 凭据不能靠改目录自动翻译：显式旧路径可暂由别名承接。BGS 服务使用的文件型 auth.json 会原样保留；独立 CLI 的旧系统 keychain 登录可能需要重新登录。Windows 尚无已验证的打开文件检查，工具拒绝自动迁移。
 
 如果旧目录还未迁移，BGS 会说明迁移方法，不会悄悄创建第二套空账号配置。历史 `runtime: codex` 事件继续可读，新事件写 `bgs`。
 
@@ -161,7 +174,7 @@ git -C vendor/bgs switch bgs/source-0.167.0
 git -C vendor/bgs switch -c bgs/source-NEW_VERSION
 git -C vendor/bgs fetch upstream tag rust-vNEW_VERSION
 git -C vendor/bgs merge --no-ff rust-vNEW_VERSION
-# 审查并解决少量产品补丁冲突，提交；保留此源码维护分支。
+# 逐项审阅相对官方的差异，只保留经确认的品牌与打包适配，提交维护分支。
 git -C vendor/bgs switch -c bgs/NEW_VERSION
 python3 scripts/brand-bgs.py vendor/bgs --report /tmp/bgs-brand-plan.json
 python3 scripts/brand-bgs.py vendor/bgs --apply
@@ -170,7 +183,7 @@ git -C vendor/bgs add -A
 git -C vendor/bgs commit -m 'brand: generate BGS distribution for NEW_VERSION'
 ```
 
-如果源码 checkout 还原后保留了 ignored 的旧 `bgs-rs/target`，先将该构建缓存移到工作区外；转换遇到已有目标会拒绝覆盖。不要用 reset --hard、自动 ours/theirs 或覆盖目录解决冲突。主仓库宿主 API 已是 BGS，不随上游重复改名。
+当前转换不重命名目录；旧 bgs-rs/target 不作为源码或新构建输入。不要用 reset --hard、自动 ours/theirs 或覆盖目录解决冲突。宿主源码不随上游重复改名。
 
 先推送源码维护分支与发行分支，再记录主仓库 gitlink。可用 GitHub Desktop 推送，也可用已登录的 Git：
 

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { BgsClient } from './client'
 import { getSafeRuntimeProcessEnvironment } from '../beegame/runtime-process-environment'
 
@@ -29,3 +30,26 @@ nativeTest('pinned Bgs applies reasoning overrides in thread config without a mo
     expect(resumed.reasoningEffort).toBe(model.defaultReasoningEffort)
   } finally { await client?.close(); await rm(root, { recursive: true, force: true }) }
 }, 15000)
+
+nativeTest('BGS project configuration uses .bgs and leaves Codex configuration separate', async () => {
+  const root = await mkdtemp('/private/tmp/bgs-config-isolation-')
+  const home = join(root, 'home'), project = join(root, 'project')
+  let client: BgsClient | undefined
+  try {
+    await mkdir(home)
+    for (const name of ['.bgs', '.codex']) await mkdir(join(project, name), { recursive: true })
+    await writeFile(join(home, 'config.toml'), '[projects.' + JSON.stringify(project) + ']\ntrust_level = "trusted"\n')
+    await writeFile(join(project, '.bgs', 'config.toml'), 'model_reasoning_effort = "low"\n')
+    const codexConfig = 'model_reasoning_effort = "high"\n'
+    await writeFile(join(project, '.codex', 'config.toml'), codexConfig)
+    client = await BgsClient.connect({ cwd: project,
+      env: { ...getSafeRuntimeProcessEnvironment(), HOME: home, BGS_HOME: home },
+      config: { cli_auth_credentials_store: 'file' } })
+    const result = await client.requestNative('config/read', { cwd: project, includeLayers: true })
+    expect(result.config.model_reasoning_effort).toBe('low')
+    const layers = JSON.stringify(result.layers)
+    expect(layers).toContain(join(project, '.bgs'))
+    expect(layers).not.toContain(join(project, '.codex'))
+    expect(await Bun.file(join(project, '.codex', 'config.toml')).text()).toBe(codexConfig)
+  } finally { await client?.close(); await rm(root, { recursive: true, force: true }) }
+}, 15_000)

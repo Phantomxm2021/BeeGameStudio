@@ -1,6 +1,6 @@
 # BeeGameStudio
 
-BeeGameStudio (BGS) is a game creation application with editable Scene/UI content, a resource library, previews, verification and publishing. Its coding agent runs through the BGS runtime, based on upstream **BGS app-server**. The embedded Claude Code fork is no longer part of the application.
+BeeGameStudio (BGS) is a game creation application with editable Scene/UI content, a resource library, previews, verification and publishing. Its coding agent runs through the BGS runtime, based on upstream **Codex app-server**. The embedded Claude Code fork is no longer part of the application.
 
 ## Development
 
@@ -19,7 +19,7 @@ bun run beegame:dev
 ```
 
 The offline build requires cached Cargo dependencies (`cargo fetch --locked` from
-`vendor/bgs/bgs-rs` on the first connected setup). It packages the binary,
+`vendor/bgs/codex-rs` on the first connected setup). It packages the binary,
 source provenance and original LICENSE/NOTICE in `dist/bgs-runtime`. This is the
 default executable for agent, auth and sandbox operations. Missing builds fail;
 there is no automatic fallback to the official npm executable. The existing

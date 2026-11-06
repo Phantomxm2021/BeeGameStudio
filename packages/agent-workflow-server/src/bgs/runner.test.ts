@@ -1389,7 +1389,7 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
     const client = (f.runtime as unknown as { client: BgsClient }).client
     const trace = async () => (await readFile(join(f.root, 'rpc.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     const emit = (...events: unknown[]) => client.request('fixture/events', { events })
-    const finish = (threadId: string, turnId: string, text: string, status = 'completed', error?: { message: string; bgsErrorInfo: string }) => emit(
+    const finish = (threadId: string, turnId: string, text: string, status = 'completed', error?: { message: string; codexErrorInfo: string }) => emit(
       { method: 'item/completed', params: { threadId, turnId, item: { type: 'agentMessage', id: turnId + '-final', text, phase: 'final_answer' } } },
       { method: 'thread/tokenUsage/updated', params: { threadId, turnId, tokenUsage: { total: { inputTokens: 100, cachedInputTokens: 20, outputTokens: 30 } } } },
       { method: 'turn/completed', params: { threadId, turnId, turn: { id: turnId, status, ...(error ? { error } : {}) } } },
@@ -1475,7 +1475,7 @@ for (const outcome of ['pass', 'revise', 'rejected', 'unresolved', 'new-defect',
       }
       await finish('review-thread-2', 'turn-2', outcome === 'invalid' ? 'not a report' : report(needsRevision),
         outcome === 'failed' || outcome === 'exhausted' ? 'failed' : 'completed',
-        outcome === 'exhausted' ? { message: 'Incomplete response returned, reason: max_output_tokens PRIVATE_UPSTREAM_DATA', bgsErrorInfo: 'other' } : undefined)
+        outcome === 'exhausted' ? { message: 'Incomplete response returned, reason: max_output_tokens PRIVATE_UPSTREAM_DATA', codexErrorInfo: 'other' } : undefined)
       if (needsRevision) {
         await waitUntilAsync(async () => (await trace()).filter(row => row.method === 'turn/start').length === 3)
         const revision = (await trace()).filter(row => row.method === 'turn/start')[2].params.input[0].text

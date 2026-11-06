@@ -175,7 +175,7 @@ createInterface({ input: process.stdin }).on('line', async line => {
     if (prompt === 'hang') { setInterval(() => {}, 1000); return }
     if (prompt === 'crash') { process.exit(3) }
     if (prompt === 'failure-details' || prompt === 'failure-notification') {
-      const error = { message: 'Connection error. fixture ECONNRESET', bgsErrorInfo: { httpConnectionFailed: { httpStatusCode: 502 } } }
+      const error = { message: 'Connection error. fixture ECONNRESET', codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 502 } } }
       if (prompt === 'failure-notification') event('error', { error, willRetry: false })
       event('turn/completed', { turn: { id: turnId, status: 'failed', ...(prompt === 'failure-details' ? { error } : {}) } })
       return

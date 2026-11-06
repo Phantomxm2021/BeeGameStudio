@@ -160,7 +160,7 @@ jobs:
           key: bgs-native-${{ runner.os }}-${{ runner.arch }}-${{ steps.bgs-source.outputs.commit }}-${{ hashFiles('scripts/build-bgs.ts') }}
       - name: Fetch locked Rust dependencies
         if: steps.bgs-runtime.outputs.cache-hit != 'true'
-        working-directory: vendor/bgs/bgs-rs
+        working-directory: vendor/bgs/codex-rs
         env:
           # Use system git for the pinned dependencies' nested submodules.
           CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
