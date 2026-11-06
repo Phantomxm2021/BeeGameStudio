@@ -7,7 +7,7 @@ BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导
 - 主仓库子模块：`vendor/bgs`；Rust 工作区：`vendor/bgs/bgs-rs`。
 - Fork：`https://github.com/Phantomxm2021/codex.git`。这是现有真实仓库地址，保留作为来源，不虚构新地址。
 - 官方上游：`https://github.com/openai/codex.git`。
-- `bgs/source-0.167.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新、锁文件版本修正、可信应用上下文持久化去重和未知/BYOK 模型 Skill 指引补丁。
+- `bgs/source-0.167.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新、锁文件版本修正、可信应用上下文持久化去重、未知/BYOK 模型 Skill 指引和 Goal 响应回执结算补丁。
 - `bgs/0.167.0`：从源码维护分支生成的完整 BGS 命名发行分支。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
 - 完整改名规则在 `scripts/brand-bgs.py`。默认只报告，`--apply` 才写入。只遍历 Git 源码，不遍历用户运行数据。`--host` 仅为本次宿主代码的一次性迁移用途；不要对后续 BGS 宿主源码重复执行，因为兼容读取代码有意保留旧名称。
 
@@ -89,6 +89,17 @@ BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
 首次准备依赖可执行 `cargo fetch --locked --manifest-path vendor/bgs/bgs-rs/Cargo.toml`。正常构建使用离线锁定依赖；本地测试使用脚本化 Responses 服务，不向真实模型提交任务。macOS 权限测试需要可运行 Seatbelt 的宿主环境。
 
 产物是 `dist/bgs-runtime/bgs`、匹配的 `bgs-code-mode-host`、`build.json`、LICENSE、NOTICE 和修改说明。构建信息记录源码 SHA、上游 tag、dirty 状态及平台架构。发布构建 `bun run bgs:build --release` 拒绝未提交的源码。缺少品牌二进制时不回退到官方 npm 包。
+
+## Goal 计数竞态修复（2026-11-06）
+
+- 根因：流式 `update_goal` 可先于其响应的终态 usage 执行，原实现当即清除 Goal 归属，导致回执确认 48 tokens 而完成结果与持久化计数为 0。
+- 在 Goal 扩展内部复用已有模型请求拦截接口；`create_goal`／`update_goal` 等待当前请求的 usage 已被 core 记账后，再沿用原有起算／结算逻辑。完成响应的用量计入 Goal，后续最终答复排除在该 Goal 外；创建请求计入新 Goal 起点以前的工作。失败、取消与缺失 usage 各自结束等待；缺失 usage 保留已知计数，不虚构数据。等待期间通过已有 `expected_goal_id` 契约防止操作替换后的新目标。未改供应商适配、宿主计费或权限策略。
+- 源码维护提交 `fab1d725b0`（包含 `5b232ae363`）；品牌发行提交 `439e71ad9f`（包含 `ba722db371`）。均已发布到现有 Fork，发行结果从维护源码生成，9,817 个文件复现零差异；上游基线与版本仍为 `rust-v0.167.0`／`bgs 0.167.0`。
+- 三条新增／加强的原生回归在旧包均失败、修复包通过：晚到 usage 的冷恢复回执和持久化计数均为 48，EOF／取消不误标 complete。全部 8 条原生 Goal／任务测试、7 条账本与 31 条扩展后端 Rust 测试通过；后端回归覆盖两种到达顺序、直接／Code Mode 调用、完成／暂停／阻塞、失败／取消／缺失回执和目标替换。
+- 89 项用量／结算检查及 5 项供应商回归通过，Clippy、宿主类型检查和 4 项品牌检查通过。验证只用现有本机模拟与原生运行包；未新增测试环境、生产入口或真实模型调用。Linux／Windows、真实供应商和真实钱包扣款未实测；其他 6 项既有回归失败不在本轮修复范围。
+- 已在空闲窗口发布已验证的候选包（UTC `2026-11-06T06:43:12.258Z`），来源 `439e71ad9f`；切换前真实任务活跃时暂缓发布，未中断任务或重启服务。运行包沿用既有 host 优先、二进制和元数据原子替换顺序，默认二进制哈希与通过回归的候选包一致。安装后 CLI 冒烟检查通过，四个服务 health 均为 200，runtime-status 为 idle。
+
+候选包、回退包、根因证据、检查结果和发布状态保存在 `claude-code-main/backups/bgs-goal-counter-fix-20261106/`。本轮使用 `CARGO_INCREMENTAL=0`；发布后已清理 `target` 构建缓存，按磁盘占用统计约 13.7 GiB，默认运行包、候选证据和回退包独立保留。
 
 ## 0.167.0 本地验证与切换（2026-11-06）
 
