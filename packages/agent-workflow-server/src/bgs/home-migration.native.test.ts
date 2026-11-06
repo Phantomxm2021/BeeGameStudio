@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createBgsRunner } from './runner'
 import { migrateBgsHome } from '../../../../scripts/migrate-bgs-home'
@@ -8,7 +8,8 @@ const localTest = process.env.BGS_SANDBOX_TESTS === '1' && process.env.BGS_LEGAC
 localTest('a pre-branding native session resumes from the migrated BGS home without rewriting its history', async () => {
   const root = await mkdtemp('/private/tmp/bgs-home-resume-'), game = join(root, 'game'), catalog = join(root, 'skills')
   const privateRoot = join(root, 'private'), legacy = join(privateRoot, 'codex'), home = join(privateRoot, 'bgs')
-  await mkdir(game); await mkdir(catalog); await mkdir(legacy, { recursive: true })
+  await mkdir(game); await mkdir(join(catalog, 'fixture'), { recursive: true }); await mkdir(legacy, { recursive: true })
+  await writeFile(join(catalog, 'fixture/SKILL.md'), '---\nname: fixture\ndescription: Offline migration fixture.\n---\nFixture.')
   const inputs: string[] = []
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     if (new URL(request.url).pathname !== '/v1/responses') return new Response('Not a fixture route', { status: 404 })

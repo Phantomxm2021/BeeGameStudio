@@ -7,8 +7,8 @@ BGS 基于 OpenAI Codex。完整品牌转换覆盖源码目录、Cargo 包及导
 - 主仓库子模块：`vendor/bgs`；Rust 工作区：`vendor/bgs/bgs-rs`。
 - Fork：`https://github.com/Phantomxm2021/codex.git`。这是现有真实仓库地址，保留作为来源，不虚构新地址。
 - 官方上游：`https://github.com/openai/codex.git`。
-- `bgs/source-0.166.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新、锁文件版本修正、可信应用上下文持久化去重和未知/BYOK 模型 Skill 指引补丁。
-- `bgs/0.166.0`：从源码维护分支生成的完整 BGS 命名发行分支。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
+- `bgs/source-0.167.0`：保留上游命名的源码维护分支，包含此前已验证的 CLI 品牌、图标、关闭官方二进制自更新、锁文件版本修正、可信应用上下文持久化去重和未知/BYOK 模型 Skill 指引补丁。
+- `bgs/0.167.0`：从源码维护分支生成的完整 BGS 命名发行分支。主仓库 gitlink 固定发行提交。Rust 工具链沿用上游固定的 `1.95.0`。
 - 完整改名规则在 `scripts/brand-bgs.py`。默认只报告，`--apply` 才写入。只遍历 Git 源码，不遍历用户运行数据。`--host` 仅为本次宿主代码的一次性迁移用途；不要对后续 BGS 宿主源码重复执行，因为兼容读取代码有意保留旧名称。
 
 后续更新在源码维护分支合并上游，再重新生成发行分支，避免对数千个改名文件逐一解决合并冲突。新增上游名称和外部协议仍需要审查；脚本不能保证未来升级无需调整。升级前还需核对仅在发行分支上的非品牌补丁，并将仍需保留的改动同步到源码维护分支，避免重新生成时丢失。
@@ -80,7 +80,7 @@ bun run bgs:build
 bun run bgs:check
 bun run bgs:verify
 python3 scripts/test_brand_bgs.py
-python3 scripts/verify-bgs-source.py bgs/source-0.166.0
+python3 scripts/verify-bgs-source.py bgs/source-0.167.0
 bun run typecheck
 bun test scripts/migrate-bgs-home.test.ts
 BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
@@ -88,7 +88,17 @@ BGS_SANDBOX_TESTS=1 bun test packages/agent-workflow-server/src/bgs
 
 首次准备依赖可执行 `cargo fetch --locked --manifest-path vendor/bgs/bgs-rs/Cargo.toml`。正常构建使用离线锁定依赖；本地测试使用脚本化 Responses 服务，不向真实模型提交任务。macOS 权限测试需要可运行 Seatbelt 的宿主环境。
 
-产物是 `dist/bgs-runtime/bgs`、`build.json`、LICENSE、NOTICE 和修改说明。构建信息记录源码 SHA、上游 tag、dirty 状态及平台架构。发布构建 `bun run bgs:build --release` 拒绝未提交的源码。缺少品牌二进制时不回退到官方 npm 包。
+产物是 `dist/bgs-runtime/bgs`、匹配的 `bgs-code-mode-host`、`build.json`、LICENSE、NOTICE 和修改说明。构建信息记录源码 SHA、上游 tag、dirty 状态及平台架构。发布构建 `bun run bgs:build --release` 拒绝未提交的源码。缺少品牌二进制时不回退到官方 npm 包。
+
+## 0.167.0 本地验证与切换（2026-11-06）
+
+- 基于官方 `rust-v0.167.0`，源码维护提交 `14a7da397`，品牌发行提交 `446d5a73d`。保留品牌、自更新禁用、可信应用上下文来源／恢复去重和未知/BYOK 模型 Skill 指引。合并上游上下文统计接口，继续以可信来源恢复上下文；适配模型元数据字段移除和新版登录界面。锁文件内部包统一为 `0.167.0`，Rust 工具链仍为 `1.95.0`。
+- macOS arm64 的 CLI 和 code-mode-host 均已离线锁定构建，运行包为 `bgs 0.167.0`、`dirty: false`。品牌生成复现覆盖 9,817 个文件，零差异。品牌检查 4 项、目录迁移 2 项、可信上下文 Rust 检查 3 项、失败／缺失 usage 的上下文计数检查 2 项、未知模型 Skill 指引检查 1 项、code-mode 输出边界检查 6 项及宿主类型检查通过。
+- 全量本地 BGS／供应商模拟检查首次为 427 项通过、1 项跳过、15 项失败。稳定复现的 10 项失败均在保留的 `0.166.0` 包上复现，涉及子任务容量断言、隔离验证结果、工具输出预算、图像夹具、工具拒绝后的目录断言、重试次数和供应商累计用量；未将旧包行为作为正确性标准，也未修改生产行为来迎合断言。工作区同期有其他编辑，4 项方法选择断言随后在新版定向检查通过。历史 Goal 新目标计数首次为 0，新版两次单项复测和旧版定向检查均通过，原因仍未查明，不能宣称全量回归通过。
+- 复用现有跨版本迁移测试，为其补齐当前契约要求的最小 Skills 夹具；`0.166.0` 创建的会话由 `0.167.0` 恢复，线程身份及历史保留。未新增测试环境、模式或入口；未修改前端或真实项目产物，未调用真实模型。Linux／Windows、真实供应商和终端交互新功能未实测。
+- 2026-11-06 11:56–11:58（Asia/Shanghai）确认后端空闲、无待处理权限、writer、用量 outbox 或原生任务后，按现有脚本替换默认运行包及 code-mode-host。版本／帮助、默认和显式 BGS_HOME、命令补全、本地插件安装／卸载及安全更新入口检查通过；切换后四个服务 health 均为 200，runtime-status 为 idle，未重启服务。源码维护和发行分支已发布到现有 Fork；主仓库通过本次 Git 提交固定发行引用，遵守先发布子模块分支再提交主仓库的顺序。
+
+本轮使用 `CARGO_INCREMENTAL=0` 构建；打包和验证后清理 Rust `target` 缓存，按磁盘占用统计移除约 28.1 GiB（Cargo 报告逻辑大小 29.6 GiB），默认运行包与 `0.166.0` 回退包独立保留。备份、检查日志、未通过项分析和切换状态保存在 `claude-code-main/backups/bgs-upgrade-0.167.0-20261106/`。上游变化见 [官方 0.167.0 发布说明](https://github.com/openai/codex/releases/tag/rust-v0.167.0)。
 
 ## 0.166.0 本地验证与切换（2026-10-30）
 
@@ -136,7 +146,7 @@ bun scripts/migrate-bgs-home.ts --from /OWNER/.runtime/app/codex --to /OWNER/.ru
 以下 NEW_VERSION 是选定的官方版本：
 
 ```sh
-git -C vendor/bgs switch bgs/source-0.166.0
+git -C vendor/bgs switch bgs/source-0.167.0
 git -C vendor/bgs switch -c bgs/source-NEW_VERSION
 git -C vendor/bgs fetch upstream tag rust-vNEW_VERSION
 git -C vendor/bgs merge --no-ff rust-vNEW_VERSION
