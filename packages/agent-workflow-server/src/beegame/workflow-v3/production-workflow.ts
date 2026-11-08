@@ -145,6 +145,7 @@ export function productionAssignmentBaseInstructions(run: Run, task: ProductionA
     'Determine whether the delivered implementation meets the confirmed scope and relevant design decisions, collecting reproducible product defects for the author. This assignment is runtime verification, not implementation, general source-code diagnosis or a new design review.',
     'Use the supplied design snapshot, author observations and referenced scripts/results to choose checks for required player outcomes and their adopted presentation and feedback; reuse observations whose source and conditions remain valid. Observe whether those decisions are realized in play, rather than inferring completion from object or control presence. Ordinary aesthetic alternatives within a satisfied treatment are not product defects. Read additional source definitions only for a concrete unresolved question. Provisional tuning is not a precision acceptance threshold, and an author claim alone is not a passing observation.',
     'Do not edit game sources, GDD, assets or dependencies. Use each tool’s configured output location; Shell scratch work may use the assigned writable temporary directory. Use the current platform’s delivered runtime and user-configured tools; do not assume Chrome or a particular engine exists. Do not generate artwork or start a broader experience study.',
+    ...(run.creation?.creativeStages ? ['Verify the adopted player behavior. A missing device, listening setup or suggested test method is a coverage-limit if the required outcome is otherwise evidenced; if the behavior itself remains unobserved or the user requires that specific condition, report unverified. Keep different outcomes separate.'] : []),
     'Return the final observation report for the required player outcomes in this assignment: passed records an observed result, failed records a reproducible product defect, and unverified records a required outcome that could not be established. Give the actual conditions and evidence for each outcome; provisional tuning and optional improvements are not required outcomes. Put reusable results and other observation limits in summary. BGS derives the existing pass, repair or blocked outcome from these observations; do not supply a separate overall verdict.',
   ].join('\n\n')
   if (task.stage === 'implementation' && run.creation?.verification === 'isolated') return [
@@ -164,10 +165,10 @@ export function productionAssignmentPrompt(run: Run, task: ProductionAssignment)
   const implementationFinish = run.creation?.verification === 'isolated' ? '' : 'Judge remaining work against those requirements and repair observed deviations. Finish this native turn with the result, checks actually performed and any remaining defects, unverified behavior or external blockers.'
   if (run.creation?.creativeStages && task.stage !== 'visual') {
     const work = {
-      discovery: 'Use the confirmed gameplay choice, configuration and supplied references to identify unresolved design questions. Inspect relevant real internal or external sources with the available tools. Save docs/ResearchBrief.md with traceable source locations (including clips/timestamps when relevant), actual observations, separately labelled inferences, applicable principles, limitations and risks. Include saved local reference materials in files. Reuse complete approved materials. If necessary evidence cannot be obtained, disclose the gap. Return ready with sections:[] and the actual files; no GDD is due.',
-      direction: 'Read the research brief and inspect its referenced material. Develop distinct expressions of the selected gameplay and compare observable candidates for distinctiveness, coherence, gameplay fit, craft and feasibility. Reuse approved designs. Use a game-view study for composition and a sequence, audio or small prototype when motion or timing determines the choice. Respect the existing budget; if no direction is supportable within it, retain exploration and return blocked. Keep exploratory alternatives outside assets/reference/selected/; save the adopted study and its dependencies together under assets/reference/selected/. Save docs/VisualContract.md describing only the adopted concept, spatial/UI, movement, sound, supporting sources, tradeoffs and observable player outcomes. Return files containing this contract and only the chosen study and its necessary media, with sections:[]. Do not submit alternatives. No GDD or runtime assets are due.',
-      design: 'Finalize docs/GDD.md from the confirmed gameplay and the adopted Visual Contract. Define the needed rules, player states, transitions, and feedback. Refer to the selected treatment rather than deciding it again. Submit the saved GDD for the existing independent rule review.',
-      resources: 'Produce usable runtime art, animation and audio for the representative passage from the reviewed GDD and selected direction, respecting the confirmed resource configuration. Register actual outputs, return their project paths and the relevant GDD headings, and identify outstanding needs. Design studies are references, not produced runtime assets.',
+      discovery: 'Use the confirmed gameplay choice, configuration and supplied references to identify unresolved design questions. Choose real sources that illuminate the unresolved player experience, including composition, movement or sound when these decisions are open. Distinguish a suggested way of investigating a risk from a required player outcome. Save docs/ResearchBrief.md with traceable source locations (including clips/timestamps when relevant), actual observations, separately labelled inferences, applicable principles, limitations and risks. Include saved local reference materials in files. Reuse complete approved materials. If necessary evidence cannot be obtained, disclose the gap. Return ready with sections:[] and the actual files; no GDD is due.',
+      direction: 'Read the research brief and inspect its referenced material. Compare different ways the same representative passage could unfold for the player, keeping confirmed rules and design choices fixed, not unresolved staging or interface behavior. Compare the observable candidates for distinctiveness, coherence, gameplay fit, craft and feasibility. Reuse approved designs. Use a game-view study for composition and a sequence, audio or small prototype when motion or timing determines the choice. Respect the existing budget; if no direction is supportable within it, retain exploration and return blocked. Keep exploratory alternatives outside assets/reference/selected/; save the adopted study and its dependencies together under assets/reference/selected/. Save docs/VisualContract.md describing only the adopted concept, spatial/UI, movement, sound, supporting sources, tradeoffs and observable player outcomes. Return files containing this contract and only the chosen study and its necessary media, with sections:[]. Do not submit alternatives. No GDD or runtime assets are due.',
+      design: 'Finalize docs/GDD.md from the confirmed gameplay and the adopted Visual Contract. Define the needed rules, player states, transitions, and feedback. Adopt player outcomes; a research suggestion about test equipment or procedure is not a delivery requirement unless explicitly requested. Refer to the selected treatment rather than deciding it again. Submit the saved GDD for the existing independent rule review.',
+      resources: 'Produce usable runtime art, animation and audio for the representative passage from the reviewed GDD and selected direction, respecting the confirmed resource configuration. Register and hand off the files the runtime will consume, their required companions and the relevant GDD headings. Retain production sources separately; alternative exports are only deliverables when they serve another real consumer. Identify outstanding needs. Design studies are references, not produced runtime assets.',
       implementation: 'Integrate the delivered resources and reviewed rules into a runnable game. Develop the representative passage first, adjust timing, composition and feedback in the first preview, then complete the agreed scope. Submit the actual runtime entry and reusable observations for independent verification.',
     }[task.stage]
     return [scope,sources,'BGS current production stage: '+task.stage+'.',work].filter(Boolean).join('\n\n')
@@ -181,13 +182,14 @@ export function productionAssignmentPrompt(run: Run, task: ProductionAssignment)
         : `${continuousAuthor ? 'Develop and implement the authorized game as one continuous authoring task. Choose its design methods, and develop the scene, subjects, interface, soundscape and feedback in concrete playable work; record the resulting decisions in docs/GDD.md, choosing its content, structure and depth for this game. The existing rule review applies to that saved record when this game task is complete.' : 'Implement or resume the current authorized assignment from the confirmed requirements, relevant GDD decisions and existing work.'} Before specialist work, read the applicable Skills and necessary references from the available catalog, reusing relevant methods already retained in the current context. When existing evidence is insufficient for the current question, use available search tools to consult relevant public examples or primary sources; retain the adopted basis and source with the corresponding design or implementation decision. Preserve confirmed targets, user-specified and selected visual designs, including their composition, subject proportions and spatial relationships. Production and implementation choices belong to this assignment; an actual design correction or authorized change may revise its owning design, but an implementation defect does not redefine the required result. For a new game, build a representative passage of play first: let the player act, pass into the resulting state and perceive the consequence. In the first available preview of that passage, follow the action at play speed and listen when available; use what happens to adjust your provisional layout, transfer of control and feedback before extending the game. For ongoing work or a local repair, build on the established passage and reuse relevant observations. Integrate the required code and resources, and register delivered asset paths and provenance through the existing resource contract. If adopting a design image, record its source through BgsWorkflow({action:"select-visual",summary,sections,files}) or workflow.mjs --select-visual without ending this task; selecting a reference is not runtime asset registration. ${run.creation?.verification === 'isolated' ? 'Deliver the runnable implementation for the separate verification assignment through the current readiness handoff.' : implementationFinish}`
   return [scope, sources, 'BGS current production stage: ' + task.stage + '.', work].filter(Boolean).join('\n\n')
 }
+const requiredObservation = z.object({
+  outcome: z.string().trim().min(1).describe('Player outcome or coverage condition being reported'),
+  status: z.enum(['passed', 'failed', 'unverified']),
+  evidence: z.string().trim().min(1).describe('Actual conditions and observed result, or the concrete reason this outcome could not be verified'),
+}).strict()
 const implementationVerificationSchema = z.object({
   summary: z.string().trim().min(1).describe('Checks performed, reusable results and other observation limits; not an overall verdict'),
-  observations: z.array(z.object({
-    outcome: z.string().trim().min(1).describe('Required player outcome from the confirmed scope being verified'),
-    status: z.enum(['passed', 'failed', 'unverified']),
-    evidence: z.string().trim().min(1).describe('Actual conditions and observed result, or the concrete reason this required outcome could not be verified'),
-  }).strict()).min(1),
+  observations: z.array(requiredObservation).min(1),
 }).strict()
 // Persist the existing result shape. Older receipts remain observations of their
 // original runs; only new reports use the current observation contract.
@@ -196,23 +198,27 @@ export type ImplementationVerificationResult = {
   summary: string
   findings: string[]
 }
-function verificationSchema(creative: boolean) {
-  return creative ? implementationVerificationSchema.extend({
-    externalBlocker:z.string().trim().min(1).nullable().describe('Concrete unavailable external input or permission preventing a required observation; null for unfinished checks.')
-  }) : implementationVerificationSchema
-}
+const creativeVerificationSchema = implementationVerificationSchema.extend({
+  observations: z.array(requiredObservation.extend({
+    status: z.enum(['passed','failed','unverified','coverage-limit']).describe('coverage-limit: additional observation conditions not required by the confirmed scope; never a substitute for a missing player outcome')
+  })).min(1),
+  externalBlocker:z.string().trim().min(1).nullable().describe('Concrete unavailable external input or permission preventing a required observation; null for optional coverage or unfinished checks.')
+})
 export function implementationVerificationOutputSchema(creative = false) {
-  return z.toJSONSchema(verificationSchema(creative), {target:'draft-7'})
+  return z.toJSONSchema(creative ? creativeVerificationSchema : implementationVerificationSchema, {target:'draft-7'})
 }
 export function parseImplementationVerification(value: unknown, creative = false): ImplementationVerificationResult {
-  const report = verificationSchema(creative).parse(value)
+  const report = creative ? creativeVerificationSchema.parse(value) : implementationVerificationSchema.parse(value)
   const blocker='externalBlocker' in report && typeof report.externalBlocker==='string' ? report.externalBlocker : undefined
-  const failed = report.observations.filter(item => item.status === 'failed')
-  const unverified = report.observations.filter(item => item.status === 'unverified')
-  const describe = (item: typeof report.observations[number]) => item.outcome + ': ' + item.evidence
+  const observations: z.infer<typeof creativeVerificationSchema>['observations'] = report.observations
+  const failed = observations.filter(item => item.status === 'failed')
+  const unverified = observations.filter(item => item.status === 'unverified')
+  const limits = observations.filter(item => item.status === 'coverage-limit')
+  const describe = (item: typeof observations[number]) => item.outcome + ': ' + item.evidence
   return {
-    status: failed.length ? 'needs-repair' : unverified.length ? (creative && !blocker ? 'incomplete' : 'blocked') : 'passed',
-    summary: [report.summary, ...(blocker?[blocker]:[]), ...unverified.map(item => '[unverified] ' + describe(item))].join('\n'),
+    status: failed.length ? 'needs-repair' : blocker ? 'blocked'
+      : unverified.length || limits.length === observations.length ? (creative ? 'incomplete' : 'blocked') : 'passed',
+    summary: [report.summary, ...(blocker?[blocker]:[]), ...unverified.map(item => '[unverified] ' + describe(item)), ...limits.map(item => '[coverage-limit] ' + describe(item))].join('\n'),
     findings: failed.map(describe),
   }
 }

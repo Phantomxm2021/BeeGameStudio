@@ -602,6 +602,18 @@ test('isolated verification reuses source handoffs without changing archived imp
     const unverified={...observation,status:'unverified',evidence:'Only the stationary result was observed, not the required controlled action'}
     expect(parseImplementationVerification({summary:'Not observed',observations:[unverified],externalBlocker:null},true).status).toBe('incomplete')
     expect(parseImplementationVerification({summary:'Access unavailable',observations:[unverified],externalBlocker:'Required platform unavailable'},true).status).toBe('blocked')
+    const limit={outcome:'Physical touchscreen feel',status:'coverage-limit',evidence:'Pointer behavior observed in emulation only'}
+    const creativeReport=(observations:unknown[],externalBlocker:string|null=null)=>
+      parseImplementationVerification({summary:'Runtime observations',observations,externalBlocker},true)
+    const qualified=creativeReport([observation,limit])
+    expect(qualified.status).toBe('passed')
+    expect(qualified.summary).toContain('[coverage-limit] Physical touchscreen feel')
+    expect(creativeReport([limit]).status).toBe('incomplete')
+    expect(creativeReport([observation,unverified,limit]).status).toBe('incomplete')
+    expect(creativeReport([observation,unverified,limit],'Required background state inaccessible').status).toBe('blocked')
+    expect(creativeReport([observation,limit],'Explicitly required device unavailable').status).toBe('blocked')
+    expect(creativeReport([{...observation,status:'failed'},limit]).status).toBe('needs-repair')
+    expect(()=>parseImplementationVerification({summary:'Historical schema',observations:[observation,limit]})).toThrow()
     const blocked=parseImplementationVerification({summary:'All checks passed',observations:[observation,unverified]})
     expect(blocked.status).toBe('blocked')
     expect(blocked.findings).toEqual([])

@@ -374,17 +374,20 @@ for (const creationMode of ['creative','blueprint']) test('new '+creationMode+' 
       } else if(stage==='resources') {
         const example=assetManifestAuthoringExamples().canonical,item=example.resources[0]!
         await write(item.root_path,'{}')
+        await write('assets/production/unused-export.png','unused production variant')
         const handoff={status:'ready',summary:'Produced piece',sections:['Play'],files:item.file_paths}
         await expect(input.finalOutput!.accept(handoff)).rejects.toThrow('registered runtime files')
         await produceResources(root,{operation:'register',projectTarget:{...example.project_target!,resource_library_usage:'optional'},requirements:example.requirements,
           resources:[{id:item.id,fulfills:item.fulfills,root_path:item.root_path,file_paths:item.file_paths,provisional:false,reason:'Runtime art',selection_reason:['Matches selected direction']}]},undefined,'optional')
         await input.finalOutput!.accept(handoff)
       } else if(stage==='implementation') {
+        expect(prompt).toContain(assetManifestAuthoringExamples().canonical.resources[0]!.root_path)
+        expect(prompt).not.toContain('unused-export.png')
         await write('index.html','<canvas></canvas>')
         await input.workflow!({action:'advance',summary:'Runtime ready',sections:[],files:['index.html']})
       } else {
         expect(prompt).toContain('index.html')
-        await input.finalOutput!.accept({summary:'Observed response',observations:[{outcome:'Respond to input',status:'passed',evidence:'Visible response'}],externalBlocker:null})
+        await input.finalOutput!.accept({summary:'Observed response',observations:[{outcome:'Respond to input',status:'passed',evidence:'Visible response'},{outcome:'Physical device feel',status:'coverage-limit',evidence:'Pointer tested in emulation'}],externalBlocker:null})
       }
     }
   })
